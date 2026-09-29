@@ -4,10 +4,12 @@ import Dexie from "dexie"
 
 import {
   DEFAULT_STANDALONE_TARGET_ID,
+  deleteRuntimeTargetDatabases,
   encryptedRuntimeTargetDatabaseName,
   RUNTIME_TARGET_REGISTRY_DB_NAME,
   RuntimeTargetRegistry,
   runtimeTargetDatabaseName,
+  runtimeTargetDatabaseNames,
 } from "./target-registry"
 
 const ACCOUNT_ID = "acct_runtime"
@@ -79,6 +81,63 @@ it("uses a distinct physical database name for every account and target", () => 
   expect(encryptedRuntimeTargetDatabaseName("acct_alpha", "web-standalone")).toBe(
     "cognia-account-acct_alpha-target-web-standalone-encrypted-v1"
   )
+})
+
+it("names every database a target owns: plaintext, encrypted, and the ledger beside the encrypted one", () => {
+  expect(runtimeTargetDatabaseNames("acct_alpha", "host-a")).toEqual([
+    "cognia-account-acct_alpha-target-host-a",
+    "cognia-account-acct_alpha-target-host-a-encrypted-v1",
+    "cognia-account-acct_alpha-target-host-a-encrypted-v1-router-fusion-v1",
+  ])
+})
+
+describe("deleteRuntimeTargetDatabases", () => {
+  it("deletes and verifies every database of the target, in order", async () => {
+    const existing = new Set(runtimeTargetDatabaseNames("acct_alpha", "host-a"))
+    const deleteDatabase = jest.fn(async (name: string) => {
+      existing.delete(name)
+    })
+    const databaseExists = jest.fn(async (name: string) => existing.has(name))
+
+    await expect(
+      deleteRuntimeTargetDatabases("acct_alpha", "host-a", { deleteDatabase, databaseExists })
+    ).resolves.toEqual(runtimeTargetDatabaseNames("acct_alpha", "host-a"))
+    expect(deleteDatabase.mock.calls.map(([name]) => name)).toEqual(
+      runtimeTargetDatabaseNames("acct_alpha", "host-a")
+    )
+    expect(databaseExists).toHaveBeenCalledTimes(3)
+    expect(existing.size).toBe(0)
+  })
+
+  it("refuses to report a target deleted when its Router + Fusion ledger survives", async () => {
+    const ledger = "cognia-account-acct_alpha-target-host-a-encrypted-v1-router-fusion-v1"
+    await expect(
+      deleteRuntimeTargetDatabases(
+        "acct_alpha",
+        "host-a",
+        {
+          deleteDatabase: async () => undefined,
+          databaseExists: async (name) => name === ledger,
+        },
+        "Companion Host database"
+      )
+    ).rejects.toThrow(`Companion Host database deletion could not be verified: ${ledger}`)
+  })
+
+  it("deletes a real database and its ledger sibling", async () => {
+    const names = runtimeTargetDatabaseNames("acct_alpha", "host-real")
+    for (const name of names.slice(1)) {
+      const db = new Dexie(name)
+      db.version(1).stores({ rows: "id" })
+      await db.open()
+      db.close()
+    }
+    await deleteRuntimeTargetDatabases("acct_alpha", "host-real", {
+      deleteDatabase: (name) => Dexie.delete(name),
+      databaseExists: (name) => Dexie.exists(name),
+    })
+    for (const name of names) await expect(Dexie.exists(name)).resolves.toBe(false)
+  })
 })
 
 it("fails closed for malformed Companion metadata", async () => {

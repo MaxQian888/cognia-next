@@ -132,13 +132,24 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
  * signed in to every site the preview visited, imported sign-ins included.
  * That part is best-effort: a cookie store that cannot be reached must not
  * leave the user's data half-deleted, so it is logged rather than thrown.
+ *
+ * Both deletions are verified, like every other path that deletes a main
+ * database and its ledger (account removal, runtime-target removal, the
+ * refused-layout reset): a delete that silently did nothing must not be
+ * reported to the user as "all data cleared".
  */
 export async function clearAll(): Promise<void> {
   const db = getDb()
-  const fusionName = fusionDatabaseName(db.name)
+  const mainName = db.name
+  const fusionName = fusionDatabaseName(mainName)
   await db.delete()
   clearTemporarySessionAssets()
   await Dexie.delete(fusionName)
+  for (const name of [mainName, fusionName]) {
+    if (await Dexie.exists(name)) {
+      throw new Error(`Clear all data could not verify the deletion of ${name}`)
+    }
+  }
   try {
     await clearBrowserPreviewData()
   } catch (error) {

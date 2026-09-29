@@ -76,6 +76,14 @@ export interface LedgerGateOptions {
   log?(level: string, message: string): void
   timeoutMs?: number
   newId?: () => string
+  /**
+   * The paired device's execution context of the send that started this turn
+   * (`remoteExecutionContext`, stamped by the host's companion `send` arm), or
+   * absent for a turn the host started itself. Carried on every
+   * `call_reserve_request` so the host routes the request to that device only
+   * and accepts its `claude_call_reserve_respond` from no other.
+   */
+  remoteExecutionContext?: unknown
 }
 export type CallLedgerGate = ReturnType<typeof createCallLedgerGate>
 function record(value: unknown): Record<string, unknown> {
@@ -244,7 +252,7 @@ export function estimatePromptTokens(parts: readonly unknown[]) {
  * }} options
  */
 export function createCallLedgerGate(options: LedgerGateOptions) {
-  const { sessionId, emit } = options
+  const { sessionId, emit, remoteExecutionContext } = options
   const log = options.log ?? (() => {})
   const timeoutMs = options.timeoutMs ?? CALL_RESERVE_TIMEOUT_MS
   const newId = options.newId ?? randomUUID
@@ -310,6 +318,7 @@ export function createCallLedgerGate(options: LedgerGateOptions) {
             : {}),
           ...(request.maxOutputTokens ? { maxOutputTokens: request.maxOutputTokens } : {}),
           ...(request.toolName ? { toolName: request.toolName } : {}),
+          ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
         })
       })
     },

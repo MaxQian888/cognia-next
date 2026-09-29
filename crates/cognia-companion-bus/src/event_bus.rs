@@ -307,6 +307,9 @@ fn register_remote_pending_request(payload: &Value) {
         Some("plugin_tool_exec") => payload.get("toolUseId"),
         Some("tool_result_review") => payload.get("reviewId"),
         Some("protocol_adapter_exec") => payload.get("execId"),
+        // ADR-0188: a Router + Fusion reservation raised on a device's turn.
+        // Only that device's ledger may answer it (`claude_call_reserve_respond`).
+        Some("call_reserve_request") => payload.get("requestId"),
         _ => None,
     }
     .and_then(Value::as_str);
@@ -617,6 +620,47 @@ mod tests {
                 "device-a",
                 "event-bus-pending-session",
                 "tool-1",
+                now_ms() as u64,
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn publishing_a_call_reserve_request_binds_it_to_the_origin_device() {
+        let context = crate::remote_context::global().register(
+            "host-a",
+            "device-a",
+            "event-bus-reserve-session",
+            now_ms() as u64,
+        );
+        let bus = EventBus::new();
+        let frame = bus.publish(
+            "claude://message".into(),
+            json!({
+                "type": "call_reserve_request",
+                "sessionId": context.session_id,
+                "requestId": "reserve-1",
+                "remoteExecutionContext": context.clone(),
+            }),
+        );
+
+        assert!(frame.visible_to("device-a"));
+        assert!(!frame.visible_to("device-b"));
+        let registry = crate::remote_context::global();
+        assert_eq!(
+            registry.session_response_origin(
+                "device-b",
+                "event-bus-reserve-session",
+                "reserve-1",
+                now_ms() as u64,
+            ),
+            Err("REMOTE_SCOPE_DENIED")
+        );
+        assert!(registry
+            .consume_session_response(
+                "device-a",
+                "event-bus-reserve-session",
+                "reserve-1",
                 now_ms() as u64,
             )
             .is_ok());

@@ -178,11 +178,14 @@ export function restartReason(existing: HostSession, options?: SendOptions) {
  * options wholesale, so anything that is per-TURN rather than per-session has
  * to be handed over explicitly here: the turn id its events are stamped with,
  * and the Router + Fusion ledger stamp (ADR-0188) — whose ABSENCE matters just
- * as much, since a switched-off surface must leave the next turn unledgered.
+ * as much, since a switched-off surface must leave the next turn unledgered —
+ * together with the paired device's execution context of this send, so the
+ * turn's reservations are answerable by the device that sent it and, for a
+ * turn the host sent itself, by no device at all.
  * Exported for the same reason `routeSteer` and `routeClose` are: the read
  * loop's session map is module-private.
  *
- * @param {{ turnRef?: { id?: string }, setNextTurnLedger?: (ledger: unknown) => void, pushUserMessage: (prompt: unknown) => void }} existing
+ * @param {{ turnRef?: { id?: string }, setNextTurnLedger?: (ledger: unknown, remoteExecutionContext?: unknown) => void, pushUserMessage: (prompt: unknown) => void }} existing
  * @param {{ turnId?: string, ledger?: unknown } | undefined} options
  * @param {string | unknown[]} prompt
  */
@@ -194,7 +197,7 @@ export function routeSendIntoLiveLoop(
   // Only reached for a session we're pushing into in place; a restarted one
   // got a fresh ref, and the loop it replaced keeps its own.
   if (existing.turnRef) existing.turnRef.id = options?.turnId
-  existing.setNextTurnLedger?.(options?.ledger)
+  existing.setNextTurnLedger?.(options?.ledger, options?.remoteExecutionContext)
   existing.pushUserMessage!(prompt)
 }
 

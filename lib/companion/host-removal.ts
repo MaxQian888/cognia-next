@@ -10,7 +10,7 @@ import { switchAccountRuntimeTarget } from "@/lib/runtime/account-runtime-target
 import {
   DEFAULT_STANDALONE_TARGET_ID,
   RuntimeTargetRegistry,
-  runtimeTargetDatabaseName,
+  deleteRuntimeTargetDatabases,
 } from "@/lib/runtime/target-registry"
 import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { suspendCompanionTransport } from "@/lib/tauri/transport-companion"
@@ -115,11 +115,7 @@ export async function removeCompanionHost(
     } else {
       await deps.deleteRuntimeTarget(input.accountId, input.hostId)
     }
-    const databaseName = runtimeTargetDatabaseName(input.accountId, input.hostId)
-    await deps.deleteDatabase(databaseName)
-    if (await deps.databaseExists(databaseName)) {
-      throw new Error(`Companion Host database deletion could not be verified: ${databaseName}`)
-    }
+    await deleteHostDatabases(input, deps)
     await deps.book.remove(hostKeyOf(record))
     deps.removeRecentAlias(record.endpoints.baseUrl)
 
@@ -154,12 +150,26 @@ async function forgetRuntimeTargetOnly(
   } else {
     await deps.deleteRuntimeTarget(input.accountId, input.hostId)
   }
-  const databaseName = runtimeTargetDatabaseName(input.accountId, input.hostId)
-  await deps.deleteDatabase(databaseName)
-  if (await deps.databaseExists(databaseName)) {
-    throw new Error(`Companion Host database deletion could not be verified: ${databaseName}`)
-  }
+  await deleteHostDatabases(input, deps)
   if (wasActive && input.platform !== "web") await deps.enterUnpaired()
+}
+
+/**
+ * Delete and verify every database of the Host's runtime target: the plaintext
+ * name, the encrypted database the window actually ran against, and the
+ * Router + Fusion ledger beside it. Deleting only the plaintext name left the
+ * Host's mirrors, queues and ledger rows behind on the device.
+ */
+async function deleteHostDatabases(
+  input: RemoveCompanionHostInput,
+  deps: HostRemovalDependencies
+): Promise<void> {
+  await deleteRuntimeTargetDatabases(
+    input.accountId,
+    input.hostId,
+    { deleteDatabase: deps.deleteDatabase, databaseExists: deps.databaseExists },
+    "Companion Host database"
+  )
 }
 
 function productionDependencies(registry: RuntimeTargetRegistry): HostRemovalDependencies {

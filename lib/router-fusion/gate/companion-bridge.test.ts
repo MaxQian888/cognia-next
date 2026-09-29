@@ -276,7 +276,16 @@ describe("dispatchRouterFusionCompanionCommand — on", () => {
 })
 
 describe("claude_call_reserve_respond relay verdict", () => {
-  const answer = { sessionId: "s1", requestId: "req-1", decision: "granted", attemptNo: 1 }
+  // As Rust hands it over: the authenticated caller, and the origin it found
+  // the reservation pending under.
+  const answer = {
+    sessionId: "s1",
+    requestId: "req-1",
+    decision: "granted",
+    attemptNo: 1,
+    callerDeviceId: "phone-1",
+    reservationOriginDeviceId: "phone-1",
+  }
 
   it("relays a well-formed answer while on, and still while tripped", async () => {
     for (const settings of [ON, TRIPPED]) {
@@ -295,6 +304,48 @@ describe("claude_call_reserve_respond relay verdict", () => {
         settings: OFF,
       })
     ).resolves.toMatchObject({ ok: false, error: { code: "ROUTER_FUSION_DISABLED" } })
+  })
+
+  it("refuses a device answering a turn another device started", async () => {
+    for (const settings of [ON, TRIPPED]) {
+      await expect(
+        dispatchRouterFusionCompanionCommand(
+          "claude_call_reserve_respond",
+          { ...answer, callerDeviceId: "phone-2" },
+          { settings }
+        )
+      ).resolves.toEqual({
+        ok: false,
+        error: {
+          status: 403,
+          code: "RESERVATION_NOT_OWNED",
+          message: "only the device that started this turn may answer its reservations",
+        },
+      })
+    }
+  })
+
+  it("refuses an answer with no verified origin, even from a device", async () => {
+    const { reservationOriginDeviceId: _origin, ...unverified } = answer
+    await expect(
+      dispatchRouterFusionCompanionCommand("claude_call_reserve_respond", unverified, {
+        settings: ON,
+      })
+    ).resolves.toMatchObject({ ok: false, error: { status: 403, code: "RESERVATION_NOT_OWNED" } })
+  })
+
+  it("refuses a caller that is not an authenticated device", async () => {
+    const { callerDeviceId: _caller, ...anonymous } = answer
+    for (const payload of [anonymous, { ...anonymous, callerDeviceId: "" }]) {
+      await expect(
+        dispatchRouterFusionCompanionCommand("claude_call_reserve_respond", payload, {
+          settings: ON,
+        })
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { status: 403, code: "COMPANION_ACTOR_REQUIRED" },
+      })
+    }
   })
 
   it("refuses an answer the sidecar could not take", async () => {

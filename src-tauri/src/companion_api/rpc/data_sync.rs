@@ -1011,6 +1011,15 @@ pub(super) async fn dispatch(
         // switch is authoritative, `lib/router-fusion/gate/companion-bridge.ts`),
         // and only an `ok` verdict reaches the sidecar, as the same frame the
         // desktop renderer's `claude_call_reserve_decision` writes.
+        //
+        // Ownership is bound here, where the device is authenticated: the
+        // reservation must be pending on a turn this very device sent
+        // (`send_arm` registered its execution context, and the event bus
+        // recorded the request under it as it published it). Any other caller
+        // — another paired device, or one answering a host-started turn — is
+        // refused before the brain is asked, and the verified origin is
+        // stamped for the brain's own check. The request is consumed only once
+        // the brain said relay, so a gate refusal leaves it answerable.
         "claude_call_reserve_respond" => {
             let session_id: String = required(&args, "sessionId")?;
             let request_id: String = required(&args, "requestId")?;
@@ -1019,7 +1028,17 @@ pub(super) async fn dispatch(
             let attempt_no: Option<u32> = optional(&args, "attemptNo")?;
             let code: Option<String> = optional(&args, "code")?;
             let message: Option<String> = optional(&args, "message")?;
-            let args = inject_caller_device_id(name, args, device_id);
+            let registry = super::super::remote_execution::global();
+            let origin = match registry.session_response_origin(
+                device_id,
+                &session_id,
+                &request_id,
+                unix_time_ms(),
+            ) {
+                Ok(origin) => origin,
+                Err(reason) => return Ok(reservation_answer_refusal(reason)),
+            };
+            let args = bind_reservation_origin(inject_caller_device_id(name, args, device_id), &origin);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
@@ -1034,6 +1053,16 @@ pub(super) async fn dispatch(
                 .map_err(|error| map_desktop_write_bridge_error(name, error))?;
             if verdict.get("ok") != Some(&Value::Bool(true)) {
                 return Ok(verdict);
+            }
+            if let Err(reason) = registry.consume_session_response(
+                device_id,
+                &session_id,
+                &request_id,
+                unix_time_ms(),
+            ) {
+                // Answered meanwhile, or retired by a later send: nothing is
+                // written, so the sidecar never sees a second decision.
+                return Ok(reservation_answer_refusal(reason));
             }
             claude_commands::claude_call_reserve_decision_impl(
                 &host.sidecar_state(),
@@ -1052,6 +1081,48 @@ pub(super) async fn dispatch(
         unknown => Err(RpcError::unknown_command(unknown)),
     };
     result
+}
+
+/// Server-side stamp of the device that sent the turn a reservation belongs to
+/// (`reservationOriginDeviceId`), read by the brain's relay verdict
+/// (`lib/router-fusion/gate/companion-bridge.ts`). Always overwritten, so a
+/// payload cannot name an origin of its own.
+fn bind_reservation_origin(mut args: Value, origin_device_id: &str) -> Value {
+    if let Value::Object(map) = &mut args {
+        map.insert(
+            "reservationOriginDeviceId".to_string(),
+            Value::String(origin_device_id.to_string()),
+        );
+    }
+    args
+}
+
+/// The Router + Fusion envelope a refused reservation answer returns, from the
+/// registry's reason. Same `{ ok: false, error }` shape the brain's verdicts
+/// use, so the answering renderer (`callReserveDecision` in `lib/claude/ipc.ts`)
+/// learns that nothing reached the sidecar.
+fn reservation_answer_refusal(reason: &str) -> Value {
+    let (status, code, message) = match reason {
+        "REMOTE_RESPONSE_STALE" => (
+            409,
+            "RESERVATION_NOT_PENDING",
+            "the reservation is not pending on this session",
+        ),
+        "REMOTE_PROXY_DISCONNECTED" => (
+            410,
+            "RESERVATION_EXPIRED",
+            "the turn that raised this reservation has expired",
+        ),
+        _ => (
+            403,
+            "RESERVATION_NOT_OWNED",
+            "only the device that started this turn may answer its reservations",
+        ),
+    };
+    serde_json::json!({
+        "ok": false,
+        "error": { "status": status, "code": code, "message": message },
+    })
 }
 
 /// An offset the bridge and the direct store can take.
@@ -1145,6 +1216,72 @@ fn bridged_page_result(name: &str, paging: Option<BridgedPaging>, result: Value)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reservation_answer_is_refused_unless_the_caller_sent_the_turn() {
+        let registry = super::super::super::remote_execution::global();
+        let session = "data-sync-reserve-owner-session";
+        let context = registry.register("host-a", "device-owner", session, unix_time_ms());
+        registry
+            .register_pending(&context, "reserve-1")
+            .expect("pending registers");
+
+        let foreign = registry
+            .session_response_origin("device-foreign", session, "reserve-1", unix_time_ms())
+            .map_err(reservation_answer_refusal)
+            .expect_err("a foreign device is refused");
+        assert_eq!(foreign["ok"], Value::Bool(false));
+        assert_eq!(foreign["error"]["status"], 403);
+        assert_eq!(foreign["error"]["code"], "RESERVATION_NOT_OWNED");
+
+        let origin = registry
+            .session_response_origin("device-owner", session, "reserve-1", unix_time_ms())
+            .expect("the owner is accepted");
+        let bound = bind_reservation_origin(
+            inject_caller_device_id(
+                "claude_call_reserve_respond",
+                serde_json::json!({
+                    "sessionId": session,
+                    "requestId": "reserve-1",
+                    "callerDeviceId": "spoofed",
+                    "reservationOriginDeviceId": "spoofed",
+                }),
+                "device-owner",
+            ),
+            &origin,
+        );
+        assert_eq!(bound["callerDeviceId"], "device-owner");
+        assert_eq!(bound["reservationOriginDeviceId"], "device-owner");
+
+        registry
+            .consume_session_response("device-owner", session, "reserve-1", unix_time_ms())
+            .expect("the owner's answer consumes the reservation");
+        let replay = registry
+            .consume_session_response("device-owner", session, "reserve-1", unix_time_ms())
+            .map_err(reservation_answer_refusal)
+            .expect_err("a second answer is refused");
+        assert_eq!(replay["error"]["status"], 409);
+        assert_eq!(replay["error"]["code"], "RESERVATION_NOT_PENDING");
+    }
+
+    #[test]
+    fn a_host_started_turn_has_no_device_to_answer_its_reservations() {
+        let registry = super::super::super::remote_execution::global();
+        let refusal = registry
+            .session_response_origin(
+                "device-any",
+                "data-sync-host-started-session",
+                "reserve-1",
+                unix_time_ms(),
+            )
+            .map_err(reservation_answer_refusal)
+            .expect_err("no remote context means no owner");
+        assert_eq!(refusal["error"]["code"], "RESERVATION_NOT_OWNED");
+        assert_eq!(
+            reservation_answer_refusal("REMOTE_PROXY_DISCONNECTED")["error"]["code"],
+            "RESERVATION_EXPIRED"
+        );
+    }
 
     #[test]
     fn github_credential_setup_is_internal_and_only_accepts_a_reference() {

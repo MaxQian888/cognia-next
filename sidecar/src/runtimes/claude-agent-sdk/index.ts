@@ -75,6 +75,7 @@ export function dispatchAnthropic(
     sessionId,
     emit,
     log,
+    remoteExecutionContext: sendOptions.remoteExecutionContext,
   })
   const sdkFallbackModel = ledgerGate.active
     ? undefined

@@ -1939,7 +1939,9 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "execution_run_control",
     // ADR-0188 companion RPC. The Run API actor of a companion run is the
     // authenticated device (`device:<id>`): only it may read, resume or stop
-    // the run, and it answers only the reservations of its own turns.
+    // the run, and it answers only the reservations of its own turns (the
+    // `claude_call_reserve_respond` arm checks the remote execution registry
+    // and stamps `reservationOriginDeviceId` for the brain's check).
     "execution_run_create",
     "execution_run_resume",
     "execution_run_get",

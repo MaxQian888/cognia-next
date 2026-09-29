@@ -532,6 +532,7 @@ it("switches to standalone before removing a revoked active Companion target", a
       deleteDatabase: async (name) => {
         events.push(`database-delete:${name}`)
       },
+      databaseExists: async () => false,
     })
   } finally {
     clearActiveRuntimeTargetContext()
@@ -544,6 +545,8 @@ it("switches to standalone before removing a revoked active Companion target", a
     "context:web-standalone",
     "metadata:companion-studio",
     "database-delete:cognia-account-acct_runtime-target-companion-studio",
+    "database-delete:cognia-account-acct_runtime-target-companion-studio-encrypted-v1",
+    "database-delete:cognia-account-acct_runtime-target-companion-studio-encrypted-v1-router-fusion-v1",
   ])
 })
 
@@ -812,7 +815,27 @@ describe("default runtime lifecycle boundaries", () => {
     expect(await detachActiveCompanionRuntimeTarget()).toEqual(standalone)
     expect(getActiveRuntimeTargetContext()?.targetId).toBe(standalone.id)
     expect(mockRegistry.deleteTarget).toHaveBeenCalledWith("acct_runtime", companion.id)
-    expect(deleteDatabase).toHaveBeenCalledWith("cognia-account-acct_runtime-target-host-default")
+    // The encrypted database the window ran against, and its Router + Fusion
+    // ledger, go with the plaintext name — and each deletion is verified.
+    const names = [
+      "cognia-account-acct_runtime-target-host-default",
+      "cognia-account-acct_runtime-target-host-default-encrypted-v1",
+      "cognia-account-acct_runtime-target-host-default-encrypted-v1-router-fusion-v1",
+    ]
+    expect(deleteDatabase.mock.calls.map(([name]) => name)).toEqual(names)
+    for (const name of names) expect(exists).toHaveBeenCalledWith(name)
+  })
+
+  it("refuses to report a detach done when the detached ledger survives", async () => {
+    const { setActiveRuntimeTargetContext } = await import("./runtime-target-context")
+    setActiveRuntimeTargetContext("acct_runtime", companion.id)
+    mockRegistry.getActiveTarget.mockResolvedValue(companion)
+    const ledger = "cognia-account-acct_runtime-target-host-default-encrypted-v1-router-fusion-v1"
+    existingDatabases.add(ledger)
+    deleteDatabase.mockImplementation(async () => undefined)
+    await expect(detachActiveCompanionRuntimeTarget()).rejects.toThrow(
+      `Runtime target database deletion could not be verified: ${ledger}`
+    )
   })
 
   it.each([null, standalone, { ...companion, id: "host-other" }])(

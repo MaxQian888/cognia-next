@@ -17,7 +17,7 @@ export interface HostSession {
     setPermissionMode?(mode: string): unknown
   }
   pushUserMessage?(prompt: Prompt, priority?: string): unknown
-  setNextTurnLedger?(ledger: unknown): void
+  setNextTurnLedger?(ledger: unknown, remoteExecutionContext?: unknown): void
   closeInput?(): void
   drainPending?(reason: string): void
   restoreConversation?(messages: unknown): unknown

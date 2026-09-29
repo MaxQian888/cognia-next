@@ -2,6 +2,7 @@ import Dexie, { type Table } from "dexie"
 
 import { assertAccountId } from "@/lib/accounts/account-types"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
+import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
 import type { CompanionRuntimeTarget, RuntimeTarget } from "./runtime-target"
 
 export const RUNTIME_TARGET_REGISTRY_DB_NAME = "cognia-runtime-target-registry"
@@ -268,6 +269,48 @@ export function encryptedRuntimeTargetDatabaseName(
   targetId: string
 ): string {
   return `${runtimeTargetDatabaseName(localAccountId, targetId)}-encrypted-v1`
+}
+
+/**
+ * Every physical database a runtime target owns, in deletion order: the
+ * plaintext name (only ever a migration source in this build), the encrypted
+ * database a window actually runs against, and the Router + Fusion ledger
+ * beside that encrypted one (ADR-0188 D39). Removing a target deletes all of
+ * them, so neither the data nor the ledger rows describing it outlive it.
+ */
+export function runtimeTargetDatabaseNames(localAccountId: string, targetId: string): string[] {
+  return [
+    runtimeTargetDatabaseName(localAccountId, targetId),
+    ...withFusionDatabase(encryptedRuntimeTargetDatabaseName(localAccountId, targetId)),
+  ]
+}
+
+export interface RuntimeTargetDatabaseDeletionIo {
+  deleteDatabase(name: string): Promise<void>
+  databaseExists(name: string): Promise<boolean>
+}
+
+/**
+ * Delete every database of a runtime target ({@link runtimeTargetDatabaseNames})
+ * and verify each one is gone, so a delete that silently did nothing is an
+ * error rather than a target reported removed while its data survives.
+ * Returns the names deleted, in order. `label` prefixes the verification error.
+ */
+export async function deleteRuntimeTargetDatabases(
+  localAccountId: string,
+  targetId: string,
+  io: RuntimeTargetDatabaseDeletionIo,
+  label = "Runtime target database"
+): Promise<string[]> {
+  const deleted: string[] = []
+  for (const databaseName of runtimeTargetDatabaseNames(localAccountId, targetId)) {
+    await io.deleteDatabase(databaseName)
+    if (await io.databaseExists(databaseName)) {
+      throw new Error(`${label} deletion could not be verified: ${databaseName}`)
+    }
+    deleted.push(databaseName)
+  }
+  return deleted
 }
 
 function assertTargetId(targetId: string): string {

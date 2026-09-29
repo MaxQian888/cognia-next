@@ -84,6 +84,31 @@ test("asks before a call and resolves a grant", async () => {
   assert.equal(gate.transportAttempts, 2)
 })
 
+test("a reservation on a paired device's turn carries that device's execution context", async () => {
+  const remoteExecutionContext = {
+    hostId: "host-a",
+    originDeviceId: "device-a",
+    sessionId: "s1",
+    generation: 3,
+    requestId: "ctx-1",
+    issuedAt: 1,
+    expiresAt: 2,
+  }
+  const { gate, events } = harness(STAMP, { remoteExecutionContext })
+  const pending = gate.reserve({ kind: "call", logicalStepId: "leg:1" })
+  // The host routes the request to this device only and accepts the answer
+  // from no other (`claude_call_reserve_respond`).
+  assert.deepEqual(events[0]?.remoteExecutionContext, remoteExecutionContext)
+  gate.resolveDecision({ requestId: "req-1", decision: "granted" })
+  await pending
+
+  // A host-started turn carries none, so no paired device can answer it.
+  const local = harness()
+  void local.gate.reserve({ kind: "call", logicalStepId: "leg:1" })
+  assert.equal("remoteExecutionContext" in local.events[0]!, false)
+  local.gate.resolveDecision({ requestId: "req-1", decision: "granted" })
+})
+
 test("a refusal is returned as-is and keeps the gate active", async () => {
   const { gate } = harness()
   const pending = gate.reserve({ kind: "call", logicalStepId: "leg:1" })

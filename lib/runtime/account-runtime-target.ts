@@ -5,7 +5,6 @@ import { activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { activateAccountDatabase } from "@/lib/db/schema"
 import { getExecutionBroker } from "@/lib/execution/broker"
-import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
 import { getActiveBrowserVault } from "./browser-vault"
 import { getRuntimeSnapshot } from "./runtime-snapshot-store"
 import {
@@ -23,6 +22,7 @@ import {
 } from "./runtime-target-lifecycle"
 import {
   RuntimeTargetRegistry,
+  deleteRuntimeTargetDatabases,
   encryptedRuntimeTargetDatabaseName,
   runtimeTargetDatabaseName,
   type RuntimeTargetRecord,
@@ -83,6 +83,7 @@ interface DetachDependencies {
   }): Promise<void>
   stopSubscriptions(): Promise<void>
   deleteDatabase(name: string): Promise<void>
+  databaseExists?(name: string): Promise<boolean>
 }
 
 interface RegisterDependencies {
@@ -190,20 +191,14 @@ export async function removeAccountRuntimeTargets(
 ): Promise<RuntimeTargetDeletionResult> {
   const targets = await dependencies.registry.listTargets(localAccountId)
   const deletedDatabases: string[] = []
+  const databaseExists = dependencies.databaseExists ?? ((name: string) => Dexie.exists(name))
   for (const target of targets) {
-    const databaseExists = dependencies.databaseExists ?? ((name: string) => Dexie.exists(name))
-    for (const databaseName of [
-      runtimeTargetDatabaseName(localAccountId, target.id),
-      // The encrypted target database is the one a window runs against, so it
-      // is the one with a Router + Fusion ledger beside it.
-      ...withFusionDatabase(encryptedRuntimeTargetDatabaseName(localAccountId, target.id)),
-    ]) {
-      await dependencies.deleteDatabase(databaseName)
-      if (await databaseExists(databaseName)) {
-        throw new Error(`Runtime target database deletion could not be verified: ${databaseName}`)
-      }
-      deletedDatabases.push(databaseName)
-    }
+    deletedDatabases.push(
+      ...(await deleteRuntimeTargetDatabases(localAccountId, target.id, {
+        deleteDatabase: dependencies.deleteDatabase,
+        databaseExists,
+      }))
+    )
   }
   await dependencies.registry.deleteAccountTargets(localAccountId)
   const remainingTargets = await dependencies.registry.listTargets(localAccountId)
@@ -390,6 +385,11 @@ export async function detachActiveCompanionRuntimeTarget(
   dependencies.activateDatabase(scope.accountId, activated.id)
   dependencies.setContext(scope.accountId, activated.id)
   await dependencies.registry.deleteTarget(scope.accountId, active.id)
-  await dependencies.deleteDatabase(runtimeTargetDatabaseName(scope.accountId, active.id))
+  // The detached target's encrypted database — the one this window ran against
+  // — and its Router + Fusion ledger go with the plaintext name.
+  await deleteRuntimeTargetDatabases(scope.accountId, active.id, {
+    deleteDatabase: dependencies.deleteDatabase,
+    databaseExists: dependencies.databaseExists ?? ((name) => Dexie.exists(name)),
+  })
   return activated
 }

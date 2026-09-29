@@ -251,6 +251,21 @@ describe("clearAll", () => {
     expect(await Dexie.exists(fusionName)).toBe(false)
   })
 
+  it("refuses to report the data cleared when the ledger survives its deletion", async () => {
+    const fusionName = `${getDb().name}-router-fusion-v1`
+    const exists = jest
+      .spyOn(Dexie, "exists")
+      .mockImplementation(async (name) => name === fusionName)
+    try {
+      await expect(clearAll()).rejects.toThrow(
+        `Clear all data could not verify the deletion of ${fusionName}`
+      )
+      expect(exists).toHaveBeenCalledWith(getDb().name)
+    } finally {
+      exists.mockRestore()
+    }
+  })
+
   // The preview's cookies and preferences live outside the database; a reset
   // device must not stay signed in to the sites the preview visited.
   it("signs the built-in browser out and forgets its preferences", async () => {

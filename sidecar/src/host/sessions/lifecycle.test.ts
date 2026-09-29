@@ -378,23 +378,26 @@ test("a live loop is handed this send's turn id and ledger stamp before the prom
   const order: unknown[] = []
   const loop = {
     turnRef: { id: "turn-1" },
-    setNextTurnLedger: (ledger: unknown) => order.push(["ledger", ledger]),
+    setNextTurnLedger: (ledger: unknown, remoteExecutionContext?: unknown) =>
+      order.push(["ledger", ledger, remoteExecutionContext]),
     pushUserMessage: (prompt: unknown) => order.push(["prompt", prompt]),
   }
   const ledger = { runId: "run-2", mode: "per_call" }
-  routeSendIntoLiveLoop(loop, { turnId: "turn-2", ledger }, "again")
+  const remoteExecutionContext = { originDeviceId: "device-a", sessionId: "s", generation: 2 }
+  routeSendIntoLiveLoop(loop, { turnId: "turn-2", ledger, remoteExecutionContext }, "again")
   assert.equal(loop.turnRef.id, "turn-2")
   assert.deepEqual(order, [
-    ["ledger", ledger],
+    ["ledger", ledger, remoteExecutionContext],
     ["prompt", "again"],
   ])
 
   // A switched-off surface sends no stamp, and the loop must be told so rather
-  // than keeping the previous turn's run.
+  // than keeping the previous turn's run. A host-started send carries no
+  // device context, and the loop must not keep the previous device's either.
   order.length = 0
   routeSendIntoLiveLoop(loop, { turnId: "turn-3" }, "third")
   assert.deepEqual(order, [
-    ["ledger", undefined],
+    ["ledger", undefined, undefined],
     ["prompt", "third"],
   ])
 })

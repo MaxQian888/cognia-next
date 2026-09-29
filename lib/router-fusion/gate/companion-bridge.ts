@@ -18,6 +18,10 @@
  *    `call_reserve_request` the host's sidecar raised for a turn that
  *    companion started. The companion's own ledger decided; this host only
  *    says whether it relays the decision, and Rust writes it to the sidecar.
+ *    Only the device that sent the turn may answer: Rust finds the request
+ *    pending under that turn's remote execution context and stamps its origin
+ *    (`reservationOriginDeviceId`) next to the caller (`callerDeviceId`), both
+ *    server-side; the verdict refuses unless the two are the same device.
  *  - `execution_run_control` (cancel and approve) is routed here first by
  *    {@link routeCompanionRunControl} when it names a companion run, which has
  *    no execution-run projection for the cockpit's control plane to find.
@@ -156,8 +160,27 @@ function gateRefusal(settings: CompanionBridgeDeps["settings"]): BridgeOutcome |
  * The relay verdict for a companion's reservation answer. Validated here so a
  * malformed decision is refused before Rust writes anything to the sidecar;
  * the sidecar itself re-validates the decision word.
+ *
+ * Ownership first: `callerDeviceId` is the device Rust authenticated, and
+ * `reservationOriginDeviceId` the device whose send raised this reservation,
+ * which Rust stamps only after finding the request pending on that session
+ * (`claude_call_reserve_respond` in `rpc/data_sync.rs`). A caller that is not
+ * a device, or an answer without a verified origin, or a device answering
+ * another device's turn is refused — a foreign ledger must never decide what
+ * someone else's turn may spend.
  */
 function reserveRelayVerdict(payload: Record<string, unknown>): BridgeOutcome {
+  const callerDeviceId = text(payload, "callerDeviceId")
+  if (!callerDeviceId) {
+    return refused(403, "COMPANION_ACTOR_REQUIRED", "this command needs a paired device")
+  }
+  if (text(payload, "reservationOriginDeviceId") !== callerDeviceId) {
+    return refused(
+      403,
+      "RESERVATION_NOT_OWNED",
+      "only the device that started this turn may answer its reservations"
+    )
+  }
   const sessionId = text(payload, "sessionId")
   if (!sessionId) return invalid("sessionId", "sessionId is required")
   const requestId = text(payload, "requestId")

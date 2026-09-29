@@ -92,8 +92,27 @@ it("switches to the selected fallback before explicit revocation and cleanup", a
   expect(active()).toBe("host-b")
   expect(dependencies.revoke).toHaveBeenCalledWith(expect.objectContaining({ targetId: "host-a" }))
   expect(removed).toEqual(["host-a"])
-  expect(dependencies.deleteDatabase).toHaveBeenCalled()
+  expect((dependencies.deleteDatabase as jest.Mock).mock.calls.map(([name]) => name)).toEqual([
+    "cognia-account-local_acct_a-target-host-a",
+    "cognia-account-local_acct_a-target-host-a-encrypted-v1",
+    "cognia-account-local_acct_a-target-host-a-encrypted-v1-router-fusion-v1",
+  ])
   expect(dependencies.removeRecentAlias).toHaveBeenCalledWith("https://host-a.local:7890")
+})
+
+it("keeps the book record when the removed Host's encrypted database survives", async () => {
+  const { dependencies, removed } = harness()
+  const encrypted = "cognia-account-local_acct_a-target-host-a-encrypted-v1"
+  dependencies.databaseExists = jest.fn(async (name: string) => name === encrypted)
+
+  await expect(
+    removeCompanionHost(
+      { accountId, hostId: "host-a", fallbackHostId: "host-b", platform: "mobile" },
+      dependencies
+    )
+  ).rejects.toThrow(`Companion Host database deletion could not be verified: ${encrypted}`)
+  expect(removed).toEqual([])
+  expect(dependencies.removeRecentAlias).not.toHaveBeenCalled()
 })
 
 it("keeps every local record when remote revocation fails after fallback switching", async () => {
@@ -137,9 +156,15 @@ it("clears a runtime target whose book record is already gone", async () => {
   // no way out except deleting the row in devtools.
   expect(dependencies.revoke).not.toHaveBeenCalled()
   expect(dependencies.deleteRuntimeTarget).toHaveBeenCalledWith(accountId, "orphan-host")
-  expect(dependencies.deleteDatabase).toHaveBeenCalledWith(
-    "cognia-account-local_acct_a-target-orphan-host"
-  )
+  // Plaintext, the encrypted database the window ran against, and its Router +
+  // Fusion ledger — each verified gone.
+  const names = [
+    "cognia-account-local_acct_a-target-orphan-host",
+    "cognia-account-local_acct_a-target-orphan-host-encrypted-v1",
+    "cognia-account-local_acct_a-target-orphan-host-encrypted-v1-router-fusion-v1",
+  ]
+  expect((dependencies.deleteDatabase as jest.Mock).mock.calls.map(([name]) => name)).toEqual(names)
+  for (const name of names) expect(dependencies.databaseExists).toHaveBeenCalledWith(name)
   expect(removed).toEqual([])
   expect(switched).toEqual([])
 })

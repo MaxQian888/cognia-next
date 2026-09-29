@@ -182,6 +182,59 @@ impl RemoteExecutionRegistry {
 }
 
 impl RemoteExecutionRegistry {
+    /// The device whose turn raised `response_id` on `session_id`, checked
+    /// against `caller_device_id` without consuming anything.
+    ///
+    /// For an answer whose sender does not echo the context back (a Router +
+    /// Fusion `call_reserve_request`, answered by `claude_call_reserve_respond`
+    /// with only its session and request ids): the host looks the context up
+    /// itself, as the session's latest one, and the answer is admitted only
+    /// when
+    ///  - a paired device started that turn and it is the caller
+    ///    (`REMOTE_SCOPE_DENIED` otherwise, including for a turn the host
+    ///    started itself, which has no remote context at all),
+    ///  - the context has not expired (`REMOTE_PROXY_DISCONNECTED`), and
+    ///  - the request was published under it and is still unanswered
+    ///    (`REMOTE_RESPONSE_STALE`).
+    ///
+    /// Ownership is decided before pending-ness, so a foreign device learns
+    /// nothing about which requests another device's turn has open.
+    pub fn session_response_origin(
+        &self,
+        caller_device_id: &str,
+        session_id: &str,
+        response_id: &str,
+        now_ms: u64,
+    ) -> Result<String, &'static str> {
+        let state = self.state.lock();
+        let context = session_response_context(&state, caller_device_id, session_id, now_ms)?;
+        if !state.pending.contains(&pending_key(context, response_id)) {
+            return Err("REMOTE_RESPONSE_STALE");
+        }
+        Ok(context.origin_device_id.clone())
+    }
+
+    /// [`Self::session_response_origin`], then retire the request: a second
+    /// answer to it is `REMOTE_RESPONSE_STALE`. Re-validates under the same
+    /// lock, so two concurrent answers cannot both pass.
+    pub fn consume_session_response(
+        &self,
+        caller_device_id: &str,
+        session_id: &str,
+        response_id: &str,
+        now_ms: u64,
+    ) -> Result<(), &'static str> {
+        let mut state = self.state.lock();
+        let key = {
+            let context = session_response_context(&state, caller_device_id, session_id, now_ms)?;
+            pending_key(context, response_id)
+        };
+        if !state.pending.remove(&key) || !state.consumed.insert(key) {
+            return Err("REMOTE_RESPONSE_STALE");
+        }
+        Ok(())
+    }
+
     /// Whether `response_id` (a permission `requestId`, a plugin `toolUseId`,
     /// …) on `session_id` was issued under a remote execution context — i.e.
     /// the turn that raised it was sent by a paired device, and only that
@@ -210,6 +263,26 @@ fn pending_key(context: &RemoteExecutionContext, response_id: &str) -> String {
         "{}:{}:{response_id}",
         context.session_id, context.request_id
     )
+}
+
+/// The session's latest remote context, when `caller_device_id` originated it
+/// and it is still live. See [`RemoteExecutionRegistry::session_response_origin`].
+fn session_response_context<'a>(
+    state: &'a RegistryState,
+    caller_device_id: &str,
+    session_id: &str,
+    now_ms: u64,
+) -> Result<&'a RemoteExecutionContext, &'static str> {
+    let Some(context) = state.latest.get(session_id) else {
+        return Err("REMOTE_SCOPE_DENIED");
+    };
+    if caller_device_id.is_empty() || context.origin_device_id != caller_device_id {
+        return Err("REMOTE_SCOPE_DENIED");
+    }
+    if context.expires_at < now_ms {
+        return Err("REMOTE_PROXY_DISCONNECTED");
+    }
+    Ok(context)
 }
 
 fn validate_locked(
@@ -425,6 +498,88 @@ mod tests {
         assert!(
             !registry.is_remote_scoped("session-a", "req-0"),
             "the oldest ids are evicted rather than growing without bound"
+        );
+    }
+
+    #[test]
+    fn a_session_response_is_answerable_only_by_the_device_whose_turn_raised_it() {
+        let registry = RemoteExecutionRegistry::default();
+        let context = registry.register("host-a", "device-a", "session-a", 100);
+        registry
+            .register_pending(&context, "reserve-1")
+            .expect("pending registers");
+
+        assert_eq!(
+            registry.session_response_origin("device-b", "session-a", "reserve-1", 101),
+            Err("REMOTE_SCOPE_DENIED"),
+            "a foreign device is refused"
+        );
+        assert_eq!(
+            registry.consume_session_response("device-b", "session-a", "reserve-1", 101),
+            Err("REMOTE_SCOPE_DENIED")
+        );
+        assert_eq!(
+            registry.session_response_origin("", "session-a", "reserve-1", 101),
+            Err("REMOTE_SCOPE_DENIED"),
+            "a caller with no device id is refused"
+        );
+        assert_eq!(
+            registry.session_response_origin("device-a", "session-a", "reserve-1", 101),
+            Ok("device-a".to_string())
+        );
+        // The owner's check did not consume; its answer does, exactly once.
+        assert!(registry
+            .consume_session_response("device-a", "session-a", "reserve-1", 102)
+            .is_ok());
+        assert_eq!(
+            registry.consume_session_response("device-a", "session-a", "reserve-1", 103),
+            Err("REMOTE_RESPONSE_STALE")
+        );
+    }
+
+    #[test]
+    fn a_session_response_must_be_pending_on_a_device_started_turn() {
+        let registry = RemoteExecutionRegistry::default();
+        // A session no device ever sent a turn on (a host-started turn).
+        assert_eq!(
+            registry.session_response_origin("device-a", "session-host", "reserve-1", 100),
+            Err("REMOTE_SCOPE_DENIED")
+        );
+        let context = registry.register("host-a", "device-a", "session-a", 100);
+        assert_eq!(
+            registry.session_response_origin("device-a", "session-a", "never-raised", 101),
+            Err("REMOTE_RESPONSE_STALE")
+        );
+        registry
+            .register_pending(&context, "reserve-1")
+            .expect("pending registers");
+        // A later send retires the earlier turn's open requests.
+        registry.register("host-a", "device-a", "session-a", 200);
+        assert_eq!(
+            registry.session_response_origin("device-a", "session-a", "reserve-1", 201),
+            Err("REMOTE_RESPONSE_STALE")
+        );
+        // Another device taking the session over makes it that device's.
+        let taken = registry.register("host-a", "device-b", "session-a", 300);
+        registry
+            .register_pending(&taken, "reserve-2")
+            .expect("pending registers");
+        assert_eq!(
+            registry.session_response_origin("device-a", "session-a", "reserve-2", 301),
+            Err("REMOTE_SCOPE_DENIED")
+        );
+        assert_eq!(
+            registry.session_response_origin("device-b", "session-a", "reserve-2", 301),
+            Ok("device-b".to_string())
+        );
+        assert_eq!(
+            registry.session_response_origin(
+                "device-b",
+                "session-a",
+                "reserve-2",
+                300 + CONTEXT_TTL_MS + 1
+            ),
+            Err("REMOTE_PROXY_DISCONNECTED")
         );
     }
 }

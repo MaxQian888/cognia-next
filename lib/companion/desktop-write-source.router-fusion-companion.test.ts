@@ -232,16 +232,28 @@ describe("companion Router + Fusion — switch on", () => {
   })
 
   it("answers the relay verdict for a companion's reservation answer", async () => {
+    const reservation = {
+      sessionId: "s1",
+      requestId: "req-1",
+      decision: "refused",
+      code: "RUN_BUDGET_EXHAUSTED",
+    }
+    // Rust stamped this device as the one whose send raised the reservation.
     await expect(
       asDevice("claude_call_reserve_respond", {
-        sessionId: "s1",
-        requestId: "req-1",
-        decision: "refused",
-        code: "RUN_BUDGET_EXHAUSTED",
+        ...reservation,
+        reservationOriginDeviceId: "phone-1",
       })
     ).resolves.toEqual({
       ok: true,
       value: { relay: true, sessionId: "s1", requestId: "req-1", decision: "refused" },
     })
+    // Another device's turn: nothing is relayed.
+    await expect(
+      asDevice("claude_call_reserve_respond", {
+        ...reservation,
+        reservationOriginDeviceId: "phone-2",
+      })
+    ).resolves.toMatchObject({ ok: false, error: { status: 403, code: "RESERVATION_NOT_OWNED" } })
   })
 })

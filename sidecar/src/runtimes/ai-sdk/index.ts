@@ -371,6 +371,10 @@ export function dispatchAiSdk({
   // outlives a single send, so each send hands its own stamp in (`setNextTurnLedger`
   // from `handleSend`); a turn without one is never gated.
   let nextTurnLedger = sendOptions.ledger ?? null
+  // The paired device's execution context of the send behind the NEXT turn, or
+  // undefined for a host-started send. Per turn like the stamp: a reservation
+  // is answerable only by the device whose send raised it (ADR-0188 D25).
+  let nextTurnRemoteContext: unknown = sendOptions.remoteExecutionContext
   /** @type {ReturnType<typeof createCallLedgerGate> | null} */
   let turnLedgerGate: CallLedgerGate | null = null
   // Distinct logical step ids for reserved calls outside the leg loop.
@@ -592,8 +596,15 @@ export function dispatchAiSdk({
     active = true
     // Router + Fusion call gate for THIS turn. Inactive (and invisible) unless
     // the send carried a ledger stamp.
-    const ledgerGate = createCallLedgerGate({ ledger: nextTurnLedger, sessionId, emit, log })
+    const ledgerGate = createCallLedgerGate({
+      ledger: nextTurnLedger,
+      sessionId,
+      emit,
+      log,
+      remoteExecutionContext: nextTurnRemoteContext,
+    })
     nextTurnLedger = null
+    nextTurnRemoteContext = undefined
     turnLedgerGate = ledgerGate
     /** @type {{ attemptId: string, attemptNo: number, logicalStepId: string } | null} */
     let openLedgerAttempt: { attemptId: string; attemptNo: number; logicalStepId: string } | null =
@@ -1421,10 +1432,12 @@ export function dispatchAiSdk({
     /**
      * Router + Fusion: the ledger stamp of the send that is about to push its
      * prompt into this live session (`handleSend`). `undefined` / null means
-     * the next turn is not gated.
+     * the next turn is not gated. `remoteExecutionContext` is that send's paired
+     * device context (absent for a host-started send).
      */
-    setNextTurnLedger: (ledger: SendOptions["ledger"]) => {
+    setNextTurnLedger: (ledger: SendOptions["ledger"], remoteExecutionContext?: unknown) => {
       nextTurnLedger = ledger ?? null
+      nextTurnRemoteContext = remoteExecutionContext
     },
     /** Resolve a pending reservation (`call_reserve_decision` from the renderer). */
     resolveCallReserve: (message: unknown) => turnLedgerGate?.resolveDecision(message) ?? false,
