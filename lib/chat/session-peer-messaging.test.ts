@@ -4,7 +4,9 @@ import type { SessionPeerMessageRow } from "@/lib/db/session-peer-messages"
 import {
   decideHeldSessionPeerMessage,
   drainSessionPeerMessages,
+  isLifecycleLinked,
   listReachableSessions,
+  resolveInboundPolicy,
   sendSessionPeerMessage,
   type SessionPeerMessagingDeps,
 } from "./session-peer-messaging"
@@ -264,5 +266,101 @@ describe("sendSessionPeerMessage", () => {
     advance(1)
     const flooded = await sendSessionPeerMessage({ ...input, content: "one-too-many" }, deps)
     expect(flooded).toMatchObject({ status: "refused", statusReason: "Sender rate limit exceeded" })
+  })
+})
+
+describe("lifecycle-linked sessions", () => {
+  function linked() {
+    const env = setup()
+    env.sessions.set("coordinator", session("coordinator", { crossSessionInboundPolicy: "hold" }))
+    env.sessions.set(
+      "thread",
+      session("thread", {
+        attachedChild: {
+          parentSessionId: "coordinator",
+          lifecycleOwnerSessionId: "coordinator",
+          context: { mode: "none" },
+          workspace: "independent",
+          status: "running",
+          createdAt: 1,
+        },
+      })
+    )
+    env.reachable.add("coordinator")
+    env.reachable.add("thread")
+    return env
+  }
+
+  it("resolves the receiver's policy unless the sender is linked", () => {
+    const owner = session("coordinator", { crossSessionInboundPolicy: "refuse" })
+    const child = session("thread", {
+      attachedChild: {
+        parentSessionId: "coordinator",
+        lifecycleOwnerSessionId: "coordinator",
+        context: { mode: "none" },
+        workspace: "independent",
+        status: "running",
+        createdAt: 1,
+      },
+    })
+    expect(isLifecycleLinked(child, owner)).toBe(true)
+    expect(resolveInboundPolicy(child, owner)).toBe("accept")
+    expect(resolveInboundPolicy(owner, child)).toBe("accept")
+    expect(resolveInboundPolicy(session("stranger"), owner)).toBe("refuse")
+    expect(resolveInboundPolicy(undefined, session("x"))).toBe("hold")
+  })
+
+  it("delivers a thread's report past the coordinator's hold", async () => {
+    const { deps, delivered } = linked()
+    const receipt = await sendSessionPeerMessage(
+      {
+        senderSessionId: "thread",
+        receiverSessionId: "coordinator",
+        content: "Done: tests green",
+        intent: "trigger_turn",
+        origin: "agent",
+      },
+      deps
+    )
+    expect(receipt.status).toBe("delivered")
+    expect(delivered).toHaveLength(1)
+  })
+
+  it("queues for a linked receiver that is not live, and drains once it is", async () => {
+    const { deps, delivered, reachable } = linked()
+    reachable.delete("coordinator")
+    const receipt = await sendSessionPeerMessage(
+      {
+        senderSessionId: "thread",
+        receiverSessionId: "coordinator",
+        content: "Report",
+        intent: "trigger_turn",
+        origin: "agent",
+        ttlMs: 24 * 60 * 60 * 1000,
+      },
+      deps
+    )
+    expect(receipt.status).toBe("queued")
+    expect(delivered).toHaveLength(0)
+
+    reachable.add("coordinator")
+    await expect(drainSessionPeerMessages("coordinator", deps)).resolves.toBe(1)
+    expect(delivered.map((row) => row.content)).toEqual(["Report"])
+  })
+
+  it("still drops a message to an unreachable stranger", async () => {
+    const { deps, reachable } = linked()
+    reachable.delete("receiver")
+    const receipt = await sendSessionPeerMessage(
+      {
+        senderSessionId: "thread",
+        receiverSessionId: "receiver",
+        content: "hi",
+        intent: "note",
+        origin: "agent",
+      },
+      deps
+    )
+    expect(receipt.status).toBe("target_unavailable")
   })
 })

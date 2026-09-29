@@ -186,6 +186,16 @@ export async function sendToThread(
   return true
 }
 
+const stopping = new Set<string>()
+
+/**
+ * True while {@link stopThread} is tearing a thread down — the turn-end that
+ * the stop itself causes is not a result to report.
+ */
+export function isThreadStopping(threadId: string): boolean {
+  return stopping.has(threadId)
+}
+
 /** Stop a thread's turn (or withdraw a queued one) and mark it interrupted. */
 export async function stopThread(
   threadId: string,
@@ -193,10 +203,15 @@ export async function stopThread(
 ): Promise<void> {
   const thread = await deps.getSession(threadId)
   if (thread?.projectRole !== "thread" || !thread.projectThread) return
-  deps.cancelQueued(threadId)
-  if (deps.statusOf(threadId) !== "idle") await deps.stopTurn(threadId)
-  await deps.interrupt(threadId, thread.projectThread.coordinatorSessionId)
-  deps.release(threadId)
+  stopping.add(threadId)
+  try {
+    deps.cancelQueued(threadId)
+    if (deps.statusOf(threadId) !== "idle") await deps.stopTurn(threadId)
+    await deps.interrupt(threadId, thread.projectThread.coordinatorSessionId)
+    deps.release(threadId)
+  } finally {
+    stopping.delete(threadId)
+  }
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { ChatSession } from "@cognia/agent-config-types"
+import type { ChatSession, CrossSessionInboundPolicy } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import {
@@ -113,6 +113,31 @@ export async function listReachableSessions(
   )
 }
 
+/**
+ * Two sessions bound by an attached-child lifecycle (a sidechat and its parent,
+ * a project thread and its coordinator — ADR-0204). The link is the consent:
+ * one side created the other to exchange exactly these messages.
+ */
+export function isLifecycleLinked(a: ChatSession, b: ChatSession): boolean {
+  return (
+    a.attachedChild?.lifecycleOwnerSessionId === b.id ||
+    b.attachedChild?.lifecycleOwnerSessionId === a.id
+  )
+}
+
+/**
+ * The receiver's inbound policy for one sender. Lifecycle-linked senders are
+ * accepted without the hold; everyone else gets the receiver's own policy.
+ * Every other check (PII gate, workspace, dedupe, rate limit) still applies.
+ */
+export function resolveInboundPolicy(
+  sender: ChatSession | undefined,
+  receiver: ChatSession
+): CrossSessionInboundPolicy {
+  if (sender && isLifecycleLinked(sender, receiver)) return "accept"
+  return receiver.crossSessionInboundPolicy ?? "hold"
+}
+
 function isBusy(status: ChatStatus): boolean {
   return status === "streaming" || status === "awaiting_approval"
 }
@@ -167,7 +192,13 @@ export async function sendSessionPeerMessage(
     expiresAt: now + (input.ttlMs ?? 5 * 60 * 1000),
   })
 
-  if (!sender || !receiver || !deps.isReachable(input.receiverSessionId)) {
+  if (!sender || !receiver) {
+    return deps.transitionMessage(row.id, "target_unavailable", now, "Target session is not live")
+  }
+  // A linked receiver that is not live keeps the message queued: its next
+  // drain (when it is held or opened) delivers it. Anyone else's is dropped.
+  const linked = isLifecycleLinked(sender, receiver)
+  if (!linked && !deps.isReachable(input.receiverSessionId)) {
     return deps.transitionMessage(row.id, "target_unavailable", now, "Target session is not live")
   }
   if (sender.projectId !== receiver.projectId) {
@@ -186,14 +217,14 @@ export async function sendSessionPeerMessage(
     return refuse(row, "Sender rate limit exceeded", deps)
   }
 
-  const policy = receiver.crossSessionInboundPolicy ?? "hold"
+  const policy = resolveInboundPolicy(sender, receiver)
   if (policy === "refuse") return refuse(row, "Receiver policy refused the message", deps)
   if (policy === "hold") {
     const held = await deps.transitionMessage(row.id, "held", now, "Awaiting receiver approval")
     await deps.enforceCapacity(receiver.id, SESSION_PEER_HELD_CAPACITY, now)
     return held
   }
-  if (isBusy(deps.getStatus(receiver.id))) {
+  if (!deps.isReachable(receiver.id) || isBusy(deps.getStatus(receiver.id))) {
     await deps.enforceCapacity(receiver.id, SESSION_PEER_ACCEPTED_CAPACITY, now)
     return row
   }
@@ -216,7 +247,7 @@ export async function drainSessionPeerMessages(
       await deps.transitionMessage(row.id, "expired", deps.now(), "Message expired before delivery")
       continue
     }
-    const policy = receiver.crossSessionInboundPolicy ?? "hold"
+    const policy = resolveInboundPolicy(await deps.getSession(row.senderSessionId), receiver)
     if (policy === "refuse") {
       await deps.transitionMessage(
         row.id,
