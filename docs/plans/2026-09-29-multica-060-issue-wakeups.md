@@ -35,7 +35,7 @@ allowlisting), or deliberately not ours (server-authoritative scoping,
 unsandboxed daemon, hosted cloud runtime). License is still restrictive
 source-available — **patterns, never code**.
 
-## Implementation status (2026-09-29)
+## Implementation status (2026-09-30)
 
 Phase 0 and Phase 1 are implemented; the seam Phase 4 needed for joined runs
 landed with them. Where the build departed from the design above, the
@@ -105,7 +105,25 @@ deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
   collapse (`lib/issues/activity-feed.ts`, both inspectors). No new
   CSV/JSON/YAML renderers were added: deliverables render through the
   artifact surface's own previews.
-- **Not built:** Phases 5 and 6 (gated on demand by this plan).
+- **Stage and triage on every programmatic face** (2026-09-30): `ctx.issues`,
+  the `action.issue.create/update` nodes, the External Bridge
+  (`issues_create` / `issues_update`) and a paired phone's
+  `issue_apply_action` / `issue_create` (wire schema widened; the host
+  enforces the phone's own `REMOTE_ISSUE_ACTION_KINDS`, pinned against the
+  schema). The External Bridge may send an issue into triage but is refused
+  accepting one out: an external agent granting the acceptance the gate
+  waits for would defeat it. The mobile inspector reuses `IssueTriageRow`
+  and gets a commit-on-blur stage box; the create page takes a stage once a
+  parent is picked.
+- **Phase 4**: `IssueRunSteer` in the detail panel's run section steers the
+  active run through `steerIssueRun`, the same path joined wakeups use: no
+  third steer path. A run whose adapter reports no live session says its
+  engine takes no input instead of offering a send it would refuse.
+- **Not built:** Phases 5 and 6 (gated on demand by this plan); `until-pr`
+  `checks` and wakeup expiry (`expires-in` / `on-timeout`); holding a
+  parent's children-done wakeup while the parent sits in backlog; a
+  per-issue or workspace instruction override on the platform
+  children-done rule.
 
 ## Delta since the August snapshots
 

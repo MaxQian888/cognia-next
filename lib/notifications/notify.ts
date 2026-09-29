@@ -19,7 +19,8 @@ export interface NotifyDbPort {
   findByDedupeKey(dedupeKey: string, sinceMs: number): Promise<NotificationRecord | undefined>
   putNotification(rec: NotificationRecord): Promise<void>
   patchNotification(id: string, patch: Partial<NotificationRecord>): Promise<void>
-  pruneNotifications(opts: { now: number; maxAgeMs: number; maxItems: number }): Promise<number>
+  /** Resolves the ids it deleted. */
+  pruneNotifications(opts: { now: number; maxAgeMs: number; maxItems: number }): Promise<string[]>
 }
 
 export interface NotifyDeps {
@@ -43,6 +44,11 @@ export interface NotifyDeps {
   isOsPermitted?: () => boolean | Promise<boolean>
   /** Reactive store hook — called after persist so the badge/panel update. */
   onRecord?: (rec: NotificationRecord, decision: RoutingDecision) => void
+  /**
+   * Rows retention just deleted, so the reactive store drops them too. Without
+   * it the in-memory feed outgrows the cap for the rest of the session.
+   */
+  onPruned?: (ids: readonly string[]) => void
   /** IANA tz for DND evaluation (defaults to the host's local zone). */
   tz?: string
   /** Override id generation (tests). */
@@ -238,6 +244,9 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
       now,
       maxAgeMs: prefs.retentionMaxAgeMs,
       maxItems: prefs.retentionMaxItems,
+    })
+    .then((ids) => {
+      if (ids.length > 0) deps.onPruned?.(ids)
     })
     .catch(() => {})
 

@@ -197,7 +197,7 @@ describe("pruneNotifications", () => {
     await putNotification(rec({ id: "exp", expiresAt: 500 }))
     await putNotification(rec({ id: "live", expiresAt: 5000 }))
     const removed = await pruneNotifications({ now: 1000, maxAgeMs: 0, maxItems: 0 })
-    expect(removed).toBe(1)
+    expect(removed).toEqual(["exp"])
     expect(await getNotification("exp")).toBeUndefined()
     expect(await getNotification("live")).toBeDefined()
   })
@@ -206,7 +206,7 @@ describe("pruneNotifications", () => {
     await putNotification(rec({ id: "old", createdAt: 100 }))
     await putNotification(rec({ id: "fresh", createdAt: 900 }))
     const removed = await pruneNotifications({ now: 1000, maxAgeMs: 500, maxItems: 0 })
-    expect(removed).toBe(1)
+    expect(removed).toEqual(["old"])
     expect(await getNotification("old")).toBeUndefined()
   })
 
@@ -215,13 +215,13 @@ describe("pruneNotifications", () => {
       await putNotification(rec({ id: `n${i}`, createdAt: 100 + i }))
     }
     const removed = await pruneNotifications({ now: 10000, maxAgeMs: 0, maxItems: 2 })
-    expect(removed).toBe(3)
+    expect([...removed].sort()).toEqual(["n0", "n1", "n2"])
     const remaining = (await listNotifications({ includeDone: true })).map((r) => r.id)
     expect(remaining.sort()).toEqual(["n3", "n4"])
   })
 
-  it("returns 0 when nothing needs pruning", async () => {
+  it("returns nothing when nothing needs pruning", async () => {
     await putNotification(rec({ id: "a", createdAt: 900 }))
-    expect(await pruneNotifications({ now: 1000, maxAgeMs: 0, maxItems: 0 })).toBe(0)
+    expect(await pruneNotifications({ now: 1000, maxAgeMs: 0, maxItems: 0 })).toEqual([])
   })
 })

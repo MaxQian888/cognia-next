@@ -116,7 +116,11 @@ export function QuoteCardDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+      {/* Only the body scrolls. With the whole dialog scrolling, the close
+          button (pinned to the dialog's corner) scrolled away with the title,
+          and on a phone the preview iframe takes most of the height — so once
+          you reached the actions there was no visible way out. */}
+      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MessageSquareQuoteIcon className="size-4" />
@@ -125,7 +129,10 @@ export function QuoteCardDialog({
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-1">
+        <div
+          className="-mx-6 min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-1"
+          data-testid="quote-card-body"
+        >
           <div className="space-y-1">
             <Label className="text-xs">{t("styleLabel")}</Label>
             <ThemeGallery value={theme} onChange={setTheme} />

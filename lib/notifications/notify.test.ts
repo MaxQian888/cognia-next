@@ -4,7 +4,11 @@ import { resolvePreferences } from "./preferences"
 import { COALESCE_UNTIL_ARCHIVED } from "./dedup"
 
 /** In-memory db port over a Map. */
-function makeDb(): NotifyDbPort & { rows: Map<string, NotificationRecord>; pruneCalls: number } {
+function makeDb(): NotifyDbPort & {
+  rows: Map<string, NotificationRecord>
+  pruneCalls: number
+  pruned: string[]
+} {
   const rows = new Map<string, NotificationRecord>()
   return {
     rows,
@@ -22,9 +26,10 @@ function makeDb(): NotifyDbPort & { rows: Map<string, NotificationRecord>; prune
       const cur = rows.get(id)
       if (cur) rows.set(id, { ...cur, ...patch })
     },
+    pruned: [],
     async pruneNotifications() {
       this.pruneCalls += 1
-      return 0
+      return this.pruned
     },
   }
 }
@@ -125,6 +130,19 @@ describe("notify — insert", () => {
     await notify({ source: "system", level: "info", title: "T" }, deps)
     await Promise.resolve()
     expect(deps.db.pruneCalls).toBe(1)
+  })
+
+  it("hands the rows retention deleted to the store, and stays quiet when none were", async () => {
+    const onPruned = jest.fn()
+    const quiet = baseDeps({ onPruned })
+    await notify({ source: "system", level: "info", title: "T" }, quiet)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(onPruned).not.toHaveBeenCalled()
+    const deps = baseDeps({ onPruned })
+    deps.db.pruned = ["old-1", "old-2"]
+    await notify({ source: "system", level: "info", title: "T" }, deps)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(onPruned).toHaveBeenCalledWith(["old-1", "old-2"])
   })
 
   it("sets expiresAt from ttlMs", async () => {

@@ -119,15 +119,15 @@ export async function clearNotifications(): Promise<void> {
 /**
  * Enforce retention: drop expired (`expiresAt <= now`), then records older than
  * `maxAgeMs`, then trim to the newest `maxItems`. Runs in one transaction.
- * Returns the number of pruned rows.
+ * Returns the ids it deleted, so an in-memory mirror can drop the same rows.
  */
 export async function pruneNotifications(opts: {
   now: number
   maxAgeMs: number
   maxItems: number
-}): Promise<number> {
+}): Promise<string[]> {
   const db = getDb()
-  let removed = 0
+  const removed: string[] = []
   await db.transaction("rw", db.notifications, async () => {
     // 1. TTL-expired.
     const expiredKeys = await db.notifications
@@ -136,7 +136,7 @@ export async function pruneNotifications(opts: {
       .primaryKeys()
     if (expiredKeys.length > 0) {
       await db.notifications.bulkDelete(expiredKeys as string[])
-      removed += expiredKeys.length
+      removed.push(...(expiredKeys as string[]))
     }
 
     // 2. Older than maxAge.
@@ -145,7 +145,7 @@ export async function pruneNotifications(opts: {
       const oldKeys = await db.notifications.where("createdAt").below(cutoff).primaryKeys()
       if (oldKeys.length > 0) {
         await db.notifications.bulkDelete(oldKeys as string[])
-        removed += oldKeys.length
+        removed.push(...(oldKeys as string[]))
       }
     }
 
@@ -157,7 +157,7 @@ export async function pruneNotifications(opts: {
         const oldest = await db.notifications.orderBy("createdAt").limit(toRemove).primaryKeys()
         if (oldest.length > 0) {
           await db.notifications.bulkDelete(oldest as string[])
-          removed += oldest.length
+          removed.push(...(oldest as string[]))
         }
       }
     }

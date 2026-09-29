@@ -116,6 +116,26 @@ describe("ingest", () => {
   })
 })
 
+describe("evict", () => {
+  it("drops the rows retention deleted and recounts the badge", () => {
+    useNotificationStore.setState({
+      items: [rec({ id: "keep" }), rec({ id: "gone", directed: true })],
+      directedUnread: 1,
+    })
+    useNotificationStore.getState().evict(["gone", "never-loaded"])
+    const state = useNotificationStore.getState()
+    expect(state.items.map((r) => r.id)).toEqual(["keep"])
+    expect(state.directedUnread).toBe(0)
+  })
+
+  it("leaves the feed untouched when none of the ids are loaded", () => {
+    const items = [rec({ id: "keep" })]
+    useNotificationStore.setState({ items })
+    useNotificationStore.getState().evict(["elsewhere"])
+    expect(useNotificationStore.getState().items).toBe(items)
+  })
+})
+
 describe("read-state actions", () => {
   it("markSeen persists and recounts", async () => {
     useNotificationStore.setState({

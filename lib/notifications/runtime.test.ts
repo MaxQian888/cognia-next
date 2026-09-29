@@ -51,7 +51,7 @@ jest.mock("@/lib/db/notifications", () => ({
     const cur = mockRows.get(id)
     if (cur) mockRows.set(id, { ...cur, ...patch })
   }),
-  pruneNotifications: jest.fn(async () => 0),
+  pruneNotifications: jest.fn(async (): Promise<string[]> => []),
 }))
 
 import { toast } from "sonner"

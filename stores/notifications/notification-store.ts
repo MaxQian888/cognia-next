@@ -54,6 +54,8 @@ export interface NotificationStoreState {
   hydrate: () => Promise<void>
   /** `notify()` onRecord hook — upsert + recompute. */
   ingest: (rec: NotificationRecord) => void
+  /** Retention deleted these rows (`notify()` `onPruned` hook). */
+  evict: (ids: readonly string[]) => void
   markSeen: (id: string) => Promise<void>
   markRead: (id: string) => Promise<void>
   markDone: (id: string) => Promise<void>
@@ -96,6 +98,16 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
       return
     }
     recount(set, upsert(get().items, rec))
+  },
+
+  evict: (ids) => {
+    const gone = new Set(ids)
+    const items = get().items
+    if (!items.some((r) => gone.has(r.id))) return
+    recount(
+      set,
+      items.filter((r) => !gone.has(r.id))
+    )
   },
 
   markSeen: async (id) => {

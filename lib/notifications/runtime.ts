@@ -235,6 +235,7 @@ function buildDeps(): NotifyDeps {
       return (await getDb().sessions.get(sessionId))?.projectId
     },
     onRecord: (rec) => useNotificationStore.getState().ingest(rec),
+    onPruned: (ids) => useNotificationStore.getState().evict(ids),
   }
 }
 
