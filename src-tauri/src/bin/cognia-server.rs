@@ -1744,10 +1744,21 @@ async fn run_serve(
     if let Some(services) = headless_services() {
         let gateway = Arc::clone(&services.gateway);
         gateway.hydrate_from_disk(data_dir.join(".cognia").join("gateway-config.json"));
+        // ADR-0188 D9/D36: the Run API, the `cognia/*` models and the
+        // passthrough ledger reach the connected brain over its
+        // `/internal/bridge` socket, and the brain publishes the account's
+        // gateway switches back. Every projection below is committed through
+        // this handle so a profile change never drops them. Installing switches
+        // nothing on: both surfaces stay off until the brain says otherwise.
+        let router_fusion =
+            app_lib::companion_api::gateway_brain::HeadlessRouterFusionGateway::install(
+                Arc::clone(&shared),
+                Arc::clone(&gateway),
+            );
 
         let profiles = Arc::clone(&services.profiles);
         let publish = {
-            let gateway = Arc::clone(&gateway);
+            let router_fusion = Arc::clone(&router_fusion);
             let profiles = Arc::clone(&profiles);
             move || {
                 let docs = match profiles.load_all() {
@@ -1766,7 +1777,7 @@ async fn run_serve(
                     &app_lib::provider_profiles::resolve_credential_ref,
                 );
                 match serde_json::from_value(snapshot_json) {
-                    Ok(snapshot) => match gateway.try_set_snapshot(snapshot) {
+                    Ok(snapshot) => match router_fusion.project_snapshot(snapshot) {
                         Ok(_) => {
                             log::info!("gateway snapshot projected (profileVersion {version})")
                         }

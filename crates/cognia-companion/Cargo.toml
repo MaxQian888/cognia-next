@@ -57,6 +57,8 @@ cognia-environment = { path = "../cognia-environment", default-features = false,
 cognia-external-agent = { path = "../cognia-external-agent" }
 cognia-files = { path = "../cognia-files" }
 cognia-fleet = { path = "../cognia-fleet" }
+# ADR-0188: the gateway's brain bridge over the writes bridge (`gateway_brain`).
+cognia-gateway = { path = "../cognia-gateway" }
 cognia-headless-contract = { path = "../cognia-headless-contract" }
 cognia-mcp-server = { path = "../cognia-mcp-server" }
 cognia-net = { path = "../cognia-net" }
@@ -114,6 +116,8 @@ cognia-agents = { path = "../cognia-agents" }
 cognia-companion-bus = { path = "../cognia-companion-bus", features = ["test-support"] }
 cognia-companion-security = { path = "../cognia-companion-security", features = ["test-support"] }
 cognia-fleet = { path = "../cognia-fleet", features = ["test-support"] }
+# The scripted brain `gateway_brain`'s tests install into a real gateway.
+cognia-gateway = { path = "../cognia-gateway", features = ["test-support"] }
 cognia-power = { path = "../cognia-power", features = ["test-support"] }
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 wiremock.workspace = true

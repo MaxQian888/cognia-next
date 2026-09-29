@@ -2106,6 +2106,7 @@ dependencies = [
  "cognia-tenant-auth",
  "cognia-terminal",
  "flate2",
+ "cognia-gateway",
  "futures-util",
  "hex",
  "hmac 0.13.0",

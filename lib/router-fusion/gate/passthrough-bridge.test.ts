@@ -80,6 +80,23 @@ describe("dispatchRouterFusionPassthroughCommand", () => {
     expect(seen[0].input).toMatchObject({ requestId: "req-1", attempt: 0, keyId: "key-a" })
   })
 
+  it("tells the ledger an embeddings attempt from a chat one, and reads anything else as chat", async () => {
+    const { host, seen } = fakeHost()
+    const deps = { settings: ON, loadHost: async () => host }
+    await dispatchRouterFusionPassthroughCommand(
+      "router_fusion_passthrough_reserve",
+      { ...RESERVE_PAYLOAD, kind: "embeddings", maxOutputTokens: 0 },
+      deps
+    )
+    await dispatchRouterFusionPassthroughCommand(
+      "router_fusion_passthrough_reserve",
+      { ...RESERVE_PAYLOAD, kind: "telepathy" },
+      deps
+    )
+    expect(seen[0].input).toMatchObject({ kind: "embeddings", maxOutputTokens: 0 })
+    expect(seen[1].input).not.toHaveProperty("kind")
+  })
+
   it("carries a real refusal back instead of bypassing it", async () => {
     // Budget and hard filters are answers, not faults: proxying anyway would
     // spend money the user said no to.
@@ -113,15 +130,67 @@ describe("dispatchRouterFusionPassthroughCommand", () => {
     warn.mockRestore()
   })
 
-  it("[ACC:ISO-02] stops asking once the breaker is open, and still lets traffic through", async () => {
+  it("[ACC:ISO-02] stops reserving once the breaker is open, and still lets traffic through", async () => {
     const loadHost = jest.fn()
     const outcome = await dispatchRouterFusionPassthroughCommand(
-      "router_fusion_passthrough_settle",
-      { runId: "gwpt:req-1", attemptId: "attempt-1", outcome: "succeeded", final: true },
+      "router_fusion_passthrough_reserve",
+      RESERVE_PAYLOAD,
       { settings: TRIPPED, loadHost: loadHost as unknown as () => Promise<RouterFusionHost> }
     )
     expect(outcome).toEqual({ status: "bypassed", code: "breaker_tripped" })
     expect(loadHost).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["switched off", OFF],
+    ["tripped", TRIPPED],
+    ["unreadable", null],
+  ])(
+    "still settles a reservation that exists when the lane is %s by the time it settles",
+    async (_label, settings) => {
+      // Money is held against the reservation. A lane turned off or tripped
+      // between this call's reserve and its settle must not strand that hold
+      // until the next boot sweep.
+      const { host, seen } = fakeHost()
+      const outcome = await dispatchRouterFusionPassthroughCommand(
+        "router_fusion_passthrough_settle",
+        {
+          runId: "gwpt:req-1",
+          attemptId: "attempt-1",
+          outcome: "succeeded",
+          usage: { inputTokens: 10, outputTokens: 2 },
+          final: true,
+        },
+        { settings, loadHost: async () => host }
+      )
+      expect(outcome).toEqual({ status: "ledgered", sealed: true })
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({
+        name: "settle",
+        input: { attemptId: "attempt-1", outcome: "succeeded" },
+      })
+    }
+  )
+
+  it("reports a settle only a fusion-database fault stopped, and counts the fault", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const { host } = fakeHost({
+      settlePassthroughCall: async () => {
+        throw new RouterFusionInfrastructureError("db_transaction", "the transaction aborted")
+      },
+    })
+    const outcome = await dispatchRouterFusionPassthroughCommand(
+      "router_fusion_passthrough_settle",
+      { runId: "gwpt:req-1", attemptId: "attempt-1", outcome: "succeeded", final: true },
+      { settings: OFF, loadHost: async () => host }
+    )
+    expect(outcome).toEqual({ status: "bypassed", code: "ledger_unavailable" })
+    expect(getBreakerSnapshot("gatewayPassthroughLedger").consecutiveFaults).toBe(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("reservation stays held"),
+      "the transaction aborted"
+    )
+    warn.mockRestore()
   })
 
   it("normalizes the usage the gateway sniffed, and never invents a zero", async () => {

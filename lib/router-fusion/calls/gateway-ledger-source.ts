@@ -37,6 +37,7 @@ import { currentFusionStore, drainAccountOutbox } from "../chat/store-provider"
 import { tenantLimitFor } from "../chat/tenant-budget"
 import { currentRouterFusionGateSettings } from "../gate/current-settings"
 import { RouterFusionInfrastructureError } from "../gate/faults"
+import type { RouteFactsHost } from "../chat/route-chat-turn"
 import { utilityRouteHost } from "./ledgered-llm-client"
 import { routeUtilityCall } from "./utility-route"
 import { AI_SDK_USAGE_SEMANTICS } from "./utility-run"
@@ -59,7 +60,14 @@ export function passthroughRunId(requestId: string): string {
   return `gwpt:${requestId}`
 }
 
+/**
+ * What kind of upstream call an attempt is (`passthrough_ledger::CallKind`).
+ * Absent means chat, which is every gateway that predates embeddings ledgering.
+ */
+export type PassthroughCallKind = "chat" | "embeddings"
+
 export interface PassthroughReserveInput {
+  kind?: PassthroughCallKind
   /** The gateway's own request id: one request, one run, however many attempts. */
   requestId: string
   /** 0-based candidate index. Each attempt is its own logical step and its own bill. */
@@ -104,6 +112,33 @@ async function appSettingsOrThrow(given?: AppSettings | null): Promise<AppSettin
 }
 
 /**
+ * The price an embeddings call is billed at.
+ *
+ * Price tables list an embeddings model with an input rate only
+ * (`text-embedding-3-small: promptPer1M 0.02`), because it has no output side.
+ * The ledger's rate card needs both rates, and for a chat model a missing
+ * output rate genuinely means "price unknown". For an embeddings call it does
+ * not: the call cannot produce an output token, so its output rate is
+ * irrelevant and zero is exact, not a guess. Only that one gap is filled; a
+ * model with no input rate stays unpriced and takes the unknown-price reserve,
+ * as every unpriced call does.
+ */
+export function embeddingsPricing(
+  pricing: ReturnType<RouteFactsHost["pricingOf"]>
+): ReturnType<RouteFactsHost["pricingOf"]> {
+  if (!pricing || typeof pricing.promptPer1M !== "number") return pricing
+  if (typeof pricing.completionPer1M === "number") return pricing
+  return { ...pricing, completionPer1M: 0 }
+}
+
+function embeddingsRouteHost(host: RouteFactsHost): RouteFactsHost {
+  return {
+    ...host,
+    pricingOf: (providerId, modelId) => embeddingsPricing(host.pricingOf(providerId, modelId)),
+  }
+}
+
+/**
  * Reserve one upstream attempt. The gateway calls this before it sends, and
  * never sends when the answer is a refusal.
  *
@@ -116,7 +151,9 @@ export async function reservePassthroughCall(
   given?: AppSettings | null
 ): Promise<PassthroughReservation> {
   const appSettings = await appSettingsOrThrow(given)
-  const route = routeUtilityCall(utilityRouteHost(appSettings), {
+  const baseHost = utilityRouteHost(appSettings)
+  const routeHost = input.kind === "embeddings" ? embeddingsRouteHost(baseHost) : baseHost
+  const route = routeUtilityCall(routeHost, {
     surface: PASSTHROUGH_SURFACE,
     providerId: input.providerId,
     modelId: input.modelId,

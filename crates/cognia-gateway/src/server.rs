@@ -2149,6 +2149,18 @@ async fn openai_embeddings(
     let mut failures: Vec<String> = Vec::new();
     let attempt_limit = route_attempt_limit(&cfg, &snapshot, candidates.len());
     let mut retry_wait_remaining_ms = cfg.max_retry_wait_ms;
+    // ADR-0188 D13: embeddings are proxied model calls like any other, so with
+    // `gatewayPassthroughLedger` on each upstream attempt is reserved before it
+    // is sent and settled from the usage the answer reports — the same lane,
+    // failure classes, 402 refusal and 2 s bypass as the chat endpoints. With
+    // the switch off nothing below asks the brain anything (D37).
+    let ledger_enabled = state.runs.passthrough_ledger_enabled();
+    let ledger_bridge = state.runs.bridge();
+    let ledger_key_name = ledger_key_name_of(&state, &ctx);
+    let mut ledger_header =
+        crate::passthrough_ledger::LedgerHeader::Bypassed("surface_off".to_string());
+    let mut ledger_run_id: Option<String> = None;
+    let mut attempts_made: usize = 0;
     for (attempt_index, candidate) in candidates.iter().take(attempt_limit).enumerate() {
         let started = Instant::now();
 
@@ -2189,10 +2201,66 @@ async fn openai_embeddings(
             req = req.header(name, value);
         }
 
+        // Reserved here and nowhere earlier: every bail above this line sent
+        // nothing, so there is nothing to settle for them.
+        let has_more_candidates = attempt_index + 1 < attempt_limit;
+        let reservation = crate::passthrough_ledger::reserve(
+            ledger_bridge.clone(),
+            ledger_enabled,
+            crate::passthrough_ledger::ReserveRequest {
+                kind: crate::passthrough_ledger::CallKind::Embeddings,
+                request_id: ctx.request_id.clone(),
+                attempt: attempt_index,
+                provider_id: candidate.provider.id.clone(),
+                model_id: candidate.model_id.clone(),
+                requested_model: model.clone(),
+                key_id: ctx.key_id.clone(),
+                key_name: ledger_key_name.clone(),
+                estimated_input_tokens: estimate_input_tokens(&upstream_body),
+                // An embeddings call produces no output tokens.
+                max_output_tokens: Some(0),
+            },
+        )
+        .await;
+        let ledgered = match reservation {
+            crate::passthrough_ledger::ReserveVerdict::Ledgered { run_id, attempt_id } => {
+                ledger_header = crate::passthrough_ledger::LedgerHeader::Ledgered;
+                ledger_run_id = Some(run_id.clone());
+                Some(crate::passthrough_ledger::LedgeredAttempt { run_id, attempt_id })
+            }
+            crate::passthrough_ledger::ReserveVerdict::Bypassed { reason } => {
+                ledger_header = crate::passthrough_ledger::LedgerHeader::Bypassed(reason);
+                None
+            }
+            crate::passthrough_ledger::ReserveVerdict::Refused { code, reasons } => {
+                return ledger_refusal(
+                    &state,
+                    &ctx,
+                    format,
+                    &model,
+                    &code,
+                    &reasons,
+                    attempts_made,
+                    ledger_run_id.as_deref(),
+                );
+            }
+        };
+        attempts_made += 1;
+
         let resp = match req.send().await {
             Ok(resp) => resp,
             Err(err) => {
                 let message = format!("connect error: {err}");
+                settle_attempt(
+                    &ledger_bridge,
+                    ledgered,
+                    crate::passthrough_ledger::AttemptOutcome::Failed(
+                        crate::passthrough_ledger::FailureClass::NotSent,
+                    ),
+                    Default::default(),
+                    Some(message.clone()),
+                    !has_more_candidates,
+                );
                 // Embeddings traffic trains the same health / breaker / cost
                 // stores as chat. `session_id` is None: embeddings must never
                 // pin a chat session's affinity (same rule as /v1/responses).
@@ -2243,6 +2311,27 @@ async fn openai_embeddings(
                 "HTTP {status}: {}",
                 text.chars().take(500).collect::<String>()
             );
+            // R4: authentication failures never switch credentials/providers
+            // unless a verified route ticket explicitly allows auth failover.
+            let auth_failure = status == 401 || status == 403;
+            let auth_failover_allowed = ctx
+                .ticket
+                .as_ref()
+                .is_some_and(|ticket| ticket.allow_auth_failover);
+            let will_retry = cfg.should_retry(status) && (!auth_failure || auth_failover_allowed);
+            // An upstream error is a completed attempt with no bill: the
+            // reservation goes back rather than being held against an answer
+            // that will never arrive.
+            settle_attempt(
+                &ledger_bridge,
+                ledgered,
+                crate::passthrough_ledger::AttemptOutcome::Failed(
+                    crate::passthrough_ledger::FailureClass::of_status(status),
+                ),
+                Default::default(),
+                Some(format!("HTTP {status}")),
+                !(will_retry && has_more_candidates),
+            );
             // Forward the cooldown window so the renderer breaker gets the same
             // dynamic backoff the chat path already feeds it.
             emit_outcome(
@@ -2255,14 +2344,7 @@ async fn openai_embeddings(
                 retry_after_ms,
                 None,
             );
-            // R4: authentication failures never switch credentials/providers
-            // unless a verified route ticket explicitly allows auth failover.
-            let auth_failure = status == 401 || status == 403;
-            let auth_failover_allowed = ctx
-                .ticket
-                .as_ref()
-                .is_some_and(|ticket| ticket.allow_auth_failover);
-            if cfg.should_retry(status) && (!auth_failure || auth_failover_allowed) {
+            if will_retry {
                 wait_before_retry(
                     &cfg,
                     attempt_index,
@@ -2274,7 +2356,7 @@ async fn openai_embeddings(
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
-            return logged_error(
+            let response = logged_error(
                 &state,
                 &ctx,
                 format,
@@ -2282,6 +2364,12 @@ async fn openai_embeddings(
                 "invalid_request_error",
                 &message,
                 Some(&model),
+            );
+            return with_ledger_headers(
+                response,
+                &ledger_header,
+                attempts_made,
+                ledger_run_id.as_deref(),
             );
         }
 
@@ -2293,6 +2381,16 @@ async fn openai_embeddings(
                 // `buffered_response`), so embeddings must too or the breaker
                 // never sees a provider that reliably returns garbage.
                 let message = format!("invalid upstream JSON: {err}");
+                // The input was sent and the provider bills for it; what we
+                // cannot say is how much. The money stays held until it is known.
+                settle_attempt(
+                    &ledger_bridge,
+                    ledgered,
+                    crate::passthrough_ledger::AttemptOutcome::Unknown,
+                    Default::default(),
+                    Some(message.clone()),
+                    true,
+                );
                 emit_outcome(
                     state.host.as_ref(),
                     candidate,
@@ -2303,7 +2401,7 @@ async fn openai_embeddings(
                     None,
                     None,
                 );
-                return logged_error(
+                let response = logged_error(
                     &state,
                     &ctx,
                     format,
@@ -2312,12 +2410,26 @@ async fn openai_embeddings(
                     &message,
                     Some(&model),
                 );
+                return with_ledger_headers(
+                    response,
+                    &ledger_header,
+                    attempts_made,
+                    ledger_run_id.as_deref(),
+                );
             }
         };
         // Embeddings report only prompt tokens (no completion side).
         let input_tokens = upstream["usage"]["prompt_tokens"]
             .as_u64()
             .or_else(|| upstream["usage"]["total_tokens"].as_u64());
+        settle_attempt(
+            &ledger_bridge,
+            ledgered,
+            crate::passthrough_ledger::AttemptOutcome::Succeeded,
+            embeddings_usage(input_tokens),
+            None,
+            true,
+        );
         emit_outcome(
             state.host.as_ref(),
             candidate,
@@ -2338,10 +2450,87 @@ async fn openai_embeddings(
             None,
             false,
         );
-        return Json(upstream).into_response();
+        return with_ledger_headers(
+            Json(upstream).into_response(),
+            &ledger_header,
+            attempts_made,
+            ledger_run_id.as_deref(),
+        );
     }
 
-    all_failed(&state, &ctx, format, &model, &failures)
+    with_ledger_headers(
+        all_failed(&state, &ctx, format, &model, &failures),
+        &ledger_header,
+        attempts_made,
+        ledger_run_id.as_deref(),
+    )
+}
+
+/// The usage an embeddings answer settles with.
+///
+/// An embeddings call has input tokens only, so a reported input count is the
+/// whole bill and its output side is a true zero. With no count reported the
+/// usage stays absent: a zero input would be a claim about the bill nothing
+/// supports, and the ledger keeps the reservation's estimate instead.
+fn embeddings_usage(input_tokens: Option<u64>) -> crate::passthrough_ledger::AttemptUsage {
+    match input_tokens {
+        Some(input) => crate::passthrough_ledger::AttemptUsage {
+            input_tokens: Some(input),
+            output_tokens: Some(0),
+            ..Default::default()
+        },
+        None => crate::passthrough_ledger::AttemptUsage::default(),
+    }
+}
+
+/// The key's display name the run records as "who asked". Resolved before any
+/// await: `state.keys` is a parking_lot guard. A copy, because the key can be
+/// renamed or revoked while the run is still listed.
+fn ledger_key_name_of(state: &AppState, ctx: &ReqCtx) -> String {
+    ctx.key_id
+        .as_ref()
+        .and_then(|id| {
+            let keys = state.keys.read();
+            keys.iter()
+                .find(|key| &key.id == id)
+                .map(|key| key.name.clone())
+        })
+        .unwrap_or_default()
+}
+
+/// A budget or policy refusal from the passthrough ledger: a real answer, not
+/// a fault. Sending anyway would spend money the user said no to (D38), so the
+/// request is answered `402` with the brain's code and nothing is sent.
+#[allow(clippy::too_many_arguments)]
+fn ledger_refusal(
+    state: &AppState,
+    ctx: &ReqCtx,
+    format: InboundFormat,
+    model: &str,
+    code: &str,
+    reasons: &[String],
+    attempts_made: usize,
+    run_id: Option<&str>,
+) -> Response {
+    let mut message = format!("Router + Fusion refused this request: {code}");
+    if !reasons.is_empty() {
+        message.push_str(&format!(" ({})", reasons.join(", ")));
+    }
+    let response = logged_error(
+        state,
+        ctx,
+        format,
+        StatusCode::PAYMENT_REQUIRED,
+        code,
+        &message,
+        Some(model),
+    );
+    with_ledger_headers(
+        response,
+        &crate::passthrough_ledger::LedgerHeader::Ledgered,
+        attempts_made,
+        run_id,
+    )
 }
 
 // ---- responses handler ------------------------------------------------------
@@ -3220,16 +3409,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     // Resolved once, before any await: `state.keys` is a parking_lot guard, and
     // the name is what the run's own history shows for "who asked" — a copy,
     // because the key can be renamed or revoked while the run is still listed.
-    let ledger_key_name = ctx
-        .key_id
-        .as_ref()
-        .and_then(|id| {
-            let keys = state.keys.read();
-            keys.iter()
-                .find(|key| &key.id == id)
-                .map(|key| key.name.clone())
-        })
-        .unwrap_or_default();
+    let ledger_key_name = ledger_key_name_of(&state, &ctx);
     let mut ledger_header =
         crate::passthrough_ledger::LedgerHeader::Bypassed("surface_off".to_string());
     let mut ledger_run_id: Option<String> = None;
@@ -3401,6 +3581,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             ledger_bridge.clone(),
             ledger_enabled,
             crate::passthrough_ledger::ReserveRequest {
+                kind: crate::passthrough_ledger::CallKind::Chat,
                 request_id: ctx.request_id.clone(),
                 attempt: attempt_index,
                 provider_id: candidate.provider.id.clone(),
@@ -3431,22 +3612,13 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             crate::passthrough_ledger::ReserveVerdict::Refused { code, reasons } => {
                 // A budget or policy refusal is a real answer, not a fault:
                 // sending anyway would spend money the user said no to.
-                let mut message = format!("Router + Fusion refused this request: {code}");
-                if !reasons.is_empty() {
-                    message.push_str(&format!(" ({})", reasons.join(", ")));
-                }
-                let response = logged_error(
+                return ledger_refusal(
                     &state,
                     &ctx,
                     format,
-                    StatusCode::PAYMENT_REQUIRED,
+                    &model,
                     &code,
-                    &message,
-                    Some(&model),
-                );
-                return with_ledger_headers(
-                    response,
-                    &crate::passthrough_ledger::LedgerHeader::Ledgered,
+                    &reasons,
                     attempts_made,
                     ledger_run_id.as_deref(),
                 );
@@ -6215,6 +6387,324 @@ mod router_fusion_server_tests {
 
     fn snapshot_with(value: Value) -> RoutingSnapshot {
         serde_json::from_value(value).unwrap()
+    }
+
+    // ---- the passthrough ledger on /v1/embeddings (ADR-0188 D13) -----------
+
+    /// A one-route OpenAI-compatible embeddings upstream answering `status`,
+    /// recording every body it gets.
+    async fn spawn_embeddings_upstream(
+        status: u16,
+    ) -> (SocketAddr, Arc<parking_lot::Mutex<Vec<Value>>>) {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let app = Router::new().route(
+            "/v1/embeddings",
+            post(move |Json(body): Json<Value>| {
+                let record = record.clone();
+                async move {
+                    record.lock().push(body.clone());
+                    if status >= 400 {
+                        return (
+                            StatusCode::from_u16(status).unwrap(),
+                            Json(json!({ "error": { "message": "upstream down" } })),
+                        )
+                            .into_response();
+                    }
+                    Json(json!({
+                        "object": "list",
+                        "model": body["model"],
+                        "data": [{ "object": "embedding", "index": 0, "embedding": [0.1, 0.2] }],
+                        "usage": { "prompt_tokens": 7, "total_tokens": 7 }
+                    }))
+                    .into_response()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (addr, seen)
+    }
+
+    /// An `emb` alias over the given upstreams, walked in order.
+    fn embeddings_snapshot(upstreams: &[SocketAddr]) -> Option<RoutingSnapshot> {
+        let providers: Vec<Value> = upstreams
+            .iter()
+            .enumerate()
+            .map(|(index, addr)| {
+                json!({ "id": format!("up{index}"), "protocol": "openai",
+                    "baseUrl": format!("http://{addr}/v1"), "apiKey": format!("sk-up{index}"),
+                    "enabled": true, "models": ["embed-small"] })
+            })
+            .collect();
+        let entries: Vec<Value> = (0..upstreams.len())
+            .map(|index| json!({ "providerId": format!("up{index}"), "modelId": "embed-small" }))
+            .collect();
+        Some(snapshot_with(json!({
+            "aliases": [{ "alias": "emb", "entries": entries }],
+            "providers": providers,
+            "generatedAtMs": 1
+        })))
+    }
+
+    fn embeddings_gateway(
+        bridge: Arc<dyn BrainBridge>,
+        ledger: bool,
+        upstreams: &[SocketAddr],
+    ) -> Gateway {
+        let gw = gateway_with(bridge, false, false, embeddings_snapshot(upstreams));
+        gw.state.runs.switches.write().passthrough_ledger_enabled = ledger;
+        {
+            // No backoff between failover attempts: the tests are about the
+            // bill, not the pacing.
+            let mut config = gw.state.config.write();
+            config.retry_backoff_base_ms = 0;
+            config.retry_backoff_max_ms = 0;
+        }
+        gw
+    }
+
+    fn embed() -> Value {
+        json!({ "model": "emb", "input": "the quick brown fox" })
+    }
+
+    fn header<'a>(response: &'a Response, name: &str) -> Option<&'a str> {
+        response.headers().get(name).and_then(|v| v.to_str().ok())
+    }
+
+    /// Settling is spawned behind the response; wait for `count` of them.
+    async fn settled(bridge: &RecordingBrainBridge, count: usize) -> Vec<Value> {
+        for _ in 0..200 {
+            let sent = bridge.payloads_for(crate::passthrough_ledger::command::SETTLE);
+            if sent.len() >= count {
+                return sent;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("expected {count} settle(s)");
+    }
+
+    #[tokio::test]
+    async fn an_embeddings_call_is_reserved_before_it_is_sent_and_settled_from_its_usage() {
+        use crate::passthrough_ledger::command::{RESERVE, SETTLE};
+        let (upstream, seen) = spawn_embeddings_upstream(200).await;
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(
+            RESERVE,
+            json!({ "status": "ledgered", "runId": "gwpt:req-e", "attemptId": "a1" }),
+        );
+        bridge.ok(SETTLE, json!({ "status": "ledgered", "sealed": true }));
+        let gw = embeddings_gateway(Arc::new(bridge.clone()), true, &[upstream]);
+
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(header(&response, "x-cognia-ledger"), Some("ledgered"));
+        assert_eq!(header(&response, "x-cognia-attempts"), Some("1"));
+        assert_eq!(header(&response, "x-cognia-run-id"), Some("gwpt:req-e"));
+        assert!(header(&response, "x-cognia-fallback").is_none());
+        assert_eq!(seen.lock().len(), 1);
+
+        let reserved = bridge.payloads_for(RESERVE);
+        assert_eq!(reserved.len(), 1);
+        assert_eq!(reserved[0]["kind"], "embeddings");
+        assert_eq!(reserved[0]["providerId"], "up0");
+        assert_eq!(reserved[0]["modelId"], "embed-small");
+        assert_eq!(reserved[0]["requestedModel"], "emb");
+        assert_eq!(reserved[0]["keyName"], "scoped robot");
+        assert_eq!(reserved[0]["maxOutputTokens"], 0);
+        assert!(reserved[0]["estimatedInputTokens"].as_u64().unwrap() > 0);
+
+        let settles = settled(&bridge, 1).await;
+        assert_eq!(settles[0]["runId"], "gwpt:req-e");
+        assert_eq!(settles[0]["attemptId"], "a1");
+        assert_eq!(settles[0]["outcome"], "succeeded");
+        assert_eq!(settles[0]["final"], true);
+        // The prompt tokens are the whole bill; the output side is a true zero.
+        assert_eq!(settles[0]["usage"], json!({ "inputTokens": 7, "outputTokens": 0 }));
+    }
+
+    #[tokio::test]
+    async fn a_ledger_refusal_stops_an_embeddings_call_before_it_is_sent() {
+        use crate::passthrough_ledger::command::RESERVE;
+        let (upstream, seen) = spawn_embeddings_upstream(200).await;
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(
+            RESERVE,
+            json!({ "status": "refused", "code": "BUDGET_EXCEEDED", "reasons": ["run cap"] }),
+        );
+        let gw = embeddings_gateway(Arc::new(bridge.clone()), true, &[upstream]);
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
+        let body = json_of(response).await;
+        assert!(body.to_string().contains("BUDGET_EXCEEDED"), "{body}");
+        assert!(seen.lock().is_empty(), "a refused call is never sent");
+        assert!(bridge
+            .payloads_for(crate::passthrough_ledger::command::SETTLE)
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_absent_brain_lets_an_embeddings_call_through_unledgered() {
+        let (upstream, seen) = spawn_embeddings_upstream(200).await;
+        // Nothing scripted: the recording brain answers `Unavailable`.
+        let bridge = RecordingBrainBridge::new();
+        let gw = embeddings_gateway(Arc::new(bridge.clone()), true, &[upstream]);
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            header(&response, "x-cognia-ledger"),
+            Some("bypassed:brain_unavailable")
+        );
+        assert!(header(&response, "x-cognia-run-id").is_none());
+        assert_eq!(seen.lock().len(), 1);
+        // Nothing was reserved, so there is nothing to settle.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(bridge
+            .payloads_for(crate::passthrough_ledger::command::SETTLE)
+            .is_empty());
+    }
+
+    /// A brain that takes longer than the reserve window costs the caller that
+    /// window once, never their answer.
+    #[tokio::test]
+    async fn a_brain_slower_than_two_seconds_lets_an_embeddings_call_through() {
+        struct Wedged;
+        impl BrainBridge for Wedged {
+            fn call(&self, _command: &'static str, _payload: Value) -> BrainFuture {
+                Box::pin(std::future::pending())
+            }
+        }
+        let (upstream, seen) = spawn_embeddings_upstream(200).await;
+        let gw = embeddings_gateway(Arc::new(Wedged), true, &[upstream]);
+        let started = std::time::Instant::now();
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            header(&response, "x-cognia-ledger"),
+            Some("bypassed:brain_timeout")
+        );
+        assert!(started.elapsed() >= crate::passthrough_ledger::RESERVE_TIMEOUT);
+        assert_eq!(seen.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn with_the_lane_off_an_embeddings_call_asks_the_brain_nothing() {
+        let (upstream, seen) = spawn_embeddings_upstream(200).await;
+        let bridge = RecordingBrainBridge::new();
+        let gw = embeddings_gateway(Arc::new(bridge.clone()), false, &[upstream]);
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            header(&response, "x-cognia-ledger"),
+            Some("bypassed:surface_off")
+        );
+        assert_eq!(seen.lock().len(), 1);
+        assert!(bridge.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_over_embeddings_request_is_one_run_with_a_bill_per_attempt() {
+        use crate::passthrough_ledger::command::{RESERVE, SETTLE};
+        let (down, down_seen) = spawn_embeddings_upstream(503).await;
+        let (up, up_seen) = spawn_embeddings_upstream(200).await;
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(
+            RESERVE,
+            json!({ "status": "ledgered", "runId": "gwpt:req-f", "attemptId": "a1" }),
+        );
+        bridge.ok(
+            RESERVE,
+            json!({ "status": "ledgered", "runId": "gwpt:req-f", "attemptId": "a2" }),
+        );
+        bridge.ok(SETTLE, json!({ "status": "ledgered" }));
+        bridge.ok(SETTLE, json!({ "status": "ledgered", "sealed": true }));
+        let gw = embeddings_gateway(Arc::new(bridge.clone()), true, &[down, up]);
+
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(header(&response, "x-cognia-ledger"), Some("ledgered"));
+        assert_eq!(header(&response, "x-cognia-attempts"), Some("2"));
+        assert_eq!(header(&response, "x-cognia-fallback"), Some("1"));
+        assert_eq!(header(&response, "x-cognia-run-id"), Some("gwpt:req-f"));
+        assert_eq!(down_seen.lock().len(), 1);
+        assert_eq!(up_seen.lock().len(), 1);
+
+        let reserved = bridge.payloads_for(RESERVE);
+        assert_eq!(reserved[0]["attempt"], 0);
+        assert_eq!(reserved[1]["attempt"], 1);
+        assert_eq!(reserved[0]["requestId"], reserved[1]["requestId"]);
+
+        let mut settles = settled(&bridge, 2).await;
+        settles.sort_by_key(|payload| payload["attemptId"].as_str().unwrap_or_default().to_string());
+        // The 503 gave the reservation back as a server error, not the last word.
+        assert_eq!(settles[0]["attemptId"], "a1");
+        assert_eq!(settles[0]["outcome"], "failed");
+        assert_eq!(settles[0]["errorClass"], "server_error");
+        assert_eq!(settles[0]["final"], false);
+        assert!(settles[0].get("usage").is_none());
+        assert_eq!(settles[1]["attemptId"], "a2");
+        assert_eq!(settles[1]["outcome"], "succeeded");
+        assert_eq!(settles[1]["final"], true);
+    }
+
+    #[tokio::test]
+    async fn an_embeddings_error_that_is_not_retried_is_settled_final_and_keeps_its_headers() {
+        use crate::passthrough_ledger::command::{RESERVE, SETTLE};
+        let (bad, _) = spawn_embeddings_upstream(400).await;
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(
+            RESERVE,
+            json!({ "status": "ledgered", "runId": "gwpt:req-b", "attemptId": "a1" }),
+        );
+        bridge.ok(SETTLE, json!({ "status": "ledgered", "sealed": true }));
+        let gw = embeddings_gateway(Arc::new(bridge.clone()), true, &[bad]);
+        let response = send(
+            &gw.app,
+            request("POST", "/v1/embeddings", Some(SECRET), Some(embed())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(header(&response, "x-cognia-ledger"), Some("ledgered"));
+        assert_eq!(header(&response, "x-cognia-run-id"), Some("gwpt:req-b"));
+        let settles = settled(&bridge, 1).await;
+        assert_eq!(settles[0]["outcome"], "failed");
+        assert_eq!(settles[0]["errorClass"], "invalid_request");
+        assert_eq!(settles[0]["final"], true);
+    }
+
+    #[test]
+    fn embeddings_usage_is_input_only_and_absent_when_unreported() {
+        let usage = embeddings_usage(Some(42));
+        assert_eq!(usage.input_tokens, Some(42));
+        assert_eq!(usage.output_tokens, Some(0));
+        assert!(embeddings_usage(None).is_empty());
     }
 
     #[tokio::test]

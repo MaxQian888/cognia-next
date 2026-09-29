@@ -57,12 +57,26 @@ export interface RouterFusionPassthroughDeps {
 /**
  * Run one bridged passthrough command. Never throws and never leaves the
  * gateway without an answer: every path ends in one of the three outcomes.
+ *
+ * Reserve and settle are gated differently, on purpose:
+ *
+ *  - **Reserve** asks whether this request should draw on the budget at all,
+ *    so the switch and the breaker decide: off or tripped is a bypass, and the
+ *    request goes out unledgered.
+ *  - **Settle** closes a reservation that already exists. Money is held against
+ *    it, so it is applied whatever the switch or the breaker say now: a lane
+ *    switched off, or tripped by some other request, between this call's
+ *    reserve and its settle must not strand the hold until the boot sweep.
+ *    Only a fault in the fusion database itself can stop it, and that is
+ *    reported as a bypass (and counted) like any other ledger fault.
  */
 export async function dispatchRouterFusionPassthroughCommand(
   command: RouterFusionPassthroughCommand,
   payload: Record<string, unknown>,
   deps: RouterFusionPassthroughDeps
 ): Promise<PassthroughOutcome> {
+  if (command === "router_fusion_passthrough_settle") return settle(payload, deps)
+
   const gate = routerFusionGate(deps.settings, SURFACE)
   // Off and tripped are both "do not ask the ledger", and both let the request
   // through — the caller never asked for Router + Fusion, they asked for a
@@ -76,26 +90,45 @@ export async function dispatchRouterFusionPassthroughCommand(
     threshold: breakerThresholdOf(deps.settings),
     fusion: async () => {
       const host = await load()
-      if (command === "router_fusion_passthrough_reserve") {
-        const reserved = await host.reservePassthroughCall(
-          reserveInputOf(payload),
-          // The full account settings, as every caller passes them.
-          deps.settings as AppSettings | null | undefined
-        )
-        return reserved.kind === "reserved"
-          ? { status: "ledgered", runId: reserved.runId, attemptId: reserved.attemptId }
-          : {
-              status: "refused",
-              code: reserved.code,
-              ...(reserved.reasons ? { reasons: reserved.reasons } : {}),
-            }
-      }
+      const reserved = await host.reservePassthroughCall(
+        reserveInputOf(payload),
+        // The full account settings, as every caller passes them.
+        deps.settings as AppSettings | null | undefined
+      )
+      return reserved.kind === "reserved"
+        ? { status: "ledgered", runId: reserved.runId, attemptId: reserved.attemptId }
+        : {
+            status: "refused",
+            code: reserved.code,
+            ...(reserved.reasons ? { reasons: reserved.reasons } : {}),
+          }
+    },
+    onBypass: (notice) => {
+      console.warn(
+        `[router-fusion] gateway passthrough went unledgered: ${notice.fault.code}`,
+        notice.fault.message
+      )
+    },
+    original: async () => ({ status: "bypassed", code: "ledger_unavailable" }),
+  })
+}
+
+async function settle(
+  payload: Record<string, unknown>,
+  deps: RouterFusionPassthroughDeps
+): Promise<PassthroughOutcome> {
+  const load = deps.loadHost ?? loadRouterFusionHost
+  return runOrdinaryWithFallback<PassthroughOutcome>({
+    surface: SURFACE,
+    threshold: breakerThresholdOf(deps.settings),
+    fusion: async () => {
+      const host = await load()
       const settled = await host.settlePassthroughCall(settleInputOf(payload))
       return { status: "ledgered", sealed: settled.sealed }
     },
     onBypass: (notice) => {
       console.warn(
-        `[router-fusion] gateway passthrough went unledgered: ${notice.fault.code}`,
+        `[router-fusion] gateway passthrough settle was not applied; its reservation stays held: ${notice.fault.code}`,
         notice.fault.message
       )
     },
@@ -115,6 +148,8 @@ function reserveInputOf(payload: Record<string, unknown>) {
   const maxOutputTokens =
     typeof payload.maxOutputTokens === "number" ? payload.maxOutputTokens : undefined
   return {
+    // Anything but a known kind is chat, the kind every older gateway sends.
+    ...(payload.kind === "embeddings" ? { kind: "embeddings" as const } : {}),
     requestId: str(payload.requestId),
     attempt: num(payload.attempt),
     providerId: str(payload.providerId),

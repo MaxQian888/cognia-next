@@ -3,11 +3,29 @@
  *
  * @jest-environment node
  */
+import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+
 import { bootstrapHeadlessRuntimes } from "../bootstrap"
 import { __resetHeadlessRuntimesForTesting } from "../registry"
 import type { HeadlessRuntimeContext, RuntimeBridge } from "../types"
 
 type Handler = (e: { payload: unknown }) => void
+
+// The brain reads the account's settings row, never a settings store.
+const mockGateSettings = jest.fn()
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: () => mockGateSettings(),
+}))
+const mockHost = {
+  runApiDeps: jest.fn(() => ({})),
+  isRunApiScope: (scope: string) => scope.startsWith("runs:"),
+  getRunFromApi: jest.fn(),
+  reservePassthroughCall: jest.fn(),
+  settlePassthroughCall: jest.fn(),
+}
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: async () => mockHost as unknown as RouterFusionHost,
+}))
 
 function makeBridge() {
   const listeners = new Map<string, Handler>()
@@ -73,5 +91,90 @@ describe("desktop-message-source headless smoke", () => {
 
     await result.stop()
     expect(listeners.size).toBe(0)
+  })
+
+  it("answers the gateway's Run API and passthrough commands from the brain", async () => {
+    // A fresh module graph: the registration above is cached with its module.
+    jest.resetModules()
+    const registry = await import("../registry")
+    registry.__resetHeadlessRuntimesForTesting()
+    await import("./desktop-message-source")
+    const { bootstrapHeadlessRuntimes: bootstrap } = await import("../bootstrap")
+    const { bridge, listeners, invocations } = makeBridge()
+    const result = await bootstrap(makeCtx(bridge))
+    expect(result.failed).toEqual([])
+    const write = listeners.get("companion://desktop-write-request")!
+
+    async function ask(requestId: string, command: string, payload: Record<string, unknown>) {
+      write({ payload: { requestId, command, payload } })
+      for (let i = 0; i < 100; i++) {
+        const answer = invocations.find(
+          (i) => i.name === "companion_desktop_write_response" && i.args.requestId === requestId
+        )
+        if (answer) return answer.args
+        await new Promise((r) => setTimeout(r, 5))
+      }
+      throw new Error(`no answer to ${command}`)
+    }
+
+    // Switched off on the account: the Run API refuses, passthrough bypasses —
+    // both as `{ ok }` envelopes the gateway's bridge reads.
+    mockGateSettings.mockResolvedValue(null)
+    expect(await ask("rf-1", "router_fusion_run_get", { runId: "run-1" })).toMatchObject({
+      error: null,
+      result: { ok: false, error: { status: 403, code: "ROUTER_FUSION_DISABLED" } },
+    })
+    expect(
+      await ask("rf-2", "router_fusion_passthrough_reserve", { requestId: "req-1", attempt: 0 })
+    ).toMatchObject({
+      error: null,
+      result: { ok: true, value: { status: "bypassed", code: "surface_off" } },
+    })
+
+    // Switched on: the same commands reach the ledger and the Run API.
+    mockGateSettings.mockResolvedValue({
+      routerFusion: {
+        enabled: true,
+        surfaces: { gatewayRuns: true, gatewayPassthroughLedger: true },
+      },
+    })
+    mockHost.getRunFromApi.mockResolvedValue({ ok: true, value: { run_id: "run-1" } })
+    mockHost.reservePassthroughCall.mockResolvedValue({
+      kind: "reserved",
+      runId: "gwpt:req-1",
+      attemptId: "a1",
+    })
+    mockHost.settlePassthroughCall.mockResolvedValue({ sealed: true })
+    expect(
+      await ask("rf-3", "router_fusion_run_get", {
+        runId: "run-1",
+        actor: { keyId: "k", keyName: "robot", scopes: ["runs:read"] },
+      })
+    ).toMatchObject({ error: null, result: { ok: true, value: { run_id: "run-1" } } })
+    expect(
+      await ask("rf-4", "router_fusion_passthrough_reserve", {
+        kind: "embeddings",
+        requestId: "req-1",
+        attempt: 0,
+      })
+    ).toMatchObject({
+      error: null,
+      result: { ok: true, value: { status: "ledgered", runId: "gwpt:req-1", attemptId: "a1" } },
+    })
+    expect(mockHost.reservePassthroughCall.mock.calls[0][0]).toMatchObject({ kind: "embeddings" })
+    expect(
+      await ask("rf-5", "router_fusion_passthrough_settle", {
+        runId: "gwpt:req-1",
+        attemptId: "a1",
+        outcome: "succeeded",
+        usage: { inputTokens: 7, outputTokens: 0 },
+        final: true,
+      })
+    ).toMatchObject({
+      error: null,
+      result: { ok: true, value: { status: "ledgered", sealed: true } },
+    })
+
+    await result.stop()
   })
 })

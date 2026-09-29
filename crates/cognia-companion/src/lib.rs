@@ -70,6 +70,9 @@ pub use cognia_companion_bus::event_bus;
 pub use cognia_companion_bus::event_channels;
 pub use cognia_companion_bus::event_leases;
 pub mod extension_origin;
+/// The LLM gateway's brain bridge over the companion writes bridge, and the
+/// headless server's Router + Fusion switches (ADR-0188 D9/D36).
+pub mod gateway_brain;
 pub mod external_bridge;
 pub mod healthz;
 pub mod host;

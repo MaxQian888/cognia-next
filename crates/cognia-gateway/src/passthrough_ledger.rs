@@ -17,7 +17,10 @@
 //! - **A refusal is not a fault.** The budget saying no is a real answer and
 //!   is never bypassed: the request is refused with the brain's own code.
 //! - **Settling never blocks the response.** The caller's bytes are already on
-//!   their way; the bill is written behind them.
+//!   their way; the bill is written behind them. Behind them, not thrown away:
+//!   a settle the bridge could not deliver is retried a bounded number of
+//!   times, and one that still did not land is logged with its run and attempt,
+//!   because until it lands the reservation stays held.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,6 +34,10 @@ use crate::brain_bridge::{BrainBridge, BrainBridgeError};
 pub mod command {
     pub const RESERVE: &str = "router_fusion_passthrough_reserve";
     pub const SETTLE: &str = "router_fusion_passthrough_settle";
+
+    /// Both commands, in the order the brain lists them in
+    /// `ROUTER_FUSION_PASSTHROUGH_COMMANDS`.
+    pub const ALL: [&str; 2] = [RESERVE, SETTLE];
 }
 
 /// How long a reservation may hold the request up.
@@ -46,6 +53,22 @@ pub const RESERVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Settling is behind the caller's response, so it may wait longer — but not
 /// forever: the task holds a bridge slot.
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How many times one settlement is offered to the brain before it is given up
+/// on. Only a delivery failure is retried — no brain attached, the bridge timed
+/// out — because only that can change by trying again: an answer the brain
+/// gave is its answer.
+///
+/// Retrying is safe because settling is idempotent in the brain: the ledger
+/// books `settle:<attemptId>` once, an UNKNOWN mark applies only to a
+/// dispatched attempt, and sealing an already-sealed run is a no-op. A first
+/// try that timed out but did land is therefore not billed twice.
+pub const SETTLE_ATTEMPTS: u32 = 3;
+
+/// The pause before the first retry; it doubles for each one after that. A
+/// brain that is restarting, or a window that is reloading, gets a few seconds
+/// to come back before the settlement is logged as lost.
+pub const SETTLE_RETRY_BACKOFF: Duration = Duration::from_millis(500);
 
 /// What the ledger said about one upstream attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,9 +181,31 @@ impl AttemptUsage {
     }
 }
 
+/// What kind of upstream call an attempt is. The brain prices them differently
+/// only in what they can produce: an embeddings call has no output side, so a
+/// price that names only its input rate is a complete price for it, and its
+/// reservation holds nothing for output it cannot generate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallKind {
+    /// `/v1/chat/completions`, `/v1/messages`, `/v1/responses`.
+    Chat,
+    /// `/v1/embeddings`.
+    Embeddings,
+}
+
+impl CallKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Embeddings => "embeddings",
+        }
+    }
+}
+
 /// Everything one attempt needs reserving against.
 #[derive(Debug, Clone)]
 pub struct ReserveRequest {
+    pub kind: CallKind,
     /// The gateway's own request id: one request, one run, however many attempts.
     pub request_id: String,
     /// 0-based candidate index. Each attempt is its own logical step.
@@ -234,6 +279,7 @@ pub async fn reserve(
         return bypass("surface_off");
     }
     let mut payload = json!({
+        "kind": request.kind.as_str(),
         "requestId": request.request_id,
         "attempt": request.attempt,
         "providerId": request.provider_id,
@@ -259,8 +305,24 @@ pub async fn reserve(
     }
 }
 
-/// Settle one attempt. Fire-and-forget: the caller's response is already on its
-/// way, and the bill is written behind it.
+/// What became of one settlement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettleDelivery {
+    /// The brain applied it. `sealed` is true when it also sealed the run.
+    Applied { sealed: bool },
+    /// The brain answered, but did not apply it: its ledger faulted
+    /// (`bypassed`), it refused, or its answer could not be read. Not retried —
+    /// the brain has spoken — and the reservation stays held until the brain's
+    /// recovery sweep seals the run.
+    NotApplied { reason: String },
+    /// No brain took it after [`SETTLE_ATTEMPTS`] tries.
+    Undelivered { reason: String },
+}
+
+/// Settle one attempt. Behind the caller's response: this returns at once and
+/// the settlement is delivered by a spawned task, which retries a delivery
+/// failure and logs a settlement that did not land. The handle is for tests and
+/// callers that want to know; production callers drop it.
 pub fn settle(
     bridge: Arc<dyn BrainBridge>,
     attempt: LedgeredAttempt,
@@ -268,7 +330,36 @@ pub fn settle(
     usage: AttemptUsage,
     reason: Option<String>,
     final_attempt: bool,
-) {
+) -> tokio::task::JoinHandle<SettleDelivery> {
+    let payload = settle_payload(&attempt, &outcome, &usage, reason, final_attempt);
+    tokio::spawn(async move {
+        let delivery = deliver_settle(bridge, payload).await;
+        match &delivery {
+            SettleDelivery::Applied { .. } => {}
+            SettleDelivery::NotApplied { reason } => log::warn!(
+                "gateway passthrough settle for run {} attempt {} was not applied by the brain \
+                 ({reason}); its reservation stays held until the run is sealed",
+                attempt.run_id,
+                attempt.attempt_id
+            ),
+            SettleDelivery::Undelivered { reason } => log::warn!(
+                "gateway passthrough settle for run {} attempt {} never reached the brain after \
+                 {SETTLE_ATTEMPTS} tries ({reason}); its reservation stays held until the run is sealed",
+                attempt.run_id,
+                attempt.attempt_id
+            ),
+        }
+        delivery
+    })
+}
+
+fn settle_payload(
+    attempt: &LedgeredAttempt,
+    outcome: &AttemptOutcome,
+    usage: &AttemptUsage,
+    reason: Option<String>,
+    final_attempt: bool,
+) -> Value {
     let mut payload = json!({
         "runId": attempt.run_id,
         "attemptId": attempt.attempt_id,
@@ -284,9 +375,58 @@ pub fn settle(
     if let Some(reason) = reason {
         payload["reason"] = json!(reason);
     }
-    tokio::spawn(async move {
-        let _ = tokio::time::timeout(SETTLE_TIMEOUT, bridge.call(command::SETTLE, payload)).await;
-    });
+    payload
+}
+
+async fn deliver_settle(bridge: Arc<dyn BrainBridge>, payload: Value) -> SettleDelivery {
+    let mut backoff = SETTLE_RETRY_BACKOFF;
+    let mut last_failure = String::new();
+    for attempt in 1..=SETTLE_ATTEMPTS {
+        match tokio::time::timeout(SETTLE_TIMEOUT, bridge.call(command::SETTLE, payload.clone()))
+            .await
+        {
+            Ok(Ok(raw)) => return settle_answer_of(&raw),
+            Ok(Err(BrainBridgeError::Refused { code, message, .. })) => {
+                return SettleDelivery::NotApplied {
+                    reason: format!("refused {code}: {message}"),
+                }
+            }
+            Ok(Err(BrainBridgeError::Unavailable(reason))) => last_failure = reason,
+            Err(_) => {
+                last_failure = format!(
+                    "the brain did not answer within {} ms",
+                    SETTLE_TIMEOUT.as_millis()
+                )
+            }
+        }
+        if attempt < SETTLE_ATTEMPTS {
+            tokio::time::sleep(backoff).await;
+            backoff = backoff.saturating_mul(2);
+        }
+    }
+    SettleDelivery::Undelivered {
+        reason: last_failure,
+    }
+}
+
+/// Read the brain's answer to a settle (`PassthroughOutcome` in
+/// `lib/router-fusion/gate/passthrough-bridge.ts`).
+fn settle_answer_of(raw: &Value) -> SettleDelivery {
+    match raw["status"].as_str() {
+        Some("ledgered") => SettleDelivery::Applied {
+            sealed: raw["sealed"].as_bool().unwrap_or(false),
+        },
+        Some("bypassed") | Some("refused") => SettleDelivery::NotApplied {
+            reason: format!(
+                "{}:{}",
+                raw["status"].as_str().unwrap_or_default(),
+                raw["code"].as_str().unwrap_or("unknown")
+            ),
+        },
+        _ => SettleDelivery::NotApplied {
+            reason: format!("unrecognised answer {raw}"),
+        },
+    }
 }
 
 /// The value of `x-cognia-ledger` for a whole request.
@@ -312,6 +452,7 @@ mod tests {
 
     fn request() -> ReserveRequest {
         ReserveRequest {
+            kind: CallKind::Chat,
             request_id: "req-1".to_string(),
             attempt: 0,
             provider_id: "openai".to_string(),
@@ -356,6 +497,7 @@ mod tests {
         let calls = bridge.calls();
         assert_eq!(calls[0].0, command::RESERVE);
         assert_eq!(calls[0].1["requestId"], "req-1");
+        assert_eq!(calls[0].1["kind"], "chat");
         assert_eq!(calls[0].1["maxOutputTokens"], 4096);
     }
 
@@ -419,34 +561,156 @@ mod tests {
         assert_eq!(FailureClass::NotSent.as_str(), "not_sent");
     }
 
+    fn attempt() -> LedgeredAttempt {
+        LedgeredAttempt {
+            run_id: "gwpt:req-1".to_string(),
+            attempt_id: "a1".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn a_settled_failure_carries_its_class() {
         let bridge = Arc::new(RecordingBrainBridge::default());
         bridge.answer(command::SETTLE, Ok(json!({ "status": "ledgered" })));
-        settle(
+        let delivery = settle(
             bridge.clone(),
-            LedgeredAttempt {
-                run_id: "gwpt:req-1".to_string(),
-                attempt_id: "a1".to_string(),
-            },
+            attempt(),
             AttemptOutcome::Failed(FailureClass::RateLimited),
             AttemptUsage::default(),
             Some("HTTP 429".to_string()),
             false,
-        );
-        // Settling is spawned; give the task its turn.
-        for _ in 0..20 {
-            if !bridge.payloads_for(command::SETTLE).is_empty() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        )
+        .await
+        .unwrap();
+        assert_eq!(delivery, SettleDelivery::Applied { sealed: false });
         let sent = bridge.payloads_for(command::SETTLE);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0]["outcome"], "failed");
         assert_eq!(sent[0]["errorClass"], "rate_limited");
         assert_eq!(sent[0]["final"], false);
         assert!(sent[0].get("usage").is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_settle_the_bridge_could_not_deliver_is_offered_again() {
+        // A brain restarting between reserve and settle must not strand the
+        // reservation: the settlement waits for it, a bounded number of times.
+        let bridge = Arc::new(RecordingBrainBridge::default());
+        bridge.answer(
+            command::SETTLE,
+            Err(BrainBridgeError::unavailable("no brain attached")),
+        );
+        bridge.answer(
+            command::SETTLE,
+            Err(BrainBridgeError::unavailable("bridge timed out")),
+        );
+        bridge.answer(
+            command::SETTLE,
+            Ok(json!({ "status": "ledgered", "sealed": true })),
+        );
+        let delivery = settle(
+            bridge.clone(),
+            attempt(),
+            AttemptOutcome::Succeeded,
+            AttemptUsage {
+                input_tokens: Some(12),
+                output_tokens: Some(3),
+                ..Default::default()
+            },
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(delivery, SettleDelivery::Applied { sealed: true });
+        let sent = bridge.payloads_for(command::SETTLE);
+        assert_eq!(sent.len(), 3, "the same settlement, three times");
+        assert!(sent.iter().all(|payload| payload == &sent[0]));
+        assert_eq!(sent[0]["usage"]["inputTokens"], 12);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_settle_that_never_lands_is_given_up_on_after_the_bound() {
+        let bridge = Arc::new(RecordingBrainBridge::default());
+        for _ in 0..SETTLE_ATTEMPTS {
+            bridge.answer(
+                command::SETTLE,
+                Err(BrainBridgeError::unavailable("no brain attached")),
+            );
+        }
+        let delivery = settle(
+            bridge.clone(),
+            attempt(),
+            AttemptOutcome::Unknown,
+            AttemptUsage::default(),
+            Some("stream stalled".to_string()),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            delivery,
+            SettleDelivery::Undelivered {
+                reason: "no brain attached".to_string()
+            }
+        );
+        assert_eq!(
+            bridge.payloads_for(command::SETTLE).len(),
+            SETTLE_ATTEMPTS as usize
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answer_the_brain_gave_is_not_retried() {
+        // The brain's ledger faulted (`bypassed`) or refused: trying again
+        // cannot change that, and each try would count against its breaker.
+        for answer in [
+            Ok(json!({ "status": "bypassed", "code": "ledger_unavailable" })),
+            Ok(json!({ "status": "what" })),
+            Err(BrainBridgeError::Refused {
+                status: 500,
+                code: "BRAIN_ERROR".to_string(),
+                message: "boom".to_string(),
+                details: None,
+            }),
+        ] {
+            let bridge = Arc::new(RecordingBrainBridge::default());
+            bridge.answer(command::SETTLE, answer);
+            let delivery = settle(
+                bridge.clone(),
+                attempt(),
+                AttemptOutcome::Succeeded,
+                AttemptUsage::default(),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+            assert!(
+                matches!(delivery, SettleDelivery::NotApplied { .. }),
+                "{delivery:?}"
+            );
+            assert_eq!(bridge.payloads_for(command::SETTLE).len(), 1);
+        }
+    }
+
+    /// The brain's dispatcher answers exactly the commands this lane sends. A
+    /// name changed on one side only is a command the brain answers with
+    /// `unknown desktop-write command`, which the lane reads as an absent
+    /// brain: every request would silently go unledgered.
+    #[test]
+    fn every_command_is_one_the_brain_dispatches_and_none_is_missing() {
+        let source = include_str!("../../../lib/router-fusion/gate/passthrough-bridge.ts");
+        let start = source
+            .find("ROUTER_FUSION_PASSTHROUGH_COMMANDS = [")
+            .expect("the brain lists its commands");
+        let end = start + source[start..].find("] as const").expect("the list ends");
+        let listed: Vec<&str> = source[start..end]
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix('"'))
+            .filter_map(|line| line.split('"').next())
+            .collect();
+        assert_eq!(listed, command::ALL.to_vec());
     }
 
     #[test]

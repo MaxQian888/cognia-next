@@ -95,9 +95,67 @@ pub struct BrainRefusal {
 
 pub type BrainFuture = Pin<Box<dyn Future<Output = Result<Value, BrainBridgeError>> + Send>>;
 
-/// One round trip to the brain. Implemented by the desktop host over the
-/// companion writes bridge, and by `RecordingBrainBridge` in tests (a test
-/// double, compiled only for tests and the `test-support` feature).
+/// The tagged outcome the brain answers every bridged command with:
+/// `{ ok: true, value }` or `{ ok: false, error: { status, code, … } }`.
+///
+/// `lib/router-fusion/gate/run-api-bridge.ts` answers the Run API in it, and
+/// `lib/companion/desktop-write-source.ts` wraps every passthrough outcome in
+/// it too, so one reader serves every transport that carries these commands —
+/// the desktop's WebView and the headless brain's `/internal/bridge` socket.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BridgeOutcome {
+    Ok { ok: bool, value: Value },
+    Err { ok: bool, error: BridgeErrorBody },
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeErrorBody {
+    #[serde(default = "default_refusal_status")]
+    status: u16,
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    details: Option<Value>,
+}
+
+fn default_refusal_status() -> u16 {
+    500
+}
+
+/// Turn what the brain sent into what the gateway's routes expect.
+///
+/// The brain answers with a tagged outcome rather than by throwing, because
+/// the gateway needs the status and the code to answer its caller with. Any
+/// other shape is a broken contract, not a refusal: the caller is told the
+/// brain is unavailable rather than being handed a guess.
+pub fn interpret_envelope(raw: Value) -> Result<Value, BrainBridgeError> {
+    match serde_json::from_value::<BridgeOutcome>(raw.clone()) {
+        Ok(BridgeOutcome::Err { ok: false, error }) => Err(BrainBridgeError::Refused {
+            status: error.status,
+            code: if error.code.is_empty() {
+                "BRAIN_ERROR".to_string()
+            } else {
+                error.code
+            },
+            message: error.message,
+            details: error.details,
+        }),
+        Ok(BridgeOutcome::Ok { ok: true, value }) => Ok(value),
+        _ => Err(BrainBridgeError::unavailable(format!(
+            "the brain answered a bridged command with an unrecognised shape: {raw}"
+        ))),
+    }
+}
+
+/// One round trip to the brain. Implemented once, over the companion writes
+/// bridge, by `cognia_companion::gateway_brain::WritesBrainBridge` — the
+/// desktop resolves its route through the app handle, `cognia-server` through
+/// the connected brain's `/internal/bridge` socket — and by
+/// `RecordingBrainBridge` in tests (a test double, compiled only for tests and
+/// the `test-support` feature).
 pub trait BrainBridge: Send + Sync {
     fn call(&self, command: &'static str, payload: Value) -> BrainFuture;
 }
@@ -219,6 +277,83 @@ mod tests {
             .filter_map(|line| line.split('"').next())
             .collect();
         assert_eq!(listed, command::ALL.to_vec());
+    }
+
+    #[test]
+    fn a_successful_outcome_unwraps_to_its_value() {
+        let value = interpret_envelope(json!({ "ok": true, "value": { "runId": "run-1" } }))
+            .expect("a successful outcome");
+        assert_eq!(value["runId"], "run-1");
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_brains_own_status_and_code() {
+        let error = interpret_envelope(json!({
+            "ok": false,
+            "error": { "status": 409, "code": "SESSION_BUSY", "message": "busy", "details": { "activeRunId": "run-2" } }
+        }))
+        .expect_err("a refusal");
+        match error {
+            BrainBridgeError::Refused {
+                status,
+                code,
+                message,
+                details,
+            } => {
+                assert_eq!(status, 409);
+                assert_eq!(code, "SESSION_BUSY");
+                assert_eq!(message, "busy");
+                assert_eq!(details.unwrap()["activeRunId"], "run-2");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_refusal_with_no_code_still_names_something() {
+        let error = interpret_envelope(json!({ "ok": false, "error": { "status": 500 } }))
+            .expect_err("a refusal");
+        match error {
+            BrainBridgeError::Refused { code, status, .. } => {
+                assert_eq!(code, "BRAIN_ERROR");
+                assert_eq!(status, 500);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_passthrough_outcome_travels_in_the_same_envelope() {
+        // `desktop-write-source.ts` wraps every passthrough outcome — a refusal
+        // or a bypass included — as `ok: true`, and `passthrough_ledger` reads
+        // the unwrapped value.
+        let value = interpret_envelope(json!({
+            "ok": true,
+            "value": { "status": "ledgered", "runId": "gwpt:req-1", "attemptId": "a1" }
+        }))
+        .expect("an enveloped passthrough outcome");
+        assert_eq!(value["status"], "ledgered");
+        assert_eq!(value["attemptId"], "a1");
+
+        // A bare outcome is a broken contract. This is the shape that once made
+        // every passthrough request read as "brain unavailable".
+        let bare = interpret_envelope(json!({ "status": "ledgered", "runId": "gwpt:req-1" }));
+        assert!(matches!(bare, Err(BrainBridgeError::Unavailable(_))));
+    }
+
+    #[test]
+    fn an_unrecognised_answer_is_unavailable_rather_than_a_guess() {
+        for raw in [
+            json!({ "runId": "run-1" }),
+            json!(null),
+            json!("nope"),
+            // The tag contradicts the payload: neither shape, so no guess.
+            json!({ "ok": false, "value": {} }),
+            json!({ "ok": true, "error": { "status": 409 } }),
+        ] {
+            let error = interpret_envelope(raw).expect_err("not a bridge outcome");
+            assert!(matches!(error, BrainBridgeError::Unavailable(_)));
+        }
     }
 
     #[tokio::test]

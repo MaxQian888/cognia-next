@@ -19,8 +19,10 @@ jest.mock("@cognia/provider-routing/build-preview-engine", () => ({
   buildRoutingEngineDeps: () => engineDeps,
 }))
 
-const PRICES: Record<string, { promptPer1M: number; completionPer1M: number }> = {
+const PRICES: Record<string, { promptPer1M?: number; completionPer1M?: number }> = {
   "openai::gpt-5-mini": { promptPer1M: 0.1, completionPer1M: 0.4 },
+  // How price tables list an embeddings model: an input rate, no output side.
+  "openai::text-embedding-3-small": { promptPer1M: 0.02 },
 }
 jest.mock("@cognia/provider-core/providers/model-pricing", () => ({
   resolveModelPricing: (providerId: string, modelId: string) =>
@@ -57,6 +59,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
 }))
 
 import {
+  embeddingsPricing,
   passthroughRunId,
   reservePassthroughCall,
   settlePassthroughCall,
@@ -221,5 +224,88 @@ describe("settlePassthroughCall", () => {
     expect(run?.status).toBe("failed")
     expect(run?.error?.code).toBe("CALL_OUTCOME_UNKNOWN")
     expect((await store.db.fusionCallAttempts.get(reserved.attemptId))?.state).toBe("UNKNOWN")
+  })
+})
+
+describe("embeddings", () => {
+  const embedding = (overrides: Record<string, unknown> = {}) =>
+    reserve({
+      kind: "embeddings",
+      requestId: "req-e",
+      modelId: "text-embedding-3-small",
+      requestedModel: "text-embedding-3-small",
+      estimatedInputTokens: 1_000,
+      maxOutputTokens: 0,
+      ...overrides,
+    })
+
+  it("prices an input-only rate as a complete price for a call with no output side", () => {
+    expect(embeddingsPricing({ promptPer1M: 0.02 })).toEqual({
+      promptPer1M: 0.02,
+      completionPer1M: 0,
+    })
+    // A published output rate is kept as it is.
+    expect(embeddingsPricing({ promptPer1M: 0.1, completionPer1M: 0.4 })).toEqual({
+      promptPer1M: 0.1,
+      completionPer1M: 0.4,
+    })
+    // No input rate is no price: nothing is invented.
+    expect(embeddingsPricing(null)).toBeNull()
+    expect(embeddingsPricing({ completionPer1M: 0.4 })).toEqual({ completionPer1M: 0.4 })
+  })
+
+  /** The reason codes the route decision for `runId` carries. */
+  async function reasonCodes(runId: string): Promise<string[]> {
+    const row = await store.db.fusionRouteDecisions.where("runId").equals(runId).first()
+    return row?.decision.reason_codes ?? []
+  }
+
+  async function reservedMicrousd(attemptId: string): Promise<number | undefined> {
+    const row = await store.db.fusionReservations.where("attemptId").equals(attemptId).first()
+    return row?.amountMicrousd
+  }
+
+  it("bills an embeddings call its prompt tokens at the model's input rate", async () => {
+    const reserved = await reservePassthroughCall(embedding(), ON)
+    if (reserved.kind !== "reserved") throw new Error(`refused: ${reserved.code}`)
+    // A known price: the reservation is sized from the rate card, not the
+    // per-call unknown-price reserve ($0.05 by default).
+    expect(await reasonCodes(reserved.runId)).not.toContain("price:estimated")
+    expect(await reservedMicrousd(reserved.attemptId)).toBeLessThan(50_000)
+
+    await settlePassthroughCall({
+      runId: reserved.runId,
+      attemptId: reserved.attemptId,
+      outcome: "succeeded",
+      usage: { inputTokens: 1_000_000, outputTokens: 0 },
+      final: true,
+    })
+    const run = await store.getRun(reserved.runId)
+    expect(run?.status).toBe("succeeded")
+    // 1M input tokens at $0.02 per million is 20 000 microusd, and nothing else.
+    expect(run?.budget.spentMicrousd).toBe(20_000)
+  })
+
+  it("takes the unknown-price path for an embeddings model no table prices", async () => {
+    const unpriced = await reservePassthroughCall(
+      embedding({ modelId: "mystery-embed", requestedModel: "mystery-embed" }),
+      ON
+    )
+    if (unpriced.kind !== "reserved") throw new Error(`refused: ${unpriced.code}`)
+    // Never a zero and never a borrowed rate: the per-call unknown-price reserve.
+    expect(await reasonCodes(unpriced.runId)).toContain("price:estimated")
+    expect(await reservedMicrousd(unpriced.attemptId)).toBeGreaterThanOrEqual(50_000)
+  })
+
+  it("leaves a chat call with an input-only price unpriced, exactly as before", async () => {
+    // Only an embeddings call may read a missing output rate as zero; for a
+    // chat model it means the price is not known.
+    const chat = await reservePassthroughCall(
+      reserve({ modelId: "text-embedding-3-small", requestedModel: "text-embedding-3-small" }),
+      ON
+    )
+    if (chat.kind !== "reserved") throw new Error(`refused: ${chat.code}`)
+    expect(await reasonCodes(chat.runId)).toContain("price:estimated")
+    expect(await reservedMicrousd(chat.attemptId)).toBeGreaterThanOrEqual(50_000)
   })
 })

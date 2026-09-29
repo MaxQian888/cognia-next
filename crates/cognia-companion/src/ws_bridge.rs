@@ -962,6 +962,22 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 log::warn!("companion-api ws-bridge: bad media respond payload: {error}")
             }
         },
+        // ADR-0188 D36: the headless brain publishes the account's two gateway
+        // switches (`lib/headless/runtimes/router-fusion.ts`), because the
+        // headless gateway's snapshot is projected from the profile store and
+        // carries none. The payload is validated whole; a desktop has no sink,
+        // since its window pushes the switches inside its routing snapshot.
+        super::gateway_brain::PUBLISH_SWITCHES_COMMAND => {
+            match super::gateway_brain::publish_switches(payload) {
+                Ok(_) => {}
+                Err(super::gateway_brain::PublishSwitchesError::NoGateway) => log::debug!(
+                    "companion-api ws-bridge: gateway switches published with no headless gateway to take them"
+                ),
+                Err(super::gateway_brain::PublishSwitchesError::Malformed(reason)) => {
+                    log::warn!("companion-api ws-bridge: bad gateway switches payload: {reason}")
+                }
+            }
+        }
         "companion_host_state_publish" => {
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();
