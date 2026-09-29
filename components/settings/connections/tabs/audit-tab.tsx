@@ -49,6 +49,7 @@ const ALL_AUDIT_KINDS: AuditKind[] = [
   "adapter.started",
   "adapter.stopped",
   "adapter.error",
+  "adapter.reauth_required",
   // SLA escalation chain (slice 1B).
   "sla.escalated",
   "sla.escalation_action_failed",
@@ -72,7 +73,12 @@ function timeRangeToMs(range: TimeRange): number | null {
 }
 
 function kindBadgeVariant(kind: AuditKind): "default" | "secondary" | "destructive" | "outline" {
-  if (kind.includes("error") || kind.includes("deadlettered") || kind.includes("failed"))
+  if (
+    kind.includes("error") ||
+    kind.includes("deadlettered") ||
+    kind.includes("failed") ||
+    kind.includes("reauth")
+  )
     return "destructive"
   if (kind.includes("success") || kind.includes("started") || kind.includes("refreshed"))
     return "default"

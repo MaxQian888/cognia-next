@@ -286,8 +286,10 @@ describe("createQQOfficialAdapter", () => {
     expect(res.error?.retryable).toBe(false)
     // Exactly one retry — not an infinite refresh loop.
     expect(mockInvoke).toHaveBeenCalledTimes(2)
-    // The failure cause is surfaced through health() for the operator UI.
-    expect(a.health().reason).toContain("failed: bad token")
+    // health() reports the stable code (localized by the Health UI and read by
+    // the heartbeat sweep); the platform detail travels on the error message.
+    expect(a.health().reason).toBe("auth_failed")
+    expect(res.error?.message).toContain("failed: bad token")
   })
 
   it("maps a 429 to rate_limited", async () => {

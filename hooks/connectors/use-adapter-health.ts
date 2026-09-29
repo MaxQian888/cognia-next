@@ -15,6 +15,8 @@
  *   - `buckets`  — 48 × 30min cells coloured by predominant event
  *   - `lastOk`   — newest delivery.success / inbound.received / running heartbeat
  *   - `lastError`— newest adapter.error / delivery.error / deadlettered
+ *   - `reauthRequired` — the row saying the credential was rejected, if the
+ *     user still has to re-authenticate
  *
  * Re-derives every time a relevant audit row lands (live query).
  */
@@ -29,6 +31,7 @@ import {
   deriveHistory,
   deriveLastError,
   deriveLastOk,
+  deriveReauthRequired,
   type HealthBucket,
   type HealthCellState,
 } from "@/lib/connectors/health/derive-history"
@@ -55,6 +58,12 @@ export interface UseAdapterHealthResult {
   buckets: HealthBucket[]
   lastOk?: AuditEntry
   lastError?: AuditEntry
+  /**
+   * Set while the platform is rejecting the adapter's credential and nothing
+   * has proven it works again — see `deriveReauthRequired`. Restarting the
+   * adapter cannot fix this; the user has to update or reconnect it.
+   */
+  reauthRequired?: AuditEntry
   /** Sum of `pendingOutboundCount` from the newest heartbeat, or 0. */
   pendingOutboundCount: number
   /**
@@ -156,6 +165,7 @@ export function useAdapterHealth(
       buckets,
       lastOk: deriveLastOk(list),
       lastError: deriveLastError(list),
+      reauthRequired: deriveReauthRequired(list),
       pendingOutboundCount,
       breaker,
       rateBucket,

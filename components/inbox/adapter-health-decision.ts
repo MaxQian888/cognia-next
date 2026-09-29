@@ -9,11 +9,17 @@
  * supplies its own i18n labels.
  */
 
-import { AlertOctagonIcon, AlertTriangleIcon, ZapOffIcon, type LucideIcon } from "lucide-react"
+import {
+  AlertOctagonIcon,
+  AlertTriangleIcon,
+  KeyRoundIcon,
+  ZapOffIcon,
+  type LucideIcon,
+} from "lucide-react"
 
 import type { UseAdapterHealthResult } from "@/hooks/connectors/use-adapter-health"
 
-export type BadgeState = "breaker-open" | "rate-limited" | "degraded" | "down"
+export type BadgeState = "reauth-required" | "breaker-open" | "rate-limited" | "degraded" | "down"
 
 export interface BadgeDecision {
   state: BadgeState
@@ -25,10 +31,17 @@ export interface BadgeDecision {
 /**
  * Inspect the hook result and decide whether to render. Returns `null`
  * when the adapter is nominal — the badge is hidden in that case. Order
- * matters: breaker open trumps a tripped rate limit (the operator should
+ * matters: a rejected credential trumps everything (it is usually WHY the
+ * breaker opened, and only the user can fix it); breaker open trumps a tripped rate limit (the operator should
  * fix the upstream failure first), and both trump generic degraded/down.
  */
 export function decideBadge(health: UseAdapterHealthResult): BadgeDecision | null {
+  if (health.reauthRequired) {
+    return {
+      state: "reauth-required",
+      reason: health.reauthRequired.message,
+    }
+  }
   if (health.breaker?.state === "open") {
     // Breaker carries openedAt; we cannot compute the precise cooldown
     // here without the breaker config, so we surface the openedAt as
@@ -62,6 +75,7 @@ export function decideBadge(health: UseAdapterHealthResult): BadgeDecision | nul
 }
 
 export const STATE_TINT: Record<BadgeState, string> = {
+  "reauth-required": "border-destructive/40 bg-destructive/10 text-destructive",
   "breaker-open": "border-destructive/40 bg-destructive/10 text-destructive",
   "rate-limited":
     "border-amber-300/60 bg-amber-100/60 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-100",
@@ -71,6 +85,7 @@ export const STATE_TINT: Record<BadgeState, string> = {
 }
 
 export const STATE_ICON: Record<BadgeState, LucideIcon> = {
+  "reauth-required": KeyRoundIcon,
   "breaker-open": AlertOctagonIcon,
   "rate-limited": ZapOffIcon,
   degraded: AlertTriangleIcon,

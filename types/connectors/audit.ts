@@ -115,6 +115,14 @@ export type AuditKind =
   // ("settings_save" | "manual_requeue") so operators can tell the two
   // apart in the Audit tab.
   | "adapter.credentials_rotated"
+  // The platform rejected the adapter's credential on an outbound send after
+  // the adapter's own refresh-and-retry-once (`reason` is the OutboundError
+  // code: `auth_failed` or `identity_reauthorization_required`). Written once
+  // per adapter until the next successful delivery; cleared for the Health
+  // surfaces by `delivery.success` / `adapter.credentials_rotated` /
+  // `credential.refreshed`. See `deriveReauthRequired` in
+  // `lib/connectors/health/derive-history.ts`.
+  | "adapter.reauth_required"
   | "adapter.config_changed"
   | "override.config_changed"
   // SLA escalation (IM delegation slice 1B). `sla.escalated` — one escalation

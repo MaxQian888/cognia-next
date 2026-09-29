@@ -10,6 +10,7 @@ import { createQQOfficialAdapter } from "./qq-official"
 import { createWechatOaAdapter } from "./wechat-oa"
 import { createDingTalkAdapter } from "./dingtalk"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
+import type { Capability } from "@/types/connectors/capability"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
 import { invoke } from "@tauri-apps/api/core"
 import { serializeSend as serializeLarkSend } from "./lark/serialize"
@@ -237,6 +238,58 @@ describe("built-in connector runtime contract", () => {
       } else {
         expect(target.address.topicId).toBe("topic:with:separators")
       }
+    }
+  )
+})
+
+/**
+ * Capability flags that correspond 1:1 to an optional `PlatformAdapter`
+ * method. `required` must ALL exist when the flag is declared; `optional`
+ * are extensions that also count as "implemented" for the reverse check.
+ * Every other flag (`send.*` granularity, `rich-*`) describes serializer
+ * behavior, not a method, and stays declarative.
+ */
+const METHOD_BACKED_CAPABILITIES: Partial<
+  Record<Capability, { required: (keyof PlatformAdapter)[]; optional?: (keyof PlatformAdapter)[] }>
+> = {
+  edit: { required: ["edit"] },
+  delete: { required: ["delete"] },
+  "send.reaction": { required: ["addReaction", "removeReaction"] },
+  forward: { required: ["forwardMessage"] },
+  urgent: { required: ["sendUrgent"] },
+  typing: { required: ["setTyping"] },
+  "history.fetch": { required: ["fetchHistory"], optional: ["fetchHistoryPage"] },
+  "presence.status": { required: ["setPresenceStatus"] },
+  pin: { required: ["pinMessage", "unpinMessage"] },
+  "chat.create": { required: ["createChat"] },
+  "chat.members": { required: ["addChatMembers", "removeChatMembers"] },
+  "chat.update": { required: ["updateChat"] },
+  "contact.resolve": { required: ["resolveContacts"] },
+}
+
+describe("capability ↔ method drift", () => {
+  // Callers feature-detect these methods (`typeof adapter.edit === "function"`
+  // routes an edit, `hasEditMethod` picks card-edit presentation), while the
+  // UI and plugins read `meta.capabilities`. The two must agree both ways.
+  it.each(adapters().map((adapter) => [adapter.meta.type, adapter] as const))(
+    "%s implements exactly the method-backed capabilities it declares",
+    (_platform, adapter) => {
+      const declared = new Set<Capability>(adapter.meta.capabilities)
+      const implemented = (method: keyof PlatformAdapter) => typeof adapter[method] === "function"
+      const drift: string[] = []
+      for (const [capability, methods] of Object.entries(METHOD_BACKED_CAPABILITIES)) {
+        const cap = capability as Capability
+        if (declared.has(cap)) {
+          for (const method of methods.required) {
+            if (!implemented(method)) drift.push(`declares ${cap} but lacks ${method}()`)
+          }
+        } else {
+          for (const method of [...methods.required, ...(methods.optional ?? [])]) {
+            if (implemented(method)) drift.push(`implements ${method}() without declaring ${cap}`)
+          }
+        }
+      }
+      expect(drift).toEqual([])
     }
   )
 })

@@ -3,7 +3,13 @@
  */
 
 import type { AuditEntry } from "@/types/connectors/audit"
-import { deriveCurrentState, deriveHistory, deriveLastError, deriveLastOk } from "./derive-history"
+import {
+  deriveCurrentState,
+  deriveHistory,
+  deriveLastError,
+  deriveLastOk,
+  deriveReauthRequired,
+} from "./derive-history"
 
 function audit(partial: Partial<AuditEntry> & Pick<AuditEntry, "kind" | "at">): AuditEntry {
   return {
@@ -187,5 +193,53 @@ describe("deriveLastOk", () => {
     })
     const success = audit({ kind: "delivery.success", at: NOW - 1000 })
     expect(deriveLastOk([degraded, success])).toBe(success)
+  })
+})
+
+describe("deriveReauthRequired", () => {
+  const reauth = (at: number) =>
+    audit({ kind: "adapter.reauth_required", at, reason: "auth_failed", message: "401" })
+  const heartbeat = (at: number, reason?: string, state = "running") =>
+    audit({ kind: "adapter.heartbeat", at, reason, fields: { state, reason } })
+
+  it("is undefined with no signal", () => {
+    expect(deriveReauthRequired([])).toBeUndefined()
+    expect(deriveReauthRequired([heartbeat(NOW)])).toBeUndefined()
+  })
+
+  it("returns the runner's reauth row while nothing has cleared it", () => {
+    const row = reauth(NOW - 1000)
+    expect(deriveReauthRequired([row])).toBe(row)
+  })
+
+  it("a healthy heartbeat does not clear the runner's reauth row", () => {
+    const row = reauth(NOW - 5000)
+    expect(deriveReauthRequired([row, heartbeat(NOW - 100)])).toBe(row)
+  })
+
+  it.each(["delivery.success", "adapter.credentials_rotated", "credential.refreshed"] as const)(
+    "a newer %s clears it",
+    (kind) => {
+      expect(deriveReauthRequired([reauth(NOW - 5000), audit({ kind, at: NOW - 100 })])).toBe(
+        undefined
+      )
+    }
+  )
+
+  it("an older clearing event does not clear a newer reauth row", () => {
+    const row = reauth(NOW - 100)
+    expect(deriveReauthRequired([audit({ kind: "delivery.success", at: NOW - 5000 }), row])).toBe(
+      row
+    )
+  })
+
+  it("returns the latest heartbeat when the adapter itself reports auth_failed", () => {
+    const hb = heartbeat(NOW - 100, "auth_failed", "degraded")
+    expect(deriveReauthRequired([audit({ kind: "delivery.success", at: NOW - 50 }), hb])).toBe(hb)
+  })
+
+  it("classifies adapter.reauth_required as down in the grid", () => {
+    const buckets = deriveHistory([reauth(NOW - 60_000)], { now: NOW })
+    expect(buckets[buckets.length - 1].state).toBe("down")
   })
 })

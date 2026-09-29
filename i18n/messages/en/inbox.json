@@ -213,7 +213,9 @@
       "reconnect": "Reconnect",
       "reconnectDesktopOnly": "Reconnect requires the desktop app.",
       "reconnectQueued": "Reconnect queued.",
-      "reconnectUnavailable": "Adapter not currently registered with the runtime."
+      "reconnectUnavailable": "Adapter not currently registered with the runtime.",
+      "reauthRequired": "Re-authenticate",
+      "reauthHint": "The platform rejected this connection's credential. Reconnecting will not fix it — update the credential in Settings → Connections."
     },
     "lastInboundDays": "Last message {days}d ago",
     "lastInboundHours": "Last message {hours}h ago",

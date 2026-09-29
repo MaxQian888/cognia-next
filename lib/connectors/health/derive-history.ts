@@ -4,7 +4,8 @@
  *
  * Cell colour precedence (within one bucket):
  *
- *   1. `adapter.error` / `delivery.deadlettered` / `inbound.signature_failed`
+ *   1. `adapter.error` / `adapter.reauth_required` / `delivery.deadlettered` /
+ *      `inbound.signature_failed`
  *      → `"down"`              (red)
  *   2. `circuit.opened` / `delivery.error` / `rate_limit.tripped` /
  *      any `inbound.deferred_*`
@@ -21,7 +22,7 @@
  * reused on the server / in workers.
  */
 
-import type { AuditEntry } from "@/types/connectors/audit"
+import type { AuditEntry, AuditKind } from "@/types/connectors/audit"
 
 export type HealthCellState = "running" | "starting" | "degraded" | "down" | "unknown"
 
@@ -46,6 +47,7 @@ function classify(entry: AuditEntry): HealthCellState {
   const kind = entry.kind
   if (
     kind === "adapter.error" ||
+    kind === "adapter.reauth_required" ||
     kind === "delivery.deadlettered" ||
     kind === "inbound.signature_failed"
   ) {
@@ -197,4 +199,43 @@ export function deriveLastOk(entries: AuditEntry[]): AuditEntry | undefined {
       return false
     })
     .sort((a, b) => b.at - a.at)[0]
+}
+
+/** The health reason an adapter reports when the platform rejected its credential. */
+export const AUTH_FAILED_HEALTH_REASON = "auth_failed"
+
+/** Events proving the credential works again (or was replaced). */
+const REAUTH_CLEARING_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>([
+  "delivery.success",
+  "adapter.credentials_rotated",
+  "credential.refreshed",
+])
+
+/**
+ * Decide whether the adapter needs the user to re-authenticate, returning the
+ * row that says so (or undefined).
+ *
+ * Two sources, because a credential can be rejected on either side:
+ *   - the adapter's own view: the latest heartbeat carries
+ *     `reason: "auth_failed"` (inbound gateway / sync rejections);
+ *   - the outbound runner's view: an `adapter.reauth_required` row newer than
+ *     the last event that proves the credential works again.
+ *
+ * A healthy heartbeat does NOT clear the runner's row — several adapters stay
+ * "running" on their transport while every send is refused with a 401.
+ */
+export function deriveReauthRequired(entries: AuditEntry[]): AuditEntry | undefined {
+  const sorted = [...entries].sort((a, b) => b.at - a.at)
+  const latestHeartbeat = sorted.find((e) => e.kind === "adapter.heartbeat")
+  if (
+    latestHeartbeat &&
+    (latestHeartbeat.fields?.reason ?? latestHeartbeat.reason) === AUTH_FAILED_HEALTH_REASON
+  ) {
+    return latestHeartbeat
+  }
+  for (const entry of sorted) {
+    if (REAUTH_CLEARING_KINDS.has(entry.kind)) return undefined
+    if (entry.kind === "adapter.reauth_required") return entry
+  }
+  return undefined
 }

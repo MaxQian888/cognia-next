@@ -25,6 +25,7 @@ import { getDb } from "@/lib/db/schema"
 import { listRunningAdapters, requeueAdapter } from "@/lib/connectors/lifecycle"
 import { appendAudit } from "@/lib/connectors/audit"
 import { recordHeartbeatNow, HEARTBEAT_INTERVAL_MS } from "./heartbeat"
+import { AUTH_FAILED_HEALTH_REASON } from "./derive-history"
 import {
   recordPassiveProbe,
   benefitsFromProbe,
@@ -136,6 +137,11 @@ export function startHeartbeatSweep(
             Promise.resolve(recordPassive(row, at))
               .then(async (result) => {
                 if (!isFailedProbe(result)) return
+                // A rejected credential fails every probe; re-dialing with the
+                // same credential cannot fix it and would restart the adapter
+                // on every passive tick. The Health surfaces ask the user to
+                // re-authenticate instead (`deriveReauthRequired`).
+                if (reportsAuthFailure(entry.adapter)) return
                 if (await requeue(row.id)) await auditReconnect(row.id, at)
               })
               .catch(() => undefined)
@@ -178,4 +184,12 @@ function isFailedProbe(value: unknown): value is DerivedHeartbeat {
     "pingOk" in value &&
     (value as { pingOk?: unknown }).pingOk === false
   )
+}
+
+function reportsAuthFailure(adapter: PlatformAdapter): boolean {
+  try {
+    return adapter.health().reason === AUTH_FAILED_HEALTH_REASON
+  } catch {
+    return false
+  }
 }

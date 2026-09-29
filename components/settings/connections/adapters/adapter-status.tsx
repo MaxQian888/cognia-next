@@ -9,7 +9,7 @@
  * "loud when unhealthy" predicate — a disabled adapter is always grey
  * regardless of health; an enabled-and-nominal adapter is green; an enabled
  * adapter with a tripped health signal maps degraded/rate-limited → amber and
- * down/breaker-open → red. Non-healthy labels reuse the existing `rowHealth.*`
+ * down/breaker-open/reauth-required → red. Non-healthy labels reuse the existing `rowHealth.*`
  * i18n keys so the wording stays consistent with the previous health badge.
  */
 
@@ -23,6 +23,7 @@ import {
 
 import { decideBadge, type BadgeState } from "@/components/inbox/adapter-health-decision"
 import type { UseAdapterHealthResult } from "@/hooks/connectors/use-adapter-health"
+import { AUTH_FAILED_HEALTH_REASON } from "@/lib/connectors/health/derive-history"
 
 export type AdapterStatus = "connected" | "warning" | "error" | "disabled"
 
@@ -61,6 +62,7 @@ const STATUS_ICON: Record<AdapterStatus, LucideIcon> = {
 
 /** Map a health `BadgeState` to its `rowHealth.*` i18n key suffix. */
 const HEALTH_LABEL_KEY: Record<BadgeState, string> = {
+  "reauth-required": "rowHealth.reauthRequired",
   "breaker-open": "rowHealth.breakerOpen",
   "rate-limited": "rowHealth.rateLimited",
   degraded: "rowHealth.degraded",
@@ -102,6 +104,9 @@ export function deriveAdapterStatus(
     tint: STATUS_TINT[status],
     Icon: STATUS_ICON[status],
     labelKey: HEALTH_LABEL_KEY[decision.state],
-    reason: health.current?.reason,
+    // A rejected credential reports the stable `auth_failed` code so the
+    // tooltip localizes it, whichever side (runner or heartbeat) detected it.
+    reason:
+      decision.state === "reauth-required" ? AUTH_FAILED_HEALTH_REASON : health.current?.reason,
   }
 }

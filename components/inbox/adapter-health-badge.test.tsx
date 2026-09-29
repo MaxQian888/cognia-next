@@ -196,4 +196,27 @@ describe("AdapterHealthBadge — rendering", () => {
       expect(mockRequeue).toHaveBeenCalledWith("tg-1")
     })
   })
+
+  it("a rejected credential shows the re-authenticate hint instead of Reconnect", async () => {
+    resetHealth({
+      breaker: { state: "open", openedAt: Date.now(), failureRate: 90, eventCount: 10 },
+      reauthRequired: {
+        id: "r1",
+        adapterId: "tg-1",
+        kind: "adapter.reauth_required",
+        at: 0,
+        reason: "auth_failed",
+        message: "Unauthorized",
+      },
+    })
+    wrap(<AdapterHealthBadge adapterId="tg-1" />)
+    expect(screen.getByTestId("adapter-health-badge")).toHaveTextContent("Re-authenticate")
+    fireEvent.click(screen.getByTestId("adapter-health-badge"))
+    await waitFor(() => {
+      expect(screen.getByTestId("adapter-health-reason")).toHaveTextContent("Unauthorized")
+      expect(screen.getByTestId("adapter-health-reauth-hint")).toBeInTheDocument()
+      expect(screen.getByTestId("adapter-health-open-full")).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId("adapter-health-reconnect")).toBeNull()
+  })
 })

@@ -74,6 +74,21 @@ export interface OutboundError {
   retryAfterMs?: number
 }
 
+/**
+ * Codes meaning the platform rejected a credential after the adapter's own
+ * refresh-and-retry-once: `auth_failed` for the bot/app credential,
+ * `identity_reauthorization_required` for a per-user identity (Lark user
+ * token). Neither heals by retrying or restarting — the user has to
+ * reconnect, so the runner records `adapter.reauth_required` for them.
+ */
+export const REAUTH_ERROR_CODES = ["auth_failed", "identity_reauthorization_required"] as const
+
+export type ReauthErrorCode = (typeof REAUTH_ERROR_CODES)[number]
+
+export function isReauthCode(code: string | undefined): code is ReauthErrorCode {
+  return code !== undefined && (REAUTH_ERROR_CODES as readonly string[]).includes(code)
+}
+
 export interface SegmentDowngrade {
   from: SegmentType
   to: SegmentType

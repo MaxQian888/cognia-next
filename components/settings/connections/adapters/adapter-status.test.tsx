@@ -45,6 +45,22 @@ describe("deriveAdapterStatus", () => {
     expect(info.labelKey).toBe("rowHealth.rateLimited")
   })
 
+  it("maps a rejected credential → error (red) with the auth_failed reason code", () => {
+    const info = deriveAdapterStatus(
+      true,
+      health({
+        current: { state: "running" },
+        reauthRequired: {
+          kind: "adapter.reauth_required",
+          message: "401",
+        } as UseAdapterHealthResult["reauthRequired"],
+      })
+    )
+    expect(info.status).toBe("error")
+    expect(info.labelKey).toBe("rowHealth.reauthRequired")
+    expect(info.reason).toBe("auth_failed")
+  })
+
   it("maps down → error (red)", () => {
     const info = deriveAdapterStatus(true, health({ current: { state: "down" } }))
     expect(info.status).toBe("error")

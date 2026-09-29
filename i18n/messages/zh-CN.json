@@ -17219,6 +17219,8 @@
         "eta": "预计 {date} 恢复",
         "openHealth": "打开完整健康面板",
         "rateLimited": "已限流",
+        "reauthHint": "平台拒绝了该连接的凭据，重连无法修复。请在 设置 → 连接 中更新凭据。",
+        "reauthRequired": "需重新认证",
         "reconnect": "重连",
         "reconnectDesktopOnly": "重连需要桌面端。",
         "reconnectQueued": "重连已排队。",
@@ -37411,6 +37413,7 @@
           "rateBucketLabel": "限流桶",
           "rateBucketNextRefill": "{seconds} 秒后补充下一令牌",
           "reason": {
+            "auth_failed": "认证失败 —— 平台拒绝了凭据，请更新或重新连接",
             "credentials_missing": "缺少凭据 —— 请填写 App ID / App Secret",
             "credentials_unavailable": "凭据不可用 —— 密钥串访问被拒绝",
             "no_data": "无入站数据 —— 连接空闲或已关闭",
@@ -37488,7 +37491,8 @@
           "breakerOpen": "熔断开启",
           "degraded": "降级",
           "down": "离线",
-          "rateLimited": "已限流"
+          "rateLimited": "已限流",
+          "reauthRequired": "需重新认证"
         },
         "scopes": {
           "grantedAt": "授权于 {date}",
@@ -37569,6 +37573,7 @@
             "credentials_rotated": "凭证已轮换",
             "error": "适配器错误",
             "heartbeat": "心跳",
+            "reauth_required": "需要重新认证",
             "started": "适配器已启动",
             "stopped": "适配器已停止"
           },

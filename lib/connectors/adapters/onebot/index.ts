@@ -14,9 +14,11 @@
  * Outbound: routes through `transport.send` (echo-matched RPC), using the v11
  * or v12 serialiser based on the cached variant from the first inbound event.
  *
- * Edit: throws unsupported (OneBot has no edit API).
+ * Edit / typing: not implemented — OneBot has neither API. The methods are
+ * left absent (not stubbed) because callers feature-detect them: the outbound
+ * runner falls back to send() only when `edit` is missing, and the run
+ * presentation picks card-edit whenever `edit` exists.
  * Delete: uses delete_msg (v11) / delete_message (v12).
- * setTyping: no-op (no typing indicator in OneBot).
  */
 
 import type {
@@ -508,18 +510,6 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     }
   }
 
-  async function edit(_messageId: string, _patch: OutboundRequest): Promise<OutboundResult> {
-    // OneBot has no edit API
-    return {
-      ok: false,
-      error: {
-        code: "unsupported_segment",
-        message: "OneBot does not support message editing",
-        retryable: false,
-      },
-    }
-  }
-
   async function deleteMessage(messageId: string): Promise<void> {
     const variant = getVariant()
     const call =
@@ -528,10 +518,6 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
         : serializeDeleteV12(messageId, opts.selfBotUin)
 
     await transport.send(call)
-  }
-
-  async function setTyping(_conversationKey: string, _on: boolean): Promise<void> {
-    // OneBot has no typing indicator — no-op
   }
 
   async function refreshCredentials(): Promise<void> {
@@ -735,9 +721,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     stop,
     health,
     send,
-    edit,
     delete: deleteMessage,
-    setTyping,
     refreshCredentials,
     forwardMessage,
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("onebot"),

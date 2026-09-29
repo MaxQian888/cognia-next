@@ -2,6 +2,7 @@
  * Coverage for the consolidated heartbeat sweep (v51):
  *   - one interval services every running adapter per tick
  *   - the passive probe fires every PASSIVE_EVERY_N ticks, passive adapters only
+ *   - a failed probe re-dials, unless the adapter reports a rejected credential
  *   - a hung passive probe never blocks other adapters' active heartbeats
  *   - dispose stops the interval and is idempotent
  */
@@ -120,6 +121,33 @@ describe("startHeartbeatSweep", () => {
 
     expect(requeue).toHaveBeenCalledWith("discord")
     expect(auditReconnect).toHaveBeenCalledWith("discord", 1234)
+  })
+
+  it("does not re-dial a gateway whose credential the platform rejected", async () => {
+    const requeue = jest.fn().mockResolvedValue(true)
+    const auditReconnect = jest.fn().mockResolvedValue(undefined)
+    const adapter = {
+      ...fakeAdapter("qq", "qq-official"),
+      health: () => ({ state: "degraded", reason: "auth_failed" }),
+    } as unknown as PlatformAdapter
+    startHeartbeatSweep({
+      listAdapters: () => [{ adapter }],
+      recordHeartbeat: jest.fn().mockResolvedValue(undefined),
+      recordPassive: jest.fn().mockResolvedValue({
+        state: "degraded",
+        reason: "gateway_probe_failed",
+        lastInboundAt: null,
+        pingOk: false,
+      }),
+      requeue,
+      auditReconnect,
+      loadRows: async () => [fakeRow("qq", "qq-official", "gateway")],
+      scheduler: makeScheduler().scheduler,
+    })
+    await flush()
+
+    expect(requeue).not.toHaveBeenCalled()
+    expect(auditReconnect).not.toHaveBeenCalled()
   })
 
   it("does not let a hung passive probe block other adapters' active heartbeats", async () => {

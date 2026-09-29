@@ -74,6 +74,7 @@ import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
+import { isReauthCode } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import {
   createCircuitBreaker,
@@ -397,6 +398,12 @@ interface AdapterState {
    * a tuning edit is an explicit operator action).
    */
   tuningFingerprint: string
+  /**
+   * Set once an `adapter.reauth_required` row has been written for this
+   * adapter, cleared by the next successful delivery. Keeps a backlog of
+   * jobs failing on the same revoked credential from writing one row each.
+   */
+  reauthRecorded: boolean
 }
 
 // ── Runtime-state registry (heartbeat read-side) ─────────────────────────────
@@ -537,6 +544,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         now: clock,
       }),
       tuningFingerprint: fingerprint,
+      reauthRecorded: existing?.reauthRecorded ?? false,
     }
     adapterState.set(adapterId, state)
     return state
@@ -820,7 +828,8 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
     // Per-adapter breaker + bucket, built with (and live-rebuilt on changes
     // to) this bot's `outboundTuning` — the row was just read above.
-    const { breaker, bucket } = getAdapterState(adapterId, adapterRow)
+    const adapterRuntime = getAdapterState(adapterId, adapterRow)
+    const { breaker, bucket } = adapterRuntime
 
     // ── Idempotency short-circuit ─────────────────────────────────────────
     if (idempotencyCache.has(idempotencyKey)) {
@@ -1174,6 +1183,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         /* best-effort — cooldown bookkeeping must never break delivery */
       }
       breaker.recordSuccess()
+      adapterRuntime.reauthRecorded = false
       idempotencyCache.set(idempotencyKey, platformMsgId)
       await appendAudit({
         adapterId,
@@ -1205,6 +1215,22 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         outcome: "failed",
         errorCode: err.code,
       })
+      // The credential (bot or user identity) was rejected after the
+      // adapter's own refresh-and-retry-once. The breaker still counts it —
+      // an open breaker defers the backlog instead of dead-lettering it — but
+      // the Health surfaces need to say "re-authenticate", not "breaker open".
+      if (isReauthCode(err.code) && !adapterRuntime.reauthRecorded) {
+        adapterRuntime.reauthRecorded = true
+        await appendAudit({
+          adapterId,
+          kind: "adapter.reauth_required",
+          at: now,
+          conversationKey,
+          idempotencyKey,
+          reason: err.code,
+          message: err.message,
+        })
+      }
       if (err.code === "identity_reauthorization_required") {
         const resolution = await readForResolution(conversationKey).catch(() => null)
         if (resolution?.sessionId) {

@@ -285,6 +285,10 @@ describe("outbound-runner — identity boundary", () => {
           kind: "draft.prepared",
           reason: "identity_reauthorization_required",
         }),
+        expect.objectContaining({
+          kind: "adapter.reauth_required",
+          reason: "identity_reauthorization_required",
+        }),
       ])
     )
   })
@@ -633,6 +637,63 @@ describe("outbound-runner — non-retryable error", () => {
       outcome: "failed",
       errorCode: "validation",
     })
+  })
+})
+
+describe("outbound-runner — rejected credential", () => {
+  it("records adapter.reauth_required once for a backlog failing on the same credential", async () => {
+    const adapterId = "a_reauth"
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: false,
+      error: { code: "auth_failed", message: "invalid_auth", retryable: false },
+    }))
+    await enqueue(adapterId, `telegram:${adapterId}:c1`)
+    await enqueue(adapterId, `telegram:${adapterId}:c2`)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs.every((j) => j.status === "deadlettered")).toBe(true)
+    const reauth = (await listRecent(adapterId)).filter((a) => a.kind === "adapter.reauth_required")
+    expect(reauth).toHaveLength(1)
+    expect(reauth[0]).toMatchObject({ reason: "auth_failed", message: "invalid_auth" })
+  })
+
+  it("records it again after a successful delivery in between", async () => {
+    const adapterId = "a_reauth_again"
+    let call = 0
+    const adapter = makeAdapter(adapterId, async () => {
+      call += 1
+      return call === 2
+        ? { ok: true, platformMessageId: "m2" }
+        : { ok: false, error: { code: "auth_failed", message: "401", retryable: false } }
+    })
+    const adapters = new Map([[adapterId, adapter]])
+    const key = `telegram:${adapterId}:chat`
+
+    await enqueue(adapterId, key)
+    await runOnce(adapters)
+    await enqueue(adapterId, key)
+    await runOnce(adapters)
+    await enqueue(adapterId, key)
+    await runOnce(adapters)
+
+    const reauth = (await listRecent(adapterId)).filter((a) => a.kind === "adapter.reauth_required")
+    expect(reauth).toHaveLength(2)
+  })
+
+  it("does not record it for non-credential failures", async () => {
+    const adapterId = "a_not_reauth"
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: false,
+      error: { code: "platform_4xx", message: "bad request", retryable: false },
+    }))
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "adapter.reauth_required")).toBe(false)
   })
 })
 

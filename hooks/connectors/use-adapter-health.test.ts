@@ -65,6 +65,29 @@ describe("useAdapterHealth", () => {
     })
   })
 
+  it("surfaces reauthRequired from the runner's adapter.reauth_required row", async () => {
+    await getDb().connectorAudit.bulkPut([
+      {
+        id: "ok-r",
+        adapterId: "slack-reauth",
+        kind: "delivery.success" as const,
+        at: NOW - 120_000,
+      },
+      {
+        id: "reauth-1",
+        adapterId: "slack-reauth",
+        kind: "adapter.reauth_required" as const,
+        at: NOW - 30_000,
+        reason: "auth_failed",
+        message: "invalid_auth",
+      },
+    ])
+    const { result } = renderHook(() => useAdapterHealth("slack-reauth", { now: () => NOW }))
+    await waitFor(() => {
+      expect(result.current.reauthRequired?.id).toBe("reauth-1")
+    })
+  })
+
   it("bucketises events into the 24h grid", async () => {
     const inWindow = {
       id: "w-1",

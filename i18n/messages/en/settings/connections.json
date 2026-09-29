@@ -113,7 +113,8 @@
         "credentials_missing": "Credentials missing — set App ID / App Secret",
         "credentials_unavailable": "Credentials unavailable — keyring access denied",
         "no_data": "No inbound data — connection idle or closed",
-        "transport_error": "Transport error — reconnecting"
+        "transport_error": "Transport error — reconnecting",
+        "auth_failed": "Authentication failed — the platform rejected the credential; update or reconnect it"
       },
       "reconnectNow": "Reconnect now",
       "reconnectQueued": "Reconnect queued.",
@@ -187,7 +188,8 @@
       "breakerOpen": "Breaker open",
       "degraded": "Degraded",
       "down": "Down",
-      "rateLimited": "Rate limited"
+      "rateLimited": "Rate limited",
+      "reauthRequired": "Re-authenticate"
     },
     "scopes": {
       "grantedAt": "Granted {date}",
@@ -275,7 +277,8 @@
         "error": "Adapter error",
         "heartbeat": "Heartbeat",
         "started": "Adapter started",
-        "stopped": "Adapter stopped"
+        "stopped": "Adapter stopped",
+        "reauth_required": "Re-authentication required"
       },
       "builtin_skill_denied": "Skill denied",
       "builtin_skill_failed": "Skill failed",

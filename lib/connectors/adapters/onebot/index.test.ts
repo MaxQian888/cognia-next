@@ -239,35 +239,10 @@ describe("createOneBotAdapter", () => {
     await adapter.stop()
   })
 
-  it("edit() returns unsupported error", async () => {
-    const bus = createEventBus()
-    mockListen.mockImplementation(bus.listenImpl)
-
+  it("leaves edit() and setTyping() absent (OneBot has neither API)", () => {
     const adapter = makeAdapter("ob-edit")
-    const { ctx } = makeCtx()
-    await adapter.start(ctx)
-
-    const result = await adapter.edit!("999", {
-      conversationRef: { platform: "onebot", adapterId: "ob-edit", chatKey: "p:200001" },
-      segments: [{ type: "text", text: "edited" }],
-      metadata: { idempotencyKey: "k2" },
-    })
-
-    expect(result.ok).toBe(false)
-    expect(result.error?.code).toBe("unsupported_segment")
-
-    await adapter.stop()
-  })
-
-  it("setTyping() is a no-op (no error)", async () => {
-    const bus = createEventBus()
-    mockListen.mockImplementation(bus.listenImpl)
-
-    const adapter = makeAdapter("ob-typing")
-    const { ctx } = makeCtx()
-    await adapter.start(ctx)
-    await expect(adapter.setTyping!("onebot:ob-typing:g:300001", true)).resolves.toBeUndefined()
-    await adapter.stop()
+    expect(adapter.edit).toBeUndefined()
+    expect(adapter.setTyping).toBeUndefined()
   })
 })
 

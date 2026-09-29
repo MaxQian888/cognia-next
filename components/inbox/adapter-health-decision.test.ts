@@ -18,6 +18,21 @@ describe("decideBadge", () => {
     expect(decideBadge(health({}))).toBeNull()
   })
 
+  it("prefers reauth-required over every other state, with the platform message", () => {
+    const decision = decideBadge(
+      health({
+        reauthRequired: {
+          kind: "adapter.reauth_required",
+          message: "invalid_auth",
+        } as UseAdapterHealthResult["reauthRequired"],
+        breaker: { state: "open", openedAt: 1, failureRate: 90, eventCount: 10 },
+        current: { state: "down" } as UseAdapterHealthResult["current"],
+      })
+    )
+    expect(decision?.state).toBe("reauth-required")
+    expect(decision?.reason).toBe("invalid_auth")
+  })
+
   it("prefers breaker-open over rate-limited and degraded", () => {
     const decision = decideBadge(
       health({
@@ -55,7 +70,7 @@ describe("decideBadge", () => {
 })
 
 describe("presentation tables", () => {
-  it.each<BadgeState>(["breaker-open", "rate-limited", "degraded", "down"])(
+  it.each<BadgeState>(["reauth-required", "breaker-open", "rate-limited", "degraded", "down"])(
     "has a tint + icon for %s",
     (state) => {
       expect(STATE_TINT[state]).toBeTruthy()

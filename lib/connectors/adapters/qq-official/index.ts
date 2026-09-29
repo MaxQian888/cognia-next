@@ -390,7 +390,7 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
               : err.status >= 500
                 ? "platform_5xx"
                 : "platform_4xx"
-        if (code === "auth_failed") healthReason = err.message
+        if (code === "auth_failed") healthReason = "auth_failed"
         return {
           ok: false,
           error: {

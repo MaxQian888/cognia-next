@@ -13,6 +13,7 @@
 
 /** Codes the adapters emit and this module localizes. */
 export const KNOWN_HEALTH_REASONS = [
+  "auth_failed",
   "credentials_missing",
   "credentials_unavailable",
   "no_data",

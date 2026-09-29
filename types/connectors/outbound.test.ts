@@ -1,4 +1,9 @@
-import { newIdempotencyKey, type OutboundRequest, type OutboundResult } from "./outbound"
+import {
+  isReauthCode,
+  newIdempotencyKey,
+  type OutboundRequest,
+  type OutboundResult,
+} from "./outbound"
 
 describe("outbound", () => {
   it("idempotency keys are unique", () => {
@@ -23,5 +28,13 @@ describe("outbound", () => {
       metadata: { idempotencyKey: newIdempotencyKey() },
     }
     expect(req.segments).toHaveLength(1)
+  })
+
+  it("isReauthCode matches only credential-rejection codes", () => {
+    expect(isReauthCode("auth_failed")).toBe(true)
+    expect(isReauthCode("identity_reauthorization_required")).toBe(true)
+    expect(isReauthCode("rate_limited")).toBe(false)
+    expect(isReauthCode("platform_4xx")).toBe(false)
+    expect(isReauthCode(undefined)).toBe(false)
   })
 })

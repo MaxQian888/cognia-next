@@ -17219,6 +17219,8 @@
         "eta": "Should recover by {date}",
         "openHealth": "Open full health",
         "rateLimited": "Rate limited",
+        "reauthHint": "The platform rejected this connection's credential. Reconnecting will not fix it — update the credential in Settings → Connections.",
+        "reauthRequired": "Re-authenticate",
         "reconnect": "Reconnect",
         "reconnectDesktopOnly": "Reconnect requires the desktop app.",
         "reconnectQueued": "Reconnect queued.",
@@ -37411,6 +37413,7 @@
           "rateBucketLabel": "Rate limit",
           "rateBucketNextRefill": "Next token in {seconds}s",
           "reason": {
+            "auth_failed": "Authentication failed — the platform rejected the credential; update or reconnect it",
             "credentials_missing": "Credentials missing — set App ID / App Secret",
             "credentials_unavailable": "Credentials unavailable — keyring access denied",
             "no_data": "No inbound data — connection idle or closed",
@@ -37488,7 +37491,8 @@
           "breakerOpen": "Breaker open",
           "degraded": "Degraded",
           "down": "Down",
-          "rateLimited": "Rate limited"
+          "rateLimited": "Rate limited",
+          "reauthRequired": "Re-authenticate"
         },
         "scopes": {
           "grantedAt": "Granted {date}",
@@ -37569,6 +37573,7 @@
             "credentials_rotated": "Credentials rotated",
             "error": "Adapter error",
             "heartbeat": "Heartbeat",
+            "reauth_required": "Re-authentication required",
             "started": "Adapter started",
             "stopped": "Adapter stopped"
           },

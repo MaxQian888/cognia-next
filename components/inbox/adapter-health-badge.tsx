@@ -12,7 +12,9 @@
  *   • An ETA when the runtime can compute one (rate bucket refill time,
  *     breaker cooldown remainder).
  *   • A "Reconnect" affordance (Tauri-only; mirrors the per-row reconnect
- *     in `ConnectionLossNotice`) that re-queues the adapter lifecycle.
+ *     in `ConnectionLossNotice`) that re-queues the adapter lifecycle —
+ *     withheld when the credential itself was rejected, where only
+ *     updating it in Settings helps.
  *   • A "Open full health" link to Settings → Connections → Adapter
  *     health for the deep view.
  *
@@ -48,6 +50,9 @@ export function AdapterHealthBadge({ adapterId }: AdapterHealthBadgeProps) {
 
   if (!decision) return null
 
+  // Restarting cannot fix a rejected credential, so the Reconnect action is
+  // replaced by a pointer to where the credential is updated.
+  const needsReauth = decision.state === "reauth-required"
   const Icon = STATE_ICON[decision.state]
   const label = t(stateToKey(decision.state))
 
@@ -95,6 +100,11 @@ export function AdapterHealthBadge({ adapterId }: AdapterHealthBadgeProps) {
               {decision.reason}
             </p>
           )}
+          {needsReauth && (
+            <p className="text-muted-foreground" data-testid="adapter-health-reauth-hint">
+              {t("reauthHint")}
+            </p>
+          )}
           {decision.etaMs && (
             <p className="text-muted-foreground" data-testid="adapter-health-eta">
               {t("eta", { date: new Date(decision.etaMs).toLocaleTimeString() })}
@@ -102,22 +112,24 @@ export function AdapterHealthBadge({ adapterId }: AdapterHealthBadgeProps) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="default"
-            className="h-7 px-2 text-xs"
-            disabled={reconnecting}
-            onClick={() => void onReconnect()}
-            data-testid="adapter-health-reconnect"
-          >
-            {reconnecting ? (
-              <LoaderIcon className="mr-1 h-3 w-3 animate-spin" aria-hidden />
-            ) : (
-              <RefreshCwIcon className="mr-1 h-3 w-3" aria-hidden />
-            )}
-            {t("reconnect")}
-          </Button>
+          {!needsReauth && (
+            <Button
+              type="button"
+              size="sm"
+              variant="default"
+              className="h-7 px-2 text-xs"
+              disabled={reconnecting}
+              onClick={() => void onReconnect()}
+              data-testid="adapter-health-reconnect"
+            >
+              {reconnecting ? (
+                <LoaderIcon className="mr-1 h-3 w-3 animate-spin" aria-hidden />
+              ) : (
+                <RefreshCwIcon className="mr-1 h-3 w-3" aria-hidden />
+              )}
+              {t("reconnect")}
+            </Button>
+          )}
           <Button
             asChild
             type="button"
@@ -145,8 +157,12 @@ export function AdapterHealthBadge({ adapterId }: AdapterHealthBadgeProps) {
  */
 export const __TESTING__ = { decideBadge }
 
-function stateToKey(state: BadgeState): "breakerOpen" | "rateLimited" | "degraded" | "down" {
+function stateToKey(
+  state: BadgeState
+): "reauthRequired" | "breakerOpen" | "rateLimited" | "degraded" | "down" {
   switch (state) {
+    case "reauth-required":
+      return "reauthRequired"
     case "breaker-open":
       return "breakerOpen"
     case "rate-limited":

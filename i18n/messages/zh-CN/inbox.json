@@ -213,7 +213,9 @@
       "reconnect": "重连",
       "reconnectDesktopOnly": "重连需要桌面端。",
       "reconnectQueued": "重连已排队。",
-      "reconnectUnavailable": "运行时未注册该适配器。"
+      "reconnectUnavailable": "运行时未注册该适配器。",
+      "reauthRequired": "需重新认证",
+      "reauthHint": "平台拒绝了该连接的凭据，重连无法修复。请在 设置 → 连接 中更新凭据。"
     },
     "lastInboundDays": "{days} 天前收到消息",
     "lastInboundHours": "{hours} 小时前收到消息",

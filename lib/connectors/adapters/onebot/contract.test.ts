@@ -5,7 +5,7 @@
  * build adapter → mock event bus → trigger action → assert serialised call shape.
  *
  * Edit and typing are NOT tested as capabilities because OneBot lacks native
- * support (edit returns unsupported, typing is a no-op).
+ * support (edit and typing are absent, so callers fall back).
  */
 
 import { listen } from "@tauri-apps/api/event"
@@ -402,44 +402,21 @@ describe("OneBot adapter contract suite", () => {
   })
 
   // ---------------------------------------------------------------------------
-  // edit — NOT supported
+  // edit / typing — NOT supported
   // ---------------------------------------------------------------------------
 
-  describe("edit — unsupported", () => {
-    it("edit() returns ok=false with unsupported_segment code", async () => {
+  describe("edit / typing — absent", () => {
+    it("leaves edit() and setTyping() undefined so callers fall back", async () => {
       const bus = createEventBus()
       mockListen.mockImplementation(bus.listenImpl)
 
       const { adapter } = await setupAdapter(bus, "ob-edit-c")
 
-      const result = await adapter.edit!("1", {
-        conversationRef: { platform: "onebot", adapterId: "ob-edit-c", chatKey: "p:200001" },
-        segments: [{ type: "text", text: "edited" }],
-        metadata: { idempotencyKey: "ke" },
-      })
-
-      expect(result.ok).toBe(false)
-      expect(result.error?.code).toBe("unsupported_segment")
-
-      await adapter.stop()
-    })
-  })
-
-  // ---------------------------------------------------------------------------
-  // typing — no-op
-  // ---------------------------------------------------------------------------
-
-  describe("typing — no-op", () => {
-    it("setTyping() resolves without emitting anything", async () => {
-      const bus = createEventBus()
-      mockListen.mockImplementation(bus.listenImpl)
-
-      const { adapter } = await setupAdapter(bus, "ob-typ")
-
-      await expect(adapter.setTyping!("onebot:ob-typ:g:300001", true)).resolves.toBeUndefined()
-
-      // No emit calls from typing
-      expect(mockOnebotSend).not.toHaveBeenCalled()
+      // The outbound runner routes an edit to send() (with an
+      // `edit_unsupported` audit) only when `edit` is missing; a stub that
+      // returned an error dead-lettered the edit instead.
+      expect(adapter.edit).toBeUndefined()
+      expect(adapter.setTyping).toBeUndefined()
 
       await adapter.stop()
     })
