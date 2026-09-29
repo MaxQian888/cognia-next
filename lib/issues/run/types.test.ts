@@ -1,7 +1,6 @@
-// Type-only module — no runtime code lives here. The side-effect import keeps
-// the (empty) module body in coverage; the literals below pin the adapter
-// contract every issue-run engine implements.
-import "./types"
+// Mostly a type module: the literals below pin the adapter contract every
+// issue-run engine implements. `withRunBrief` is its one runtime helper.
+import { withRunBrief } from "./types"
 import type {
   IssueRunAdapter,
   IssueRunOrigin,
@@ -95,5 +94,14 @@ describe("IssueRunAdapter", () => {
     }
     const verdict = await adapter.canRun({} as IssueRunTarget)
     expect(verdict).toEqual({ ok: false, reason: "no-github-ref" })
+  })
+})
+
+describe("withRunBrief", () => {
+  it("appends a brief after the engine text, and stands alone on empty text", () => {
+    expect(withRunBrief("Issue", undefined)).toBe("Issue")
+    expect(withRunBrief("Issue", "   ")).toBe("Issue")
+    expect(withRunBrief("Issue", " brief ")).toBe("Issue\n\nbrief")
+    expect(withRunBrief("", "brief")).toBe("brief")
   })
 })

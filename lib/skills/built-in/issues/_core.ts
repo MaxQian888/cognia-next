@@ -186,6 +186,7 @@ export function summariseIssue(issue: Issue) {
     ...(issue.blockedBy?.length ? { blockedBy: issue.blockedBy } : {}),
     ...(issue.dueDate !== undefined ? { dueDate: issue.dueDate } : {}),
     ...(issue.estimate !== undefined ? { estimate: issue.estimate } : {}),
+    ...(issue.stage !== undefined ? { stage: issue.stage } : {}),
     ...(issue.cycleId ? { cycleId: issue.cycleId } : {}),
     ...(issue.externalRefs?.length ? { externalRefs: issue.externalRefs } : {}),
   }

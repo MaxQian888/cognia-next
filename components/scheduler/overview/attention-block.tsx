@@ -42,6 +42,8 @@ export function useAttentionSentence(): (signal: AttentionSignal) => string {
     switch (signal.kind) {
       case "auto-paused":
         return t("autoPaused", { name, count: signal.count ?? 0 })
+      case "wakeup-paused":
+        return t(`wakeupPaused.${signal.wakeupPauseReason ?? "loop"}`, { name })
       case "needs-approval":
         if (signal.tools && signal.roots) {
           return t("needsApprovalToolsAndTrust", { name, tools: signal.tools, roots: signal.roots })

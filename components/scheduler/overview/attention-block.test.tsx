@@ -132,6 +132,26 @@ describe("AttentionBlock", () => {
     expect(onSelectItem).toHaveBeenCalledWith("app:n")
   })
 
+  it("says why an issue wakeup stopped itself", () => {
+    render(
+      <AttentionBlock
+        signals={[
+          signal({
+            kind: "wakeup-paused",
+            severity: "critical",
+            itemUnifiedId: "app:w",
+            itemName: "MERC-1 wakeup",
+            wakeupPauseReason: "rate",
+          }),
+        ]}
+        onSelectItem={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("attention-wakeup-paused")).toHaveTextContent(
+      "MERC-1 wakeup paused itself: it fired too often in an hour"
+    )
+  })
+
   it("renders no action when the caller cannot answer the signal", () => {
     render(
       <AttentionBlock signals={[signal({ kind: "host-suspended" })]} onSelectItem={jest.fn()} />

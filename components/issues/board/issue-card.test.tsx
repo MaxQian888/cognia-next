@@ -92,6 +92,13 @@ describe("IssueCard", () => {
     expect(screen.getByText("source.github")).toBeInTheDocument()
   })
 
+  it("badges an issue waiting in triage", () => {
+    const { rerender } = render(<IssueCard item={item()} />)
+    expect(screen.queryByText("triage.badge")).not.toBeInTheDocument()
+    rerender(<IssueCard item={item({ triage: "pending" })} />)
+    expect(screen.getByText("triage.badge")).toBeInTheDocument()
+  })
+
   it("disables dragging for a federated row — capabilities are the only gate", () => {
     render(<IssueCard item={item({ kind: "github" })} />)
     expect(mockUseSortable).toHaveBeenCalledWith(
@@ -197,6 +204,13 @@ describe("IssueCard", () => {
     expect(screen.queryByTestId("squad-run-chip-team-1")).not.toBeInTheDocument()
     rerender(<IssueCard item={item()} squadRun={run} />)
     expect(screen.getByTestId("squad-run-chip-team-1")).toHaveAttribute("href", "/squads?id=team-1")
+  })
+
+  it("shows the wakeup cue only for an issue with wakeups", () => {
+    const { rerender } = render(<IssueCard item={item()} />)
+    expect(screen.queryByTestId("issue-card-wakeup-cue")).not.toBeInTheDocument()
+    rerender(<IssueCard item={item()} wakeupCue={{ active: 1, paused: 0, held: 0 }} />)
+    expect(screen.getByTestId("issue-card-wakeup-cue")).toHaveAttribute("data-state", "active")
   })
 
   it("does not select the card when the squad chip is clicked", () => {

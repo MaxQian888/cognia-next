@@ -17949,24 +17949,35 @@
       "label_added": "added a label",
       "label_removed": "removed a label",
       "parent_changed": "changed the parent issue",
+      "pr_state_changed": "{to, select, merged {saw a linked pull request merge} closed {saw a linked pull request close} other {saw a linked pull request open}}",
       "priority_changed": "changed priority from {from} to {to}",
       "project_changed": "moved this to another project",
       "reassigned": "reassigned this from {from} to {to}",
+      "run_checked_in": "a periodic run checked in",
       "run_failed": "an agent run failed",
       "run_started": "started an agent run",
       "run_succeeded": "finished an agent run",
+      "stage_changed": "changed the sub-issue stage",
       "status_changed": "moved this from {from} to {to}",
       "sync_conflict": "kept the {winner} value of {field} after a sync conflict",
       "sync_conflict_resolved": "resolved a sync conflict",
       "synced_in": "applied a change from {provider}",
       "title_changed": "renamed this issue",
+      "triage_changed": "{to, select, pending {sent this to triage} other {accepted this out of triage}}",
       "unassigned": "removed the assignee",
+      "wakeup_fired": "a wakeup fired ({delivery})",
       "work_settled": "an agent turn on this issue finished: {to}",
       "work_started": "an agent turn started on this issue"
     },
     "activitySide": {
       "local": "local",
       "remote": "remote"
+    },
+    "activityWakeupDelivery": {
+      "joined": "joined the active run",
+      "notified": "notified the assignee",
+      "run": "started a run",
+      "trail": "no assignee"
     },
     "actor": {
       "agent": "Agent",
@@ -18143,6 +18154,13 @@
       "titleOne": "Delete {identifier}?",
       "working": "Deleting…"
     },
+    "deliverables": {
+      "conversationGone": "The conversation this artifact was made in no longer exists.",
+      "previewUnavailable": "This artifact is not on this device; open its conversation to see it.",
+      "section": "Deliverables",
+      "version": "v{version}",
+      "versions": "Versions"
+    },
     "detail": {
       "activity": "Activity",
       "assignee": "Assignee",
@@ -18162,6 +18180,7 @@
       "priority": "Priority",
       "project": "Project",
       "properties": "Properties",
+      "repeats": "×{count}",
       "status": "Status",
       "title": "Title",
       "updated": "Updated"
@@ -18269,6 +18288,10 @@
       "status_changed": {
         "body": "{title}",
         "title": "{identifier} moved to {to}"
+      },
+      "wakeup_fired": {
+        "body": "{instruction}",
+        "title": "{identifier}: a wakeup fired"
       }
     },
     "planning": {
@@ -18296,6 +18319,7 @@
       "noEstimate": "No estimate",
       "noMatch": "No issue matches",
       "noParent": "Top-level issue",
+      "noStage": "No stage",
       "noSubIssues": "No sub-issues",
       "parent": "Parent",
       "pickParent": "Choose a parent issue",
@@ -18313,6 +18337,10 @@
       "removeBlocker": "Remove blocker",
       "searchPlaceholder": "Search issues…",
       "section": "Planning",
+      "stage": "Stage",
+      "stageHint": "Sub-issues in a lower stage finish before a higher stage is due. The parent is woken as each stage completes.",
+      "stageLabel": "Stage {stage}",
+      "stagePlaceholder": "#",
       "subIssues": "Sub-issues",
       "subIssuesTitle": "{done} of {total} sub-issues done",
       "unlink": "Remove link"
@@ -18421,7 +18449,9 @@
       "table": "Table",
       "targetDate": "Due date",
       "tasklist": "Tasklist",
-      "title": "Projects"
+      "title": "Projects",
+      "triageNewIssues": "File new open issues into triage",
+      "triageNewIssuesHint": "A newly imported issue that is open and unassigned waits in triage. Agents do not start on it from a chat or a wakeup until someone accepts it."
     },
     "rail": {
       "cycles": "Cycles",
@@ -18472,6 +18502,7 @@
         "blocked": "Blocked by {detail}. Finish those issues first.",
         "desktop-only": "Available on the desktop app only.",
         "issue-finished": "Finished issues cannot be run.",
+        "issue-in-triage": "It is waiting in triage. Accept it first, or start the run from here yourself.",
         "no-github-account": "Connect a GitHub account in Settings → Connections first.",
         "no-github-ref": "Link this issue to a GitHub issue first.",
         "no-github-repo": "Bind the project to the issue's GitHub repository first.",
@@ -18495,6 +18526,8 @@
         "succeeded": "Succeeded"
       },
       "submit": "Run",
+      "timeline": "Run history",
+      "timelineEntry": "{engine}: {status}, started {at}",
       "title": "Run {identifier}",
       "trigger": "Run"
     },
@@ -18604,11 +18637,160 @@
         "updated": "Last updated"
       }
     },
+    "triage": {
+      "accept": "Accept",
+      "badge": "Triage",
+      "cardHint": "Waiting in triage: agents do not start on it until someone accepts it.",
+      "pendingHint": "Waiting in triage. Its status and assignee are a proposal; chats and wakeups will not start an agent on it until it is accepted.",
+      "send": "Send to triage"
+    },
     "views": {
       "all": "All",
       "assigned": "Assigned",
       "created": "Created",
       "myAgents": "My Agents and Squads"
+    },
+    "wakeups": {
+      "add": "Add wakeup",
+      "at": "When",
+      "createDescription": "When the trigger happens, the assigned agent or squad gets a run with your instruction and what happened. If a run is already going, the input joins it. A person assignee gets a notification instead.",
+      "createSubmit": "Add wakeup",
+      "createTitle": "Add a wakeup to {identifier}",
+      "createdToast": "Wakeup added to {identifier}",
+      "cue": {
+        "active": "{count, plural, one {# wakeup waiting} other {# wakeups waiting}}",
+        "held": "{count, plural, one {# input not yet seen} other {# inputs not yet seen}}",
+        "paused": "{count, plural, one {# wakeup paused} other {# wakeups paused}}",
+        "pausedWith": "{count, plural, one {# wakeup paused} other {# wakeups paused}}: {reason}",
+        "reason": {
+          "issue-closed": "issue finished",
+          "loop": "looping between agents",
+          "rate": "fired too often"
+        }
+      },
+      "dailyAt": "Time",
+      "delete": "Delete wakeup",
+      "deletedToast": "Wakeup deleted",
+      "empty": "No wakeups on this issue.",
+      "error": {
+        "issue-finished": "This issue is finished; reopen it first.",
+        "issue-missing": "This issue no longer exists.",
+        "not-a-wakeup": "That wakeup no longer exists.",
+        "pr-unobservable": "This project is not bound to a GitHub repository in import mode, so a merge would never be seen.",
+        "target-missing": "The issue to watch no longer exists.",
+        "target-other-workspace": "The issue to watch is in another workspace."
+      },
+      "finishedHint": "This issue is finished, so its wakeups stopped. Reopen it to resume them.",
+      "fires": "Fired {count} of {max}",
+      "held": "{count, plural, one {# input held for the active run} other {# inputs held for the active run}}",
+      "instruction": "Instruction for the agent",
+      "instructionPlaceholder": "e.g. Answer the question in the new comment, or update the plan.",
+      "intervalHours": "Every (hours)",
+      "kind": {
+        "artifact_linked": "artifact linked",
+        "assigned": "assigned",
+        "blocker_added": "blocker added",
+        "blocker_removed": "blocker removed",
+        "child_stage_changed": "sub-issue stage changes",
+        "child_status_changed": "sub-issue status changes",
+        "commented": "comments",
+        "created": "issue created",
+        "cycle_changed": "cycle changes",
+        "description_changed": "description changes",
+        "due_date_changed": "due date changes",
+        "estimate_changed": "estimate changes",
+        "external_linked": "external link added",
+        "external_unlinked": "external link removed",
+        "github_linked": "GitHub issue linked",
+        "github_write_back": "GitHub write-back",
+        "label_added": "label added",
+        "label_removed": "label removed",
+        "parent_changed": "parent changes",
+        "pr_state_changed": "linked pull request changes",
+        "priority_changed": "priority changes",
+        "project_changed": "project changes",
+        "reassigned": "reassigned",
+        "run_checked_in": "run checked in",
+        "run_failed": "run failed",
+        "run_started": "run started",
+        "run_succeeded": "run succeeded",
+        "stage_changed": "stage changes",
+        "status_changed": "status changes",
+        "sync_conflict": "sync conflict",
+        "sync_conflict_resolved": "sync conflict resolved",
+        "synced_in": "remote sync",
+        "title_changed": "title changes",
+        "triage_changed": "triage changes",
+        "unassigned": "unassigned",
+        "work_settled": "work settled",
+        "work_started": "work started"
+      },
+      "maxFires": "Fire budget",
+      "next": "Next {when}",
+      "noTargets": "No other open issue on this board to watch.",
+      "once": "Only once",
+      "pause": "Pause",
+      "pauseReason": {
+        "issue-closed": "Stopped: issue finished",
+        "loop": "Paused: looping between agents",
+        "rate": "Paused: fired too often"
+      },
+      "pausedToast": "Wakeup paused",
+      "peopleOnly": "Only comments from people",
+      "preset": {
+        "at": "Once, at a set time",
+        "children-done": "Every sub-issue is finished",
+        "comment": "Someone comments",
+        "daily": "Every day at…",
+        "interval": "Every few hours",
+        "issue-finished": "Another issue is finished",
+        "pr-merged": "A linked pull request merges",
+        "status": "The status changes to…"
+      },
+      "presetHint": {
+        "at": "Fires once at the chosen time.",
+        "children-done": "Fires once the last open sub-issue is done or canceled.",
+        "comment": "Fires on each new comment on this issue.",
+        "daily": "A periodic check. The woken agent may check in instead of finishing when there is nothing to do.",
+        "interval": "A periodic check. The woken agent may check in instead of finishing when there is nothing to do.",
+        "issue-finished": "Fires once the chosen issue is done or canceled.",
+        "pr-merged": "Fires once a pull request linked to this issue merges. Needs the project bound to its GitHub repository in import mode; state is picked up by that sync, so it can lag by its interval.",
+        "status": "Fires when this issue moves to the chosen status."
+      },
+      "presetLabel": "Wake when",
+      "resume": "Resume",
+      "resumedToast": "Wakeup resumed",
+      "safetyHint": "The rule expires after its fire budget. It never fires on its own run's activity.",
+      "section": "Wakeups",
+      "sectionHint": "Rules that wake an agent on this issue when something happens or on a timer. A rule that loops between agents or fires more than 12 times an hour pauses itself.",
+      "stage": "Sub-issue stage (optional)",
+      "stageHint": "Wait only for staged sub-issues up to this stage. Leave empty to wait for every sub-issue.",
+      "stagePlaceholder": "Every sub-issue",
+      "state": {
+        "active": "Waiting",
+        "autoPaused": "Paused after repeated failures",
+        "budgetSpent": "Fire budget spent",
+        "consumed": "Done",
+        "ended": "Expired",
+        "paused": "Paused"
+      },
+      "system": "Automatic",
+      "target": "Issue to watch",
+      "targetPlaceholder": "Choose an issue",
+      "toStatus": "Status",
+      "trigger": {
+        "anyActivity": "any activity",
+        "at": "Once at {at}",
+        "byPeople": "{base} (people only)",
+        "childrenDone": "When every sub-issue is finished",
+        "childrenDoneStage": "When sub-issue stage {stage} is finished",
+        "cron": "On schedule {expression}",
+        "event": "On {kinds}",
+        "interval": "Every {hours, plural, one {hour} other {# hours}}",
+        "issueFinished": "When {issue} is finished",
+        "prMerged": "When a linked pull request merges",
+        "statusTo": "When status changes to {statuses}"
+      }
     },
     "workspace": {
       "agentsWorking": "Agents working",
@@ -32157,7 +32339,12 @@
         "running": "{name} is running now",
         "runningWithProcesses": "{name} is running now with {count} live processes",
         "sourceFailed": "The {kind} source failed to load: {error}",
-        "unsupportedType": "{name} cannot run on this host"
+        "unsupportedType": "{name} cannot run on this host",
+        "wakeupPaused": {
+          "issue-closed": "{name} stopped because its issue finished",
+          "loop": "{name} paused itself: it kept waking agents in a loop",
+          "rate": "{name} paused itself: it fired too often in an hour"
+        }
       },
       "emptyNext": "Next up: {name} at {when}",
       "emptyNothingScheduled": "Nothing is scheduled to run.",
@@ -32173,7 +32360,12 @@
         "needsApprovalTrust": "Waiting for you to trust {roots}",
         "running": "Running now",
         "runningWithProcesses": "Running now, {count} live processes",
-        "unsupportedType": "Cannot run on this host"
+        "unsupportedType": "Cannot run on this host",
+        "wakeupPaused": {
+          "issue-closed": "Stopped: its issue finished",
+          "loop": "Paused itself: looping between agents",
+          "rate": "Paused itself: fired too often"
+        }
       }
     },
     "authoredBy": {
@@ -33281,6 +33473,7 @@
       "github-issue-sync": "GitHub Issue Sync",
       "goal": "Goal",
       "im-push": "IM Push",
+      "issue-wakeup": "Issue Wakeup",
       "monitor": "Monitor",
       "plan": "Plan",
       "plugin": "Plugin",

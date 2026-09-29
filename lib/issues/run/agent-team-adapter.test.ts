@@ -12,6 +12,7 @@ import {
   createAgentTeamChildRun,
 } from "@/lib/db/agent-team-runtime"
 import {
+  squadRunOriginOf,
   AGENT_TEAM_RUN_ADAPTER_ID,
   BUSY_TEAM_STATUSES,
   __setLoadedAgentTeamStoreForTesting,
@@ -257,6 +258,22 @@ describe("start", () => {
     // start returned before the team run finished
     expect(result.id).toBe("run-new")
     expect(harness.starts).toEqual([["team-1", "im", undefined]])
+    harness.resolveStart()
+  })
+
+  it("appends a wakeup brief to the task and stores the lineage on the run", async () => {
+    const harness = makeDeps()
+    const wakeup = { taskId: "wk", chain: ["wk"], statusBefore: "todo" as const, periodic: false }
+    await createAgentTeamRunAdapter(harness.deps).start(target(), {
+      by: HUMAN,
+      origin: "wakeup",
+      brief: "[WAKEUP wk] MERC-1",
+      wakeup,
+    })
+    expect(harness.created[0]!.description).toBe(
+      "All of it\n\nProject context: ctx\n\n[WAKEUP wk] MERC-1"
+    )
+    expect(harness.runs[0]).toMatchObject({ wakeup })
     harness.resolveStart()
   })
 
@@ -606,5 +623,19 @@ describe("default deps", () => {
       triggeredFrom: { source: "ui" },
     })
     expect(sessionByKey).not.toHaveBeenCalled()
+  })
+})
+
+describe("squadRunOriginOf", () => {
+  it("runs a wakeup under the scheduler's headless policy and says so", () => {
+    expect(squadRunOriginOf("wakeup")).toEqual({
+      origin: "scheduler",
+      triggeredFrom: { source: "schedule" },
+    })
+    expect(squadRunOriginOf("im")).toEqual({ origin: "im", triggeredFrom: { source: "im" } })
+    expect(squadRunOriginOf("interactive")).toEqual({
+      origin: "interactive",
+      triggeredFrom: { source: "ui" },
+    })
   })
 })

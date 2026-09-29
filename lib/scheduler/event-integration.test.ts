@@ -106,6 +106,7 @@ describe("event-integration", () => {
         "agent:completed",
         "connection:housekeeping:daily",
         "custom",
+        "issue:activity",
       ]
 
       for (const eventType of validTypes) {

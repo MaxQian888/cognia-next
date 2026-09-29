@@ -29,6 +29,7 @@ import type {
   IssueRunArtifact,
   IssueRunKind,
   IssueRunStatus,
+  IssueRunWakeup,
 } from "@/types/issues"
 import { isActiveIssueRunStatus } from "@/types/issues"
 import { getDb } from "./schema"
@@ -49,6 +50,8 @@ export interface CreateIssueRunInput {
   by: IssueActor
   /** Defaults to `running`; pass `queued` when the engine has not picked it up yet. */
   status?: Extract<IssueRunStatus, "queued" | "running">
+  /** Lineage, when an issue wakeup started this run. */
+  wakeup?: IssueRunWakeup
   /** Test injection. */
   now?: number
 }
@@ -75,6 +78,7 @@ export async function createIssueRun(input: CreateIssueRunInput): Promise<IssueR
     startedAt: now,
     updatedAt: now,
     artifacts: [],
+    ...(input.wakeup ? { wakeup: input.wakeup } : {}),
   }
   await db.transaction("rw", db.issueRuns, db.issueEvents, async () => {
     await db.issueRuns.add(row)
@@ -221,6 +225,14 @@ export async function linkIssueRunArtifact(
 
 export type SettleIssueRunInput =
   | { status: "succeeded"; summary?: string; artifacts?: IssueRunArtifact[] }
+  /**
+   * A periodic wakeup's run reporting that it looked and there was nothing to
+   * deliver. Settles as `succeeded` with the note as its summary, but the
+   * trail says `run_checked_in` rather than `run_succeeded`: no verdict was
+   * delivered, and the caller (`checkInIssueRun`) leaves the issue where it
+   * was instead of advancing it to review.
+   */
+  | { status: "succeeded"; mode: "checkin"; note: string }
   | { status: "failed"; error: string; artifacts?: IssueRunArtifact[] }
   | { status: "cancelled"; error?: string }
 
@@ -259,7 +271,18 @@ export async function settleIssueRun(
     }
     delete next.summary
     delete next.error
-    if (input.status === "succeeded") {
+    if ("mode" in input) {
+      next.summary = input.note
+      await appendIssueEvent({
+        issueId: existing.issueId,
+        payload: {
+          kind: "run_checked_in",
+          runId: id,
+          adapterId: existing.adapterId,
+          note: input.note,
+        },
+      })
+    } else if (input.status === "succeeded") {
       if (input.summary) next.summary = input.summary
       await appendIssueEvent({
         issueId: existing.issueId,

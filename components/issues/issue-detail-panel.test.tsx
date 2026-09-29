@@ -392,6 +392,21 @@ describe("IssueDetailPanel", () => {
     ).toBeInTheDocument()
   })
 
+  it("collapses a streak of run failures into one line with a count", () => {
+    const failure = (id: string, ts: number) => ({
+      id,
+      issueId: "i1",
+      kind: "run_failed",
+      ts,
+      payload: { kind: "run_failed", runId: id, adapterId: "fake", error: "boom" },
+    })
+    liveValue = [failure("f3", 3), failure("f2", 2), failure("f1", 1)]
+    render(<IssueDetailPanel item={item()} />)
+    const trail = screen.getByTestId("issue-detail-activity")
+    expect(trail.querySelectorAll("li")).toHaveLength(1)
+    expect(within(trail).getByTestId("activity-repeats-f3")).toHaveTextContent("detail.repeats")
+  })
+
   it("closes when asked", () => {
     const onClose = jest.fn()
     render(<IssueDetailPanel item={item()} onClose={onClose} />)

@@ -244,6 +244,24 @@ describe("start", () => {
     expect(input.input).not.toHaveProperty("body")
   })
 
+  it("appends a wakeup brief to the body, even with no description, and stores the lineage", async () => {
+    const executed: Array<[string, unknown]> = []
+    const harness = makeDeps({
+      execute: async (pluginId, input) => {
+        executed.push([pluginId, input])
+        return job({ status: "running" })
+      },
+    })
+    const wakeup = { taskId: "wk", chain: ["wk"], statusBefore: "todo" as const, periodic: false }
+    await createGithubLoopRunAdapter(harness.deps).start(
+      target({ issue: issue({ description: undefined }) }),
+      { by: HUMAN, origin: "wakeup", brief: "[WAKEUP wk]", wakeup }
+    )
+    const [, input] = executed[0] as [string, { input: Record<string, unknown> }]
+    expect(input.input.body).toBe("[WAKEUP wk]")
+    expect(harness.runs[0]).toMatchObject({ wakeup })
+  })
+
   it("throws for an unrunnable target", async () => {
     const adapter = createGithubLoopRunAdapter(makeDeps().deps)
     await expect(

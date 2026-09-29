@@ -8,6 +8,8 @@ import {
   createIssue,
   getIssue,
   getIssueByExternalKey,
+  linkIssueExternal,
+  setIssueAssignee,
   setIssueDueDate,
   updateIssue,
 } from "@/lib/db/issues"
@@ -16,7 +18,7 @@ import { listIssueCycles } from "@/lib/db/issue-cycles"
 import { listLabels } from "@/lib/db/labels"
 import { getDb } from "@/lib/db/schema"
 import type { IssueActor, IssueProject } from "@/types/issues"
-import { bindingWatermark, pushIdempotencyKey, reconcileBinding } from "./engine"
+import { bindingWatermark, pushIdempotencyKey, reconcileBinding, triageOnImport } from "./engine"
 import type {
   IssueSyncBinding,
   IssueSyncProvider,
@@ -147,6 +149,47 @@ describe("reconcileBinding: import", () => {
   })
 })
 
+describe("triage on import", () => {
+  const triaging = () =>
+    binding({
+      resource: {
+        kind: "github-repo",
+        repoFullName: "o/r",
+        addedAt: 1,
+        sync: { mode: "import", triageNewIssues: true },
+      },
+    })
+
+  it("files open, unassigned new items into triage when the binding opted in", async () => {
+    const { provider } = fake({
+      pull: {
+        items: [
+          remote({ externalId: "o/r#1", assigneeLabel: undefined }),
+          remote({ externalId: "o/r#2" }),
+          remote({ externalId: "o/r#3", assigneeLabel: undefined, status: "done" }),
+        ],
+        notModified: false,
+      },
+    })
+    await reconcileBinding(triaging(), provider, { now: () => 2_000 })
+    expect((await getIssueByExternalKey("fake", "o/r#1"))!.triage).toBe("pending")
+    expect((await getIssueByExternalKey("fake", "o/r#2"))!.triage).toBeUndefined()
+    expect((await getIssueByExternalKey("fake", "o/r#3"))!.triage).toBeUndefined()
+  })
+
+  it("leaves imports alone without the opt-in", () => {
+    const open = { status: "todo" as const, assigneeLabel: undefined }
+    expect(triageOnImport(triaging(), open)).toBe(true)
+    expect(triageOnImport(binding(), open)).toBe(false)
+    expect(
+      triageOnImport(
+        binding({ resource: { kind: "workspace-root", rootId: "r", addedAt: 1 } as never }),
+        open
+      )
+    ).toBe(false)
+  })
+})
+
 describe("reconcileBinding: field reconciliation", () => {
   async function importOne(): Promise<string> {
     const { provider } = fake({ pull: { items: [remote()], notModified: false } })
@@ -188,6 +231,22 @@ describe("reconcileBinding: field reconciliation", () => {
     const issue = (await getIssue(id))!
     expect(issue.title).toBe("Renamed locally")
     expect(issue.externalRefs?.[0]).toMatchObject({ syncedAt: T, remoteUpdatedAt: 5_000 })
+  })
+
+  it("hands a local assignee change to a provider that pushes assignees", async () => {
+    const id = await importOne()
+    await setIssueAssignee(id, { kind: "human", label: "hubot" }, HUMAN)
+    const { provider, pushes } = fake({
+      pull: { items: [], notModified: true },
+      pushFields: ["title", "assignee"],
+    })
+    await reconcileBinding(binding(), provider, { now: () => Date.now() + 100_000 })
+    expect(pushes[0].patch).toEqual({ assignee: "hubot" })
+
+    await setIssueAssignee(id, null, HUMAN)
+    const second = fake({ pull: { items: [], notModified: true }, pushFields: ["assignee"] })
+    await reconcileBinding(binding(), second.provider, { now: () => Date.now() + 200_000 })
+    expect(second.pushes[0].patch).toEqual({ assignee: null })
   })
 
   it("pushes local edits on rows an incremental pull did not mention", async () => {
@@ -369,5 +428,53 @@ describe("reconcileBinding: cycles and links", () => {
     )
     // Linking again is a no-op.
     expect((await reconcileBinding(binding(), provider)).linked).toBe(0)
+  })
+
+  it("records a pull request's state on every issue carrying it, including run-made links", async () => {
+    const named = await createIssue({
+      projectId: "w1",
+      issueProjectId: container.id,
+      title: "Named in the PR",
+      createdBy: HUMAN,
+    })
+    // Linked by the run that opened the PR; the PR text never names it.
+    const opener = await createIssue({
+      projectId: "w1",
+      issueProjectId: container.id,
+      title: "Opened by a run",
+      createdBy: HUMAN,
+    })
+    await linkIssueExternal(
+      opener.id,
+      { provider: "github-pr", externalId: "o/r#8", url: "https://x/pull/8" },
+      HUMAN
+    )
+    const pass = (prState: "open" | "merged") =>
+      fake({
+        pull: {
+          items: [],
+          links: [
+            {
+              provider: "github-pr",
+              externalId: "o/r#8",
+              url: "https://x/pull/8",
+              label: "PR #8",
+              mentionsIdentifiers: [named.identifier],
+              mentionsExternalIds: [],
+              prState,
+            },
+          ],
+          notModified: false,
+        },
+      }).provider
+    await reconcileBinding(binding(), pass("open"))
+    await reconcileBinding(binding(), pass("open"))
+    await reconcileBinding(binding(), pass("merged"))
+    for (const id of [named.id, opener.id]) {
+      const states = (await listIssueEvents({ issueId: id }))
+        .filter((event) => event.kind === "pr_state_changed")
+        .map((event) => (event.payload as { to: string }).to)
+      expect(states).toEqual(["open", "merged"])
+    }
   })
 })

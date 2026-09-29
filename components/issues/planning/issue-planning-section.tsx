@@ -1,8 +1,9 @@
 "use client"
 
 /**
- * The inspector's planning section: cycle, due date, estimate, parent,
- * sub-issues, blockers, what this issue blocks, and links into other systems.
+ * The inspector's planning section: cycle, due date, estimate, stage (on a
+ * sub-issue), parent, sub-issues, blockers, what this issue blocks, and
+ * links into other systems.
  *
  * Every write is an `IssueBulkAction` handed to `onAction` (spec 2026-09-06,
  * D3), so this section cannot reach a field the context menu, the agent
@@ -21,6 +22,7 @@ import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
 import { issueHref } from "@/lib/issues/hrefs"
 import type { IssueMenuSection } from "@/lib/issues/menu-model"
 import { wouldCreateParentLoop } from "@/lib/issues/relations"
+import { ISSUE_STAGE_MAX, isIssueStage } from "@/types/issues"
 import type { IssueCycle, IssueExternalRef } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { IssuePropertyMenu } from "../editors/issue-property-menu"
@@ -226,6 +228,39 @@ export function IssuePlanningSection({
           </span>
         )}
       </PropertyRow>
+
+      {item.parentId ? (
+        <PropertyRow label={t("planning.stage")}>
+          {editable ? (
+            <Input
+              type="number"
+              min={1}
+              max={ISSUE_STAGE_MAX}
+              step={1}
+              inputMode="numeric"
+              value={item.stage ?? ""}
+              placeholder={t("planning.stagePlaceholder")}
+              onChange={(event) => {
+                const raw = event.target.value
+                if (raw === "") return onAction?.({ kind: "stage", to: null })
+                const stage = Number(raw)
+                // A half-typed or out-of-range value is not an edit yet.
+                if (isIssueStage(stage)) onAction?.({ kind: "stage", to: stage })
+              }}
+              aria-label={t("planning.stage")}
+              title={t("planning.stageHint")}
+              className="h-7 w-24 text-xs"
+              data-testid="issue-detail-stage"
+            />
+          ) : (
+            <span className={item.stage === undefined ? "italic opacity-70" : undefined}>
+              {item.stage === undefined
+                ? t("planning.noStage")
+                : t("planning.stageLabel", { stage: item.stage })}
+            </span>
+          )}
+        </PropertyRow>
+      ) : null}
 
       <PropertyRow label={t("planning.parent")}>
         <span className="flex min-w-0 flex-wrap items-center gap-1">

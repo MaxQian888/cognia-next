@@ -18,6 +18,8 @@ export interface IssueActivityPayload {
   provider?: unknown
   field?: unknown
   winner?: unknown
+  /** `wakeup_fired`: what the fire became. */
+  delivery?: unknown
 }
 
 /** Translate function shape both shells already have from `useTranslations`. */
@@ -61,5 +63,8 @@ export function activityValues(
   if (typeof payload?.provider === "string") values.provider = payload.provider
   if (typeof payload?.field === "string") values.field = payload.field
   if (typeof payload?.winner === "string") values.winner = t(`activitySide.${payload.winner}`)
+  if (typeof payload?.delivery === "string") {
+    values.delivery = t(`activityWakeupDelivery.${payload.delivery}`)
+  }
   return values
 }

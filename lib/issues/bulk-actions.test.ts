@@ -6,6 +6,8 @@ jest.mock("@/lib/db/issues", () => ({
   setIssueCycle: jest.fn(async () => undefined),
   setIssueDueDate: jest.fn(async () => undefined),
   setIssueEstimate: jest.fn(async () => undefined),
+  setIssueStage: jest.fn(async () => undefined),
+  setIssueTriage: jest.fn(async () => undefined),
   setIssueParent: jest.fn(async () => undefined),
   unlinkIssueExternal: jest.fn(async () => undefined),
   addIssueLabel: jest.fn(async () => undefined),
@@ -25,6 +27,8 @@ import {
   setIssueCycle,
   setIssueDueDate,
   setIssueEstimate,
+  setIssueStage,
+  setIssueTriage,
   setIssueParent,
   unlinkIssueExternal,
   addIssueLabel,
@@ -191,6 +195,10 @@ describe("applyIssueBulkAction", () => {
     expect(setIssueDueDate).toHaveBeenCalledWith("p2", 5, BY)
     await applyIssueBulkAction([item({ sourceId: "p3" })], { kind: "estimate", to: null }, BY)
     expect(setIssueEstimate).toHaveBeenCalledWith("p3", null, BY)
+    await applyIssueBulkAction([item({ sourceId: "p3" })], { kind: "stage", to: 2 }, BY)
+    expect(setIssueStage).toHaveBeenCalledWith("p3", 2, BY)
+    await applyIssueBulkAction([item({ sourceId: "p3" })], { kind: "triage", to: null }, BY)
+    expect(setIssueTriage).toHaveBeenCalledWith("p3", null, BY)
     await applyIssueBulkAction([item({ sourceId: "p4" })], { kind: "parent", parentId: "x" }, BY)
     expect(setIssueParent).toHaveBeenCalledWith("p4", "x", BY)
     await applyIssueBulkAction(

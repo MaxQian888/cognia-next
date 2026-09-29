@@ -38,17 +38,32 @@ export async function openFilesEntry(
     return "canvas"
   }
   if (target === "artifact") {
-    const sessionId = entry.originSessionId!
-    const session = await getSession(sessionId)
-    if (!session) return "preview"
-    useChatStore.getState().setActiveSession(sessionId)
-    useUIStore.getState().setSelectedGuild(guildFromSession(session))
-    useArtifactStore.getState().setActiveArtifact(entry.sourceId, sessionId)
-    useArtifactStore.getState().openPanel("artifact")
-    navigator.push("/")
-    return "artifact"
+    return (await openArtifactInSession(entry.sourceId, entry.originSessionId!, navigator))
+      ? "artifact"
+      : "preview"
   }
   return "preview"
+}
+
+/**
+ * Focus the conversation an artifact was made in and open it in that
+ * conversation's artifact panel. `false` when the conversation is gone, so
+ * the caller can preview in place instead. Shared with the issue
+ * inspector's deliverables, which open the same way.
+ */
+export async function openArtifactInSession(
+  artifactId: string,
+  sessionId: string,
+  navigator: FilesNavigator
+): Promise<boolean> {
+  const session = await getSession(sessionId)
+  if (!session) return false
+  useChatStore.getState().setActiveSession(sessionId)
+  useUIStore.getState().setSelectedGuild(guildFromSession(session))
+  useArtifactStore.getState().setActiveArtifact(artifactId, sessionId)
+  useArtifactStore.getState().openPanel("artifact")
+  navigator.push("/")
+  return true
 }
 
 /** Focus a conversation and leave Files for it (after "Use in chat"). */

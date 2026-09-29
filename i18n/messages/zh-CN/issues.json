@@ -104,6 +104,7 @@
     "assignee": "负责人",
     "close": "关闭详情",
     "comment": "评论",
+    "repeats": "×{count}",
     "commentPlaceholder": "写下评论…",
     "created": "创建于",
     "description": "描述",
@@ -146,6 +147,9 @@
     "blocker_removed": "移除了阻塞议题",
     "due_date_changed": "更改了截止日期",
     "estimate_changed": "更改了估点",
+    "stage_changed": "更改了子议题阶段",
+    "triage_changed": "{to, select, pending {将其送入待分诊} other {已接受，移出待分诊}}",
+    "pr_state_changed": "{to, select, merged {发现关联的拉取请求已合并} closed {发现关联的拉取请求已关闭} other {发现关联的拉取请求已打开}}",
     "cycle_changed": "移到了另一个迭代",
     "external_linked": "关联了外部记录",
     "external_unlinked": "移除了外部关联",
@@ -153,7 +157,9 @@
     "sync_conflict": "同步冲突后保留了 {field} 的{winner}值",
     "sync_conflict_resolved": "解决了一次同步冲突",
     "work_started": "一次 Agent 回合开始处理此事项",
-    "work_settled": "处理此事项的 Agent 回合已结束：{to}"
+    "work_settled": "处理此事项的 Agent 回合已结束：{to}",
+    "wakeup_fired": "触发了一个唤醒（{delivery}）",
+    "run_checked_in": "周期运行已签到"
   },
   "create": {
     "trigger": "新建议题",
@@ -311,6 +317,8 @@
     "syncModeImportHint": "每个 issue 变成一条关联到 GitHub 的本地议题。改动双向流动，里程碑成为迭代，提到议题的 PR 会关联到它。",
     "projectV2Number": "Projects v2 看板（可选）",
     "projectV2Hint": "项目 URL 中的编号。它的迭代会成为这里的迭代。",
+    "triageNewIssues": "新议题进入待分诊",
+    "triageNewIssuesHint": "新导入的、未关闭且无人负责的议题会先进入待分诊。在有人接受之前，聊天或唤醒不会让智能体开始处理它。",
     "projectV2Invalid": "请填写项目 URL 中的整数编号。",
     "larkAccount": "飞书账号",
     "noLarkAccounts": "还没有连接飞书账号。请先在 设置 → 连接 中连接一个。",
@@ -511,7 +519,8 @@
       "run-active": "这个议题已有一个运行在进行中。",
       "issue-finished": "已结束的议题不能运行。",
       "adapter-missing": "该执行引擎不可用。",
-      "blocked": "被 {detail} 阻塞，请先完成这些议题。"
+      "blocked": "被 {detail} 阻塞，请先完成这些议题。",
+      "issue-in-triage": "它正在待分诊。请先接受，或由你在这里亲自发起运行。"
     },
     "status": {
       "queued": "排队中",
@@ -520,6 +529,8 @@
       "failed": "失败",
       "cancelled": "已取消"
     },
+    "timeline": "运行历史",
+    "timelineEntry": "{engine}：{status}，开始于 {at}",
     "stackOn": "叠加在",
     "stackOnHint": "把这个 issue 的 PR 基于另一个 issue 的分支，而不是基分支，这样每次评审只看到它自己的改动。只列出已完成的运行真正推送过的分支。",
     "stackOnNone": "不叠加——使用基分支",
@@ -560,6 +571,10 @@
       "human": "你",
       "agent": "一个 Agent",
       "team": "一个小队"
+    },
+    "wakeup_fired": {
+      "title": "{identifier}：一个唤醒已触发",
+      "body": "{instruction}"
     }
   },
   "rail": {
@@ -619,6 +634,11 @@
     "noEstimate": "未估点",
     "estimatePlaceholder": "点",
     "points": "{count} 点",
+    "stage": "阶段",
+    "noStage": "未分阶段",
+    "stagePlaceholder": "#",
+    "stageHint": "低阶段的子议题先完成，高阶段才开始。每完成一个阶段都会唤醒父议题。",
+    "stageLabel": "阶段 {stage}",
     "parent": "父议题",
     "noParent": "顶级议题",
     "clearParent": "移除父议题",
@@ -653,6 +673,20 @@
       "import_markdown": "Markdown 导入",
       "other": "外部系统"
     }
+  },
+  "triage": {
+    "badge": "待分诊",
+    "cardHint": "待分诊：在有人接受之前，智能体不会开始处理。",
+    "pendingHint": "正在待分诊。它的状态和负责人只是提议；在被接受之前，聊天和唤醒都不会让智能体开始处理。",
+    "accept": "接受",
+    "send": "送入待分诊"
+  },
+  "deliverables": {
+    "section": "交付物",
+    "version": "v{version}",
+    "versions": "版本",
+    "previewUnavailable": "此产物不在本设备上；打开它所在的对话查看。",
+    "conversationGone": "创建此产物的对话已不存在。"
   },
   "cycles": {
     "manageTitle": "迭代与里程碑",
@@ -747,5 +781,153 @@
     "projectsEmptyHint": "项目需要在大屏设备上创建，创建后会自动显示在这里。",
     "cyclesEmpty": "还没有迭代",
     "cyclesEmptyHint": "迭代需要在大屏设备上规划，规划后会自动显示在这里。"
+  },
+  "activityWakeupDelivery": {
+    "run": "启动了运行",
+    "joined": "并入了当前运行",
+    "notified": "通知了受让人",
+    "trail": "无受让人"
+  },
+  "wakeups": {
+    "section": "唤醒",
+    "sectionHint": "当某件事发生或到达定时点时，在这个议题上唤醒 Agent 的规则。在 Agent 之间循环、或一小时内触发超过 12 次的规则会自动暂停。",
+    "finishedHint": "议题已结束，其唤醒规则已停止。重新打开议题后可恢复。",
+    "add": "添加唤醒",
+    "empty": "这个议题还没有唤醒规则。",
+    "system": "自动",
+    "fires": "已触发 {count}/{max} 次",
+    "next": "下次 {when}",
+    "held": "{count, plural, other {# 条输入等待当前运行结束}}",
+    "pause": "暂停",
+    "resume": "恢复",
+    "delete": "删除唤醒",
+    "pausedToast": "唤醒已暂停",
+    "resumedToast": "唤醒已恢复",
+    "deletedToast": "唤醒已删除",
+    "createdToast": "已为 {identifier} 添加唤醒",
+    "createTitle": "为 {identifier} 添加唤醒",
+    "createDescription": "触发条件发生时，指派的 Agent 或小队会带着你的指令和发生的事开始一次运行。若已有运行进行中，输入会并入该运行。受让人是人时改为发送通知。",
+    "presetLabel": "何时唤醒",
+    "preset": {
+      "comment": "有人评论",
+      "status": "状态变为…",
+      "children-done": "所有子议题都已结束",
+      "issue-finished": "另一个议题结束",
+      "pr-merged": "关联的拉取请求合并",
+      "daily": "每天某个时间",
+      "interval": "每隔几小时",
+      "at": "在指定时间一次"
+    },
+    "presetHint": {
+      "comment": "这个议题每有一条新评论就触发。",
+      "status": "议题移到所选状态时触发。",
+      "children-done": "最后一个未结束的子议题完成或取消时触发。",
+      "issue-finished": "所选议题完成或取消时触发。",
+      "pr-merged": "关联到此议题的拉取请求合并后触发一次。需要项目以导入模式绑定其 GitHub 仓库；状态由该同步获取，因此可能延迟一个同步间隔。",
+      "daily": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
+      "interval": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
+      "at": "在所选时间触发一次。"
+    },
+    "peopleOnly": "仅限人发表的评论",
+    "toStatus": "状态",
+    "target": "要关注的议题",
+    "targetPlaceholder": "选择一个议题",
+    "stage": "子议题阶段（可选）",
+    "stagePlaceholder": "全部子议题",
+    "stageHint": "只等待到此阶段为止的已分阶段子议题。留空则等待所有子议题。",
+    "noTargets": "看板上没有其他可关注的未结束议题。",
+    "dailyAt": "时间",
+    "intervalHours": "间隔（小时）",
+    "at": "时间",
+    "instruction": "给 Agent 的指令",
+    "instructionPlaceholder": "例如：回答新评论中的问题，或更新计划。",
+    "maxFires": "触发次数上限",
+    "once": "只触发一次",
+    "safetyHint": "规则在用完触发次数后失效，且不会被它自己运行产生的活动再次触发。",
+    "createSubmit": "添加唤醒",
+    "state": {
+      "active": "等待中",
+      "paused": "已暂停",
+      "autoPaused": "连续失败后已暂停",
+      "budgetSpent": "触发次数已用完",
+      "ended": "已过期",
+      "consumed": "已完成"
+    },
+    "pauseReason": {
+      "loop": "已暂停：在 Agent 之间循环",
+      "rate": "已暂停：触发过于频繁",
+      "issue-closed": "已停止：议题已结束"
+    },
+    "trigger": {
+      "anyActivity": "任何活动",
+      "statusTo": "状态变为 {statuses} 时",
+      "event": "发生 {kinds} 时",
+      "byPeople": "{base}（仅限人）",
+      "childrenDone": "所有子议题结束时",
+      "childrenDoneStage": "子议题阶段 {stage} 结束时",
+      "issueFinished": "{issue} 结束时",
+      "prMerged": "关联的拉取请求合并时",
+      "cron": "按计划 {expression}",
+      "interval": "每 {hours} 小时",
+      "at": "在 {at} 一次"
+    },
+    "kind": {
+      "created": "议题创建",
+      "status_changed": "状态变化",
+      "assigned": "被指派",
+      "unassigned": "取消指派",
+      "reassigned": "改派",
+      "priority_changed": "优先级变化",
+      "label_added": "添加标签",
+      "label_removed": "移除标签",
+      "title_changed": "标题变化",
+      "description_changed": "描述变化",
+      "project_changed": "项目变化",
+      "commented": "评论",
+      "run_started": "运行开始",
+      "run_succeeded": "运行成功",
+      "run_failed": "运行失败",
+      "run_checked_in": "运行签到",
+      "artifact_linked": "关联产物",
+      "github_linked": "关联 GitHub issue",
+      "github_write_back": "回写 GitHub",
+      "parent_changed": "父议题变化",
+      "blocker_added": "新增阻塞",
+      "blocker_removed": "解除阻塞",
+      "due_date_changed": "截止日期变化",
+      "estimate_changed": "估算变化",
+      "stage_changed": "阶段变化",
+      "triage_changed": "分诊变化",
+      "pr_state_changed": "关联拉取请求变化",
+      "cycle_changed": "周期变化",
+      "external_linked": "新增外部链接",
+      "external_unlinked": "移除外部链接",
+      "work_started": "工作开始",
+      "work_settled": "工作结束",
+      "synced_in": "远端同步",
+      "sync_conflict": "同步冲突",
+      "sync_conflict_resolved": "同步冲突已解决",
+      "child_status_changed": "子议题状态变化",
+      "child_stage_changed": "子议题阶段变化"
+    },
+    "cue": {
+      "active": "{count, plural, other {# 个唤醒等待中}}",
+      "paused": "{count, plural, other {# 个唤醒已暂停}}",
+      "pausedWith": "{count, plural, other {# 个唤醒已暂停}}：{reason}",
+      "held": "{count, plural, other {# 条输入尚未被处理}}",
+      "reason": {
+        "loop": "在 Agent 之间循环",
+        "rate": "触发过于频繁",
+        "issue-closed": "议题已结束"
+      }
+    },
+    "error": {
+      "issue-missing": "这个议题已不存在。",
+      "issue-finished": "议题已结束，请先重新打开。",
+      "target-missing": "要关注的议题已不存在。",
+      "target-other-workspace": "要关注的议题属于另一个工作空间。",
+      "pr-unobservable": "此项目未以导入模式绑定 GitHub 仓库，合并永远不会被观察到。",
+      "not-a-wakeup": "这个唤醒已不存在。"
+    }
   }
 }

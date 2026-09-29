@@ -89,6 +89,9 @@ describe("SchedulerListRow", () => {
   it("phrases every item signal", () => {
     const cases: [AttentionSignal["kind"], Partial<AttentionSignal>, string][] = [
       ["auto-paused", { count: 4 }, "Paused itself after 4 failures"],
+      ["wakeup-paused", { wakeupPauseReason: "loop" }, "Paused itself: looping between agents"],
+      ["wakeup-paused", { wakeupPauseReason: "rate" }, "Paused itself: fired too often"],
+      ["wakeup-paused", { wakeupPauseReason: "issue-closed" }, "Stopped: its issue finished"],
       ["last-run-failed", {}, "Last run failed"],
       ["last-run-failed", { detail: "boom" }, "Last run failed: boom"],
       ["unsupported-type", {}, "Cannot run on this host"],

@@ -43,6 +43,11 @@ export type SchedulerEventType =
   | "connection:housekeeping:daily"
   | "job:exited"
   | "monitor:fired"
+  // Every entry appended to an issue's activity trail, published by
+  // `lib/issues/wakeups/bridge.ts` on `eventSource: "issue:<id>"`. The trail
+  // kind and the actor ride in the data (`IssueActivityEventData`), so one
+  // event type serves every issue wakeup rule.
+  | "issue:activity"
 
 /**
  * Event data that can be passed to event-triggered tasks
@@ -127,6 +132,7 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "connection:housekeeping:daily",
     "job:exited",
     "monitor:fired",
+    "issue:activity",
   ]
   return validTypes.includes(eventType as SchedulerEventType)
 }

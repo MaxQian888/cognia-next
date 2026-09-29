@@ -55,6 +55,8 @@ export const DEFAULT_ISSUE_NOTIFY_TEXT: Readonly<Record<string, string>> = Objec
   "notify.status_changed.body": "{title}",
   "notify.commented.title": "New comment on {identifier} from {by}",
   "notify.commented.body": "{body}",
+  "notify.wakeup_fired.title": "{identifier}: a wakeup fired",
+  "notify.wakeup_fired.body": "{instruction}",
   "notify.status.in_review": "In review",
   "notify.status.done": "Done",
   "notify.status.canceled": "Canceled",
@@ -126,6 +128,10 @@ export function issueEventToNotification(
       return build("run_succeeded", "success", {}, true)
     case "run_failed":
       return build("run_failed", "error", { error: payload.error }, true)
+    // A wakeup fired on an issue a person owns: they are the delivery.
+    case "wakeup_fired":
+      if (payload.delivery !== "notified") return null
+      return build("wakeup_fired", "info", { instruction: payload.instruction.slice(0, 280) }, true)
     case "status_changed":
       if (!NOTIFY_ON_STATUS.has(payload.to)) return null
       return build("status_changed", "info", { to: t(`notify.status.${payload.to}`) }, false)

@@ -38,6 +38,7 @@ import type {
   IssueRunTarget,
   IssueRunVerdict,
 } from "./types"
+import { withRunBrief } from "./types"
 
 export const GITHUB_LOOP_RUN_ADAPTER_ID = "github-loop"
 
@@ -248,7 +249,9 @@ export function createGithubLoopRunAdapter(
           head,
           base,
           title: `${issue.identifier}: ${issue.title}`,
-          ...(issue.description ? { body: issue.description } : {}),
+          ...(issue.description || context.brief
+            ? { body: withRunBrief(issue.description ?? "", context.brief) }
+            : {}),
         },
         source: "manual",
         idempotencyKey: `issue-run:${issue.id}:${now}`,
@@ -272,6 +275,7 @@ export function createGithubLoopRunAdapter(
         },
         by: context.by,
         status: job.status === "running" ? "running" : "queued",
+        ...(context.wakeup ? { wakeup: context.wakeup } : {}),
         now,
       })
     },

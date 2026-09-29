@@ -82,6 +82,32 @@ describe("issueEventToNotification", () => {
     expect(
       issueEventToNotification(ISSUE, { kind: "run_succeeded", runId: "r", adapterId: "a" })
     ).toMatchObject({ level: "success", title: "MERC-1 run finished — ready for review" })
+    // A wakeup on a person's issue: the notification IS the delivery.
+    expect(
+      issueEventToNotification(ISSUE, {
+        kind: "wakeup_fired",
+        taskId: "wk",
+        delivery: "notified",
+        instruction: "Look at the new comment",
+        inputs: 1,
+      })
+    ).toMatchObject({
+      level: "info",
+      title: "MERC-1: a wakeup fired",
+      body: "Look at the new comment",
+      directed: true,
+    })
+    for (const delivery of ["run", "joined", "trail"] as const) {
+      expect(
+        issueEventToNotification(ISSUE, {
+          kind: "wakeup_fired",
+          taskId: "wk",
+          delivery,
+          instruction: "x",
+          inputs: 1,
+        })
+      ).toBeNull()
+    }
     expect(
       issueEventToNotification(ISSUE, {
         kind: "run_failed",

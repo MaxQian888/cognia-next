@@ -66,6 +66,8 @@ import {
   type SquadRunRef,
 } from "@/lib/issues/run/running"
 import { getIssueSourceRegistry } from "@/lib/issues/sources/registry"
+import { summarizeWakeupCues, type IssueWakeupCue } from "@/lib/issues/wakeups/model"
+import { listWorkspaceIssueWakeups } from "@/lib/issues/wakeups/service"
 import { runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
 import { isSyncedResource } from "@/lib/issues/sync/bindings"
 import { summarizeSync, syncSummaryMessage } from "@/lib/issues/sync/describe"
@@ -212,6 +214,18 @@ export function IssueConsole({
     new Map<string, SquadRunRef>()
   )
   /**
+   * Local issue id to its wakeup cue. Wakeups are scheduler rows in the same
+   * database, so this live query follows a rule pausing itself mid-session.
+   */
+  const wakeupCues = useClientLiveQuery(
+    async () =>
+      projectId
+        ? summarizeWakeupCues(await listWorkspaceIssueWakeups(projectId))
+        : new Map<string, IssueWakeupCue>(),
+    [projectId],
+    new Map<string, IssueWakeupCue>()
+  )
+  /**
    * Manual re-read trigger for the federated sources. A GitHub write-back
    * changes nothing local, so `localSignature` cannot notice it — without this
    * a user would comment, watch nothing happen, and comment again.
@@ -320,6 +334,13 @@ export function IssueConsole({
         [...(squadRuns ?? [])].map(([id, ref]) => [makeUnifiedIssueId("local", id), ref] as const)
       ),
     [squadRuns]
+  )
+  const wakeupCuesByUnifiedId = useMemo(
+    () =>
+      new Map(
+        [...(wakeupCues ?? [])].map(([id, cue]) => [makeUnifiedIssueId("local", id), cue] as const)
+      ),
+    [wakeupCues]
   )
   const groups = useMemo(() => buildIssueGroups(sorted, prefs.groupBy), [sorted, prefs.groupBy])
 
@@ -785,6 +806,7 @@ export function IssueConsole({
           projectNamesById={projectNamesById}
           runningIds={runningUnifiedIds}
           squadRuns={squadRunsByUnifiedId}
+          wakeupCues={wakeupCuesByUnifiedId}
           planningHints={planningHints}
           columnCollapse={prefs.columnCollapse}
           onToggleColumnCollapsed={(status) => toggleColumnCollapsed(viewId, status)}

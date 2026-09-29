@@ -30,6 +30,7 @@ import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { actorKey } from "@/lib/issues/board-model"
 import { activityValues } from "@/lib/issues/activity-values"
+import { collapseActivity } from "@/lib/issues/activity-feed"
 import type { IssueEvent, IssueRun } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
@@ -268,7 +269,7 @@ export function IssueDetailSheet({
                     {t("detail.activity")}
                   </h3>
                   <ol className="flex flex-col gap-2" data-testid="issues-mobile-detail-activity">
-                    {(events ?? []).map((event) => (
+                    {collapseActivity(events ?? []).map(({ event, repeats }) => (
                       <li key={event.id} className="flex flex-col gap-0.5 text-xs">
                         <span className="text-muted-foreground">
                           {event.kind === "commented" ? (
@@ -277,6 +278,15 @@ export function IssueDetailSheet({
                             </Badge>
                           ) : null}
                           {t(`activity.${event.kind}`, activityValues(event.payload, t))}
+                          {repeats > 1 ? (
+                            <Badge
+                              variant="outline"
+                              className="ml-1 h-4 px-1 text-[10px]"
+                              data-testid={`activity-repeats-${event.id}`}
+                            >
+                              {t("detail.repeats", { count: repeats })}
+                            </Badge>
+                          ) : null}
                         </span>
                         {event.payload.kind === "commented" ? (
                           <p className="whitespace-pre-wrap rounded-md bg-muted/40 px-2 py-1.5 text-sm">

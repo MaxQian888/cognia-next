@@ -12,7 +12,10 @@ import {
   IssueRunRefusedError,
   IssueRunRegistry,
   cancelIssueRun,
+  checkInIssueRun,
   getIssueRunRegistry,
+  issueRunSessionIds,
+  steerIssueRun,
   listIssueRunOptions,
   loadIssueRunTarget,
   reconcileIssueRuns,
@@ -23,6 +26,7 @@ import {
   startIssueRun,
 } from "./registry"
 import type { IssueRunAdapter, IssueRunPollResult, IssueRunTarget } from "./types"
+import { isNamedRunOrigin } from "./types"
 
 const dbFixture = createDbTestFixture()
 beforeAll(dbFixture.initialize)
@@ -176,6 +180,37 @@ describe("loadIssueRunTarget / listIssueRunOptions", () => {
   })
 })
 
+describe("triage", () => {
+  it("refuses derived runs on an issue in triage and lets a named one through", async () => {
+    const registry = new IssueRunRegistry()
+    const adapter = fakeAdapter()
+    registry.register(adapter)
+    const issue = await makeIssue({ triage: "pending" })
+    for (const origin of ["im", "wakeup"] as const) {
+      expect((await listIssueRunOptions(issue.id, registry, origin))[0].verdict).toEqual({
+        ok: false,
+        reason: "issue-in-triage",
+      })
+      await expect(
+        startIssueRun({ issueId: issue.id, adapterId: "fake", by: HUMAN, origin }, registry)
+      ).rejects.toMatchObject({ reason: "issue-in-triage" })
+    }
+    expect(adapter.starts).toHaveLength(0)
+    expect((await listIssueRunOptions(issue.id, registry))[0].verdict).toEqual({ ok: true })
+    await startIssueRun(
+      { issueId: issue.id, adapterId: "fake", by: HUMAN, origin: "interactive" },
+      registry
+    )
+    expect(adapter.starts).toHaveLength(1)
+  })
+
+  it("names only an interactive origin", () => {
+    expect(isNamedRunOrigin("interactive")).toBe(true)
+    expect(isNamedRunOrigin("im")).toBe(false)
+    expect(isNamedRunOrigin("wakeup")).toBe(false)
+  })
+})
+
 describe("startIssueRun", () => {
   it("dispatches through the adapter and takes in_progress for the runtime", async () => {
     const registry = new IssueRunRegistry()
@@ -279,6 +314,27 @@ describe("settleIssueRunAndIssue / reconcileIssueRuns / cancelIssueRun", () => {
     expect((await getIssue(c.issue.id))!.status).toBe("todo")
   })
 
+  it("links the pull requests a settled run opened onto its issue", async () => {
+    const registry = new IssueRunRegistry()
+    registry.register(fakeAdapter())
+    const { issue, run } = await running(registry)
+    await settleIssueRunAndIssue(run.id, {
+      status: "succeeded",
+      artifacts: [
+        { label: "Pull request #9", href: "https://github.com/acme/app/pull/9" },
+        { label: "Branch", href: "/workspace?tab=environments" },
+      ],
+    })
+    expect((await getIssue(issue.id))!.externalRefs).toEqual([
+      {
+        provider: "github-pr",
+        externalId: "acme/app#9",
+        url: "https://github.com/acme/app/pull/9",
+        label: "Pull request #9",
+      },
+    ])
+  })
+
   it("runtimeActorFor names the engine on status changes", () => {
     const base = {
       id: "r",
@@ -359,5 +415,135 @@ describe("settleIssueRunAndIssue / reconcileIssueRuns / cancelIssueRun", () => {
     registry.register(adapter)
     const { run } = await running(registry)
     expect((await cancelIssueRun(run.id, registry))?.status).toBe("cancelled")
+  })
+})
+
+describe("wakeup support", () => {
+  it("passes the brief and the lineage through to the adapter", async () => {
+    const registry = new IssueRunRegistry()
+    const contexts: unknown[] = []
+    registry.register(
+      fakeAdapter({
+        start: async (target, ctx) => {
+          contexts.push(ctx)
+          return createIssueRun({
+            issueId: target.issue.id,
+            projectId: target.issue.projectId,
+            adapterId: "fake",
+            kind: "agent-task",
+            targetId: "t-1",
+            by: ctx.by,
+            ...(ctx.wakeup ? { wakeup: ctx.wakeup } : {}),
+          })
+        },
+      })
+    )
+    const issue = await makeIssue()
+    const wakeup = { taskId: "wk", chain: ["wk"], statusBefore: "todo" as const, periodic: true }
+    await startIssueRun(
+      { issueId: issue.id, adapterId: "fake", by: HUMAN, origin: "wakeup", brief: "B", wakeup },
+      registry
+    )
+    expect(contexts[0]).toMatchObject({ origin: "wakeup", brief: "B", wakeup })
+  })
+
+  it("names sessions only for an active run whose adapter can", async () => {
+    const registry = new IssueRunRegistry()
+    registry.register(fakeAdapter({ sessionIds: async () => ["s2", "s1"] }))
+    const issue = await makeIssue()
+    const run = await startIssueRun(
+      { issueId: issue.id, adapterId: "fake", by: HUMAN, origin: "interactive" },
+      registry
+    )
+    expect(await issueRunSessionIds(run, registry)).toEqual(["s2", "s1"])
+    expect(await issueRunSessionIds({ ...run, status: "succeeded" }, registry)).toEqual([])
+    expect(await issueRunSessionIds({ ...run, adapterId: "gone" }, registry)).toEqual([])
+  })
+
+  it("steers the newest session, and reports false instead of throwing", async () => {
+    const registry = new IssueRunRegistry()
+    registry.register(fakeAdapter({ sessionIds: async () => ["s2", "s1"] }))
+    const issue = await makeIssue()
+    const run = await startIssueRun(
+      { issueId: issue.id, adapterId: "fake", by: HUMAN, origin: "interactive" },
+      registry
+    )
+    const steer = jest.fn(async () => ({ accepted: true }))
+    expect(await steerIssueRun(run, "hi", { registry, steer })).toBe(true)
+    expect(steer).toHaveBeenCalledWith("s2", "hi")
+    const refuse = jest.fn(async () => {
+      throw new Error("PII")
+    })
+    expect(await steerIssueRun(run, "hi", { registry, steer: refuse })).toBe(false)
+
+    const bare = new IssueRunRegistry()
+    bare.register(fakeAdapter())
+    expect(await steerIssueRun(run, "hi", { registry: bare, steer })).toBe(false)
+  })
+
+  it("checks in a periodic wakeup run: settles with the note and hands the issue back", async () => {
+    const issue = await makeIssue({ status: "backlog" })
+    const run = await createIssueRun({
+      issueId: issue.id,
+      projectId: "w1",
+      adapterId: "fake",
+      kind: "agent-task",
+      targetId: "t",
+      by: HUMAN,
+      wakeup: { taskId: "wk", chain: ["wk"], statusBefore: "backlog", periodic: true },
+    })
+    const { applyRuntimeIssueStatus } = await import("@/lib/db/issues")
+    await applyRuntimeIssueStatus(issue.id, "in_progress", HUMAN)
+
+    const result = await checkInIssueRun(run.id, "nothing to do")
+    expect(result).toMatchObject({
+      status: "checked-in",
+      run: { status: "succeeded", summary: "nothing to do" },
+    })
+    expect((await getIssue(issue.id))!.status).toBe("backlog")
+    const kinds = (await listIssueEvents({ issueId: issue.id })).map((event) => event.kind)
+    expect(kinds).toContain("run_checked_in")
+    expect(kinds).not.toContain("run_succeeded")
+    expect(await checkInIssueRun(run.id, "again")).toEqual({
+      status: "refused",
+      reason: "not-active",
+    })
+  })
+
+  it("refuses to check in a run no periodic wakeup started", async () => {
+    const issue = await makeIssue()
+    const plain = await createIssueRun({
+      issueId: issue.id,
+      projectId: "w1",
+      adapterId: "fake",
+      kind: "agent-task",
+      targetId: "t",
+      by: HUMAN,
+    })
+    expect(await checkInIssueRun(plain.id, "x")).toEqual({
+      status: "refused",
+      reason: "not-periodic-wakeup",
+    })
+    expect(await checkInIssueRun("missing", "x")).toEqual({
+      status: "refused",
+      reason: "not-found",
+    })
+  })
+
+  it("leaves an issue a person moved meanwhile where they put it", async () => {
+    const issue = await makeIssue()
+    const run = await createIssueRun({
+      issueId: issue.id,
+      projectId: "w1",
+      adapterId: "fake",
+      kind: "agent-task",
+      targetId: "t",
+      by: HUMAN,
+      wakeup: { taskId: "wk", chain: ["wk"], statusBefore: "todo", periodic: true },
+    })
+    const { getDb } = await import("@/lib/db/schema")
+    await getDb().issues.update(issue.id, { status: "in_review", statusCategory: "started" })
+    await checkInIssueRun(run.id, "ok")
+    expect((await getIssue(issue.id))!.status).toBe("in_review")
   })
 })

@@ -21,11 +21,17 @@ describe("issue.* skill family — registration smoke", () => {
     "issue.delete",
     "issue.delete_project",
     "issue.get",
+    "issue.link_artifact",
     "issue.list",
     "issue.list_projects",
     "issue.run",
     "issue.update",
     "issue.update_project",
+    "issue.wakeup_checkin",
+    "issue.wakeup_create",
+    "issue.wakeup_delete",
+    "issue.wakeup_list",
+    "issue.wakeup_set_enabled",
   ]
 
   it("registers exactly the documented skills", () => {
@@ -50,7 +56,7 @@ describe("issue.* skill family — registration smoke", () => {
 
   it("mutation / imAccess tiers match the family's design table", () => {
     const byId = Object.fromEntries(issueSkills().map((s) => [s.id, s]))
-    for (const id of ["issue.list", "issue.get", "issue.list_projects"]) {
+    for (const id of ["issue.list", "issue.get", "issue.list_projects", "issue.wakeup_list"]) {
       expect(byId[id]).toMatchObject({ mutation: "read", imAccess: "always" })
     }
     for (const id of [
@@ -59,14 +65,18 @@ describe("issue.* skill family — registration smoke", () => {
       "issue.comment",
       "issue.run",
       "issue.cancel_run",
+      "issue.link_artifact",
       "issue.create_project",
       "issue.update_project",
+      "issue.wakeup_create",
+      "issue.wakeup_set_enabled",
+      "issue.wakeup_checkin",
     ]) {
       expect(byId[id]).toMatchObject({ mutation: "write", imAccess: "always" })
     }
     // Both deletes cascade rows the user cannot get back, so neither is
     // offered in a channel that has not named it explicitly.
-    for (const id of ["issue.delete", "issue.delete_project"]) {
+    for (const id of ["issue.delete", "issue.delete_project", "issue.wakeup_delete"]) {
       expect(byId[id]).toMatchObject({ mutation: "destructive", imAccess: "opt-in" })
     }
   })

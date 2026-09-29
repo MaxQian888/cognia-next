@@ -4,7 +4,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
-import { goToSession, openFilesEntry, openTargetFor } from "./open"
+import { goToSession, openArtifactInSession, openFilesEntry, openTargetFor } from "./open"
 import type { FilesEntry } from "./types"
 
 jest.setTimeout(30_000)
@@ -88,6 +88,19 @@ describe("openFilesEntry", () => {
     await expect(openFilesEntry(entry({ kind: "upload", sourceId: "u" }), { push })).resolves.toBe(
       "preview"
     )
+    expect(push).not.toHaveBeenCalled()
+  })
+})
+
+describe("openArtifactInSession", () => {
+  it("opens the artifact in its conversation, or reports the conversation gone", async () => {
+    const push = jest.fn()
+    const setActiveArtifact = jest.spyOn(useArtifactStore.getState(), "setActiveArtifact")
+    await expect(openArtifactInSession("a2", "s1", { push })).resolves.toBe(true)
+    expect(setActiveArtifact).toHaveBeenCalledWith("a2", "s1")
+    expect(push).toHaveBeenCalledWith("/")
+    push.mockClear()
+    await expect(openArtifactInSession("a2", "gone", { push })).resolves.toBe(false)
     expect(push).not.toHaveBeenCalled()
   })
 })

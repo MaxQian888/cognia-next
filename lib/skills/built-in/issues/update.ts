@@ -16,6 +16,7 @@
 import { z } from "zod"
 
 import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
+import { ISSUE_STAGE_MAX } from "@/types/issues"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
@@ -75,6 +76,16 @@ const schema = z.object({
     .nullable()
     .optional()
     .describe("Effort in points. Pass null to clear it."),
+  stage: z
+    .number()
+    .int()
+    .min(1)
+    .max(ISSUE_STAGE_MAX)
+    .nullable()
+    .optional()
+    .describe(
+      "Sub-issue stage: siblings in a lower stage finish before a higher stage is due, and the parent is woken as each stage completes. Pass null to unstage."
+    ),
   parent: z
     .string()
     .nullable()
@@ -135,6 +146,9 @@ function plannedActions(
   if (args.estimate !== undefined) {
     planned.push({ field: "estimate", action: { kind: "estimate", to: args.estimate } })
   }
+  if (args.stage !== undefined) {
+    planned.push({ field: "stage", action: { kind: "stage", to: args.stage } })
+  }
   if (resolved.parentId !== undefined) {
     planned.push({ field: "parent", action: { kind: "parent", parentId: resolved.parentId } })
   }
@@ -160,9 +174,9 @@ const skill: BuiltInSkill<typeof schema> = {
   family: "issue",
   label: { en: "Update issue", "zh-CN": "更新议题" },
   description: {
-    en: "Edit an issue: title, description, status column, priority, assignee, labels, delivery container, cycle, due date, estimate, parent issue or blockers. Supply only the fields to change. Each is applied through the board's own guard and reported separately, so some may be refused while others land.",
+    en: "Edit an issue: title, description, status column, priority, assignee, labels, delivery container, cycle, due date, estimate, sub-issue stage, parent issue or blockers. Supply only the fields to change. Each is applied through the board's own guard and reported separately, so some may be refused while others land.",
     "zh-CN":
-      "修改议题的标题、描述、状态列、优先级、负责人、标签、所属交付容器、迭代、截止日期、估点、父议题或阻塞项。只传需要改的字段。每个字段都会经过看板自身的守卫逐一执行并分别回报，可能出现部分成功、部分被拒。",
+      "修改议题的标题、描述、状态列、优先级、负责人、标签、所属交付容器、迭代、截止日期、估点、子议题阶段、父议题或阻塞项。只传需要改的字段。每个字段都会经过看板自身的守卫逐一执行并分别回报，可能出现部分成功、部分被拒。",
   },
   platforms: "any",
   mutation: "write",

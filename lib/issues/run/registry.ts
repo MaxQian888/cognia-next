@@ -19,10 +19,12 @@
  *                          the engine-table watchers in `install.ts`.
  */
 
-import type { IssueActor, IssueRun, IssueRunKind } from "@/types/issues"
+import type { IssueActor, IssueRun, IssueRunKind, IssueRunWakeup } from "@/types/issues"
+import { isActiveIssueRunStatus } from "@/types/issues"
 import { getIssue, listIssues } from "@/lib/db/issues"
 import { applyRuntimeIssueStatus } from "@/lib/db/issues"
 import { openBlockers } from "@/lib/issues/relations"
+import { linkRunPullRequests } from "@/lib/issues/pull-requests"
 import { getIssueProject } from "@/lib/db/issue-projects"
 import {
   getIssueRun,
@@ -39,6 +41,7 @@ import type {
   IssueRunTarget,
   IssueRunVerdict,
 } from "./types"
+import { isNamedRunOrigin } from "./types"
 
 /** Raised by `startIssueRun` for a policy refusal — machine-readable, i18n at the UI. */
 export class IssueRunRefusedError extends Error {
@@ -151,11 +154,12 @@ export interface IssueRunOption {
  */
 export async function listIssueRunOptions(
   issueId: string,
-  registry: IssueRunRegistry = getIssueRunRegistry()
+  registry: IssueRunRegistry = getIssueRunRegistry(),
+  origin: IssueRunOrigin = "interactive"
 ): Promise<IssueRunOption[]> {
   const target = await loadIssueRunTarget(issueId)
   if (!target) return []
-  const blanket = await trackerVerdict(target)
+  const blanket = await trackerVerdict(target, origin)
   const adapters = registry.list()
   return Promise.all(
     adapters.map(async (adapter) => ({
@@ -165,10 +169,16 @@ export async function listIssueRunOptions(
   )
 }
 
-async function trackerVerdict(target: IssueRunTarget): Promise<IssueRunVerdict> {
+async function trackerVerdict(
+  target: IssueRunTarget,
+  origin: IssueRunOrigin
+): Promise<IssueRunVerdict> {
   const { issue } = target
   if (issue.statusCategory === "completed" || issue.statusCategory === "canceled") {
     return { ok: false, reason: "issue-finished" }
+  }
+  if (issue.triage === "pending" && !isNamedRunOrigin(origin)) {
+    return { ok: false, reason: "issue-in-triage" }
   }
   if (await hasActiveIssueRun(issue.id)) return { ok: false, reason: "run-active" }
   // A human may still drag a blocked issue anywhere (the tracker does not
@@ -197,6 +207,10 @@ export interface StartIssueRunInput {
   /** The IM thread behind an `im` origin, so an engine can ask there. */
   conversation?: IssueRunConversation
   options?: Readonly<Record<string, unknown>>
+  /** Text appended to what the engine receives. See `IssueRunStartContext.brief`. */
+  brief?: string
+  /** Lineage when an issue wakeup is the caller. */
+  wakeup?: IssueRunWakeup
 }
 
 /**
@@ -214,7 +228,7 @@ export async function startIssueRun(
   const target = await loadIssueRunTarget(input.issueId)
   if (!target) throw new Error(`Issue not found: ${input.issueId}`)
 
-  const blanket = await trackerVerdict(target)
+  const blanket = await trackerVerdict(target, input.origin)
   if (!blanket.ok) throw new IssueRunRefusedError(blanket.reason, blanket.detail)
   const verdict = await adapter.canRun(target)
   if (!verdict.ok) throw new IssueRunRefusedError(verdict.reason, verdict.detail)
@@ -224,6 +238,8 @@ export async function startIssueRun(
     origin: input.origin,
     ...(input.conversation ? { conversation: input.conversation } : {}),
     ...(input.options ? { options: input.options } : {}),
+    ...(input.brief ? { brief: input.brief } : {}),
+    ...(input.wakeup ? { wakeup: input.wakeup } : {}),
   })
   await applyRuntimeIssueStatus(target.issue.id, "in_progress", input.by)
   return run
@@ -241,7 +257,8 @@ export function runtimeActorFor(run: IssueRun): IssueActor {
 /**
  * Settle a run and move its issue on. Terminal success/failure both advance
  * to `in_review` — either way a human has to look; a cancel hands the issue
- * back to `todo`. Idempotent: an already-settled run returns `undefined` and
+ * back to `todo`. Pull requests among the run's artifacts are linked onto the
+ * issue (`linkRunPullRequests`). Idempotent: an already-settled run returns `undefined` and
  * touches nothing.
  */
 export async function settleIssueRunAndIssue(
@@ -252,6 +269,9 @@ export async function settleIssueRunAndIssue(
   const settled = await settleIssueRun(runId, settlement, now)
   if (!settled) return undefined
   const actor = runtimeActorFor(settled)
+  // A PR the run opened belongs on the issue even when its text never names
+  // the issue; that is what lets an until-pr wakeup see it merge.
+  await linkRunPullRequests(settled.issueId, settled.artifacts, actor)
   if (settled.status === "cancelled") {
     await applyRuntimeIssueStatus(settled.issueId, "todo", actor)
   } else {
@@ -316,4 +336,89 @@ export async function cancelIssueRun(
   const adapter = registry.get(run.adapterId)
   if (adapter?.cancel) await adapter.cancel(run)
   return settleIssueRunAndIssue(runId, { status: "cancelled" }, now)
+}
+
+/**
+ * Sessions the run is executing in, newest first, or `[]` when it is not
+ * active or its adapter cannot say (`IssueRunAdapter.sessionIds`).
+ */
+export async function issueRunSessionIds(
+  run: IssueRun,
+  registry: IssueRunRegistry = getIssueRunRegistry()
+): Promise<string[]> {
+  if (!isActiveIssueRunStatus(run.status)) return []
+  const adapter = registry.get(run.adapterId)
+  if (!adapter?.sessionIds) return []
+  return adapter.sessionIds(run)
+}
+
+export interface SteerIssueRunDeps {
+  registry?: IssueRunRegistry
+  /** Defaults to `steerSession` in `lib/claude/ipc`, which runs its own PII gate. */
+  steer?: (sessionId: string, text: string) => Promise<unknown>
+}
+
+/**
+ * Deliver `text` into an active run's live session. Resolves `true` when the
+ * session acknowledged it, `false` when the run has no steerable session or
+ * the steer was refused (provider without a live-input lane, PII gate, the
+ * turn already closed its input). Never throws for a refusal: the caller has
+ * a fallback, and a refusal is the ordinary case for two of three engines.
+ */
+export async function steerIssueRun(
+  run: IssueRun,
+  text: string,
+  deps: SteerIssueRunDeps = {}
+): Promise<boolean> {
+  const sessions = await issueRunSessionIds(run, deps.registry)
+  const sessionId = sessions[0]
+  if (!sessionId) return false
+  const steer =
+    deps.steer ??
+    (async (id: string, prompt: string) => {
+      const { steerSession } = await import("@/lib/claude/ipc")
+      return steerSession(id, prompt)
+    })
+  try {
+    await steer(sessionId, text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export type CheckInIssueRunResult =
+  | { status: "checked-in"; run: IssueRun }
+  | { status: "refused"; reason: "not-found" | "not-active" | "not-periodic-wakeup" }
+
+/**
+ * Settle a periodic wakeup's run with a note and leave the issue where it was.
+ *
+ * Starting the run moved the issue to `in_progress`; a check-in delivered
+ * nothing to review, so instead of `settleIssueRunAndIssue`'s advance to
+ * `in_review` the issue goes back to the open column it was in
+ * (`IssueRunWakeup.statusBefore`). `applyRuntimeIssueStatus` only hands back
+ * from `in_progress`, so an issue a person moved meanwhile stays where they
+ * put it. The engine keeps running until its turn ends; its later terminal
+ * poll finds the run already settled and changes nothing.
+ *
+ * Who may call this is the caller's question (`issue.wakeup_checkin` checks
+ * the calling session is the run's own).
+ */
+export async function checkInIssueRun(
+  runId: string,
+  note: string,
+  now = Date.now()
+): Promise<CheckInIssueRunResult> {
+  const run = await getIssueRun(runId)
+  if (!run) return { status: "refused", reason: "not-found" }
+  if (!isActiveIssueRunStatus(run.status)) return { status: "refused", reason: "not-active" }
+  if (!run.wakeup?.periodic) return { status: "refused", reason: "not-periodic-wakeup" }
+  const settled = await settleIssueRun(runId, { status: "succeeded", mode: "checkin", note }, now)
+  if (!settled) return { status: "refused", reason: "not-active" }
+  const before = run.wakeup.statusBefore
+  if (before === "backlog" || before === "todo" || before === "in_review") {
+    await applyRuntimeIssueStatus(settled.issueId, before, runtimeActorFor(settled))
+  }
+  return { status: "checked-in", run: settled }
 }

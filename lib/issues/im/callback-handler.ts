@@ -252,7 +252,7 @@ export async function handleIssueActionCallback(
       return { kind: "moved", issue }
     }
     case "run": {
-      const options = await listIssueRunOptions(payload.issueId)
+      const options = await listIssueRunOptions(payload.issueId, undefined, "im")
       const runnable = options.filter((option) => option.verdict.ok)
       // A button that already names its engine was pressed on the choice card
       // below; the person, not registration order, picked it. Its verdict is

@@ -2,9 +2,9 @@
  * Host-neutral boot for the issue tracker (ADR-0132).
  *
  * Registers the five issue sources (local, the GitHub mirror, the two agent
- * engines, and the ADR-0149 collaboration mirror), installs the run bridge and the lifecycle → Notification
- * Center watcher, seeds the starter label catalogue, and reconciles the GitHub
- * refresh schedule.
+ * engines, and the ADR-0149 collaboration mirror), installs the run bridge, the lifecycle → Notification
+ * Center watcher and the issue wakeup bridge, seeds the starter label
+ * catalogue, and reconciles the GitHub refresh schedule.
  *
  * Lives in `lib/` rather than beside the React initializer because BOTH hosts
  * boot it: the desktop through `IssueTrackerInitializer`, and the cloud brain
@@ -26,6 +26,7 @@ import { seedBuiltinIssueLabels } from "@/lib/db/labels"
 import { syncGithubIssueSchedule } from "@/lib/issues/github-sync-schedule"
 import { installIssueNotifications, type IssueNotifyTranslate } from "@/lib/issues/notify"
 import { installIssueRunBridge } from "@/lib/issues/run/install"
+import { installIssueWakeupBridge } from "@/lib/issues/wakeups/bridge"
 import { registerAgentTaskIssueSource } from "@/lib/issues/sources/agent-task-source"
 import { registerCollabIssueSource } from "@/lib/issues/sources/collab-source"
 import { registerAgentTeamIssueSource } from "@/lib/issues/sources/agent-team-source"
@@ -44,7 +45,7 @@ export interface BootIssueTrackerOptions {
 }
 
 /**
- * Returns a teardown for the two watchers this boots. The desktop initializer
+ * Returns a teardown for the three watchers this boots. The desktop initializer
  * ignores it — the tracker lives as long as the window does — but the headless
  * brain stops its runtimes in reverse order on shutdown, and a run bridge still
  * subscribed to Dexie after teardown would keep a closed database alive. Source
@@ -80,11 +81,31 @@ export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): P
     translate: options.translate,
     onError: (error) => log.warn("issue-tracker: notify error", { error: String(error) }),
   })
+  // Issue wakeups: the trail → `issue:activity` scheduler events, and the
+  // executor + fire gate that turn a matching event into a run. The executor
+  // module pulls the scheduler graph, so it loads off the boot's critical path;
+  // a wakeup that comes due first loads it through `executor-owners.ts`.
+  const disposeWakeups = installIssueWakeupBridge({
+    onError: (error) => log.warn("issue-tracker: wakeup bridge error", { error: String(error) }),
+  })
+  void import("@/lib/issues/wakeups/executor")
+    .then(({ registerIssueWakeupExecutor }) => registerIssueWakeupExecutor())
+    .catch((error) =>
+      log.warn("issue-tracker: wakeup executor failed to load", { error: String(error) })
+    )
   await seedBuiltinIssueLabels()
   // Reconcile the background refresh against the bindings that already exist.
   // Adding a resource schedules it there and then; this covers the restart
   // case, where the binding survives but the scheduler row may not.
   await syncGithubIssueSchedule()
+  // Plan Phase 1: every open parent waits for its children. The bridge adds
+  // the rule when a parent is set from now on; this covers parents that
+  // gained children before, or while the tracker was not running.
+  void import("@/lib/issues/wakeups/service")
+    .then(({ reconcileChildrenDoneWakeups }) => reconcileChildrenDoneWakeups())
+    .catch((error) =>
+      log.warn("issue-tracker: children-done wakeup reconcile failed", { error: String(error) })
+    )
   // ADR-0149 §6 — the pull that makes the collaboration mirror non-empty.
   //
   // Deliberately last, and deliberately quiet. It is the only step here that
@@ -104,6 +125,7 @@ export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): P
     }
   })
   return () => {
+    disposeWakeups()
     disposeNotifications()
     disposeRunBridge()
   }

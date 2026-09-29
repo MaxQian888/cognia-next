@@ -182,6 +182,52 @@ export function unregisterTaskExecutor(taskType: string): void {
 }
 
 /**
+ * What an event fire gate answers. `payload` is merged over the task's own
+ * payload (after the `event` envelope) for the execution this fire starts.
+ */
+export type EventFireVerdict =
+  { fire: true; payload?: Record<string, unknown> } | { fire: false; reason: string }
+
+/** The event as `triggerEventTask` received it. */
+export interface EventFireInput {
+  type: string
+  source?: string
+  data?: Record<string, unknown>
+}
+
+/**
+ * Decides, BEFORE an execution exists, whether an event may fire a task of
+ * one type.
+ *
+ * `eventType` + `eventSource` are the only match the scheduler performs
+ * itself. A subsystem whose rules filter further (who caused the event, what
+ * state the world is in now, whether the event is the task's own echo) used to
+ * have only one place to say no: inside its executor, after the scheduler had
+ * already written an execution row and charged the fire against `maxRuns`. A
+ * "wait until every child is done" rule then spent its budget on every child
+ * that was not the last one. A gate answers first, so a non-matching event
+ * leaves no row and costs nothing.
+ *
+ * A gate may persist state of its own (a held input) but must not execute
+ * the task's work; that is the executor's job and has to be recorded.
+ */
+export type EventFireGate = (
+  task: ScheduledTask,
+  event: EventFireInput
+) => Promise<EventFireVerdict>
+
+const eventFireGates: Map<string, EventFireGate> = new Map()
+
+/** Register the fire gate for a task type. Last write wins, like executors. */
+export function registerEventFireGate(taskType: string, gate: EventFireGate): void {
+  eventFireGates.set(taskType, gate)
+}
+
+export function unregisterEventFireGate(taskType: string): void {
+  eventFireGates.delete(taskType)
+}
+
+/**
  * Check whether a task executor is currently registered for a task type.
  */
 export function hasTaskExecutor(taskType: string): boolean {
@@ -3159,12 +3205,22 @@ class TaskSchedulerImpl {
 
     for (const task of eventTasks) {
       if (!task.trigger.eventSource || task.trigger.eventSource === eventSource) {
+        const verdict = await this.askEventFireGate(task, {
+          type: eventType,
+          ...(eventSource !== undefined ? { source: eventSource } : {}),
+          ...(payload !== undefined ? { data: payload } : {}),
+        })
+        if (!verdict.fire) {
+          log.debug(`Event ${eventType} did not fire task ${task.name}: ${verdict.reason}`)
+          continue
+        }
         log.info(`Event ${eventType} triggered task: ${task.name}`)
 
         // Merge event payload with task payload
         const mergedPayload = {
           ...task.payload,
           event: { type: eventType, source: eventSource, data: payload },
+          ...(verdict.payload ?? {}),
         }
         const taskWithPayload = { ...task, payload: mergedPayload }
 
@@ -3172,6 +3228,38 @@ class TaskSchedulerImpl {
           log.error(`Error executing event-triggered task ${task.name}:`, err)
         })
       }
+    }
+  }
+
+  /**
+   * The gate's verdict for one event fire (`registerEventFireGate`). A gate
+   * is registered by the same module as its executor, so a type whose
+   * executor is not loaded yet but has a declared owner loads that owner
+   * first; a type with no gate fires as before. A gate that throws does not
+   * fire: it could not tell us the event matched.
+   */
+  private async askEventFireGate(
+    task: ScheduledTask,
+    event: EventFireInput
+  ): Promise<EventFireVerdict> {
+    if (
+      !eventFireGates.has(task.type) &&
+      !executors.has(task.type) &&
+      hasTaskExecutorOwner(task.type)
+    ) {
+      await loadTaskExecutorOwner(task.type).catch((error) => {
+        log.warn(`Loading the owner of "${task.type}" for its fire gate failed`, {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+    }
+    const gate = eventFireGates.get(task.type)
+    if (!gate) return { fire: true }
+    try {
+      return await gate(task, event)
+    } catch (error) {
+      log.error(`Fire gate for "${task.type}" threw on task ${task.name}`, error)
+      return { fire: false, reason: "gate-error" }
     }
   }
 

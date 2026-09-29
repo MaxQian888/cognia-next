@@ -395,10 +395,10 @@ describe("a scheduler started without initSchedulerSystem", () => {
 })
 
 describe("TASK_EXECUTOR_OWNERS", () => {
-  it("declares the built-ins and provider diagnostics, and no connector or deprecated type", () => {
+  it("declares the built-ins, provider diagnostics and issue wakeups, and no connector or deprecated type", () => {
     const owned = Object.keys(TASK_EXECUTOR_OWNERS)
     expect([...owned].sort()).toEqual(
-      [...BUILT_IN_EXECUTOR_TASK_TYPES, "provider-diagnostics-refresh"].sort()
+      [...BUILT_IN_EXECUTOR_TASK_TYPES, "provider-diagnostics-refresh", "issue-wakeup"].sort()
     )
     expect(owned.filter((type) => type.startsWith("connection:"))).toEqual([])
     expect(
@@ -410,6 +410,7 @@ describe("TASK_EXECUTOR_OWNERS", () => {
 
   it("answers whether a type has an owner", () => {
     expect(hasTaskExecutorOwner("provider-diagnostics-refresh")).toBe(true)
+    expect(hasTaskExecutorOwner("issue-wakeup")).toBe(true)
     expect(hasTaskExecutorOwner("chat")).toBe(true)
     expect(hasTaskExecutorOwner("plugin")).toBe(true)
     expect(hasTaskExecutorOwner("connection:presence:refresh")).toBe(false)

@@ -27,6 +27,7 @@ import { getDb } from "./schema"
 import { deleteIssueCounter } from "./issue-counters"
 import { deleteIssueEventsForIssues } from "./issue-events"
 import { deleteIssueRunsForIssues } from "./issue-runs"
+import { cascadeIssueWakeups } from "./issues"
 import { deleteIssueCyclesForWorkspace } from "./issue-cycles"
 import { recordTombstones } from "@/lib/sync/tombstones"
 
@@ -219,6 +220,7 @@ function sameResource(a: IssueProjectResource, b: IssueProjectResource): boolean
  */
 export async function deleteIssueProject(id: string): Promise<void> {
   const db = getDb()
+  let deletedIssueIds: string[] = []
   // Table array rather than positional args: Dexie's `transaction` overloads
   // stop at five tables, and the tombstone store is the sixth.
   await db.transaction(
@@ -235,6 +237,7 @@ export async function deleteIssueProject(id: string): Promise<void> {
     async () => {
       const issues = await db.issues.where("issueProjectId").equals(id).toArray()
       const issueIds = issues.map((issue) => issue.id)
+      deletedIssueIds = issueIds
       const eventIds = await deleteIssueEventsForIssues(issueIds)
       const runIds = await deleteIssueRunsForIssues(issueIds)
       // Cycles bound to this container go with it. Workspace-wide cycles (no
@@ -259,6 +262,7 @@ export async function deleteIssueProject(id: string): Promise<void> {
       await recordTombstones("issueCycles", cycleIds, at)
     }
   )
+  cascadeIssueWakeups(deletedIssueIds)
 }
 
 /**
@@ -275,7 +279,8 @@ export async function deleteIssueProject(id: string): Promise<void> {
  */
 export async function deleteIssueDataForWorkspace(projectId: string): Promise<string[]> {
   const db = getDb()
-  return db.transaction(
+  let deletedIssueIds: string[] = []
+  const removed = await db.transaction(
     "rw",
     [
       db.issueProjects,
@@ -293,6 +298,7 @@ export async function deleteIssueDataForWorkspace(projectId: string): Promise<st
       // already orphaned still carries this `projectId` and must go too.
       const issues = await db.issues.where("projectId").equals(projectId).toArray()
       const issueIds = issues.map((issue) => issue.id)
+      deletedIssueIds = issueIds
       const hasCycles = (await db.issueCycles.where("projectId").equals(projectId).count()) > 0
       if (containerIds.length === 0 && issueIds.length === 0 && !hasCycles) return []
 
@@ -312,4 +318,6 @@ export async function deleteIssueDataForWorkspace(projectId: string): Promise<st
       return containerIds
     }
   )
+  cascadeIssueWakeups(deletedIssueIds)
+  return removed
 }

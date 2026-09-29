@@ -55,6 +55,8 @@ export function useAttentionLine(): (signal: AttentionSignal) => string {
     switch (signal.kind) {
       case "auto-paused":
         return t("row.autoPaused", { count: signal.count ?? 0 })
+      case "wakeup-paused":
+        return t(`row.wakeupPaused.${signal.wakeupPauseReason ?? "loop"}`)
       case "needs-approval":
         if (signal.tools && signal.roots) {
           return t("row.needsApprovalToolsAndTrust", { tools: signal.tools, roots: signal.roots })

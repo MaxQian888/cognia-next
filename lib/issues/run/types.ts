@@ -14,11 +14,31 @@
  * `done` is the human's call — no adapter may promote past review.
  */
 
-import type { Issue, IssueActor, IssueProject, IssueRun, IssueRunKind } from "@/types/issues"
+import type {
+  Issue,
+  IssueActor,
+  IssueProject,
+  IssueRun,
+  IssueRunKind,
+  IssueRunWakeup,
+} from "@/types/issues"
 import type { SettleIssueRunInput } from "@/lib/db/issue-runs"
 
-/** Where the Run gesture came from; picks the team gate policy. */
-export type IssueRunOrigin = "interactive" | "im"
+/**
+ * Where the Run gesture came from; picks the team gate policy. `wakeup` is an
+ * issue wakeup firing (`lib/issues/wakeups/`): nobody pressed anything, so it
+ * gets the unattended policy `im` without a conversation gets.
+ */
+export type IssueRunOrigin = "interactive" | "im" | "wakeup"
+
+/**
+ * Did a person name this run (pick the engine and the moment), as opposed to
+ * a door deriving it from the issue? Only named runs may start on an issue in
+ * triage. Derived is the default, so a new origin is strict until it says so.
+ */
+export function isNamedRunOrigin(origin: IssueRunOrigin): boolean {
+  return origin === "interactive"
+}
 
 /** Everything an adapter needs to decide and to start. */
 export interface IssueRunTarget {
@@ -53,6 +73,13 @@ export type IssueRunRefusalReason =
   | "issue-finished"
   /** An open blocker stands in the way (spec 2026-09-06 D5). `detail` lists them. */
   | "blocked"
+  /**
+   * The issue waits in triage (`Issue.triage`) and nobody named this run: a
+   * run whose engine and moment were derived (`im`, `wakeup`) would act on a
+   * proposal nobody accepted yet. An `interactive` run — a person picking
+   * the engine in the Run dialog — proceeds. See {@link isNamedRunOrigin}.
+   */
+  | "issue-in-triage"
   /** No adapter is registered under the requested id. */
   | "adapter-missing"
 
@@ -85,6 +112,21 @@ export interface IssueRunStartContext {
    * GitHub loop). Adapters validate what they read and ignore the rest.
    */
   options?: Readonly<Record<string, unknown>>
+  /**
+   * Why this run exists beyond the issue itself: a wakeup's instruction and
+   * the inputs that fired it. Every adapter appends it to the text its engine
+   * receives (`withRunBrief`), after the issue.
+   */
+  brief?: string
+  /** Lineage when an issue wakeup started the run. Adapters store it on the row. */
+  wakeup?: IssueRunWakeup
+}
+
+/** The engine-facing text with a run brief appended, when there is one. */
+export function withRunBrief(text: string, brief: string | undefined): string {
+  const trimmed = brief?.trim()
+  if (!trimmed) return text
+  return text.trim() ? `${text}\n\n${trimmed}` : trimmed
 }
 
 /**
@@ -110,4 +152,12 @@ export interface IssueRunAdapter {
   poll(run: IssueRun): Promise<IssueRunPollResult>
   /** Best-effort engine-side cancel. The bridge settles the run as `cancelled` afterwards. */
   cancel?(run: IssueRun): Promise<void>
+  /**
+   * Chat sessions the active run is executing in, newest first. Two callers:
+   * a wakeup input joins the run by steering the newest one, and a check-in
+   * is accepted only from one of them. An adapter that cannot name a session
+   * omits this, which makes its runs unjoinable (inputs are held until the
+   * run settles) and un-check-in-able, rather than guessed at.
+   */
+  sessionIds?(run: IssueRun): Promise<string[]>
 }

@@ -1003,6 +1003,7 @@
     "github-issue-sync": "GitHub Issue 同步",
     "goal": "目标",
     "im-push": "IM 推送",
+    "issue-wakeup": "议题唤醒",
     "monitor": "Monitor",
     "plan": "计划",
     "plugin": "插件",
@@ -1177,7 +1178,12 @@
       "running": "{name} 正在运行",
       "runningWithProcesses": "{name} 正在运行，有 {count} 个活动进程",
       "sourceFailed": "{kind} 数据源加载失败：{error}",
-      "unsupportedType": "{name} 无法在此主机上运行"
+      "unsupportedType": "{name} 无法在此主机上运行",
+      "wakeupPaused": {
+        "loop": "{name} 已自动暂停：它在 Agent 之间循环唤醒",
+        "rate": "{name} 已自动暂停：一小时内触发过于频繁",
+        "issue-closed": "{name} 已停止，因为所属议题已结束"
+      }
     },
     "emptyNext": "下一个：{name}，{when}",
     "emptyNothingScheduled": "没有计划中的运行。",
@@ -1193,7 +1199,12 @@
       "needsApprovalTrust": "等待你信任 {roots}",
       "running": "正在运行",
       "runningWithProcesses": "正在运行，{count} 个活动进程",
-      "unsupportedType": "此主机无法运行"
+      "unsupportedType": "此主机无法运行",
+      "wakeupPaused": {
+        "loop": "已自动暂停：在 Agent 之间循环",
+        "rate": "已自动暂停：触发过于频繁",
+        "issue-closed": "已停止：所属议题已结束"
+      }
     }
   },
   "hostPopover": {

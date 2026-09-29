@@ -8,6 +8,8 @@ import {
   stopTaskScheduler,
   registerTaskExecutor,
   unregisterTaskExecutor,
+  registerEventFireGate,
+  unregisterEventFireGate,
   createTaskScheduler,
   waitForTaskExecutor,
   resolveDefaultTimingDriver,
@@ -1039,6 +1041,88 @@ describe("TaskScheduler", () => {
         await jest.advanceTimersByTimeAsync(100)
 
         expect(executor).toHaveBeenCalled()
+      })
+
+      function gatedTask(): ScheduledTask {
+        return {
+          id: "gated-task-1",
+          name: "Gated Task",
+          type: "gated-test" as ScheduledTask["type"],
+          trigger: { type: "event", eventType: "gated-event", eventSource: "src-1" },
+          payload: { own: true },
+          config: {
+            maxRetries: 0,
+            retryDelay: 1000,
+            timeout: 30000,
+            allowConcurrent: true,
+            runMissedOnStartup: false,
+          },
+          notification: { onStart: false, onComplete: false, onError: false },
+          status: "active",
+          runCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      }
+
+      afterEach(() => {
+        unregisterEventFireGate("gated-test")
+        unregisterTaskExecutor("gated-test")
+      })
+
+      it("asks the type's fire gate before any execution exists", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("gated-test", executor)
+        const gate = jest.fn().mockResolvedValue({ fire: false, reason: "no-match" })
+        registerEventFireGate("gated-test", gate)
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([gatedTask()])
+        mockSchedulerDb.createExecution.mockClear()
+
+        await scheduler.triggerEventTask("gated-event", "src-1", { n: 1 })
+        await jest.advanceTimersByTimeAsync(100)
+
+        expect(gate).toHaveBeenCalledWith(expect.objectContaining({ id: "gated-task-1" }), {
+          type: "gated-event",
+          source: "src-1",
+          data: { n: 1 },
+        })
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.createExecution).not.toHaveBeenCalled()
+      })
+
+      it("merges the gate's payload into the fire it admits", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("gated-test", executor)
+        registerEventFireGate("gated-test", async () => ({
+          fire: true,
+          payload: { released: true },
+        }))
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([gatedTask()])
+
+        await scheduler.triggerEventTask("gated-event", "src-1", { n: 1 })
+        await jest.advanceTimersByTimeAsync(100)
+
+        expect(executor.mock.calls[0][0].payload).toEqual({
+          own: true,
+          event: { type: "gated-event", source: "src-1", data: { n: 1 } },
+          released: true,
+        })
+      })
+
+      it("does not fire when the gate throws", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("gated-test", executor)
+        registerEventFireGate("gated-test", async () => {
+          throw new Error("broken gate")
+        })
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([gatedTask()])
+
+        await scheduler.triggerEventTask("gated-event", "src-1")
+        await jest.advanceTimersByTimeAsync(100)
+
+        expect(executor).not.toHaveBeenCalled()
       })
     })
 

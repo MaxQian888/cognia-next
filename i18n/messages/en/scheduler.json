@@ -1003,6 +1003,7 @@
     "github-issue-sync": "GitHub Issue Sync",
     "goal": "Goal",
     "im-push": "IM Push",
+    "issue-wakeup": "Issue Wakeup",
     "monitor": "Monitor",
     "plan": "Plan",
     "plugin": "Plugin",
@@ -1177,7 +1178,12 @@
       "running": "{name} is running now",
       "runningWithProcesses": "{name} is running now with {count} live processes",
       "sourceFailed": "The {kind} source failed to load: {error}",
-      "unsupportedType": "{name} cannot run on this host"
+      "unsupportedType": "{name} cannot run on this host",
+      "wakeupPaused": {
+        "loop": "{name} paused itself: it kept waking agents in a loop",
+        "rate": "{name} paused itself: it fired too often in an hour",
+        "issue-closed": "{name} stopped because its issue finished"
+      }
     },
     "emptyNext": "Next up: {name} at {when}",
     "emptyNothingScheduled": "Nothing is scheduled to run.",
@@ -1193,7 +1199,12 @@
       "needsApprovalTrust": "Waiting for you to trust {roots}",
       "running": "Running now",
       "runningWithProcesses": "Running now, {count} live processes",
-      "unsupportedType": "Cannot run on this host"
+      "unsupportedType": "Cannot run on this host",
+      "wakeupPaused": {
+        "loop": "Paused itself: looping between agents",
+        "rate": "Paused itself: fired too often",
+        "issue-closed": "Stopped: its issue finished"
+      }
     }
   },
   "hostPopover": {

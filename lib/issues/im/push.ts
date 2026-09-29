@@ -152,7 +152,8 @@ export async function pushIssueCard(
     .filter((to) => to !== "in_progress")
   const canRun =
     input.canRun ??
-    (!runActive && (await listIssueRunOptions(issue.id)).some((option) => option.verdict.ok))
+    (!runActive &&
+      (await listIssueRunOptions(issue.id, undefined, "im")).some((option) => option.verdict.ok))
   const project = await getIssueProject(issue.issueProjectId)
   const surfaceId = `issue:${issue.id}:${newIdempotencyKey().slice(0, 8)}`
   const surface = buildIssueCardSurface({

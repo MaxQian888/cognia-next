@@ -115,6 +115,32 @@ describe("itemAttention", () => {
     })
   })
 
+  it("names why an issue wakeup paused itself, above the generic failure lines", () => {
+    const paused = (reason: string) =>
+      itemAttention(item("app", "a"), {
+        task: task("a", {
+          type: "issue-wakeup",
+          status: "paused",
+          lastTerminalReason: reason,
+          consecutiveFailures: 3,
+          lastError: "looped",
+        }),
+        hostSupport: supported,
+      })
+    expect(paused("wakeup-paused-loop")).toMatchObject({
+      kind: "wakeup-paused",
+      severity: "critical",
+      wakeupPauseReason: "loop",
+      detail: "looped",
+    })
+    // A finished issue stopping its rules is the expected ending.
+    expect(paused("wakeup-paused-issue-closed")).toMatchObject({
+      kind: "wakeup-paused",
+      severity: "info",
+      wakeupPauseReason: "issue-closed",
+    })
+  })
+
   it("counts consecutive failures from the threshold", () => {
     expect(
       itemAttention(item("app", "a"), {

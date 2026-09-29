@@ -86,6 +86,11 @@ export type ScheduledTaskType =
   // GitHub issue mirror refresh for the `/issues` board — registered in
   // `lib/scheduler/executors/github-issue-sync-executor.ts`.
   | "github-issue-sync"
+  // An issue wakeup: an event / condition / timer subscription scoped to one
+  // issue that delivers an ordinary issue run when it fires. Authored by the
+  // issue detail panel and the `issue.wakeup_*` skills, executed by
+  // `lib/issues/wakeups/executor.ts` (payload: `IssueWakeupPayload`).
+  | "issue-wakeup"
   // Attention Radar report — registered in
   // `lib/scheduler/executors/radar-report-executor.ts`.
   | "radar-report"
@@ -150,6 +155,19 @@ export type TaskExecutionTerminalReason =
   // (`needsApproval`) and any `workspaceTrust` restriction. Never retried: a
   // retry replays the same turn into the same wall (`isRetryableTerminalReason`).
   | "needs-approval"
+  // An issue wakeup stopped itself (`types/issues/wakeup.ts`): a rule revisited
+  // on one chain with no person in between, an event rule over its hourly cap,
+  // or its issue finished. The task is `paused` and this names why, so the
+  // board and the scheduler can say more than "paused".
+  | "wakeup-paused-loop"
+  | "wakeup-paused-rate"
+  | "wakeup-paused-issue-closed"
+  // An issue wakeup fired while a run was active that could not take the
+  // input; it is held on the rule and delivered when that run settles.
+  | "wakeup-deferred"
+  // An issue wakeup fired but the run engines refused the issue (blocked,
+  // no engine for the assignee, …). The refusal is in the execution output.
+  | "wakeup-refused"
 
 /**
  * Terminal reasons an executor returns for a run whose retry would only
@@ -157,6 +175,12 @@ export type TaskExecutionTerminalReason =
  */
 const NON_RETRYABLE_TERMINAL_REASONS: ReadonlySet<string> = new Set<TaskExecutionTerminalReason>([
   "needs-approval",
+  // A retry of a wakeup pause would pause again, and a retried refusal would
+  // meet the same verdict; both only spend the fire budget.
+  "wakeup-paused-loop",
+  "wakeup-paused-rate",
+  "wakeup-paused-issue-closed",
+  "wakeup-refused",
 ])
 
 /**

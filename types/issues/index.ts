@@ -38,6 +38,10 @@
  *     column, so the tracker can bind to any engine without a schema bump.
  */
 
+import type { IssueRunWakeup, IssueWakeupDelivery } from "./wakeup"
+
+export * from "./wakeup"
+
 /** Board columns, in display order. Fixed by design — see ADR-0132 §1. */
 export const ISSUE_STATUSES = [
   "backlog",
@@ -70,6 +74,19 @@ const STATUS_CATEGORY: Readonly<Record<IssueStatus, IssueStatusCategory>> = {
 /** Single authority for status → category. Never inline this mapping. */
 export function statusCategoryOf(status: IssueStatus): IssueStatusCategory {
   return STATUS_CATEGORY[status]
+}
+
+/** `Issue.triage`. One state today; absent means accepted. */
+export type IssueTriageState = "pending"
+
+/** Upper bound of `Issue.stage` (lower bound is 1). */
+export const ISSUE_STAGE_MAX = 1000
+
+/** Is `value` a legal `Issue.stage`? */
+export function isIssueStage(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= ISSUE_STAGE_MAX
+  )
 }
 
 /** Highest → lowest. `none` sorts last everywhere. */
@@ -121,10 +138,15 @@ export interface IssueActor {
  *
  * `projectV2Number` names the repository's Projects v2 board whose iteration
  * field populates `issueCycles` (D11). Milestones are pulled regardless.
+ *
+ * `triageNewIssues` (import mode only) files each newly imported issue that
+ * is open and unassigned into triage (`Issue.triage`), so nothing derived
+ * runs on it before a person accepts it. Off: it lands as it always did.
  */
 export interface GithubRepoSyncSettings {
   mode: "mirror" | "import"
   projectV2Number?: number
+  triageNewIssues?: boolean
 }
 
 /**
@@ -278,6 +300,19 @@ export interface IssueExternalRef {
   meta?: Record<string, string | number>
 }
 
+/**
+ * A linked pull request's state (`github-pr` refs), carried in the ref's
+ * `meta.prState` and moved by `recordIssuePullRequestState`. What an
+ * `until-pr` wakeup waits on.
+ */
+export const ISSUE_PULL_REQUEST_STATES = ["open", "closed", "merged"] as const
+
+export type IssuePullRequestState = (typeof ISSUE_PULL_REQUEST_STATES)[number]
+
+export function isIssuePullRequestState(value: unknown): value is IssuePullRequestState {
+  return (ISSUE_PULL_REQUEST_STATES as readonly unknown[]).includes(value)
+}
+
 export const ISSUE_EXTERNAL_PROVIDERS = [
   "github",
   "github-pr",
@@ -379,8 +414,27 @@ export interface Issue {
   githubRef?: IssueGithubRef
   /** Set when the issue was filed from an IM conversation. */
   origin?: IssueOrigin
+  /**
+   * `pending` while the issue waits in triage: its status, assignee and the
+   * rest are a proposal nobody accepted yet, so only a run a person names
+   * may start on it (`issue-in-triage` in `lib/issues/run/types.ts`).
+   * Absent once accepted, and on every issue filed straight onto the board.
+   * An attribute rather than a seventh column, so the board's six statuses
+   * (ADR-0132 §1) and every projection of them stay as they are.
+   */
+  triage?: IssueTriageState
   /** Parent issue id. Children render as sub-issues on the parent. */
   parentId?: string
+  /**
+   * Ordered barrier group among the parent's sub-issues, an integer from 1 to
+   * {@link ISSUE_STAGE_MAX}. Absent means unstaged. Siblings in a lower stage
+   * finish before a higher stage is due; the parent's children-done wakeup
+   * fires once per stage it completes and once when everything is done
+   * (`lib/issues/wakeups/model.ts` `childrenBarrier`). Meaningless on a
+   * top-level issue, where it is kept but ignored. Local only: no sync
+   * provider carries it.
+   */
+  stage?: number
   /**
    * Issue ids that must finish before this one should start. `blocks` is
    * derived. Optional on the type, like `externalRefs` and `externalKeys`,
@@ -431,6 +485,11 @@ export type IssueEventKind =
   | "blocker_removed"
   | "due_date_changed"
   | "estimate_changed"
+  | "stage_changed"
+  /** Entered triage (`to: "pending"`) or was accepted out of it (`to` absent). */
+  | "triage_changed"
+  /** A linked pull request (`github-pr` ref) was first seen in, or moved to, a state. */
+  | "pr_state_changed"
   | "cycle_changed"
   | "external_linked"
   | "external_unlinked"
@@ -440,6 +499,10 @@ export type IssueEventKind =
   | "synced_in"
   | "sync_conflict"
   | "sync_conflict_resolved"
+  /** An issue wakeup fired (`types/issues/wakeup.ts`); `delivery` says what it became. */
+  | "wakeup_fired"
+  /** A periodic wakeup's run settled with a note and left the issue where it was. */
+  | "run_checked_in"
 
 /**
  * Per-kind payload. Discriminated on `kind` so the activity timeline renders
@@ -474,6 +537,20 @@ export type IssueEventPayload =
   | { kind: "blocker_removed"; blockerId: string; by: IssueActor }
   | { kind: "due_date_changed"; from?: number; to?: number; by: IssueActor }
   | { kind: "estimate_changed"; from?: number; to?: number; by: IssueActor }
+  | { kind: "stage_changed"; from?: number; to?: number; by: IssueActor }
+  | {
+      kind: "triage_changed"
+      from?: IssueTriageState
+      to?: IssueTriageState
+      by: IssueActor
+    }
+  | {
+      kind: "pr_state_changed"
+      ref: Pick<IssueExternalRef, "provider" | "externalId" | "url" | "label">
+      from?: IssuePullRequestState
+      to: IssuePullRequestState
+      by: IssueActor
+    }
   | { kind: "cycle_changed"; from?: string; to?: string; by: IssueActor }
   | { kind: "external_linked"; ref: IssueExternalRef; by: IssueActor }
   /**
@@ -506,6 +583,18 @@ export type IssueEventPayload =
       kept: "local" | "remote"
       by: IssueActor
     }
+  | {
+      kind: "wakeup_fired"
+      /** The `issue-wakeup` scheduled task. */
+      taskId: string
+      delivery: IssueWakeupDelivery
+      /** The run started (`run`) or joined (`joined`). */
+      runId?: string
+      instruction: string
+      /** How many inputs this fire carried. */
+      inputs: number
+    }
+  | { kind: "run_checked_in"; runId: string; adapterId: string; note: string }
 
 /** The fields the sync engine reconciles. Keyed so an event can name one. */
 export const ISSUE_SYNC_FIELDS = [
@@ -562,10 +651,30 @@ export function isActiveIssueRunStatus(status: IssueRunStatus): boolean {
   return status === "queued" || status === "running"
 }
 
-/** A produced thing worth linking from the issue: PR, branch, worktree, session. */
+/**
+ * A produced thing worth linking from the issue: PR, branch, worktree,
+ * session — or a deliverable an agent linked from inside its run
+ * (`issue.link_artifact`).
+ */
 export interface IssueRunArtifact {
   label: string
+  /**
+   * Where it lives: a URL, an app route, or `artifact:<id>` for a Cognia
+   * artifact (`artifactId` then names it). Runs dedupe on this.
+   */
   href: string
+  /** The Cognia artifact behind an `artifact:` href. */
+  artifactId?: string
+  /** The conversation that artifact was made in, where it opens. */
+  sessionId?: string
+  /**
+   * The agent linked this as a result of the work, not as a trace of it.
+   * Deliverables with the same label are versions of one another
+   * (`lib/issues/deliverables.ts`).
+   */
+  deliverable?: true
+  /** Unix epoch ms the link was made. Orders versions. */
+  linkedAt?: number
 }
 
 /**
@@ -599,4 +708,10 @@ export interface IssueRun {
   /** Short outcome text from the engine (result preview, PR title, …). */
   summary?: string
   error?: string
+  /**
+   * Present when an issue wakeup started this run. Not indexed, so adding it
+   * needed no schema bump; see `types/issues/wakeup.ts` for why lineage lives
+   * on the run rather than on the rule.
+   */
+  wakeup?: IssueRunWakeup
 }

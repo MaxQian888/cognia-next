@@ -41,6 +41,7 @@ import type {
   IssueRunTarget,
   IssueRunVerdict,
 } from "./types"
+import { withRunBrief } from "./types"
 
 export const AGENT_TEAM_RUN_ADAPTER_ID = "agent-team"
 
@@ -154,6 +155,25 @@ export async function resolveImSquadRunSurface(input: {
   }
 }
 
+/**
+ * The gate-policy origin and provenance a Squad run gets for an issue-run
+ * origin. A wakeup is a scheduler fire: nobody is watching a modal, so the
+ * Squad gets the scheduler's headless gate policy and says "schedule".
+ */
+export function squadRunOriginOf(origin: IssueRunOrigin): {
+  origin: string
+  triggeredFrom: WorkflowTriggeredFrom
+} {
+  switch (origin) {
+    case "wakeup":
+      return { origin: "scheduler", triggeredFrom: { source: "schedule" } }
+    case "im":
+      return { origin: "im", triggeredFrom: { source: "im" } }
+    case "interactive":
+      return { origin: "interactive", triggeredFrom: { source: "ui" } }
+  }
+}
+
 async function defaultGetTeamStore() {
   const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
   return useAgentTeamStore
@@ -200,8 +220,8 @@ export function createDefaultAgentTeamRunAdapterDeps(): AgentTeamRunAdapterDeps 
       const result = await startSquadRun({
         squadId: teamId,
         goal: objective,
-        origin,
-        triggeredFrom: im?.triggeredFrom ?? { source: origin === "im" ? "im" : "ui" },
+        ...squadRunOriginOf(origin),
+        ...(im?.triggeredFrom ? { triggeredFrom: im.triggeredFrom } : {}),
         ...(runId ? { runId } : {}),
         ...(im ? { planApprovalDelegate: im.planApprovalDelegate } : {}),
         ...(im?.session ? { session: im.session, bindConnectorRun: true } : {}),
@@ -320,10 +340,13 @@ export function createAgentTeamRunAdapter(
       const task = deps.createTask({
         teamId,
         title: `${issue.identifier}: ${issue.title}`,
-        description: [
-          issue.description ?? issue.title,
-          project?.description ? `\n\nProject context: ${project.description}` : "",
-        ].join(""),
+        description: withRunBrief(
+          [
+            issue.description ?? issue.title,
+            project?.description ? `\n\nProject context: ${project.description}` : "",
+          ].join(""),
+          context.brief
+        ),
         priority: issuePriorityToSubAgentPriority(issue.priority),
         tags: ["issue", issue.identifier],
         metadata: { issueId: issue.id, issueIdentifier: issue.identifier },
@@ -337,6 +360,7 @@ export function createAgentTeamRunAdapter(
         targetRef: { taskId: task.id },
         by: context.by,
         status: "running",
+        ...(context.wakeup ? { wakeup: context.wakeup } : {}),
         now: deps.now(),
       })
       // Resolves at terminal state — never awaited here. A start that throws

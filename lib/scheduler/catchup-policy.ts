@@ -81,6 +81,10 @@ const TIER_BY_TYPE: Partial<Record<ScheduledTaskType, CatchupTier>> = {
   // the next run covers every window that was missed — replaying them would
   // spend rate-limit budget re-asking for the same answer.
   "github-issue-sync": "never",
+  // A periodic wakeup is a check-in on one issue. One missed tick that is
+  // still fresh is worth delivering after a restart; a backlog of them would
+  // wake the same agent N times to look at the same issue.
+  "issue-wakeup": "grace",
   // Same reasoning, one layer up. A `poll` trigger carries a cursor and a
   // `derivedState` one carries the last edge value, so the next tick covers
   // whatever a missed slot would have seen. Replaying them would re-ask the

@@ -121,6 +121,20 @@ describe("IssueBoard", () => {
       expect(screen.getByTestId("issue-column-todo")).toHaveTextContent("MERC-2")
     })
 
+    it("hands each card its own wakeup cue", () => {
+      const cued = item({ status: "todo" })
+      const plain = item({ status: "todo" })
+      render(
+        <IssueBoard
+          items={[cued, plain]}
+          wakeupCues={new Map([[cued.unifiedId, { active: 0, paused: 1, held: 0 }]])}
+        />
+      )
+      const cues = screen.getAllByTestId("issue-card-wakeup-cue")
+      expect(cues).toHaveLength(1)
+      expect(cues[0]).toHaveAttribute("data-state", "paused")
+    })
+
     it("shows a per-column empty state once a column is explicitly expanded", () => {
       render(<IssueBoard items={[]} columnCollapse={ALL_EXPANDED} />)
       expect(screen.getAllByText("board.empty")).toHaveLength(ISSUE_STATUSES.length)

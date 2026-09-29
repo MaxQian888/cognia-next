@@ -81670,6 +81670,7 @@ paths:
                         - wiki-rebuild
                         - wiki-lint
                         - github-issue-sync
+                        - issue-wakeup
                         - radar-report
                         - provider-diagnostics-refresh
                     trigger:
@@ -82869,6 +82870,7 @@ paths:
                               - wiki-rebuild
                               - wiki-lint
                               - github-issue-sync
+                              - issue-wakeup
                               - radar-report
                               - provider-diagnostics-refresh
                           trigger:
@@ -83381,6 +83383,7 @@ paths:
                           - wiki-rebuild
                           - wiki-lint
                           - github-issue-sync
+                          - issue-wakeup
                           - radar-report
                           - provider-diagnostics-refresh
                     statuses:

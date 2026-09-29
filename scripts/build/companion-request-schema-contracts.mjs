@@ -148,6 +148,7 @@ const scheduledTaskTypes = [
   "wiki-rebuild",
   "wiki-lint",
   "github-issue-sync",
+  "issue-wakeup",
   "radar-report",
   "provider-diagnostics-refresh",
 ]

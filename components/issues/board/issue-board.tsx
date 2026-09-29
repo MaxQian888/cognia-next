@@ -32,6 +32,7 @@ import {
 import { allowedIssueMoveTargets } from "@/lib/issues/state-machine"
 import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
 import type { SquadRunRef } from "@/lib/issues/run/running"
+import type { IssueWakeupCue } from "@/lib/issues/wakeups/model"
 import { resolveColumnCollapsed } from "@/lib/issues/views"
 import type { IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
@@ -54,6 +55,8 @@ export interface IssueBoardProps {
   runningIds?: ReadonlySet<string>
   /** `unifiedId` to the Squad run that owns it, for the card's squad chip. */
   squadRuns?: ReadonlyMap<string, SquadRunRef>
+  /** `unifiedId` to its wakeup cue, for the card's wakeup indicator. */
+  wakeupCues?: ReadonlyMap<string, IssueWakeupCue>
   /** `unifiedId` to its planning hint (blocked, sub-issues, due). */
   planningHints?: ReadonlyMap<string, IssuePlanningHint>
   /** Per-column collapse overrides. Absent means expanded — columns only collapse explicitly. */
@@ -76,6 +79,7 @@ export function IssueBoard({
   projectNamesById,
   runningIds,
   squadRuns,
+  wakeupCues,
   planningHints,
   columnCollapse,
   onToggleColumnCollapsed,
@@ -196,6 +200,7 @@ export function IssueBoard({
           selected={selectedId === item.unifiedId}
           running={isRunning(item.unifiedId)}
           squadRun={squadRuns?.get(item.unifiedId)}
+          wakeupCue={wakeupCues?.get(item.unifiedId)}
           onSelect={onSelect}
         />
       )}
@@ -208,6 +213,7 @@ export function IssueBoard({
             projectName={projectNameOf(item)}
             running={isRunning(item.unifiedId)}
             squadRun={squadRuns?.get(item.unifiedId)}
+            wakeupCue={wakeupCues?.get(item.unifiedId)}
             overlay
             draggable
           />

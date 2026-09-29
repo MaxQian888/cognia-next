@@ -175,12 +175,13 @@ describe("CARD_AUTHORED_TASK_TYPES covers every subsystem-authored type", () => 
   // The type picker is an explicit allowlist, so a missing entry here does not
   // leak the type into the form — but `isCardAuthoredTaskType` is the SSOT any
   // other surface reads, and it silently answered "no" for these two.
-  it.each(["github-issue-sync", "connection:housekeeping:attachment-cache"] as const)(
-    "recognises %s",
-    (type) => {
-      expect(isCardAuthoredTaskType(type)).toBe(true)
-    }
-  )
+  it.each([
+    "github-issue-sync",
+    "issue-wakeup",
+    "connection:housekeeping:attachment-cache",
+  ] as const)("recognises %s", (type) => {
+    expect(isCardAuthoredTaskType(type)).toBe(true)
+  })
 
   it("recognises every connector-owned type", () => {
     const connectorTypes = CARD_AUTHORED_TASK_TYPES.filter((type) => type.startsWith("connection:"))

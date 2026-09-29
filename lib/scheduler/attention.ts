@@ -14,6 +14,7 @@
  */
 
 import type { ScheduledTask } from "@/types/scheduler"
+import { wakeupPauseReasonOf, type IssueWakeupPauseReason } from "@/types/issues/wakeup"
 import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
 import { runApprovalRequest, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
@@ -24,6 +25,10 @@ export type AttentionSeverity = "critical" | "attention" | "info"
 
 export type AttentionKind =
   | "auto-paused"
+  // An issue wakeup stopped itself (`types/issues/wakeup.ts`). Its own kind
+  // rather than a generic "paused": the reason (a loop between agents, too
+  // many fires, the issue finished) is what tells the user what to fix.
+  | "wakeup-paused"
   | "needs-approval"
   | "consecutive-failures"
   | "last-run-failed"
@@ -63,6 +68,8 @@ export interface AttentionSignal {
   reason?: TaskTypeHostSupport["reason"]
   /** For `unsupported-type`: the requirements the host lacks, joined. */
   missing?: string
+  /** For `wakeup-paused`: why the wakeup stopped itself. */
+  wakeupPauseReason?: IssueWakeupPauseReason
 }
 
 export interface AttentionInput {
@@ -130,6 +137,21 @@ export function itemAttention(
   const hostSupport = context.hostSupport ?? getTaskTypeHostSupport
   const base = { itemUnifiedId: item.unifiedId, itemName: item.name }
 
+  const wakeupPauseReason =
+    task?.status === "paused" && typeof task.lastTerminalReason === "string"
+      ? wakeupPauseReasonOf(task.lastTerminalReason)
+      : undefined
+  if (wakeupPauseReason) {
+    return {
+      id: `wakeup-paused:${item.unifiedId}`,
+      kind: "wakeup-paused",
+      // A finished issue stopping its rules is the expected ending, not a fault.
+      severity: wakeupPauseReason === "issue-closed" ? "info" : "critical",
+      ...base,
+      wakeupPauseReason,
+      detail: task?.lastError,
+    }
+  }
   if (task?.lastTerminalReason === "auto-paused" && task.status === "paused") {
     return {
       id: `auto-paused:${item.unifiedId}`,

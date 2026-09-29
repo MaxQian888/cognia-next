@@ -197,6 +197,9 @@
     "0199-an-agent-variant-follows-its-base",
     "0200-files-is-a-view-that-keeps-what-you-keep",
     "0201-the-desktop-browser-runs-chromium-locally",
-    "0204-a-project-coordinator-runs-threads-in-the-background"
+    "0202-memory-ages-and-every-change-can-be-undone",
+    "0203-external-bridge-workspace-tools",
+    "0204-a-project-coordinator-runs-threads-in-the-background",
+    "0205-video-generation-runs-as-durable-jobs"
   ]
 }

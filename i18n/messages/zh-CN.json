@@ -17949,24 +17949,35 @@
       "label_added": "添加了标签",
       "label_removed": "移除了标签",
       "parent_changed": "更改了父议题",
+      "pr_state_changed": "{to, select, merged {发现关联的拉取请求已合并} closed {发现关联的拉取请求已关闭} other {发现关联的拉取请求已打开}}",
       "priority_changed": "将优先级从「{from}」改为「{to}」",
       "project_changed": "将其移动到了另一个项目",
       "reassigned": "将负责人从 {from} 改为 {to}",
+      "run_checked_in": "周期运行已签到",
       "run_failed": "Agent 运行失败",
       "run_started": "启动了一次 Agent 运行",
       "run_succeeded": "完成了一次 Agent 运行",
+      "stage_changed": "更改了子议题阶段",
       "status_changed": "将状态从「{from}」改为「{to}」",
       "sync_conflict": "同步冲突后保留了 {field} 的{winner}值",
       "sync_conflict_resolved": "解决了一次同步冲突",
       "synced_in": "应用了来自 {provider} 的更改",
       "title_changed": "重命名了这个议题",
+      "triage_changed": "{to, select, pending {将其送入待分诊} other {已接受，移出待分诊}}",
       "unassigned": "移除了负责人",
+      "wakeup_fired": "触发了一个唤醒（{delivery}）",
       "work_settled": "处理此事项的 Agent 回合已结束：{to}",
       "work_started": "一次 Agent 回合开始处理此事项"
     },
     "activitySide": {
       "local": "本地",
       "remote": "远端"
+    },
+    "activityWakeupDelivery": {
+      "joined": "并入了当前运行",
+      "notified": "通知了受让人",
+      "run": "启动了运行",
+      "trail": "无受让人"
     },
     "actor": {
       "agent": "Agent",
@@ -18143,6 +18154,13 @@
       "titleOne": "删除 {identifier}？",
       "working": "删除中…"
     },
+    "deliverables": {
+      "conversationGone": "创建此产物的对话已不存在。",
+      "previewUnavailable": "此产物不在本设备上；打开它所在的对话查看。",
+      "section": "交付物",
+      "version": "v{version}",
+      "versions": "版本"
+    },
     "detail": {
       "activity": "活动",
       "assignee": "负责人",
@@ -18162,6 +18180,7 @@
       "priority": "优先级",
       "project": "项目",
       "properties": "属性",
+      "repeats": "×{count}",
       "status": "状态",
       "title": "标题",
       "updated": "更新于"
@@ -18269,6 +18288,10 @@
       "status_changed": {
         "body": "{title}",
         "title": "{identifier} 已移至 {to}"
+      },
+      "wakeup_fired": {
+        "body": "{instruction}",
+        "title": "{identifier}：一个唤醒已触发"
       }
     },
     "planning": {
@@ -18296,6 +18319,7 @@
       "noEstimate": "未估点",
       "noMatch": "没有匹配的议题",
       "noParent": "顶级议题",
+      "noStage": "未分阶段",
       "noSubIssues": "没有子议题",
       "parent": "父议题",
       "pickParent": "选择父议题",
@@ -18313,6 +18337,10 @@
       "removeBlocker": "移除阻塞项",
       "searchPlaceholder": "搜索议题…",
       "section": "规划",
+      "stage": "阶段",
+      "stageHint": "低阶段的子议题先完成，高阶段才开始。每完成一个阶段都会唤醒父议题。",
+      "stageLabel": "阶段 {stage}",
+      "stagePlaceholder": "#",
       "subIssues": "子议题",
       "subIssuesTitle": "{total} 个子议题已完成 {done} 个",
       "unlink": "移除关联"
@@ -18421,7 +18449,9 @@
       "table": "数据表",
       "targetDate": "截止日期",
       "tasklist": "任务清单",
-      "title": "项目"
+      "title": "项目",
+      "triageNewIssues": "新议题进入待分诊",
+      "triageNewIssuesHint": "新导入的、未关闭且无人负责的议题会先进入待分诊。在有人接受之前，聊天或唤醒不会让智能体开始处理它。"
     },
     "rail": {
       "cycles": "迭代",
@@ -18472,6 +18502,7 @@
         "blocked": "被 {detail} 阻塞，请先完成这些议题。",
         "desktop-only": "仅桌面端可用。",
         "issue-finished": "已结束的议题不能运行。",
+        "issue-in-triage": "它正在待分诊。请先接受，或由你在这里亲自发起运行。",
         "no-github-account": "请先在 设置 → 连接 中接入 GitHub 账号。",
         "no-github-ref": "请先把这个议题关联到一个 GitHub issue。",
         "no-github-repo": "请先把项目绑定到该议题所在的 GitHub 仓库。",
@@ -18495,6 +18526,8 @@
         "succeeded": "成功"
       },
       "submit": "运行",
+      "timeline": "运行历史",
+      "timelineEntry": "{engine}：{status}，开始于 {at}",
       "title": "运行 {identifier}",
       "trigger": "运行"
     },
@@ -18604,11 +18637,160 @@
         "updated": "最近更新"
       }
     },
+    "triage": {
+      "accept": "接受",
+      "badge": "待分诊",
+      "cardHint": "待分诊：在有人接受之前，智能体不会开始处理。",
+      "pendingHint": "正在待分诊。它的状态和负责人只是提议；在被接受之前，聊天和唤醒都不会让智能体开始处理。",
+      "send": "送入待分诊"
+    },
     "views": {
       "all": "全部",
       "assigned": "指派给我",
       "created": "我创建的",
       "myAgents": "我的 Agent 与小队"
+    },
+    "wakeups": {
+      "add": "添加唤醒",
+      "at": "时间",
+      "createDescription": "触发条件发生时，指派的 Agent 或小队会带着你的指令和发生的事开始一次运行。若已有运行进行中，输入会并入该运行。受让人是人时改为发送通知。",
+      "createSubmit": "添加唤醒",
+      "createTitle": "为 {identifier} 添加唤醒",
+      "createdToast": "已为 {identifier} 添加唤醒",
+      "cue": {
+        "active": "{count, plural, other {# 个唤醒等待中}}",
+        "held": "{count, plural, other {# 条输入尚未被处理}}",
+        "paused": "{count, plural, other {# 个唤醒已暂停}}",
+        "pausedWith": "{count, plural, other {# 个唤醒已暂停}}：{reason}",
+        "reason": {
+          "issue-closed": "议题已结束",
+          "loop": "在 Agent 之间循环",
+          "rate": "触发过于频繁"
+        }
+      },
+      "dailyAt": "时间",
+      "delete": "删除唤醒",
+      "deletedToast": "唤醒已删除",
+      "empty": "这个议题还没有唤醒规则。",
+      "error": {
+        "issue-finished": "议题已结束，请先重新打开。",
+        "issue-missing": "这个议题已不存在。",
+        "not-a-wakeup": "这个唤醒已不存在。",
+        "pr-unobservable": "此项目未以导入模式绑定 GitHub 仓库，合并永远不会被观察到。",
+        "target-missing": "要关注的议题已不存在。",
+        "target-other-workspace": "要关注的议题属于另一个工作空间。"
+      },
+      "finishedHint": "议题已结束，其唤醒规则已停止。重新打开议题后可恢复。",
+      "fires": "已触发 {count}/{max} 次",
+      "held": "{count, plural, other {# 条输入等待当前运行结束}}",
+      "instruction": "给 Agent 的指令",
+      "instructionPlaceholder": "例如：回答新评论中的问题，或更新计划。",
+      "intervalHours": "间隔（小时）",
+      "kind": {
+        "artifact_linked": "关联产物",
+        "assigned": "被指派",
+        "blocker_added": "新增阻塞",
+        "blocker_removed": "解除阻塞",
+        "child_stage_changed": "子议题阶段变化",
+        "child_status_changed": "子议题状态变化",
+        "commented": "评论",
+        "created": "议题创建",
+        "cycle_changed": "周期变化",
+        "description_changed": "描述变化",
+        "due_date_changed": "截止日期变化",
+        "estimate_changed": "估算变化",
+        "external_linked": "新增外部链接",
+        "external_unlinked": "移除外部链接",
+        "github_linked": "关联 GitHub issue",
+        "github_write_back": "回写 GitHub",
+        "label_added": "添加标签",
+        "label_removed": "移除标签",
+        "parent_changed": "父议题变化",
+        "pr_state_changed": "关联拉取请求变化",
+        "priority_changed": "优先级变化",
+        "project_changed": "项目变化",
+        "reassigned": "改派",
+        "run_checked_in": "运行签到",
+        "run_failed": "运行失败",
+        "run_started": "运行开始",
+        "run_succeeded": "运行成功",
+        "stage_changed": "阶段变化",
+        "status_changed": "状态变化",
+        "sync_conflict": "同步冲突",
+        "sync_conflict_resolved": "同步冲突已解决",
+        "synced_in": "远端同步",
+        "title_changed": "标题变化",
+        "triage_changed": "分诊变化",
+        "unassigned": "取消指派",
+        "work_settled": "工作结束",
+        "work_started": "工作开始"
+      },
+      "maxFires": "触发次数上限",
+      "next": "下次 {when}",
+      "noTargets": "看板上没有其他可关注的未结束议题。",
+      "once": "只触发一次",
+      "pause": "暂停",
+      "pauseReason": {
+        "issue-closed": "已停止：议题已结束",
+        "loop": "已暂停：在 Agent 之间循环",
+        "rate": "已暂停：触发过于频繁"
+      },
+      "pausedToast": "唤醒已暂停",
+      "peopleOnly": "仅限人发表的评论",
+      "preset": {
+        "at": "在指定时间一次",
+        "children-done": "所有子议题都已结束",
+        "comment": "有人评论",
+        "daily": "每天某个时间",
+        "interval": "每隔几小时",
+        "issue-finished": "另一个议题结束",
+        "pr-merged": "关联的拉取请求合并",
+        "status": "状态变为…"
+      },
+      "presetHint": {
+        "at": "在所选时间触发一次。",
+        "children-done": "最后一个未结束的子议题完成或取消时触发。",
+        "comment": "这个议题每有一条新评论就触发。",
+        "daily": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
+        "interval": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
+        "issue-finished": "所选议题完成或取消时触发。",
+        "pr-merged": "关联到此议题的拉取请求合并后触发一次。需要项目以导入模式绑定其 GitHub 仓库；状态由该同步获取，因此可能延迟一个同步间隔。",
+        "status": "议题移到所选状态时触发。"
+      },
+      "presetLabel": "何时唤醒",
+      "resume": "恢复",
+      "resumedToast": "唤醒已恢复",
+      "safetyHint": "规则在用完触发次数后失效，且不会被它自己运行产生的活动再次触发。",
+      "section": "唤醒",
+      "sectionHint": "当某件事发生或到达定时点时，在这个议题上唤醒 Agent 的规则。在 Agent 之间循环、或一小时内触发超过 12 次的规则会自动暂停。",
+      "stage": "子议题阶段（可选）",
+      "stageHint": "只等待到此阶段为止的已分阶段子议题。留空则等待所有子议题。",
+      "stagePlaceholder": "全部子议题",
+      "state": {
+        "active": "等待中",
+        "autoPaused": "连续失败后已暂停",
+        "budgetSpent": "触发次数已用完",
+        "consumed": "已完成",
+        "ended": "已过期",
+        "paused": "已暂停"
+      },
+      "system": "自动",
+      "target": "要关注的议题",
+      "targetPlaceholder": "选择一个议题",
+      "toStatus": "状态",
+      "trigger": {
+        "anyActivity": "任何活动",
+        "at": "在 {at} 一次",
+        "byPeople": "{base}（仅限人）",
+        "childrenDone": "所有子议题结束时",
+        "childrenDoneStage": "子议题阶段 {stage} 结束时",
+        "cron": "按计划 {expression}",
+        "event": "发生 {kinds} 时",
+        "interval": "每 {hours} 小时",
+        "issueFinished": "{issue} 结束时",
+        "prMerged": "关联的拉取请求合并时",
+        "statusTo": "状态变为 {statuses} 时"
+      }
     },
     "workspace": {
       "agentsWorking": "工作中的 Agent",
@@ -32157,7 +32339,12 @@
         "running": "{name} 正在运行",
         "runningWithProcesses": "{name} 正在运行，有 {count} 个活动进程",
         "sourceFailed": "{kind} 数据源加载失败：{error}",
-        "unsupportedType": "{name} 无法在此主机上运行"
+        "unsupportedType": "{name} 无法在此主机上运行",
+        "wakeupPaused": {
+          "issue-closed": "{name} 已停止，因为所属议题已结束",
+          "loop": "{name} 已自动暂停：它在 Agent 之间循环唤醒",
+          "rate": "{name} 已自动暂停：一小时内触发过于频繁"
+        }
       },
       "emptyNext": "下一个：{name}，{when}",
       "emptyNothingScheduled": "没有计划中的运行。",
@@ -32173,7 +32360,12 @@
         "needsApprovalTrust": "等待你信任 {roots}",
         "running": "正在运行",
         "runningWithProcesses": "正在运行，{count} 个活动进程",
-        "unsupportedType": "此主机无法运行"
+        "unsupportedType": "此主机无法运行",
+        "wakeupPaused": {
+          "issue-closed": "已停止：所属议题已结束",
+          "loop": "已自动暂停：在 Agent 之间循环",
+          "rate": "已自动暂停：触发过于频繁"
+        }
       }
     },
     "authoredBy": {
@@ -33281,6 +33473,7 @@
       "github-issue-sync": "GitHub Issue 同步",
       "goal": "目标",
       "im-push": "IM 推送",
+      "issue-wakeup": "议题唤醒",
       "monitor": "Monitor",
       "plan": "计划",
       "plugin": "插件",

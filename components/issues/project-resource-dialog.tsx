@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -127,6 +128,7 @@ export function ProjectResourceDialog({
   const [repo, setRepo] = useState("")
   const [syncMode, setSyncMode] = useState<"mirror" | "import">("mirror")
   const [projectV2, setProjectV2] = useState("")
+  const [triageNewIssues, setTriageNewIssues] = useState(false)
   const [rootId, setRootId] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -293,6 +295,7 @@ export function ProjectResourceDialog({
                 sync: {
                   mode: "import" as const,
                   ...(projectV2Number !== undefined ? { projectV2Number } : {}),
+                  ...(triageNewIssues ? { triageNewIssues: true } : {}),
                 },
               }
             : {}),
@@ -444,6 +447,22 @@ export function ProjectResourceDialog({
                     {projectV2Invalid
                       ? t("projects.projectV2Invalid")
                       : t("projects.projectV2Hint")}
+                  </p>
+                </div>
+              ) : null}
+              {syncMode === "import" ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="resource-triage-new">{t("projects.triageNewIssues")}</Label>
+                    <Switch
+                      id="resource-triage-new"
+                      checked={triageNewIssues}
+                      onCheckedChange={setTriageNewIssues}
+                      data-testid="resource-triage-new"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("projects.triageNewIssuesHint")}
                   </p>
                 </div>
               ) : null}

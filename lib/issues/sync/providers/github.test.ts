@@ -4,6 +4,8 @@ import type { IssueSyncBinding } from "../types"
 import {
   createGithubSyncProvider,
   extractIssueMentions,
+  githubLoginOfAssignee,
+  nextGithubAssignees,
   iterationExternalId,
   milestoneExternalId,
   statusToGithubState,
@@ -234,6 +236,8 @@ describe("pull", () => {
           body: "closes #1",
           html_url: "p",
           head: { ref: "merc-4-fix" },
+          state: "closed",
+          merged_at: "2026-02-01T00:00:00Z",
         },
         { number: 21, title: "unrelated", body: "", html_url: "q", head: { ref: "main" } },
       ],
@@ -258,6 +262,7 @@ describe("pull", () => {
         externalId: "acme/one#20",
         mentionsIdentifiers: ["MERC-4"],
         mentionsExternalIds: ["acme/one#1"],
+        prState: "merged",
       }),
     ])
   })
@@ -320,5 +325,105 @@ describe("push", () => {
         by: { kind: "agent" },
       })
     ).rejects.toMatchObject({ name: "MissingGithubCredentialError" })
+  })
+})
+
+describe("assignee push", () => {
+  const ref: IssueExternalRef = { provider: "github", externalId: "acme/one#5" }
+
+  function setup(remoteAssignees: string[]) {
+    const request = jest.fn(async () => ({
+      status: 200,
+      headers: {},
+      data: { assignees: remoteAssignees.map((login) => ({ login })) },
+    }))
+    const execute = jest.fn(async () => ({ id: "job", status: "awaiting_approval" }))
+    const provider = createGithubSyncProvider({
+      resolveOctokitOrNull: async () => ({ request }) as unknown as OctokitLike,
+      execute: execute as never,
+      resolveAccount: async () => ({ id: "acct", enabled: true }) as never,
+    })
+    return { provider, request, execute }
+  }
+
+  it("recognises only an assignee that came from GitHub", () => {
+    expect(githubLoginOfAssignee({ assignee: { kind: "human", label: "octo-cat" } })).toBe(
+      "octo-cat"
+    )
+    expect(githubLoginOfAssignee({ assignee: { kind: "human", id: "u1", label: "octocat" } })).toBe(
+      undefined
+    )
+    expect(githubLoginOfAssignee({ assignee: { kind: "agent", id: "a1", label: "Coder" } })).toBe(
+      undefined
+    )
+    expect(githubLoginOfAssignee({ assignee: { kind: "human", label: "Ada Lovelace" } })).toBe(
+      undefined
+    )
+    expect(githubLoginOfAssignee({})).toBe(undefined)
+  })
+
+  it("replaces the first assignee and keeps the others", () => {
+    expect(nextGithubAssignees(["old", "b", "c"], "new")).toEqual(["new", "b", "c"])
+    expect(nextGithubAssignees(["old", "New"], "new")).toEqual(["new"])
+    expect(nextGithubAssignees([], "new")).toEqual(["new"])
+    expect(nextGithubAssignees(["a", "b"], null)).toEqual([])
+  })
+
+  it("sends the full assignee list read from GitHub", async () => {
+    const { provider, request, execute } = setup(["alice", "bob"])
+    const issue = { id: "i1", assignee: { kind: "human", label: "carol" } } as never
+    await provider.push!(binding(), ref, { assignee: "carol" }, issue, {
+      idempotencyKey: "k",
+      by: { kind: "agent" },
+    })
+    expect(request).toHaveBeenCalledWith("GET /repos/{owner}/{repo}/issues/{issue_number}", {
+      owner: "acme",
+      repo: "one",
+      issue_number: 5,
+    })
+    expect(execute).toHaveBeenCalledWith(
+      "github-delivery",
+      expect.objectContaining({
+        input: { repoFullName: "acme/one", issueNumber: 5, assignees: ["carol", "bob"] },
+      })
+    )
+  })
+
+  it("clears GitHub's assignees when the local issue is unassigned", async () => {
+    const { provider, execute } = setup(["alice", "bob"])
+    await provider.push!(binding(), ref, { assignee: null }, { id: "i1" } as never, {
+      idempotencyKey: "k",
+      by: { kind: "agent" },
+    })
+    expect(execute).toHaveBeenCalledWith(
+      "github-delivery",
+      expect.objectContaining({ input: expect.objectContaining({ assignees: [] }) })
+    )
+  })
+
+  it("keeps an agent assignee local and sends the rest of the patch", async () => {
+    const { provider, request, execute } = setup(["alice"])
+    const issue = { id: "i1", assignee: { kind: "agent", id: "a1", label: "Coder" } } as never
+    await provider.push!(binding(), ref, { assignee: "Coder", title: "T" }, issue, {
+      idempotencyKey: "k",
+      by: { kind: "agent" },
+    })
+    expect(request).not.toHaveBeenCalled()
+    expect(execute).toHaveBeenCalledWith(
+      "github-delivery",
+      expect.objectContaining({ input: { repoFullName: "acme/one", issueNumber: 5, title: "T" } })
+    )
+  })
+
+  it("sends nothing when the only change was a local-only assignee", async () => {
+    const { provider, execute } = setup(["alice"])
+    const issue = { id: "i1", assignee: { kind: "agent", id: "a1", label: "Coder" } } as never
+    await expect(
+      provider.push!(binding(), ref, { assignee: "Coder" }, issue, {
+        idempotencyKey: "k",
+        by: { kind: "agent" },
+      })
+    ).resolves.toEqual({ status: "applied" })
+    expect(execute).not.toHaveBeenCalled()
   })
 })

@@ -2,6 +2,11 @@
  * @jest-environment jsdom
  */
 
+const mockCascadeDeleteIssueWakeups = jest.fn()
+jest.mock("@/lib/issues/wakeups/service", () => ({
+  cascadeDeleteIssueWakeups: (...args: unknown[]) => mockCascadeDeleteIssueWakeups(...args),
+}))
+
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import { allocateIssueNumber } from "./issue-counters"
@@ -205,6 +210,8 @@ describe("deleteIssueProject", () => {
     expect(await db.issues.get(issue.id)).toBeUndefined()
     expect(await listIssueEvents({ issueId: issue.id })).toEqual([])
     expect(await db.issueCounters.get(project.id)).toBeUndefined()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockCascadeDeleteIssueWakeups).toHaveBeenCalledWith([issue.id])
   })
 
   it("releases the key so a fresh project can reuse it and renumber from 1", async () => {
@@ -256,6 +263,8 @@ describe("deleteIssueDataForWorkspace", () => {
     // Scoped by workspace, so the neighbouring one is untouched.
     expect(await listIssueProjects({ projectId: "w2" })).toHaveLength(1)
     expect(await getDb().issues.get(kept.issue.id)).toBeDefined()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockCascadeDeleteIssueWakeups).toHaveBeenLastCalledWith([doomed.issue.id])
   })
 
   it("releases the container key back to the pool", async () => {

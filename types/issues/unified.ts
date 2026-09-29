@@ -32,6 +32,7 @@ import type {
   IssueStatus,
   IssueStatusCategory,
   IssueOrigin,
+  IssueTriageState,
 } from "@/types/issues"
 
 /** Single exhaustive runtime/type authority for every federated source. */
@@ -143,6 +144,10 @@ export interface UnifiedIssueItem {
   blockedBy?: readonly string[]
   dueDate?: number
   estimate?: number
+  /** `Issue.stage` — the sub-issue barrier group. Local source only. */
+  stage?: number
+  /** `Issue.triage` — waiting for someone to accept it. Local source only. */
+  triage?: IssueTriageState
   cycleId?: string
   externalRefs?: readonly IssueExternalRef[]
   /** Where the row was filed from (`Issue.origin`). Local source only. */

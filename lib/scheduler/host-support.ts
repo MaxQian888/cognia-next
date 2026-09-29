@@ -75,6 +75,10 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   // Authored by the /issues project console when a GitHub repo resource is
   // bound (`lib/issues/github-sync-schedule.ts`), never from the task form.
   "github-issue-sync",
+  // Authored from the issue detail panel and the `issue.wakeup_*` skills
+  // (`lib/issues/wakeups/service.ts`): the payload names an issue and a match
+  // the generic form has no fields for.
+  "issue-wakeup",
   "provider-diagnostics-refresh",
   "connection:scheduled:digest",
   "connection:outbound:send",

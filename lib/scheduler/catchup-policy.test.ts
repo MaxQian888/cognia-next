@@ -28,6 +28,8 @@ describe("resolveCatchupTier", () => {
       "agent-team",
       "goal",
       "plan",
+      // One fresh missed check-in on an issue, never a backlog of them.
+      "issue-wakeup",
     ]) {
       expect(resolveCatchupTier(type)).toBe("grace")
     }

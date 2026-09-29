@@ -39,6 +39,12 @@ describe("activityValues", () => {
     expect(activityValues({ kind: "created" }, t)).toEqual({ from: "", to: "" })
   })
 
+  it("names what a wakeup fire became", () => {
+    expect(activityValues({ kind: "wakeup_fired", delivery: "joined" }, t)).toMatchObject({
+      delivery: t("activityWakeupDelivery.joined"),
+    })
+  })
+
   it("survives an event whose payload is missing entirely", () => {
     // These rows cross the companion wire now, so a host on an older shape
     // can hand a phone an event this code does not recognise. A timeline is

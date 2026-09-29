@@ -34,6 +34,11 @@ import type {
 } from "@/types/issues"
 import { statusCategoryOf } from "@/types/issues"
 import { isGithubImportBinding } from "../bindings"
+import {
+  PULL_REQUEST_REF_PROVIDER,
+  pullRequestExternalId,
+  pullRequestStateOf,
+} from "@/lib/issues/pull-requests"
 import type {
   IssueSyncBinding,
   IssueSyncProvider,
@@ -47,7 +52,7 @@ import type {
 } from "../types"
 
 export const GITHUB_SYNC_PROVIDER_ID = "github"
-export const GITHUB_PR_PROVIDER_ID = "github-pr"
+export const GITHUB_PR_PROVIDER_ID = PULL_REQUEST_REF_PROVIDER
 
 export const GITHUB_PULL_FIELDS: readonly IssueSyncField[] = [
   "title",
@@ -61,9 +66,44 @@ export const GITHUB_PUSH_FIELDS: readonly IssueSyncField[] = [
   "title",
   "description",
   "status",
+  "assignee",
   "labels",
   "cycle",
 ]
+
+/** GitHub's login grammar: 1–39 alphanumerics or single hyphens, no leading hyphen. */
+const GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/
+
+/**
+ * The GitHub login a local issue's assignee stands for, or `undefined` when
+ * the assignee is not a GitHub identity.
+ *
+ * Only an assignee that came FROM GitHub qualifies: import writes it as a
+ * `human` actor with the login as its label and no local id. An agent or a
+ * workspace member has no GitHub login here, and guessing one from a display
+ * name would assign a stranger.
+ */
+export function githubLoginOfAssignee(issue: Pick<Issue, "assignee">): string | undefined {
+  const assignee = issue.assignee
+  if (!assignee || assignee.kind !== "human" || assignee.id) return undefined
+  const label = assignee.label?.trim()
+  return label && GITHUB_LOGIN_RE.test(label) ? label : undefined
+}
+
+/**
+ * The full assignee list to send for a local single-assignee change.
+ *
+ * The board mirrors only the FIRST GitHub assignee, so the push replaces that
+ * one and keeps the rest — sending just `[login]` would silently unassign
+ * everyone else. `null` (nobody locally) clears the issue.
+ */
+export function nextGithubAssignees(current: readonly string[], login: string | null): string[] {
+  if (login === null) return []
+  const rest = current
+    .slice(1)
+    .filter((candidate) => candidate.toLowerCase() !== login.toLowerCase())
+  return [login, ...rest]
+}
 
 export function milestoneExternalId(number: number): string {
   return `milestone/${number}`
@@ -96,6 +136,8 @@ interface RawPull {
   body?: string | null
   html_url?: string
   head?: { ref?: string } | null
+  state?: string
+  merged_at?: string | null
 }
 
 interface ProjectV2Response {
@@ -233,13 +275,20 @@ export function statusToGithubState(status: IssueStatus): {
   return { state: "open" }
 }
 
-/** The `updateIssue` action input for a patch. Milestones only, never iterations. */
+/**
+ * The `updateIssue` action input for a patch. Milestones only, never
+ * iterations. `assignees` is the complete list to set, computed by the caller
+ * from the remote's current assignees (see {@link nextGithubAssignees}); the
+ * patch's own `assignee` label is not sent directly.
+ */
 export function toUpdateIssueInput(
   repoFullName: string,
   issueNumber: number,
-  patch: RemotePatch
+  patch: RemotePatch,
+  assignees?: readonly string[]
 ): Record<string, unknown> {
   const input: Record<string, unknown> = { repoFullName, issueNumber }
+  if (assignees !== undefined) input.assignees = [...assignees]
   if (patch.title !== undefined) input.title = patch.title
   if (patch.description !== undefined) input.body = patch.description ?? ""
   if (patch.status !== undefined) {
@@ -361,13 +410,15 @@ async function fetchPullLinks(
     const text = [pull.title ?? "", pull.body ?? "", pull.head?.ref ?? ""].join("\n")
     const mentions = extractIssueMentions(text, binding.projectKey, repoFullName)
     if (mentions.identifiers.length === 0 && mentions.externalIds.length === 0) continue
+    const prState = pullRequestStateOf(pull)
     links.push({
       provider: GITHUB_PR_PROVIDER_ID,
-      externalId: `${repoFullName}#${pull.number}`,
+      externalId: pullRequestExternalId(repoFullName, pull.number),
       ...(pull.html_url ? { url: pull.html_url } : {}),
       label: `PR #${pull.number}${pull.title ? `: ${pull.title}` : ""}`,
       mentionsIdentifiers: mentions.identifiers,
       mentionsExternalIds: mentions.externalIds,
+      ...(prState ? { prState } : {}),
     })
   }
   return links
@@ -453,7 +504,7 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
       binding: IssueSyncBinding,
       ref: IssueExternalRef,
       patch: RemotePatch,
-      _issue: Issue,
+      issue: Issue,
       context: { idempotencyKey: string }
     ): Promise<PushOutcome> {
       const resource = binding.resource
@@ -463,13 +514,40 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
       if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
         throw new Error(`Not a GitHub issue ref: ${ref.externalId}`)
       }
+
+      // An assignee goes out only when it names a GitHub login (or nobody);
+      // an agent or member assignee stays local, as it always has.
+      let assignees: string[] | undefined
+      if (patch.assignee !== undefined) {
+        const login = patch.assignee === null ? null : githubLoginOfAssignee(issue)
+        if (login !== undefined) {
+          const [owner, repo] = resource.repoFullName.split("/")
+          const current = await (
+            await octokitFor(resource.repoFullName)
+          ).request("GET /repos/{owner}/{repo}/issues/{issue_number}", {
+            owner,
+            repo,
+            issue_number: issueNumber,
+          })
+          const logins = (
+            (current.data as { assignees?: Array<{ login?: string }> } | undefined)?.assignees ?? []
+          )
+            .map((assignee) => assignee.login)
+            .filter((value): value is string => typeof value === "string")
+          assignees = nextGithubAssignees(logins, login)
+        }
+      }
+      const input = toUpdateIssueInput(resource.repoFullName, issueNumber, patch, assignees)
+      // Nothing left to send (the patch was only a local-only assignee).
+      if (Object.keys(input).length <= 2) return { status: "applied" }
+
       const account = await resolveAccount()
       if (!account) throw new MissingGithubCredentialError(resource.repoFullName)
       const job = await execute(GITHUB_DELIVERY_PLUGIN_ID, {
         integrationId: GITHUB_INTEGRATION_ID,
         accountId: account.id,
         actionId: "updateIssue",
-        input: toUpdateIssueInput(resource.repoFullName, issueNumber, patch),
+        input,
         source: "workflow",
         idempotencyKey: context.idempotencyKey,
       })

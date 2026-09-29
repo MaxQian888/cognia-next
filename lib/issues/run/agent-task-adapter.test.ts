@@ -222,6 +222,19 @@ describe("start", () => {
     expect(result.status).toBe("running")
   })
 
+  it("appends a wakeup brief to the task and stores the lineage on the run", async () => {
+    const { deps, created, runs } = makeDeps()
+    const wakeup = { taskId: "wk", chain: ["wk"], statusBefore: "todo" as const, periodic: true }
+    await createAgentTaskRunAdapter(deps).start(target(), {
+      by: HUMAN,
+      origin: "wakeup",
+      brief: "[WAKEUP wk] MERC-1",
+      wakeup,
+    })
+    expect(created[0]!.description.endsWith("\n\n[WAKEUP wk] MERC-1")).toBe(true)
+    expect(runs[0]).toMatchObject({ wakeup })
+  })
+
   it("throws when the target is not runnable and when the scheduler refuses", async () => {
     const { deps } = makeDeps({
       runTaskNow: async () => {
@@ -297,5 +310,35 @@ describe("cancel", () => {
     const { deps, cancelled } = makeDeps()
     await createAgentTaskRunAdapter(deps).cancel!(run())
     expect(cancelled).toEqual(["agent-task:abc"])
+  })
+})
+
+describe("sessionIds", () => {
+  it("names the sessions of live attempts only, newest attempt first", async () => {
+    const attempt = (
+      attemptNo: number,
+      status: AgentTaskAttempt["status"],
+      sessionId?: string
+    ): AgentTaskAttempt => ({
+      id: `a${attemptNo}`,
+      taskId: "agent-task:abc",
+      agentId: "char-1",
+      attemptNo,
+      status,
+      ...(sessionId ? { sessionId } : {}),
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const adapter = createAgentTaskRunAdapter(
+      makeDeps({
+        listAttempts: async () => [
+          attempt(1, "failed", "s1"),
+          attempt(2, "running", "s2"),
+          attempt(3, "queued", "s3"),
+          attempt(4, "running"),
+        ],
+      }).deps
+    )
+    expect(await adapter.sessionIds!(run())).toEqual(["s3", "s2"])
   })
 })

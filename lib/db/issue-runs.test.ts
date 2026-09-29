@@ -57,6 +57,25 @@ async function kindsOf(id: string) {
 }
 
 describe("createIssueRun", () => {
+  it("stores a wakeup's lineage on the row", async () => {
+    const wakeup = {
+      taskId: "wk1",
+      chain: ["wk0", "wk1"],
+      statusBefore: "todo" as const,
+      periodic: true,
+    }
+    const run = await createIssueRun({
+      issueId,
+      projectId: "w1",
+      adapterId: "agent-task",
+      kind: "agent-task",
+      targetId: "t-w",
+      by: HUMAN,
+      wakeup,
+    })
+    expect((await getIssueRun(run.id))!.wakeup).toEqual(wakeup)
+  })
+
   it("writes a running row and appends run_started in one go", async () => {
     const run = await start()
     expect(run.status).toBe("running")
@@ -203,6 +222,24 @@ describe("settleIssueRun", () => {
     expect(await settleIssueRun(run.id, { status: "failed", error: "late" })).toBeUndefined()
     expect(await settleIssueRun("missing", { status: "succeeded" })).toBeUndefined()
     expect((await getIssueRun(run.id))!.status).toBe("succeeded")
+  })
+
+  it("checkin: settles succeeded with the note, and says run_checked_in rather than run_succeeded", async () => {
+    const run = await start()
+    const settled = await settleIssueRun(
+      run.id,
+      { status: "succeeded", mode: "checkin", note: "all quiet" },
+      9
+    )
+    expect(settled).toMatchObject({ status: "succeeded", summary: "all quiet", endedAt: 9 })
+    const events = await listIssueEvents({ issueId })
+    expect(events.at(-1)!.payload).toEqual({
+      kind: "run_checked_in",
+      runId: run.id,
+      adapterId: run.adapterId,
+      note: "all quiet",
+    })
+    expect(events.some((event) => event.kind === "run_succeeded")).toBe(false)
   })
 
   it("does not duplicate an artifact already linked", async () => {

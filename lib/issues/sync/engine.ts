@@ -25,7 +25,9 @@ import {
   createIssue,
   getIssueByExternalKey,
   linkIssueExternal,
+  listIssuesByExternalKey,
   mapIssuesByExternalProvider,
+  recordIssuePullRequestState,
   touchIssueExternalRef,
 } from "@/lib/db/issues"
 import {
@@ -152,6 +154,22 @@ function refOf(
   )
 }
 
+/**
+ * Does a newly imported item land in triage? Only when its binding opted in
+ * (`GithubRepoSyncSettings.triageNewIssues`) and the item is open and nobody
+ * is assigned: a closed item has nothing to decide, an assigned one was
+ * already decided remotely.
+ */
+export function triageOnImport(
+  binding: Pick<IssueSyncBinding, "resource">,
+  remote: Pick<RemoteIssue, "status" | "assigneeLabel">
+): boolean {
+  const resource = binding.resource
+  if (resource.kind !== "github-repo" || resource.sync?.triageNewIssues !== true) return false
+  const category = statusCategoryOf(remote.status)
+  return (category === "unstarted" || category === "started") && !remote.assigneeLabel
+}
+
 async function importRemote(
   binding: IssueSyncBinding,
   remote: RemoteIssue,
@@ -174,6 +192,7 @@ async function importRemote(
     ...(typeof remote.dueDate === "number" ? { dueDate: remote.dueDate } : {}),
     ...(typeof remote.estimate === "number" ? { estimate: remote.estimate } : {}),
     ...(cycleId ? { cycleId } : {}),
+    ...(triageOnImport(binding, remote) ? { triage: "pending" as const } : {}),
     externalRefs: [
       {
         provider: binding.providerId,
@@ -347,6 +366,7 @@ function addToPatch(patch: RemotePatch, field: IssueSyncField, value: RemoteFiel
       patch.cycleExternalId = typeof value === "string" ? value : null
       break
     case "assignee":
+      patch.assignee = typeof value === "string" && value ? value : null
       break
   }
 }
@@ -404,23 +424,34 @@ async function linkRemote(
       const issue = await getIssueByExternalKey(binding.providerId, externalId)
       if (issue) targets.set(issue.id, issue)
     }
+    // A pull request already linked to other issues (by an earlier pass, or
+    // by the run that opened it) still gets its state recorded there.
+    if (link.prState) {
+      for (const issue of await listIssuesByExternalKey(externalKeyOf(link))) {
+        if (issue.projectId === binding.projectId) targets.set(issue.id, issue)
+      }
+    }
     for (const issue of targets.values()) {
       const already = (issue.externalKeys ?? []).includes(
         externalKeyOf({ provider: link.provider, externalId: link.externalId })
       )
-      if (already) continue
-      await linkIssueExternal(
-        issue.id,
-        {
-          provider: link.provider,
-          externalId: link.externalId,
-          ...(link.url ? { url: link.url } : {}),
-          ...(link.label ? { label: link.label } : {}),
-          meta: { binding: binding.key },
-        },
-        by
-      )
-      tally.linked += 1
+      if (!already) {
+        await linkIssueExternal(
+          issue.id,
+          {
+            provider: link.provider,
+            externalId: link.externalId,
+            ...(link.url ? { url: link.url } : {}),
+            ...(link.label ? { label: link.label } : {}),
+            meta: { binding: binding.key },
+          },
+          by
+        )
+        tally.linked += 1
+      }
+      if (link.prState) {
+        await recordIssuePullRequestState(issue.id, link.externalId, link.prState, by)
+      }
     }
   }
 }

@@ -11,10 +11,16 @@
  * | issue.comment             | write       | always   | []       |
  * | issue.run                 | write       | always   | []       |
  * | issue.cancel_run          | write       | always   | []       |
+ * | issue.link_artifact       | write       | always   | []       |
  * | issue.create_project      | write       | always   | []       |
  * | issue.update_project      | write       | always   | []       |
  * | issue.delete              | destructive | opt-in   | []       |
  * | issue.delete_project      | destructive | opt-in   | []       |
+ * | issue.wakeup_list         | read        | always   | []       |
+ * | issue.wakeup_create       | write       | always   | []       |
+ * | issue.wakeup_set_enabled  | write       | always   | []       |
+ * | issue.wakeup_checkin      | write       | always   | []       |
+ * | issue.wakeup_delete       | destructive | opt-in   | []       |
  *
  * The family started as `create` plus `list_projects`, which made the tracker
  * write-only from a model's point of view: an assistant could file an issue
@@ -35,7 +41,13 @@ import "./update"
 import "./comment"
 import "./run"
 import "./cancel-run"
+import "./link-artifact"
 import "./create-project"
 import "./update-project"
 import "./delete"
 import "./delete-project"
+import "./wakeup-list"
+import "./wakeup-create"
+import "./wakeup-set-enabled"
+import "./wakeup-checkin"
+import "./wakeup-delete"

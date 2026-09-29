@@ -93,6 +93,38 @@ describe("IssuePlanningSection", () => {
     expect(onAction).toHaveBeenLastCalledWith({ kind: "addBlocker", blockerId: "o" })
   })
 
+  it("offers a stage only on a sub-issue, and ignores a value that is not one", () => {
+    const onAction = jest.fn()
+    const parent = local({ sourceId: "p" })
+    const top = local({ sourceId: "top" })
+    const { rerender } = render(
+      <IssuePlanningSection item={top} items={[parent, top]} cycles={[]} onAction={onAction} />
+    )
+    expect(screen.queryByTestId("issue-detail-stage")).toBeNull()
+
+    const child = local({ sourceId: "me", parentId: "p", stage: 1 })
+    rerender(
+      <IssuePlanningSection item={child} items={[parent, child]} cycles={[]} onAction={onAction} />
+    )
+    fireEvent.change(screen.getByTestId("issue-detail-stage"), { target: { value: "2" } })
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "stage", to: 2 })
+    fireEvent.change(screen.getByTestId("issue-detail-stage"), { target: { value: "" } })
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "stage", to: null })
+    onAction.mockClear()
+    fireEvent.change(screen.getByTestId("issue-detail-stage"), { target: { value: "0" } })
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
+  it("prints the stage read-only when edits are refused", () => {
+    const parent = local({ sourceId: "p" })
+    const child = local({ sourceId: "me", parentId: "p", stage: 3 })
+    render(<IssuePlanningSection item={child} items={[parent, child]} cycles={[]} />)
+    expect(screen.queryByTestId("issue-detail-stage")).toBeNull()
+    expect(
+      screen.getByText(`planning.stageLabel:${JSON.stringify({ stage: 3 })}`)
+    ).toBeInTheDocument()
+  })
+
   it("lists parent, sub-issues, blockers and the derived blocks side", () => {
     const onAction = jest.fn()
     const parent = local({ sourceId: "p" })

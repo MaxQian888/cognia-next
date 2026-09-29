@@ -45,7 +45,8 @@ const skill: BuiltInSkill<typeof schema> = {
 
     const { listIssueRunOptions, startIssueRun, IssueRunRefusedError } =
       await import("@/lib/issues/run/registry")
-    const options = await listIssueRunOptions(issue.id)
+    const origin = ctx.imBinding ? "im" : "interactive"
+    const options = await listIssueRunOptions(issue.id, undefined, origin)
     const accepting = options.filter((option) => option.verdict.ok)
 
     let adapterId = args.adapterId
@@ -84,7 +85,7 @@ const skill: BuiltInSkill<typeof schema> = {
         issueId: issue.id,
         adapterId,
         by,
-        origin: ctx.imBinding ? "im" : "interactive",
+        origin,
       })
       return {
         status: "started",

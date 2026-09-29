@@ -29,7 +29,7 @@ description: 每个工作区一个本地 Issue 追踪器——项目、Issue、�
 
 ### 1. 术语与不变量
 
-`Workspace = Project`（`types/plugin/_compat.ts`），拥有 `WorkspaceRoot[]`、`IssueProject[]`、`Issue[]` 与 `AgentTeam[]`。Issue 的**受让人**是 `IssueActor`：`human`、`agent`（= `Character` id）或 `team`（= `AgentTeam` id）；其他一律被选择器与 IM 处理器拒绝。看板六列固定。人类迁移走 `lib/issues/state-machine.ts`。**run 在飞时运行时拥有 `in_progress`**——`runActive` 时 `canMoveIssue` 双向拒绝进出该列——但没有活跃 run 时，人类可以像对待任何一列那样把 Issue 移进去。（本 ADR 早前的措辞是「人类永远不能移过去」，守卫从未实现过这一点，而守卫自己的注释恰恰主张相反：「issue tracker 不该跟用户争论」。以代码为准，措辞已对齐。）run 结束把 Issue 停在 `in_review`，绝不 `done`；取消 run 退回 `todo`。`applyRuntimeIssueStatus`（`lib/db/issues.ts`）是运行时迁移的唯一写入者。
+`Workspace = Project`（`types/plugin/_compat.ts`），拥有 `WorkspaceRoot[]`、`IssueProject[]`、`Issue[]` 与 `AgentTeam[]`。Issue 的**受让人**是 `IssueActor`：`human`、`agent`（= `Character` id）或 `team`（= `AgentTeam` id）；其他一律被选择器与 IM 处理器拒绝。看板六列固定。**分诊是属性，不是第七列**（2026-09-29）：`Issue.triage = "pending"` 表示该 Issue 的状态与受让人只是尚未被接受的提议。它不改变任何列，也不改变任何类别投影；它改变的是谁可以启动 run——`trackerVerdict` 对由入口推导出的来源（`im`、`wakeup`）以 `issue-in-triage` 拒绝，而放行由人在 Run 对话框中点名的 run（`interactive`，见 `isNamedRunOrigin`）。接受分诊走与其他编辑相同的批量动作词汇表清除该属性，并释放期间被暂存的唤醒输入。GitHub 导入模式可把新导入的、未关闭且无人受让的 Issue 送入分诊（`GithubRepoSyncSettings.triageNewIssues`）。人类迁移走 `lib/issues/state-machine.ts`。**run 在飞时运行时拥有 `in_progress`**——`runActive` 时 `canMoveIssue` 双向拒绝进出该列——但没有活跃 run 时，人类可以像对待任何一列那样把 Issue 移进去。（本 ADR 早前的措辞是「人类永远不能移过去」，守卫从未实现过这一点，而守卫自己的注释恰恰主张相反：「issue tracker 不该跟用户争论」。以代码为准，措辞已对齐。）run 结束把 Issue 停在 `in_review`，绝不 `done`；取消 run 退回 `todo`。`applyRuntimeIssueStatus`（`lib/db/issues.ts`）是运行时迁移的唯一写入者。
 
 ### 2. 执行桥——`issueRuns`（Dexie **v174**）与 `IssueRunAdapter`
 

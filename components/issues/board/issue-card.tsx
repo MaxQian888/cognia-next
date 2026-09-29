@@ -34,6 +34,8 @@ import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
 import { SquadRunChip } from "./squad-run-chip"
+import { WakeupCueChip } from "./wakeup-cue-chip"
+import type { IssueWakeupCue } from "@/lib/issues/wakeups/model"
 import { PlanningBadges } from "../planning/planning-badges"
 
 export interface IssueCardVisualProps {
@@ -49,6 +51,8 @@ export interface IssueCardVisualProps {
   running?: boolean
   /** The Squad this issue was dispatched to, when any. */
   squadRun?: SquadRunRef
+  /** What its wakeups are doing, when it has any. */
+  wakeupCue?: IssueWakeupCue
   /** The real card, dimmed while its clone rides the drag overlay. */
   dragging?: boolean
   /** The clone inside `<DragOverlay>` — lifted, and never marked selected. */
@@ -69,6 +73,7 @@ export function IssueCardVisual({
   selected,
   running,
   squadRun,
+  wakeupCue,
   dragging,
   overlay,
   draggable,
@@ -110,6 +115,17 @@ export function IssueCardVisual({
             className="size-1.5 shrink-0 rounded-full bg-amber-500 motion-safe:animate-pulse"
           />
         ) : null}
+        {item.triage === "pending" ? (
+          <Badge
+            variant="secondary"
+            className="h-5 shrink-0 px-1.5 text-[10px] font-normal"
+            title={t("triage.cardHint")}
+            data-testid={`issue-card-triage-${item.unifiedId}`}
+          >
+            {t("triage.badge")}
+          </Badge>
+        ) : null}
+        {wakeupCue ? <WakeupCueChip cue={wakeupCue} /> : null}
         {item.priority !== "none" ? <IssuePriorityIcon priority={item.priority} /> : null}
         {item.kind !== "local" ? (
           <Badge
@@ -163,6 +179,7 @@ export interface IssueCardProps {
   selected?: boolean
   running?: boolean
   squadRun?: SquadRunRef
+  wakeupCue?: IssueWakeupCue
   onSelect?: (unifiedId: string) => void
 }
 
@@ -174,6 +191,7 @@ export function IssueCard({
   selected,
   running,
   squadRun,
+  wakeupCue,
   onSelect,
 }: IssueCardProps) {
   const draggable = item.capabilities.canMove
@@ -219,6 +237,7 @@ export function IssueCard({
         selected={selected}
         running={running}
         squadRun={squadRun}
+        wakeupCue={wakeupCue}
         dragging={isDragging}
         draggable={draggable}
       />

@@ -26,7 +26,14 @@ import { GITHUB_LOOP_RUN_ADAPTER_ID } from "@/lib/issues/run/github-loop-adapter
 import type { IssueRunRefusalReason } from "@/lib/issues/run/types"
 import type { IssueMoveDenial } from "@/lib/issues/state-machine"
 import { ISSUE_LIST_DENSITIES, ISSUE_SORT_MODES, BUILTIN_ISSUE_VIEWS } from "@/lib/issues/views"
-import type { IssueActorKind, IssueEventKind } from "@/types/issues"
+import type {
+  IssueActorKind,
+  IssueEventKind,
+  IssueWakeupDelivery,
+  IssueWakeupPauseReason,
+} from "@/types/issues"
+import { ISSUE_WAKEUP_EVENT_KINDS, WAKEUP_PRESETS } from "@/lib/issues/wakeups/model"
+import type { IssueWakeupWriteError } from "@/lib/issues/wakeups/service"
 import {
   ISSUE_PRIORITIES,
   ISSUE_PROJECT_STATUSES,
@@ -68,6 +75,7 @@ const RUN_REFUSALS = exhaustive<IssueRunRefusalReason>({
   "issue-finished": true,
   "adapter-missing": true,
   blocked: true,
+  "issue-in-triage": true,
 })
 
 /** Every `IssueEvent["kind"]`, which the activity trail renders one line for. */
@@ -95,6 +103,9 @@ const EVENT_KINDS = exhaustive<IssueEventKind>({
   blocker_removed: true,
   due_date_changed: true,
   estimate_changed: true,
+  stage_changed: true,
+  triage_changed: true,
+  pr_state_changed: true,
   cycle_changed: true,
   external_linked: true,
   external_unlinked: true,
@@ -103,6 +114,31 @@ const EVENT_KINDS = exhaustive<IssueEventKind>({
   synced_in: true,
   sync_conflict: true,
   sync_conflict_resolved: true,
+  wakeup_fired: true,
+  run_checked_in: true,
+})
+
+/** Every refusal `IssueWakeupWriteError` keys for the wakeup surfaces (`policy` passes through). */
+const WAKEUP_WRITE_ERRORS = exhaustive<Exclude<IssueWakeupWriteError["reason"], "policy">>({
+  "issue-missing": true,
+  "issue-finished": true,
+  "target-missing": true,
+  "target-other-workspace": true,
+  "pr-unobservable": true,
+  "not-a-wakeup": true,
+})
+
+/** Every pause reason a wakeup records, and every delivery a fire becomes. */
+const WAKEUP_PAUSE_REASONS = exhaustive<IssueWakeupPauseReason>({
+  loop: true,
+  rate: true,
+  "issue-closed": true,
+})
+const WAKEUP_DELIVERIES = exhaustive<IssueWakeupDelivery>({
+  run: true,
+  joined: true,
+  notified: true,
+  trail: true,
 })
 
 /** Every `TaskMoveError` the Agent Team board localizes on a refused drop. */
@@ -189,6 +225,19 @@ const DYNAMIC_KEYS: string[] = [
   ...ACTOR_KEYS.map((v) => `issues.actor.${v}`),
   // The Agent Team board refuses drops with its own denial vocabulary.
   ...TASK_MOVE_DENIALS.map((v) => `agentTeamsWorkspace.tasks.board.denied.${v}`),
+  // Issue wakeups: the trigger text names any kind a rule can watch, and the
+  // board cue, the detail section and the trail name pauses and deliveries.
+  ...ISSUE_WAKEUP_EVENT_KINDS.map((v) => `issues.wakeups.kind.${v}`),
+  ...WAKEUP_PAUSE_REASONS.flatMap((v) => [
+    `issues.wakeups.pauseReason.${v}`,
+    `issues.wakeups.cue.reason.${v}`,
+  ]),
+  ...WAKEUP_DELIVERIES.map((v) => `issues.activityWakeupDelivery.${v}`),
+  ...WAKEUP_PRESETS.flatMap((v) => [
+    `issues.wakeups.preset.${v}`,
+    `issues.wakeups.presetHint.${v}`,
+  ]),
+  ...WAKEUP_WRITE_ERRORS.map((v) => `issues.wakeups.error.${v}`),
   // Section headings the property menus reuse for their own labels.
   ...["status", "priority", "assignee", "labels", "project"].map((v) => `issues.detail.${v}`),
 ]
@@ -218,7 +267,7 @@ describe("issue tracker dynamic message keys", () => {
     })
 
     it("covers every event kind the activity trail can be handed", () => {
-      expect(EVENT_KINDS).toHaveLength(31)
+      expect(EVENT_KINDS).toHaveLength(36)
     })
   })
 })

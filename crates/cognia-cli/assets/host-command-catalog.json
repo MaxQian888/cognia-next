@@ -38450,6 +38450,7 @@
                 "wiki-rebuild",
                 "wiki-lint",
                 "github-issue-sync",
+                "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh"
               ]
@@ -38733,6 +38734,7 @@
                   "wiki-rebuild",
                   "wiki-lint",
                   "github-issue-sync",
+                  "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh"
                 ]
@@ -39117,6 +39119,7 @@
               "wiki-rebuild",
               "wiki-lint",
               "github-issue-sync",
+              "issue-wakeup",
               "radar-report",
               "provider-diagnostics-refresh"
             ]
@@ -39586,6 +39589,7 @@
                     "wiki-rebuild",
                     "wiki-lint",
                     "github-issue-sync",
+                    "issue-wakeup",
                     "radar-report",
                     "provider-diagnostics-refresh"
                   ]
@@ -39969,6 +39973,7 @@
                   "wiki-rebuild",
                   "wiki-lint",
                   "github-issue-sync",
+                  "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh"
                 ]
@@ -40332,6 +40337,7 @@
                         "wiki-rebuild",
                         "wiki-lint",
                         "github-issue-sync",
+                        "issue-wakeup",
                         "radar-report",
                         "provider-diagnostics-refresh"
                       ]
@@ -40826,6 +40832,7 @@
                     "wiki-rebuild",
                     "wiki-lint",
                     "github-issue-sync",
+                    "issue-wakeup",
                     "radar-report",
                     "provider-diagnostics-refresh"
                   ]
@@ -40933,6 +40940,7 @@
                 "wiki-rebuild",
                 "wiki-lint",
                 "github-issue-sync",
+                "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh"
               ]
@@ -41386,6 +41394,7 @@
                   "wiki-rebuild",
                   "wiki-lint",
                   "github-issue-sync",
+                  "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh"
                 ]
@@ -41589,6 +41598,7 @@
                 "wiki-rebuild",
                 "wiki-lint",
                 "github-issue-sync",
+                "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh"
               ]
@@ -41848,6 +41858,7 @@
                 "wiki-rebuild",
                 "wiki-lint",
                 "github-issue-sync",
+                "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh"
               ]
@@ -42532,6 +42543,7 @@
                   "wiki-rebuild",
                   "wiki-lint",
                   "github-issue-sync",
+                  "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh"
                 ]
@@ -64468,5 +64480,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9c54a9a7902fa1f5afd811548486b2e0720cfbee80b81ccb08a84d5b3f7ed735"
+  "catalogHash": "9e9a5de4d785718d97521f996b80e463dfa7158129eccfcd8b5c622a04e12180"
 }

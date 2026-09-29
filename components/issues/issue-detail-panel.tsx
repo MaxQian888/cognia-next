@@ -42,6 +42,7 @@ import { Separator } from "@/components/ui/separator"
 import { useClientLiveQuery } from "@/hooks/data"
 import { parseGithubMirrorId } from "@/lib/db/github-issue-mirror"
 import { activityValues } from "@/lib/issues/activity-values"
+import { collapseActivity } from "@/lib/issues/activity-feed"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
@@ -71,6 +72,11 @@ import { LinkGithubIssueDialog } from "./link-github-issue-dialog"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
 import { RunIssueDialog } from "./run-issue-dialog"
 import { IssuePlanningSection } from "./planning/issue-planning-section"
+import { IssueTriageRow } from "./triage/issue-triage-row"
+import { IssueDeliverablesSection } from "./deliverables/issue-deliverables-section"
+import { IssueRunArtifactLink } from "./deliverables/issue-run-artifact-link"
+import { IssueRunStrip } from "./runs/issue-run-strip"
+import { IssueWakeupsSection } from "./wakeups/issue-wakeups-section"
 import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
 import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 
@@ -274,6 +280,8 @@ export function IssueDetailPanel({
             {t("source.readOnly", { source: t(`source.${item.kind}`) })}
           </p>
         ) : null}
+
+        <IssueTriageRow item={item} onAction={onAction} />
 
         <section className="flex flex-col gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -567,6 +575,7 @@ export function IssueDetailPanel({
               <p className="text-xs text-muted-foreground">
                 {activeRun ? t("run.activeHint") : t("run.sectionHint")}
               </p>
+              <IssueRunStrip runs={runs ?? []} />
               {(runs ?? []).length > 0 ? (
                 <ol className="flex flex-col gap-2" data-testid="issue-run-list">
                   {(runs ?? []).map((run) => (
@@ -615,17 +624,7 @@ export function IssueDetailPanel({
                       {run.artifacts.length > 0 ? (
                         <span className="flex flex-wrap gap-2">
                           {run.artifacts.map((artifact) => (
-                            <a
-                              key={artifact.href}
-                              href={artifact.href}
-                              target={artifact.href.startsWith("/") ? undefined : "_blank"}
-                              rel="noreferrer noopener"
-                              className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                              data-testid="issue-run-artifact"
-                            >
-                              <ExternalLinkIcon className="size-3" />
-                              {artifact.label}
-                            </a>
+                            <IssueRunArtifactLink key={artifact.href} artifact={artifact} />
                           ))}
                         </span>
                       ) : null}
@@ -634,6 +633,7 @@ export function IssueDetailPanel({
                 </ol>
               ) : null}
             </section>
+            <IssueDeliverablesSection runs={runs ?? []} />
             {runOpen ? (
               <RunIssueDialog
                 open
@@ -658,6 +658,20 @@ export function IssueDetailPanel({
           </>
         ) : null}
 
+        {/* Wakeups are local scheduler rows that deliver runs or notifications
+            on this issue, so they follow the same local-and-editable rule. */}
+        {localId && onAction ? (
+          <>
+            <Separator />
+            <IssueWakeupsSection
+              issueId={localId}
+              identifier={item.identifier}
+              items={items}
+              finished={item.statusCategory === "completed" || item.statusCategory === "canceled"}
+            />
+          </>
+        ) : null}
+
         {localId || writesCollabComments ? (
           <>
             <Separator />
@@ -666,7 +680,7 @@ export function IssueDetailPanel({
                 {t("detail.activity")}
               </h3>
               <ol className="flex flex-col gap-2" data-testid="issue-detail-activity">
-                {(events ?? []).map((event) => (
+                {collapseActivity(events ?? []).map(({ event, repeats }) => (
                   <li key={event.id} className="flex flex-col gap-0.5 text-xs">
                     <span className="text-muted-foreground">
                       {event.kind === "commented" ? (
@@ -675,10 +689,24 @@ export function IssueDetailPanel({
                         </Badge>
                       ) : null}
                       {t(`activity.${event.kind}`, activityValues(event.payload, t))}
+                      {repeats > 1 ? (
+                        <Badge
+                          variant="outline"
+                          className="ml-1 h-4 px-1 text-[10px]"
+                          data-testid={`activity-repeats-${event.id}`}
+                        >
+                          {t("detail.repeats", { count: repeats })}
+                        </Badge>
+                      ) : null}
                     </span>
                     {event.payload.kind === "commented" ? (
                       <p className="whitespace-pre-wrap rounded-md bg-muted/40 px-2 py-1.5 text-sm">
                         {event.payload.body}
+                      </p>
+                    ) : null}
+                    {event.payload.kind === "run_checked_in" ? (
+                      <p className="whitespace-pre-wrap rounded-md bg-muted/40 px-2 py-1.5 text-sm">
+                        {event.payload.note}
                       </p>
                     ) : null}
                   </li>

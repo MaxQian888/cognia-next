@@ -254,6 +254,24 @@ describe("binding a GitHub repo in import mode", () => {
     })
   })
 
+  it("writes the triage opt-in only when switched on", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.type(screen.getByTestId("resource-repo"), "acme/one")
+    expect(screen.queryByTestId("resource-triage-new")).toBeNull()
+    await user.click(screen.getByTestId("resource-sync-mode"))
+    await user.click(await screen.findByRole("option", { name: "projects.syncModeImportOption" }))
+    await user.click(screen.getByTestId("resource-triage-new"))
+    await user.click(screen.getByTestId("resource-submit"))
+    await waitFor(() => expect(mockAddResource).toHaveBeenCalled())
+    expect(mockAddResource).toHaveBeenCalledWith("p1", {
+      kind: "github-repo",
+      repoFullName: "acme/one",
+      addedAt: expect.any(Number),
+      sync: { mode: "import", triageNewIssues: true },
+    })
+  })
+
   it("refuses a project number that is not a positive whole number", async () => {
     const user = userEvent.setup()
     renderDialog()

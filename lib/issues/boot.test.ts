@@ -11,6 +11,10 @@ const mockInstallIssueNotifications = jest.fn((..._args: unknown[]) => mockDispo
 const mockSeedBuiltinIssueLabels = jest.fn().mockResolvedValue(undefined)
 const mockSyncSchedule = jest.fn().mockResolvedValue({ action: "skipped", bindingCount: 0 })
 const mockWarn = jest.fn()
+const mockDisposeWakeups = jest.fn()
+const mockInstallIssueWakeupBridge = jest.fn((..._args: unknown[]) => mockDisposeWakeups)
+const mockRegisterIssueWakeupExecutor = jest.fn()
+const mockReconcileChildrenDoneWakeups = jest.fn().mockResolvedValue(0)
 
 jest.mock("@/lib/issues/sources/local-source", () => ({
   registerLocalIssueSource: (...args: unknown[]) => mockRegisterLocalIssueSource(...args),
@@ -26,6 +30,15 @@ jest.mock("@/lib/issues/sources/agent-team-source", () => ({
 }))
 jest.mock("@/lib/issues/run/install", () => ({
   installIssueRunBridge: (...args: unknown[]) => mockInstallIssueRunBridge(...args),
+}))
+jest.mock("@/lib/issues/wakeups/bridge", () => ({
+  installIssueWakeupBridge: (...args: unknown[]) => mockInstallIssueWakeupBridge(...args),
+}))
+jest.mock("@/lib/issues/wakeups/executor", () => ({
+  registerIssueWakeupExecutor: () => mockRegisterIssueWakeupExecutor(),
+}))
+jest.mock("@/lib/issues/wakeups/service", () => ({
+  reconcileChildrenDoneWakeups: () => mockReconcileChildrenDoneWakeups(),
 }))
 jest.mock("@/lib/issues/notify", () => ({
   installIssueNotifications: (...args: unknown[]) => mockInstallIssueNotifications(...args),
@@ -99,11 +112,28 @@ it("reconciles the GitHub refresh schedule so a binding survives a restart", asy
   expect(mockSyncSchedule).toHaveBeenCalledTimes(1)
 })
 
+it("installs the wakeup bridge, registers its executor and reconciles parents' rules", async () => {
+  await bootIssueTracker()
+  expect(mockInstallIssueWakeupBridge).toHaveBeenCalledTimes(1)
+  await new Promise((resolve) => setImmediate(resolve))
+  expect(mockRegisterIssueWakeupExecutor).toHaveBeenCalled()
+  expect(mockReconcileChildrenDoneWakeups).toHaveBeenCalled()
+  const options = mockInstallIssueWakeupBridge.mock.calls[0][0] as {
+    onError: (error: unknown) => void
+  }
+  options.onError(new Error("wakeup boom"))
+  expect(mockWarn).toHaveBeenCalledWith(
+    "issue-tracker: wakeup bridge error",
+    expect.objectContaining({ error: expect.stringContaining("wakeup boom") })
+  )
+})
+
 describe("teardown", () => {
   // The brain stops its runtimes in reverse order on shutdown; a run bridge
   // still subscribed to Dexie afterwards would keep a closed database alive.
-  it("disposes both watchers, notifications before the run bridge", async () => {
+  it("disposes every watcher: wakeups, then notifications, then the run bridge", async () => {
     const order: string[] = []
+    mockDisposeWakeups.mockImplementation(() => order.push("wakeups"))
     mockDisposeNotifications.mockImplementation(() => order.push("notifications"))
     mockDisposeRunBridge.mockImplementation(() => order.push("run-bridge"))
 
@@ -111,7 +141,7 @@ describe("teardown", () => {
     expect(order).toEqual([])
 
     stop()
-    expect(order).toEqual(["notifications", "run-bridge"])
+    expect(order).toEqual(["wakeups", "notifications", "run-bridge"])
   })
 
   it("does not dispose anything merely by booting", async () => {

@@ -71,6 +71,19 @@ describe("issue.update", () => {
     })
   })
 
+  it("stages and unstages a sub-issue, and rejects a stage outside 1–1000", async () => {
+    const issue = await makeIssue()
+    expect(await run({ issue: "MERC-1", stage: 2 })).toMatchObject({
+      status: "applied",
+      results: [{ field: "stage", status: "applied" }],
+    })
+    expect((await getIssue(issue.id))!.stage).toBe(2)
+    await run({ issue: "MERC-1", stage: null })
+    expect((await getIssue(issue.id))!.stage).toBeUndefined()
+    expect(skill.inputSchema.safeParse({ issue: "MERC-1", stage: 0 }).success).toBe(false)
+    expect(skill.inputSchema.safeParse({ issue: "MERC-1", stage: 2.5 }).success).toBe(false)
+  })
+
   it("assigns and clears an assignee", async () => {
     const issue = await makeIssue()
     await run({ issue: issue.id, assignee: { kind: "agent", id: "c1", label: "Scout" } })

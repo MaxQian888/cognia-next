@@ -3,6 +3,12 @@
  */
 
 import type { IssueActor } from "@/types/issues"
+
+const mockCascadeDeleteIssueWakeups = jest.fn()
+jest.mock("@/lib/issues/wakeups/service", () => ({
+  cascadeDeleteIssueWakeups: (...args: unknown[]) => mockCascadeDeleteIssueWakeups(...args),
+}))
+beforeEach(() => mockCascadeDeleteIssueWakeups.mockClear())
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import { createIssueProject } from "./issue-projects"
@@ -18,10 +24,15 @@ import {
   setIssueCycle,
   setIssueDueDate,
   setIssueEstimate,
+  setIssueStage,
+  setIssueTriage,
+  recordIssuePullRequestState,
+  listIssuesByExternalKey,
   setIssueParent,
   touchIssueExternalRef,
   unlinkIssueExternal,
   applyRuntimeIssueStatus,
+  cascadeIssueWakeups,
   createIssue,
   deleteIssue,
   getIssue,
@@ -456,6 +467,30 @@ describe("applyRuntimeIssueStatus", () => {
     row = (await getIssue(reviewing.id))!
     expect(row.status).toBe("in_review")
   })
+
+  it("hands a checked-in wakeup run's issue back to backlog, under the same guard", async () => {
+    const running = await make({ status: "in_progress" })
+    await applyRuntimeIssueStatus(running.id, "backlog", AGENT)
+    expect((await getIssue(running.id))!.status).toBe("backlog")
+
+    const reviewing = await make({ status: "in_review" })
+    await applyRuntimeIssueStatus(reviewing.id, "backlog", AGENT)
+    expect((await getIssue(reviewing.id))!.status).toBe("in_review")
+  })
+})
+
+describe("wakeup cascade", () => {
+  it("removes a deleted issue's wakeups after the commit", async () => {
+    const issue = await make()
+    await deleteIssue(issue.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockCascadeDeleteIssueWakeups).toHaveBeenCalledWith([issue.id])
+  })
+
+  it("does nothing for an empty set", () => {
+    cascadeIssueWakeups([])
+    expect(mockCascadeDeleteIssueWakeups).not.toHaveBeenCalled()
+  })
 })
 
 describe("relations (v223)", () => {
@@ -549,6 +584,50 @@ describe("relations (v223)", () => {
     ])
   })
 
+  it("stages a sub-issue with from/to on the trail, and refuses a stage that is not one", async () => {
+    const issue = await make()
+    await setIssueStage(issue.id, 2, HUMAN)
+    await setIssueStage(issue.id, 2, HUMAN)
+    await setIssueStage(issue.id, 3, HUMAN)
+    await setIssueStage(issue.id, null, HUMAN)
+    await expect(setIssueStage(issue.id, 0, HUMAN)).rejects.toThrow(/integer from 1/)
+    await expect(setIssueStage(issue.id, 1.5, HUMAN)).rejects.toThrow(/integer from 1/)
+    expect((await getIssue(issue.id))!.stage).toBeUndefined()
+    const trail = (await listIssueEvents({ issueId: issue.id })).filter(
+      (event) => event.kind === "stage_changed"
+    )
+    expect(trail.map((event) => event.payload)).toEqual([
+      { kind: "stage_changed", to: 2, by: HUMAN },
+      { kind: "stage_changed", from: 2, to: 3, by: HUMAN },
+      { kind: "stage_changed", from: 3, by: HUMAN },
+    ])
+    await expect(
+      createIssue({
+        projectId: "w1",
+        issueProjectId: (await getIssue(issue.id))!.issueProjectId,
+        title: "x",
+        createdBy: HUMAN,
+        stage: 1001,
+      })
+    ).rejects.toThrow(/integer from 1/)
+  })
+
+  it("files into triage and accepts out of it, on the trail both ways", async () => {
+    const issue = await make()
+    await setIssueTriage(issue.id, "pending", HUMAN)
+    await setIssueTriage(issue.id, "pending", HUMAN)
+    expect((await getIssue(issue.id))!.triage).toBe("pending")
+    await setIssueTriage(issue.id, null, HUMAN)
+    expect((await getIssue(issue.id))!.triage).toBeUndefined()
+    const trail = (await listIssueEvents({ issueId: issue.id })).filter(
+      (event) => event.kind === "triage_changed"
+    )
+    expect(trail.map((event) => event.payload)).toEqual([
+      { kind: "triage_changed", to: "pending", by: HUMAN },
+      { kind: "triage_changed", from: "pending", by: HUMAN },
+    ])
+  })
+
   it("plans into a cycle of the same workspace only", async () => {
     const { createIssueCycle } = await import("./issue-cycles")
     const cycle = await createIssueCycle({ projectId: "w1", kind: "cycle", name: "S1" })
@@ -564,6 +643,28 @@ describe("relations (v223)", () => {
 })
 
 describe("external refs (v223)", () => {
+  it("records a linked pull request's state once per change, on the ref and the trail", async () => {
+    const issue = await make()
+    const ref = { provider: "github-pr", externalId: "a/b#1", url: "https://github.com/a/b/pull/1" }
+    expect(await recordIssuePullRequestState(issue.id, "a/b#1", "open", HUMAN)).toBe(false)
+    await linkIssueExternal(issue.id, { ...ref, meta: { binding: "a/b" } }, HUMAN)
+    expect(await recordIssuePullRequestState(issue.id, "a/b#1", "open", HUMAN)).toBe(true)
+    expect(await recordIssuePullRequestState(issue.id, "a/b#1", "open", HUMAN)).toBe(false)
+    expect(await recordIssuePullRequestState(issue.id, "a/b#1", "merged", HUMAN)).toBe(true)
+    const row = (await getIssue(issue.id))!
+    expect(row.externalRefs).toEqual([{ ...ref, meta: { binding: "a/b", prState: "merged" } }])
+    const trail = (await listIssueEvents({ issueId: issue.id })).filter(
+      (event) => event.kind === "pr_state_changed"
+    )
+    expect(trail.map((event) => event.payload)).toEqual([
+      { kind: "pr_state_changed", ref, to: "open", by: HUMAN },
+      { kind: "pr_state_changed", ref, from: "open", to: "merged", by: HUMAN },
+    ])
+    expect((await listIssuesByExternalKey("github-pr:a/b#1")).map((row) => row.id)).toEqual([
+      issue.id,
+    ])
+  })
+
   it("links, dedupes on provider:externalId, and finds by key", async () => {
     const issue = await make()
     await linkIssueExternal(issue.id, { provider: "lark-task", externalId: "g1", url: "u" }, HUMAN)

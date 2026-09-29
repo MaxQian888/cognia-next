@@ -26,9 +26,17 @@ import type {
   IssueGithubRef,
   IssueOrigin,
   IssuePriority,
+  IssuePullRequestState,
   IssueStatus,
+  IssueTriageState,
 } from "@/types/issues"
-import { externalKeyOf, statusCategoryOf } from "@/types/issues"
+import {
+  ISSUE_STAGE_MAX,
+  externalKeyOf,
+  isIssuePullRequestState,
+  isIssueStage,
+  statusCategoryOf,
+} from "@/types/issues"
 import { formatIssueIdentifier } from "@/lib/issues/identifier"
 import { canMoveIssue, statusTimestampPatch, type IssueMoveError } from "@/lib/issues/state-machine"
 import { FULL_ISSUE_CAPABILITIES } from "@/types/issues/unified"
@@ -82,6 +90,10 @@ export interface CreateIssueInput {
   blockedBy?: string[]
   dueDate?: number
   estimate?: number
+  /** Sub-issue stage (`Issue.stage`), 1 to `ISSUE_STAGE_MAX`. */
+  stage?: number
+  /** File it into triage (`Issue.triage`). */
+  triage?: IssueTriageState
   cycleId?: string
   /** Links into other systems, e.g. the row this issue was imported from. */
   externalRefs?: IssueExternalRef[]
@@ -118,6 +130,9 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
   const db = getDb()
   const title = input.title.trim()
   if (!title) throw new Error("Issue title is required")
+  if (input.stage !== undefined && !isIssueStage(input.stage)) {
+    throw new Error(`Stage must be an integer from 1 to ${ISSUE_STAGE_MAX}`)
+  }
 
   return db.transaction(
     "rw",
@@ -171,6 +186,8 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
         blockedBy: [...new Set(input.blockedBy ?? [])],
         ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
         ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
+        ...(input.stage !== undefined ? { stage: input.stage } : {}),
+        ...(input.triage ? { triage: input.triage } : {}),
         ...(input.cycleId ? { cycleId: input.cycleId } : {}),
         externalRefs: [],
         externalKeys: [],
@@ -574,6 +591,21 @@ export async function deleteIssue(id: string): Promise<void> {
       await recordTombstones("issueRuns", runIds, at)
     }
   )
+  // Wakeups live in the scheduler, which has timers to disarm that a Dexie
+  // transaction cannot, so they go after the commit.
+  cascadeIssueWakeups([id])
+}
+
+/**
+ * Remove the wakeups of deleted issues. Loaded lazily: the CRUD layer must not
+ * pull the scheduler graph in at import time, and a rule that survives a
+ * failed cascade is also removed by its executor the next time it fires.
+ */
+export function cascadeIssueWakeups(issueIds: readonly string[]): void {
+  if (issueIds.length === 0) return
+  void import("@/lib/issues/wakeups/service")
+    .then(({ cascadeDeleteIssueWakeups }) => cascadeDeleteIssueWakeups(issueIds))
+    .catch(() => {})
 }
 
 /**
@@ -727,6 +759,72 @@ export async function setIssueEstimate(
   })
 }
 
+/**
+ * Set or clear the sub-issue stage (`Issue.stage`). Only integers from 1 to
+ * `ISSUE_STAGE_MAX` are legal; a top-level issue may carry one, it is ignored
+ * until the issue gains a parent.
+ */
+export async function setIssueStage(
+  id: string,
+  stage: number | null,
+  by: IssueActor
+): Promise<void> {
+  if (stage !== null && !isIssueStage(stage)) {
+    throw new Error(`Stage must be an integer from 1 to ${ISSUE_STAGE_MAX}`)
+  }
+  const db = getDb()
+  await db.transaction("rw", db.issues, db.issueEvents, async () => {
+    const existing = await db.issues.get(id)
+    if (!existing) return
+    const from = existing.stage
+    if ((stage ?? undefined) === from) return
+    const next: Issue = { ...existing, updatedAt: Date.now() }
+    if (stage === null) delete next.stage
+    else next.stage = stage
+    await db.issues.put(next)
+    await appendIssueEvent({
+      issueId: id,
+      payload: {
+        kind: "stage_changed",
+        ...(from !== undefined ? { from } : {}),
+        ...(stage !== null ? { to: stage } : {}),
+        by,
+      },
+    })
+  })
+}
+
+/**
+ * Put an issue into triage (`"pending"`) or accept it out (`null`). Accepting
+ * is what lets derived runs (IM, wakeups) start on it again.
+ */
+export async function setIssueTriage(
+  id: string,
+  triage: IssueTriageState | null,
+  by: IssueActor
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.issues, db.issueEvents, async () => {
+    const existing = await db.issues.get(id)
+    if (!existing) return
+    const from = existing.triage
+    if ((triage ?? undefined) === from) return
+    const next: Issue = { ...existing, updatedAt: Date.now() }
+    if (triage === null) delete next.triage
+    else next.triage = triage
+    await db.issues.put(next)
+    await appendIssueEvent({
+      issueId: id,
+      payload: {
+        kind: "triage_changed",
+        ...(from ? { from } : {}),
+        ...(triage ? { to: triage } : {}),
+        by,
+      },
+    })
+  })
+}
+
 /** Plan into a cycle, or take out of one. A cycle of another workspace is refused. */
 export async function setIssueCycle(
   id: string,
@@ -790,6 +888,57 @@ export async function linkIssueExternal(
   })
 }
 
+/**
+ * Record the state a linked pull request (`github-pr` ref) was observed in.
+ * The state rides on the ref's `meta.prState`; a change appends one
+ * `pr_state_changed` entry, which is what an `until-pr` wakeup waits for.
+ * The first observation counts as a change (no `from`). Returns whether
+ * anything changed; an unknown ref or an unchanged state writes nothing.
+ */
+export async function recordIssuePullRequestState(
+  id: string,
+  externalId: string,
+  state: IssuePullRequestState,
+  by: IssueActor
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.issues, db.issueEvents, async () => {
+    const existing = await db.issues.get(id)
+    if (!existing) return false
+    const key = externalKeyOf({ provider: "github-pr", externalId })
+    const ref = (existing.externalRefs ?? []).find((candidate) => externalKeyOf(candidate) === key)
+    if (!ref) return false
+    const observed = ref.meta?.prState
+    const from = isIssuePullRequestState(observed) ? observed : undefined
+    if (from === state) return false
+    const next: IssueExternalRef = { ...ref, meta: { ...(ref.meta ?? {}), prState: state } }
+    await db.issues.put(
+      withExternalRefs(
+        { ...existing, updatedAt: Date.now() },
+        (existing.externalRefs ?? []).map((candidate) =>
+          externalKeyOf(candidate) === key ? next : candidate
+        )
+      )
+    )
+    await appendIssueEvent({
+      issueId: id,
+      payload: {
+        kind: "pr_state_changed",
+        ref: {
+          provider: ref.provider,
+          externalId: ref.externalId,
+          ...(ref.url ? { url: ref.url } : {}),
+          ...(ref.label ? { label: ref.label } : {}),
+        },
+        ...(from ? { from } : {}),
+        to: state,
+        by,
+      },
+    })
+    return true
+  })
+}
+
 export async function unlinkIssueExternal(
   id: string,
   ref: Pick<IssueExternalRef, "provider" | "externalId">,
@@ -847,6 +996,11 @@ export async function getIssueByExternalKey(
     .first()
 }
 
+/** Every issue carrying the ref `key` (`externalKeyOf`). A pull request can link several. */
+export async function listIssuesByExternalKey(key: string): Promise<Issue[]> {
+  return getDb().issues.where("externalKeys").equals(key).toArray()
+}
+
 /** Every local issue carrying a ref from `provider`, keyed by `externalId`. */
 export async function mapIssuesByExternalProvider(
   provider: string,
@@ -874,10 +1028,15 @@ export async function mapIssuesByExternalProvider(
  * finishes, or hand the issue back to `todo` when the run is cancelled before
  * producing anything — and NOTHING else. `done` is never reachable from here;
  * promoting a reviewed issue is the human's call (`lib/issues/state-machine.ts`).
+ *
+ * `backlog` is the one other hand-back: a wakeup check-in returns the issue to
+ * the open column it was in before its run took it (`checkInIssueRun`), and
+ * an issue woken from the backlog belongs back there, not promoted to `todo`.
+ * It carries the same guard as `todo`.
  */
 export async function applyRuntimeIssueStatus(
   id: string,
-  to: Extract<IssueStatus, "in_progress" | "in_review" | "todo">,
+  to: Extract<IssueStatus, "in_progress" | "in_review" | "todo" | "backlog">,
   by: IssueActor
 ): Promise<void> {
   const db = getDb()
@@ -889,7 +1048,7 @@ export async function applyRuntimeIssueStatus(
     if (existing.statusCategory === "completed" || existing.statusCategory === "canceled") return
     // The cancel hand-back only relinquishes the runtime's own column; it never
     // demotes an issue a human has already moved elsewhere.
-    if (to === "todo" && existing.status !== "in_progress") return
+    if ((to === "todo" || to === "backlog") && existing.status !== "in_progress") return
     const now = Date.now()
     const timestamps = statusTimestampPatch(to, now, existing)
     const next: Issue = {

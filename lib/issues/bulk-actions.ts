@@ -32,12 +32,20 @@ import {
   setIssueCycle,
   setIssueDueDate,
   setIssueEstimate,
+  setIssueStage,
+  setIssueTriage,
   setIssueParent,
   unlinkIssueExternal,
   updateIssue,
 } from "@/lib/db/issues"
 import { canMoveIssue, type IssueMoveDenial } from "./state-machine"
-import type { IssueActor, IssueExternalRef, IssuePriority, IssueStatus } from "@/types/issues"
+import type {
+  IssueActor,
+  IssueExternalRef,
+  IssuePriority,
+  IssueStatus,
+  IssueTriageState,
+} from "@/types/issues"
 import type { IssueSourceMutation, UnifiedIssueItem } from "@/types/issues/unified"
 import { parseUnifiedIssueId } from "@/types/issues/unified"
 import { getIssueSourceRegistry } from "./sources/registry"
@@ -63,6 +71,10 @@ export type IssueBulkAction =
   | { kind: "cycle"; cycleId: string | null }
   | { kind: "dueDate"; to: number | null }
   | { kind: "estimate"; to: number | null }
+  /** Sub-issue stage (`Issue.stage`). `null` unstages. */
+  | { kind: "stage"; to: number | null }
+  /** Into triage (`"pending"`) or accepted out of it (`null`). */
+  | { kind: "triage"; to: IssueTriageState | null }
   /** Relations (v223). Single-item by nature, so absent from `menu-model`. */
   | { kind: "parent"; parentId: string | null }
   | { kind: "addBlocker"; blockerId: string }
@@ -100,6 +112,8 @@ function requiredCapability(action: IssueBulkAction): keyof UnifiedIssueItem["ca
     case "cycle":
     case "dueDate":
     case "estimate":
+    case "stage":
+    case "triage":
     case "parent":
     case "addBlocker":
     case "removeBlocker":
@@ -214,6 +228,12 @@ async function applyOne(sourceId: string, action: IssueBulkAction, by: IssueActo
       return
     case "estimate":
       await setIssueEstimate(sourceId, action.to, by)
+      return
+    case "stage":
+      await setIssueStage(sourceId, action.to, by)
+      return
+    case "triage":
+      await setIssueTriage(sourceId, action.to, by)
       return
     case "parent":
       await setIssueParent(sourceId, action.parentId, by)

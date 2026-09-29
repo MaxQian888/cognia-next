@@ -17,6 +17,7 @@ import type {
   IssuePriority,
   IssueProject,
   IssueProjectResource,
+  IssuePullRequestState,
   IssueStatus,
   IssueSyncField,
 } from "@/types/issues"
@@ -91,6 +92,12 @@ export interface RemoteLink {
   /** Local identifiers (`KEY-12`) and remote issue ids the link mentions. */
   mentionsIdentifiers: readonly string[]
   mentionsExternalIds: readonly string[]
+  /**
+   * A pull request's state as the remote reported it this pass. The engine
+   * records a change on every issue that carries the link, including links
+   * made earlier, which is how an `until-pr` wakeup sees a merge.
+   */
+  prState?: IssuePullRequestState
 }
 
 export interface PullOptions {
@@ -121,6 +128,13 @@ export interface RemotePatch {
   estimate?: number | null
   /** Local cycle's ref for this provider, when one exists, else `null`. */
   cycleExternalId?: string | null
+  /**
+   * The local assignee's display label, `null` when nobody is assigned. A
+   * provider pushes it only when the label names someone on the remote (a
+   * GitHub login that came from GitHub); agents and workspace members stay
+   * local, exactly as before assignees were pushed at all.
+   */
+  assignee?: string | null
 }
 
 export type PushOutcome =
