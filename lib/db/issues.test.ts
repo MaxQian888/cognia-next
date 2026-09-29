@@ -26,6 +26,7 @@ import {
   setIssueEstimate,
   setIssueStage,
   setIssueTriage,
+  recordIssuePullRequestChecks,
   recordIssuePullRequestState,
   listIssuesByExternalKey,
   setIssueParent,
@@ -663,6 +664,28 @@ describe("external refs (v223)", () => {
     expect((await listIssuesByExternalKey("github-pr:a/b#1")).map((row) => row.id)).toEqual([
       issue.id,
     ])
+  })
+
+  it("records a linked pull request's CI beside its state, each on its own trail kind", async () => {
+    const issue = await make()
+    const ref = { provider: "github-pr", externalId: "a/b#2" }
+    await linkIssueExternal(issue.id, ref, HUMAN)
+    await recordIssuePullRequestState(issue.id, "a/b#2", "open", HUMAN)
+    expect(await recordIssuePullRequestChecks(issue.id, "a/b#2", "pending", HUMAN)).toBe(true)
+    expect(await recordIssuePullRequestChecks(issue.id, "a/b#2", "pending", HUMAN)).toBe(false)
+    expect(await recordIssuePullRequestChecks(issue.id, "a/b#2", "failing", HUMAN)).toBe(true)
+    expect((await getIssue(issue.id))!.externalRefs?.[0]?.meta).toEqual({
+      prState: "open",
+      ciState: "failing",
+    })
+    const checks = (await listIssueEvents({ issueId: issue.id })).filter(
+      (event) => event.kind === "pr_checks_changed"
+    )
+    expect(checks.map((event) => event.payload)).toEqual([
+      { kind: "pr_checks_changed", ref, to: "pending", by: HUMAN },
+      { kind: "pr_checks_changed", ref, from: "pending", to: "failing", by: HUMAN },
+    ])
+    expect(await recordIssuePullRequestChecks(issue.id, "a/b#9", "passing", HUMAN)).toBe(false)
   })
 
   it("links, dedupes on provider:externalId, and finds by key", async () => {

@@ -320,6 +320,20 @@ export function isIssuePullRequestState(value: unknown): value is IssuePullReque
   return (ISSUE_PULL_REQUEST_STATES as readonly unknown[]).includes(value)
 }
 
+/**
+ * A linked open pull request's CI, rolled up over its head commit's check
+ * runs and commit statuses (`summarizeCi`), carried in the ref's
+ * `meta.ciState` and moved by `recordIssuePullRequestChecks`. A pull request
+ * with no checks at all has no CI state rather than a made-up one.
+ */
+export const ISSUE_PULL_REQUEST_CI_STATES = ["pending", "passing", "failing"] as const
+
+export type IssuePullRequestCiState = (typeof ISSUE_PULL_REQUEST_CI_STATES)[number]
+
+export function isIssuePullRequestCiState(value: unknown): value is IssuePullRequestCiState {
+  return (ISSUE_PULL_REQUEST_CI_STATES as readonly unknown[]).includes(value)
+}
+
 export const ISSUE_EXTERNAL_PROVIDERS = [
   "github",
   "github-pr",
@@ -497,6 +511,8 @@ export type IssueEventKind =
   | "triage_changed"
   /** A linked pull request (`github-pr` ref) was first seen in, or moved to, a state. */
   | "pr_state_changed"
+  /** A linked open pull request's checks moved (`meta.ciState`). */
+  | "pr_checks_changed"
   | "cycle_changed"
   | "external_linked"
   | "external_unlinked"
@@ -556,6 +572,13 @@ export type IssueEventPayload =
       ref: Pick<IssueExternalRef, "provider" | "externalId" | "url" | "label">
       from?: IssuePullRequestState
       to: IssuePullRequestState
+      by: IssueActor
+    }
+  | {
+      kind: "pr_checks_changed"
+      ref: Pick<IssueExternalRef, "provider" | "externalId" | "url" | "label">
+      from?: IssuePullRequestCiState
+      to: IssuePullRequestCiState
       by: IssueActor
     }
   | { kind: "cycle_changed"; from?: string; to?: string; by: IssueActor }

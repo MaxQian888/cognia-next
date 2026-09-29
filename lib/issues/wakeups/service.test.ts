@@ -175,6 +175,24 @@ describe("createIssueWakeup", () => {
     })
   })
 
+  it("holds a pr-checks rule to the same binding requirement", async () => {
+    const issue = await makeIssue()
+    await expect(addRule(issue.id, { trigger: { on: "pr-checks" } })).rejects.toMatchObject({
+      reason: "pr-unobservable",
+      message: expect.stringContaining("a pull request's checks"),
+    })
+    const { addIssueProjectResource } = await import("@/lib/db/issue-projects")
+    await addIssueProjectResource(containerId, {
+      kind: "github-repo",
+      repoFullName: "acme/app",
+      addedAt: 1,
+      sync: { mode: "import" },
+    })
+    await expect(
+      addRule(issue.id, { trigger: { on: "pr-checks", result: "passing" } })
+    ).resolves.toMatchObject({ payload: { condition: { kind: "pr-checks", result: "passing" } } })
+  })
+
   it("surfaces a policy refusal, and a verdict that still wants a person", async () => {
     const issue = await makeIssue()
     mockAuthorize.mockResolvedValueOnce({ allowed: false, message: "Agents may not." })

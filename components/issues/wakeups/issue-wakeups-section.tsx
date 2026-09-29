@@ -85,6 +85,10 @@ export function useWakeupTriggerText(items: readonly UnifiedIssueItem[] = []) {
       }
       case "pr-merged":
         return t("trigger.prMerged")
+      case "pr-checks":
+        return spec.result
+          ? t("trigger.prChecksResult", { result: spec.result })
+          : t("trigger.prChecks")
       case "cron":
         return t("trigger.cron", { expression: spec.cronExpression })
       case "interval":

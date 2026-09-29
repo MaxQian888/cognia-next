@@ -66,6 +66,11 @@ describe("wakeupTriggerFromForm", () => {
       stage: 2,
     })
     expect(wakeupTriggerFromForm(form({ preset: "pr-merged" }))).toEqual({ on: "pr-merged" })
+    expect(wakeupTriggerFromForm(form({ preset: "pr-checks" }))).toEqual({ on: "pr-checks" })
+    expect(wakeupTriggerFromForm(form({ preset: "pr-checks", checkResult: "failing" }))).toEqual({
+      on: "pr-checks",
+      result: "failing",
+    })
     expect(wakeupTriggerFromForm(form({ preset: "issue-finished", targetIssueId: "i2" }))).toEqual({
       on: "issue-finished",
       targetIssueId: "i2",

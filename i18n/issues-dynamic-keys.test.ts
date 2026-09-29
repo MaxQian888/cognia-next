@@ -34,6 +34,7 @@ import type {
 } from "@/types/issues"
 import {
   ISSUE_WAKEUP_EVENT_KINDS,
+  WAKEUP_CHECK_RESULTS,
   WAKEUP_EXPIRY_HOURS,
   WAKEUP_PRESETS,
 } from "@/lib/issues/wakeups/model"
@@ -110,6 +111,7 @@ const EVENT_KINDS = exhaustive<IssueEventKind>({
   stage_changed: true,
   triage_changed: true,
   pr_state_changed: true,
+  pr_checks_changed: true,
   cycle_changed: true,
   external_linked: true,
   external_unlinked: true,
@@ -239,6 +241,7 @@ const DYNAMIC_KEYS: string[] = [
   ...WAKEUP_DELIVERIES.map((v) => `issues.activityWakeupDelivery.${v}`),
   "issues.activityWakeupDelivery.timedOut",
   ...["none", ...WAKEUP_EXPIRY_HOURS].map((v) => `issues.wakeups.expiresIn.${v}`),
+  ...WAKEUP_CHECK_RESULTS.map((v) => `issues.wakeups.checkResults.${v}`),
   ...WAKEUP_PRESETS.flatMap((v) => [
     `issues.wakeups.preset.${v}`,
     `issues.wakeups.presetHint.${v}`,
@@ -273,7 +276,7 @@ describe("issue tracker dynamic message keys", () => {
     })
 
     it("covers every event kind the activity trail can be handed", () => {
-      expect(EVENT_KINDS).toHaveLength(36)
+      expect(EVENT_KINDS).toHaveLength(37)
     })
   })
 })

@@ -117,7 +117,9 @@ export function buildActivityData(
           ? { triageTo: payload.to ?? null }
           : payload.kind === "pr_state_changed"
             ? { prTo: payload.to }
-            : {}
+            : payload.kind === "pr_checks_changed"
+              ? { ciTo: payload.to }
+              : {}
   // A person acting resets the chain: a revisit after a human is legitimate.
   const chain = actor?.kind === "human" ? [] : (run?.wakeup?.chain ?? [])
   return {

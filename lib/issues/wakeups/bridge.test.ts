@@ -174,6 +174,26 @@ describe("relayIssueEvent", () => {
       undefined
     )
     expect(merged).toMatchObject({ prTo: "merged", summary: "pull request a/b#1 is merged" })
+    const checked = buildActivityData(
+      {
+        id: "e9",
+        issueId: "c1",
+        kind: "pr_checks_changed",
+        ts: 1,
+        payload: {
+          kind: "pr_checks_changed",
+          ref: { provider: "github-pr", externalId: "a/b#1" },
+          from: "pending",
+          to: "failing",
+          by: { kind: "agent", id: "sync:github" },
+        },
+      },
+      undefined
+    )
+    expect(checked).toMatchObject({
+      ciTo: "failing",
+      summary: "pull request a/b#1 checks are failing",
+    })
   })
 
   it("does not re-publish other child entries on the parent", async () => {

@@ -26,6 +26,7 @@ import type {
   IssueActor,
   IssueActorKind,
   IssueEventKind,
+  IssuePullRequestCiState,
   IssuePullRequestState,
   IssueStatus,
 } from "./index"
@@ -76,11 +77,19 @@ export interface IssueWakeupMatch {
  *                   observed merging (`pr_state_changed` into `merged`).
  *                   Observed by the GitHub import sweep, so only a container
  *                   bound to its repository in import mode can satisfy it.
+ *   pr-checks       an open linked pull request's CI settled
+ *                   (`pr_checks_changed` into passing or failing): to
+ *                   `result` when one is named, to either otherwise. Read by
+ *                   the same sweep, so it has the same binding requirement.
  */
 export type IssueWakeupCondition =
   | { kind: "children-done"; stage?: number }
   | { kind: "issue-finished"; issueId: string }
   | { kind: "pr-merged" }
+  | { kind: "pr-checks"; result?: IssuePullRequestCheckResult }
+
+/** The settled CI a `pr-checks` rule can wait for. */
+export type IssuePullRequestCheckResult = Exclude<IssuePullRequestCiState, "pending">
 
 /**
  * How far a parent's sub-issues got, as a children-done rule sees it.
@@ -228,6 +237,8 @@ export interface IssueActivityEventData extends Record<string, unknown> {
   triageTo?: "pending" | null
   /** Pull request state reached, for `pr_state_changed`. */
   prTo?: IssuePullRequestState
+  /** CI state reached, for `pr_checks_changed`. */
+  ciTo?: IssuePullRequestCiState
   /** Run the event belongs to (its `run_*` entry, or the run whose agent acted). */
   runId?: string
   /** The wakeup that started {@link runId}, for self-suppression. */

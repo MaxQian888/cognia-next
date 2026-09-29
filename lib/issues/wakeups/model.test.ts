@@ -175,6 +175,25 @@ describe("compileIssueWakeup", () => {
     })
   })
 
+  it("compiles a pr-checks rule onto the issue's own source, one-shot, with its outcome", () => {
+    expect(compileIssueWakeup({ ...base, trigger: { on: "pr-checks" } })).toMatchObject({
+      trigger: { type: "event", eventType: "issue:activity", eventSource: "issue:i1" },
+      payload: {
+        once: true,
+        match: { kinds: ["pr_checks_changed"] },
+        condition: { kind: "pr-checks" },
+      },
+    })
+    expect(
+      compileIssueWakeup({ ...base, trigger: { on: "pr-checks", result: "failing" }, once: false })
+        .payload
+    ).toMatchObject({ condition: { kind: "pr-checks", result: "failing" } })
+    expect(
+      compileIssueWakeup({ ...base, trigger: { on: "pr-checks", result: "failing" }, once: false })
+        .payload.once
+    ).toBeUndefined()
+  })
+
   it("scopes a children-done rule to a stage, and refuses a stage that is not one", () => {
     expect(
       compileIssueWakeup({ ...base, trigger: { on: "children-done", stage: 2 } }).payload.condition
@@ -201,6 +220,8 @@ describe("decompileWakeupTrigger", () => {
     [{ on: "children-done", stage: 2 }],
     [{ on: "issue-finished", targetIssueId: "i2" }],
     [{ on: "pr-merged" }],
+    [{ on: "pr-checks" }],
+    [{ on: "pr-checks", result: "passing" }],
     [{ on: "cron", cronExpression: "0 9 * * *" }],
     [{ on: "interval", intervalMs: 3_600_000 }],
   ] as const)("round-trips %o", (trigger) => {

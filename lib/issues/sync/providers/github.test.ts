@@ -267,6 +267,49 @@ describe("pull", () => {
     ])
   })
 
+  it("reads CI for open linked pull requests only, within the per-pass budget", async () => {
+    const ciCalls: string[] = []
+    const octokit = fakeOctokit({
+      "GET /repos/{owner}/{repo}/issues": () => [],
+      "GET /repos/{owner}/{repo}/milestones": () => [],
+      "POST /graphql": () => ({ data: { repository: { projectV2: null } } }),
+      "GET /repos/{owner}/{repo}/pulls": () => [
+        { number: 30, title: "MERC-1", state: "open", head: { ref: "a", sha: "s30" } },
+        { number: 31, title: "MERC-2", state: "open", head: { ref: "b", sha: "s31" } },
+        { number: 32, title: "MERC-3", state: "closed", head: { ref: "c", sha: "s32" } },
+      ],
+      "GET /repos/{owner}/{repo}/commits/{ref}/check-runs": (params) => {
+        ciCalls.push(String(params.ref))
+        if (params.ref === "s31") throw new Error("403 checks:read")
+        return {
+          total_count: 1,
+          check_runs: [{ name: "ci", status: "completed", conclusion: "failure" }],
+        }
+      },
+      "GET /repos/{owner}/{repo}/commits/{ref}/status": () => ({ statuses: [] }),
+    })
+    const provider = createGithubSyncProvider({
+      resolveOctokitOrNull: async () => octokit,
+      pullRequestCiLimit: 5,
+    })
+    const result = await provider.pull(binding(), { since: 1 })
+    const byId = new Map(result.links?.map((link) => [link.externalId, link]))
+    expect(byId.get("acme/one#30")).toMatchObject({ prState: "open", ciState: "failing" })
+    // An unreadable CI leaves the link and its state in place.
+    expect(byId.get("acme/one#31")).toMatchObject({ prState: "open" })
+    expect(byId.get("acme/one#31")).not.toHaveProperty("ciState")
+    expect(byId.get("acme/one#32")).not.toHaveProperty("ciState")
+    expect(ciCalls).toEqual(["s30", "s31"])
+
+    ciCalls.length = 0
+    const budgeted = createGithubSyncProvider({
+      resolveOctokitOrNull: async () => octokit,
+      pullRequestCiLimit: 1,
+    })
+    await budgeted.pull(binding(), { since: 1 })
+    expect(ciCalls).toEqual(["s30"])
+  })
+
   it("fails the binding, not the run, when no credential resolves", async () => {
     const provider = createGithubSyncProvider({ resolveOctokitOrNull: async () => null })
     await expect(provider.pull(binding(), {})).rejects.toMatchObject({

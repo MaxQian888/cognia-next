@@ -150,6 +150,7 @@
     "stage_changed": "更改了子议题阶段",
     "triage_changed": "{to, select, pending {将其送入待分诊} other {已接受，移出待分诊}}",
     "pr_state_changed": "{to, select, merged {发现关联的拉取请求已合并} closed {发现关联的拉取请求已关闭} other {发现关联的拉取请求已打开}}",
+    "pr_checks_changed": "{to, select, passing {发现关联的拉取请求检查已通过} failing {发现关联的拉取请求检查失败} other {发现关联的拉取请求检查已开始}}",
     "cycle_changed": "移到了另一个迭代",
     "external_linked": "关联了外部记录",
     "external_unlinked": "移除了外部关联",
@@ -823,6 +824,7 @@
       "children-done": "所有子议题都已结束",
       "issue-finished": "另一个议题结束",
       "pr-merged": "关联的拉取请求合并",
+      "pr-checks": "关联的拉取请求检查完成",
       "daily": "每天某个时间",
       "interval": "每隔几小时",
       "at": "在指定时间一次"
@@ -833,6 +835,7 @@
       "children-done": "最后一个未结束的子议题完成或取消时触发。",
       "issue-finished": "所选议题完成或取消时触发。",
       "pr-merged": "关联到此议题的拉取请求合并后触发一次。需要项目以导入模式绑定其 GitHub 仓库；状态由该同步获取，因此可能延迟一个同步间隔。",
+      "pr-checks": "关联到此议题的未关闭拉取请求检查通过或失败后触发一次。需要项目以导入模式绑定其 GitHub 仓库；检查结果由该同步读取，因此可能延迟一个同步间隔。",
       "daily": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
       "interval": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
       "at": "在所选时间触发一次。"
@@ -844,6 +847,12 @@
     "stage": "子议题阶段（可选）",
     "stagePlaceholder": "全部子议题",
     "stageHint": "只等待到此阶段为止的已分阶段子议题。留空则等待所有子议题。",
+    "checkResult": "结果",
+    "checkResults": {
+      "any": "通过或失败",
+      "passing": "通过",
+      "failing": "失败"
+    },
     "noTargets": "看板上没有其他可关注的未结束议题。",
     "dailyAt": "时间",
     "intervalHours": "间隔（小时）",
@@ -876,6 +885,8 @@
       "childrenDoneStage": "子议题阶段 {stage} 结束时",
       "issueFinished": "{issue} 结束时",
       "prMerged": "关联的拉取请求合并时",
+      "prChecks": "关联的拉取请求检查完成时",
+      "prChecksResult": "{result, select, passing {关联的拉取请求检查通过时} other {关联的拉取请求检查失败时}}",
       "cron": "按计划 {expression}",
       "interval": "每 {hours} 小时",
       "at": "在 {at} 一次"
@@ -908,6 +919,7 @@
       "stage_changed": "阶段变化",
       "triage_changed": "分诊变化",
       "pr_state_changed": "关联拉取请求变化",
+      "pr_checks_changed": "关联拉取请求检查变化",
       "cycle_changed": "周期变化",
       "external_linked": "新增外部链接",
       "external_unlinked": "移除外部链接",

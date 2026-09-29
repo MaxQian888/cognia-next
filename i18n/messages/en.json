@@ -17949,6 +17949,7 @@
       "label_added": "added a label",
       "label_removed": "removed a label",
       "parent_changed": "changed the parent issue",
+      "pr_checks_changed": "{to, select, passing {saw a linked pull request's checks pass} failing {saw a linked pull request's checks fail} other {saw a linked pull request's checks start}}",
       "pr_state_changed": "{to, select, merged {saw a linked pull request merge} closed {saw a linked pull request close} other {saw a linked pull request open}}",
       "priority_changed": "changed priority from {from} to {to}",
       "project_changed": "moved this to another project",
@@ -18662,6 +18663,12 @@
     "wakeups": {
       "add": "Add wakeup",
       "at": "When",
+      "checkResult": "Outcome",
+      "checkResults": {
+        "any": "Passing or failing",
+        "failing": "Failing",
+        "passing": "Passing"
+      },
       "createDescription": "When the trigger happens, the assigned agent or squad gets a run with your instruction and what happened. If a run is already going, the input joins it. A person assignee gets a notification instead.",
       "createSubmit": "Add wakeup",
       "createTitle": "Add a wakeup to {identifier}",
@@ -18728,6 +18735,7 @@
         "label_added": "label added",
         "label_removed": "label removed",
         "parent_changed": "parent changes",
+        "pr_checks_changed": "linked pull request checks change",
         "pr_state_changed": "linked pull request changes",
         "priority_changed": "priority changes",
         "project_changed": "project changes",
@@ -18766,6 +18774,7 @@
         "daily": "Every day at…",
         "interval": "Every few hours",
         "issue-finished": "Another issue is finished",
+        "pr-checks": "A linked pull request's checks finish",
         "pr-merged": "A linked pull request merges",
         "status": "The status changes to…"
       },
@@ -18776,6 +18785,7 @@
         "daily": "A periodic check. The woken agent may check in instead of finishing when there is nothing to do.",
         "interval": "A periodic check. The woken agent may check in instead of finishing when there is nothing to do.",
         "issue-finished": "Fires once the chosen issue is done or canceled.",
+        "pr-checks": "Fires once the checks of an open pull request linked to this issue pass or fail. Needs the project bound to its GitHub repository in import mode; checks are read by that sync, so they can lag by its interval.",
         "pr-merged": "Fires once a pull request linked to this issue merges. Needs the project bound to its GitHub repository in import mode; state is picked up by that sync, so it can lag by its interval.",
         "status": "Fires when this issue moves to the chosen status."
       },
@@ -18812,6 +18822,8 @@
         "event": "On {kinds}",
         "interval": "Every {hours, plural, one {hour} other {# hours}}",
         "issueFinished": "When {issue} is finished",
+        "prChecks": "When a linked pull request's checks finish",
+        "prChecksResult": "{result, select, passing {When a linked pull request's checks pass} other {When a linked pull request's checks fail}}",
         "prMerged": "When a linked pull request merges",
         "statusTo": "When status changes to {statuses}"
       },

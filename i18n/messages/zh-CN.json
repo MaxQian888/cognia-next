@@ -17949,6 +17949,7 @@
       "label_added": "添加了标签",
       "label_removed": "移除了标签",
       "parent_changed": "更改了父议题",
+      "pr_checks_changed": "{to, select, passing {发现关联的拉取请求检查已通过} failing {发现关联的拉取请求检查失败} other {发现关联的拉取请求检查已开始}}",
       "pr_state_changed": "{to, select, merged {发现关联的拉取请求已合并} closed {发现关联的拉取请求已关闭} other {发现关联的拉取请求已打开}}",
       "priority_changed": "将优先级从「{from}」改为「{to}」",
       "project_changed": "将其移动到了另一个项目",
@@ -18662,6 +18663,12 @@
     "wakeups": {
       "add": "添加唤醒",
       "at": "时间",
+      "checkResult": "结果",
+      "checkResults": {
+        "any": "通过或失败",
+        "failing": "失败",
+        "passing": "通过"
+      },
       "createDescription": "触发条件发生时，指派的 Agent 或小队会带着你的指令和发生的事开始一次运行。若已有运行进行中，输入会并入该运行。受让人是人时改为发送通知。",
       "createSubmit": "添加唤醒",
       "createTitle": "为 {identifier} 添加唤醒",
@@ -18728,6 +18735,7 @@
         "label_added": "添加标签",
         "label_removed": "移除标签",
         "parent_changed": "父议题变化",
+        "pr_checks_changed": "关联拉取请求检查变化",
         "pr_state_changed": "关联拉取请求变化",
         "priority_changed": "优先级变化",
         "project_changed": "项目变化",
@@ -18766,6 +18774,7 @@
         "daily": "每天某个时间",
         "interval": "每隔几小时",
         "issue-finished": "另一个议题结束",
+        "pr-checks": "关联的拉取请求检查完成",
         "pr-merged": "关联的拉取请求合并",
         "status": "状态变为…"
       },
@@ -18776,6 +18785,7 @@
         "daily": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
         "interval": "周期性检查。没有需要做的事时，被唤醒的 Agent 可以签到而不必结束议题。",
         "issue-finished": "所选议题完成或取消时触发。",
+        "pr-checks": "关联到此议题的未关闭拉取请求检查通过或失败后触发一次。需要项目以导入模式绑定其 GitHub 仓库；检查结果由该同步读取，因此可能延迟一个同步间隔。",
         "pr-merged": "关联到此议题的拉取请求合并后触发一次。需要项目以导入模式绑定其 GitHub 仓库；状态由该同步获取，因此可能延迟一个同步间隔。",
         "status": "议题移到所选状态时触发。"
       },
@@ -18812,6 +18822,8 @@
         "event": "发生 {kinds} 时",
         "interval": "每 {hours} 小时",
         "issueFinished": "{issue} 结束时",
+        "prChecks": "关联的拉取请求检查完成时",
+        "prChecksResult": "{result, select, passing {关联的拉取请求检查通过时} other {关联的拉取请求检查失败时}}",
         "prMerged": "关联的拉取请求合并时",
         "statusTo": "状态变为 {statuses} 时"
       },

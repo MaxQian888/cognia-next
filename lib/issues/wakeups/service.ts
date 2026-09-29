@@ -169,14 +169,17 @@ export async function validateIssueWakeupSpec(spec: IssueWakeupSpec): Promise<Is
       )
     }
   }
-  if (spec.trigger.on === "pr-merged") {
-    // Pull request state only moves when the import sweep observes it. A rule
-    // on a container that is not swept would wait forever, so say so now.
+  if (spec.trigger.on === "pr-merged" || spec.trigger.on === "pr-checks") {
+    // Pull request state and CI only move when the import sweep observes
+    // them. A rule on a container that is not swept would wait forever, so
+    // say so now.
     const project = await getIssueProject(issue.issueProjectId)
     if (!project?.resources.some(isGithubImportBinding)) {
+      const what =
+        spec.trigger.on === "pr-merged" ? "a pull request merging" : "a pull request's checks"
       throw new IssueWakeupWriteError(
         "pr-unobservable",
-        `${issue.identifier}'s project is not bound to a GitHub repository in import mode, so a pull request merging would never be observed.`
+        `${issue.identifier}'s project is not bound to a GitHub repository in import mode, so ${what} would never be observed.`
       )
     }
   }

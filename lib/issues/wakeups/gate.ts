@@ -10,8 +10,8 @@
  *   - an event the rule's own run caused never refires it;
  *   - the match (kinds, actor kinds, target statuses) and the condition
  *     (the sub-issue barrier advanced, the watched issue finished, a linked
- *     pull request merged) must
- *     hold; a children-done fire carries the barrier it reached;
+ *     pull request merged or its checks settled) must hold; a children-done
+ *     fire carries the barrier it reached;
  *   - an input that arrives while the issue's run cannot take it is held on
  *     the rule instead of firing, so it is neither lost nor turned into a
  *     second run racing the first;
@@ -35,7 +35,7 @@ import type { EventFireInput, EventFireVerdict } from "@/lib/scheduler/task-sche
 import { getIssue, listIssues } from "@/lib/db/issues"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { issueRunSessionIds } from "@/lib/issues/run/registry"
-import { hasMergedPullRequest } from "@/lib/issues/pull-requests"
+import { hasMergedPullRequest, hasSettledPullRequestChecks } from "@/lib/issues/pull-requests"
 import {
   appendDeferred,
   barrierAdvanced,
@@ -132,6 +132,17 @@ async function conditionHolds(
       if (data.kind !== "pr_state_changed" || data.prTo !== "merged") return { holds: false }
       const issue = await getIssue(payload.issueId)
       return { holds: Boolean(issue && hasMergedPullRequest(issue)) }
+    }
+    case "pr-checks": {
+      if (data.kind !== "pr_checks_changed") return { holds: false }
+      const settled = condition.result
+        ? data.ciTo === condition.result
+        : data.ciTo === "passing" || data.ciTo === "failing"
+      if (!settled) return { holds: false }
+      // The trail says a PR's checks moved; the refs say whether an OPEN one
+      // still sits there (a PR merged in the same sweep is no answer).
+      const issue = await getIssue(payload.issueId)
+      return { holds: Boolean(issue && hasSettledPullRequestChecks(issue, condition.result)) }
     }
   }
 }

@@ -1,6 +1,8 @@
 import type { Issue, IssueExternalRef } from "@/types/issues"
 import {
+  fetchPullRequestCi,
   hasMergedPullRequest,
+  hasSettledPullRequestChecks,
   linkRunPullRequests,
   linkedPullRequests,
   parsePullRequestUrl,
@@ -122,5 +124,91 @@ describe("linkRunPullRequests", () => {
       )
     ).toEqual([])
     expect(harness.linked).toEqual([])
+  })
+})
+
+describe("hasSettledPullRequestChecks", () => {
+  const issue = (meta: Record<string, string>) => ({
+    externalRefs: [{ provider: "github-pr", externalId: "a/b#1", meta }] as IssueExternalRef[],
+  })
+
+  it("answers for an open pull request whose CI finished, by result when asked", () => {
+    expect(hasSettledPullRequestChecks(issue({ prState: "open", ciState: "passing" }))).toBe(true)
+    expect(hasSettledPullRequestChecks(issue({ prState: "open", ciState: "failing" }))).toBe(true)
+    expect(hasSettledPullRequestChecks(issue({ prState: "open", ciState: "pending" }))).toBe(false)
+    expect(
+      hasSettledPullRequestChecks(issue({ prState: "open", ciState: "failing" }), "passing")
+    ).toBe(false)
+  })
+
+  it("ignores the last CI of a merged or closed pull request", () => {
+    expect(hasSettledPullRequestChecks(issue({ prState: "merged", ciState: "passing" }))).toBe(
+      false
+    )
+    expect(linkedPullRequests(issue({ ciState: "bogus" }))[0]).not.toHaveProperty("ci")
+  })
+})
+
+describe("fetchPullRequestCi", () => {
+  function octokit(checkRuns: unknown[][], status: unknown, total?: number) {
+    const calls: Array<[string, Record<string, unknown> | undefined]> = []
+    return {
+      calls,
+      request: async (route: string, params?: Record<string, unknown>) => {
+        calls.push([route, params])
+        if (route.endsWith("/check-runs")) {
+          const page = Number(params?.page ?? 1)
+          const runs = checkRuns[page - 1] ?? []
+          return {
+            status: 200,
+            headers: {},
+            data: {
+              total_count: total ?? checkRuns.reduce((n, p) => n + p.length, 0),
+              check_runs: runs,
+            },
+          }
+        }
+        return { status: 200, headers: {}, data: status }
+      },
+    }
+  }
+  const done = (conclusion: string) => ({ name: "ci", status: "completed", conclusion })
+
+  it("rolls check runs and commit statuses into passing, failing or pending", async () => {
+    await expect(
+      fetchPullRequestCi(octokit([[done("success")]], { statuses: [] }), "a", "b", "sha")
+    ).resolves.toBe("passing")
+    await expect(
+      fetchPullRequestCi(
+        octokit([[done("success")]], { statuses: [{ context: "lint", state: "failure" }] }),
+        "a",
+        "b",
+        "sha"
+      )
+    ).resolves.toBe("failing")
+    await expect(
+      fetchPullRequestCi(
+        octokit([[{ name: "ci", status: "in_progress" }]], { statuses: [] }),
+        "a",
+        "b",
+        "sha"
+      )
+    ).resolves.toBe("pending")
+  })
+
+  it("gives no state to a commit with no checks", async () => {
+    await expect(
+      fetchPullRequestCi(octokit([[]], { statuses: [] }), "a", "b", "sha")
+    ).resolves.toBeUndefined()
+  })
+
+  it("pages check runs, and calls an unfinished read pending rather than passing", async () => {
+    const page = Array.from({ length: 100 }, () => done("success"))
+    const three = octokit([page, page, page], { statuses: [] }, 400)
+    await expect(fetchPullRequestCi(three, "a", "b", "sha")).resolves.toBe("pending")
+    expect(three.calls.filter(([route]) => route.endsWith("/check-runs"))).toHaveLength(3)
+    const two = octokit([page, [done("success")]], { statuses: [] })
+    await expect(fetchPullRequestCi(two, "a", "b", "sha")).resolves.toBe("passing")
+    expect(two.calls.filter(([route]) => route.endsWith("/check-runs"))).toHaveLength(2)
   })
 })

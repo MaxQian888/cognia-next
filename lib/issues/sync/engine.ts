@@ -27,6 +27,7 @@ import {
   linkIssueExternal,
   listIssuesByExternalKey,
   mapIssuesByExternalProvider,
+  recordIssuePullRequestChecks,
   recordIssuePullRequestState,
   touchIssueExternalRef,
 } from "@/lib/db/issues"
@@ -426,7 +427,7 @@ async function linkRemote(
     }
     // A pull request already linked to other issues (by an earlier pass, or
     // by the run that opened it) still gets its state recorded there.
-    if (link.prState) {
+    if (link.prState || link.ciState) {
       for (const issue of await listIssuesByExternalKey(externalKeyOf(link))) {
         if (issue.projectId === binding.projectId) targets.set(issue.id, issue)
       }
@@ -451,6 +452,9 @@ async function linkRemote(
       }
       if (link.prState) {
         await recordIssuePullRequestState(issue.id, link.externalId, link.prState, by)
+      }
+      if (link.ciState) {
+        await recordIssuePullRequestChecks(issue.id, link.externalId, link.ciState, by)
       }
     }
   }

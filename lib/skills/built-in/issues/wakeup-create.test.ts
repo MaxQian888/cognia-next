@@ -127,6 +127,14 @@ it("resolves a watched issue by identifier and a one-off time", async () => {
   ).rejects.toThrow(/ISO-8601/)
 })
 
+it("accepts a pr-checks trigger with or without an outcome", () => {
+  const parse = (trigger: unknown) =>
+    skill.inputSchema.safeParse({ issue: "MERC-1", instruction: "x", trigger }).success
+  expect(parse({ on: "pr-checks" })).toBe(true)
+  expect(parse({ on: "pr-checks", result: "failing" })).toBe(true)
+  expect(parse({ on: "pr-checks", result: "pending" })).toBe(false)
+})
+
 it("passes a deadline and whether to wake when it passes", async () => {
   const issue = await make()
   await skill.execute(

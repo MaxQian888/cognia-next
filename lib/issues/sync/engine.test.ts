@@ -477,4 +477,39 @@ describe("reconcileBinding: cycles and links", () => {
       expect(states).toEqual(["open", "merged"])
     }
   })
+
+  it("records a linked pull request's CI once per change beside its state", async () => {
+    const named = await createIssue({
+      projectId: "w1",
+      issueProjectId: container.id,
+      title: "Waiting on CI",
+      createdBy: HUMAN,
+    })
+    const pass = (ciState?: "pending" | "passing") =>
+      fake({
+        pull: {
+          items: [],
+          links: [
+            {
+              provider: "github-pr",
+              externalId: "o/r#9",
+              mentionsIdentifiers: [named.identifier],
+              mentionsExternalIds: [],
+              prState: "open",
+              ...(ciState ? { ciState } : {}),
+            },
+          ],
+          notModified: false,
+        },
+      }).provider
+    await reconcileBinding(binding(), pass("pending"))
+    await reconcileBinding(binding(), pass("pending"))
+    // A pass whose CI read failed changes nothing.
+    await reconcileBinding(binding(), pass())
+    await reconcileBinding(binding(), pass("passing"))
+    const checks = (await listIssueEvents({ issueId: named.id }))
+      .filter((event) => event.kind === "pr_checks_changed")
+      .map((event) => (event.payload as { to: string }).to)
+    expect(checks).toEqual(["pending", "passing"])
+  })
 })

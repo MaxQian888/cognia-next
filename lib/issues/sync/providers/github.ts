@@ -36,6 +36,7 @@ import { statusCategoryOf } from "@/types/issues"
 import { isGithubImportBinding } from "../bindings"
 import {
   PULL_REQUEST_REF_PROVIDER,
+  fetchPullRequestCi,
   pullRequestExternalId,
   pullRequestStateOf,
 } from "@/lib/issues/pull-requests"
@@ -120,6 +121,11 @@ export interface GithubSyncProviderDeps {
   resolveAccount?: typeof resolveGithubWritebackAccount
   /** How many recently updated pull requests to scan for links. */
   pullRequestPageSize?: number
+  /**
+   * How many open linked pull requests get their CI read per pass. Two
+   * requests each, so the sweep's cost stays bounded however busy the repo.
+   */
+  pullRequestCiLimit?: number
 }
 
 interface RawMilestone {
@@ -135,7 +141,7 @@ interface RawPull {
   title?: string
   body?: string | null
   html_url?: string
-  head?: { ref?: string } | null
+  head?: { ref?: string; sha?: string } | null
   state?: string
   merged_at?: string | null
 }
@@ -393,7 +399,8 @@ async function fetchPullLinks(
   owner: string,
   repo: string,
   binding: IssueSyncBinding,
-  perPage: number
+  perPage: number,
+  ciLimit: number
 ): Promise<RemoteLink[]> {
   const repoFullName = `${owner}/${repo}`
   const response = await octokit.request("GET /repos/{owner}/{repo}/pulls", {
@@ -406,11 +413,25 @@ async function fetchPullLinks(
   })
   const rows = Array.isArray(response.data) ? (response.data as RawPull[]) : []
   const links: RemoteLink[] = []
+  let ciReads = 0
   for (const pull of rows) {
     const text = [pull.title ?? "", pull.body ?? "", pull.head?.ref ?? ""].join("\n")
     const mentions = extractIssueMentions(text, binding.projectKey, repoFullName)
     if (mentions.identifiers.length === 0 && mentions.externalIds.length === 0) continue
     const prState = pullRequestStateOf(pull)
+    // Only an open pull request's CI can still move, and the newest-updated
+    // come first, so the budget goes where a wakeup is most likely waiting.
+    let ciState: RemoteLink["ciState"]
+    if (prState === "open" && pull.head?.sha && ciReads < ciLimit) {
+      ciReads += 1
+      try {
+        ciState = await fetchPullRequestCi(octokit, owner, repo, pull.head.sha)
+      } catch {
+        // A token without checks access, or a transient error, leaves this
+        // PR's CI unread this pass; the links and states still land.
+        ciState = undefined
+      }
+    }
     links.push({
       provider: GITHUB_PR_PROVIDER_ID,
       externalId: pullRequestExternalId(repoFullName, pull.number),
@@ -419,6 +440,7 @@ async function fetchPullLinks(
       mentionsIdentifiers: mentions.identifiers,
       mentionsExternalIds: mentions.externalIds,
       ...(prState ? { prState } : {}),
+      ...(ciState ? { ciState } : {}),
     })
   }
   return links
@@ -431,6 +453,7 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
   const execute = deps.execute ?? executeIntegrationAction
   const resolveAccount = deps.resolveAccount ?? resolveGithubWritebackAccount
   const pullPageSize = deps.pullRequestPageSize ?? 50
+  const pullCiLimit = deps.pullRequestCiLimit ?? 10
 
   async function octokitFor(repoFullName: string): Promise<OctokitLike> {
     const octokit = await resolveOctokitOrNull(repoFullName)
@@ -487,7 +510,7 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
               iterationByIssue: new Map<number, string>(),
             }),
       ])
-      const links = await fetchPullLinks(octokit, owner, repo, binding, pullPageSize)
+      const links = await fetchPullLinks(octokit, owner, repo, binding, pullPageSize, pullCiLimit)
 
       return {
         items: issues.rows.map((row) =>

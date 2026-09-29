@@ -286,6 +286,38 @@ it("fires a pr-merged rule only on a merge the issue's refs confirm", async () =
   ).resolves.toMatchObject({ fire: false })
 })
 
+it("fires a pr-checks rule only on the outcome it waits for, on a PR still open", async () => {
+  const { linkIssueExternal, recordIssuePullRequestChecks, recordIssuePullRequestState } =
+    await import("@/lib/db/issues")
+  const issue = await makeIssue()
+  await linkIssueExternal(issue.id, { provider: "github-pr", externalId: "a/b#1" }, HUMAN)
+  const anyResult = rule(issue.id, {
+    match: { kinds: ["pr_checks_changed"] },
+    condition: { kind: "pr-checks" },
+  })
+  const failingOnly = rule(issue.id, {
+    match: { kinds: ["pr_checks_changed"] },
+    condition: { kind: "pr-checks", result: "failing" },
+  })
+  const { gate } = setup()
+  const passed = event(activity(issue.id, { kind: "pr_checks_changed", ciTo: "passing" }))
+  // The event says passing but the ref does not (yet): no fire.
+  await expect(gate(anyResult, passed)).resolves.toMatchObject({ fire: false })
+  await recordIssuePullRequestChecks(issue.id, "a/b#1", "passing", HUMAN)
+  await expect(gate(anyResult, passed)).resolves.toEqual({ fire: true })
+  await expect(gate(failingOnly, passed)).resolves.toMatchObject({ fire: false })
+  // Checks that only started are not an answer.
+  await expect(
+    gate(anyResult, event(activity(issue.id, { kind: "pr_checks_changed", ciTo: "pending" })))
+  ).resolves.toMatchObject({ fire: false })
+  await recordIssuePullRequestChecks(issue.id, "a/b#1", "failing", HUMAN)
+  const failed = event(activity(issue.id, { kind: "pr_checks_changed", ciTo: "failing" }))
+  await expect(gate(failingOnly, failed)).resolves.toEqual({ fire: true })
+  // A PR merged meanwhile: its last CI is history.
+  await recordIssuePullRequestState(issue.id, "a/b#1", "merged", HUMAN)
+  await expect(gate(failingOnly, failed)).resolves.toMatchObject({ fire: false })
+})
+
 describe("an active run on the issue", () => {
   it("lets the fire through when the run has a session to steer", async () => {
     registerIssueRunAdapter(adapter(["s1"]))

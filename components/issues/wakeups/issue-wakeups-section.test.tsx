@@ -130,6 +130,20 @@ it("labels the platform rule and a spent budget", () => {
   expect(row).toHaveTextContent("state.budgetSpent")
 })
 
+it("names the outcome a pr-checks rule waits for", () => {
+  mockTasks = [
+    wakeup(
+      {},
+      {
+        match: { kinds: ["pr_checks_changed"] },
+        condition: { kind: "pr-checks", result: "failing" },
+      }
+    ),
+  ]
+  render(<IssueWakeupsSection issueId="i1" identifier="MERC-1" />)
+  expect(screen.getByTestId("issue-wakeup-wk1")).toHaveTextContent("trigger.prChecksResult:failing")
+})
+
 it("pauses, resumes and deletes as the user", async () => {
   mockSetEnabled.mockResolvedValue(undefined)
   mockDelete.mockResolvedValue(undefined)

@@ -17,6 +17,7 @@ import type {
   IssuePriority,
   IssueProject,
   IssueProjectResource,
+  IssuePullRequestCiState,
   IssuePullRequestState,
   IssueStatus,
   IssueSyncField,
@@ -98,6 +99,8 @@ export interface RemoteLink {
    * made earlier, which is how an `until-pr` wakeup sees a merge.
    */
   prState?: IssuePullRequestState
+  /** An open pull request's rolled-up CI this pass, when it has checks. Recorded like `prState`. */
+  ciState?: IssuePullRequestCiState
 }
 
 export interface PullOptions {

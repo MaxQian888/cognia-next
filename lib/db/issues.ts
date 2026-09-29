@@ -25,7 +25,9 @@ import type {
   IssueExternalRef,
   IssueGithubRef,
   IssueOrigin,
+  IssueEventPayload,
   IssuePriority,
+  IssuePullRequestCiState,
   IssuePullRequestState,
   IssueStatus,
   IssueTriageState,
@@ -33,6 +35,7 @@ import type {
 import {
   ISSUE_STAGE_MAX,
   externalKeyOf,
+  isIssuePullRequestCiState,
   isIssuePullRequestState,
   isIssueStage,
   statusCategoryOf,
@@ -889,17 +892,21 @@ export async function linkIssueExternal(
 }
 
 /**
- * Record the state a linked pull request (`github-pr` ref) was observed in.
- * The state rides on the ref's `meta.prState`; a change appends one
- * `pr_state_changed` entry, which is what an `until-pr` wakeup waits for.
- * The first observation counts as a change (no `from`). Returns whether
- * anything changed; an unknown ref or an unchanged state writes nothing.
+ * Move one observed field on a linked pull request's ref (`github-pr`) and,
+ * when it changed, append the trail entry for it, in one transaction. The
+ * first observation counts as a change (no `from`). Returns whether anything
+ * changed; an unknown ref or an unchanged value writes nothing.
  */
-export async function recordIssuePullRequestState(
+async function recordPullRequestObservation<V extends string>(
   id: string,
   externalId: string,
-  state: IssuePullRequestState,
-  by: IssueActor
+  metaKey: "prState" | "ciState",
+  value: V,
+  isValue: (raw: unknown) => raw is V,
+  entry: (
+    ref: Pick<IssueExternalRef, "provider" | "externalId" | "url" | "label">,
+    from?: V
+  ) => IssueEventPayload
 ): Promise<boolean> {
   const db = getDb()
   return db.transaction("rw", db.issues, db.issueEvents, async () => {
@@ -908,10 +915,10 @@ export async function recordIssuePullRequestState(
     const key = externalKeyOf({ provider: "github-pr", externalId })
     const ref = (existing.externalRefs ?? []).find((candidate) => externalKeyOf(candidate) === key)
     if (!ref) return false
-    const observed = ref.meta?.prState
-    const from = isIssuePullRequestState(observed) ? observed : undefined
-    if (from === state) return false
-    const next: IssueExternalRef = { ...ref, meta: { ...(ref.meta ?? {}), prState: state } }
+    const observed = ref.meta?.[metaKey]
+    const from = isValue(observed) ? observed : undefined
+    if (from === value) return false
+    const next: IssueExternalRef = { ...ref, meta: { ...(ref.meta ?? {}), [metaKey]: value } }
     await db.issues.put(
       withExternalRefs(
         { ...existing, updatedAt: Date.now() },
@@ -922,21 +929,71 @@ export async function recordIssuePullRequestState(
     )
     await appendIssueEvent({
       issueId: id,
-      payload: {
-        kind: "pr_state_changed",
-        ref: {
+      payload: entry(
+        {
           provider: ref.provider,
           externalId: ref.externalId,
           ...(ref.url ? { url: ref.url } : {}),
           ...(ref.label ? { label: ref.label } : {}),
         },
-        ...(from ? { from } : {}),
-        to: state,
-        by,
-      },
+        from
+      ),
     })
     return true
   })
+}
+
+/**
+ * Record the state a linked pull request (`github-pr` ref) was observed in.
+ * The state rides on the ref's `meta.prState`; a change appends one
+ * `pr_state_changed` entry, which is what an `until-pr` wakeup waits for.
+ */
+export async function recordIssuePullRequestState(
+  id: string,
+  externalId: string,
+  state: IssuePullRequestState,
+  by: IssueActor
+): Promise<boolean> {
+  return recordPullRequestObservation(
+    id,
+    externalId,
+    "prState",
+    state,
+    isIssuePullRequestState,
+    (ref, from) => ({
+      kind: "pr_state_changed",
+      ref,
+      ...(from ? { from } : {}),
+      to: state,
+      by,
+    })
+  )
+}
+
+/**
+ * Record a linked open pull request's rolled-up CI (`meta.ciState`); a change
+ * appends one `pr_checks_changed` entry, which a `pr-checks` wakeup waits for.
+ */
+export async function recordIssuePullRequestChecks(
+  id: string,
+  externalId: string,
+  state: IssuePullRequestCiState,
+  by: IssueActor
+): Promise<boolean> {
+  return recordPullRequestObservation(
+    id,
+    externalId,
+    "ciState",
+    state,
+    isIssuePullRequestCiState,
+    (ref, from) => ({
+      kind: "pr_checks_changed",
+      ref,
+      ...(from ? { from } : {}),
+      to: state,
+      by,
+    })
+  )
 }
 
 export async function unlinkIssueExternal(

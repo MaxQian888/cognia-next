@@ -150,6 +150,7 @@
     "stage_changed": "changed the sub-issue stage",
     "triage_changed": "{to, select, pending {sent this to triage} other {accepted this out of triage}}",
     "pr_state_changed": "{to, select, merged {saw a linked pull request merge} closed {saw a linked pull request close} other {saw a linked pull request open}}",
+    "pr_checks_changed": "{to, select, passing {saw a linked pull request's checks pass} failing {saw a linked pull request's checks fail} other {saw a linked pull request's checks start}}",
     "cycle_changed": "moved this to another cycle",
     "external_linked": "linked an external record",
     "external_unlinked": "removed an external link",
@@ -823,6 +824,7 @@
       "children-done": "Every sub-issue is finished",
       "issue-finished": "Another issue is finished",
       "pr-merged": "A linked pull request merges",
+      "pr-checks": "A linked pull request's checks finish",
       "daily": "Every day at…",
       "interval": "Every few hours",
       "at": "Once, at a set time"
@@ -833,6 +835,7 @@
       "children-done": "Fires once the last open sub-issue is done or canceled.",
       "issue-finished": "Fires once the chosen issue is done or canceled.",
       "pr-merged": "Fires once a pull request linked to this issue merges. Needs the project bound to its GitHub repository in import mode; state is picked up by that sync, so it can lag by its interval.",
+      "pr-checks": "Fires once the checks of an open pull request linked to this issue pass or fail. Needs the project bound to its GitHub repository in import mode; checks are read by that sync, so they can lag by its interval.",
       "daily": "A periodic check. The woken agent may check in instead of finishing when there is nothing to do.",
       "interval": "A periodic check. The woken agent may check in instead of finishing when there is nothing to do.",
       "at": "Fires once at the chosen time."
@@ -844,6 +847,12 @@
     "stage": "Sub-issue stage (optional)",
     "stagePlaceholder": "Every sub-issue",
     "stageHint": "Wait only for staged sub-issues up to this stage. Leave empty to wait for every sub-issue.",
+    "checkResult": "Outcome",
+    "checkResults": {
+      "any": "Passing or failing",
+      "passing": "Passing",
+      "failing": "Failing"
+    },
     "noTargets": "No other open issue on this board to watch.",
     "dailyAt": "Time",
     "intervalHours": "Every (hours)",
@@ -876,6 +885,8 @@
       "childrenDoneStage": "When sub-issue stage {stage} is finished",
       "issueFinished": "When {issue} is finished",
       "prMerged": "When a linked pull request merges",
+      "prChecks": "When a linked pull request's checks finish",
+      "prChecksResult": "{result, select, passing {When a linked pull request's checks pass} other {When a linked pull request's checks fail}}",
       "cron": "On schedule {expression}",
       "interval": "Every {hours, plural, one {hour} other {# hours}}",
       "at": "Once at {at}"
@@ -908,6 +919,7 @@
       "stage_changed": "stage changes",
       "triage_changed": "triage changes",
       "pr_state_changed": "linked pull request changes",
+      "pr_checks_changed": "linked pull request checks change",
       "cycle_changed": "cycle changes",
       "external_linked": "external link added",
       "external_unlinked": "external link removed",

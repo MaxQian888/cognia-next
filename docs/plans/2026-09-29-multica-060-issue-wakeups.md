@@ -94,9 +94,9 @@ wakeup-paused-{loop,rate,issue-closed}` (no schema change); the scheduler
   `meta.prState` (open/closed/merged), recorded by the import sweep on
   every issue carrying the link (`recordIssuePullRequestState`,
   `pr_state_changed`); settled runs link the PRs they opened
-  (`linkRunPullRequests`). Condition `pr-merged` only (no `checks`: no
-  per-PR CI fetch exists); the service refuses it on a container without
-  an import-mode GitHub binding. Latency = the sync interval.
+  (`linkRunPullRequests`). Condition `pr-merged`; the service refuses it
+  on a container without an import-mode GitHub binding. Latency = the sync
+  interval.
 - **Phase 3**: `issue.link_artifact` (write; resolves the caller's run by
   session, like check-in), `IssueRunArtifact.{artifactId,sessionId,
 deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
@@ -150,8 +150,20 @@ deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
   trail's `wakeup_fired` carries `timedOut`, it is not charged to the rate
   cap, and what an expired rule could not deliver lands on the trail rather
   than being held forever. The dialog offers deadline presets.
-- **Not built:** Phases 5 and 6 (gated on demand by this plan); `until-pr`
-  `checks`.
+- **`until-pr` `checks`** (2026-09-30): the import sweep now also reads
+  the head commit's CI of each open linked pull request (check runs, up to
+  three pages, plus commit statuses, rolled up by the Agent Team
+  observer's `summarizeCi`; a read cut short never reports passing). It
+  lands on the ref as `meta.ciState` (pending/passing/failing) through
+  `recordIssuePullRequestChecks`, which appends `pr_checks_changed` once
+  per change. Condition `pr-checks` (optional `result`) fires when the
+  trail says the checks settled and an OPEN linked pull request's ref
+  agrees; a merged or closed one's last CI is history. Same binding
+  requirement and latency as `pr-merged`. Deliberately not the observer's
+  own fetch: that one is ETag-cached per observation and also reads
+  reviews and comments. Per-sweep CI reads are capped
+  (`pullRequestCiLimit`, 10).
+- **Not built:** Phases 5 and 6 (gated on demand by this plan).
 
 ## Delta since the August snapshots
 

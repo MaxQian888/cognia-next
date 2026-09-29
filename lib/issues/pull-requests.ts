@@ -11,11 +11,20 @@
  *
  * State moves only when the sweep observes it, so an `until-pr` rule needs
  * the issue's container bound to its repository in import mode; the wakeup
- * service refuses one that could never fire.
+ * service refuses one that could never fire. The same sweep reads an open
+ * linked pull request's CI (`fetchPullRequestCi`), so a `pr-checks` rule
+ * has the same requirement.
  */
 
-import type { Issue, IssueActor, IssuePullRequestState, IssueRunArtifact } from "@/types/issues"
-import { isIssuePullRequestState } from "@/types/issues"
+import type {
+  Issue,
+  IssueActor,
+  IssuePullRequestCiState,
+  IssuePullRequestState,
+  IssueRunArtifact,
+} from "@/types/issues"
+import { isIssuePullRequestCiState, isIssuePullRequestState } from "@/types/issues"
+import type { OctokitLike } from "@/lib/github/issues"
 
 /** The ref provider every linked pull request is stored under. */
 export const PULL_REQUEST_REF_PROVIDER = "github-pr"
@@ -59,20 +68,96 @@ export function pullRequestStateOf(raw: {
   return undefined
 }
 
-/** The linked pull requests of an issue with the state last observed, if any. */
-export function linkedPullRequests(
-  issue: Pick<Issue, "externalRefs">
-): { externalId: string; url?: string; state?: IssuePullRequestState }[] {
+/** The linked pull requests of an issue with the state and CI last observed, if any. */
+export function linkedPullRequests(issue: Pick<Issue, "externalRefs">): {
+  externalId: string
+  url?: string
+  state?: IssuePullRequestState
+  ci?: IssuePullRequestCiState
+}[] {
   return (issue.externalRefs ?? [])
     .filter((ref) => ref.provider === PULL_REQUEST_REF_PROVIDER)
     .map((ref) => {
       const state = ref.meta?.prState
+      const ci = ref.meta?.ciState
       return {
         externalId: ref.externalId,
         ...(ref.url ? { url: ref.url } : {}),
         ...(isIssuePullRequestState(state) ? { state } : {}),
+        ...(isIssuePullRequestCiState(ci) ? { ci } : {}),
       }
     })
+}
+
+/**
+ * Has an open linked pull request's CI settled — to `result`, or to either
+ * passing or failing when none is named? A merged or closed PR's last CI is
+ * history, not an answer.
+ */
+export function hasSettledPullRequestChecks(
+  issue: Pick<Issue, "externalRefs">,
+  result?: "passing" | "failing"
+): boolean {
+  return linkedPullRequests(issue).some(
+    (pr) =>
+      pr.state !== "merged" &&
+      pr.state !== "closed" &&
+      (result ? pr.ci === result : pr.ci === "passing" || pr.ci === "failing")
+  )
+}
+
+/** Check-run pages read per commit: 3 × 100, beyond which a PR is unusual enough to call pending. */
+const CI_CHECK_RUN_PAGES = 3
+
+/**
+ * A commit's CI, rolled up over its check runs and commit statuses by the
+ * same `summarizeCi` the Agent Team PR observer uses. `undefined` when the
+ * commit has no checks at all. Deliberately not the observer's own fetch: that
+ * one is ETag-cached against a persisted observation and also reads reviews
+ * and comments, none of which a sweep over many pull requests should pay for.
+ */
+export async function fetchPullRequestCi(
+  octokit: OctokitLike,
+  owner: string,
+  repo: string,
+  sha: string
+): Promise<IssuePullRequestCiState | undefined> {
+  const { summarizeCi } = await import("@/lib/github/pr-observe/fetch")
+  const checkRuns: Parameters<typeof summarizeCi>[1] = []
+  let truncated = false
+  for (let page = 1; page <= CI_CHECK_RUN_PAGES; page += 1) {
+    const response = await octokit.request("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
+      owner,
+      repo,
+      ref: sha,
+      per_page: 100,
+      page,
+    })
+    const body = (response.data ?? {}) as {
+      total_count?: number
+      check_runs?: Parameters<typeof summarizeCi>[1]
+    }
+    const runs = Array.isArray(body.check_runs) ? body.check_runs : []
+    checkRuns.push(...runs)
+    if (runs.length < 100 || checkRuns.length >= (body.total_count ?? 0)) break
+    if (page === CI_CHECK_RUN_PAGES) truncated = true
+  }
+  const status = await octokit.request("GET /repos/{owner}/{repo}/commits/{ref}/status", {
+    owner,
+    repo,
+    ref: sha,
+    per_page: 100,
+  })
+  const summary = summarizeCi(
+    sha,
+    checkRuns,
+    (status.data ?? null) as Parameters<typeof summarizeCi>[2]
+  ).summary
+  if (summary === "failing") return "failing"
+  // Unread runs could still be going, so an unfinished read is not "passing".
+  if (summary === "pending" || (truncated && summary === "passing")) return "pending"
+  if (summary === "passing") return "passing"
+  return undefined
 }
 
 /** Has any linked pull request been observed merged? */

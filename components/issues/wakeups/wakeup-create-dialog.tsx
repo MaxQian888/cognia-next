@@ -39,9 +39,11 @@ import {
   ISSUE_WAKEUP_DEFAULT_MAX_FIRES,
   ISSUE_WAKEUP_INSTRUCTION_MAX,
   ISSUE_WAKEUP_MAX_FIRES_LIMIT,
+  WAKEUP_CHECK_RESULTS,
   WAKEUP_EXPIRY_HOURS,
   WAKEUP_PRESETS,
   isTerminalIssueStatus,
+  type WakeupCheckResult,
   type WakeupPreset,
   type IssueWakeupSpec,
   type IssueWakeupTriggerSpec,
@@ -59,6 +61,8 @@ export interface WakeupFormState {
   targetIssueId: string
   /** Children-done: the sub-issue stage to wait for, `""` for every sub-issue. */
   stage: string
+  /** PR checks: the outcome to wait for, `any` for either. */
+  checkResult: WakeupCheckResult
   /** `HH:MM`, local time. */
   dailyAt: string
   intervalHours: number
@@ -79,6 +83,7 @@ export const INITIAL_WAKEUP_FORM: WakeupFormState = {
   toStatus: "in_review",
   targetIssueId: "",
   stage: "",
+  checkResult: "any",
   dailyAt: "09:00",
   intervalHours: 4,
   at: "",
@@ -113,6 +118,10 @@ export function wakeupTriggerFromForm(form: WakeupFormState): IssueWakeupTrigger
       return form.targetIssueId ? { on: "issue-finished", targetIssueId: form.targetIssueId } : null
     case "pr-merged":
       return { on: "pr-merged" }
+    case "pr-checks":
+      return form.checkResult === "any"
+        ? { on: "pr-checks" }
+        : { on: "pr-checks", result: form.checkResult }
     case "daily": {
       const match = /^(\d{1,2}):(\d{2})$/.exec(form.dailyAt)
       if (!match) return null
@@ -343,6 +352,27 @@ export function WakeupCreateDialog({
                   {t("noTargets")}
                 </p>
               )}
+            </div>
+          ) : null}
+
+          {form.preset === "pr-checks" ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="wakeup-check-result">{t("checkResult")}</Label>
+              <Select
+                value={form.checkResult}
+                onValueChange={(value) => set("checkResult", value as WakeupCheckResult)}
+              >
+                <SelectTrigger id="wakeup-check-result" data-testid="wakeup-check-result">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WAKEUP_CHECK_RESULTS.map((result) => (
+                    <SelectItem key={result} value={result}>
+                      {t(`checkResults.${result}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           ) : null}
 

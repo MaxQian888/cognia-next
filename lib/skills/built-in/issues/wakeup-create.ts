@@ -62,6 +62,17 @@ export const wakeupTriggerSchema = z
       .describe(
         "When a pull request linked to the issue merges. Needs the issue's project bound to its GitHub repository in import mode; refused otherwise."
       ),
+    z
+      .object({
+        on: z.literal("pr-checks"),
+        result: z
+          .enum(["passing", "failing"])
+          .optional()
+          .describe("Only this outcome. Omit to wake on either."),
+      })
+      .describe(
+        "When an open pull request linked to the issue finishes its checks. Same GitHub import binding requirement as pr-merged."
+      ),
     z.object({
       on: z.literal("cron"),
       cronExpression: z.string().min(1).describe("5-field cron, e.g. '0 9 * * 1-5'."),
@@ -95,7 +106,7 @@ const schema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Stop after the first delivery. Defaults to true for children-done / issue-finished / pr-merged."
+      "Stop after the first delivery. Defaults to true for children-done / issue-finished / pr-merged / pr-checks."
     ),
   maxFires: z
     .number()
@@ -161,9 +172,9 @@ const skill: BuiltInSkill<typeof schema> = {
   family: "issue",
   label: { en: "Add issue wakeup", "zh-CN": "新建议题唤醒" },
   description: {
-    en: "Subscribe to an issue: when the trigger happens (a comment, a status change, every sub-issue or sub-issue stage finishing, another issue finishing, a linked pull request merging, or a timer), an agent run starts on the issue with the instruction and what happened. If a run is already active the input joins it. Rules that loop between agents or fire too often pause themselves.",
+    en: "Subscribe to an issue: when the trigger happens (a comment, a status change, every sub-issue or sub-issue stage finishing, another issue finishing, a linked pull request merging or finishing its checks, or a timer), an agent run starts on the issue with the instruction and what happened. If a run is already active the input joins it. Rules that loop between agents or fire too often pause themselves.",
     "zh-CN":
-      "订阅一个议题：当触发条件发生（评论、状态变化、所有子议题或某个子议题阶段完成、另一个议题完成、关联的拉取请求合并或定时），会在该议题上启动一次 Agent 运行，并带上指令和发生的事。若已有运行进行中，输入会并入该运行。在 Agent 之间循环或触发过于频繁的规则会自动暂停。",
+      "订阅一个议题：当触发条件发生（评论、状态变化、所有子议题或某个子议题阶段完成、另一个议题完成、关联的拉取请求合并或检查完成、或定时），会在该议题上启动一次 Agent 运行，并带上指令和发生的事。若已有运行进行中，输入会并入该运行。在 Agent 之间循环或触发过于频繁的规则会自动暂停。",
   },
   platforms: "any",
   mutation: "write",

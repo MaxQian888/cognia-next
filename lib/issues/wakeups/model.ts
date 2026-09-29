@@ -15,6 +15,7 @@ import type {
   IssueChildrenBarrier,
   IssueEvent,
   IssueEventPayload,
+  IssuePullRequestCheckResult,
   IssueRun,
   IssueStatus,
   IssueWakeupCondition,
@@ -75,6 +76,11 @@ export type IssueWakeupTriggerSpec =
   | { on: "issue-finished"; targetIssueId: string }
   /** A linked pull request merges. Needs an import-mode GitHub binding. */
   | { on: "pr-merged" }
+  /**
+   * An open linked pull request's CI settles: to `result`, or to either
+   * passing or failing. Same binding requirement as `pr-merged`.
+   */
+  | { on: "pr-checks"; result?: IssuePullRequestCheckResult }
   | { on: "cron"; cronExpression: string; timezone?: string }
   | { on: "interval"; intervalMs: number }
   | { on: "at"; runAt: Date }
@@ -221,6 +227,15 @@ export function compileIssueWakeup(spec: IssueWakeupSpec): CompiledIssueWakeup {
         ...((spec.once ?? true) ? { once: true } : {}),
       }
       break
+    case "pr-checks":
+      trigger = { type: "event", eventType: ISSUE_ACTIVITY_EVENT, eventSource: ownSource }
+      payload = {
+        ...base,
+        match: { kinds: ["pr_checks_changed"] },
+        condition: { kind: "pr-checks", ...(t.result ? { result: t.result } : {}) },
+        ...((spec.once ?? true) ? { once: true } : {}),
+      }
+      break
     case "cron":
       trigger = {
         type: "cron",
@@ -312,6 +327,12 @@ export function decompileWakeupTrigger(task: Pick<ScheduledTask, "trigger" | "pa
     return { on: "issue-finished", targetIssueId: condition.issueId } as const
   }
   if (condition?.kind === "pr-merged") return { on: "pr-merged" } as const
+  if (condition?.kind === "pr-checks") {
+    return {
+      on: "pr-checks",
+      ...(condition.result ? { result: condition.result } : {}),
+    } as const
+  }
   return {
     on: "event",
     ...(payload?.match?.kinds ? { kinds: payload.match.kinds } : {}),
@@ -494,6 +515,8 @@ export function summarizeIssueEventPayload(payload: IssueEventPayload): string {
       return payload.to ? "put into triage" : "accepted out of triage"
     case "pr_state_changed":
       return `pull request ${payload.ref.label ?? payload.ref.externalId} is ${payload.to}${payload.ref.url ? ` (${payload.ref.url})` : ""}`
+    case "pr_checks_changed":
+      return `pull request ${payload.ref.label ?? payload.ref.externalId} checks are ${payload.to}${payload.ref.url ? ` (${payload.ref.url})` : ""}`
     default:
       return payload.kind.replace(/_/g, " ")
   }
@@ -645,12 +668,21 @@ export function buildWakeupBrief(input: WakeupBriefInput): string {
  */
 export const WAKEUP_EXPIRY_HOURS = ["1", "4", "24", "72", "168", "336"] as const
 
+/**
+ * The outcomes the `pr-checks` preset offers: either settled result, or one.
+ * Here for the same reason as {@link WAKEUP_PRESETS}.
+ */
+export const WAKEUP_CHECK_RESULTS = ["any", "passing", "failing"] as const
+
+export type WakeupCheckResult = (typeof WAKEUP_CHECK_RESULTS)[number]
+
 export const WAKEUP_PRESETS = [
   "comment",
   "status",
   "children-done",
   "issue-finished",
   "pr-merged",
+  "pr-checks",
   "daily",
   "interval",
   "at",
@@ -692,6 +724,7 @@ export const ISSUE_WAKEUP_EVENT_KINDS = [
   "stage_changed",
   "triage_changed",
   "pr_state_changed",
+  "pr_checks_changed",
   "cycle_changed",
   "external_linked",
   "external_unlinked",
