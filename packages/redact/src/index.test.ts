@@ -11,6 +11,7 @@ import {
   PII_PLACEHOLDER_SOURCE,
   hasNoLeakingPii,
   hasNoLeakingPiiDeep,
+  normalizeForRedaction,
   redactText,
   unredactText,
 } from "./index"
@@ -311,6 +312,218 @@ describe("redactText — hardened secret/PII coverage (T0.1)", () => {
   })
 })
 
+describe("redactText — ported secret shapes (ai-memory sanitizer)", () => {
+  // Fixtures are assembled at runtime so no scanner flags this file itself.
+  const alnum = (n: number) => "aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zC".repeat(4).slice(0, n)
+
+  function expectRedacted(text: string, secret: string, kind = "API_KEY") {
+    const { redacted, map } = redactText(text)
+    expect(redacted).not.toContain(secret)
+    expect(Object.values(map).map((r) => r.kind)).toContain(kind)
+    expect(unredactText(redacted, map)).toBe(text)
+    expect(hasNoLeakingPii(redacted)).toBe(true)
+    return redacted
+  }
+
+  function expectUntouched(text: string) {
+    const { redacted, map } = redactText(text)
+    expect(redacted).toBe(text)
+    expect(map).toEqual({})
+  }
+
+  it("redacts Stripe live/test secret and restricted keys", () => {
+    for (const prefix of ["sk_live_", "rk_live_", "sk_test_", "rk_test_"]) {
+      const key = `${prefix}${alnum(24)}`
+      expectRedacted(`stripe ${key} done`, key)
+      expect(hasNoLeakingPii(`stripe ${key}`)).toBe(false)
+    }
+  })
+
+  it("leaves ordinary sk_ identifiers in code alone", () => {
+    expectUntouched("const sk_live_connection_pool_size = sk_user_id + sk_live_mode")
+    expect(hasNoLeakingPii("sk_live_connection_pool_size")).toBe(true)
+  })
+
+  it("redacts the full GitHub gh[pousr]_ token family", () => {
+    for (const prefix of ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]) {
+      const token = `${prefix}${alnum(36)}`
+      expectRedacted(`token ${token}`, token)
+    }
+    expectUntouched("helper ghu_short and ghr_tmp")
+  })
+
+  it("redacts AWS ASIA temporary access key ids alongside AKIA", () => {
+    const asia = `ASIA${"Q7RT2WXYZ3ABCDEF"}`
+    const akia = `AKIA${"IOSFODNN7EXAMPLE"}`
+    expectRedacted(`id ${asia}`, asia)
+    expectRedacted(`id ${akia}`, akia)
+    expect(hasNoLeakingPii(`id ${asia}`)).toBe(false)
+    expectUntouched("ASIA PACIFIC region and ASIAN markets")
+  })
+
+  it("redacts Google OAuth refresh tokens but not `1//` comments or URLs", () => {
+    const token = `1//0g${alnum(40)}`
+    expectRedacted(`refresh ${token}`, token)
+    expect(hasNoLeakingPii(`refresh ${token}`)).toBe(false)
+    expectUntouched("x = 1//comment")
+    expectUntouched("x = 1// a long trailing comment with spaces in it")
+    expectUntouched("see http://10.0.0.1//long_path_segment_value_here")
+  })
+
+  it("redacts Meta EAA access tokens but not short EAA prose", () => {
+    const token = `EAAB${alnum(40)}`
+    expectRedacted(`fb ${token}`, token)
+    expect(hasNoLeakingPii(`fb ${token}`)).toBe(false)
+    expectUntouched("The EAAB meeting and EAACCESS notes")
+  })
+
+  it("redacts Telegram bot tokens but not times or ts:hash pairs", () => {
+    const token = `123456789:AA${alnum(33)}`
+    expectRedacted(`bot ${token}`, token)
+    expect(hasNoLeakingPii(`bot ${token}`)).toBe(false)
+    expectUntouched("meet at 12:34 or 09:15:00")
+    // 40-char sha1 after a unix timestamp is not the fixed 34/35-char secret.
+    // (The bare 10-digit timestamp is still a PHONE candidate, pre-existing.)
+    const tsHash = "1700000000:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    const { redacted, map } = redactText(tsHash)
+    expect(redacted).toContain(":da39a3ee5e6b4b0d3255bfef95601890afd80709")
+    expect(Object.values(map).map((r) => r.kind)).not.toContain("API_KEY")
+    expect(hasNoLeakingPii(tsHash)).toBe(true)
+  })
+
+  it("redacts Slack app-level xapp- tokens", () => {
+    const token = `xapp-1-A0123456789-${alnum(20)}`
+    expectRedacted(`slack ${token}`, token)
+    expectUntouched("the xapp-config file")
+  })
+
+  it("redacts whitespace Bearer tokens, keeping the keyword", () => {
+    const token = `${alnum(20)}.${alnum(12)}`
+    const redacted = expectRedacted(`Authorization: Bearer ${token}`, token)
+    expect(redacted).toMatch(/^Authorization: Bearer <API_KEY_\d{3}>$/)
+    expectRedacted(`authorization: bearer\t${alnum(24)}`, alnum(24))
+    expect(hasNoLeakingPii(`Authorization: Bearer ${token}`)).toBe(false)
+  })
+
+  it("leaves Bearer prose, short operands and JWT operands to the right pass", () => {
+    expectUntouched("Use bearer authentication for the Bearer authorization scheme")
+    expectUntouched("Bearer abc123")
+    expect(hasNoLeakingPii("Use bearer authentication for this")).toBe(true)
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+    const { redacted } = redactText(`Bearer ${jwt}`)
+    expect(redacted).toBe("Bearer <JWT_001>")
+  })
+
+  it("redacts env-style secret values, keeping the variable name", () => {
+    const cases: Array<[string, string]> = [
+      ["DB_PASSWORD=hunter22hunter", "hunter22hunter"],
+      ['export STRIPE_WEBHOOK_SECRET="whsec_abcdef12"', "whsec_abcdef12"],
+      ["HF_TOKEN: hf_abcdefgh", "hf_abcdefgh"],
+      ["AWS_SECRET_ACCESS_KEY = wJalrXUtnFEMI/K7MDENG", "wJalrXUtnFEMI/K7MDENG"],
+      ["SERVICE_CREDENTIALS='c0rrect-horse'", "c0rrect-horse"],
+      ['{"MY_APP_PRIVATE_KEY": "shortkey1"}', "shortkey1"],
+    ]
+    for (const [text, value] of cases) {
+      const redacted = expectRedacted(text, value)
+      const name = text.match(/[A-Z][A-Z0-9_]+/)?.[0] ?? ""
+      expect(redacted).toContain(name)
+      expect(hasNoLeakingPii(text)).toBe(false)
+    }
+  })
+
+  it("covers the AWS_ACCESS_KEY_ID name the generic suffix rule misses", () => {
+    expectRedacted("AWS_ACCESS_KEY_ID=notAkiaShaped1", "notAkiaShaped1")
+  })
+
+  it("leaves short env values, references and lower-case code alone", () => {
+    expectUntouched("FOO_KEY=1\nMAX_TOKEN=4096\nAPP_SECRET=short")
+    expectUntouched("OPENAI_API_KEY=$OPENAI_API_KEY_FROM_VAULT")
+    expectUntouched("GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}")
+    expectUntouched("const API_KEY = process.env.API_KEY")
+    expectUntouched("cache_key = build_cache_key(user)")
+    expectUntouched("MAX_TOKENS=100000000")
+    expect(hasNoLeakingPii("FOO_KEY=1 MAX_TOKEN=4096")).toBe(true)
+  })
+
+  it("does not re-tokenize an env value already claimed by the prefix pass", () => {
+    const key = `sk-proj-${alnum(24)}`
+    const { redacted, map } = redactText(`OPENAI_API_KEY=${key}`)
+    expect(redacted).toBe("OPENAI_API_KEY=<API_KEY_001>")
+    expect(Object.keys(map)).toHaveLength(1)
+    expect(redactText(redacted).redacted).toBe(redacted)
+  })
+
+  it("redacts credential directory paths from the directory onward", () => {
+    const cases: Array<[string, string, string]> = [
+      ["cat ~/.ssh/id_ed25519", "~/", ".ssh/id_ed25519"],
+      ["open /home/alice/.aws/credentials now", "/home/alice/", ".aws/credentials"],
+      ["KUBECONFIG=/Users/bob/.kube/config", "/Users/bob/", ".kube/config"],
+      ["gpg dir ~/.gnupg/private-keys-v1.d", "~/", ".gnupg/private-keys-v1.d"],
+      [
+        "adc at ~/.config/gcloud/application_default_credentials.json",
+        "~/",
+        ".config/gcloud/application_default_credentials.json",
+      ],
+      ["read C:\\Users\\alice\\.ssh\\id_rsa", "C:\\Users\\alice\\", ".ssh\\id_rsa"],
+      ["ls ~/.ssh", "~/", ".ssh"],
+    ]
+    for (const [text, kept, secret] of cases) {
+      const { redacted, map } = redactText(text)
+      expect(redacted).toContain(`${kept}<CREDENTIAL_PATH_001>`)
+      expect(map["<CREDENTIAL_PATH_001>"]).toEqual({
+        placeholder: "<CREDENTIAL_PATH_001>",
+        original: secret,
+        kind: "CREDENTIAL_PATH",
+      })
+      expect(unredactText(redacted, map)).toBe(text)
+    }
+  })
+
+  it("leaves credential-dir lookalikes alone and does not fail the gate on paths", () => {
+    expectUntouched("put it in your .ssh folder; see foo.aws.com and ~/.sshrc")
+    expectUntouched("~/.config/gcloudish and ~/.awsome/notes")
+    // Naming a credential path leaks no secret; the gate must not block it.
+    expect(hasNoLeakingPii("how do I set up ~/.ssh/config?")).toBe(true)
+  })
+})
+
+describe("normalizeForRedaction", () => {
+  const ESC = String.fromCharCode(0x1b)
+  const BEL = String.fromCharCode(0x07)
+
+  it("strips ANSI CSI / OSC sequences, controls and bidi overrides", () => {
+    const text = `${ESC}[31mred${ESC}[0m ${ESC}]0;title${BEL}ok${ESC}]8;;x${ESC}\\ a\u0000b\u202Ec\u2066d\u2069`
+    expect(normalizeForRedaction(text)).toBe("red ok abcd")
+  })
+
+  it("keeps tab / newline / carriage return and ordinary unicode", () => {
+    const text = "a\tb\nc\r\n张伟 — café ✓"
+    expect(normalizeForRedaction(text)).toBe(text)
+  })
+
+  it("is not applied by redactText (its output equals input outside placeholders)", () => {
+    const text = `${ESC}[1mbold${ESC}[0m alice@example.com`
+    const { redacted, map } = redactText(text)
+    expect(redacted).toBe(`${ESC}[1mbold${ESC}[0m <EMAIL_001>`)
+    expect(unredactText(redacted, map)).toBe(text)
+  })
+
+  it("lets hasNoLeakingPii see a secret split by an escape or control char", () => {
+    const key = `sk-proj-abcdefgh${ESC}[0mijklmnop12345678`
+    expect(hasNoLeakingPii(key)).toBe(false)
+    expect(hasNoLeakingPii("ghp_abcdefghij\u202Eklmnopqrst1234")).toBe(false)
+    // Plain coloured output with no secret stays clean.
+    expect(hasNoLeakingPii(`${ESC}[32mPASS${ESC}[0m 12 tests`)).toBe(true)
+  })
+
+  it("produces text redactText can then fully scrub", () => {
+    const raw = `token sk-proj-abcdefgh${ESC}[0mijklmnop12345678`
+    const { redacted } = redactText(normalizeForRedaction(raw))
+    expect(redacted).toBe("token <API_KEY_001>")
+    expect(hasNoLeakingPii(redacted)).toBe(true)
+  })
+})
+
 describe("hasNoLeakingPiiDeep", () => {
   it("allows shared acyclic schemas while inspecting their values", () => {
     const schema = { type: "string", description: "Workspace path" }
@@ -487,6 +700,7 @@ describe("placeholder pattern single-source (PII_KINDS)", () => {
       PEM_KEY: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
       PASSPORT: "passport E12345678",
       DRIVER_LICENSE: "driver license: 123456789012",
+      CREDENTIAL_PATH: "cat ~/.ssh/id_ed25519",
     }
     for (const [kind, text] of Object.entries(samples)) {
       const { map } = redactText(text, kind === "NAME" ? ["Bob"] : [])
@@ -494,7 +708,7 @@ describe("placeholder pattern single-source (PII_KINDS)", () => {
       expect(kinds).toContain(kind)
       expect(PII_KINDS).toContain(kind as (typeof PII_KINDS)[number])
     }
-    expect(PII_KINDS).toHaveLength(12)
+    expect(PII_KINDS).toHaveLength(13)
   })
 
   it("PII_PLACEHOLDER_SOURCE matches every kind including JWT and PEM_KEY", () => {

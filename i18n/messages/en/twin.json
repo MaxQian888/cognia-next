@@ -338,12 +338,16 @@
     "API_KEY": "API_KEY",
     "BANK_CARD": "BANK_CARD",
     "CN_ID": "CN_ID",
+    "CREDENTIAL_PATH": "CREDENTIAL_PATH",
     "DRIVER_LICENSE": "DRIVER_LICENSE",
     "EMAIL": "EMAIL",
     "IP_ADDR": "IP_ADDR",
+    "JWT": "JWT",
     "NAME": "NAME",
     "PASSPORT": "PASSPORT",
-    "PHONE": "PHONE"
+    "PEM_KEY": "PEM_KEY",
+    "PHONE": "PHONE",
+    "SSN": "SSN"
   },
   "selector": {
     "activeTwinAria": "Active twin: {name}",

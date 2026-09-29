@@ -39209,6 +39209,7 @@
             "API_KEY": "API key",
             "BANK_CARD": "Bank card",
             "CN_ID": "National ID",
+            "CREDENTIAL_PATH": "Credential path",
             "DRIVER_LICENSE": "Driver license",
             "EMAIL": "Email",
             "IP_ADDR": "IP address",
@@ -49754,12 +49755,16 @@
       "API_KEY": "API_KEY",
       "BANK_CARD": "BANK_CARD",
       "CN_ID": "CN_ID",
+      "CREDENTIAL_PATH": "CREDENTIAL_PATH",
       "DRIVER_LICENSE": "DRIVER_LICENSE",
       "EMAIL": "EMAIL",
       "IP_ADDR": "IP_ADDR",
+      "JWT": "JWT",
       "NAME": "NAME",
       "PASSPORT": "PASSPORT",
-      "PHONE": "PHONE"
+      "PEM_KEY": "PEM_KEY",
+      "PHONE": "PHONE",
+      "SSN": "SSN"
     },
     "selector": {
       "activeTwinAria": "Active twin: {name}",

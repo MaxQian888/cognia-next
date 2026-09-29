@@ -140,6 +140,7 @@
         "API_KEY": "API key",
         "BANK_CARD": "Bank card",
         "CN_ID": "National ID",
+        "CREDENTIAL_PATH": "Credential path",
         "DRIVER_LICENSE": "Driver license",
         "EMAIL": "Email",
         "IP_ADDR": "IP address",

@@ -39209,6 +39209,7 @@
             "API_KEY": "API 密钥",
             "BANK_CARD": "银行卡",
             "CN_ID": "身份证",
+            "CREDENTIAL_PATH": "凭据路径",
             "DRIVER_LICENSE": "驾驶证",
             "EMAIL": "邮箱",
             "IP_ADDR": "IP 地址",
@@ -49754,12 +49755,16 @@
       "API_KEY": "API 密钥",
       "BANK_CARD": "银行卡",
       "CN_ID": "身份证",
+      "CREDENTIAL_PATH": "凭据路径",
       "DRIVER_LICENSE": "驾照",
       "EMAIL": "邮箱",
       "IP_ADDR": "IP 地址",
+      "JWT": "JWT",
       "NAME": "姓名",
       "PASSPORT": "护照",
-      "PHONE": "手机"
+      "PEM_KEY": "私钥",
+      "PHONE": "手机",
+      "SSN": "社保号"
     },
     "selector": {
       "activeTwinAria": "当前孪生：{name}",

@@ -21,17 +21,43 @@
  *                     coverage is best-effort, not a proof-of-correctness.
  *   • IP addresses  — IPv4 (with private-range exclusions) + IPv6 (uncompressed
  *                     and `::`-compressed forms)
- *   • API keys      — `sk-…` / `ghp_…` / `gho_…` / `ghs_…` / `xox[abp]-…` /
- *                     `AKIA…` / OpenAI org keys + a high-entropy fallback for long
- *                     tokens preceded by an obvious key hint (`api_key`, `apikey`,
- *                     `secret`, `token`, `bearer`, `password`, the AWS secret-key
- *                     names, …). The hinted value stops at whitespace/quote so
- *                     dotted secrets (JWT-after-hint) are captured whole.
+ *   • API keys      — `sk-…` / Stripe `sk_live_…` `rk_live_…` (+ `_test_`) /
+ *                     GitHub `gh[pousr]_…` `github_pat_…` / Slack `xox[abprs]-…`
+ *                     `xapp-…` / Google `AIza…` + OAuth refresh `1//…` / AWS
+ *                     `AKIA…` `ASIA…` / Meta `EAA…` / Telegram bot `123456:AA…`
+ *                     + a high-entropy fallback for long tokens preceded by an
+ *                     obvious key hint (`api_key`, `apikey`, `secret`, `token`,
+ *                     `bearer`, `password`, the AWS secret-key names, …). The
+ *                     hinted value stops at whitespace/quote so dotted secrets
+ *                     (JWT-after-hint) are captured whole.
+ *   • Bearer tokens — `Bearer <token>` (whitespace form, case-insensitive,
+ *                     ≥16 chars, token must carry a digit or inner capital so
+ *                     prose like "bearer authentication" is left alone)
+ *   • Env secrets   — `NAME_KEY=…` / `NAME_TOKEN=…` / `_SECRET` / `_PASSWORD` /
+ *                     `_CREDENTIAL(S)` / `_PRIVATE_KEY` assignments and the
+ *                     well-known provider names (`ANTHROPIC_API_KEY`, `HF_TOKEN`,
+ *                     `AWS_ACCESS_KEY_ID`, …). Only the value (≥8 chars) is
+ *                     redacted, the name stays so the text still reads;
+ *                     references (`$VAR`, `process.env.X`) are left alone.
+ *   • Cred. paths   — `~/.ssh/…`, `.aws`, `.kube`, `.config/gcloud`, `.gnupg`:
+ *                     the path from the credential directory onward. Redacted
+ *                     by `redactText` but NOT a `hasNoLeakingPii` failure (like
+ *                     PHONE / NAME): naming a path leaks no secret, and failing
+ *                     the gate on it would block ordinary "how do I set up
+ *                     ~/.ssh/config" prompts.
  *   • JWT           — three-segment `eyJ…`.`…`.`…` JSON Web Tokens
  *   • PEM keys      — `-----BEGIN … PRIVATE KEY-----` … `-----END … PRIVATE KEY-----`
  *   • URL creds     — the password in `scheme://user:password@host`
  *   • Passport      — ICAO machine-readable + CN passport prefixes (E/G/EH/EJ)
  *   • Driver lic.   — CN driver-license card numbers (12 digits, hint-driven)
+ *
+ * Terminal escapes (ANSI CSI / OSC), C0/C1 controls and bidi overrides are
+ * NOT stripped by `redactText`: its contract is "text unchanged except PII"
+ * (`unredactText` round-trips it and `translateOffsetsThroughRedaction`
+ * relies on it). They are handled by the separate, exported
+ * {@link normalizeForRedaction} pre-normalization step, and `hasNoLeakingPii`
+ * scans the normalized view too, so a secret split by an escape sequence or
+ * visually reordered by a bidi override cannot slip past the gate.
  *
  * The emitted placeholder format is `<KIND_NNN>` (e.g. `<EMAIL_001>`,
  * `<PHONE_002>`); the mapping is keyed by placeholder so we can run
@@ -59,6 +85,7 @@ export const PII_KINDS = [
   "PEM_KEY",
   "PASSPORT",
   "DRIVER_LICENSE",
+  "CREDENTIAL_PATH",
 ] as const
 
 export type PiiKind = (typeof PII_KINDS)[number]
@@ -127,10 +154,41 @@ const IPV6_RE = /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g
 // forms are link-local / loopback anyway (non-PII), mirroring the private-IPv4
 // exclusions above.
 const IPV6_COMPRESSED_RE = /\b(?:[0-9a-fA-F]{1,4}:){2,}:(?:[0-9a-fA-F]{1,4}:?)*[0-9a-fA-F]{1,4}\b/g
-// Known API key prefixes — covers OpenAI, Anthropic, GitHub, Slack and a
-// few others that ship recognisable prefixes.
+// Known API key prefixes — covers OpenAI, Anthropic, Stripe, GitHub, Slack,
+// Google, AWS, Meta, Telegram and a few others that ship recognisable
+// prefixes. Shapes ported from ai-memory's sanitizer, tightened where the
+// upstream class would eat ordinary code:
+//   • Stripe `(?:sk|rk)_(?:live|test)_` takes an alphanumeric body only (real
+//     keys have no `_`), so `sk_live_connection_pool` is not a key.
+//   • Google OAuth refresh tokens `1//…` refuse a preceding `.` `:` `/` so a
+//     URL like `http://10.0.0.1//long_path_segment` is not a token.
+//   • Telegram bot tokens `<bot id>:<35-char secret>`; the fixed secret length
+//     keeps `12:34` times and `ts:<sha1>` pairs out.
 const API_KEY_PREFIX_RE =
-  /\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g
+  /\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,}|(?<![.:/])1\/\/[0-9A-Za-z_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|EAA[A-Za-z0-9]{20,}|\d{6,10}:(?:AA[A-Za-z0-9_-]{30,}|[A-Za-z0-9_-]{34,35}))\b/g
+// `Bearer <token>` with whitespace (the HTTP `Authorization` header form).
+// `m[1]` is the token. `isTokenLike` then drops prose ("bearer
+// authentication") — see there. The colon/equals form (`bearer: …`) stays with
+// the hinted-secret pass below.
+const BEARER_RE = /\bbearer\s+([A-Za-z0-9._~+/=-]{16,})/gi
+// Env-style secret assignments: `<NAME>"?\s*[=:]\s*["']?<value>`. Group 1 is
+// the variable name, kept so the text stays readable; group 2 is the value,
+// the only part redacted. Case-sensitive on purpose: the upper-case env
+// convention is what separates `OPENAI_API_KEY=…` from code such as
+// `cache_key = build_key(…)`. The explicit provider names are listed even
+// where the generic suffix rule already covers them, and they add the
+// `AWS_ACCESS_KEY_ID` family, whose `_ID` suffix the generic rule misses.
+// `isRedactableEnvValue` applies the ≥8-char floor (so `FOO_KEY=1` config is
+// left alone), skips placeholders and variable references.
+const ENV_SECRET_RE =
+  /\b((?:ANTHROPIC_API_KEY|OPENAI_API_KEY|OPENROUTER_API_KEY|VOYAGE_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|DEEPSEEK_API_KEY|HF_TOKEN|HUGGINGFACE_TOKEN|AWS_(?:SECRET_)?ACCESS_KEY[A-Z_]*|AWS_SESSION_TOKEN|GITHUB_TOKEN|GH_TOKEN|GITLAB_TOKEN|GOOGLE_API_KEY|GEMINI_API_KEY|OLLAMA_API_KEY)|[A-Z][A-Z0-9_]*_(?:PRIVATE_KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|CREDENTIAL))"?\s*[=:]\s*["']?([^\s"']+)/g
+// Credential directories. Matches from the directory onward (the part before
+// it — `~/`, `/home/alice/`, `C:\\Users\\alice\\` — is kept; identifying
+// home paths are `project-path-normalize.ts`'s concern). The directory must
+// follow a path separator and end at a separator or a non-name char, so prose
+// (".ssh folder"), hostnames (`foo.aws.com`) and `~/.sshrc` don't match.
+const CREDENTIAL_PATH_RE =
+  /(?<=[\\/])\.(?:ssh|aws|kube|gnupg|config[\\/]gcloud)(?![\w.-])(?:[\\/][^\s"'`<>()[\]{},;]*)?/gi
 // High-entropy fallback: matches `<hint>\s*[:=]\s*"?<value>"?` where `<value>`
 // is ≥20 non-whitespace, non-quote chars. The captured group `m[1]` is the
 // secret. The value class is `[^\s"']` (not a base64 whitelist) so dotted /
@@ -150,6 +208,55 @@ const PASSPORT_RE = /\b(?:[A-Z]{1,2}\d{7,8}|[Ee]\d{8}|[Gg]\d{8}|[Ee][Hh]\d{7}|[E
 // default flavour), so we list the CJK hints without word boundaries.
 const DRIVER_LICENSE_HINT_RE =
   /(?:\b(?:driver[_\s-]?license|driver[_\s-]?lic|dl[\s#]?|driving[\s_-]?license)\b|驾驶证|驾照)[^\d]{0,20}(\d{12})/gi
+
+// Terminal escape sequences: CSI (`ESC [ … final`), OSC (`ESC ] … BEL` or
+// `ESC \\`) and the two-character forms, removed whole so a colour code does
+// not leave `[31m` behind. Then the C0/C1 controls except tab / LF / CR, DEL,
+// and the bidi embedding / override / isolate chars (U+202A–202E,
+// U+2066–2069) that make text render in an order other than its bytes.
+const ESCAPE_SEQUENCE_RE =
+  /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g
+const STRIPPED_CONTROL_RE =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/g
+
+/**
+ * Pre-normalization step for text headed to a model: drops terminal escape
+ * sequences, C0/C1 control characters (keeping `\t` `\n` `\r`) and bidi
+ * overrides. An escape inside a secret would otherwise split it out of reach
+ * of every detector, and a bidi override lets text read differently from
+ * what is sent.
+ *
+ * Deliberately separate from `redactText`, whose output must equal its input
+ * outside the placeholders (round-trip and offset translation depend on it).
+ * Call it BEFORE `redactText` when char offsets into the original are not
+ * needed; `hasNoLeakingPii` applies it internally to its second scan.
+ */
+export function normalizeForRedaction(text: string): string {
+  return text.replace(ESCAPE_SEQUENCE_RE, "").replace(STRIPPED_CONTROL_RE, "")
+}
+
+// One placeholder anywhere in a string (non-global → stateless `.test()`).
+const PLACEHOLDER_DETECT = new RegExp(PII_PLACEHOLDER_SOURCE)
+
+/**
+ * Whether a `Bearer` operand looks like a credential rather than a word.
+ * Random tokens of ≥16 chars virtually always carry a digit or an upper-case
+ * letter past the first char; English words ("authentication",
+ * "Authentication") carry neither.
+ */
+function isTokenLike(token: string): boolean {
+  return /\d/.test(token) || /[A-Z]/.test(token.slice(1))
+}
+
+// Values that point at a secret instead of containing one.
+const ENV_REFERENCE_RE =
+  /^(?:\$|%|\{\{|process\.env\b|import\.meta\.env\b|os\.environ\b|os\.getenv\b|getenv\(|env\()/
+
+function isRedactableEnvValue(value: string): boolean {
+  if (value.length < 8) return false
+  if (PLACEHOLDER_DETECT.test(value)) return false
+  return !ENV_REFERENCE_RE.test(value)
+}
 
 // Non-global clones of the detectors used by the no-leak gate. Derived from
 // the canonical `/g` patterns above so the two never drift, but with the `g`
@@ -262,9 +369,24 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   // JWTs before the hinted-secret pass so a `token: eyJ…` is claimed as a JWT
   // (and the short placeholder no longer trips the ≥20-char hint matcher).
   out = out.replace(JWT_RE, (m) => tokenize(state, "JWT", m))
+  // Bearer and env-style values after JWT (so `Bearer eyJ…` is a JWT) and
+  // after the prefix pass (so `OPENAI_API_KEY=sk-…` is already a placeholder
+  // and the env pass skips it). Only the token / value is replaced; the
+  // `Bearer ` keyword and the variable name stay.
+  out = out.replace(BEARER_RE, (full, token: string) =>
+    isTokenLike(token) ? full.replace(token, tokenize(state, "API_KEY", token)) : full
+  )
+  out = out.replace(ENV_SECRET_RE, (full, _name: string, value: string) =>
+    isRedactableEnvValue(value)
+      ? full.slice(0, full.length - value.length) + tokenize(state, "API_KEY", value)
+      : full
+  )
   out = out.replace(API_KEY_HINT_RE, (full, secret: string) =>
     full.replace(secret, tokenize(state, "API_KEY", secret))
   )
+  // Credential paths before the digit passes so `id_rsa_2024…` segments are
+  // claimed whole instead of being probed as phones / cards.
+  out = out.replace(CREDENTIAL_PATH_RE, (m) => tokenize(state, "CREDENTIAL_PATH", m))
   out = out.replace(BANK_CARD_CANDIDATE_RE, (m) =>
     luhn(m.replace(/[ -]/g, "")) ? tokenize(state, "BANK_CARD", m) : m
   )
@@ -403,6 +525,14 @@ export function translateOffsetsThroughRedaction<T extends RedactableOffsetEntry
  * the draft through a second redaction pass + audit log entry.
  */
 export function hasNoLeakingPii(text: string): boolean {
+  if (!scanIsClean(text)) return false
+  // Second scan over the normalized view: an escape sequence or control char
+  // spliced into a secret (`sk-abc\x1b[0mdef…`) hides it from the raw scan.
+  const normalized = normalizeForRedaction(text)
+  return normalized === text || scanIsClean(normalized)
+}
+
+function scanIsClean(text: string): boolean {
   // Presence checks run on NON-global detector clones: `.test()` on a
   // non-global regex is stateless (no `lastIndex` to track or reset), so the
   // gate is idempotent and safe under concurrent / interleaved calls. The
@@ -416,6 +546,12 @@ export function hasNoLeakingPii(text: string): boolean {
   }
   if (API_KEY_DETECT.test(text)) return false
   if (API_KEY_HINT_DETECT.test(text)) return false
+  for (const match of text.matchAll(BEARER_RE)) {
+    if (isTokenLike(match[1] ?? "")) return false
+  }
+  for (const match of text.matchAll(ENV_SECRET_RE)) {
+    if (isRedactableEnvValue(match[2] ?? "")) return false
+  }
   if (JWT_DETECT.test(text)) return false
   if (PEM_DETECT.test(text)) return false
   if (URL_CRED_DETECT.test(text)) return false

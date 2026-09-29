@@ -140,6 +140,7 @@
         "API_KEY": "API 密钥",
         "BANK_CARD": "银行卡",
         "CN_ID": "身份证",
+        "CREDENTIAL_PATH": "凭据路径",
         "DRIVER_LICENSE": "驾驶证",
         "EMAIL": "邮箱",
         "IP_ADDR": "IP 地址",
