@@ -10,6 +10,7 @@ import {
   DEFAULT_LIVE_VOICE_SETTINGS,
   DEFAULT_UPDATE_SETTINGS,
   DEFAULT_USER_PROFILE,
+  DEFAULT_VIDEO_GENERATION_SETTINGS,
 } from "@cognia/agent-config-types"
 import { DEFAULT_TTS_SETTINGS, normalizeTTSProvider } from "@cognia/tts/types"
 import {
@@ -75,6 +76,9 @@ export const DEFAULTS: AppSettings = {
   updates: { ...DEFAULT_UPDATE_SETTINGS },
   // Multi-provider live voice — off until the user configures a deployment.
   liveVoice: { ...DEFAULT_LIVE_VOICE_SETTINGS },
+  // Chat video generation (ADR-0205). The agent tool is offered only once a
+  // video provider is configured, so "on" here costs nothing until then.
+  videoGeneration: { ...DEFAULT_VIDEO_GENERATION_SETTINGS },
   browserCookieImportEnabled: false,
   // ADR-0062 live sync is opt-in: the watcher walks the user's agent history
   // trees, so it never starts without an explicit switch.
@@ -362,6 +366,7 @@ export async function getSettings(): Promise<AppSettings> {
         }
       ),
     },
+    videoGeneration: { ...DEFAULT_VIDEO_GENERATION_SETTINGS, ...(row.videoGeneration ?? {}) },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),

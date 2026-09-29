@@ -38,6 +38,7 @@ import { WebFetchCard } from "./mcp-renderers/web-fetch-card"
 import { WebSearchCard } from "./mcp-renderers/web-search-card"
 import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
+import { VideoGenerateCard } from "./mcp-renderers/video-generate-card"
 import { ProjectThreadCard } from "./mcp-renderers/project-thread-card"
 import { SuggestedThreadsCard } from "./mcp-renderers/suggested-threads-card"
 import { PROJECT_COORDINATOR_TOOL_NAMES } from "@/lib/claude/project-coordinator-builtin-tools"
@@ -55,6 +56,9 @@ const REGISTRY: Record<string, CardComponent> = {
   runtime_query: RuntimeQueryCard,
   spawn_task: SpawnTaskCard,
   "mcp__cognia-plugin-tools__spawn_task": SpawnTaskCard,
+  // Video generation (ADR-0205): the job's live card. Both name forms, as above.
+  video_generate: VideoGenerateCard,
+  "mcp__cognia-plugin-tools__video_generate": VideoGenerateCard,
   // Project coordination (ADR-0204): thread-addressing tools render the live
   // thread; proposals render with Start buttons. Both name forms, as above.
   ...Object.fromEntries(

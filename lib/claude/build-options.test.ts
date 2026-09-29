@@ -4193,6 +4193,81 @@ describe("resolveSendOptions — artifact authoring tools", () => {
   })
 })
 
+describe("resolveSendOptions — video generation tools (ADR-0205)", () => {
+  const toolNames = (opts: { pluginTools?: { name: string }[] }) =>
+    (opts.pluginTools ?? []).map((t) => t.name)
+  // Google is the provider the web build (this suite's host) can reach.
+  const withVideoProvider = (extra: Partial<AppSettings> = {}) =>
+    ({
+      id: "singleton",
+      providerSettings: { google: { enabled: true, apiKey: "g-key" } },
+      ...extra,
+    }) as unknown as AppSettings
+
+  it("offers video_generate and video_status with their consent tier once a provider is configured", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: withVideoProvider(),
+    })
+    expect(toolNames(opts)).toEqual(expect.arrayContaining(["video_generate", "video_status"]))
+    expect(opts.permissionRuleset?.video_generate).toBe("ask")
+    expect(opts.permissionRuleset?.video_status).toBe("allow")
+  })
+
+  it("withholds both the tools and the tier without a reachable video provider", async () => {
+    for (const appSettings of [
+      { id: "singleton" } as AppSettings,
+      // Configured, but the web build cannot reach Replicate (no CORS).
+      {
+        id: "singleton",
+        providerSettings: { replicate: { enabled: true, apiKey: "r" } },
+      } as unknown as AppSettings,
+    ]) {
+      const opts = await resolveSendOptions({ session: makeSession({ id: "s1" }), appSettings })
+      expect(toolNames(opts)).not.toContain("video_generate")
+      expect(opts.permissionRuleset?.video_generate).toBeUndefined()
+    }
+  })
+
+  it("withholds them when the user switches the agent tool off", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: withVideoProvider({ videoGeneration: { agentTool: false } }),
+    })
+    expect(toolNames(opts)).not.toContain("video_generate")
+    expect(opts.permissionRuleset?.video_status).toBeUndefined()
+  })
+
+  it("withholds them from an IM-bound session and from the CLI", async () => {
+    const im = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: {
+          adapterId: "lark",
+          platform: "lark",
+          conversationKey: "c1",
+          conversationRef: { platform: "lark", adapterId: "lark", channelId: "c1" },
+        },
+      }),
+      appSettings: withVideoProvider(),
+    })
+    expect(toolNames(im)).not.toContain("video_generate")
+
+    const host = globalThis as Record<string, unknown>
+    host.__COGNIA_CLI__ = true
+    try {
+      const cli = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        appSettings: withVideoProvider(),
+      })
+      expect(toolNames(cli)).not.toContain("video_generate")
+      expect(cli.permissionRuleset?.video_generate).toBeUndefined()
+    } finally {
+      delete host.__COGNIA_CLI__
+    }
+  })
+})
+
 describe("resolveSendOptions — brief mode", () => {
   it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
     const opts = await resolveSendOptions({

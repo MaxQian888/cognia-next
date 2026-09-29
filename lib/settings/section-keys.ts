@@ -205,6 +205,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "ttsStreamingEnabled",
     "ttsFallbackEnabled",
   ],
+  "media-generation": ["videoGeneration"],
   search: [
     "searchEnabled",
     "searchMaxResults",

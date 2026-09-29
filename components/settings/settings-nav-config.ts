@@ -20,6 +20,7 @@ import {
   RadioTowerIcon,
   GlobeIcon,
   Volume2Icon,
+  ClapperboardIcon,
   ScrollTextIcon,
   BugIcon,
   WalletIcon,
@@ -106,6 +107,7 @@ export type SettingsSectionId =
   | "terminal"
   | "source-control"
   | "speech"
+  | "media-generation"
   | "characters"
   | "skills"
   | "subagents"
@@ -407,6 +409,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "speech",
     group: "capabilities",
     icon: Volume2Icon,
+  },
+  {
+    id: "media-generation",
+    labelKey: "mediaGeneration",
+    descriptionKey: "mediaGeneration",
+    group: "capabilities",
+    icon: ClapperboardIcon,
   },
   {
     id: "automation",
@@ -1210,6 +1219,22 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "语音",
     "朗读",
     "听写",
+  ],
+  "media-generation": [
+    "video",
+    "generate video",
+    "text to video",
+    "image to video",
+    "veo",
+    "seedance",
+    "wan",
+    "fal",
+    "replicate",
+    "grok imagine",
+    "视频",
+    "生成视频",
+    "文生视频",
+    "图生视频",
   ],
   characters: ["persona", "agent"],
   skills: ["skill", "instruction", "prompt", "kit"],

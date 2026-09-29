@@ -89,6 +89,24 @@ describe("StructuredToolPart", () => {
     )
   })
 
+  it("labels a video job by its prompt and status, both name forms", () => {
+    render(
+      <StructuredToolPart
+        part={part("tool-mcp__cognia-plugin-tools__video_generate", {
+          input: { prompt: "A paper boat" },
+          output: JSON.stringify({ ok: true, jobId: "vjob_1", status: "timed_out" }),
+        })}
+      />
+    )
+    const row = screen.getByTestId("structured-tool-part")
+    expect(row.getAttribute("data-kind")).toBe("video_generate")
+    expect(row.textContent).toContain("verb.video")
+    expect(row.textContent).toContain("A paper boat")
+    expect(screen.getByTestId("structured-tool-meta")).toHaveTextContent(
+      "chat.videoGeneration.status.timedOut"
+    )
+  })
+
   it("shimmers the target while the call is running and starts expanded", () => {
     render(
       <StructuredToolPart

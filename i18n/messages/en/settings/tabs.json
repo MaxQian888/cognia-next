@@ -67,5 +67,6 @@
   "webhooks": "Webhooks",
   "workflows": "Workflows",
   "workspaceTrust": "Workspace Trust",
-  "connectivity": "Connectivity"
+  "connectivity": "Connectivity",
+  "mediaGeneration": "Media generation"
 }

@@ -65,7 +65,12 @@ bridge buffers up to 64 MiB; larger results fail early from a
   with a read-only `video_status`. It is not offered in IM-bound sessions
   or the CLI. A finished job does not start a new agent turn; the chat card
   plays it.
-- `/video` starts a job without an agent turn and persists a job part.
+- `/video` starts a job without an agent turn and writes a system message
+  carrying the job's id to the transcript; the card reads the job's row, so
+  it follows the job with no further writes. A staged image becomes the start
+  frame (stored as an asset of the conversation) and is left out of the turn.
+- Jobs are not synced. A companion viewing the conversation from another
+  device shows the card as "not stored on this device".
 - A "Media generation" settings section holds defaults; every surface can
   override them per call.
 - The Files page gains a `video` kind aggregated from succeeded jobs.
@@ -94,8 +99,8 @@ by a test.
    "check again" for a timed-out job).
 3. The Files `video` kind and the `action.media.generateVideo` workflow node.
 
-Until step 2 lands no job has a chat origin; the engine, storage, backup and
-session cascade already handle one.
+Step 1 shipped with no chat origin in use; the engine, storage, backup and
+session cascade already handled one, and step 2 uses it.
 
 ## Consequences
 

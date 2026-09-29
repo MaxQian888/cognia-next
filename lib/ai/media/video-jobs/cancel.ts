@@ -106,6 +106,11 @@ const REMOTE_VIDEO_CANCEL: Partial<Record<VideoProviderId, CancelBuilder>> = {
   },
 }
 
+/** Whether cancelling a job on this provider actually stops it remotely. */
+export function supportsRemoteVideoCancel(providerId: VideoProviderId): boolean {
+  return REMOTE_VIDEO_CANCEL[providerId] !== undefined
+}
+
 export function buildRemoteVideoCancel(
   providerId: VideoProviderId,
   context: RemoteCancelContext

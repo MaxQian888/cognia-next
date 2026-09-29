@@ -1,0 +1,29 @@
+{
+  "video": {
+    "agentTool": "允许智能体生成视频",
+    "agentToolHint": "配置了视频提供商时，向智能体提供 video_generate 和 video_status。每次生成前都会征求你的同意；在确认时选择「始终允许」即可不再询问。",
+    "clearSavedProvider": "改用第一个已配置的提供商",
+    "description": "在对话中生成视频（由智能体或 /video 发起）时使用的默认值。单次请求可覆盖其中任意一项。",
+    "desktopRequired": "{provider}（需要桌面端应用）",
+    "model": "模型",
+    "modelDefault": "提供商默认（{model}）",
+    "modelNeedsImage": "此模型基于图片生成视频：使用 /video 时先添加图片，或由智能体使用对话中的图片。",
+    "modelTextOnly": "此模型仅根据文字生成，不接受起始图片。",
+    "noProviders": "尚未配置视频提供商。",
+    "noProvidersHint": "请在「AI 连接」中添加 Google（Veo）、xAI、fal、Replicate、火山引擎 / 豆包（Seedance）或通义（Wan）并填写 API 密钥。",
+    "openConnections": "打开 AI 连接",
+    "options": {
+      "aspectRatio": "画面比例",
+      "durationSec": "时长",
+      "resolution": "分辨率"
+    },
+    "optionsNeedProvider": "选择提供商后，可设置其默认时长、画面比例和分辨率。",
+    "provider": "提供商",
+    "providerAuto": "第一个已配置的提供商",
+    "providerDecides": "提供商默认",
+    "savedProviderGone": "{provider} 已不再配置。在你选择其他提供商之前，对话中的视频将使用第一个已配置的提供商。",
+    "seconds": "{count} 秒",
+    "title": "视频",
+    "webNote": "在浏览器中只能访问 Google Veo。桌面端和移动端应用可访问所有提供商。"
+  }
+}

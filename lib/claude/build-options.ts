@@ -1166,6 +1166,32 @@ async function proIdeWriteToolsAvailable(ctx: BuildOptionsContext): Promise<bool
 }
 
 /**
+ * Whether the video tools (ADR-0205) can run for this send: the user has not
+ * switched them off, and a video provider is configured that this shell can
+ * reach (the web build reaches only CORS-open providers). Never throws: a
+ * failure to answer means "do not surface", like the Pro IDE check above.
+ */
+async function videoToolsAvailable(appSettings: AppSettings | null | undefined): Promise<boolean> {
+  if (appSettings?.videoGeneration?.agentTool === false) return false
+  try {
+    const [{ hasUsableVideoProvider }, { reachesNonCorsHosts }] = await Promise.all([
+      import("@/lib/ai/media/video-jobs/defaults"),
+      import("@/lib/network/platform-fetch"),
+    ])
+    const snapshot = createProviderSettingsSnapshot({
+      defaultProvider: appSettings?.defaultProvider,
+      providerSettings: appSettings?.providerSettings as
+        Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry> | undefined,
+      customProviders: appSettings?.customProviders as
+        import("@/lib/ai/provider-consumption").RichCustomProviderEntry[] | undefined,
+    })
+    return hasUsableVideoProvider(snapshot, reachesNonCorsHosts())
+  } catch {
+    return false
+  }
+}
+
+/**
  * Add a session-stable section to `appendSystemPrompt`, ahead of the per-turn
  * dynamic tail when that tail is already in place.
  *
@@ -2581,6 +2607,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const artifactsChannelAvailable = !session?.platformBinding?.adapterId && !isCliHost()
   const artifactAuthoringEnabled =
     artifactsChannelAvailable && appSettings?.artifacts?.agentAuthoring !== false
+  // Video generation (ADR-0205): the same dock condition — a job's live card
+  // and its video need a chat surface, not an IM thread or the CLI — plus a
+  // reachable video provider, so the model is never handed a tool that can
+  // only answer `no_provider`. One flag for the manifest and the consent tier.
+  const videoToolsSurfaced = artifactsChannelAvailable && (await videoToolsAvailable(appSettings))
 
   const editorWriteToolsSurfaced = await proIdeWriteToolsAvailable(ctx)
   // Sites publishing needs Dexie, the OS keyring, and `sandbox_exec` — all
@@ -2612,6 +2643,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const { buildTemplateToolRuleset } = await import("@/lib/claude/permissions/template-tool-rules")
   const { buildPetToolRuleset } = await import("@/lib/claude/permissions/pet-tool-rules")
   const projectRoleToolsSurfaced = projectRoleToolsApply(session, ctx.activeProject)
+  const { buildMediaToolRuleset } = await import("@/lib/claude/permissions/media-tool-rules")
   const { buildProjectCoordinatorToolRuleset } =
     await import("@/lib/claude/permissions/project-coordinator-tool-rules")
   const mergedRuleset = mergeRulesets(
@@ -2620,6 +2652,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     artifactAuthoringEnabled ? buildArtifactToolRuleset() : undefined,
     templateToolsEnabled ? buildTemplateToolRuleset() : undefined,
     petToolsSurfaced ? buildPetToolRuleset() : undefined,
+    videoToolsSurfaced ? buildMediaToolRuleset() : undefined,
     projectRoleToolsSurfaced ? buildProjectCoordinatorToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
@@ -3612,6 +3645,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       ]
     } catch (err) {
       loggers.app.warn("failed to append pet built-in tools", { error: String(err) })
+    }
+  }
+  // Video generation (ADR-0205). Gated on the same `videoToolsSurfaced` flag
+  // as its consent tier above, for the same reason as the pet tools.
+  if (videoToolsSurfaced) {
+    try {
+      const { buildMediaManifestEntries } = await import("@/lib/claude/media-builtin-tools")
+      const existing = new Set((opts.pluginTools ?? []).map((entry) => entry.name))
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...buildMediaManifestEntries().filter((entry) => !existing.has(entry.name)),
+      ]
+    } catch (err) {
+      loggers.app.warn("failed to append video built-in tools", { error: String(err) })
     }
   }
   // Template / chat-template / squad tools (ADR-0164). Gated on the same

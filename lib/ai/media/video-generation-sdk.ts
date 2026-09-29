@@ -165,3 +165,24 @@ export function videoStartFrameMode(model: string): VideoStartFrameMode {
  * network error — the desktop and mobile shells reach them natively.
  */
 export const BROWSER_DIRECT_VIDEO_PROVIDERS: ReadonlySet<VideoProviderId> = new Set(["google"])
+
+/**
+ * Whether this shell can reach a provider at all: every provider from the
+ * desktop and mobile shells, only {@link BROWSER_DIRECT_VIDEO_PROVIDERS} from
+ * the web build. The job engine refuses the rest with `unavailable_on_web`;
+ * the settings card, the agent tool gate and `/video` use the same answer.
+ */
+export function isVideoProviderReachable(
+  providerId: VideoProviderId,
+  reachesNonCorsHosts: boolean
+): boolean {
+  return reachesNonCorsHosts || BROWSER_DIRECT_VIDEO_PROVIDERS.has(providerId)
+}
+
+/** Choices the settings card and `/video` offer; the provider has the last word on each value. */
+export const VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1"] as const
+export const VIDEO_RESOLUTIONS = ["1280x720", "1920x1080"] as const
+export const VIDEO_DURATIONS_SEC = [4, 5, 6, 8, 10] as const
+
+export type VideoAspectRatio = (typeof VIDEO_ASPECT_RATIOS)[number]
+export type VideoResolution = (typeof VIDEO_RESOLUTIONS)[number]

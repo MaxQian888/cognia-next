@@ -2627,7 +2627,8 @@
       "query": "Query",
       "computer": "Computer",
       "workflow": "Workflow",
-      "think": "Think"
+      "think": "Think",
+      "video": "Video"
     },
     "copyTarget": "Copy target",
     "copyCommand": "Copy command",
@@ -2872,5 +2873,45 @@
     "label": "Scheduled · {name}",
     "hint": "Opened by the scheduled task {name}. Open it in the scheduler.",
     "goneHint": "Opened by the scheduled task {name}, which has since been deleted."
+  },
+  "videoGeneration": {
+    "cancel": "Cancel",
+    "cancelledLocal": "Stopped checking. The provider may still finish the video and bill for it.",
+    "cancelledRemote": "The provider was asked to stop.",
+    "checkAgain": "Check again",
+    "elapsed": "{elapsed} elapsed",
+    "errors": {
+      "credentialChanged": "The provider's API key changed since this job started. Restore it, then check again.",
+      "downloadFailed": "The finished video could not be downloaded.",
+      "generationFailed": "The provider could not generate this video.",
+      "noProvider": "No video provider is configured. Add one under AI connections.",
+      "piiBlocked": "The prompt looked like it contained personal data, so it was not sent.",
+      "providerError": "The provider could not be reached.",
+      "resultExpired": "The provider no longer serves the finished video.",
+      "resultTooLarge": "The finished video is too large for this app to store.",
+      "storeFailed": "The video could not be saved.",
+      "timedOut": "The provider did not finish within 30 minutes. It may still be working.",
+      "unavailableOnWeb": "This provider needs the desktop or mobile app; the browser cannot reach it.",
+      "unsupportedInput": "The provider or model does not accept this option or image."
+    },
+    "lastPollError": "The last check failed ({error}). Trying again.",
+    "loadingVideo": "Loading the video…",
+    "missingJob": "This video job is not stored on this device.",
+    "missingVideo": "The video file is no longer stored.",
+    "notStarted": "The video was not started.",
+    "providerModel": "{provider} · {model}",
+    "retryFailed": "Could not start again: {error}",
+    "startFrame": "Animated from an image",
+    "status": {
+      "cancelled": "Video cancelled",
+      "downloading": "Saving the video…",
+      "failed": "Video failed",
+      "generating": "Generating video…",
+      "succeeded": "Video ready",
+      "timedOut": "Video timed out"
+    },
+    "stopWaiting": "Stop waiting",
+    "stopWaitingHint": "{provider} cannot cancel a started job. Stopping here only stops checking; the provider may still finish and bill for it.",
+    "tryAgain": "Try again"
   }
 }

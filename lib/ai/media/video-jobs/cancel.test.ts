@@ -1,4 +1,4 @@
-import { buildRemoteVideoCancel } from "./cancel"
+import { buildRemoteVideoCancel, supportsRemoteVideoCancel } from "./cancel"
 
 describe("remote video cancel", () => {
   it("builds each vendor's cancel request from the SDK operation", () => {
@@ -86,5 +86,13 @@ describe("remote video cancel", () => {
     expect(
       buildRemoteVideoCancel("doubao", { operation: null, apiKey: "a", baseURL: "https://x" })
     ).toBeNull()
+  })
+
+  it("reports which providers stop remotely (the UI's cancel wording)", () => {
+    for (const id of ["replicate", "fal", "doubao", "volcengine", "qwen"] as const) {
+      expect(supportsRemoteVideoCancel(id)).toBe(true)
+    }
+    expect(supportsRemoteVideoCancel("google")).toBe(false)
+    expect(supportsRemoteVideoCancel("xai")).toBe(false)
   })
 })

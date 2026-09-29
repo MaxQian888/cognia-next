@@ -68,6 +68,7 @@ function setup(overrides: Partial<VideoJobEngineDeps> = {}) {
     fetch,
     materialize,
     resolveStartFrame,
+    now: () => now,
     advance: (ms: number) => {
       now += ms
     },
@@ -160,6 +161,13 @@ describe("startVideoJob", () => {
       })
     ).resolves.toMatchObject({ ok: false, error: { code: "pii_blocked" } })
     await expect(
+      t.engine.start({
+        prompt: "A boat",
+        origin,
+        providerOptions: { replicate: { "alice@example.com": true } },
+      })
+    ).resolves.toMatchObject({ ok: false, error: { code: "pii_blocked" } })
+    await expect(
       t.engine.start({ prompt: "A boat", origin, providerOptions: { fal: { prompt: "other" } } })
     ).resolves.toMatchObject({ ok: false, error: { code: "unsupported_input" } })
     expect(t.startVideo).not.toHaveBeenCalled()
@@ -172,6 +180,36 @@ describe("startVideoJob", () => {
     expect(t.startVideo).toHaveBeenCalledWith(
       expect.objectContaining({ providerOptions: { replicate: { prompt_optimizer: true } } })
     )
+  })
+
+  it("holds a requested model id to an id's shape and to the PII gate", async () => {
+    const t = setup()
+    await expect(
+      t.engine.start({ prompt: "A boat", origin, model: "video mail bob@example.com" })
+    ).resolves.toMatchObject({ ok: false, error: { code: "unsupported_input" } })
+    await expect(
+      t.engine.start({ prompt: "A boat", origin, model: "video-4111111111111111" })
+    ).resolves.toMatchObject({ ok: false, error: { code: "pii_blocked" } })
+    expect(t.startVideo).not.toHaveBeenCalled()
+  })
+
+  it("scrubs URL queries and personal data out of stored provider text", async () => {
+    const t = setup()
+    await started(t)
+    t.getVideoStatus.mockResolvedValue({
+      status: "completed",
+      videos: [{ type: "url", url: "https://cdn.test/v.mp4?key=secret", mediaType: "video/mp4" }],
+      warnings: [],
+      response: {},
+    })
+    t.fetch.mockRejectedValue(
+      new Error("GET https://cdn.test/v.mp4?key=AIzaSecret failed for alice@example.com")
+    )
+    const row = await t.engine.poll("vjob_1")
+    expect(row?.error?.code).toBe("download_failed")
+    expect(row?.error?.message).toContain("https://cdn.test/v.mp4")
+    expect(row?.error?.message).not.toContain("AIzaSecret")
+    expect(row?.error?.message).not.toContain("alice@example.com")
   })
 
   it("refuses a non-image start frame", async () => {
@@ -194,6 +232,24 @@ describe("startVideoJob", () => {
       error: { code: "unavailable_on_web" },
     })
     expect(t.startVideo).not.toHaveBeenCalled()
+  })
+
+  it("falls through to a configured provider the web build can reach when none is named", async () => {
+    const t = setup({ reachesNonCorsHosts: () => false })
+    t.setSettings({
+      defaultProvider: "replicate",
+      providers: {
+        replicate: { enabled: true, apiKey: "rep-key" },
+        google: { enabled: true, apiKey: "g-key" },
+      },
+      customProviders: [],
+    })
+    const result = await t.engine.start({ prompt: "A boat", origin })
+    expect(result).toMatchObject({ ok: true, job: { provider: { providerId: "google" } } })
+    // A provider named explicitly is refused by name, not swapped.
+    await expect(
+      t.engine.start({ prompt: "A boat", origin, providerId: "replicate" })
+    ).resolves.toMatchObject({ ok: false, error: { code: "unavailable_on_web" } })
   })
 
   it("reports a failed provider start without writing a row", async () => {
@@ -331,6 +387,46 @@ describe("pollVideoJob", () => {
     await expect(t.engine.poll("vjob_1")).resolves.toMatchObject({
       status: "failed",
       error: { code: "credential_changed", recheckable: true },
+    })
+    expect(t.getVideoStatus).not.toHaveBeenCalled()
+  })
+})
+
+describe("recheckVideoJob", () => {
+  it("reopens a timed-out job with a fresh deadline and checks it at once", async () => {
+    const t = setup()
+    await started(t)
+    t.advance(VIDEO_JOB_DEADLINE_MS)
+    await t.engine.poll("vjob_1")
+    expect(t.getVideoStatus).not.toHaveBeenCalled()
+
+    t.getVideoStatus.mockResolvedValueOnce({ status: "pending", response: {} })
+    const reopened = await t.engine.recheck("vjob_1")
+    expect(reopened).toMatchObject({ status: "generating", pollCount: 1 })
+    expect(reopened?.error).toBeUndefined()
+    expect(reopened?.settledAt).toBeUndefined()
+    expect(reopened!.deadlineAt).toBeGreaterThan(t.now() + VIDEO_JOB_DEADLINE_MS - 1000)
+  })
+
+  it("picks up a credential-changed job once the original key is back", async () => {
+    const t = setup()
+    await started(t)
+    t.setSettings(snapshot("another-key"))
+    await t.engine.poll("vjob_1")
+    t.setSettings(snapshot())
+    t.getVideoStatus.mockResolvedValueOnce({ status: "pending", response: {} })
+    await expect(t.engine.recheck("vjob_1")).resolves.toMatchObject({ status: "generating" })
+  })
+
+  it("leaves jobs alone that cannot succeed by asking again", async () => {
+    const t = setup()
+    await started(t)
+    t.getVideoStatus.mockResolvedValueOnce({ status: "error", error: "flagged", response: {} })
+    await t.engine.poll("vjob_1")
+    t.getVideoStatus.mockClear()
+    await expect(t.engine.recheck("vjob_1")).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "generation_failed" },
     })
     expect(t.getVideoStatus).not.toHaveBeenCalled()
   })

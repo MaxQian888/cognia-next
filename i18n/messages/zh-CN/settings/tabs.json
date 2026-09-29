@@ -67,5 +67,6 @@
   "webhooks": "Webhooks",
   "workflows": "工作流",
   "workspaceTrust": "工作区信任",
-  "connectivity": "连接"
+  "connectivity": "连接",
+  "mediaGeneration": "媒体生成"
 }

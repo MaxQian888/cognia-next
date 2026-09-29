@@ -69,13 +69,15 @@ export interface VideoJobError {
 /**
  * Where the start request came from; decides where the result lands.
  *
- * `chat-tool` and `slash` are produced by the chat surfaces (the
- * `video_generate` agent tool and `/video`, ADR-0205 delivery step 2); the
- * engine, storage, backup remap and session cascade already handle them.
+ * `chat-tool` is the `video_generate` agent tool and `slash` is `/video`
+ * (including "try again" on either card); their video becomes an asset of
+ * that conversation. Jobs live in this device's database and are not synced:
+ * a companion viewing the conversation from another device shows the card as
+ * "not stored on this device" rather than a job it cannot follow.
  */
 export type VideoJobOrigin =
-  | { surface: "chat-tool"; sessionId: string; toolCallId?: string }
-  | { surface: "slash"; sessionId: string; messageId?: string }
+  | { surface: "chat-tool"; sessionId: string }
+  | { surface: "slash"; sessionId: string }
   | { surface: "plugin"; pluginId: string }
   | { surface: "executor" }
 
@@ -158,6 +160,12 @@ export interface MediaGenerationJobRow {
 
 export function isSettledVideoJob(row: Pick<MediaGenerationJobRow, "status">): boolean {
   return SETTLED_VIDEO_JOB_STATUSES.has(row.status)
+}
+
+/** A settled job the user can ask to check again (G9). */
+export function canRecheckVideoJob(row: Pick<MediaGenerationJobRow, "status" | "error">): boolean {
+  if (row.status === "timed_out") return true
+  return row.status === "failed" && row.error?.recheckable === true
 }
 
 export function newVideoJobId(now: number = Date.now()): string {

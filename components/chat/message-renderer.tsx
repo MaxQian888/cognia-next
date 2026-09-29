@@ -61,10 +61,14 @@ import {
 } from "@/components/chat/message-parts/hook-notice-part"
 import { DiagnosticsCard } from "@/components/chat/message-parts/diagnostics-card"
 import { SlashCommandResultChip } from "@/components/chat/message-parts/slash-command-result-chip"
+import { VideoJobView } from "@/components/chat/video-generation/video-job-view"
+import { toolNameOf } from "@/components/chat/message-parts/mcp-tool-card"
+import { VIDEO_GENERATE_TOOL_NAME } from "@/lib/claude/media-builtin-tools"
 import {
   DIAGNOSTICS_PART_TYPE,
   isSystemMessageBlock,
   isSlashCommandResultBlock,
+  isVideoJobBlock,
   type SystemMessageBlock,
 } from "@/lib/slash-commands/system-blocks"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
@@ -1836,10 +1840,15 @@ function renderToolPart(
   }
 
   // A failed call and a still-running one open by default (the user needs the
-  // trace / the live output); a settled success stays collapsed.
+  // trace / the live output); a settled success stays collapsed — except a
+  // generated video, whose row IS the result the user asked for (its job card,
+  // then the video), not a trace of how the answer was reached.
   const defaultOpen =
     preferenceOpen ??
-    (mode === "detailed" || tp.state === "output-error" || tp.state === "input-available")
+    (mode === "detailed" ||
+      tp.state === "output-error" ||
+      tp.state === "input-available" ||
+      toolNameOf(tp) === VIDEO_GENERATE_TOOL_NAME)
 
   // Every tool renders as an inline row (status dot + lead + target + meta +
   // chevron) through the shared `ToolRowShell` chrome: Bash gets the `$`
@@ -1937,6 +1946,9 @@ function renderPart(
     const data = (part as { data?: unknown }).data
     if (isSlashCommandResultBlock(data)) {
       return <SlashCommandResultChip key={key} block={data} />
+    }
+    if (isVideoJobBlock(data)) {
+      return <VideoJobView key={key} jobId={data.jobId} />
     }
     if (isSystemMessageBlock(data)) {
       return <DiagnosticsCard key={key} block={data as SystemMessageBlock} />

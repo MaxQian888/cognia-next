@@ -38,6 +38,7 @@ import { dispatchMemorySubcommand } from "./actions/memory"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
 import { handleRunWorkflow } from "./actions/run-saved-workflow"
 import { handleCouncil } from "./actions/council"
+import { VIDEO_COMMAND_PARAMS, handleVideoCommand } from "./actions/video"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -77,6 +78,33 @@ export interface SlashContext {
    * renders as a compact inline result chip (/resume, …).
    */
   pushSystemMessage: (payload: string | SystemMessageBlock | SlashCommandResultBlock) => void
+  /**
+   * Files staged in the composer when the command ran, in chip order. Hosts
+   * without a composer (the tray, a plugin invoking a command) leave it unset.
+   */
+  stagedFiles?: readonly SlashStagedFile[]
+  /**
+   * Take staged files for this command so the turn the composer sends after the
+   * batch does not also carry them to the model (`/video` uses an image as the
+   * start frame; sending it to the chat model too would be a second, unasked
+   * upload). Ids that are not staged are ignored.
+   */
+  consumeStagedFiles?: (ids: readonly string[]) => void
+}
+
+/** What a composer hands its action-command runner: the staged files and a way to take some. */
+export interface SlashStagedFiles {
+  files: readonly SlashStagedFile[]
+  consume(ids: readonly string[]): void
+}
+
+/** A composer attachment as an action command sees it. */
+export interface SlashStagedFile {
+  id: string
+  /** A `blob:` URL owned by the composer; read it before the handler returns. */
+  url: string
+  mediaType: string
+  filename?: string
 }
 
 export type SlashScope = "builtin" | "project" | "user" | "plugin"
@@ -618,6 +646,22 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     category: "chat",
     argumentHint: "<question> [--models a,b,c] [--synth alias]",
     handler: handleCouncil,
+  },
+  // Chat video generation (ADR-0205). A staged image becomes the start frame
+  // and is taken out of the turn; the job's card lands in this conversation and
+  // updates itself until the video is there. Starting it asks nothing further:
+  // typing the command is the user's own request, unlike the agent's
+  // `video_generate`, which asks first.
+  {
+    name: "video",
+    description:
+      "Generate a short video from a prompt; a staged image becomes the first frame. Defaults come from Settings → Media generation.",
+    scope: "builtin",
+    category: "chat",
+    argumentHint:
+      "<prompt> [--duration s] [--aspect 16:9] [--resolution 1280x720] [--provider id] [--model id]",
+    params: VIDEO_COMMAND_PARAMS,
+    handler: handleVideoCommand,
   },
   // Workflow Copilot commands — only active inside workflow-editor sessions.
   // Each handler self-gates on activeSessionId so the picker never lists

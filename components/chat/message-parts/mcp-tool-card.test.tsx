@@ -61,6 +61,10 @@ describe("isStructuredMcpToolPart", () => {
     expect(isStructuredMcpToolPart(part("tool-spawn_task"))).toBe(true)
     expect(isStructuredMcpToolPart(part("tool-mcp__cognia-tools__spawn_task"))).toBe(true)
     expect(isStructuredMcpToolPart(part("tool-mcp__cognia-plugin-tools__spawn_task"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-video_generate"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-mcp__cognia-plugin-tools__video_generate"))).toBe(
+      true
+    )
   })
 
   it("recognises the Claude built-ins that still own cards here", () => {

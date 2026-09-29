@@ -67,5 +67,6 @@
   "webhooks": "Outbound webhooks, endpoint subscriptions, HMAC signing, delivery retries, and logs.",
   "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
   "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode.",
-  "connectivity": "How this device and a Host reach each other: local server, relay and tunnel, pairing, remote hosts, push, and sync."
+  "connectivity": "How this device and a Host reach each other: local server, relay and tunnel, pairing, remote hosts, push, and sync.",
+  "mediaGeneration": "Default provider, model and options for videos generated from chat, and whether the agent may start one."
 }

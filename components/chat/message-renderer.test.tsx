@@ -2231,3 +2231,41 @@ describe("messageAgentCatalogId", () => {
     expect(messageAgentCatalogId(user, undefined, agent("s", "academic"))).toBeUndefined()
   })
 })
+
+jest.mock("@/components/chat/video-generation/video-job-view", () => ({
+  VideoJobView: ({ jobId }: { jobId: string }) =>
+    ReactForMocks.createElement("div", { "data-testid": "video-job-view" }, jobId),
+}))
+
+describe("a video_generate tool call", () => {
+  it("opens its row so the job card is on screen, unlike a settled trace", () => {
+    const message = {
+      id: "a-video",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-video_generate",
+          toolCallId: "tc-v",
+          state: "output-available",
+          input: { prompt: "A boat" },
+          output: { ok: true, jobId: "vjob_1" },
+        },
+      ],
+    } as never
+    render(<MessageRenderer message={message} />)
+    const row = screen.getByTestId("structured-tool-part")
+    expect(row.querySelector("[aria-expanded]")).toHaveAttribute("aria-expanded", "true")
+  })
+})
+
+describe("a /video job block", () => {
+  it("renders the job's live card from the diagnostics part", () => {
+    const message = {
+      id: "sys-1",
+      role: "system",
+      parts: [{ type: "data-diagnostics", data: { kind: "video-job", jobId: "vjob_1" } }],
+    } as never
+    render(<MessageRenderer message={message} />)
+    expect(screen.getByTestId("video-job-view")).toHaveTextContent("vjob_1")
+  })
+})

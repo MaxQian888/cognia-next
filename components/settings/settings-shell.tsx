@@ -129,6 +129,10 @@ const SpeechSection = dynamic(() => import("./speech-section").then((m) => m.Spe
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const MediaGenerationSection = dynamic(
+  () => import("./media-generation-section").then((m) => m.MediaGenerationSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const TerminalSection = dynamic(
   () => import("./terminal/terminal-section").then((m) => m.TerminalSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -653,6 +657,8 @@ function SectionContent({
       return <GitSection />
     case "speech":
       return <SpeechSection />
+    case "media-generation":
+      return <MediaGenerationSection />
     case "characters":
       return <CharactersSection />
     case "skills":

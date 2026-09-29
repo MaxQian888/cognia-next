@@ -19,6 +19,7 @@ import {
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
 import { __setPetToolDepsForTesting } from "./pet-builtin-tools"
+import { __setMediaToolDepsForTesting } from "./media-builtin-tools"
 import type { VectorToolRunDeps } from "./vector-builtin-tools"
 import type { ProjectHistoryToolDeps } from "./project-history-tool"
 // Static imports so these share the SAME module instance the top-level
@@ -1047,6 +1048,44 @@ describe("handlePluginToolExec — desktop pet built-ins", () => {
       ok: true,
       name: "Boba",
     })
+  })
+})
+
+describe("handlePluginToolExec — video generation built-ins", () => {
+  afterEach(() => {
+    __setMediaToolDepsForTesting(null)
+    __setPluginToolResolverForTesting(null)
+  })
+
+  it("routes a video tool ahead of the plugin registry with the calling session and tool call", async () => {
+    const execute = jest.fn()
+    __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
+    const start = jest.fn(async () => ({
+      ok: true as const,
+      job: {
+        id: "vjob_1",
+        status: "generating",
+        provider: { providerId: "google", modelId: "veo-3.1-generate-preview" },
+      } as never,
+    }))
+    __setMediaToolDepsForTesting(() => ({
+      start,
+      getJob: async () => undefined,
+      settings: () => undefined,
+      configuredProviders: () => ["google"],
+      listMessages: async () => [],
+      projectIdOf: async () => undefined,
+    }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "video_generate", args: { prompt: "A boat" }, sessionId: "s1" })
+    )
+    expect(execute).not.toHaveBeenCalled()
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: { surface: "chat-tool", sessionId: "s1" },
+      })
+    )
+    expect(response.result).toMatchObject({ ok: true, jobId: "vjob_1", status: "generating" })
   })
 })
 

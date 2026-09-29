@@ -3516,6 +3516,31 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = {
   deployments: [],
 }
 
+/**
+ * The `videoGeneration` block of {@link AppSettings} (ADR-0205): defaults for
+ * every chat video job — the `video_generate` agent tool and `/video`. A
+ * per-call value overrides its default; the model and options below belong to
+ * `providerId`, so they apply only while the call uses that provider.
+ */
+export interface VideoGenerationSettings {
+  /** Provider for new jobs; unset uses the first configured video provider. */
+  providerId?: string
+  /** Model for `providerId`; unset uses that provider's default model. */
+  model?: string
+  durationSec?: number
+  aspectRatio?: `${number}:${number}`
+  resolution?: `${number}x${number}`
+  /**
+   * Offer `video_generate` / `video_status` to the agent when a video provider
+   * is configured. Each start still asks for approval (G7).
+   */
+  agentTool: boolean
+}
+
+export const DEFAULT_VIDEO_GENERATION_SETTINGS: VideoGenerationSettings = {
+  agentTool: true,
+}
+
 export type SubscriptionAccountProvider = string
 
 /**
@@ -5211,6 +5236,9 @@ export interface AppSettings {
    * the voice conversation's.
    */
   liveVoice?: LiveVoiceSettings
+
+  /** Chat video generation defaults (Settings → Media generation, ADR-0205). */
+  videoGeneration?: VideoGenerationSettings
 
   /** Common TTS controls. */
   ttsEnabled?: boolean

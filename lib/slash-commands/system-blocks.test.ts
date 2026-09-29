@@ -2,6 +2,7 @@ import {
   DIAGNOSTICS_PART_TYPE,
   isSystemMessageBlock,
   isSlashCommandResultBlock,
+  isVideoJobBlock,
 } from "./system-blocks"
 
 describe("DIAGNOSTICS_PART_TYPE", () => {
@@ -40,5 +41,22 @@ describe("isSlashCommandResultBlock", () => {
   it("rejects non-objects", () => {
     expect(isSlashCommandResultBlock(null)).toBe(false)
     expect(isSlashCommandResultBlock("slash-result")).toBe(false)
+  })
+})
+
+describe("isVideoJobBlock", () => {
+  it("accepts a block naming a job", () => {
+    expect(isVideoJobBlock({ kind: "video-job", jobId: "vjob_1" })).toBe(true)
+  })
+
+  it("rejects a block without a job id, other kinds and non-objects", () => {
+    expect(isVideoJobBlock({ kind: "video-job" })).toBe(false)
+    expect(isVideoJobBlock({ kind: "video-job", jobId: "" })).toBe(false)
+    expect(isVideoJobBlock({ kind: "slash-result", jobId: "vjob_1" })).toBe(false)
+    expect(isVideoJobBlock(null)).toBe(false)
+  })
+
+  it("is not mistaken for a diagnostics card", () => {
+    expect(isSystemMessageBlock({ kind: "video-job", jobId: "vjob_1" })).toBe(false)
   })
 })

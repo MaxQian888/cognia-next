@@ -246,6 +246,7 @@ export const SETTINGS_SYNC = {
   // token minting depends on the host keyring. A phone has neither, so syncing
   // deployments to it would advertise sessions it cannot open.
   liveVoice: { category: "desktop-only" },
+  videoGeneration: { category: "desktop-only" },
   ttsEnabled: { category: "shared" },
   ttsRate: { category: "shared" },
   ttsPitch: { category: "shared" },

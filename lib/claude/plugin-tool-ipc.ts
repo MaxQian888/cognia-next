@@ -72,6 +72,11 @@ import {
   runPetBuiltinTool,
 } from "@/lib/claude/pet-builtin-tools"
 import {
+  isMediaBuiltinTool,
+  resolveMediaToolDeps,
+  runMediaBuiltinTool,
+} from "./media-builtin-tools"
+import {
   isTemplateBuiltinTool,
   resolveTemplateToolDeps as resolveProductionTemplateToolDeps,
   runTemplateBuiltinTool,
@@ -774,6 +779,19 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         await resolvePetToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Video generation (ADR-0205) ──────────────────────────────────────
+    // Host-routed: the job engine, its Dexie table and the provider transport
+    // all live in the renderer. `video_generate` returns a job id at once; the
+    // reconciler carries the job from there.
+    if (isMediaBuiltinTool(request.name)) {
+      const result = await runMediaBuiltinTool(
+        request.name,
+        request.args,
+        await resolveMediaToolDeps(),
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

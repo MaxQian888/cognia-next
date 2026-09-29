@@ -9127,6 +9127,7 @@
         "search": "搜索",
         "task": "子任务",
         "think": "思考",
+        "video": "视频",
         "wiki": "百科",
         "workflow": "工作流",
         "write": "写入"
@@ -9220,6 +9221,46 @@
     },
     "unreadDivider": {
       "label": "新消息"
+    },
+    "videoGeneration": {
+      "cancel": "取消",
+      "cancelledLocal": "已停止查询。提供商仍可能完成视频并计费。",
+      "cancelledRemote": "已请求提供商停止生成。",
+      "checkAgain": "重新查询",
+      "elapsed": "已用时 {elapsed}",
+      "errors": {
+        "credentialChanged": "该任务开始后提供商的 API 密钥已更改。恢复原密钥后再重新查询。",
+        "downloadFailed": "无法下载已生成的视频。",
+        "generationFailed": "提供商未能生成此视频。",
+        "noProvider": "尚未配置视频提供商，请在「AI 连接」中添加。",
+        "piiBlocked": "提示词疑似包含个人信息，因此未发送。",
+        "providerError": "无法连接到提供商。",
+        "resultExpired": "提供商已不再提供该视频的下载。",
+        "resultTooLarge": "生成的视频过大，本应用无法保存。",
+        "storeFailed": "无法保存视频。",
+        "timedOut": "提供商在 30 分钟内未完成，可能仍在处理。",
+        "unavailableOnWeb": "此提供商需要桌面端或移动端应用，浏览器无法访问。",
+        "unsupportedInput": "提供商或模型不支持此选项或图片。"
+      },
+      "lastPollError": "上次查询失败（{error}），正在重试。",
+      "loadingVideo": "正在加载视频…",
+      "missingJob": "此设备上没有这个视频任务。",
+      "missingVideo": "视频文件已不存在。",
+      "notStarted": "视频未开始生成。",
+      "providerModel": "{provider} · {model}",
+      "retryFailed": "无法重新开始：{error}",
+      "startFrame": "基于图片生成",
+      "status": {
+        "cancelled": "视频已取消",
+        "downloading": "正在保存视频…",
+        "failed": "视频生成失败",
+        "generating": "正在生成视频…",
+        "succeeded": "视频已生成",
+        "timedOut": "视频生成超时"
+      },
+      "stopWaiting": "停止等待",
+      "stopWaitingHint": "{provider} 不支持取消已开始的任务。这里只会停止查询，提供商仍可能完成生成并计费。",
+      "tryAgain": "重新生成"
     },
     "welcomeDemo": {
       "analyze": "分析",
@@ -40865,6 +40906,7 @@
       "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
       "lsp": "配置由智能体运行时与编辑器共享的 LSP 语言服务器",
       "mcp": "Model Context Protocol 服务器（stdio / SSE / HTTP）。",
+      "mediaGeneration": "在对话中生成视频时使用的默认提供商、模型和选项，以及是否允许智能体发起生成。",
       "memory": "自治长期记忆——助手跨会话记住关于你的事，含抽取、召回与隐私控制。",
       "modelCatalog": "搜索规范模型、提供方 offering、别名、能力、生命周期与实际路由 ID。",
       "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。",
@@ -42570,6 +42612,35 @@
       },
       "tableAriaLabel": "已配置的语言服务器",
       "title": "语言服务器"
+    },
+    "mediaGeneration": {
+      "video": {
+        "agentTool": "允许智能体生成视频",
+        "agentToolHint": "配置了视频提供商时，向智能体提供 video_generate 和 video_status。每次生成前都会征求你的同意；在确认时选择「始终允许」即可不再询问。",
+        "clearSavedProvider": "改用第一个已配置的提供商",
+        "description": "在对话中生成视频（由智能体或 /video 发起）时使用的默认值。单次请求可覆盖其中任意一项。",
+        "desktopRequired": "{provider}（需要桌面端应用）",
+        "model": "模型",
+        "modelDefault": "提供商默认（{model}）",
+        "modelNeedsImage": "此模型基于图片生成视频：使用 /video 时先添加图片，或由智能体使用对话中的图片。",
+        "modelTextOnly": "此模型仅根据文字生成，不接受起始图片。",
+        "noProviders": "尚未配置视频提供商。",
+        "noProvidersHint": "请在「AI 连接」中添加 Google（Veo）、xAI、fal、Replicate、火山引擎 / 豆包（Seedance）或通义（Wan）并填写 API 密钥。",
+        "openConnections": "打开 AI 连接",
+        "options": {
+          "aspectRatio": "画面比例",
+          "durationSec": "时长",
+          "resolution": "分辨率"
+        },
+        "optionsNeedProvider": "选择提供商后，可设置其默认时长、画面比例和分辨率。",
+        "provider": "提供商",
+        "providerAuto": "第一个已配置的提供商",
+        "providerDecides": "提供商默认",
+        "savedProviderGone": "{provider} 已不再配置。在你选择其他提供商之前，对话中的视频将使用第一个已配置的提供商。",
+        "seconds": "{count} 秒",
+        "title": "视频",
+        "webNote": "在浏览器中只能访问 Google Veo。桌面端和移动端应用可访问所有提供商。"
+      }
     },
     "memory": {
       "autoExtract": {
@@ -44889,6 +44960,7 @@
       "logs": "日志",
       "lsp": "语言服务器",
       "mcp": "MCP",
+      "mediaGeneration": "媒体生成",
       "memory": "记忆",
       "modelCatalog": "模型目录",
       "network": "网络代理",

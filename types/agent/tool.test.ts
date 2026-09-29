@@ -14,6 +14,10 @@ import {
 import type { BuiltInToolName } from "./tool"
 import { buildProjectHistoryManifestEntries } from "@/lib/claude/project-history-tool"
 import { PET_BUILTIN_PLUGIN_ID, buildPetManifestEntries } from "@/lib/claude/pet-builtin-tools"
+import {
+  MEDIA_BUILTIN_PLUGIN_ID,
+  buildMediaManifestEntries,
+} from "@/lib/claude/media-builtin-tools"
 
 // The artifact/canvas arm, restated as a value so it can be compared. If the
 // union changes, this list must change with it — a `satisfies` keeps the two
@@ -78,6 +82,26 @@ describe("declared pet tool names", () => {
   it("all agree on the plugin id the relay routes them under", () => {
     for (const entry of buildPetManifestEntries()) {
       expect(entry.pluginId).toBe(PET_BUILTIN_PLUGIN_ID)
+    }
+  })
+})
+
+// The video arm (ADR-0205). `video_generate` / `video_status` sat in the union
+// with no implementation; they now ship, and this keeps the two one fact.
+const DECLARED_MEDIA_TOOLS = [
+  "video_generate",
+  "video_status",
+] as const satisfies readonly BuiltInToolName[]
+
+describe("declared media tool names", () => {
+  it("match the tools actually shipped in the manifest", () => {
+    const shipped = buildMediaManifestEntries().map((entry) => entry.name)
+    expect([...shipped].sort()).toEqual([...DECLARED_MEDIA_TOOLS].sort())
+  })
+
+  it("all agree on the plugin id the relay routes them under", () => {
+    for (const entry of buildMediaManifestEntries()) {
+      expect(entry.pluginId).toBe(MEDIA_BUILTIN_PLUGIN_ID)
     }
   })
 })

@@ -151,3 +151,21 @@ export function isSlashCommandResultBlock(value: unknown): value is SlashCommand
   if (!value || typeof value !== "object") return false
   return (value as { kind?: unknown }).kind === "slash-result"
 }
+
+/**
+ * A video job started by `/video` (ADR-0205). The block holds only the job id;
+ * the card reads the job's live row, so progress, cancel and the finished
+ * video need no further message writes. Carried through the same
+ * `data-diagnostics` part as the blocks above and rendered by `VideoJobView`.
+ */
+export interface VideoJobBlock {
+  kind: "video-job"
+  jobId: string
+}
+
+/** Narrowing guard for the `/video` job block. */
+export function isVideoJobBlock(value: unknown): value is VideoJobBlock {
+  if (!value || typeof value !== "object") return false
+  const block = value as { kind?: unknown; jobId?: unknown }
+  return block.kind === "video-job" && typeof block.jobId === "string" && block.jobId.length > 0
+}

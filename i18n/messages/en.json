@@ -9127,6 +9127,7 @@
         "search": "Search",
         "task": "Task",
         "think": "Think",
+        "video": "Video",
         "wiki": "Wiki",
         "workflow": "Workflow",
         "write": "Write"
@@ -9220,6 +9221,46 @@
     },
     "unreadDivider": {
       "label": "New messages"
+    },
+    "videoGeneration": {
+      "cancel": "Cancel",
+      "cancelledLocal": "Stopped checking. The provider may still finish the video and bill for it.",
+      "cancelledRemote": "The provider was asked to stop.",
+      "checkAgain": "Check again",
+      "elapsed": "{elapsed} elapsed",
+      "errors": {
+        "credentialChanged": "The provider's API key changed since this job started. Restore it, then check again.",
+        "downloadFailed": "The finished video could not be downloaded.",
+        "generationFailed": "The provider could not generate this video.",
+        "noProvider": "No video provider is configured. Add one under AI connections.",
+        "piiBlocked": "The prompt looked like it contained personal data, so it was not sent.",
+        "providerError": "The provider could not be reached.",
+        "resultExpired": "The provider no longer serves the finished video.",
+        "resultTooLarge": "The finished video is too large for this app to store.",
+        "storeFailed": "The video could not be saved.",
+        "timedOut": "The provider did not finish within 30 minutes. It may still be working.",
+        "unavailableOnWeb": "This provider needs the desktop or mobile app; the browser cannot reach it.",
+        "unsupportedInput": "The provider or model does not accept this option or image."
+      },
+      "lastPollError": "The last check failed ({error}). Trying again.",
+      "loadingVideo": "Loading the video…",
+      "missingJob": "This video job is not stored on this device.",
+      "missingVideo": "The video file is no longer stored.",
+      "notStarted": "The video was not started.",
+      "providerModel": "{provider} · {model}",
+      "retryFailed": "Could not start again: {error}",
+      "startFrame": "Animated from an image",
+      "status": {
+        "cancelled": "Video cancelled",
+        "downloading": "Saving the video…",
+        "failed": "Video failed",
+        "generating": "Generating video…",
+        "succeeded": "Video ready",
+        "timedOut": "Video timed out"
+      },
+      "stopWaiting": "Stop waiting",
+      "stopWaitingHint": "{provider} cannot cancel a started job. Stopping here only stops checking; the provider may still finish and bill for it.",
+      "tryAgain": "Try again"
     },
     "welcomeDemo": {
       "analyze": "Analyze",
@@ -40865,6 +40906,7 @@
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
       "lsp": "Configure LSP language servers shared by the agent runtime and editor",
       "mcp": "Model Context Protocol servers (stdio / SSE / HTTP).",
+      "mediaGeneration": "Default provider, model and options for videos generated from chat, and whether the agent may start one.",
       "memory": "Autonomous long-term memory — what the assistant remembers about you across sessions, plus extraction, recall, and privacy controls.",
       "modelCatalog": "Search canonical models, provider offerings, aliases, capabilities, lifecycle, and routed IDs.",
       "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
@@ -42570,6 +42612,35 @@
       },
       "tableAriaLabel": "Configured Language Servers",
       "title": "Language Servers"
+    },
+    "mediaGeneration": {
+      "video": {
+        "agentTool": "Let the agent generate videos",
+        "agentToolHint": "Offers the agent video_generate and video_status while a video provider is configured. It asks before each generation; choose Allow always in the approval to stop asking.",
+        "clearSavedProvider": "Use the first configured provider",
+        "description": "Defaults for videos generated from chat — by the agent or with /video. A single request can override any of them.",
+        "desktopRequired": "{provider} (desktop app required)",
+        "model": "Model",
+        "modelDefault": "Provider default ({model})",
+        "modelNeedsImage": "This model animates an image: stage one with /video, or the agent uses one from the conversation.",
+        "modelTextOnly": "This model generates from text only and does not take a start image.",
+        "noProviders": "No video provider is configured.",
+        "noProvidersHint": "Add Google (Veo), xAI, fal, Replicate, Volcengine / Doubao (Seedance) or Qwen (Wan) with an API key under AI connections.",
+        "openConnections": "Open AI connections",
+        "options": {
+          "aspectRatio": "Aspect ratio",
+          "durationSec": "Duration",
+          "resolution": "Resolution"
+        },
+        "optionsNeedProvider": "Pick a provider to set its default duration, aspect ratio and resolution.",
+        "provider": "Provider",
+        "providerAuto": "First configured provider",
+        "providerDecides": "Provider default",
+        "savedProviderGone": "{provider} is no longer configured. Chat videos use the first configured provider until you pick another.",
+        "seconds": "{count, plural, one {# second} other {# seconds}}",
+        "title": "Video",
+        "webNote": "In the browser only Google Veo can be reached. The desktop and mobile apps reach every provider."
+      }
     },
     "memory": {
       "autoExtract": {
@@ -44889,6 +44960,7 @@
       "logs": "Logs",
       "lsp": "Language Servers",
       "mcp": "MCP",
+      "mediaGeneration": "Media generation",
       "memory": "Memory",
       "modelCatalog": "Model Catalog",
       "network": "Network Proxy",

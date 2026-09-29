@@ -178,6 +178,7 @@ import {
   type SettingsTab,
   type SlashCommand,
   type SlashContext,
+  type SlashStagedFiles,
 } from "@/lib/slash-commands/builtin"
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { mergeSlashCommands } from "@/lib/slash-commands/merge"
@@ -491,7 +492,12 @@ interface InnerProps {
   attachmentCitations: AttachmentCitations
   onStop: () => void | Promise<void>
   commandRunning?: boolean
-  onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
+  /**
+   * Run an action command. `staged` is the composer's attachments at send time;
+   * a command that uses one (`/video`'s start frame) consumes it, and the turn
+   * sent after the batch leaves consumed files out.
+   */
+  onCommand: (cmd: SlashCommand, args: string, staged?: SlashStagedFiles) => Promise<boolean>
   onSubmitMemory: (target: ComposerMemoryTarget, text: string) => Promise<boolean>
   /**
    * Run a `!shell` line. Lives here (rather than being inferred from the
@@ -2072,16 +2078,38 @@ function ComposerInner(props: InnerProps) {
             noteCommandUsed(seg.name)
           }
         }
+        // Files an action command took for itself (`/video`'s start frame). A
+        // later command in the same batch sees only what is still staged.
+        const consumed = new Set<string>()
+        const commandFiles = snapshotFiles.flatMap((file) =>
+          file.id && file.url
+            ? [
+                {
+                  id: file.id,
+                  url: file.url,
+                  mediaType: file.mediaType ?? "",
+                  ...(file.filename ? { filename: file.filename } : {}),
+                },
+              ]
+            : []
+        )
+        const stagedForCommand = (): SlashStagedFiles => ({
+          files: commandFiles.filter((file) => !consumed.has(file.id)),
+          consume: (ids) => {
+            for (const id of ids) consumed.add(id)
+          },
+        })
         const { outgoingText, overrides, ranAction, errors, cancelled } = await runSegments(
           pipelineSegments,
           {
             commandMap,
             runAction: async (command, args) => {
-              return props.onCommand(command, args)
+              return props.onCommand(command, args, stagedForCommand())
             },
             applyTemplate,
           }
         )
+        const remainingFiles = filesToSend.filter((file) => !file.id || !consumed.has(file.id))
         if (cancelled) return
         useChatStore.getState().setPendingCommandOverrides(overrides)
         // A failed command in a batch used to vanish: `runSegments` isolates the
@@ -2101,11 +2129,11 @@ function ComposerInner(props: InnerProps) {
         // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
         // today's "action command clears the input, no turn" behavior.
         let sent = true
-        if (outgoingText.length > 0 || filesToSend.length > 0) {
+        if (outgoingText.length > 0 || remainingFiles.length > 0) {
           const outgoing = restoreText(outgoingText)
           sent = await props.onSubmit(
             outgoing,
-            filesToSend,
+            remainingFiles,
             precomputed,
             templateRun,
             undefined,
@@ -3597,7 +3625,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   } = usePluginSlashCommandExecution(session?.id ?? null)
 
   const handleSlashCommand = useCallback(
-    async (cmd: SlashCommand, args: string): Promise<boolean> => {
+    async (cmd: SlashCommand, args: string, staged?: SlashStagedFiles): Promise<boolean> => {
       if (cmd.handler) {
         const ctx: SlashContext = {
           args,
@@ -3616,6 +3644,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           openSettings: onOpenSettings,
           setPermissionMode: (mode) => setPermissionMode(mode, session?.id ?? null),
           pushSystemMessage,
+          ...(staged ? { stagedFiles: staged.files, consumeStagedFiles: staged.consume } : {}),
         }
         try {
           if (cmd.scope === "plugin") {

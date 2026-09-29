@@ -254,6 +254,22 @@ describe("getSettings", () => {
     expect(s.liveVoice?.deployments).toEqual([])
   })
 
+  it("ships chat video generation with the agent tool on and no provider chosen", async () => {
+    const s = await getSettings()
+    expect(s.videoGeneration).toEqual({ agentTool: true })
+  })
+
+  it("keeps saved video defaults and fills the agent-tool switch for an older row", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      videoGeneration: { providerId: "doubao", durationSec: 5 },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+    expect(s.videoGeneration).toEqual({ providerId: "doubao", durationSec: 5, agentTool: true })
+  })
+
   it("merges live-voice defaults under a row saved before a field existed", async () => {
     await getDb().settings.put({
       id: "singleton",

@@ -24,6 +24,7 @@ import { useTranslations } from "next-intl"
 import {
   BookOpenIcon,
   BotIcon,
+  ClapperboardIcon,
   ClipboardListIcon,
   FileSearchIcon,
   GlobeIcon,
@@ -55,6 +56,11 @@ import {
 import { cn } from "@/lib/utils"
 
 type ParsedOutput = Record<string, unknown> | null
+
+/** `chat.videoGeneration.status.*` key for a job status (`timed_out` → `timedOut`). */
+function videoStatusKey(status: string): string {
+  return status === "timed_out" ? "timedOut" : status
+}
 type Translator = ReturnType<typeof useTranslations>
 
 interface StructuredSpec {
@@ -133,6 +139,27 @@ const SPEC: Record<string, StructuredSpec> = {
         : parsed?.mode === "aside"
           ? t("chat.mcp.spawnTask.aside")
           : null,
+  },
+  // Video generation (ADR-0205): the prompt is the target, the job's status the meta.
+  video_generate: {
+    verb: "video",
+    verbClass: VIOLET,
+    icon: ClapperboardIcon,
+    target: (input) => asString(input.prompt),
+    meta: (_i, parsed, t) =>
+      parsed?.ok === true && typeof parsed.status === "string"
+        ? t(`chat.videoGeneration.status.${videoStatusKey(parsed.status)}` as never)
+        : null,
+  },
+  video_status: {
+    verb: "video",
+    verbClass: VIOLET,
+    icon: ClapperboardIcon,
+    target: (input) => asString(input.jobId),
+    meta: (_i, parsed, t) =>
+      parsed?.ok === true && typeof parsed.status === "string"
+        ? t(`chat.videoGeneration.status.${videoStatusKey(parsed.status)}` as never)
+        : null,
   },
   wiki_search: {
     verb: "wiki",

@@ -15,7 +15,7 @@ import {
   type JSONValue,
 } from "ai"
 import { computeBackoffDelay } from "@cognia/primitives"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
 import type { ProviderSettingsSnapshot, ResolvedProvider } from "@/lib/ai/provider-consumption"
 import { credentialAffinityOf } from "@/lib/ai/operations/credential-affinity"
@@ -26,7 +26,8 @@ import {
   resolveVideoProvider,
 } from "../provider-generation"
 import {
-  BROWSER_DIRECT_VIDEO_PROVIDERS,
+  VIDEO_GENERATION_PROVIDER_IDS,
+  isVideoProviderReachable,
   resolveVideoModel,
   type VideoProviderId,
 } from "../video-generation-sdk"
@@ -34,6 +35,7 @@ import { buildRemoteVideoCancel } from "./cancel"
 import { checkVideoJobParams, type VideoJobParams } from "./params"
 import type { MediaJobStore } from "./store"
 import {
+  canRecheckVideoJob,
   isSettledVideoJob,
   newVideoJobId,
   type MediaGenerationJobRow,
@@ -115,12 +117,24 @@ export interface StartVideoJobInput {
 export type StartVideoJobResult =
   { ok: true; job: MediaGenerationJobRow } | { ok: false; error: VideoJobError }
 
+/**
+ * Provider and transport text is stored on the row, shown on the job card and
+ * handed back to the agent by `video_status`. Scrub it once here: drop URL
+ * query strings (Google's download URL carries `?key=<api key>`) and redact
+ * anything the PII detector flags, so a quoted email in a provider's error can
+ * neither leak nor turn every later status read into a gate refusal.
+ */
+function scrubbed(text: string): string {
+  const withoutQueries = text.replace(/(https?:\/\/[^\s?#"']+)\?[^\s#"']*/g, "$1")
+  return hasNoLeakingPii(withoutQueries) ? withoutQueries : redactText(withoutQueries).redacted
+}
+
 function failure(code: VideoJobErrorCode, message: string, recheckable = false): VideoJobError {
-  return { code, message, recheckable }
+  return { code, message: scrubbed(message), recheckable }
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return scrubbed(error instanceof Error ? error.message : String(error))
 }
 
 function fromMediaError(error: unknown): VideoJobError {
@@ -158,9 +172,9 @@ function warningText(warnings: ReadonlyArray<unknown>): string[] {
     if (warning && typeof warning === "object") {
       const w = warning as { feature?: unknown; details?: unknown; message?: unknown }
       const parts = [w.feature, w.details ?? w.message].filter((p) => typeof p === "string")
-      if (parts.length) return parts.join(": ")
+      if (parts.length) return scrubbed(parts.join(": "))
     }
-    return JSON.stringify(warning)
+    return scrubbed(JSON.stringify(warning))
   })
 }
 
@@ -172,11 +186,38 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
   const modelFetch = deps.fetch as unknown as typeof globalThis.fetch
 
   function webBlocked(providerId: VideoProviderId): VideoJobError | null {
-    if (deps.reachesNonCorsHosts() || BROWSER_DIRECT_VIDEO_PROVIDERS.has(providerId)) return null
+    if (isVideoProviderReachable(providerId, deps.reachesNonCorsHosts())) return null
     return failure(
       "unavailable_on_web",
       `${providerId} video generation needs the desktop or mobile app; the browser cannot reach it.`
     )
+  }
+
+  /**
+   * The provider for a new job. A named one is taken as is (the web gate then
+   * refuses it by name). Without a name the first choice is the default chat
+   * provider or the first configured one; on the web build that may be one the
+   * browser cannot reach while another configured provider is fine, so fall
+   * through to the first reachable one rather than failing the whole request.
+   */
+  function resolveStartProvider(
+    snapshot: ProviderSettingsSnapshot,
+    providerId: string | undefined
+  ): ResolvedProvider {
+    const first = resolveVideoProvider(snapshot, providerId)
+    const reach = deps.reachesNonCorsHosts()
+    if (providerId || isVideoProviderReachable(first.providerId as VideoProviderId, reach)) {
+      return first
+    }
+    for (const candidate of VIDEO_GENERATION_PROVIDER_IDS) {
+      if (!isVideoProviderReachable(candidate, reach)) continue
+      try {
+        return resolveVideoProvider(snapshot, candidate)
+      } catch {
+        // Not configured; keep looking.
+      }
+    }
+    return first
   }
 
   async function start(input: StartVideoJobInput): Promise<StartVideoJobResult> {
@@ -192,7 +233,7 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
 
     let resolved: ResolvedProvider
     try {
-      resolved = resolveVideoProvider(input.snapshot ?? deps.getSnapshot(), input.providerId)
+      resolved = resolveStartProvider(input.snapshot ?? deps.getSnapshot(), input.providerId)
     } catch (error) {
       return { ok: false, error: fromMediaError(error) }
     }
@@ -201,6 +242,18 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
     if (blocked) return { ok: false, error: blocked }
 
     const modelId = resolveVideoModel(providerId, input.model ?? resolved.model)
+    // The model id goes out in the request path or body. A model name only has
+    // to contain a known fragment to be accepted, so hold it to an id's shape
+    // and to the PII gate like the prompt.
+    if (!MODEL_ID.test(modelId)) {
+      return { ok: false, error: failure("unsupported_input", "That is not a model id.") }
+    }
+    if (!hasNoLeakingPii(modelId)) {
+      return {
+        ok: false,
+        error: failure("pii_blocked", "The model id failed the outbound PII gate."),
+      }
+    }
     const params = input.params ?? {}
     const check = checkVideoJobParams(providerId, modelId, params, input.startFrame !== undefined)
     if (!check.ok) return { ok: false, error: failure("unsupported_input", check.message) }
@@ -512,6 +565,32 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
   }
 
   /**
+   * Put a settled-but-recheckable job back to `generating` with a fresh
+   * deadline and check it now (G9 "check again"). The remote job kept its id,
+   * so a job that finished while this side was timed out or disconnected is
+   * picked up rather than paid for twice.
+   */
+  async function recheck(
+    jobId: string,
+    options: { snapshot?: ProviderSettingsSnapshot } = {}
+  ): Promise<MediaGenerationJobRow | undefined> {
+    const row = await deps.store.get(jobId)
+    if (!row || !canRecheckVideoJob(row)) return row
+    const now = deps.now()
+    const reopened = await deps.store.transition(row.id, row.status, "generating", {
+      error: undefined,
+      settledAt: undefined,
+      pollCount: 0,
+      // Checked right below; the reconciler must not pick it up meanwhile.
+      nextPollAt: now + FIRST_POLL_DELAY_MS,
+      deadlineAt: now + VIDEO_JOB_DEADLINE_MS,
+      updatedAt: now,
+    })
+    if (!reopened) return deps.store.get(row.id)
+    return poll(row.id, { ...options, force: true })
+  }
+
+  /**
    * Resolve when the job settles, polling it in-process on its own schedule.
    * For callers that must hand back the video itself (plugin API, workflow
    * node). Another window's reconciler may settle it first; either way the
@@ -546,7 +625,7 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
     }
   }
 
-  return { start, poll, cancel, wait }
+  return { start, poll, recheck, cancel, wait }
 }
 
 export type VideoJobEngine = ReturnType<typeof createVideoJobEngine>
@@ -558,12 +637,26 @@ export type VideoJobEngine = ReturnType<typeof createVideoJobEngine>
  */
 const PROMPT_OVERRIDE_KEYS = new Set(["prompt", "text", "image", "image_url", "img_url"])
 
+/** Provider model ids: letters, digits and `. _ : / -`, as every listed provider uses. */
+const MODEL_ID = /^[\w.:/-]{1,128}$/
+
+/** `hasNoLeakingPiiDeep` reads values only; option keys go out verbatim too. */
+function keysAreClean(value: unknown, seen: WeakSet<object> = new WeakSet()): boolean {
+  if (!value || typeof value !== "object") return true
+  if (seen.has(value)) return true
+  seen.add(value)
+  if (Array.isArray(value)) return value.every((item) => keysAreClean(item, seen))
+  return Object.entries(value).every(
+    ([key, child]) => hasNoLeakingPii(key) && keysAreClean(child, seen)
+  )
+}
+
 /** Vendor options go out verbatim: gate every string in them, and refuse prompt overrides. */
 function checkProviderOptions(
   providerOptions: StartVideoJobInput["providerOptions"]
 ): VideoJobError | null {
   if (!providerOptions) return null
-  if (!hasNoLeakingPiiDeep(providerOptions)) {
+  if (!hasNoLeakingPiiDeep(providerOptions) || !keysAreClean(providerOptions)) {
     return failure("pii_blocked", "Video provider options failed the outbound PII gate.")
   }
   for (const [provider, options] of Object.entries(providerOptions)) {

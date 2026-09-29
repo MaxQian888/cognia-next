@@ -1,6 +1,10 @@
 import {
   BROWSER_DIRECT_VIDEO_PROVIDERS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_DURATIONS_SEC,
   VIDEO_PROVIDER_OPTIONS,
+  VIDEO_RESOLUTIONS,
+  isVideoProviderReachable,
   VIDEO_PROVIDERS,
   videoStartFrameMode,
   isSupportedVideoProvider,
@@ -70,5 +74,20 @@ describe("video-generation-sdk registry", () => {
   it("only lists browser-direct providers that are video providers", () => {
     // Pinned: widening this set is a claim about a vendor's CORS policy.
     expect([...BROWSER_DIRECT_VIDEO_PROVIDERS]).toEqual(["google"])
+  })
+
+  it("reaches every provider natively and only browser-direct ones from the web", () => {
+    for (const providerId of providerIds) {
+      expect(isVideoProviderReachable(providerId, true)).toBe(true)
+      expect(isVideoProviderReachable(providerId, false)).toBe(
+        BROWSER_DIRECT_VIDEO_PROVIDERS.has(providerId)
+      )
+    }
+  })
+
+  it("offers option choices in the shapes the job engine accepts", () => {
+    for (const ratio of VIDEO_ASPECT_RATIOS) expect(ratio).toMatch(/^\d+:\d+$/)
+    for (const size of VIDEO_RESOLUTIONS) expect(size).toMatch(/^\d+x\d+$/)
+    for (const seconds of VIDEO_DURATIONS_SEC) expect(Number.isInteger(seconds)).toBe(true)
   })
 })
