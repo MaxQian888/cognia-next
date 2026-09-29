@@ -239,12 +239,6 @@
     "browser_cookie_clear_all": {
       "to": "browser.cookie.clear_all"
     },
-    "browser_cookie_import": {
-      "to": "browser.cookie.import"
-    },
-    "browser_cookie_import_available": {
-      "to": "browser.cookie.import_available"
-    },
     "browser_downloads": {
       "to": "browser.download.list"
     },

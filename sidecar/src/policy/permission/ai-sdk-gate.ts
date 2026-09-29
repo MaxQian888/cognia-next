@@ -14,7 +14,12 @@ import { BUILTIN_SERVER_NAME } from "../tool-catalog/catalog.ts"
 import { PLUGIN_TOOLS_SERVER_NAME, splitToolName } from "../tool-catalog/names.ts"
 import { awaitApproval } from "./approval.ts"
 import type { PendingApproval } from "./approval.ts"
-import { decidePermission } from "./ladder.ts"
+import {
+  buildApprovalRequiredSet,
+  buildPerCallApprovalSet,
+  decidePermission,
+  requiresPerCallApproval,
+} from "./ladder.ts"
 import type { DenyReason, PermissionSendOptions, RailProfile } from "./ladder.ts"
 
 /**
@@ -153,6 +158,9 @@ export function createToolPermissionGate({
   // `registerTool` entry that declared `access` gets the same confinement
   // classification the built-in read/write sets get.
   const pluginAccess = buildPluginAccessMap(sendOptions?.pluginTools)
+  // Plugin tools that declared `requiresApproval`: asked on every call.
+  const perCallApproval = buildPerCallApprovalSet(sendOptions?.pluginTools)
+  const approvalRequired = buildApprovalRequiredSet(sendOptions?.pluginTools)
 
   return async function gate(toolName, input, signal) {
     const outcome = decidePermission(AI_SDK_RAIL, {
@@ -170,6 +178,7 @@ export function createToolPermissionGate({
         sandboxScope: sendOptions?.builtinProcessSandbox,
         cwd: sendOptions?.cwd,
         pluginAccess,
+        perCallApproval,
       },
     })
     if (outcome.kind === "allow") return input
@@ -184,6 +193,10 @@ export function createToolPermissionGate({
       toolName,
       displayName: toolName,
       input,
+      ...(requiresPerCallApproval(toolName, approvalRequired) ? { requiresApproval: true } : {}),
+      ...(requiresPerCallApproval(toolName, perCallApproval)
+        ? { requiresPerCallApproval: true, suppressAlwaysAllowRule: true, defaultToNo: true }
+        : {}),
       ...(sendOptions!.remoteExecutionContext
         ? { remoteExecutionContext: sendOptions!.remoteExecutionContext }
         : {}),

@@ -158,6 +158,8 @@ export type ManagedSubsystem =
   | "pluginHost"
   | "tunnel"
   | "backgroundJob"
+  /** The local Chromium runtime (ADR-0201), a singleton on a loopback port. */
+  | "localBrowser"
 
 /** Normalized lifecycle state of a managed process (matches Rust `ManagedStatus`). */
 export type ManagedStatus = "starting" | "running" | "stopping" | "stopped" | "error"

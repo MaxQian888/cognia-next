@@ -93,9 +93,17 @@ describe("PerfManagedProcesses", () => {
           mp({ subsystem: "pluginHost", id: "web-tools", name: "node (web-tools)", pid: 301 }),
           mp({ subsystem: "headlessTerminal", id: "hl-1", name: "/bin/zsh", pid: 302 }),
           mp({ subsystem: "tunnel", id: "cloudflared", name: "cloudflared", pid: 303 }),
+          mp({
+            subsystem: "localBrowser",
+            id: "local-browser",
+            name: "local-main.mjs 127.0.0.1:51234",
+            pid: 304,
+          }),
         ])}
       />
     )
+    expect(screen.getByTestId("perf-managed-group-localBrowser")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-managed-row-local-browser")).toBeInTheDocument()
     expect(screen.getByTestId("perf-managed-row-web-tools")).toBeInTheDocument()
     expect(screen.getByTestId("perf-managed-row-hl-1")).toBeInTheDocument()
     expect(screen.getByTestId("perf-managed-row-cloudflared")).toBeInTheDocument()

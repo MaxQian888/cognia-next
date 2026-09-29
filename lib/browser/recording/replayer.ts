@@ -127,7 +127,14 @@ async function runStep(
       // contract sends (`browser_fill_form` → `{ text }`). The overlay coerces a
       // missing `text` to "" and still returns ok, so getting this name wrong is
       // a silent no-op, not an error. The arg names are per action, not uniform.
-      await act(engine, step.target, "fill", { text: value })
+      // A secret the human supplied for this replay is marked as such: the
+      // engines refuse agent-typed values into secret fields (ADR-0201).
+      await act(
+        engine,
+        step.target,
+        "fill",
+        step.secret ? { text: value, humanProvidedSecret: true } : { text: value }
+      )
       return
     }
     case "select": {

@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { chromium } from "playwright-core"
+import { chromium, devices } from "playwright-core"
 
 import { RemoteChromiumService } from "./browser-service.mjs"
 import { WorkspaceFileBridge } from "./file-bridge.mjs"
@@ -32,18 +32,20 @@ if (secret.length < 32) throw new Error("COGNIA_WORKSPACE_RUNTIME_SECRET must be
 
 const overlayScript = await fs.readFile(overlayPath, "utf8")
 const fileBridge = new WorkspaceFileBridge({ workspaceRoot })
+const eventJournal = new RuntimeEventJournal()
 const browserService = new RemoteChromiumService({
   chromium,
   overlayScript,
   workspaceRoot,
   profilesRoot,
   fileBridge,
+  devices,
+  onEvent: (event) => eventJournal.publish(event),
   maxSessions: positiveInteger("COGNIA_BROWSER_MAX_SESSIONS", 3),
   maxPages: positiveInteger("COGNIA_BROWSER_MAX_PAGES", 8),
   idleTimeoutMs: positiveInteger("COGNIA_BROWSER_IDLE_TIMEOUT_MS", 30 * 60 * 1000),
   maxLifetimeMs: positiveInteger("COGNIA_BROWSER_MAX_LIFETIME_MS", 8 * 60 * 60 * 1000),
 })
-const eventJournal = new RuntimeEventJournal()
 const supervisor = new AgentSupervisor({
   workspaceRoot,
   onEvent: (event) => eventJournal.publish(event),

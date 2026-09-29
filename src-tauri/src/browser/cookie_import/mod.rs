@@ -1,84 +1,88 @@
-//! Import Chromium cookies into the embedded browser without exposing values
-//! across the renderer IPC boundary (ADR-0073).
+//! Import sign-ins from the browsers on this machine into the embedded
+//! preview or the local Chromium runtime without exposing values across the
+//! renderer IPC boundary (ADR-0073, amended by ADR-0201), and sign the
+//! preview out again.
+//!
+//! Reading and decrypting live in `cognia-browser-cookies`; this module holds
+//! the command shells, the macOS Keychain adapter, and the sinks.
+//!
+//! Bulk imports need OS user presence (`cognia_secrets::user_presence`,
+//! the same check and `user_presence_*` error codes as the password vault):
+//! a chosen set of domains, every domain, and any import into the local
+//! Chromium runtime. A one-site import into the embedded preview keeps the
+//! ADR-0073 flow without a prompt.
 
 #[cfg(target_os = "macos")]
 mod inject_macos;
 #[cfg(target_os = "macos")]
 mod keychain_macos;
+mod sinks;
 
-use std::path::{Component, Path, PathBuf};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
+use tauri::{Manager, WebviewWindow};
 
-use tauri::Manager;
-
-// The Chromium reader, and the types it shares with the macOS keychain adapter
-// and the WebKit sink below, live in `cognia-browser-cookies` (ADR-0196 P6g).
-use cognia_browser_cookies::{chromium, ImportError};
+use cognia_browser_cookies::browsers::{Browser, HostDirs, Os};
+use cognia_browser_cookies::import::{
+    collect_cookies, cookie_domains, cookie_sources, CookieBatch, DomainCount, SourceInfo,
+};
+use cognia_browser_cookies::scope::{site_of_host, CookieScope};
+use cognia_browser_cookies::system::SystemSecrets;
+use cognia_browser_cookies::{chromium, ImportError, ImportedCookie, Keychain};
 
 use crate::browser::embedded::EMBED_LABEL;
+use cognia_secrets::user_presence::{self, UserPresenceError};
+
+/// The only window whose renderer may import sign-ins or manage saved
+/// passwords. Other webviews (the preview itself, the pet, popouts) are
+/// refused.
+pub(crate) const OWNER_WINDOW_LABEL: &str = "main";
+
+pub(crate) fn require_main_window(label: &str) -> Result<(), String> {
+    if label == OWNER_WINDOW_LABEL {
+        Ok(())
+    } else {
+        Err("forbidden_caller".into())
+    }
+}
+
+/// The host's macOS Keychain adapter; elsewhere Keychain reads are refused
+/// (Windows and Linux keys come from DPAPI and the Secret Service).
+pub(crate) fn host_keychain() -> Box<dyn Keychain + Send> {
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(keychain_macos::MacKeychain)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Box::new(cognia_browser_cookies::system::NoKeychain)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ChromiumBrowser {
-    Chrome,
-    Edge,
-    Brave,
-    Chromium,
-}
-
-impl ChromiumBrowser {
-    fn safe_storage_service(self) -> &'static str {
-        match self {
-            Self::Chrome => "Chrome Safe Storage",
-            Self::Edge => "Microsoft Edge Safe Storage",
-            Self::Brave => "Brave Safe Storage",
-            Self::Chromium => "Chromium Safe Storage",
-        }
-    }
-
-    fn keychain_account(self) -> &'static str {
-        match self {
-            Self::Chrome => "Chrome",
-            Self::Edge => "Microsoft Edge",
-            Self::Brave => "Brave",
-            Self::Chromium => "Chromium",
-        }
-    }
-
-    fn profiles_root_at(self, home: &Path) -> PathBuf {
-        let support = home.join("Library/Application Support");
-        match self {
-            Self::Chrome => support.join("Google/Chrome"),
-            Self::Edge => support.join("Microsoft Edge"),
-            Self::Brave => support.join("BraveSoftware/Brave-Browser"),
-            Self::Chromium => support.join("Chromium"),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct CookieImportAvailability {
-    supported: bool,
-    profiles: Vec<String>,
-    reason: Option<String>,
+pub enum CookieSinkKind {
+    Embedded,
+    Local,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum CookieImportResult {
+pub enum CookieImportV2Result {
     Ok {
         injected: usize,
-        names: Vec<String>,
+        #[serde(rename = "skippedAppBound")]
+        skipped_app_bound: usize,
         domains: Vec<String>,
     },
+    PermissionDenied,
+    FullDiskAccessRequired,
+    NoProfile,
+    NoMatchingCookies,
     Unsupported {
         reason: String,
     },
-    PermissionDenied,
-    NoProfile,
-    NoMatchingCookies,
 }
 
 /// What clearing a site's sign-in removed. Counts only: like the import, no
@@ -99,128 +103,220 @@ pub struct CookieClearAllResult {
     removed: usize,
 }
 
-fn is_supported_platform(platform: &str) -> bool {
-    platform == "macos"
-}
-
-fn unsupported_result_for(platform: &str) -> Option<CookieImportResult> {
-    (!is_supported_platform(platform)).then(|| CookieImportResult::Unsupported {
-        reason: "macos_only".into(),
-    })
-}
-
-fn profile_path(root: &Path, profile: &str) -> Option<PathBuf> {
-    let path = Path::new(profile);
-    let mut components = path.components();
-    match (components.next(), components.next()) {
-        (Some(Component::Normal(name)), None) if !name.is_empty() => Some(root.join(name)),
-        _ => None,
+/// Typed, non-error outcomes of a failed read; anything else is a command
+/// error carrying the error code.
+fn result_for_error(error: ImportError) -> Result<CookieImportV2Result, String> {
+    match error {
+        ImportError::PermissionDenied => Ok(CookieImportV2Result::PermissionDenied),
+        ImportError::FullDiskAccessRequired => Ok(CookieImportV2Result::FullDiskAccessRequired),
+        ImportError::NoProfile => Ok(CookieImportV2Result::NoProfile),
+        ImportError::UnsupportedOs | ImportError::DatabaseLocked => {
+            Ok(CookieImportV2Result::Unsupported {
+                reason: error.code().into(),
+            })
+        }
+        other => Err(other.code().into()),
     }
 }
 
-fn availability_for(
-    platform: &str,
-    browser: ChromiumBrowser,
-    home: Option<&Path>,
-) -> CookieImportAvailability {
-    if !is_supported_platform(platform) {
-        return CookieImportAvailability {
-            supported: false,
-            profiles: Vec::new(),
-            reason: Some("macos_only".into()),
-        };
+fn summarize(injected: &[ImportedCookie], skipped_app_bound: usize) -> CookieImportV2Result {
+    if injected.is_empty() && skipped_app_bound == 0 {
+        return CookieImportV2Result::NoMatchingCookies;
     }
-    let Some(home) = home else {
-        return CookieImportAvailability {
-            supported: true,
-            profiles: Vec::new(),
-            reason: Some("no_profiles".into()),
-        };
-    };
-    let root = browser.profiles_root_at(home);
-    let mut profiles = std::fs::read_dir(root)
-        .ok()
+    let domains = injected
+        .iter()
+        .map(|cookie| site_of_host(&cookie.host_key))
+        .collect::<BTreeSet<_>>()
         .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .filter(|entry| chromium::find_cookie_database(&entry.path()).is_some())
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect::<Vec<_>>();
-    profiles.sort();
-    CookieImportAvailability {
-        supported: true,
-        reason: profiles.is_empty().then(|| "no_profiles".into()),
-        profiles,
+        .collect();
+    CookieImportV2Result::Ok {
+        injected: injected.len(),
+        skipped_app_bound,
+        domains,
     }
 }
 
+/// Every browser cookies can be imported from, with its profiles or the
+/// reason it cannot be used. No Keychain, DPAPI or Secret Service access.
 #[tauri::command]
-pub fn browser_cookie_import_available(browser: ChromiumBrowser) -> CookieImportAvailability {
-    availability_for(std::env::consts::OS, browser, dirs::home_dir().as_deref())
+pub async fn browser_cookie_sources(window: WebviewWindow) -> Result<Vec<SourceInfo>, String> {
+    require_main_window(window.label())?;
+    tokio::task::spawn_blocking(|| cookie_sources(Os::current(), &HostDirs::detect()))
+        .await
+        .map_err(|_| "cookie source worker failed".to_string())
 }
 
+/// A profile's sites and cookie counts, read without decrypting any value.
 #[tauri::command]
-pub async fn browser_cookie_import(
-    app: tauri::AppHandle,
-    browser: ChromiumBrowser,
+pub async fn browser_cookie_domains(
+    window: WebviewWindow,
+    browser: Browser,
     profile: String,
-    domain: String,
-) -> Result<CookieImportResult, String> {
-    if let Some(result) = unsupported_result_for(std::env::consts::OS) {
-        return Ok(result);
-    }
+) -> Result<Vec<DomainCount>, String> {
+    require_main_window(window.label())?;
+    tokio::task::spawn_blocking(move || {
+        cookie_domains(browser, &profile, Os::current(), &HostDirs::detect())
+    })
+    .await
+    .map_err(|_| "cookie domain worker failed".to_string())?
+    .map_err(|error| error.code().to_string())
+}
 
+async fn inject_embedded(
+    app: &tauri::AppHandle,
+    cookies: Vec<ImportedCookie>,
+) -> Result<Vec<ImportedCookie>, String> {
+    if app.get_webview(EMBED_LABEL).is_none() {
+        return Err("embedded_not_open".into());
+    }
     #[cfg(target_os = "macos")]
     {
-        let current_host = app
-            .get_webview(EMBED_LABEL)
-            .and_then(|webview| webview.url().ok())
-            .and_then(|url| url.host_str().map(str::to_owned));
-        if current_host.as_deref() != Some(domain.as_str())
-            || chromium::registrable_domain(&domain).is_err()
-        {
-            return Err(ImportError::InvalidDomain.to_string());
-        }
-        let Some(home) = dirs::home_dir() else {
-            return Ok(CookieImportResult::NoProfile);
-        };
-        let root = browser.profiles_root_at(&home);
-        let Some(profile_dir) = profile_path(&root, &profile) else {
-            return Ok(CookieImportResult::NoProfile);
-        };
-        if chromium::find_cookie_database(&profile_dir).is_none() {
-            return Ok(CookieImportResult::NoProfile);
-        }
-
-        let result = tokio::task::spawn_blocking(move || {
-            chromium::import_profile(
-                &profile_dir,
-                &domain,
-                browser.safe_storage_service(),
-                browser.keychain_account(),
-                &keychain_macos::MacKeychain,
-                &inject_macos::WkWebviewSink::new(app),
-            )
+        use cognia_browser_cookies::CookieSink;
+        let app = app.clone();
+        tokio::task::spawn_blocking(move || {
+            inject_macos::WkWebviewSink::new(app)
+                .inject(&cookies)
+                .map_err(|error| error.code().to_string())
         })
         .await
-        .map_err(|_| "cookie import worker failed".to_string())?;
+        .map_err(|_| "cookie injection worker failed".to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let webview = app
+            .get_webview(EMBED_LABEL)
+            .ok_or_else(|| "embedded_not_open".to_string())?;
+        tokio::task::spawn_blocking(move || sinks::inject_with_tauri(&webview, &cookies))
+            .await
+            .map_err(|_| "cookie injection worker failed".to_string())
+    }
+}
 
-        match result {
-            Ok(summary) if summary.injected == 0 => Ok(CookieImportResult::NoMatchingCookies),
-            Ok(summary) => Ok(CookieImportResult::Ok {
-                injected: summary.injected,
-                names: summary.names,
-                domains: summary.domains,
-            }),
-            Err(ImportError::PermissionDenied) => Ok(CookieImportResult::PermissionDenied),
-            Err(error) => Err(error.to_string()),
+async fn inject_local(
+    app: &tauri::AppHandle,
+    session_id: Option<String>,
+    cookies: Vec<ImportedCookie>,
+) -> Result<Vec<ImportedCookie>, String> {
+    let session_id = session_id
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| "session_required".to_string())?;
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "cookies": sinks::runtime_cookies(&cookies),
+    });
+    let response =
+        crate::browser::local::rpc_privileged(app, "browser.cookies.set", payload).await?;
+    let count = sinks::runtime_injected_count(&response, cookies.len());
+    let mut injected = cookies;
+    injected.truncate(count);
+    Ok(injected)
+}
+
+/// Whether an import of `scope` into `sink` must first pass OS user presence:
+/// every multi-site scope and every import into the local runtime.
+pub(crate) fn import_needs_presence(scope: &CookieScope, sink: CookieSinkKind) -> bool {
+    matches!(sink, CookieSinkKind::Local)
+        || matches!(scope, CookieScope::Domains { .. } | CookieScope::All)
+}
+
+/// The prompt reason for an import that needs presence.
+fn presence_reason(scope: &CookieScope) -> &'static str {
+    match scope {
+        CookieScope::All => "import sign-ins for every site",
+        CookieScope::Domains { .. } => "import sign-ins for the chosen sites",
+        CookieScope::Site { .. } => "import sign-ins into the local browser",
+    }
+}
+
+/// A presence failure as the command error string (`user_presence_denied`,
+/// `user_presence_cancelled`, …) — the same codes the password commands use.
+fn presence_error(error: UserPresenceError) -> String {
+    error.to_string()
+}
+
+/// Ask for OS user presence off the async workers.
+async fn require_presence(reason: &'static str) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || user_presence::verify(reason).map_err(presence_error))
+        .await
+        .map_err(|_| "user presence worker failed".to_string())?
+}
+
+/// Import one profile's cookies of `scope` into `sink`. Values are read,
+/// decrypted and injected in Rust; the renderer gets counts and sites.
+/// Multi-site scopes and the local sink require OS user presence first.
+#[tauri::command]
+pub async fn browser_cookie_import_v2(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    browser: Browser,
+    profile: String,
+    scope: CookieScope,
+    sink: CookieSinkKind,
+    session_id: Option<String>,
+) -> Result<CookieImportV2Result, String> {
+    require_main_window(window.label())?;
+    if import_needs_presence(&scope, sink) {
+        require_presence(presence_reason(&scope)).await?;
+    }
+    let collected = tokio::task::spawn_blocking(move || -> Result<CookieBatch, ImportError> {
+        let keychain = host_keychain();
+        let secrets = SystemSecrets::new(keychain.as_ref());
+        collect_cookies(
+            browser,
+            &profile,
+            &scope,
+            Os::current(),
+            &HostDirs::detect(),
+            &secrets,
+        )
+    })
+    .await
+    .map_err(|_| "cookie import worker failed".to_string())?;
+    let batch = match collected {
+        Ok(batch) => batch,
+        Err(error) => return result_for_error(error),
+    };
+    let CookieBatch {
+        cookies,
+        skipped_app_bound,
+    } = batch;
+    if cookies.is_empty() {
+        return Ok(summarize(&[], skipped_app_bound));
+    }
+    let injected = match sink {
+        CookieSinkKind::Embedded => inject_embedded(&app, cookies).await?,
+        CookieSinkKind::Local => inject_local(&app, session_id, cookies).await?,
+    };
+    Ok(summarize(&injected, skipped_app_bound))
+}
+
+/// The System Settings pane Safari cookie import needs (Privacy & Security
+/// → Full Disk Access).
+const FULL_DISK_ACCESS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+/// Open System Settings at Full Disk Access (macOS). The URL is fixed; the
+/// renderer passes nothing.
+#[tauri::command]
+pub async fn browser_open_full_disk_access_settings(window: WebviewWindow) -> Result<(), String> {
+    require_main_window(window.label())?;
+    #[cfg(target_os = "macos")]
+    {
+        let status = tokio::process::Command::new("/usr/bin/open")
+            .arg(FULL_DISK_ACCESS_URL)
+            .status()
+            .await
+            .map_err(|error| error.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("open_failed".into())
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, browser, profile, domain);
-        unreachable!("unsupported platforms return before platform dispatch")
+        let _ = FULL_DISK_ACCESS_URL;
+        Err("unsupported_os".into())
     }
 }
 
@@ -398,84 +494,155 @@ mod tests {
     }
 
     #[test]
-    fn browser_keychain_metadata_matches_chromium_variants() {
-        assert_eq!(
-            ChromiumBrowser::Chrome.safe_storage_service(),
-            "Chrome Safe Storage"
-        );
-        assert_eq!(ChromiumBrowser::Edge.keychain_account(), "Microsoft Edge");
-        assert_eq!(
-            ChromiumBrowser::Brave.safe_storage_service(),
-            "Brave Safe Storage"
-        );
-        assert_eq!(ChromiumBrowser::Chromium.keychain_account(), "Chromium");
+    fn only_the_main_window_may_import() {
+        assert_eq!(require_main_window("main"), Ok(()));
+        for label in ["browser-embed", "pet", "main-2", ""] {
+            assert_eq!(require_main_window(label), Err("forbidden_caller".into()));
+        }
     }
 
     #[test]
-    fn non_macos_is_typed_unsupported() {
-        let availability = availability_for("windows", ChromiumBrowser::Chrome, None);
+    fn typed_outcomes_for_read_failures() {
         assert_eq!(
-            availability,
-            CookieImportAvailability {
-                supported: false,
-                profiles: Vec::new(),
-                reason: Some("macos_only".into()),
-            }
+            result_for_error(ImportError::PermissionDenied),
+            Ok(CookieImportV2Result::PermissionDenied)
         );
         assert_eq!(
-            unsupported_result_for("windows"),
-            Some(CookieImportResult::Unsupported {
-                reason: "macos_only".into(),
+            result_for_error(ImportError::FullDiskAccessRequired),
+            Ok(CookieImportV2Result::FullDiskAccessRequired)
+        );
+        assert_eq!(
+            result_for_error(ImportError::NoProfile),
+            Ok(CookieImportV2Result::NoProfile)
+        );
+        assert_eq!(
+            result_for_error(ImportError::UnsupportedOs),
+            Ok(CookieImportV2Result::Unsupported {
+                reason: "unsupported_os".into()
             })
         );
-        assert_eq!(unsupported_result_for("macos"), None);
+        assert_eq!(
+            result_for_error(ImportError::DatabaseLocked),
+            Ok(CookieImportV2Result::Unsupported {
+                reason: "browser_running".into()
+            })
+        );
+        assert_eq!(
+            result_for_error(ImportError::InvalidDomain),
+            Err("invalid_domain".into())
+        );
     }
 
-    #[test]
-    fn discovers_only_profiles_with_cookie_databases_in_sorted_order() {
-        let home = tempfile::tempdir().unwrap();
-        let root = ChromiumBrowser::Chrome.profiles_root_at(home.path());
-        for profile in ["Profile 2", "Default", "Empty"] {
-            std::fs::create_dir_all(root.join(profile).join("Network")).unwrap();
+    fn imported(host: &str) -> ImportedCookie {
+        ImportedCookie {
+            host_key: host.into(),
+            name: "n".into(),
+            value: "secret-value".into(),
+            path: "/".into(),
+            expires_unix: None,
+            is_secure: true,
+            is_httponly: true,
+            same_site: cognia_browser_cookies::SameSite::Lax,
         }
-        std::fs::write(root.join("Profile 2/Network/Cookies"), []).unwrap();
-        std::fs::write(root.join("Default/Cookies"), []).unwrap();
-        std::fs::write(root.join("not-a-profile"), []).unwrap();
+    }
 
+    #[test]
+    fn summaries_carry_counts_and_sites_never_values() {
+        assert_eq!(summarize(&[], 0), CookieImportV2Result::NoMatchingCookies);
+        let result = summarize(
+            &[
+                imported(".github.com"),
+                imported("api.github.com"),
+                imported("x.org"),
+            ],
+            2,
+        );
+        let json = serde_json::to_value(&result).unwrap();
         assert_eq!(
-            availability_for("macos", ChromiumBrowser::Chrome, Some(home.path())),
-            CookieImportAvailability {
-                supported: true,
-                profiles: vec!["Default".into(), "Profile 2".into()],
-                reason: None,
-            }
+            json,
+            serde_json::json!({
+                "kind": "ok",
+                "injected": 3,
+                "skippedAppBound": 2,
+                "domains": ["github.com", "x.org"]
+            })
+        );
+        assert!(!json.to_string().contains("secret-value"));
+        assert_eq!(
+            serde_json::to_value(summarize(&[], 4)).unwrap()["skippedAppBound"],
+            4
         );
     }
 
     #[test]
-    fn reports_no_profiles_when_home_or_cookie_databases_are_missing() {
-        let expected = CookieImportAvailability {
-            supported: true,
-            profiles: Vec::new(),
-            reason: Some("no_profiles".into()),
+    fn result_kinds_serialize_as_the_ipc_contract() {
+        for (result, kind) in [
+            (CookieImportV2Result::PermissionDenied, "permission_denied"),
+            (
+                CookieImportV2Result::FullDiskAccessRequired,
+                "full_disk_access_required",
+            ),
+            (CookieImportV2Result::NoProfile, "no_profile"),
+            (
+                CookieImportV2Result::NoMatchingCookies,
+                "no_matching_cookies",
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_value(result).unwrap(),
+                serde_json::json!({ "kind": kind })
+            );
+        }
+        assert_eq!(
+            serde_json::from_value::<CookieSinkKind>(serde_json::json!("local")).unwrap(),
+            CookieSinkKind::Local
+        );
+    }
+
+    #[test]
+    fn bulk_and_local_imports_need_user_presence() {
+        let site = CookieScope::Site {
+            domain: "github.com".into(),
         };
+        let domains = CookieScope::Domains {
+            domains: vec!["github.com".into()],
+        };
+        assert!(!import_needs_presence(&site, CookieSinkKind::Embedded));
+        assert!(import_needs_presence(&site, CookieSinkKind::Local));
+        assert!(import_needs_presence(&domains, CookieSinkKind::Embedded));
+        assert!(import_needs_presence(&domains, CookieSinkKind::Local));
+        assert!(import_needs_presence(&CookieScope::All, CookieSinkKind::Embedded));
+        assert!(import_needs_presence(&CookieScope::All, CookieSinkKind::Local));
+        for scope in [&site, &domains, &CookieScope::All] {
+            assert!(!presence_reason(scope).trim().is_empty());
+        }
+    }
+
+    #[test]
+    fn presence_failures_use_the_vault_error_codes() {
         assert_eq!(
-            availability_for("macos", ChromiumBrowser::Chrome, None),
-            expected
+            presence_error(UserPresenceError::Denied),
+            "user_presence_denied"
         );
-        let home = tempfile::tempdir().unwrap();
         assert_eq!(
-            availability_for("macos", ChromiumBrowser::Chrome, Some(home.path())),
-            expected
+            presence_error(UserPresenceError::Cancelled),
+            "user_presence_cancelled"
+        );
+        assert_eq!(
+            presence_error(UserPresenceError::Unavailable),
+            "user_presence_unavailable"
+        );
+        assert_eq!(
+            presence_error(UserPresenceError::Failed("x".into())),
+            "user_presence_failed: x"
         );
     }
 
     #[test]
-    fn rejects_profile_path_traversal() {
-        let root = Path::new("/profiles");
-        assert_eq!(profile_path(root, "Default"), Some(root.join("Default")));
-        assert_eq!(profile_path(root, "../Default"), None);
-        assert_eq!(profile_path(root, "Profile 1/Cookies"), None);
-        assert_eq!(profile_path(root, "/absolute"), None);
+    fn the_full_disk_access_url_is_fixed() {
+        assert_eq!(
+            FULL_DISK_ACCESS_URL,
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        );
     }
 }

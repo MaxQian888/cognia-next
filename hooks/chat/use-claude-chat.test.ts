@@ -950,6 +950,10 @@ import { subscribeDiagnostic } from "@/lib/diagnostics/bus"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { useClaudeChat } from "./use-claude-chat-controller"
 import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
+import {
+  clearSubagentApprovalRoute,
+  registerSubagentApprovalRoute,
+} from "@/lib/claude/agents/subagent-approval-routes"
 import { answerChatApproval, stopChatTurn } from "./chat-control-bridge"
 import {
   AgentExecutionHandleProvider,
@@ -4699,6 +4703,142 @@ describe("useClaudeChat — actions", () => {
         suppressAlwaysAllowRule: true,
       })
     )
+  })
+
+  it("turns a per-call permission_request into a request that can never be always-allowed", async () => {
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-4",
+        toolUseID: "tu-4",
+        toolName: "browser_fill_credential",
+        input: {},
+        requiresPerCallApproval: true,
+      })
+    })
+    expect(chatState.pushApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-4",
+        suppressAlwaysAllowRule: true,
+        requiresPerCallApproval: true,
+      })
+    )
+  })
+
+  it("never auto-approves a per-call tool from the always-allow list", async () => {
+    settingsState.settings.alwaysAllowTools = ["browser_set_files"]
+    try {
+      renderHook(() => useClaudeChat())
+      await flush()
+      settingsSubscribers.forEach((sub) => sub(settingsState))
+      subscribers.forEach((sub) => sub(chatState))
+      approveToolMock.mockClear()
+      await act(async () => {
+        _messageCallback?.({
+          type: "permission_request",
+          sessionId: "sess-1",
+          requestId: "req-6",
+          toolUseID: "tu-6",
+          toolName: "browser_set_files",
+          input: { ref: "f", paths: ["a.txt"] },
+          requiresPerCallApproval: true,
+        })
+      })
+      expect(approveToolMock).not.toHaveBeenCalled()
+      expect(chatState.pushApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "req-6", requiresPerCallApproval: true })
+      )
+    } finally {
+      settingsState.settings.alwaysAllowTools = []
+    }
+  })
+
+  it("lets a plugin deny a per-call tool but never approve it through a modify", async () => {
+    const preToolUse = jest.requireMock("@/lib/claude/adapter-hooks")
+      .dispatchPreToolUse as jest.Mock
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    approveToolMock.mockClear()
+
+    preToolUse.mockResolvedValueOnce({ action: "modify", modifiedArgs: { credentialId: "x" } })
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-7",
+        toolUseID: "tu-7",
+        toolName: "browser_fill_credential",
+        input: { credentialId: "c1" },
+        requiresPerCallApproval: true,
+      })
+    })
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(chatState.pushApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-7", input: { credentialId: "c1" } })
+    )
+
+    preToolUse.mockResolvedValueOnce({ action: "deny", reason: "blocked by plugin" })
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-8",
+        toolUseID: "tu-8",
+        toolName: "browser_fill_credential",
+        input: {},
+        requiresPerCallApproval: true,
+      })
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-8",
+      "deny",
+      "blocked by plugin",
+      undefined,
+      undefined,
+      { authority: "policy-deny" }
+    )
+  })
+
+  it("keeps a subagent's per-call permission_request from ever being always-allowed", async () => {
+    registerSubagentApprovalRoute("ephemeral-per-call", {
+      parentSessionId: "sess-1",
+      runId: "run-per-call",
+      subagentId: "researcher",
+      backgrounded: false,
+    })
+    try {
+      renderHook(() => useClaudeChat())
+      await flush()
+      subscribers.forEach((sub) => sub(chatState))
+      await act(async () => {
+        _messageCallback?.({
+          type: "permission_request",
+          sessionId: "ephemeral-per-call",
+          requestId: "req-5",
+          toolUseID: "tu-5",
+          toolName: "browser_fill_credential",
+          input: {},
+          requiresPerCallApproval: true,
+        })
+      })
+      expect(chatState.pushApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "req-5",
+          origin: "subagent",
+          subagentId: "researcher",
+          suppressAlwaysAllowRule: true,
+          requiresPerCallApproval: true,
+        })
+      )
+    } finally {
+      clearSubagentApprovalRoute("ephemeral-per-call")
+    }
   })
 })
 

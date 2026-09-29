@@ -137,9 +137,18 @@
             "result": {}
           }
         },
-        "cookie": {},
+        "cookie": {
+          "children": {
+            "source": {},
+            "domain": {}
+          }
+        },
         "dialog": {},
-        "download": {},
+        "download": {
+          "children": {
+            "directory": {}
+          }
+        },
         "embed": {
           "children": {
             "bounds": {},
@@ -165,7 +174,30 @@
         "profile": {},
         "runtime": {},
         "session": {},
-        "zoom": {}
+        "zoom": {},
+        "local": {
+          "children": {
+            "frame": {},
+            "upload": {}
+          }
+        },
+        "user_chrome": {},
+        "extension": {
+          "children": {
+            "update": {},
+            "pending": {}
+          }
+        },
+        "local_file": {},
+        "dev_server": {},
+        "password": {
+          "children": {
+            "source": {},
+            "match": {},
+            "pending": {}
+          }
+        },
+        "credential": {}
       }
     },
     "canvas": {

@@ -143,6 +143,7 @@
       "codeServer": "Pro IDE（code-server）",
       "externalAgent": "外部 Agent",
       "headlessTerminal": "无头 Shell",
+      "localBrowser": "本地浏览器运行时",
       "mcpServer": "MCP 服务器",
       "pluginHost": "插件宿主",
       "tunnel": "隧道"

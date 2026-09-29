@@ -1,0 +1,62 @@
+# ADR-0201 — the desktop's local Chromium. Supervises the bundled
+# workspace-runtime browser service on loopback (`supervisor`), installs
+# Chromium (`installer`), talks to the service (`client`), bridges its frames and
+# events (`bridge`), keeps the Chrome extension store (`extensions`), finds the
+# user's own Chrome (`user_chrome`), and serves local files and lists local dev
+# servers (`local_files`, `dev_servers`). Tauri-free: the command shells live in
+# `src-tauri/src/browser/`.
+[package]
+name = "cognia-local-browser"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Local Chromium for the desktop browser: service supervision, installer, loopback client, extension store, user-Chrome discovery, local content."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_local_browser"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+
+# Local files server + dev-server discovery (worker F).
+axum.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+mime_guess = "2"
+percent-encoding = "2"
+rand.workspace = true
+
+# Runtime supervision, loopback client, installer, extension store, user Chrome
+# (worker B2). `hex` and `rand` above are shared with the secret generator.
+# `cognia-net` (foundation) supplies the proxy-aware client for Web Store
+# downloads and the rustls crypto provider for the loopback client.
+cognia-net = { path = "../cognia-net" }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
+parking_lot.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+sha2.workspace = true
+base64.workspace = true
+dirs.workspace = true
+zip = { workspace = true, features = ["deflate"] }
+# CRX3 proof verification (RSA PKCS#1 v1.5 / ECDSA P-256 over SHA-256). Already
+# in the lock through rustls; declared locally because fewer than three members
+# name it directly.
+ring = "0.17"
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

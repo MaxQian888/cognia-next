@@ -25,6 +25,8 @@ export interface SendOptions {
     pluginId?: string
     manifestPath?: string
     timeoutMs?: unknown
+    /** Per-call human approval: no grant, mode or auto-answer may skip it. */
+    requiresApproval?: unknown
   }[]
   ledger?: { mode?: string; runId?: string; envelopeMaxBudgetUsd?: number }
   claudeAgentSdk?: ClaudeAgentSdkOptionsV1

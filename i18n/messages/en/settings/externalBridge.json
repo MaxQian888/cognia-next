@@ -140,7 +140,8 @@
     "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
     "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF.",
     "issues:read": "⚠ Lets external agents list and read your issue tracker: issues, their activity trail, projects and cycles of the active workspace. Default OFF.",
-    "issues:write": "⚠ Lets external agents create, edit, move, assign and comment on issues. Every write goes through the board's own gate and is recorded on the issue with an external-agent actor. Default OFF."
+    "issues:write": "⚠ Lets external agents create, edit, move, assign and comment on issues. Every write goes through the board's own gate and is recorded on the issue with an external-agent actor. Default OFF.",
+    "browser:control": "Lets external agents drive Cognia's browser through the browser_* tools: open and navigate pages, read snapshots, click and type, manage tabs and downloads, print PDFs, emulate devices, inspect cookie metadata and storage, and sign in with a saved password. Independent of any character's tool settings. Tools that need approval in the app (running page scripts, uploads, downloads, password sign-in) still ask you on each call, and page content is fenced as untrusted. Default OFF."
   },
   "scopes": {
     "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
@@ -156,7 +157,8 @@
       "runtime": "Runtime",
       "usage": "Usage",
       "wiki": "Wiki",
-      "workflow": "Workflows"
+      "workflow": "Workflows",
+      "browser": "Browser"
     },
     "plannedBadge": "Planned",
     "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",
@@ -315,5 +317,9 @@
     "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
     "toastLintFailed": "Lint failed: {message}",
     "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
+  },
+  "browserApproval": {
+    "reason": "{client} wants to run {tool} in Cognia's browser ({detail}).",
+    "perCallReason": "{client} wants to sign in with a saved password using {tool} ({detail}). The password is filled by Cognia and never shared with the agent. You are asked every time."
   }
 }

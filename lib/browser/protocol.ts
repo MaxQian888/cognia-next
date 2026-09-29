@@ -375,15 +375,34 @@ export function screenshotToFile(base64Png: string, filename = "preview.png"): S
 export type TrustTier = "trusted" | "public"
 
 /**
- * Classify a target URL. Loopback hosts (localhost/127.0.0.1/::1) are the
- * trusted dev-preview tier and route to the embedded webview; everything else
- * is public. Fail-closed: unparseable input is treated as public.
+ * Whether a (URL-normalized) hostname is loopback: `localhost`, any
+ * `*.localhost` name (RFC 6761 reserves the whole zone for loopback), the
+ * entire `127.0.0.0/8` block, `::1`, and the IPv4-mapped `::ffff:127.x.y.z`
+ * form (which WHATWG URL serializes as `::ffff:7fxx:xxxx`). LAN ranges are
+ * deliberately NOT loopback: another machine serves them.
+ */
+export function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+  if (host === "localhost" || host.endsWith(".localhost")) return true
+  if (host === "::1") return true
+  if (/^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)) return true
+  const octets = host.split(".")
+  if (octets.length !== 4) return false
+  if (!octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)) return false
+  return octets[0] === "127"
+}
+
+/**
+ * Classify a target URL. Loopback hosts (see `isLoopbackHostname`) are the
+ * trusted dev-preview tier (ADR-0201); everything else is public. Fail-closed:
+ * unparseable input is treated as public.
  */
 export function resolveTrustTier(url: string): TrustTier {
   try {
-    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "")
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "trusted"
-    return "public"
+    return isLoopbackHostname(new URL(url).hostname) ? "trusted" : "public"
   } catch {
     return "public"
   }
@@ -396,7 +415,10 @@ export interface SnapshotNode {
   name: string
   tag: string
   rect: ElementRect
+  /** Always null for a secret (password) field — see `secret`. */
   value: string | null
+  /** A password-type field: its value is never reported (ADR-0201). */
+  secret?: boolean
   state: { disabled: boolean; checked: boolean | null; expanded: boolean | null }
   /**
    * True when the node lives inside a (same-origin) iframe. Its `rect` is then
@@ -425,6 +447,28 @@ export interface EvaluateResult extends BrowserDialogState {
   value?: unknown
   error?: string
   generation?: number
+  /**
+   * Stable refusal code when the engine declined to evaluate (ADR-0201), e.g.
+   * `browser_human_input_required` after a vault credential was filled.
+   */
+  code?: string
+}
+
+/** Refusal code shared by secret-field refusals and the post-fill evaluate lock. */
+export const BROWSER_HUMAN_INPUT_REQUIRED = "browser_human_input_required"
+
+/**
+ * The refusal an engine returns for `evaluate` once a vault credential was
+ * filled in its session: the page now holds a password an expression could
+ * read back, so only an expression a person approved for this one call runs.
+ */
+export function credentialFilledEvaluateRefusal(): EvaluateResult {
+  return {
+    ok: false,
+    code: BROWSER_HUMAN_INPUT_REQUIRED,
+    error:
+      "A saved password was filled in this browser session, so page evaluation needs the user's approval for each expression.",
+  }
 }
 
 /** In-flight + completed request counters from the embedded page. */
@@ -459,6 +503,11 @@ export interface BrowserActionResult extends BrowserDialogState {
   ok: boolean
   error: string | null
   generation: number
+  /**
+   * Stable refusal code, when the engine declined the action (ADR-0201), e.g.
+   * `browser_human_input_required` for an agent typing into a secret field.
+   */
+  code?: string
 }
 
 /** A captured console line from the previewed page. */
@@ -470,9 +519,76 @@ export interface ConsoleEntry {
 
 /** A captured network request (status/timing only — not the response body). */
 export interface NetworkEntry {
+  /** Chromium backends: the id `browser_network_request` takes (ADR-0201). */
+  id?: string
   url: string
   method: string
   status: number
   ok: boolean
   durationMs: number | null
+}
+
+/**
+ * Headers the tool surface never returns, whatever the runtime sent. The single
+ * source for every engine (ADR-0201): extend it here, not at a call site.
+ */
+export const REDACTED_NETWORK_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "proxy-authorization",
+  "authentication",
+  "www-authenticate",
+  "proxy-authenticate",
+  "cookie",
+  "cookie2",
+  "set-cookie",
+  "set-cookie2",
+  "x-api-key",
+  "api-key",
+  "apikey",
+  "x-auth-token",
+  "x-access-token",
+  "x-refresh-token",
+  "x-id-token",
+  "x-session-token",
+  "x-session-id",
+  "x-csrf-token",
+  "x-csrftoken",
+  "x-xsrf-token",
+  "csrf-token",
+  "x-amz-security-token",
+  "x-goog-api-key",
+  "x-forwarded-authorization",
+  "x-ms-token-aad-access-token",
+  "x-ms-token-aad-id-token",
+  "x-ms-token-aad-refresh-token",
+  "x-client-secret",
+  "x-hub-signature",
+  "x-hub-signature-256",
+  "x-upstream-authorization",
+  "private-token",
+  "dpop",
+])
+
+/**
+ * Name fragments that mark a header as credential-bearing even when it is not
+ * listed above (`x-vendor-api-token`, `x-my-app-secret`, `x-foo-auth`, …).
+ */
+const REDACTED_NETWORK_HEADER_PATTERN =
+  /(^|[-_])(auth|authorization|token|secret|password|passwd|api[-_]?key|apikey|session|csrf|xsrf|cookie|credential|signature)([-_]|$)/i
+
+/** Whether `name` names a credential-bearing header the tool surface must redact. */
+export function isRedactedNetworkHeader(name: string): boolean {
+  const lower = name.toLowerCase()
+  return REDACTED_NETWORK_HEADERS.has(lower) || REDACTED_NETWORK_HEADER_PATTERN.test(lower)
+}
+
+/** Redact credential-bearing headers (defense in depth over the runtime's own pass). */
+export function redactNetworkHeaders(
+  headers: Record<string, string> | undefined | null
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    out[name] = isRedactedNetworkHeader(name) ? "[REDACTED]" : String(value)
+  }
+  return out
 }

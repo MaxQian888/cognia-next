@@ -53,6 +53,7 @@
     "cognia-sandbox-pool": "domain",
     "cognia-codex-app": "domain",
     "cognia-codeserver": "domain",
+    "cognia-local-browser": "domain",
 
     "cognia-companion": "companion",
     "cognia-companion-rpc": "companion",

@@ -26,6 +26,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::browser::local::{LocalBrowserManagedInfo, LocalBrowserManagedPhase};
 use crate::claude::sidecar::{kill_sidecar, SidecarState};
 use crate::codeserver::process::{CodeServerManagedInfo, CodeServerState};
 use crate::external_agent::commands::{AcpTerminalState, ExternalAgentState};
@@ -69,6 +70,10 @@ pub enum ManagedSubsystem {
     /// inside the sidecar, so they were the sidecar's grandchildren and no
     /// subsystem registry knew they existed.
     BackgroundJob,
+    /// The local Chromium runtime (ADR-0201): one Node child running
+    /// `local-main.mjs` on a loopback port, supervised by
+    /// `cognia-local-browser`, which in turn owns the Chromium processes.
+    LocalBrowser,
 }
 
 /// Lifecycle state of a managed process, normalized across subsystems.
@@ -285,6 +290,39 @@ fn sidecar_row(pid: Option<u32>, ready: bool) -> ManagedProcess {
     }
 }
 
+/// Singleton logical id for the one-per-app local browser runtime row.
+const LOCAL_BROWSER_SINGLETON_ID: &str = "local-browser";
+
+/// Row for the local browser runtime. Listed while running, restarting after a
+/// crash, or parked in `failed` (so the user can see why and restart it).
+fn local_browser_row(info: &LocalBrowserManagedInfo) -> ManagedProcess {
+    let (status, detail) = match &info.phase {
+        LocalBrowserManagedPhase::Running => (
+            ManagedStatus::Running,
+            info.generation.map(|generation| format!("generation {generation}")),
+        ),
+        LocalBrowserManagedPhase::Restarting { attempt } => (
+            ManagedStatus::Starting,
+            Some(format!("restart attempt {attempt}")),
+        ),
+        LocalBrowserManagedPhase::Failed(error) => (ManagedStatus::Error, Some(error.clone())),
+    };
+    ManagedProcess {
+        subsystem: ManagedSubsystem::LocalBrowser,
+        id: LOCAL_BROWSER_SINGLETON_ID.to_string(),
+        name: match &info.address {
+            Some(address) => format!("local-main.mjs {address}"),
+            None => "local-main.mjs".to_string(),
+        },
+        pid: info.pid,
+        status,
+        can_kill: true,
+        // Restart = stop + the same start path `browser_local_start` uses.
+        can_restart: true,
+        detail,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Aggregation + control
 // ---------------------------------------------------------------------------
@@ -365,6 +403,11 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         }
     }
 
+    // The local Chromium runtime (ADR-0201), when running or failed.
+    if let Some(info) = crate::browser::local::managed_snapshot(app).await {
+        out.push(local_browser_row(&info));
+    }
+
     // Background jobs. Read from the process-global supervisor rather than
     // Tauri state, because the same registry has to work under the headless
     // binary where there is no `AppHandle` to hang state off.
@@ -437,15 +480,22 @@ async fn kill_subsystem(
             st.inner().tunnel.stop();
             Ok(())
         }
+        ManagedSubsystem::LocalBrowser => {
+            // Same path as `browser_local_stop`: frames, tailer, process, and
+            // a `session.closed` event per open session.
+            crate::browser::local::shutdown(app).await;
+            Ok(())
+        }
         ManagedSubsystem::ExternalAgent => {
             Err("external-agent lifecycle is controlled in the renderer".to_string())
         }
     }
 }
 
-/// Restart the managed process `id`. Only code-server supports this natively —
-/// its instances are keyed by project root, so a restart is just stop +
-/// re-ensure with no renderer state to keep in sync.
+/// Restart the managed process `id`. Only code-server and the local browser
+/// runtime support this natively: code-server instances are keyed by project
+/// root and the runtime is a singleton, so a restart is just stop + re-start
+/// with no renderer state to keep in sync.
 async fn restart_subsystem(
     app: &AppHandle,
     subsystem: ManagedSubsystem,
@@ -457,6 +507,7 @@ async fn restart_subsystem(
             state.inner().stop(id).await;
             state.inner().ensure(app, id).await.map(|_| ())
         }
+        ManagedSubsystem::LocalBrowser => crate::browser::local::restart(app).await,
         _ => Err(format!(
             "restart is not supported for {subsystem:?} via the native registry"
         )),
@@ -464,8 +515,8 @@ async fn restart_subsystem(
 }
 
 /// Control a managed process. `Kill` is served natively for every
-/// Rust-supervised subsystem; `Restart` only for code-server (the panel greys it
-/// out elsewhere), and external-agent control is routed through the renderer.
+/// Rust-supervised subsystem; `Restart` only for code-server and the local
+/// browser runtime (the panel greys it out elsewhere), and external-agent control is routed through the renderer.
 #[tauri::command]
 pub async fn control_managed_process(
     app: AppHandle,
@@ -494,7 +545,7 @@ pub async fn list_managed_processes(app: AppHandle) -> Result<Vec<ManagedProcess
 /// This drift is not hypothetical — code-server was added to [`collect`] but
 /// not to the shutdown path, and leaked a Node server holding a port past every
 /// app exit until this list existed.
-pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 9] = [
+pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 10] = [
     ManagedSubsystem::ExternalAgent,
     ManagedSubsystem::AcpTerminal,
     ManagedSubsystem::HeadlessTerminal,
@@ -504,6 +555,7 @@ pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 9] = [
     ManagedSubsystem::PluginHost,
     ManagedSubsystem::Tunnel,
     ManagedSubsystem::BackgroundJob,
+    ManagedSubsystem::LocalBrowser,
 ];
 
 /// Position of `subsystem` in [`ALL_SUBSYSTEMS`]. Exhaustive by construction.
@@ -522,6 +574,7 @@ const fn subsystem_index(subsystem: ManagedSubsystem) -> usize {
         ManagedSubsystem::PluginHost => 6,
         ManagedSubsystem::Tunnel => 7,
         ManagedSubsystem::BackgroundJob => 8,
+        ManagedSubsystem::LocalBrowser => 9,
     }
 }
 
@@ -583,6 +636,11 @@ async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
                     Err(e) => log::warn!("jobs: shutdown failed: {e}"),
                 }
             }
+        }
+        // Stops the Node runtime so it closes Chromium cleanly; a no-op when
+        // the state is not managed or the runtime never started.
+        ManagedSubsystem::LocalBrowser => {
+            crate::browser::local::shutdown(app).await;
         }
     }
 }
@@ -818,6 +876,48 @@ mod tests {
             "\"headlessTerminal\""
         );
         assert_eq!(s(&ManagedSubsystem::Tunnel), "\"tunnel\"");
+        assert_eq!(s(&ManagedSubsystem::LocalBrowser), "\"localBrowser\"");
+    }
+
+    #[test]
+    fn local_browser_row_is_a_restartable_singleton_on_its_loopback_port() {
+        let row = local_browser_row(&LocalBrowserManagedInfo {
+            pid: Some(5150),
+            address: Some("127.0.0.1:51234".into()),
+            generation: Some(2),
+            phase: LocalBrowserManagedPhase::Running,
+        });
+        assert_eq!(row.subsystem, ManagedSubsystem::LocalBrowser);
+        assert_eq!(row.id, LOCAL_BROWSER_SINGLETON_ID);
+        assert!(row.name.contains("127.0.0.1:51234"));
+        assert_eq!(row.pid, Some(5150));
+        assert_eq!(row.status, ManagedStatus::Running);
+        assert!(row.can_kill && row.can_restart);
+        assert_eq!(row.detail.as_deref(), Some("generation 2"));
+    }
+
+    #[test]
+    fn local_browser_row_maps_restarting_and_failed_phases() {
+        let restarting = local_browser_row(&LocalBrowserManagedInfo {
+            pid: None,
+            address: None,
+            generation: None,
+            phase: LocalBrowserManagedPhase::Restarting { attempt: 3 },
+        });
+        assert_eq!(restarting.status, ManagedStatus::Starting);
+        assert_eq!(restarting.pid, None);
+        assert_eq!(restarting.name, "local-main.mjs");
+        assert_eq!(restarting.detail.as_deref(), Some("restart attempt 3"));
+
+        let failed = local_browser_row(&LocalBrowserManagedInfo {
+            pid: None,
+            address: None,
+            generation: None,
+            phase: LocalBrowserManagedPhase::Failed("exited 6 times".into()),
+        });
+        assert_eq!(failed.status, ManagedStatus::Error);
+        assert_eq!(failed.detail.as_deref(), Some("exited 6 times"));
+        assert!(failed.can_kill && failed.can_restart);
     }
 
     #[test]
@@ -825,7 +925,7 @@ mod tests {
         // `teardown_subsystem` is exhaustive by `match`, but the list it is
         // driven from is not. Pin the two together so a new variant cannot be
         // collected without also being shut down (the code-server leak).
-        assert_eq!(ALL_SUBSYSTEMS.len(), 9);
+        assert_eq!(ALL_SUBSYSTEMS.len(), 10);
         for (i, subsystem) in ALL_SUBSYSTEMS.iter().enumerate() {
             assert_eq!(
                 subsystem_index(*subsystem),

@@ -3,7 +3,7 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
 }))
 
 import { transport } from "@/lib/tauri/transport-instance"
-import { RemoteChromiumEngine } from "./remote-chromium-engine"
+import { REMOTE_UNSUPPORTED_FEATURES, RemoteChromiumEngine } from "./remote-chromium-engine"
 
 const call = transport.call as jest.Mock
 
@@ -93,5 +93,43 @@ describe("RemoteChromiumEngine", () => {
         { browserSessionId: "session-1", options: { scope: "element", ref: "target" } },
       ],
     ])
+  })
+})
+
+describe("RemoteChromiumEngine desktop-only surface (ADR-0201)", () => {
+  it("refuses every local-runtime feature without calling the gateway, naming the way out", async () => {
+    const engine = new RemoteChromiumEngine("session-1")
+    expect(engine.backend).toBe("remote-chromium")
+    const calls: Array<[keyof typeof REMOTE_UNSUPPORTED_FEATURES, () => Promise<unknown>]> = [
+      ["pdf", () => engine.pdf()],
+      ["emulate", () => engine.emulate({ offline: true })],
+      ["cookies", () => engine.listCookies()],
+      ["cookies", () => engine.clearCookies("a.test")],
+      ["storage", () => engine.getStorage("local")],
+      ["storage", () => engine.setStorage("local", "k", "v")],
+      ["storage", () => engine.clearStorage("session")],
+      ["networkRequest", () => engine.networkRequest("r")],
+      ["credentials", () => engine.detectLoginForms()],
+      ["credentials", () => engine.fillCredential({})],
+      ["extensions", () => engine.listExtensions()],
+      ["extensions", () => engine.openExtension("x", "popup")],
+      ["finalizeTabs", () => engine.finalizeTabs()],
+      ["downloadControl", () => engine.cancelDownload("d")],
+      ["downloadControl", () => engine.deleteDownload("d")],
+      ["downloadControl", () => engine.saveDownload("d", "/x")],
+    ]
+    for (const [feature, run] of calls) {
+      const error = await run().then(
+        () => null,
+        (cause: { code?: string; message?: string }) => cause
+      )
+      expect(error?.code).toBe("browser_feature_unsupported")
+      expect(error?.message).toContain(REMOTE_UNSUPPORTED_FEATURES[feature])
+      expect(error?.message).toContain("local Chromium")
+    }
+    expect(new Set(calls.map(([feature]) => feature))).toEqual(
+      new Set(Object.keys(REMOTE_UNSUPPORTED_FEATURES))
+    )
+    expect(call).not.toHaveBeenCalled()
   })
 })

@@ -221,6 +221,8 @@ export async function tryAutoModeDecision(
     requestId: string
     toolName: string
     input: unknown
+    /** ADR-0201: approve-every-call — auto mode may deny it, never allow it. */
+    requiresPerCallApproval?: boolean
   },
   respond?: (decision: "allow" | "deny", message?: string) => Promise<void>
 ): Promise<boolean> {
@@ -254,6 +256,9 @@ export async function tryAutoModeDecision(
       }),
     ])
     if (decision && decision.decision === "allow") {
+      // A per-call tool is a person's decision every time: fall through to
+      // the prompt instead of letting a rule or the judge answer for them.
+      if (evt.requiresPerCallApproval === true) return false
       if (respond) await respond("allow")
       else
         await approveTool(evt.sessionId, evt.requestId, "allow", undefined, undefined, undefined, {
@@ -692,6 +697,12 @@ export async function handleEvent(
       // a modify approves with the plugin's rewritten args (same semantics as
       // the agent-executor responder). Fail-open — adapter-hooks swallows
       // dispatcher errors and returns `allow`.
+      //
+      // ADR-0201: an approve-every-call tool (`requiresPerCallApproval`) is a
+      // person's decision on EVERY call. A plugin may still deny it, but its
+      // "modify" never approves it and the always-allow list never applies —
+      // the request falls through to the user with its original input.
+      const perCall = evt.requiresPerCallApproval === true
       {
         const pre = await dispatchPluginPreToolUse(evt.toolName, evt.input, evt.sessionId)
         if (pre.action === "deny") {
@@ -710,7 +721,7 @@ export async function handleEvent(
           }
           return
         }
-        if (pre.action === "modify" && pre.modifiedArgs) {
+        if (!perCall && pre.action === "modify" && pre.modifiedArgs) {
           try {
             await approveTool(
               evt.sessionId,
@@ -730,7 +741,7 @@ export async function handleEvent(
         }
       }
       // Auto-approve if the user has previously allowed this tool.
-      if (allowListRef.current.includes(evt.toolName)) {
+      if (!perCall && allowListRef.current.includes(evt.toolName)) {
         try {
           await approveTool(
             evt.sessionId,
@@ -784,7 +795,11 @@ export async function handleEvent(
             blockedPath: evt.blockedPath,
             decisionReason: evt.decisionReason,
             defaultToNo: evt.defaultToNo,
-            suppressAlwaysAllowRule: evt.suppressAlwaysAllowRule,
+            // A per-call tool never becomes a standing grant, whichever flag
+            // the request arrived with — every surface reads this one field.
+            suppressAlwaysAllowRule:
+              evt.suppressAlwaysAllowRule || evt.requiresPerCallApproval || undefined,
+            ...(evt.requiresPerCallApproval ? { requiresPerCallApproval: true } : {}),
             origin: "subagent",
             subagentId: subagentRoute.subagentId,
             subagentRunId: subagentRoute.runId,
@@ -850,7 +865,9 @@ export async function handleEvent(
         blockedPath: evt.blockedPath,
         decisionReason: evt.decisionReason,
         defaultToNo: evt.defaultToNo,
-        suppressAlwaysAllowRule: evt.suppressAlwaysAllowRule,
+        suppressAlwaysAllowRule:
+          evt.suppressAlwaysAllowRule || evt.requiresPerCallApproval || undefined,
+        ...(evt.requiresPerCallApproval ? { requiresPerCallApproval: true } : {}),
       }
       pushInteractiveApproval(approval)
       return

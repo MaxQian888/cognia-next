@@ -178,7 +178,11 @@ import { createBotsAPI } from "../api/bots-api"
 import { createShareAPI } from "../api/share-api"
 import { createBackupAPI } from "../api/backup-api"
 import { createAutomationAPI } from "../api/automation-api"
-import { createBrowserAPI } from "../api/browser-api"
+import {
+  createBrowserAPI,
+  isFirstPartyBrowserPlugin,
+  type PluginBrowserAPI,
+} from "../api/browser-api"
 import { createCharacterPacksAPI } from "../api/character-packs-api"
 import { createSandboxAPI } from "../api/sandbox-api"
 import { createRecorderAPI } from "../api/recorder-api"
@@ -459,7 +463,7 @@ export function createFullPluginContext(
     share: createShareAPI(pluginId),
     backup: createBackupAPI(pluginId),
     automation: createAutomationAPI(pluginId),
-    browser: createBrowserAPI(),
+    browser: createGuardedBrowserAPI(pluginId, plugin.source),
     characterPacks: createCharacterPacksAPI(pluginId),
     sandbox: createSandboxAPI(pluginId),
     recorder: createRecorderAPI(pluginId),
@@ -1305,6 +1309,51 @@ function createPythonAPI(pluginId: string, manager: PluginManager): PluginPython
       }
     },
   }
+}
+
+// =============================================================================
+// Browser API (ADR-0201)
+// =============================================================================
+
+/**
+ * `ctx.browser` drives a real browser with the user's sessions in it, so every
+ * method needs `agent:control` (`saveAnnotation` also `session:read`, as the
+ * contract catalog declares). The synchronous router / consent / pane reads
+ * skip the async consent overlay so they stay synchronous; they still require
+ * the granted permission. Only the bundled Browser Tools plugin receives the
+ * full engine; every other plugin gets the facade without the credential,
+ * storage-value, request-body and cookie methods.
+ */
+const BROWSER_GUARD_MAP: Record<keyof PluginBrowserAPI, PluginPermission | PluginPermission[]> = {
+  routeEngine: "agent:control",
+  isDomainAuthorized: "agent:control",
+  primeDomainGrants: "agent:control",
+  saveAnnotation: ["agent:control", "session:read"],
+  primeLocalRouting: "agent:control",
+  ensureLocalEngine: "agent:control",
+  openPane: "agent:control",
+  attachDownload: "agent:control",
+  isSurfaceVisible: "agent:control",
+}
+
+const BROWSER_SYNC_METHODS: ReadonlyArray<keyof PluginBrowserAPI> = [
+  "routeEngine",
+  "isDomainAuthorized",
+  "openPane",
+  "attachDownload",
+  "isSurfaceVisible",
+]
+
+export function createGuardedBrowserAPI(
+  pluginId: string,
+  source: Plugin["source"] | undefined
+): PluginBrowserAPI {
+  return createGuardedAPI(
+    pluginId,
+    createBrowserAPI({ firstParty: isFirstPartyBrowserPlugin(pluginId, source) }),
+    BROWSER_GUARD_MAP,
+    { consentExempt: BROWSER_SYNC_METHODS }
+  )
 }
 
 // =============================================================================

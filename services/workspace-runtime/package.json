@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node src/main.mjs",
+    "start:local": "node src/local-main.mjs",
     "test": "node --test src/*.test.mjs"
   },
   "dependencies": {

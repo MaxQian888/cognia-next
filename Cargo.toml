@@ -90,6 +90,9 @@ members = [
   # ADR-0196 P6g — Chromium cookie import (profile discovery, Safe Storage
   # decryption), out of `app_lib`.
   "crates/cognia-browser-cookies",
+  # ADR-0201 — local Chromium: runtime supervision, installer, extensions,
+  # user-Chrome discovery, local files and dev servers.
+  "crates/cognia-local-browser",
   # ADR-0196 P6b — Codex App dispatch over the app-server control socket, out of
   # `app_lib`.
   "crates/cognia-codex-app",

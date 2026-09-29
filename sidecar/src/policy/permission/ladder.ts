@@ -68,6 +68,13 @@ export interface LadderPolicy {
   sandboxScope: SandboxScopePolicy | null | undefined
   cwd: string | undefined
   pluginAccess: PluginAccessMap
+  /**
+   * Bare plugin tool names that must ask a human on every call
+   * (`buildPerCallApprovalSet`). Such a call is never allowed by a shortcut —
+   * no remembered grant, ruleset allow, acceptEdits or bypass mode — and
+   * dontAsk denies it.
+   */
+  perCallApproval?: ReadonlySet<string> | null
 }
 
 export interface LadderCall {
@@ -200,6 +207,54 @@ class CallState {
 
 const ALLOW: LadderOutcome = { kind: "allow" }
 
+/**
+ * Plugin tools whose approval can never be remembered, turned into a standing
+ * grant, or skipped by a permission mode — each call asks a human (ADR-0201:
+ * `browser_fill_credential` puts a stored password into a page;
+ * `browser_set_files` hands local files to a web page). A tool is treated this
+ * way only when it is in this list AND its manifest entry says
+ * `requiresApproval: true`, so the catalog cannot be satisfied by a name alone.
+ */
+export const PER_CALL_PLUGIN_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "browser_fill_credential",
+  "browser_set_files",
+])
+
+/** Bare names of the plugin tools whose manifest entry says `requiresApproval: true`. */
+export function buildApprovalRequiredSet(pluginTools: unknown): Set<string> {
+  const set = new Set<string>()
+  if (!Array.isArray(pluginTools)) return set
+  for (const entry of pluginTools as unknown[]) {
+    const tool = entry as { name?: unknown; requiresApproval?: unknown } | null
+    if (!tool || typeof tool.name !== "string" || tool.requiresApproval !== true) continue
+    if (tool.name === ASK_USER_TOOL_NAME) continue
+    set.add(tool.name)
+  }
+  return set
+}
+
+/**
+ * The per-call subset: declared `requiresApproval` AND listed in
+ * {@link PER_CALL_PLUGIN_TOOL_NAMES}.
+ */
+export function buildPerCallApprovalSet(pluginTools: unknown): Set<string> {
+  const set = new Set<string>()
+  for (const name of buildApprovalRequiredSet(pluginTools)) {
+    if (PER_CALL_PLUGIN_TOOL_NAMES.has(name)) set.add(name)
+  }
+  return set
+}
+
+/** Whether `toolName` is a plugin tool in `names` (a set of bare plugin tool names). */
+export function requiresPerCallApproval(
+  toolName: string,
+  perCallApproval: ReadonlySet<string> | null | undefined
+): boolean {
+  if (!perCallApproval || perCallApproval.size === 0) return false
+  const { server, bare } = splitToolName(toolName)
+  return server === PLUGIN_TOOLS_SERVER_NAME && perCallApproval.has(bare)
+}
+
 function deny(reason: DenyReason): LadderOutcome {
   return { kind: "deny", reason }
 }
@@ -260,13 +315,18 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
     }
     case "dont-ask":
       if (policy.mode !== "dontAsk") return undefined
+      if (requiresPerCallApproval(toolName, policy.perCallApproval)) {
+        return deny({ code: "dont-ask" })
+      }
       // A doomed repeat cannot be asked about here, so it is denied outright.
       if (!state.doomed && (isReadOnlyBuiltin(toolName) || state.granted())) return ALLOW
       return deny({ code: "dont-ask" })
     case "bypass":
+      if (requiresPerCallApproval(toolName, policy.perCallApproval)) return undefined
       return policy.mode === "bypassPermissions" && !state.doomed ? ALLOW : undefined
     case "grants":
       if (state.doomed) return undefined
+      if (requiresPerCallApproval(toolName, policy.perCallApproval)) return undefined
       if (
         policy.mode === "acceptEdits" &&
         state.profile.acceptsEdit(toolName) &&

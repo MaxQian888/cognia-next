@@ -5,7 +5,7 @@ description: "On macOS, explicitly import only the current site's cookies from a
 
 # ADR-0073 — Chromium cookie import for the embedded browser
 
-**Status**: Accepted (2026-07-16)
+**Status**: Accepted (2026-07-16). Amended by [ADR-0201](./0201-the-desktop-browser-runs-chromium-locally) (every desktop OS, Firefox and Safari sources, domain-set scopes, local-Chromium sink).
 **Authors**: Max Qian + Codex
 
 ## Context

@@ -12,6 +12,7 @@ import {
   BookOpenIcon,
   BotIcon,
   BrainIcon,
+  GlobeIcon,
   GaugeIcon,
   InboxIcon,
   KeyRoundIcon,
@@ -96,6 +97,8 @@ export type ScopeGroupId =
   | "memory"
   | "workflow"
   | "usage"
+  /** ADR-0201 — `browser:control`, the dedicated `browser_*` tools. */
+  | "browser"
 
 export interface ScopeGroup {
   id: ScopeGroupId
@@ -115,6 +118,7 @@ const GROUP_ICONS: Record<ScopeGroupId, LucideIcon> = {
   memory: BrainIcon,
   workflow: WorkflowIcon,
   usage: GaugeIcon,
+  browser: GlobeIcon,
 }
 
 const GROUP_ORDER: ScopeGroupId[] = [
@@ -124,6 +128,7 @@ const GROUP_ORDER: ScopeGroupId[] = [
   "memory",
   "agent",
   "workflow",
+  "browser",
   "inbox",
   "plugin",
   "mcp",

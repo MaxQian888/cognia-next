@@ -172,6 +172,12 @@ const ChatCopilotInitializer = dynamic(
   () => import("./chat-copilot-initializer").then((m) => m.ChatCopilotInitializer),
   { ssr: false }
 )
+// The browser's download history (ADR-0201): fed here, not by the pane, so a
+// download from a headless agent session still lands in the history.
+const BrowserDownloadsInitializer = dynamic(
+  () => import("./browser-downloads-initializer").then((m) => m.BrowserDownloadsInitializer),
+  { ssr: false }
+)
 const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
@@ -228,6 +234,7 @@ export function DesktopOnlyInitializers() {
       <IslandInitializer />
       <ChatCopilotInitializer />
       <SessionImportWatchInitializer />
+      <BrowserDownloadsInitializer />
       <SitesInitializer />
       <RouterFusionInitializer />
     </>

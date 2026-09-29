@@ -101,6 +101,10 @@ jest.mock("@/lib/tauri/notification", () => ({
   notify: (...args: unknown[]) => notifyMock(...args),
 }))
 jest.mock("./tray-section", () => ({ TraySection: () => null }))
+// Separately tested (browser/browser-local-settings.test.tsx); only its mount is asserted here.
+jest.mock("./browser/browser-local-settings", () => ({
+  BrowserLocalSettings: () => <div data-testid="browser-local-settings" />,
+}))
 jest.mock("./selection-toolbar-settings", () => ({
   SelectionToolbarSettings: () => <div data-testid="selection-toolbar-settings" />,
 }))
@@ -177,6 +181,12 @@ it("persists the opt-in browser cookie import toggle", async () => {
   await waitFor(() =>
     expect(saveSettingsMock).toHaveBeenCalledWith({ browserCookieImportEnabled: true })
   )
+})
+
+it("mounts the browser settings block", async () => {
+  render(<DesktopSection />)
+  await screen.findByText(/Windows \(windows\)/)
+  expect(screen.getByTestId("browser-local-settings")).toBeInTheDocument()
 })
 
 it("reflects a persisted enabled cookie import setting", async () => {

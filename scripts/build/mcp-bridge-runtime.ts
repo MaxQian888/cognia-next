@@ -26,6 +26,8 @@ export const scheduleTask = (input: unknown) => rendererCall("schedule_task", in
 export const listScheduledTasks = (input: unknown) => rendererCall("list_scheduled_tasks", input)
 export const cancelScheduledTask = (input: unknown) => rendererCall("cancel_scheduled_task", input)
 export const spawnTask = (input: unknown) => rendererCall("spawn_task", input)
+// ADR-0201: browser_* MCP tools run in the renderer (plugin executors, consent, pane).
+export const browserTool = (input: unknown) => rendererCall("browser_tool", input)
 
 export const usageQuery = (...args: unknown[]) => hostCall("usageQuery", ...args)
 export const sessionHealth = (...args: unknown[]) => hostCall("sessionHealth", ...args)

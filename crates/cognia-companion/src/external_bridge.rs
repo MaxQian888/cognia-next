@@ -38,6 +38,8 @@ const VALID_SCOPES: &[&str] = &[
     "issues:read",
     "issues:write",
     "workflow:run",
+    // ADR-0201 — first-class browser_* MCP tools.
+    "browser:control",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -477,6 +479,17 @@ mod tests {
         assert_eq!(
             validate_scopes(&["workflow:run".to_string()]).unwrap(),
             vec!["workflow:run".to_string()]
+        );
+    }
+
+    #[test]
+    fn browser_control_scope_is_accepted_but_not_enabled_by_default() {
+        assert!(!ExternalBridgeConfig::default()
+            .enabled_scopes
+            .contains(&"browser:control".to_string()));
+        assert_eq!(
+            validate_scopes(&["browser:control".to_string()]).unwrap(),
+            vec!["browser:control".to_string()]
         );
     }
 

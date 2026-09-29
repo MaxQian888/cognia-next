@@ -43,6 +43,11 @@ export interface PluginToolManifestEntry {
   pluginId?: string | undefined
   /** Per-tool timeout override; `0` means no timeout. */
   timeoutMs?: unknown
+  /**
+   * The plugin declared the tool `requiresApproval`: every call asks a human
+   * (see `buildPerCallApprovalSet` in ../../policy/permission/ladder.ts).
+   */
+  requiresApproval?: unknown
 }
 
 /** What the renderer answers a `plugin_tool_exec` with. */

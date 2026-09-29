@@ -55,6 +55,13 @@ describe("controlManaged", () => {
     expect(mockControl).toHaveBeenCalledWith("mcpServer", "mcp-server", "restart")
   })
 
+  it("routes a local-browser restart through the native command", async () => {
+    await controlManaged({ subsystem: "localBrowser", id: "local-browser" }, "restart")
+    expect(mockControl).toHaveBeenCalledWith("localBrowser", "local-browser", "restart")
+    expect(mockDestroyPane).not.toHaveBeenCalled()
+    expect(manager.reconnect).not.toHaveBeenCalled()
+  })
+
   it("destroys the native pane when a code-server is killed", async () => {
     // Stopping only the process would leave the webview pinned over the DOM
     // showing a dead page — the pane has to go with it.

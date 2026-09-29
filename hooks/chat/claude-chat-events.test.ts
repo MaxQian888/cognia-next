@@ -913,3 +913,29 @@ describe("renderer broker Auto-mode responder", () => {
     }
   )
 })
+
+describe("Auto mode and per-call tools (ADR-0201)", () => {
+  it("never lets Auto mode allow a per-call tool, but lets it deny one", async () => {
+    const { runAutoModeForTool } = await import("@/lib/claude/permissions/auto-mode-runner")
+    const { tryAutoModeDecision } = await import("./claude-chat-events")
+    const respond = jest.fn(async (_decision: "allow" | "deny", _message?: string) => {})
+    const request = {
+      sessionId: "chat",
+      requestId: "req",
+      toolName: "mcp__cognia-plugin-tools__browser_set_files",
+      input: { ref: "f", paths: ["a"] },
+      requiresPerCallApproval: true,
+    }
+    jest
+      .mocked(runAutoModeForTool)
+      .mockResolvedValueOnce({ decision: "allow", source: "rules", reason: "fixture" } as never)
+    await expect(tryAutoModeDecision(request, respond)).resolves.toBe(false)
+    expect(respond).not.toHaveBeenCalled()
+
+    jest
+      .mocked(runAutoModeForTool)
+      .mockResolvedValueOnce({ decision: "deny", source: "rules", reason: "fixture" } as never)
+    await expect(tryAutoModeDecision(request, respond)).resolves.toBe(true)
+    expect(respond.mock.calls[0][0]).toBe("deny")
+  })
+})

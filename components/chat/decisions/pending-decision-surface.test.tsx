@@ -226,3 +226,20 @@ it("honors SDK deny focus and hides persistent approval when suppressed", async 
   await userEvent.setup().keyboard("{Enter}")
   expect(onRespond).toHaveBeenCalledWith("deny")
 })
+
+// ADR-0201: an approve-every-call tool (e.g. browser_fill_credential) never
+// offers a standing grant, even if only the per-call flag reached the renderer.
+it("hides Always allow for a per-call approval request", () => {
+  render(
+    <PendingDecisionSurface
+      decision={{
+        kind: "tool-approval",
+        approval: { ...approval, requiresPerCallApproval: true },
+      }}
+      onApprovalRespond={jest.fn()}
+    />
+  )
+  expect(screen.queryByTestId("decision-allow-always")).not.toBeInTheDocument()
+  expect(screen.getByTestId("decision-allow")).toBeInTheDocument()
+  expect(screen.getByTestId("decision-deny")).toBeInTheDocument()
+})

@@ -484,6 +484,21 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.browser.saveAnnotation": {
     kind: "none",
   },
+  "ctx.browser.primeLocalRouting": {
+    kind: "none",
+  },
+  "ctx.browser.ensureLocalEngine": {
+    kind: "host-owned",
+  },
+  "ctx.browser.openPane": {
+    kind: "none",
+  },
+  "ctx.browser.attachDownload": {
+    kind: "none",
+  },
+  "ctx.browser.isSurfaceVisible": {
+    kind: "none",
+  },
   "ctx.canvas.addComment": {
     kind: "none",
   },

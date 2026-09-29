@@ -17,6 +17,7 @@ const HOST_BRIDGED_IMPORTS = new Set([
   "../handlers/spawn-task",
   "../handlers/usage",
   "../handlers/issues",
+  "../handlers/browser",
 ])
 
 const FORBIDDEN_OUTPUT_INPUTS = [

@@ -5191,13 +5191,6 @@
     },
     "cookieImport": {
       "action": "Site sign-in",
-      "browser": {
-        "brave": "Brave",
-        "chrome": "Google Chrome",
-        "chromium": "Chromium",
-        "edge": "Microsoft Edge"
-      },
-      "browserLabel": "Browser",
       "clear": {
         "action": "Clear cookies",
         "clearing": "Clearing…",
@@ -5208,37 +5201,12 @@
         "title": "Sign out in the preview"
       },
       "close": "Close",
-      "consent": {
-        "continue": "I understand, continue",
-        "description": "Cognia will read saved sign-in cookies for the current site from the selected Chromium profile and inject them into this preview.",
-        "localOnly": "Cookie values never cross Cognia's IPC boundary, enter its renderer or logs, or upload to Cognia. The target site receives its own cookies normally.",
-        "title": "Allow local cookie access?"
-      },
       "description": "Choose the local browser profile whose sign-in should be reused for this site.",
       "dialogDescription": "Reuse a sign-in from a local Chromium profile, or remove this site's cookies from the built-in preview.",
       "dialogTitle": "Sign-in for {host}",
-      "import": "Import and reload",
-      "importing": "Importing…",
-      "keychainHint": "macOS may ask for Keychain access. Denying the prompt leaves the preview unchanged.",
-      "openSettings": "Open Desktop settings",
-      "profileLabel": "Profile",
       "reason": {
-        "checkFailed": "Could not check local Chromium profiles. Restart the desktop app and try again.",
-        "checking": "Checking local Chromium profiles…",
-        "featureDisabled": "Enable Chromium cookie import in Settings → Desktop first.",
-        "noProfiles": "No compatible Chromium profiles were found on this Mac.",
         "openPage": "Open a public web page before importing cookies.",
-        "remoteBackend": "Sign-in reuse applies to the built-in preview on this Mac, not the cloud browser.",
-        "unsupported": "Cookie import is unavailable on this platform. Windows App-Bound Encryption is not bypassed; use a separate browser profile instead."
-      },
-      "result": {
-        "failed": "Cookie import failed without exposing cookie values.",
-        "featureDisabled": "Chromium cookie import is disabled in Settings.",
-        "noMatchingCookies": "The selected profile has no cookies for this site.",
-        "noProfile": "The selected browser profile is no longer available.",
-        "ok": "Imported {count, plural, one {# cookie} other {# cookies}} and reloaded the preview.",
-        "permissionDenied": "Keychain access was denied. No cookies were imported.",
-        "unsupported": "Cookie import is unavailable on this platform."
+        "remoteBackend": "Sign-in reuse applies to the built-in preview on this Mac, not the cloud browser."
       },
       "title": "Reuse Chromium sign-in"
     },
@@ -5428,6 +5396,436 @@
     "runtime": "Runtime",
     "title": "Developer mode",
     "valueTruncated": "Result truncated."
+  },
+  "browserLocal": {
+    "address": {
+      "localFileFailed": "Could not open that local file: {message}"
+    },
+    "backend": {
+      "auto": "Automatic",
+      "chromiumHint": "Chromium (about 170 MB) is downloaded once and runs on this computer with its own profile, tabs, downloads and extensions.",
+      "copied": "Copied",
+      "copyInspectUrl": "Copy the address",
+      "embedded": "Built-in preview",
+      "install": "Install Chromium",
+      "installDone": "Chromium is installed.",
+      "installExtracting": "Unpacking Chromium…",
+      "installFailed": "Chromium could not be installed: {message}",
+      "installProgress": "Downloading Chromium… {received} of {total}",
+      "installProgressUnknown": "Downloading Chromium… {received}",
+      "installing": "Installing…",
+      "label": "Browser engine",
+      "localChromium": "Local Chromium",
+      "localChromiumMissing": "Local Chromium (not installed)",
+      "recheck": "Check again",
+      "remote": "Cloud browser",
+      "runtimeMissing": "This build does not include the local browser runtime.",
+      "userChrome": "Your Chrome",
+      "userChromeBrowser": "Browser to attach",
+      "userChromeConsent": "Your browser asks you to allow each connection. Cognia opens its tabs in a separate window and closes only the tabs it opened.",
+      "userChromeDisabled": "Remote debugging is off in {browser}. Open {url} in it, turn remote debugging on, then check again.",
+      "userChromeNone": "No supported browser (Chrome, Edge, Brave) was found on this computer.",
+      "userChromeNotInstalled": "{browser} is not installed.",
+      "userChromeUnavailable": "Your Chrome (unavailable)"
+    },
+    "dialog": {
+      "accept": "OK",
+      "alert": "The page says",
+      "beforeunload": "Leave this page?",
+      "confirm": "The page asks",
+      "dismiss": "Cancel",
+      "failed": "Could not answer the page's dialog",
+      "prompt": "The page asks for input",
+      "promptLabel": "Your answer"
+    },
+    "downloads": {
+      "attach": "Attach to chat",
+      "attachFailed": "Could not attach the file to the chat",
+      "attached": "Attached to the chat",
+      "button": "Downloads",
+      "buttonActive": "Downloads, {count, plural, one {# in progress} other {# in progress}}",
+      "cancel": "Cancel download",
+      "cancelFailed": "Could not cancel the download",
+      "clear": "Clear list",
+      "clearFailed": "Could not clear the list",
+      "empty": "Nothing downloaded yet.",
+      "failedDetail": "Download failed: {message}",
+      "noSession": "Open a chat session first",
+      "open": "Open file",
+      "openBlocked": "This kind of file isn't opened from here. Use Show in folder instead.",
+      "openFailed": "Could not open the file",
+      "progress": "{received} of {total}",
+      "progressUnknown": "{received}",
+      "remove": "Remove from list",
+      "removeFailed": "Could not remove the entry",
+      "retry": "Download again",
+      "reveal": "Show in folder",
+      "revealFailed": "Could not show the file",
+      "saveAs": "Save as…",
+      "saveAsFailed": "Could not save a copy of the file",
+      "state": {
+        "attached": "Attached",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed",
+        "in_progress": "Downloading",
+        "quarantined": "Quarantined",
+        "saved": "Saved"
+      },
+      "title": "Downloads",
+      "tooLarge": "This file is larger than 64 MB and can't be attached to the chat."
+    },
+    "extensions": {
+      "button": "Extensions"
+    },
+    "pane": {
+      "canvas": "Local browser page",
+      "closeTab": "Close tab",
+      "closed": "The browser session ended.",
+      "failed": "The local browser could not start: {code}",
+      "newTab": "New tab",
+      "restart": "Start again",
+      "starting": "Starting the local browser…",
+      "tabs": "Tabs",
+      "untitled": "Untitled"
+    },
+    "settings": {
+      "chromium": {
+        "installed": "Installed · Chromium {version}",
+        "installedNoVersion": "Installed",
+        "notInstalled": "Not installed",
+        "title": "Local Chromium",
+        "uninstall": "Uninstall",
+        "uninstallFailed": "Could not uninstall Chromium: {message}",
+        "uninstalled": "Chromium was removed."
+      },
+      "defaultBackend": "Default engine",
+      "defaultBackendHint": "Automatic uses local Chromium for public sites once it is installed, and the built-in preview for localhost.",
+      "description": "Which engine the browser pane uses, where downloads go, and the local Chromium profile.",
+      "downloads": {
+        "askWhereToSave": "Ask where to save each file",
+        "change": "Change…",
+        "defaultBadge": "Default",
+        "folder": "Download folder",
+        "forbidden": "That folder can't hold downloads. Choose one that isn't your home folder, a system folder or a hidden folder.",
+        "loadFailed": "Could not read the download settings",
+        "reset": "Use the system Downloads folder",
+        "saveFailed": "Could not save the download settings",
+        "title": "Downloads"
+      },
+      "extensions": {
+        "count": "{count, plural, =0 {No extensions installed} one {# extension installed} other {# extensions installed}}",
+        "description": "Chrome extensions load into local Chromium only; your own Chrome keeps its own.",
+        "manage": "Manage extensions",
+        "title": "Extensions"
+      },
+      "passwords": {
+        "count": "{count, plural, =0 {No saved sign-ins} one {# saved sign-in} other {# saved sign-ins}}",
+        "description": "Passwords are kept in the system keychain, never in the app's database. Revealing, copying or exporting one asks you to confirm it's you.",
+        "manage": "Manage passwords",
+        "title": "Passwords"
+      },
+      "profile": {
+        "description": "Local Chromium keeps its sign-ins, history and cookies in its own profile, separate from Cognia's built-in preview.",
+        "reveal": "Show in folder",
+        "revealFailed": "Could not open the profile folder: {message}",
+        "title": "Browser profile"
+      },
+      "title": "Browser",
+      "webOnly": "The local browser is available in the desktop app."
+    },
+    "upload": {
+      "failed": "Couldn't upload the file: {message}",
+      "singleFile": "This field takes one file, so only {name} was uploaded."
+    }
+  },
+  "browserVault": {
+    "autofill": {
+      "account": "Account",
+      "description": "Cognia fills the form directly. The password is never shown here.",
+      "dismiss": "Not now",
+      "failed": "Could not fill the sign-in form.",
+      "fill": "Fill",
+      "filled": "Signed-in details filled for {username}.",
+      "filling": "Filling…",
+      "reason": {
+        "ambiguous": "More than one saved password matches. Choose an account.",
+        "no_login_form": "The sign-in form is no longer on the page.",
+        "no_match": "No saved password matches this site."
+      },
+      "region": "Saved password available",
+      "title": "Sign in with a saved password"
+    },
+    "common": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "failed": "Something went wrong. Try again.",
+      "loading": "Loading…",
+      "refresh": "Refresh",
+      "retry": "Retry"
+    },
+    "cookieAction": {
+      "chooseImport": "Choose what to import…",
+      "localClearDescription": "Remove {domain}'s cookies from the local Chromium session.",
+      "localCleared": "Cleared {domain}'s cookies and reloaded the page.",
+      "localNoSession": "Open a local Chromium session to manage its cookies.",
+      "userChromeClear": "This is your own Chrome profile. Manage its cookies in Chrome's settings."
+    },
+    "cookieImport": {
+      "all": "All sites",
+      "allHint": "Every cookie in the profile is imported. Use this only for a profile you fully trust.",
+      "browser": "Browser",
+      "consent": {
+        "continue": "I understand, continue",
+        "description": "Cognia will read saved sign-in cookies from the browser profile you pick and add them to this browser.",
+        "localOnly": "Cookie values stay on this device and never enter this window, logs, or Cognia's servers.",
+        "title": "Allow local cookie access?"
+      },
+      "description": "Reuse sign-ins from another browser on this device.",
+      "domains": "Chosen sites",
+      "domainsCount": "{count, plural, one {# cookie} other {# cookies}}",
+      "domainsEmpty": "This profile has no cookies.",
+      "domainsLoadFailed": "Could not list this profile's sites.",
+      "domainsNoMatch": "No site matches “{query}”.",
+      "domainsSearch": "Search sites",
+      "domainsSelected": "{count, plural, one {# site selected} other {# sites selected}}",
+      "featureDisabled": "Enable browser cookie import in Settings → Desktop first.",
+      "fullDiskAccess": {
+        "description": "macOS protects Safari's cookies. Give Cognia Full Disk Access in System Settings → Privacy & Security → Full Disk Access, then restart Cognia.",
+        "open": "Open Full Disk Access settings",
+        "openFailed": "Could not open System Settings. Open Privacy & Security → Full Disk Access yourself."
+      },
+      "import": "Import",
+      "importing": "Importing…",
+      "keychainHint": "Your system may ask for permission to read the browser's saved keys. Denying it leaves this browser unchanged.",
+      "loadFailed": "Could not list browsers on this device.",
+      "noSources": "No supported browser was found on this device.",
+      "openSettings": "Open Desktop settings",
+      "profile": "Profile",
+      "reason": {
+        "full_disk_access_required": "Needs Full Disk Access",
+        "not_installed": "Not installed",
+        "unsupported_os": "Not supported on this system"
+      },
+      "result": {
+        "appBound": "{count, plural, one {# cookie was} other {# cookies were}} protected by Chrome's App-Bound Encryption and skipped. Sign in once in this browser, or use your own Chrome instead.",
+        "failed": "Cookie import failed. No cookie values were exposed.",
+        "fullDiskAccessRequired": "Cognia needs Full Disk Access to read Safari's cookies.",
+        "noMatchingCookies": "The selected profile has no cookies for that scope.",
+        "noProfile": "The selected browser profile is no longer available.",
+        "ok": "Imported {count, plural, one {# cookie} other {# cookies}}.",
+        "permissionDenied": "Access to the browser's saved keys was denied. No cookies were imported.",
+        "unsupported": "Cookie import is unavailable for this browser on this system."
+      },
+      "scope": "What to import",
+      "sink": {
+        "embedded": "Cookies are added to the built-in preview.",
+        "local": "Cookies are added to the local Chromium session.",
+        "localNoSession": "Open a local Chromium session first; cookies are added to a running session.",
+        "unsupported": "The cloud browser runs on another machine, so it cannot receive cookies from this device."
+      },
+      "site": "This site ({host})",
+      "sourceWithReason": "{label} ({reason})",
+      "title": "Import sign-in cookies"
+    },
+    "extensions": {
+      "cancel": "Cancel",
+      "checkUpdates": "Check for updates",
+      "checking": "Checking…",
+      "description": "Extensions run in the local Chromium browser. Enabling, disabling or installing one restarts open local sessions.",
+      "disable": "Disable {name}",
+      "empty": "No extensions installed.",
+      "enable": "Enable {name}",
+      "errors": {
+        "crx_id_mismatch": "The package's ID does not match the extension you asked for.",
+        "crx_invalid": "That file is not a valid Chrome extension package.",
+        "extension_install_expired": "That install was not confirmed in time. Start it again.",
+        "extension_not_found": "That extension is no longer installed.",
+        "extensions_unsupported_backend": "Extensions only run in the local Chromium browser.",
+        "manifest_invalid": "The extension's manifest is missing or invalid.",
+        "webstore_unavailable": "The Chrome Web Store could not be reached, or it does not offer that extension.",
+        "zip_path_traversal": "The extension package contains unsafe file paths and was rejected."
+      },
+      "failed": "The extension action failed.",
+      "hostPermissions": "{count, plural, one {# site} other {# sites}}",
+      "install": {
+        "crx": "Install .crx file…",
+        "done": "Installed {name}.",
+        "installing": "Installing…",
+        "label": "Chrome Web Store ID or link",
+        "placeholder": "Extension ID or chromewebstore.google.com link",
+        "unpacked": "Load unpacked folder…",
+        "webstore": "Install"
+      },
+      "installConfirm": {
+        "allSites": "All sites",
+        "confirm": "Install extension",
+        "description": "Version {version}. Review what this extension may access before you install it.",
+        "hostPermissions": "Sites it can read and change",
+        "none": "This extension asks for no special permissions.",
+        "permissions": "Permissions",
+        "title": "Install {name}?"
+      },
+      "loadFailed": "Could not load extensions.",
+      "loading": "Loading extensions…",
+      "noUpdates": "All extensions are up to date.",
+      "openOptions": "Options",
+      "openPopup": "Open popup",
+      "openRequiresSession": "Open a local Chromium session to use extension pages.",
+      "permissions": "{count, plural, one {# permission} other {# permissions}}",
+      "remove": "Remove",
+      "removeConfirm": {
+        "confirm": "Remove extension",
+        "description": "{name} and its local data are removed from Cognia's browser.",
+        "title": "Remove this extension?"
+      },
+      "removed": "Removed {name}.",
+      "retry": "Retry",
+      "source": {
+        "crx": "CRX file",
+        "unpacked": "Unpacked",
+        "webstore": "Web Store"
+      },
+      "title": "Extensions",
+      "unsupported": {
+        "embedded": "The built-in preview cannot run Chrome extensions. Switch the browser to local Chromium to use them. Installed extensions are listed below for reference.",
+        "remote": "The cloud browser does not load extensions from this device. Switch to local Chromium to use them.",
+        "title": "Extensions are not active here",
+        "userChrome": "Your own Chrome keeps its own extensions. Manage them in Chrome; Cognia's extension set applies only to its local Chromium."
+      },
+      "update": "Update to {version}",
+      "updated": "Updated {name}.",
+      "updatesAvailable": "{count, plural, one {# update available} other {# updates available}}",
+      "version": "Version {version}"
+    },
+    "localContent": {
+      "devServers": "Local dev servers",
+      "devServersEmpty": "No local web servers are running.",
+      "devServersFailed": "Could not look for local servers.",
+      "openFile": "Open file…",
+      "openFolder": "Open folder…",
+      "openServer": "Open {url}",
+      "port": "Port {port}",
+      "portWithProcess": "Port {port} · {process}",
+      "serveFailed": "Could not open that file in the browser.",
+      "served": "Shared folders",
+      "servedDescription": "These folders are served only to this device while Cognia runs.",
+      "serving": "Opening…",
+      "stop": "Stop sharing",
+      "stopFailed": "Could not stop sharing that folder.",
+      "title": "Open local content"
+    },
+    "passwords": {
+      "actions": "Actions for {origin}",
+      "add": "Add password",
+      "copied": "Password copied. The clipboard clears in 30 seconds.",
+      "copy": "Copy password",
+      "count": "{count, plural, one {# saved password} other {# saved passwords}}",
+      "delete": "Delete",
+      "deleteConfirm": {
+        "confirm": "Delete password",
+        "description": "The password for {username} on {origin} is removed from this device. This cannot be undone.",
+        "title": "Delete this password?"
+      },
+      "deleted": "Password deleted.",
+      "description": "Passwords are kept in the operating system's secure store. Revealing, copying or exporting one asks you to verify it's you.",
+      "edit": "Edit",
+      "empty": "No saved passwords yet. Add one or import from another browser.",
+      "emptySearch": "No saved password matches “{query}”.",
+      "export": {
+        "action": "Export CSV",
+        "confirm": "Choose where to save",
+        "done": "Passwords exported.",
+        "failed": "Could not export passwords.",
+        "warning": "The exported file contains every password in plain text. Store it somewhere safe and delete it when you are done."
+      },
+      "form": {
+        "addTitle": "Add password",
+        "editPasswordHint": "Leave empty to keep the current password.",
+        "editTitle": "Edit password",
+        "invalidOrigin": "Enter a web address such as https://example.com.",
+        "note": "Note",
+        "origin": "Website",
+        "originPlaceholder": "https://example.com",
+        "password": "Password",
+        "passwordRequired": "Enter a password.",
+        "save": "Save",
+        "saved": "Password saved.",
+        "saving": "Saving…",
+        "updated": "Password updated.",
+        "username": "Username",
+        "usernameRequired": "Enter a username."
+      },
+      "hide": "Hide password",
+      "import": {
+        "action": "Import",
+        "appBound": "{count, plural, one {# password was} other {# passwords were}} protected by Chrome's App-Bound Encryption and skipped. Export them from Chrome as CSV (Settings → Passwords → Export) and import that file instead.",
+        "browserTab": "From a browser",
+        "chooseFile": "Choose CSV file…",
+        "csvTab": "From a CSV file",
+        "description": "Passwords are read on this device and written straight into the secure store. They never pass through this window.",
+        "errors": "{count, plural, one {# row could not be imported.} other {# rows could not be imported.}}",
+        "failed": "Import failed.",
+        "fileFilter": "CSV file",
+        "format": "File format",
+        "formats": {
+          "1password": "1Password",
+          "auto": "Detect automatically",
+          "bitwarden": "Bitwarden",
+          "chrome": "Chrome, Edge or Brave",
+          "firefox": "Firefox",
+          "generic": "Generic (url, username, password)",
+          "lastpass": "LastPass",
+          "safari": "Safari"
+        },
+        "importing": "Importing…",
+        "noSources": "No browser with saved passwords was found on this device.",
+        "primaryPasswordSet": "This Firefox profile is protected by a Primary Password, which Cognia cannot unlock. Export the passwords from Firefox as CSV and import that file instead.",
+        "profile": "Profile",
+        "reason": {
+          "not_installed": "Not installed",
+          "unsupported_os": "Not supported on this system"
+        },
+        "result": "Imported {imported}, updated {updated}, skipped {skipped}.",
+        "run": "Import passwords",
+        "source": "Browser",
+        "sourceWithReason": "{label} ({reason})",
+        "title": "Import passwords"
+      },
+      "lastUsed": "Last used {date}",
+      "loadFailed": "Could not load saved passwords.",
+      "reveal": "Show password",
+      "search": "Search passwords",
+      "searchPlaceholder": "Search by website or username",
+      "source": {
+        "csv": "CSV",
+        "import": "Imported",
+        "manual": "Added manually",
+        "saved": "Saved while browsing"
+      },
+      "title": "Passwords"
+    },
+    "presence": {
+      "cancelled": "Verification was cancelled.",
+      "denied": "Your identity could not be verified. Nothing was revealed.",
+      "failed": "Identity verification failed. Nothing was revealed.",
+      "unavailable": "This device has no way to verify your identity (Touch ID, Windows Hello or a system password prompt), so saved passwords stay hidden."
+    },
+    "savePrompt": {
+      "dismiss": "Not now",
+      "failed": "Could not save the password.",
+      "more": "{count, plural, one {# more waiting} other {# more waiting}}",
+      "never": "Never for this site",
+      "region": "Save password",
+      "save": "Save",
+      "saveDescription": "Save the password for {username} on {origin}?",
+      "saveTitle": "Save password?",
+      "saved": "Password saved.",
+      "update": "Update",
+      "updateDescription": "Update the saved password for {username} on {origin}?",
+      "updateTitle": "Update password?",
+      "updated": "Password updated."
+    }
   },
   "canvas": {
     "action": {
@@ -20091,9 +20489,6 @@
         "branchScope": "Branch",
         "claimKind": "Kind",
         "contamination": "Context trust",
-        "corroboration": "Corroboration",
-        "corroborationUnknown": "Not measured yet",
-        "corroborationValue": "{percent}% · {sessions, plural, =0 {no conversations yet} one {# conversation} other {# conversations}}",
         "created": "Created",
         "evidence": "Evidence",
         "freshnessField": "Freshness",
@@ -20121,7 +20516,6 @@
       "sections": {
         "activity": "Activity",
         "content": "Memory",
-        "history": "History",
         "metrics": "Metrics",
         "origin": "Origin",
         "projectClaim": "Project context",
@@ -20212,83 +20606,6 @@
       "unreviewed": "Unreviewed",
       "verified": "Verified"
     },
-    "health": {
-      "checking": "Checking…",
-      "contradictionCheck": {
-        "disabled": "Contradiction check is off while memory is disabled or temporary.",
-        "no_vectors": "Contradiction check skipped: no stored vectors are available.",
-        "ran": "Contradiction check used stored vectors."
-      },
-      "description": "Checks that point at memories worth a look. Nothing here changes a memory until you open it and act.",
-      "empty": "No issues found.",
-      "gone": "(deleted)",
-      "kinds": {
-        "cold_episodic": {
-          "description": "Retention {retention} is below the cold threshold; the lifecycle sweep would compact or fold it.",
-          "title": "Gone cold"
-        },
-        "conflict_open": {
-          "description": "Contradicts {count, plural, one {# other memory} other {# other memories}} and is withheld from recall until you decide.",
-          "title": "Unresolved conflict"
-        },
-        "duplicate": {
-          "description": "{count, plural, one {# memory says} other {# memories say}} the same thing in the same scope.",
-          "title": "Duplicate"
-        },
-        "feedback_flagged": {
-          "description": "Still active although it was marked unhelpful or out of date ({positive} helpful, {negative} unhelpful).",
-          "title": "Flagged by you"
-        },
-        "missing_evidence": {
-          "description": "Every source that supported this memory has since been deleted.",
-          "title": "Evidence gone"
-        },
-        "pending_instruction_aging": {
-          "description": "A learned working preference has waited {waitedDays, plural, one {# day} other {# days}} for your review; it is not used until you approve it.",
-          "title": "Waiting for review"
-        },
-        "pinned_expiring": {
-          "description": "Pinning keeps it from being forgotten, but its expiry ({daysUntilExpiry, plural, one {# day} other {# days}}) still ends it.",
-          "title": "Pinned but expiring"
-        },
-        "stale": {
-          "description": "An episode from {ageDays, plural, one {# day} other {# days}} ago that has never been recalled.",
-          "title": "Never used"
-        },
-        "suspected_contradiction": {
-          "description": "Two memories about the same subject (similarity {similarity}) that are not duplicates. The newer one is listed first.",
-          "title": "Possible contradiction"
-        }
-      },
-      "open": "Open",
-      "refresh": "Check again",
-      "scanned": "{count, plural, one {# memory checked} other {# memories checked}}",
-      "severity": {
-        "info": "Note",
-        "warning": "Warning"
-      },
-      "title": "Memory health"
-    },
-    "history": {
-      "empty": "No earlier versions.",
-      "reasons": {
-        "compaction": "Compacted",
-        "conflict-merge": "Conflict merged",
-        "consolidation": "Merged with new detail",
-        "dedup-merge": "Duplicates folded in",
-        "edit": "Edited",
-        "external-update": "Changed by an integration",
-        "restore": "Replaced by a restore"
-      },
-      "restore": "Restore",
-      "restoreConfirm": {
-        "cancel": "Cancel",
-        "confirm": "Restore",
-        "description": "The current text is kept in the history, so you can switch back later.",
-        "title": "Restore this version?"
-      },
-      "window": "{from} – {to}"
-    },
     "panel": {
       "accessedRelative": "used {time}",
       "add": "Add",
@@ -20311,7 +20628,6 @@
       "clearFilters": "Clear filters",
       "clearTags": "Clear tags",
       "clearedToast": "{count, plural, one {# memory deleted} other {# memories deleted}}",
-      "compacted": "compacted",
       "copied": "Copied",
       "copyText": "Copy text",
       "createdRelative": "added {time}",
@@ -20386,8 +20702,7 @@
       "summary": "{active} active · {pinned} pinned · {conflicts} in conflict · {coverage}% indexed",
       "tabs": {
         "app": "App memory",
-        "external": "External agent memory",
-        "health": "Health"
+        "external": "External agent memory"
       },
       "tagFilterLabel": "Tags:",
       "title": "Memory",
@@ -24423,6 +24738,7 @@
         "codeServer": "Pro IDE (code-server)",
         "externalAgent": "External agents",
         "headlessTerminal": "Headless shells",
+        "localBrowser": "Local browser runtime",
         "mcpServer": "MCP server",
         "pluginHost": "Plugin hosts",
         "tunnel": "Tunnel"
@@ -40318,6 +40634,10 @@
       "badgeIdle": "idle",
       "badgeLive": "live",
       "badgeWeb": "web",
+      "browserApproval": {
+        "perCallReason": "{client} wants to sign in with a saved password using {tool} ({detail}). The password is filled by Cognia and never shared with the agent. You are asked every time.",
+        "reason": "{client} wants to run {tool} in Cognia's browser ({detail})."
+      },
       "description": "Expose this app's knowledge and runtime to external MCP clients.",
       "inbound": {
         "accept": "Accept",
@@ -40410,6 +40730,7 @@
       "scopeDescriptions": {
         "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
         "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
+        "browser:control": "Lets external agents drive Cognia's browser through the browser_* tools: open and navigate pages, read snapshots, click and type, manage tabs and downloads, print PDFs, emulate devices, inspect cookie metadata and storage, and sign in with a saved password. Independent of any character's tool settings. Tools that need approval in the app (running page scripts, uploads, downloads, password sign-in) still ask you on each call, and page content is fenced as untrusted. Default OFF.",
         "inbound:write": "⚠ Lets external agents contribute lessons, skill drafts, and notes. Nothing is applied automatically — submissions land in a review queue as pending, untrusted drafts for you to accept or discard. Default OFF.",
         "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
         "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF.",
@@ -40437,6 +40758,7 @@
         "grantedCount": "{granted}/{total} granted",
         "groups": {
           "agent": "Agents",
+          "browser": "Browser",
           "inbound": "Inbound",
           "inbox": "Inbox",
           "mcp": "Computer use",
@@ -41830,34 +42152,6 @@
           }
         }
       },
-      "maintenance": {
-        "coldThreshold": {
-          "description": "An episode whose retention score falls below this value counts as cold. Higher values act on more memories.",
-          "label": "Cold threshold"
-        },
-        "compaction": {
-          "description": "Shrink a cold episode to its first sentence plus the file paths, error codes and identifiers it mentions.",
-          "label": "Compact cold episodes"
-        },
-        "dedup": {
-          "description": "Merge cold episodes that say almost the same thing into the one you used most, keeping every path and identifier any of them mentioned.",
-          "label": "Fold near-duplicate episodes",
-          "noVectors": "Needs hybrid retrieval with an allowed embedding backend; until then this pass is skipped."
-        },
-        "forgetting": {
-          "title": "Forgetting"
-        },
-        "reinforcement": {
-          "description": "Memories you keep recalling are forgotten more slowly when the per-scope cap is reached. It only ever keeps memory longer; it never changes recall ranking.",
-          "label": "Access reinforcement",
-          "off": "Off"
-        },
-        "sweep": {
-          "description": "A daily pass over episodic memories nobody has needed in a while. It never deletes: the previous text stays in each memory's history and can be restored.",
-          "gatedReason": "Turn on compaction or duplicate folding to use the sweep.",
-          "title": "Lifecycle sweep"
-        }
-      },
       "manage": "Manage memories",
       "maxIdle": {
         "label": "Forget after unused days (0 = never)"
@@ -41987,11 +42281,6 @@
         "label": "Minimum recall relevance"
       },
       "retrieval": {
-        "beliefWeight": {
-          "description": "Rank memories confirmed across several conversations higher. At off, ranking ignores corroboration; it is still shown in the memory inspector.",
-          "label": "Corroboration weight",
-          "off": "Off"
-        },
         "gates": {
           "memoryOff": "Turn on long-term memory to edit retrieval controls.",
           "recallOff": "Turn on memory recall to edit these controls."
@@ -42004,10 +42293,6 @@
           "description": "Combine semantic vector search with keyword matching.",
           "label": "Hybrid retrieval"
         },
-        "llmRerank": {
-          "description": "Let the utility model reorder the top recalled memories (up to 30) once per turn. The query is redacted before it is sent; any failure keeps the local order.",
-          "label": "Rerank with the utility model"
-        },
         "queryExpansion": {
           "description": "Expand the keyword query with related terms.",
           "label": "Query expansion"
@@ -42015,10 +42300,6 @@
         "relevanceFloor": {
           "description": "Exclude memories whose relevance score falls below this value.",
           "label": "Minimum relevance"
-        },
-        "sessionRecall": {
-          "description": "When you ask about an earlier conversation (\"last time\", \"上次\"), rank remembered episodes above general facts.",
-          "label": "Past-conversation routing"
         },
         "tokenBudget": {
           "description": "Maximum number of memory tokens that may be injected into a turn.",

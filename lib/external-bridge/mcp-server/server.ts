@@ -74,6 +74,12 @@ import {
   issuesUpdate,
 } from "../handlers/issues"
 import { spawnTask } from "../handlers/spawn-task"
+import { browserTool, type BrowserToolOutput } from "../handlers/browser"
+import {
+  BROWSER_TOOL_DEFINITIONS,
+  BROWSER_TOOL_NAMES,
+  type BrowserToolName,
+} from "@cognia/plugin-sdk/api/browser"
 import { optimizationFindings, sessionHealth, usageQuery } from "../handlers/usage"
 import {
   proxiedWorkflowMcpHost,
@@ -142,6 +148,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerMemoryTools(server, opts.settingsGetter)
   registerIssuesTools(server, opts.settingsGetter)
   registerUsageTools(server, opts.settingsGetter)
+  registerBrowserTools(server, opts.settingsGetter)
   registerWorkflowLifecycleTools(
     server,
     opts.settingsGetter,
@@ -1058,8 +1065,9 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
       description:
         "Invoke a plugin-registered tool by `pluginId` + `toolName`. The plugin's " +
         "own permission-consent gate and ownership check still apply per call. " +
-        "Denied by default until the `plugin:tools` scope is enabled in Settings → " +
-        "External Bridge.",
+        "The browser plugin (`cognia-browser-tools`) is refused here: use the " +
+        "dedicated browser_* tools. Denied by default until the `plugin:tools` scope " +
+        "is enabled in Settings → External Bridge.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -1081,6 +1089,101 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         body: () => pluginToolInvoke(args as Parameters<typeof pluginToolInvoke>[0]),
       })
   )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Browser tools (ADR-0201) — the same `browser_*` surface the in-app agent has,
+// proxied to the plugin executors with a session bound per client, the
+// per-tool approval flag honoured, and the pane (or a headless local Chromium)
+// opened on first use. One scope, `browser:control`, default OFF.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Tools that only read the page (MCP `readOnlyHint`). */
+const READ_ONLY_BROWSER_TOOLS: ReadonlySet<BrowserToolName> = new Set([
+  "browser_snapshot",
+  "browser_get_page",
+  "browser_pages",
+  "browser_read_console",
+  "browser_read_network",
+  "browser_network_request",
+  "browser_downloads",
+  "browser_screenshot",
+  "browser_find",
+  "browser_wait_for",
+])
+
+function browserToolTitle(name: BrowserToolName): string {
+  return `Browser: ${name.replace(/^browser_/, "").replace(/_/g, " ")}`
+}
+
+/**
+ * Page content is third-party text: fence it so a downstream model never takes
+ * it as instructions. Image blocks (screenshots) pass through as images.
+ */
+function presentBrowserTool(
+  output: BrowserToolOutput
+): Pick<ToolEnvelope, "content" | "structuredContent" | "isError"> {
+  // `structuredContent` is read by clients as trusted JSON, outside any
+  // fence: it carries only the outcome, never page data or error text (the
+  // fenced `content` array carries those).
+  const structuredContent: Record<string, unknown> = {
+    ok: output.ok,
+    redacted: output.redacted === true,
+    ...(typeof output.code === "string" ? { code: output.code } : {}),
+  }
+  const result = output.result as { content?: unknown } | undefined
+  if (output.ok && result && Array.isArray(result.content)) {
+    const content: ToolEnvelope["content"] = []
+    for (const block of result.content as Array<Record<string, unknown>>) {
+      if (block?.type === "image" && typeof block.data === "string") {
+        content.push({
+          type: "image",
+          data: block.data,
+          mimeType: typeof block.mimeType === "string" ? block.mimeType : "image/png",
+        })
+      } else if (block?.type === "text" && typeof block.text === "string") {
+        content.push({ type: "text", text: wrapUntrusted(block.text) })
+      }
+    }
+    if (content.length > 0) return { content, structuredContent }
+  }
+  return {
+    content: [{ type: "text", text: wrapUntrusted(JSON.stringify(output)) }],
+    structuredContent,
+    ...(output.ok ? {} : { isError: true }),
+  }
+}
+
+function registerBrowserTools(server: McpServer, settingsGetter: SettingsGetter) {
+  for (const name of BROWSER_TOOL_NAMES) {
+    const definition = BROWSER_TOOL_DEFINITIONS[name]
+    const needsApproval = "requiresApproval" in definition && definition.requiresApproval === true
+    server.registerTool(
+      name,
+      {
+        title: browserToolTitle(name),
+        description:
+          `${definition.description} ` +
+          (needsApproval ? "The user approves each call in Cognia. " : "") +
+          "Denied until the `browser:control` scope is enabled in Settings → External Bridge.",
+        annotations: {
+          readOnlyHint: READ_ONLY_BROWSER_TOOLS.has(name),
+          destructiveHint: !READ_ONLY_BROWSER_TOOLS.has(name),
+          idempotentHint: READ_ONLY_BROWSER_TOOLS.has(name),
+          openWorldHint: true,
+        },
+        inputSchema: jsonSchemaToZodShape(definition.parametersSchema),
+      },
+      async (args: Record<string, unknown>, extra: BridgeRequestExtra) =>
+        runWithGate({
+          tool: name,
+          scope: "browser:control",
+          check: checkToolCall(await scopedSettings(settingsGetter, extra), name),
+          body: () => browserTool({ tool: name, args: args ?? {}, clientId: bridgeCaller(extra) }),
+          present: presentBrowserTool,
+        })
+    )
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1662,7 +1765,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
     {
       title: "Search Cognia's long-term memory",
       description:
-        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Pass asOf to search what was remembered at a past instant (earlier wordings included; lexical only). Default OFF; gate via Settings → External Bridge → memory:read.",
+        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Default OFF; gate via Settings → External Bridge → memory:read.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -1684,12 +1787,6 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         agentId: z.string().optional().describe("Include this private agent layer"),
         branch: z.string().optional().describe("Exact branch context"),
         path: z.string().optional().describe("Workspace-relative path context"),
-        asOf: z
-          .union([z.number().int().positive(), z.string()])
-          .optional()
-          .describe(
-            "Search memory as it was at this instant (epoch ms or ISO 8601). Hits whose text was an earlier wording carry revisionId/validFrom/validTo."
-          ),
       },
     },
     async (args, extra) =>
@@ -1707,7 +1804,6 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             agentId: args.agentId,
             branch: args.branch,
             path: args.path,
-            asOf: args.asOf,
           }),
       })
   )
@@ -2381,7 +2477,7 @@ interface RunWithGateInput<T> {
    * `null` keeps the default. Only `computer_use` uses this so far, because a
    * screenshot serialised as text is a screenshot the model cannot look at.
    */
-  present?: (result: T) => Pick<ToolEnvelope, "content" | "structuredContent"> | null
+  present?: (result: T) => Pick<ToolEnvelope, "content" | "structuredContent" | "isError"> | null
 }
 
 interface ToolEnvelope {
@@ -2452,4 +2548,9 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
   }
 }
 
-export const __TESTING__ = { mapEntityToScope, runWithGate, presentComputerUse }
+export const __TESTING__ = {
+  mapEntityToScope,
+  runWithGate,
+  presentComputerUse,
+  presentBrowserTool,
+}

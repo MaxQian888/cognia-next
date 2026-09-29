@@ -196,7 +196,9 @@ function ApprovalDecisionBody({
               >
                 {t("deny")}
               </ConfirmationAction>
-              {!approval.suppressAlwaysAllowRule && (
+              {/* A per-call tool (ADR-0201) or a withheld grant never offers a
+                  standing rule. */}
+              {!approval.suppressAlwaysAllowRule && !approval.requiresPerCallApproval && (
                 <ConfirmationAction
                   variant="secondary"
                   disabled={responding}

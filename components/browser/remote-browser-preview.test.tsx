@@ -890,6 +890,23 @@ describe("engine switch", () => {
     expect(onBackendChange).toHaveBeenCalledWith("embedded")
   })
 
+  // ADR-0201: the desktop hands in its full four-engine switch instead.
+  it("draws the desktop's engine switch in place of the two-way select", async () => {
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+        onBackendChange={jest.fn()}
+        backendSwitcher={<div data-testid="desktop-switcher" />}
+      />
+    )
+    await waitFor(() => expect(streamOptions).not.toBeNull())
+    const overflow = within(screen.getByTestId("popover-content"))
+    expect(overflow.getByTestId("desktop-switcher")).toBeInTheDocument()
+    expect(overflow.queryByRole("combobox", { name: "browser.backend.label" })).toBeNull()
+  })
+
   // Off the desktop there is no other engine to go back to.
   it("offers no switch when the host has nothing to switch to", async () => {
     render(

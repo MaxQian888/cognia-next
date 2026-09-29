@@ -138,6 +138,16 @@ export type BridgeScope =
    * spend without learning what the user is working on.
    */
   | "usage:read"
+  /**
+   * Drive Cognia's browser through the first-class `browser_*` tools
+   * (ADR-0201): navigate, act on snapshot refs, tabs, downloads, PDF,
+   * emulation, cookie/storage inspection, vault sign-in. Default OFF and
+   * independent of any character's tool settings. Every tool that needs
+   * approval in-app (`browser_evaluate`, `browser_set_files`,
+   * `browser_download`, `browser_fill_credential`) asks the user here too;
+   * `plugin_tool_invoke` refuses the browser plugin and points at these tools.
+   */
+  | "browser:control"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -163,6 +173,7 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "issues:write",
   "workflow:run",
   "usage:read",
+  "browser:control",
 ] as const
 
 export const WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES = [

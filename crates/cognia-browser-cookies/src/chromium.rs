@@ -1,20 +1,23 @@
-use std::collections::BTreeSet;
+//! Chromium cookie databases: find, snapshot, read and decrypt.
+//!
+//! The selected database and its `-wal` / `-shm` / `-journal` companions are
+//! copied to an auto-cleaned temporary directory and opened read-only and
+//! immutable there, so a running browser's locks never matter (except on
+//! Windows, where a running Chromium holds the file exclusively: that is the
+//! typed [`ImportError::DatabaseLocked`]).
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use aes::Aes128;
-use cbc::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
-use pbkdf2::pbkdf2_hmac;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
-use sha1::Sha1;
-use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
-use super::{CookieSink, ImportError, ImportedCookie, Keychain, SameSite};
+use crate::crypto::{decrypt_value, strip_host_hash, ChromiumKey, Decrypted};
+use crate::import::CookieBatch;
+use crate::scope::ScopeFilter;
+use crate::{ImportError, ImportedCookie, SameSite};
 
-pub struct ImportSummary {
-    pub injected: usize,
-    pub names: Vec<String>,
-    pub domains: Vec<String>,
-}
+pub use crate::scope::registrable_domain;
 
 pub fn find_cookie_database(profile_dir: &Path) -> Option<PathBuf> {
     [
@@ -25,122 +28,41 @@ pub fn find_cookie_database(profile_dir: &Path) -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-fn copy_cookie_database(source: &Path, destination_dir: &Path) -> Result<PathBuf, ImportError> {
-    let destination = destination_dir.join("Cookies");
-    std::fs::copy(source, &destination).map_err(|_| ImportError::Database)?;
-    for suffix in ["-wal", "-shm"] {
+fn classify_copy_error(error: &std::io::Error) -> ImportError {
+    // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION: the running browser
+    // holds the database exclusively (Chromium on Windows).
+    if cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)) {
+        return ImportError::DatabaseLocked;
+    }
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => ImportError::PermissionDenied,
+        _ => ImportError::Database,
+    }
+}
+
+/// A database copied aside with its journal companions. The directory (and
+/// the copy) disappear when this drops.
+pub struct DatabaseSnapshot {
+    _dir: tempfile::TempDir,
+    pub path: PathBuf,
+}
+
+pub fn snapshot_database(source: &Path) -> Result<DatabaseSnapshot, ImportError> {
+    let dir = tempfile::tempdir().map_err(|_| ImportError::Database)?;
+    let file_name = source.file_name().ok_or(ImportError::Database)?;
+    let destination = dir.path().join(file_name);
+    std::fs::copy(source, &destination).map_err(|error| classify_copy_error(&error))?;
+    for suffix in ["-wal", "-shm", "-journal"] {
         let companion = PathBuf::from(format!("{}{suffix}", source.display()));
         if companion.is_file() {
             let copied = PathBuf::from(format!("{}{suffix}", destination.display()));
-            std::fs::copy(companion, copied).map_err(|_| ImportError::Database)?;
+            std::fs::copy(companion, copied).map_err(|error| classify_copy_error(&error))?;
         }
     }
-    Ok(destination)
-}
-
-pub fn import_profile(
-    profile_dir: &Path,
-    target: &str,
-    service: &str,
-    account: &str,
-    keychain: &dyn Keychain,
-    sink: &dyn CookieSink,
-) -> Result<ImportSummary, ImportError> {
-    registrable_domain(target)?;
-    let source = find_cookie_database(profile_dir).ok_or(ImportError::Database)?;
-    let temp = tempfile::tempdir().map_err(|_| ImportError::Database)?;
-    let database = copy_cookie_database(&source, temp.path())?;
-    let passphrase = keychain.read(service, account)?;
-    if passphrase.is_empty() {
-        return Ok(ImportSummary {
-            injected: 0,
-            names: Vec::new(),
-            domains: Vec::new(),
-        });
-    }
-    let cookies = read_cookies(&database, target, &passphrase)?;
-    if cookies.is_empty() {
-        return Ok(ImportSummary {
-            injected: 0,
-            names: Vec::new(),
-            domains: Vec::new(),
-        });
-    }
-    let injected_cookies = sink.inject(&cookies)?;
-    let names = injected_cookies
-        .iter()
-        .map(|cookie| cookie.name.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let domains = injected_cookies
-        .iter()
-        .map(|cookie| cookie.host_key.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    Ok(ImportSummary {
-        injected: injected_cookies.len(),
-        names,
-        domains,
+    Ok(DatabaseSnapshot {
+        _dir: dir,
+        path: destination,
     })
-}
-
-fn derive_key(passphrase: &str) -> [u8; 16] {
-    let mut key = [0_u8; 16];
-    pbkdf2_hmac::<Sha1>(passphrase.as_bytes(), b"saltysalt", 1003, &mut key);
-    key
-}
-
-fn decrypt_cookie_value(
-    key: &[u8; 16],
-    host_key: &str,
-    encrypted_value: &[u8],
-    db_version: i64,
-) -> Result<String, ImportError> {
-    let ciphertext = encrypted_value
-        .strip_prefix(b"v10")
-        .ok_or(ImportError::Decryption)?;
-    let mut plaintext = cbc::Decryptor::<Aes128>::new(&(*key).into(), &[0x20_u8; 16].into())
-        .decrypt_padded_vec::<Pkcs7>(ciphertext)
-        .map_err(|_| ImportError::Decryption)?;
-
-    if db_version >= 24 {
-        let expected = Sha256::digest(host_key.as_bytes());
-        if plaintext.len() < expected.len() || plaintext[..expected.len()] != expected[..] {
-            return Err(ImportError::Decryption);
-        }
-        plaintext.drain(..expected.len());
-    }
-
-    String::from_utf8(plaintext).map_err(|_| ImportError::Decryption)
-}
-
-fn chrome_expires_to_unix(expires_utc: i64) -> Option<i64> {
-    (expires_utc != 0).then(|| expires_utc / 1_000_000 - 11_644_473_600)
-}
-
-pub fn registrable_domain(target: &str) -> Result<String, ImportError> {
-    let normalized = target.trim().trim_start_matches('.').to_ascii_lowercase();
-    let domain = match url::Host::parse(&normalized).map_err(|_| ImportError::InvalidDomain)? {
-        url::Host::Domain(domain) => domain,
-        _ => return Err(ImportError::InvalidDomain),
-    };
-    psl::domain_str(&domain)
-        .map(str::to_owned)
-        .ok_or(ImportError::InvalidDomain)
-}
-
-fn domain_matches(host_key: &str, target_host: &str) -> bool {
-    let cookie_domain = host_key.trim_start_matches('.').to_ascii_lowercase();
-    let target_host = target_host.trim_start_matches('.').to_ascii_lowercase();
-    if !host_key.starts_with('.') {
-        return target_host == cookie_domain;
-    }
-    target_host == cookie_domain
-        || target_host
-            .strip_suffix(&cookie_domain)
-            .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 fn immutable_database_uri(database: &Path) -> Result<String, ImportError> {
@@ -149,22 +71,52 @@ fn immutable_database_uri(database: &Path) -> Result<String, ImportError> {
     Ok(uri.to_string())
 }
 
-fn read_cookies(
-    database: &Path,
-    target: &str,
-    passphrase: &str,
-) -> Result<Vec<ImportedCookie>, ImportError> {
-    let domain = registrable_domain(target)?;
-    let target_host = target.trim().trim_start_matches('.').to_ascii_lowercase();
-    let database_uri = immutable_database_uri(database)?;
-    let connection = Connection::open_with_flags(
-        database_uri,
+/// Open a snapshot read-only and immutable.
+pub fn open_immutable(database: &Path) -> Result<Connection, ImportError> {
+    Connection::open_with_flags(
+        immutable_database_uri(database)?,
         OpenFlags::SQLITE_OPEN_READ_ONLY
             | OpenFlags::SQLITE_OPEN_NO_MUTEX
             | OpenFlags::SQLITE_OPEN_URI,
     )
-    .map_err(|_| ImportError::Database)?;
-    let db_version = connection
+    .map_err(|_| ImportError::Database)
+}
+
+pub fn table_columns(
+    connection: &Connection,
+    table: &str,
+) -> Result<BTreeSet<String>, ImportError> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|_| ImportError::Database)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|_| ImportError::Database)?
+        .filter_map(Result::ok)
+        .collect();
+    Ok(columns)
+}
+
+fn chrome_expires_to_unix(expires_utc: i64) -> Option<i64> {
+    (expires_utc != 0).then(|| expires_utc / 1_000_000 - 11_644_473_600)
+}
+
+/// Chromium's 1601-based microsecond timestamps as Unix milliseconds.
+pub fn chrome_time_to_unix_ms(value: i64) -> Option<i64> {
+    (value > 0).then(|| value / 1_000 - 11_644_473_600_000)
+}
+
+fn same_site_from(value: i64) -> SameSite {
+    match value {
+        0 => SameSite::None,
+        1 => SameSite::Lax,
+        2 => SameSite::Strict,
+        _ => SameSite::Unspecified,
+    }
+}
+
+fn database_version(connection: &Connection) -> Result<i64, ImportError> {
+    Ok(connection
         .query_row(
             "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'version'",
             [],
@@ -172,35 +124,41 @@ fn read_cookies(
         )
         .optional()
         .map_err(|_| ImportError::Database)?
-        .unwrap_or(0);
-    let key = derive_key(passphrase);
-    let exact_dot = format!(".{domain}");
-    let suffix = format!("%.{domain}");
-    let has_partition_key = connection
-        .prepare("PRAGMA table_info(cookies)")
-        .and_then(|mut statement| {
-            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-            for column in columns {
-                if column.as_deref() == Ok("top_frame_site_key") {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        })
-        .map_err(|_| ImportError::Database)?;
-    let partition_filter = if has_partition_key {
-        " AND COALESCE(top_frame_site_key, '') = ''"
+        .unwrap_or(0))
+}
+
+/// Read every admitted cookie from a snapshot. Rows that fail to decrypt are
+/// skipped individually; `v20` rows are counted in `skipped_app_bound`.
+/// `key == None` reads only rows stored in plaintext.
+pub fn read_cookie_database(
+    database: &Path,
+    filter: &ScopeFilter,
+    key: Option<&ChromiumKey>,
+) -> Result<CookieBatch, ImportError> {
+    let connection = open_immutable(database)?;
+    let db_version = database_version(&connection)?;
+    let columns = table_columns(&connection, "cookies")?;
+    if columns.is_empty() {
+        return Err(ImportError::Database);
+    }
+    let value_column = if columns.contains("value") {
+        "value"
+    } else {
+        "''"
+    };
+    let partition_filter = if columns.contains("top_frame_site_key") {
+        " WHERE COALESCE(top_frame_site_key, '') = ''"
     } else {
         ""
     };
     let mut statement = connection
         .prepare(&format!(
-            "SELECT host_key,name,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite \
-             FROM cookies WHERE (host_key = ?1 OR host_key = ?2 OR host_key LIKE ?3){partition_filter}"
+            "SELECT host_key,name,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite,{value_column} \
+             FROM cookies{partition_filter}"
         ))
         .map_err(|_| ImportError::Database)?;
     let rows = statement
-        .query_map(rusqlite::params![domain, exact_dot, suffix], |row| {
+        .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -210,24 +168,64 @@ fn read_cookies(
                 row.get::<_, i64>(5)?,
                 row.get::<_, i64>(6)?,
                 row.get::<_, i64>(7)?,
+                row.get::<_, String>(8)?,
             ))
         })
         .map_err(|_| ImportError::Database)?;
 
-    let mut cookies = Vec::new();
+    let mut batch = CookieBatch::default();
     for row in rows {
-        let Ok((host_key, name, encrypted_value, path, expires_utc, secure, httponly, same_site)) =
-            row
+        let Ok((
+            host_key,
+            name,
+            encrypted,
+            path,
+            expires_utc,
+            secure,
+            httponly,
+            same_site,
+            mut plain,
+        )) = row
         else {
             continue;
         };
-        if !domain_matches(&host_key, &target_host) {
+        if !filter.admits(&host_key) {
+            plain.zeroize();
             continue;
         }
-        let Ok(value) = decrypt_cookie_value(&key, &host_key, &encrypted_value, db_version) else {
-            continue;
+        let value = if encrypted.is_empty() {
+            std::mem::take(&mut plain)
+        } else {
+            plain.zeroize();
+            let Some(key) = key else {
+                continue;
+            };
+            match decrypt_value(key, &encrypted) {
+                Decrypted::AppBound => {
+                    batch.skipped_app_bound += 1;
+                    continue;
+                }
+                decrypted => {
+                    let Some(mut bytes) = decrypted.take() else {
+                        continue;
+                    };
+                    if db_version >= 24 {
+                        match strip_host_hash(bytes, &host_key) {
+                            Some(stripped) => bytes = stripped,
+                            None => continue,
+                        }
+                    }
+                    match String::from_utf8(bytes) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            error.into_bytes().zeroize();
+                            continue;
+                        }
+                    }
+                }
+            }
         };
-        cookies.push(ImportedCookie {
+        batch.cookies.push(ImportedCookie {
             host_key,
             name,
             value,
@@ -235,86 +233,111 @@ fn read_cookies(
             expires_unix: chrome_expires_to_unix(expires_utc),
             is_secure: secure != 0,
             is_httponly: httponly != 0,
-            same_site: match same_site {
-                0 => SameSite::None,
-                1 => SameSite::Lax,
-                2 => SameSite::Strict,
-                _ => SameSite::Unspecified,
-            },
+            same_site: same_site_from(same_site),
         });
     }
-    Ok(cookies)
+    Ok(batch)
+}
+
+/// Cookie counts per stored host, read without touching any value.
+pub fn cookie_host_counts(database: &Path) -> Result<BTreeMap<String, u32>, ImportError> {
+    let connection = open_immutable(database)?;
+    let columns = table_columns(&connection, "cookies")?;
+    if columns.is_empty() {
+        return Err(ImportError::Database);
+    }
+    let partition_filter = if columns.contains("top_frame_site_key") {
+        " WHERE COALESCE(top_frame_site_key, '') = ''"
+    } else {
+        ""
+    };
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT host_key, COUNT(*) FROM cookies{partition_filter} GROUP BY host_key"
+        ))
+        .map_err(|_| ImportError::Database)?;
+    let counts = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })
+        .map_err(|_| ImportError::Database)?
+        .filter_map(Result::ok)
+        .collect();
+    Ok(counts)
 }
 
 #[cfg(test)]
-fn import_with(
-    database: &Path,
-    target: &str,
-    service: &str,
-    account: &str,
-    keychain: &dyn Keychain,
-    sink: &dyn CookieSink,
-) -> Result<usize, ImportError> {
-    let passphrase = keychain.read(service, account)?;
-    let cookies = read_cookies(database, target, &passphrase)?;
-    sink.inject(&cookies).map(|injected| injected.len())
+pub(crate) mod test_support {
+    use rusqlite::Connection;
+    use sha2::{Digest, Sha256};
+
+    use crate::crypto::test_support::{encrypt_cbc, encrypt_gcm};
+    use crate::crypto::{derive_cbc_key, ChromiumKey};
+
+    pub const SCHEMA: &str = "CREATE TABLE meta(key TEXT PRIMARY KEY, value INTEGER);\
+         INSERT INTO meta(key,value) VALUES('version',24);\
+         CREATE TABLE cookies(\
+           host_key TEXT, name TEXT, value TEXT DEFAULT '', encrypted_value BLOB, path TEXT, expires_utc INTEGER,\
+           is_secure INTEGER, is_httponly INTEGER, samesite INTEGER, top_frame_site_key TEXT DEFAULT ''\
+         );";
+
+    /// Encrypt `value` the way `key`'s platform stores a v24 cookie.
+    pub fn encrypt_cookie(
+        key: &ChromiumKey,
+        prefix: &[u8],
+        host_key: &str,
+        value: &str,
+    ) -> Vec<u8> {
+        let plaintext = [
+            Sha256::digest(host_key.as_bytes()).as_slice(),
+            value.as_bytes(),
+        ]
+        .concat();
+        match key {
+            ChromiumKey::Cbc { v10, v11 } => {
+                let key = if prefix == b"v11" { v11.unwrap() } else { *v10 };
+                encrypt_cbc(prefix, &key, &plaintext)
+            }
+            ChromiumKey::Gcm(key) => encrypt_gcm(prefix, key, [4; 12], &plaintext),
+        }
+    }
+
+    pub fn mac_encrypt(passphrase: &str, host_key: &str, value: &str) -> Vec<u8> {
+        let key = derive_cbc_key(passphrase, 1003);
+        let plaintext = [
+            Sha256::digest(host_key.as_bytes()).as_slice(),
+            value.as_bytes(),
+        ]
+        .concat();
+        encrypt_cbc(b"v10", &key, &plaintext)
+    }
+
+    pub fn insert(conn: &Connection, host: &str, name: &str, encrypted: &[u8], plain: &str) {
+        conn.execute(
+            "INSERT INTO cookies(host_key,name,value,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite) \
+             VALUES(?1,?2,?3,?4,'/',0,1,1,1)",
+            rusqlite::params![host, name, plain, encrypted],
+        )
+        .unwrap();
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use aes::Aes128;
-    use cbc::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
     use rusqlite::Connection;
-    use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
+    use super::test_support::*;
     use super::*;
-    use crate::SameSite;
+    use crate::crypto::derive_cbc_key;
+    use crate::crypto::test_support::encrypt_cbc;
+    use crate::scope::CookieScope;
 
-    fn encrypt_v10(passphrase: &str, host_key: &str, value: &str, prefixed: bool) -> Vec<u8> {
-        let key = derive_key(passphrase);
-        let mut plaintext = Vec::new();
-        if prefixed {
-            plaintext.extend_from_slice(&Sha256::digest(host_key.as_bytes()));
-        }
-        plaintext.extend_from_slice(value.as_bytes());
-        let ciphertext = cbc::Encryptor::<Aes128>::new(&key.into(), &[0x20; 16].into())
-            .encrypt_padded_vec::<Pkcs7>(&plaintext);
-        [b"v10".as_slice(), ciphertext.as_slice()].concat()
-    }
-
-    #[test]
-    fn derives_the_documented_macos_key() {
-        assert_eq!(
-            hex::encode(derive_key("test-passphrase")),
-            "1520ca2d2c5dceeeebcd3a50818a46c7"
-        );
-    }
-
-    #[test]
-    fn decrypts_v10_values_before_and_after_database_v24() {
-        let key = derive_key("pass");
-        let legacy = encrypt_v10("pass", ".example.com", "legacy", false);
-        let current = encrypt_v10("pass", ".example.com", "current", true);
-
-        assert_eq!(
-            decrypt_cookie_value(&key, ".example.com", &legacy, 23).unwrap(),
-            "legacy"
-        );
-        assert_eq!(
-            decrypt_cookie_value(&key, ".example.com", &current, 24).unwrap(),
-            "current"
-        );
-    }
-
-    #[test]
-    fn rejects_non_v10_and_wrong_host_prefixes() {
-        let key = derive_key("pass");
-        assert!(decrypt_cookie_value(&key, ".example.com", b"plain", 23).is_err());
-        let encrypted = encrypt_v10("pass", ".other.com", "value", true);
-        assert!(decrypt_cookie_value(&key, ".example.com", &encrypted, 24).is_err());
+    fn site(domain: &str) -> ScopeFilter {
+        ScopeFilter::new(&CookieScope::Site {
+            domain: domain.into(),
+        })
+        .unwrap()
     }
 
     #[test]
@@ -322,39 +345,8 @@ mod tests {
         assert_eq!(chrome_expires_to_unix(0), None);
         assert_eq!(chrome_expires_to_unix(11_644_473_600_000_000), Some(0));
         assert_eq!(chrome_expires_to_unix(11_644_473_601_500_000), Some(1));
-    }
-
-    #[test]
-    fn normalizes_to_the_registrable_domain() {
-        assert_eq!(registrable_domain("www.github.com").unwrap(), "github.com");
-        assert_eq!(
-            registrable_domain("sub.example.co.uk").unwrap(),
-            "example.co.uk"
-        );
-        assert!(registrable_domain("bad domain").is_err());
-    }
-
-    #[test]
-    fn matches_only_the_target_domain_boundary() {
-        for host in [".github.com", "www.github.com"] {
-            assert!(
-                domain_matches(host, "www.github.com"),
-                "expected match: {host}"
-            );
-        }
-        for host in [
-            "github.com",
-            ".api.github.com",
-            "evilgithub.com",
-            ".notgithub.com",
-            "github.com.evil.test",
-        ] {
-            assert!(
-                !domain_matches(host, "www.github.com"),
-                "unexpected match: {host}"
-            );
-        }
-        assert!(domain_matches("github.com", "github.com"));
+        assert_eq!(chrome_time_to_unix_ms(0), None);
+        assert_eq!(chrome_time_to_unix_ms(11_644_473_601_500_000), Some(1_500));
     }
 
     #[test]
@@ -377,7 +369,7 @@ mod tests {
              );",
         )
         .unwrap();
-        let good = encrypt_v10("pass", ".github.com", "secret", true);
+        let good = mac_encrypt("pass", ".github.com", "secret");
         conn.execute(
             "INSERT INTO cookies VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
             rusqlite::params![
@@ -404,12 +396,39 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let cookies = read_cookies(&db, "www.github.com", "pass").unwrap();
-        assert_eq!(cookies.len(), 1);
-        assert_eq!(cookies[0].name, "session");
-        assert_eq!(cookies[0].value, "secret");
-        assert_eq!(cookies[0].expires_unix, Some(1));
-        assert_eq!(cookies[0].same_site, SameSite::Strict);
+        let batch = read_cookie_database(
+            &db,
+            &site("www.github.com"),
+            Some(&ChromiumKey::macos("pass")),
+        )
+        .unwrap();
+        assert_eq!(batch.cookies.len(), 1);
+        assert_eq!(batch.cookies[0].name, "session");
+        assert_eq!(batch.cookies[0].value, "secret");
+        assert_eq!(batch.cookies[0].expires_unix, Some(1));
+        assert_eq!(batch.cookies[0].same_site, SameSite::Strict);
+        assert_eq!(batch.skipped_app_bound, 0);
+    }
+
+    #[test]
+    fn legacy_databases_have_no_host_hash_prefix() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("Cookies");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(&SCHEMA.replace("VALUES('version',24)", "VALUES('version',23)"))
+            .unwrap();
+        let key = derive_cbc_key("pass", 1003);
+        insert(
+            &conn,
+            ".github.com",
+            "legacy",
+            &encrypt_cbc(b"v10", &key, b"old"),
+            "",
+        );
+        drop(conn);
+        let batch = read_cookie_database(&db, &ScopeFilter::All, Some(&ChromiumKey::macos("pass")))
+            .unwrap();
+        assert_eq!(batch.cookies[0].value, "old");
     }
 
     #[test]
@@ -417,161 +436,144 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = dir.path().join("Cookies");
         let conn = Connection::open(&db).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE meta(key TEXT PRIMARY KEY, value INTEGER);\
-             INSERT INTO meta(key,value) VALUES('version',24);\
-             CREATE TABLE cookies(\
-               host_key TEXT, name TEXT, encrypted_value BLOB, path TEXT, expires_utc INTEGER,\
-               is_secure INTEGER, is_httponly INTEGER, samesite INTEGER, top_frame_site_key TEXT\
-             );",
-        )
-        .unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
         for (name, partition) in [("regular", ""), ("partitioned", "https://top.example")] {
-            let encrypted = encrypt_v10("pass", ".github.com", name, true);
+            let encrypted = mac_encrypt("pass", ".github.com", name);
             conn.execute(
-                "INSERT INTO cookies VALUES('.github.com',?1,?2,'/',0,1,1,1,?3)",
+                "INSERT INTO cookies(host_key,name,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite,top_frame_site_key) \
+                 VALUES('.github.com',?1,?2,'/',0,1,1,1,?3)",
                 rusqlite::params![name, encrypted, partition],
             )
             .unwrap();
         }
         drop(conn);
 
-        let cookies = read_cookies(&db, "www.github.com", "pass").unwrap();
-        assert_eq!(cookies.len(), 1);
-        assert_eq!(cookies[0].name, "regular");
-    }
-
-    struct FakeKeychain(Result<String, ImportError>);
-
-    impl Keychain for FakeKeychain {
-        fn read(&self, _service: &str, _account: &str) -> Result<String, ImportError> {
-            self.0
-                .as_ref()
-                .map(Clone::clone)
-                .map_err(|_| ImportError::PermissionDenied)
-        }
-    }
-
-    #[derive(Default)]
-    struct FakeSink(Mutex<Vec<String>>);
-
-    impl CookieSink for FakeSink {
-        fn inject(&self, cookies: &[ImportedCookie]) -> Result<Vec<ImportedCookie>, ImportError> {
-            self.0
-                .lock()
-                .unwrap()
-                .extend(cookies.iter().map(|cookie| cookie.name.clone()));
-            Ok(cookies.to_vec())
-        }
-    }
-
-    fn create_profile_with_cookie(passphrase: &str) -> tempfile::TempDir {
-        let profile = tempdir().unwrap();
-        let network = profile.path().join("Network");
-        std::fs::create_dir(&network).unwrap();
-        let database = network.join("Cookies");
-        let connection = Connection::open(database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE meta(key TEXT PRIMARY KEY, value INTEGER);\
-                 INSERT INTO meta(key,value) VALUES('version',24);\
-                 CREATE TABLE cookies(\
-                   host_key TEXT, name TEXT, encrypted_value BLOB, path TEXT, expires_utc INTEGER,\
-                   is_secure INTEGER, is_httponly INTEGER, samesite INTEGER\
-                 );",
-            )
-            .unwrap();
-        let encrypted = encrypt_v10(passphrase, ".github.com", "secret", true);
-        for name in ["z-session", "a-session", "a-session"] {
-            connection
-                .execute(
-                    "INSERT INTO cookies VALUES(?1,?2,?3,'/',0,1,1,1)",
-                    rusqlite::params![".github.com", name, encrypted],
-                )
-                .unwrap();
-        }
-        drop(connection);
-        profile
-    }
-
-    #[test]
-    fn orchestration_stops_on_permission_denial() {
-        let sink = FakeSink::default();
-        let result = import_with(
-            Path::new("missing"),
-            "example.com",
-            "service",
-            "account",
-            &FakeKeychain(Err(ImportError::PermissionDenied)),
-            &sink,
+        let batch = read_cookie_database(
+            &db,
+            &site("www.github.com"),
+            Some(&ChromiumKey::macos("pass")),
+        )
+        .unwrap();
+        assert_eq!(batch.cookies.len(), 1);
+        assert_eq!(batch.cookies[0].name, "regular");
+        assert_eq!(
+            cookie_host_counts(&db).unwrap().get(".github.com"),
+            Some(&1)
         );
-        assert!(matches!(result, Err(ImportError::PermissionDenied)));
-        assert!(sink.0.lock().unwrap().is_empty());
     }
 
     #[test]
-    fn profile_import_injects_and_deduplicates_public_metadata() {
-        let profile = create_profile_with_cookie("pass");
-        let sink = FakeSink::default();
-
-        let summary = import_profile(
-            profile.path(),
-            "www.github.com",
-            "service",
-            "account",
-            &FakeKeychain(Ok("pass".into())),
-            &sink,
-        )
+    fn windows_databases_decrypt_gcm_and_count_app_bound_rows() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("Cookies");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        let key = ChromiumKey::Gcm([3; 32]);
+        insert(
+            &conn,
+            ".example.com",
+            "gcm",
+            &encrypt_cookie(&key, b"v10", ".example.com", "v"),
+            "",
+        );
+        insert(
+            &conn,
+            ".example.com",
+            "bound",
+            &encrypt_cookie(&key, b"v20", ".example.com", "x"),
+            "",
+        );
+        insert(
+            &conn,
+            ".example.com",
+            "bound2",
+            &encrypt_cookie(&key, b"v20", ".example.com", "y"),
+            "",
+        );
+        insert(
+            &conn,
+            ".other.com",
+            "bound3",
+            &encrypt_cookie(&key, b"v20", ".other.com", "z"),
+            "",
+        );
+        drop(conn);
+        let filter = ScopeFilter::new(&CookieScope::Domains {
+            domains: vec!["example.com".into()],
+        })
         .unwrap();
-
-        assert_eq!(summary.injected, 3);
-        assert_eq!(summary.names, ["a-session", "z-session"]);
-        assert_eq!(summary.domains, [".github.com"]);
-        assert_eq!(sink.0.lock().unwrap().len(), 3);
+        let batch = read_cookie_database(&db, &filter, Some(&key)).unwrap();
+        assert_eq!(batch.cookies.len(), 1);
+        assert_eq!(batch.cookies[0].value, "v");
+        assert_eq!(batch.skipped_app_bound, 2);
     }
 
     #[test]
-    fn empty_safe_storage_passphrase_skips_the_profile() {
-        let profile = create_profile_with_cookie("pass");
-        let sink = FakeSink::default();
-
-        let summary = import_profile(
-            profile.path(),
-            "github.com",
-            "service",
-            "account",
-            &FakeKeychain(Ok(String::new())),
-            &sink,
-        )
-        .unwrap();
-
-        assert_eq!(summary.injected, 0);
-        assert!(summary.names.is_empty());
-        assert!(summary.domains.is_empty());
-        assert!(sink.0.lock().unwrap().is_empty());
+    fn linux_databases_mix_v10_v11_and_plaintext_rows() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("Cookies");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        let key = ChromiumKey::linux(Some("kr"));
+        insert(
+            &conn,
+            "a.com",
+            "v10",
+            &encrypt_cookie(&key, b"v10", "a.com", "one"),
+            "",
+        );
+        insert(
+            &conn,
+            "a.com",
+            "v11",
+            &encrypt_cookie(&key, b"v11", "a.com", "two"),
+            "",
+        );
+        insert(&conn, "a.com", "plain", &[], "three");
+        drop(conn);
+        let mut values = read_cookie_database(&db, &ScopeFilter::All, Some(&key))
+            .unwrap()
+            .cookies
+            .iter()
+            .map(|cookie| cookie.value.clone())
+            .collect::<Vec<_>>();
+        values.sort();
+        assert_eq!(values, ["one", "three", "two"]);
+        let plain_only = read_cookie_database(&db, &ScopeFilter::All, None).unwrap();
+        assert_eq!(plain_only.cookies.len(), 1);
     }
 
-    struct FailingSink;
-
-    impl CookieSink for FailingSink {
-        fn inject(&self, _cookies: &[ImportedCookie]) -> Result<Vec<ImportedCookie>, ImportError> {
-            Err(ImportError::Injection)
+    #[test]
+    fn counts_hosts_without_decrypting() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("Cookies");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        for host in [".github.com", ".github.com", "api.github.com", "x.org"] {
+            insert(&conn, host, "n", b"v10garbage", "");
         }
+        drop(conn);
+        let counts = cookie_host_counts(&db).unwrap();
+        assert_eq!(counts.get(".github.com"), Some(&2));
+        assert_eq!(counts.get("api.github.com"), Some(&1));
+        assert_eq!(counts.get("x.org"), Some(&1));
     }
 
     #[test]
-    fn profile_import_propagates_sink_failures() {
-        let profile = create_profile_with_cookie("pass");
+    fn a_database_without_a_cookies_table_is_unreadable() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("Cookies");
+        Connection::open(&db)
+            .unwrap()
+            .execute_batch("CREATE TABLE other(x);")
+            .unwrap();
         assert!(matches!(
-            import_profile(
-                profile.path(),
-                "github.com",
-                "service",
-                "account",
-                &FakeKeychain(Ok("pass".into())),
-                &FailingSink,
-            ),
-            Err(ImportError::Injection)
+            read_cookie_database(&db, &ScopeFilter::All, None),
+            Err(ImportError::Database)
+        ));
+        assert!(matches!(
+            cookie_host_counts(&db),
+            Err(ImportError::Database)
         ));
     }
 
@@ -593,23 +595,35 @@ mod tests {
     }
 
     #[test]
-    fn copies_wal_and_shm_companions() {
+    fn copies_wal_shm_and_journal_companions() {
         let source_dir = tempdir().unwrap();
-        let destination_dir = tempdir().unwrap();
         let source = source_dir.path().join("Cookies");
         std::fs::write(&source, b"db").unwrap();
-        std::fs::write(format!("{}-wal", source.display()), b"wal").unwrap();
-        std::fs::write(format!("{}-shm", source.display()), b"shm").unwrap();
+        for suffix in ["-wal", "-shm", "-journal"] {
+            std::fs::write(format!("{}{suffix}", source.display()), suffix.as_bytes()).unwrap();
+        }
+        let snapshot = snapshot_database(&source).unwrap();
+        assert_eq!(std::fs::read(&snapshot.path).unwrap(), b"db");
+        for suffix in ["-wal", "-shm", "-journal"] {
+            assert_eq!(
+                std::fs::read(format!("{}{suffix}", snapshot.path.display())).unwrap(),
+                suffix.as_bytes()
+            );
+        }
+        let copied = snapshot.path.clone();
+        drop(snapshot);
+        assert!(!copied.exists());
+        assert!(matches!(
+            snapshot_database(&source_dir.path().join("missing")),
+            Err(ImportError::Database)
+        ));
+    }
 
-        let copied = copy_cookie_database(&source, destination_dir.path()).unwrap();
-        assert_eq!(std::fs::read(&copied).unwrap(), b"db");
-        assert_eq!(
-            std::fs::read(format!("{}-wal", copied.display())).unwrap(),
-            b"wal"
-        );
-        assert_eq!(
-            std::fs::read(format!("{}-shm", copied.display())).unwrap(),
-            b"shm"
-        );
+    #[test]
+    fn classifies_copy_errors() {
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(classify_copy_error(&denied), ImportError::PermissionDenied);
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(classify_copy_error(&missing), ImportError::Database);
     }
 }

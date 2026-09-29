@@ -418,7 +418,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 231
+export const CURRENT_SCHEMA_VERSION = 232
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -617,6 +617,12 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   browserAnnotations: "&id, sessionId, baseUrl, status, createdAt, [baseUrl+status]",
   // v229 — pages visited in the built-in browser, one row per address.
   browserHistory: "&id, visitedAt",
+  // v232 — ADR-0201: download history (no bytes) for every desktop backend,
+  // plus metadata-only mirrors of the Rust-owned extension registry and
+  // password vault. Neither mirror ever holds a secret.
+  browserDownloads: "&id, sessionId, backend, state, startedAt",
+  browserExtensionMirror: "&id, name, updatedAt",
+  browserCredentialMeta: "&id, origin, updatedAt",
   behaviorEvents: "&id, eventName, at, sessionId, [eventName+at]",
   executionRuns:
     "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId], parentRunId, [parentRunId+status]",
@@ -1811,6 +1817,11 @@ export class CogniaDB extends Dexie {
   browserAnnotations!: Table<import("./browser-annotations").BrowserAnnotationRow, string>
   // v229 — the built-in browser's recent pages. See `lib/db/browser-history.ts`.
   browserHistory!: Table<import("./browser-history").BrowserHistoryRow, string>
+  // v232 — ADR-0201 download history and vault / extension metadata mirrors.
+  // See `lib/db/browser-downloads.ts` and `lib/db/browser-mirrors.ts`.
+  browserDownloads!: Table<import("./browser-downloads").BrowserDownloadRow, string>
+  browserExtensionMirror!: Table<import("./browser-mirrors").BrowserExtensionMirrorRow, string>
+  browserCredentialMeta!: Table<import("./browser-mirrors").BrowserCredentialMetaRow, string>
   // v117 — host-local remote browser profile and public-domain grants.
   browserProfiles!: Table<import("./browser-profiles").BrowserProfileRow, string>
   browserDomainGrants!: Table<import("./browser-profiles").BrowserDomainGrantRow, string>

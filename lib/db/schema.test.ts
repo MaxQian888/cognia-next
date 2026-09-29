@@ -1561,6 +1561,22 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v232 adds the browser download history and vault / extension metadata mirrors", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(232)
+    expect(db.browserDownloads.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sessionId", "backend", "state", "startedAt"])
+    )
+    expect(db.browserExtensionMirror.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["name", "updatedAt"])
+    )
+    expect(db.browserCredentialMeta.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["origin", "updatedAt"])
+    )
+  })
+
   it("v231 adds the Files page tables with favorite / folder / origin indexes", async () => {
     const db = getDb()
     await db.open()

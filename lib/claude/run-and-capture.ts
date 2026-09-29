@@ -980,10 +980,14 @@ async function captureAssistantReplyCore(
           // plugin firewall previously run by the competing UI subscriber.
           const pre = await dispatchPreToolUse(req.toolName, req.input, sessionId)
           if (settled || abortRequested || signal?.aborted) return
+          // ADR-0201: an approve-every-call tool is the approver's decision on
+          // the input the MODEL sent. A plugin may deny it, but a plugin
+          // "modify" neither rewrites nor pre-approves it.
+          const perCall = req.requiresPerCallApproval === true
           if (pre.action === "deny") {
             outcome = { decision: "deny", message: pre.reason ?? "denied by plugin onPreToolUse" }
           } else {
-            const rewritten = pre.action === "modify" ? pre.modifiedArgs : undefined
+            const rewritten = !perCall && pre.action === "modify" ? pre.modifiedArgs : undefined
             outcome = await cap.onPermissionRequest!({
               ...req,
               ...(rewritten ? { input: rewritten } : {}),
@@ -1002,7 +1006,8 @@ async function captureAssistantReplyCore(
           await approveTool(
             sessionId,
             req.requestId,
-            req.suppressAlwaysAllowRule && outcome.decision === "allow_always"
+            (req.suppressAlwaysAllowRule || req.requiresPerCallApproval) &&
+              outcome.decision === "allow_always"
               ? "allow"
               : outcome.decision,
             outcome.message,

@@ -1882,16 +1882,28 @@ name = "cognia-browser-cookies"
 version = "0.1.0"
 dependencies = [
  "aes 0.9.3",
+ "aes-gcm",
+ "base64 0.23.1",
  "cbc 0.2.1",
+ "cognia-secrets",
+ "des",
+ "dirs 7.0.0",
  "hex",
+ "hmac 0.13.0",
+ "log",
  "pbkdf2",
  "psl",
+ "rand 0.10.3",
  "rusqlite",
+ "serde",
+ "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
  "url",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -2094,6 +2106,7 @@ dependencies = [
  "cognia-external-agent",
  "cognia-files",
  "cognia-fleet",
+ "cognia-gateway",
  "cognia-headless-contract",
  "cognia-mcp-server",
  "cognia-net",
@@ -2106,7 +2119,6 @@ dependencies = [
  "cognia-tenant-auth",
  "cognia-terminal",
  "flate2",
- "cognia-gateway",
  "futures-util",
  "hex",
  "hmac 0.13.0",
@@ -2609,6 +2621,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-local-browser"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "cognia-net",
+ "dirs 7.0.0",
+ "futures-util",
+ "hex",
+ "libc",
+ "mime_guess",
+ "parking_lot",
+ "percent-encoding",
+ "rand 0.10.3",
+ "reqwest 0.13.5",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "cognia-mcp-server"
 version = "0.1.0"
 dependencies = [
@@ -2715,6 +2757,7 @@ dependencies = [
  "cognia-hooks",
  "cognia-instrument",
  "cognia-jobs",
+ "cognia-local-browser",
  "cognia-mcp-server",
  "cognia-media",
  "cognia-net",
@@ -3108,17 +3151,23 @@ name = "cognia-secrets"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "block2",
  "cognia-core",
  "dirs 7.0.0",
  "hex",
  "keyring",
  "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-local-authentication",
  "parking_lot",
  "rand 0.10.3",
  "security-framework-sys",
  "serde",
  "serde_json",
  "tokio",
+ "windows 0.62.2",
+ "windows-future 0.3.2",
 ]
 
 [[package]]
@@ -9794,6 +9843,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-local-authentication"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48e0b8b339e0d9d2ed4416b7f93f9d4daadff7d4dd797f89867cde11aeac607"
+dependencies = [
+ "block2",
+ "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-media-toolbox"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15382,6 +15442,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

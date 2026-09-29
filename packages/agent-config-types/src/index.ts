@@ -1318,6 +1318,11 @@ export interface PermissionRequestEvent {
   defaultToNo?: boolean
   /** This request must not offer or create a persistent permission rule. */
   suppressAlwaysAllowRule?: boolean
+  /**
+   * ADR-0201: the tool is marked approve-every-call (e.g. `browser_fill_credential`).
+   * The sidecar also sets `suppressAlwaysAllowRule`; either one hides "Always allow".
+   */
+  requiresPerCallApproval?: boolean
 }
 
 /**
@@ -3618,6 +3623,14 @@ export interface AppSettings {
    * advertises or provisions a remote browser.
    */
   remoteBrowserEnabled?: boolean
+  /**
+   * ADR-0201: the desktop browser pane's default engine. `auto` (or absent)
+   * picks local Chromium for public pages once it is installed and the
+   * embedded webview otherwise; an explicit engine wins whenever it can be
+   * served. `user-chrome` names which of the user's browsers to attach.
+   */
+  browserDefaultBackend?: "auto" | "embedded" | "local-chromium" | "user-chrome" | "remote"
+  browserUserChromeBrowser?: "chrome" | "chrome-beta" | "chrome-canary" | "edge" | "brave"
   /**
    * Epoch ms of the last write, bumped by `lib/db/settings.ts:saveSettings`.
    * Drives the companion sync cursor for the settings singleton: the desktop
@@ -6351,6 +6364,8 @@ export interface PendingApproval {
   decisionReason?: string
   defaultToNo?: boolean
   suppressAlwaysAllowRule?: boolean
+  /** ADR-0201: approve-every-call tool; never offers a standing grant. */
+  requiresPerCallApproval?: boolean
   /**
    * Approval lifecycle. Absent/"pending" = live (answerable). "interrupted" =
    * the sidecar waiter died (turn aborted / session closed) and the tool was

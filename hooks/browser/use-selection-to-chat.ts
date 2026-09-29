@@ -25,6 +25,33 @@ import {
   type BrowserAnnotationSeverity,
 } from "@/lib/db/browser-annotations"
 
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+}
+
+/**
+ * The media type a downloaded file is sent under when the backend did not say.
+ * Only images need one: documents are routed by their filename extension.
+ */
+export function mediaTypeForFilename(filename: string): string {
+  const extension = filename.split(".").pop()?.toLowerCase() ?? ""
+  return IMAGE_MEDIA_TYPES[extension] ?? "application/octet-stream"
+}
+
+/** Chunked so a multi-megabyte download does not overflow the call stack. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ""
+  const chunk = 0x8000
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
+  }
+  return btoa(binary)
+}
+
 export interface SendScreenshotOptions {
   /** Target chat session. Defaults to the focused session. */
   sessionId?: string
@@ -257,7 +284,46 @@ export function useSelectionToChat() {
     [send]
   )
 
+  /**
+   * Ship a file the browser downloaded to chat as an attachment (ADR-0201
+   * Downloads panel "Attach to chat"). Goes through the same
+   * {@link buildSendContent} gate as the composer, so a type the chat cannot
+   * read is refused here instead of arriving as an empty turn.
+   *
+   * Resolves `"sent"`, `"no-session"`, or `"unsupported"` (every block was
+   * rejected by the attachment pipeline).
+   */
+  const sendFileBytes = useCallback(
+    async (
+      bytes: Uint8Array,
+      file: { filename: string; mimeType?: string; sourceUrl?: string },
+      options: { sessionId?: string } = {}
+    ): Promise<"sent" | "no-session" | "unsupported"> => {
+      const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return "no-session"
+      const mediaType = file.mimeType || mediaTypeForFilename(file.filename)
+      const submitted: SubmittedFile = {
+        url: `data:${mediaType};base64,${bytesToBase64(bytes)}`,
+        mediaType,
+        filename: file.filename,
+      }
+      const text = file.sourceUrl
+        ? `Attached ${file.filename}, downloaded in the in-app browser from ${file.sourceUrl}.`
+        : `Attached ${file.filename}, downloaded in the in-app browser.`
+      const { content, rejected } = await buildSendContent(text, [submitted])
+      if (rejected.length > 0) return "unsupported"
+      const status = useChatStore.getState().sessions[sessionId]?.status
+      if (status === "streaming" || status === "awaiting_approval") {
+        await interruptAndSteer(sessionId)
+      }
+      await send(content, undefined, { sessionId })
+      return "sent"
+    },
+    [send, interruptAndSteer]
+  )
+
   return {
+    sendFileBytes,
     sendComment,
     queueAnnotation,
     sendAnnotations,

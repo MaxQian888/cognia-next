@@ -68,6 +68,7 @@
       "resources/terminal/shell-integration.ps1",
       "resources/plugin-node/**/*",
       "resources/plugins/**/*",
+      "resources/browser-runtime/**/*",
       "../hooks/builtin/auto-context-loader.mjs",
       "../hooks/builtin/cost-quota-guard.mjs",
       "../hooks/builtin/pii-safety-guard.mjs",

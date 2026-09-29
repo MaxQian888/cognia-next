@@ -3,6 +3,14 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 
+jest.mock("@/components/browser/local-content/browser-local-content-picker", () => ({
+  BrowserLocalContentPicker: ({ onOpen }: { onOpen: (url: string) => void }) => (
+    <button type="button" onClick={() => onOpen("http://127.0.0.1:4321/")}>
+      picker
+    </button>
+  ),
+}))
+
 import { BrowserEmptyState, EMPTY_STATE_RECENT_LIMIT, QUICK_OPEN_URLS } from "./browser-empty-state"
 
 it("offers a one-click chip per common dev-server address", () => {
@@ -47,5 +55,23 @@ describe("recent pages", () => {
   it("draws no recent row before anything has been visited", () => {
     render(<BrowserEmptyState onOpen={jest.fn()} />)
     expect(screen.queryByTestId("browser-empty-recent")).toBeNull()
+  })
+})
+
+describe("on the desktop", () => {
+  it("shows the detected-local-content picker instead of guessed ports", () => {
+    const onOpen = jest.fn()
+    render(<BrowserEmptyState onOpen={onOpen} desktop />)
+    for (const url of QUICK_OPEN_URLS) {
+      expect(screen.queryByRole("button", { name: new URL(url).host })).toBeNull()
+    }
+    fireEvent.click(screen.getByRole("button", { name: "picker" }))
+    expect(onOpen).toHaveBeenCalledWith("http://127.0.0.1:4321/")
+  })
+
+  it("keeps the guessed ports on the web shell", () => {
+    render(<BrowserEmptyState onOpen={jest.fn()} desktop={false} />)
+    expect(screen.queryByRole("button", { name: "picker" })).toBeNull()
+    expect(screen.getByRole("button", { name: "localhost:3000" })).toBeInTheDocument()
   })
 })

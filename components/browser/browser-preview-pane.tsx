@@ -33,6 +33,10 @@ import {
   BrowserNetworkPanel,
 } from "@/components/browser/browser-devtools-panels"
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
+import { BrowserBackendSwitcher } from "@/components/browser/browser-backend-switcher"
+import { BrowserDownloadsButton } from "@/components/browser/browser-downloads-panel"
+import { LocalChromiumPreview } from "@/components/browser/local-chromium-preview"
+import { BrowserAutofillPrompt } from "@/components/browser/vault/browser-autofill-prompt"
 import {
   BrowserToolbar,
   addressDisplayParts,
@@ -40,6 +44,7 @@ import {
 } from "@/components/browser/browser-toolbar"
 import { BrowserToolsDock } from "@/components/browser/browser-tools-dock"
 import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
+import { useLocalBrowser } from "@/hooks/browser/use-local-browser"
 import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
 import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
@@ -75,9 +80,13 @@ import {
   type ElementRect,
   type OutputDetailLevel,
   normalizePreviewUrl,
+  resolveTrustTier,
   toBrowserNavIntent,
 } from "@/lib/browser/protocol"
 import { resolveDesktopBackend, type BrowserBackend } from "@/lib/browser/backend-availability"
+import { primeLocalBrowserRouting, setLocalChromiumInstalled } from "@/lib/browser/agent-engine"
+import { localPathFromAddress, serveLocalFile } from "@/lib/browser/local-content-client"
+import type { UserChromeBrowser } from "@/lib/browser/local-client"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isTauri } from "@/lib/tauri"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
@@ -90,6 +99,19 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 const DETAIL_LEVELS: OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
+
+/** `settings.browserDefaultBackend` as a preference: `auto` / absent is none. */
+function defaultBackendPreference(value: string | undefined): BrowserBackend | null {
+  switch (value) {
+    case "embedded":
+    case "local-chromium":
+    case "user-chrome":
+    case "remote":
+      return value
+    default:
+      return null
+  }
+}
 
 /** Host of a URL for display, or the raw string / "" if it can't be parsed. */
 function hostOf(url: string | null): string {
@@ -153,6 +175,7 @@ export function BrowserPreviewPane({
   // ("Browser Adjust") is what makes the rest of that namespace browser-only.
   const tAnnotations = useTranslations("annotations")
   const tCdp = useTranslations("browserCdp")
+  const tLocal = useTranslations("browserLocal")
   const normalizedInitialUrl = initialUrl ? normalizePreviewUrl(initialUrl) : null
   const reservedRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -302,6 +325,74 @@ export function BrowserPreviewPane({
   // `owned` is resolved by `useBrowserPaneWebview` below; the visibility it
   // consumes is computed there from the same three inputs plus the lease.
 
+  const remoteBrowserEnabled = useSettingsStore(
+    (state) => state.settings?.remoteBrowserEnabled ?? false
+  )
+  const settingsDefaultBackend = useSettingsStore((state) => state.settings?.browserDefaultBackend)
+  const settingsUserChromeBrowser = useSettingsStore(
+    (state) => state.settings?.browserUserChromeBrowser ?? null
+  )
+  const activeProjectId = useProjectStore((state) => state.activeProjectId)
+  // ADR-0201: four desktop engines. The preference is the user's pick in the
+  // pane, else the Settings default; `resolveDesktopBackend` serves it when it
+  // can and falls back (embedded) when it can't. Off the desktop the sandboxed
+  // iframe is the fallback.
+  const local = useLocalBrowser()
+  const localInstalled = local.status?.installed ?? false
+  const [paneBackendPreference, setBackendPreference] = useState<BrowserBackend | null>(null)
+  const backendPreference =
+    paneBackendPreference ?? defaultBackendPreference(settingsDefaultBackend)
+  const [paneUserChromeBrowser, setUserChromeBrowser] = useState<string | null>(null)
+  const userChromeBrowser = paneUserChromeBrowser ?? settingsUserChromeBrowser
+  const userChromeCandidate =
+    local.userChrome.find((candidate) => candidate.browser === userChromeBrowser) ??
+    local.userChrome.find((candidate) => candidate.available) ??
+    null
+  // No address yet reads as a loopback preview: an empty pane stays on the
+  // lightweight webview instead of spawning Chromium for nothing.
+  const targetUrl = surfaceRequest?.url ?? committedUrl
+  const backend = resolveDesktopBackend(
+    {
+      tauri: isTauri(),
+      remoteBrowserEnabled,
+      remoteHostActive: isRemoteHostActive(),
+      webCompanionTarget: hasWebCompanionTarget(),
+      localChromiumInstalled: localInstalled,
+      userChromeAvailable: userChromeCandidate?.available ?? false,
+      targetTier: targetUrl ? resolveTrustTier(targetUrl) : "trusted",
+    },
+    backendPreference
+  )
+  const embeddedActive = isTauri() && backend.backend === "embedded"
+  /** Whether a requested engine can be served right now (for URL requests). */
+  const canServeBackendRef = useRef<(wanted: BrowserBackend) => boolean>(() => false)
+  useEffect(() => {
+    canServeBackendRef.current = (wanted) => {
+      switch (wanted) {
+        case "embedded":
+          return isTauri()
+        case "local-chromium":
+          return backend.localReachable
+        case "user-chrome":
+          return backend.userChromeReachable
+        case "remote":
+          return backend.remoteReachable
+        default:
+          return false
+      }
+    }
+  }, [backend.localReachable, backend.userChromeReachable, backend.remoteReachable])
+  // Download history is fed app-wide (`BrowserDownloadsInitializer`), so a
+  // headless agent session's downloads land there with no pane open.
+
+  // Agent routing reads the install state synchronously; keep it current.
+  useEffect(() => {
+    void primeLocalBrowserRouting()
+  }, [])
+  useEffect(() => {
+    if (local.status) setLocalChromiumInstalled(local.status.installed)
+  }, [local.status])
+
   const handleWebviewReady = useCallback(() => setWebviewReady(true), [])
   const handleWebviewError = useCallback(
     (error: unknown) => {
@@ -316,12 +407,15 @@ export function BrowserPreviewPane({
   const { getRect, refreshBounds, owned, contended, takeLease } = useBrowserPaneWebview(
     reservedRef,
     {
-      url: committedUrl,
+      // Only the embedded engine drives the native webview. Handing it the
+      // address while another engine is showing would navigate (and could
+      // surface) a webview floating over that engine's canvas.
+      url: embeddedActive ? committedUrl : null,
       ownerId,
       onReady: handleWebviewReady,
       onError: handleWebviewError,
       onRectChange: handleRectChange,
-      visible: !!committedUrl && hasPainted && regionVisible,
+      visible: embeddedActive && !!committedUrl && hasPainted && regionVisible,
       // The same nonce the web and remote surfaces follow. `committedUrl` alone
       // cannot express "go to A again": React bails out of the identical
       // `setState`, so a pane whose page had drifted to B (an in-page navigation,
@@ -336,22 +430,6 @@ export function BrowserPreviewPane({
     useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
   const toolbarWidth = useElementWidth(toolbarRef)
-  const remoteBrowserEnabled = useSettingsStore(
-    (state) => state.settings?.remoteBrowserEnabled ?? false
-  )
-  const activeProjectId = useProjectStore((state) => state.activeProjectId)
-  // Desktop keeps the embedded webview by default and offers remote as a
-  // switch; off the desktop the sandboxed iframe is the fallback.
-  const [backendPreference, setBackendPreference] = useState<BrowserBackend | null>(null)
-  const backend = resolveDesktopBackend(
-    {
-      tauri: isTauri(),
-      remoteBrowserEnabled,
-      remoteHostActive: isRemoteHostActive(),
-      webCompanionTarget: hasWebCompanionTarget(),
-    },
-    backendPreference
-  )
 
   useEffect(() => {
     committedUrlRef.current = committedUrl
@@ -456,14 +534,8 @@ export function BrowserPreviewPane({
   const [railRendered, setRailRendered] = useState(railWanted)
   if (railWanted && !railRendered) setRailRendered(true)
 
-  const commitUrl = useCallback(
-    (e: FormEvent) => {
-      e.preventDefault()
-      const next = normalizePreviewUrl(urlInput)
-      if (!next) {
-        toast.error(t("errors.navigate"))
-        return
-      }
+  const commitAddress = useCallback(
+    (next: string) => {
       setUrlInput(next)
       beginLoad()
       if (next === committedUrl) {
@@ -475,7 +547,35 @@ export function BrowserPreviewPane({
       }
       urlInputRef.current?.blur()
     },
-    [urlInput, committedUrl, t, beginLoad]
+    [committedUrl, beginLoad]
+  )
+
+  const commitUrl = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault()
+      // ADR-0201: an absolute path or file:// URL is served by Rust's loopback
+      // static server — the webview cannot script a file:// origin.
+      const localPath = localPathFromAddress(urlInput)
+      if (localPath) {
+        void serveLocalFile(localPath).then(
+          (served) => commitAddress(served.url),
+          (error: unknown) =>
+            toast.error(
+              tLocal("address.localFileFailed", {
+                message: error instanceof Error ? error.message : String(error),
+              })
+            )
+        )
+        return
+      }
+      const next = normalizePreviewUrl(urlInput)
+      if (!next) {
+        toast.error(t("errors.navigate"))
+        return
+      }
+      commitAddress(next)
+    },
+    [urlInput, t, tLocal, commitAddress]
   )
 
   const onUrlKeyDown = useCallback(
@@ -688,11 +788,17 @@ export function BrowserPreviewPane({
   }, [regionVisible])
   useEffect(
     () =>
-      onBrowserUrlRequest((url) => {
-        const normalized = normalizePreviewUrl(url)
-        if (!normalized) return false
+      onBrowserUrlRequest((url, request) => {
+        // An empty address is `browser_open` without a URL: show the pane on
+        // whatever it has open. Anything else must be a navigable address.
+        const normalized = url ? normalizePreviewUrl(url) : null
+        if (url && !normalized) return false
         if (!regionVisibleRef.current && revealRef.current?.() !== true) return false
-        openQuickUrl(normalized)
+        // ADR-0201: a requested engine is honored when it can be served now;
+        // an unservable one leaves the pane on the engine it already resolved.
+        const wanted = request.backend
+        if (wanted && canServeBackendRef.current(wanted)) setBackendPreference(wanted)
+        if (normalized) openQuickUrl(normalized)
         return true
       }),
     [openQuickUrl]
@@ -730,6 +836,35 @@ export function BrowserPreviewPane({
   // the one place the cloud browser is genuinely reachable from the desktop —
   // could never select it, and the browser profiles and domain grants in
   // Settings did nothing there. See `lib/browser/backend-availability.ts`.
+  const backendSwitcher = isTauri() ? (
+    <BrowserBackendSwitcher
+      decision={backend}
+      preference={backendPreference}
+      onPreferenceChange={setBackendPreference}
+      local={local}
+      userChromeBrowser={userChromeBrowser}
+      onUserChromeBrowserChange={setUserChromeBrowser}
+    />
+  ) : undefined
+
+  if (backend.backend === "local-chromium" || backend.backend === "user-chrome") {
+    const attached =
+      backend.backend === "user-chrome"
+        ? ((userChromeCandidate?.browser ?? null) as UserChromeBrowser | null)
+        : null
+    return (
+      <LocalChromiumPreview
+        key={`${backend.backend}:${attached ?? ""}`}
+        backend={backend.backend}
+        userChromeBrowser={attached}
+        chatSessionId={effectiveSessionId}
+        initialUrl={committedUrl ?? normalizedInitialUrl ?? undefined}
+        requestedUrl={surfaceRequest?.url}
+        requestNonce={surfaceRequest?.nonce}
+        backendSwitcher={backendSwitcher}
+      />
+    )
+  }
   if (backend.backend === "remote") {
     return (
       <RemoteBrowserPreview
@@ -739,6 +874,7 @@ export function BrowserPreviewPane({
         requestedUrl={surfaceRequest?.url}
         requestNonce={surfaceRequest?.nonce}
         onBackendChange={isTauri() && backend.remoteReachable ? setBackendPreference : undefined}
+        {...(backendSwitcher ? { backendSwitcher } : {})}
       />
     )
   }
@@ -827,6 +963,7 @@ export function BrowserPreviewPane({
         currentUrl={owned ? currentUrl : null}
         onReload={reloadAfterCookieImport}
       />
+      <BrowserDownloadsButton chatSessionId={effectiveSessionId} onRetry={openQuickUrl} />
       <TooltipIconButton
         tooltip={t("actions.openExternal")}
         aria-label={t("actions.openExternal")}
@@ -894,22 +1031,7 @@ export function BrowserPreviewPane({
         pageActions={pageActions}
         overflowExtras={
           <>
-            {backend.remoteReachable && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">{t("backend.label")}</span>
-                <NativeSelect
-                  value={backend.backend}
-                  onChange={(event) => setBackendPreference(event.target.value as BrowserBackend)}
-                  aria-label={t("backend.label")}
-                  size="sm"
-                  wrapperClassName="w-full"
-                  className="h-7 text-xs"
-                >
-                  <NativeSelectOption value="embedded">{t("backend.embedded")}</NativeSelectOption>
-                  <NativeSelectOption value="remote">{t("backend.remote")}</NativeSelectOption>
-                </NativeSelect>
-              </div>
-            )}
+            {backendSwitcher}
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">{t("detail.label")}</span>
               {detailControl}
@@ -955,6 +1077,12 @@ export function BrowserPreviewPane({
       />
 
       {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
+
+      {/* Above the reserved region, never over it: the native webview floats
+          above React and would hide anything drawn on top of the page. */}
+      {nativeReady && currentUrl && /^https?:/i.test(currentUrl) && (
+        <BrowserAutofillPrompt backend="embedded" url={currentUrl} />
+      )}
 
       {/* Below the compact threshold a 320px side rail would leave the page
           nothing to render into, and the native webview floats above React so

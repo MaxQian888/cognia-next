@@ -3,7 +3,12 @@
  * Plugin Context Tests
  */
 
-import { createPluginContext, createFullPluginContext, isFullPluginContext } from "./context"
+import {
+  createGuardedBrowserAPI,
+  createPluginContext,
+  createFullPluginContext,
+  isFullPluginContext,
+} from "./context"
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import type { PluginManager } from "./manager"
 import { invoke } from "@tauri-apps/api/core"
@@ -2527,5 +2532,59 @@ describe("ctx.config", () => {
     // The store replaces the config object on every settings change.
     mockStorePlugins["test-plugin"] = { config: { privacyMode: true } }
     expect(context.config).toEqual({ privacyMode: true })
+  })
+})
+
+describe("ctx.browser guard (ADR-0201)", () => {
+  const PRIVILEGED = [
+    "fillCredential",
+    "getStorage",
+    "networkRequest",
+    "listCookies",
+    "clearCookies",
+  ] as const
+
+  beforeEach(() => {
+    resetPermissionGuard()
+  })
+
+  it("requires agent:control for every method", () => {
+    getPermissionGuard().registerPlugin("no-agent", [])
+    const api = createGuardedBrowserAPI("no-agent", "marketplace")
+    expect(() => api.routeEngine("http://localhost/")).toThrow(PermissionError)
+    expect(() => api.isDomainAuthorized("https://a.test/")).toThrow(PermissionError)
+    expect(() => api.isSurfaceVisible()).toThrow(PermissionError)
+    expect(() => api.ensureLocalEngine("local-chromium")).toThrow(PermissionError)
+  })
+
+  it("hands a third-party plugin an engine facade without the privileged methods", async () => {
+    getPermissionGuard().registerPlugin("third-party", ["agent:control"])
+    const route = createGuardedBrowserAPI("third-party", "marketplace").routeEngine(
+      "http://localhost/"
+    )
+    for (const method of PRIVILEGED) {
+      expect((route.engine as Record<string, unknown>)[method]).toBeUndefined()
+    }
+    expect(typeof route.engine.snapshot).toBe("function")
+    expect(route.engine.backend).toBe("embedded")
+    expect(Object.isFrozen(route.engine)).toBe(true)
+  })
+
+  it("does not trust a non-bundled plugin that reuses the Browser Tools id", () => {
+    getPermissionGuard().registerPlugin("cognia-browser-tools", ["agent:control"])
+    const route = createGuardedBrowserAPI("cognia-browser-tools", "local").routeEngine(
+      "http://localhost/"
+    )
+    expect((route.engine as Record<string, unknown>).fillCredential).toBeUndefined()
+  })
+
+  it("gives the bundled Browser Tools plugin the full engine", () => {
+    getPermissionGuard().registerPlugin("cognia-browser-tools", ["agent:control"])
+    const route = createGuardedBrowserAPI("cognia-browser-tools", "builtin").routeEngine(
+      "http://localhost/"
+    )
+    for (const method of PRIVILEGED) {
+      expect(typeof (route.engine as Record<string, unknown>)[method]).toBe("function")
+    }
   })
 })

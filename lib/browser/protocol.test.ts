@@ -6,11 +6,15 @@ import {
   formatSelectionComment,
   formatSelectionsComment,
   isLocalHostname,
+  isLoopbackHostname,
   normalizePreviewUrl,
   resolveTrustTier,
   screenshotToFile,
   BROWSER_NAV_INTENTS,
   toBrowserNavIntent,
+  isRedactedNetworkHeader,
+  redactNetworkHeaders,
+  REDACTED_NETWORK_HEADERS,
 } from "./protocol"
 
 describe("browser action dialog contract", () => {
@@ -262,14 +266,37 @@ describe("resolveTrustTier", () => {
     ["http://localhost:3000/", "trusted"],
     ["http://127.0.0.1:8080/x", "trusted"],
     ["http://[::1]:5173/", "trusted"],
+    ["http://127.0.0.2:4000/", "trusted"],
+    ["http://127.255.255.254/", "trusted"],
+    ["http://127.1/", "trusted"],
+    ["http://app.localhost:3000/", "trusted"],
+    ["http://LOCALHOST./", "trusted"],
+    ["http://[::ffff:127.0.0.1]/", "trusted"],
     ["https://app.example.com/", "public"],
     ["http://192.168.1.10/", "public"],
+    ["http://128.0.0.1/", "public"],
+    ["http://127.0.0.1.example.com/", "public"],
+    ["http://localhost.example.com/", "public"],
+    ["http://[::2]/", "public"],
+    ["file:///tmp/index.html", "public"],
   ])("classifies %s as %s", (url, tier) => {
     expect(resolveTrustTier(url)).toBe(tier)
   })
 
   it("treats unparseable input as public (fail-closed)", () => {
     expect(resolveTrustTier("not a url")).toBe("public")
+  })
+})
+
+describe("isLoopbackHostname", () => {
+  it("accepts loopback names and addresses and rejects LAN / public hosts", () => {
+    expect(isLoopbackHostname("localhost")).toBe(true)
+    expect(isLoopbackHostname("dev.app.localhost")).toBe(true)
+    expect(isLoopbackHostname("127.0.0.53")).toBe(true)
+    expect(isLoopbackHostname("[::1]")).toBe(true)
+    expect(isLoopbackHostname("10.0.0.1")).toBe(false)
+    expect(isLoopbackHostname("127.0.0.256")).toBe(false)
+    expect(isLoopbackHostname("notlocalhost")).toBe(false)
   })
 })
 
@@ -299,5 +326,52 @@ describe("browser navigation intents", () => {
     for (const bad of [undefined, null, "", "nonsense", 7, {}]) {
       expect(toBrowserNavIntent(bad)).toBe("push")
     }
+  })
+})
+
+describe("network header redaction (single source)", () => {
+  it("redacts every listed credential header case-insensitively", () => {
+    for (const name of REDACTED_NETWORK_HEADERS) {
+      expect(isRedactedNetworkHeader(name.toUpperCase())).toBe(true)
+    }
+  })
+
+  it("redacts vendor credential headers by name fragment", () => {
+    for (const name of [
+      "X-Vendor-Api-Token",
+      "x-my-app-secret",
+      "x-foo-auth",
+      "X-Custom-ApiKey",
+      "x-user-password",
+      "x-upstream-session",
+      "x_signature",
+    ]) {
+      expect(isRedactedNetworkHeader(name)).toBe(true)
+    }
+  })
+
+  it("keeps ordinary headers readable", () => {
+    for (const name of [
+      "content-type",
+      "content-length",
+      "cache-control",
+      ":authority",
+      "accept",
+      "x-request-id",
+      "user-agent",
+    ]) {
+      expect(isRedactedNetworkHeader(name)).toBe(false)
+    }
+    expect(
+      redactNetworkHeaders({
+        "X-Amz-Security-Token": "t",
+        "x-goog-api-key": "k",
+        "content-type": "application/json",
+      })
+    ).toEqual({
+      "X-Amz-Security-Token": "[REDACTED]",
+      "x-goog-api-key": "[REDACTED]",
+      "content-type": "application/json",
+    })
   })
 })

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
     embedNavigate: jest.fn(async () => {}),
@@ -22,9 +23,46 @@ jest.mock("@/lib/browser/client", () => ({
   },
 }))
 
+const mockFillCredential = jest.fn()
+jest.mock(
+  "./passwords",
+  () => ({ fillCredential: (...args: unknown[]) => mockFillCredential(...args) }),
+  { virtual: true }
+)
+
+const mockTransportCall = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => false,
+  transport: {
+    call: (...args: unknown[]) => mockTransportCall(...args),
+    subscribe: jest.fn(() => () => {}),
+  },
+}))
+
+const mockLocal = {
+  status: jest.fn(),
+  createSession: jest.fn(),
+  rpc: jest.fn(),
+}
+jest.mock("@/lib/browser/local-client", () => ({
+  localBrowser: {
+    status: (...args: unknown[]) => mockLocal.status(...args),
+    createSession: (...args: unknown[]) => mockLocal.createSession(...args),
+    rpc: (...args: unknown[]) => mockLocal.rpc(...args),
+  },
+}))
+
 import { browserClient } from "@/lib/browser/client"
+import { LocalChromiumEngine } from "@/lib/browser/local-chromium-engine"
 import {
+  BROWSER_AGENT_LOCAL_SESSION_EVENT,
+  configureLocalBrowserEngine,
   configureRemoteBrowserEngine,
+  ensureAgentLocalEngine,
+  primeLocalBrowserRouting,
+  redactNetworkHeaders,
+  resetLocalBrowserRouting,
+  setLocalChromiumInstalled,
   EMBEDDED_UNSUPPORTED_FEATURES,
   embeddedUnsupportedMessage,
   routeEngine,
@@ -40,6 +78,10 @@ beforeEach(() => {
   Object.values(mockClient).forEach((m) => m.mockClear())
   configureRemoteBrowserEngine(null)
   resetEmbeddedSnapshotCache()
+  resetLocalBrowserRouting()
+  mockFillCredential.mockReset()
+  mockTransportCall.mockReset()
+  Object.values(mockLocal).forEach((m) => m.mockReset())
 })
 
 describe("routeEngine", () => {
@@ -50,11 +92,17 @@ describe("routeEngine", () => {
     expect(r.untrusted).toBe(false)
   })
 
-  it("flags public URLs as untrusted (still embedded in Phase 1)", () => {
+  it("flags public URLs as untrusted and keeps them embedded until local Chromium is installed", () => {
     const r = routeEngine("https://example.com/")
     expect(r.tier).toBe("public")
     expect(r.untrusted).toBe(true)
     expect(r.engine).toBeInstanceOf(EmbeddedEngine)
+  })
+
+  it("treats every loopback form as trusted and embedded", () => {
+    for (const url of ["http://127.0.0.2:8080", "http://app.localhost:3000", "http://[::1]/"]) {
+      expect(routeEngine(url)).toMatchObject({ backend: "embedded", tier: "trusted" })
+    }
   })
 
   it("routes cloud/mobile/headless and authorized public pages to a ready remote engine", () => {
@@ -72,6 +120,90 @@ describe("routeEngine", () => {
         domainAuthorized: true,
       })
     ).toMatchObject({ engine: remote, backend: "remote-chromium" })
+  })
+
+  it("falls back to the best desktop engine for an authorized public URL instead of throwing", () => {
+    expect(
+      routeEngine("https://app.example.com", { hostProfile: "desktop", domainAuthorized: true })
+    ).toMatchObject({ backend: "embedded", untrusted: true })
+    setLocalChromiumInstalled(true)
+    expect(
+      routeEngine("https://app.example.com", { hostProfile: "desktop", domainAuthorized: true })
+    ).toMatchObject({ backend: "local-chromium", untrusted: true })
+  })
+
+  it("routes on the TARGET URL: public to local Chromium, loopback to embedded", () => {
+    setLocalChromiumInstalled(true)
+    expect(routeEngine("https://example.com").backend).toBe("local-chromium")
+    expect(routeEngine("http://localhost:5173").backend).toBe("embedded")
+  })
+
+  it("keeps the agent on the session the pane is showing, for every URL", () => {
+    configureLocalBrowserEngine({ sessionId: "pane-1", backend: "user-chrome" })
+    const route = routeEngine("http://localhost:3000")
+    expect(route.backend).toBe("user-chrome")
+    expect(route.engine).toBeInstanceOf(LocalChromiumEngine)
+    expect((route.engine as LocalChromiumEngine).sessionId).toBe("pane-1")
+    configureLocalBrowserEngine(null)
+    expect(routeEngine("http://localhost:3000").backend).toBe("embedded")
+  })
+
+  it("honours explicit local preferences and refuses what cannot be served", () => {
+    expect(() =>
+      routeEngine("https://example.com", { backendPreference: "local-chromium" })
+    ).toThrow(expect.objectContaining({ code: "browser_feature_unsupported" }))
+    expect(() => routeEngine("https://example.com", { backendPreference: "user-chrome" })).toThrow(
+      expect.objectContaining({ code: "browser_feature_unsupported" })
+    )
+    expect(
+      routeEngine("https://example.com", {
+        backendPreference: "local-chromium",
+        localChromiumInstalled: true,
+      }).backend
+    ).toBe("local-chromium")
+    expect(routeEngine("https://example.com", { backendPreference: "embedded" }).backend).toBe(
+      "embedded"
+    )
+  })
+
+  it("lazily creates one headless local session on first use and announces it", async () => {
+    setLocalChromiumInstalled(true)
+    mockLocal.createSession.mockImplementation(async ({ id }: { id: string }) => ({ id }))
+    mockLocal.rpc.mockResolvedValue({ url: "https://example.com/", title: "Example" })
+    const announced: unknown[] = []
+    const listener = (event: Event) => announced.push((event as CustomEvent).detail)
+    window.addEventListener(BROWSER_AGENT_LOCAL_SESSION_EVENT, listener)
+    const { engine } = routeEngine("https://example.com")
+    expect(engine.backend).toBe("local-chromium")
+    await expect(engine.getPage()).resolves.toEqual({
+      url: "https://example.com/",
+      title: "Example",
+    })
+    await routeEngine("https://example.com").engine.getPage()
+    window.removeEventListener(BROWSER_AGENT_LOCAL_SESSION_EVENT, listener)
+    expect(mockLocal.createSession).toHaveBeenCalledTimes(1)
+    expect(mockLocal.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "local", headless: true })
+    )
+    const sessionId = (mockLocal.createSession.mock.calls[0][0] as { id: string }).id
+    expect(mockLocal.rpc).toHaveBeenCalledWith("browser.page", { sessionId })
+    expect(announced).toEqual([{ sessionId, backend: "local-chromium" }])
+    // Once created, routing hands out the concrete engine.
+    expect(routeEngine("https://example.com").engine).toBeInstanceOf(LocalChromiumEngine)
+  })
+
+  it("dedupes concurrent lazy session creation", async () => {
+    mockLocal.createSession.mockImplementation(async ({ id }: { id: string }) => ({ id }))
+    const [a, b] = await Promise.all([ensureAgentLocalEngine(), ensureAgentLocalEngine()])
+    expect(a).toBe(b)
+    expect(mockLocal.createSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("primes the install snapshot from the runtime status (desktop only)", async () => {
+    mockLocal.status.mockResolvedValue({ installed: true })
+    await primeLocalBrowserRouting()
+    // isTauri() is false under jest: the web shell never probes.
+    expect(mockLocal.status).not.toHaveBeenCalled()
   })
 
   it("keeps desktop localhost embedded and rejects unavailable explicit remote routing", () => {
@@ -153,19 +285,107 @@ describe("EmbeddedEngine", () => {
     })
   })
 
-  it("closes the embedded page by returning it to about:blank", async () => {
-    await new EmbeddedEngine().closePage("embedded")
-    expect(mockClient.embedStop).toHaveBeenCalled()
-    expect(mockClient.embedNavigate).toHaveBeenCalledWith("about:blank")
+  it("refuses to close its only page instead of blanking it (ADR-0201)", async () => {
+    await expect(new EmbeddedEngine().closePage("embedded")).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+    expect(mockClient.embedNavigate).not.toHaveBeenCalled()
+    expect(mockClient.embedStop).not.toHaveBeenCalled()
   })
 
-  it("reports remote-only file capabilities as unsupported", async () => {
+  it("reports upload as unsupported and lists the (empty) embedded downloads", async () => {
     const engine = new EmbeddedEngine()
     await expect(engine.setFiles("e1", ["fixture.txt"])).rejects.toMatchObject({
       code: "browser_feature_unsupported",
     })
-    await expect(engine.downloads()).rejects.toMatchObject({
-      code: "browser_feature_unsupported",
+    await expect(engine.downloads()).resolves.toEqual([])
+  })
+
+  it("reads, writes and clears web storage through the page", async () => {
+    const engine = new EmbeddedEngine()
+    mockClient.embedEvaluate.mockResolvedValueOnce({
+      ok: true,
+      value: { origin: "http://localhost:3000", entries: { a: "1" } },
+    })
+    await expect(engine.getStorage("local")).resolves.toEqual({
+      area: "local",
+      origin: "http://localhost:3000",
+      entries: { a: "1" },
+    })
+    expect(mockClient.embedEvaluate.mock.calls[0][0]).toContain("window.localStorage")
+    mockClient.embedEvaluate.mockResolvedValueOnce({ ok: true, value: { entries: { k: null } } })
+    await expect(engine.getStorage("session", "k")).resolves.toMatchObject({
+      entries: { k: null },
+    })
+    expect(mockClient.embedEvaluate.mock.calls[1][0]).toContain(
+      'window.sessionStorage.getItem("k")'
+    )
+    await expect(engine.setStorage("local", "k", 'v"1')).resolves.toEqual({ ok: true })
+    expect(mockClient.embedEvaluate.mock.calls[2][0]).toContain('setItem("k","v\\"1")')
+    await expect(engine.clearStorage("session")).resolves.toEqual({ ok: true })
+    mockClient.embedEvaluate.mockResolvedValueOnce({ ok: false, error: "SecurityError" })
+    await expect(engine.clearStorage("local")).rejects.toThrow("SecurityError")
+  })
+
+  it("clears cookies for one site or every public site through Rust", async () => {
+    const engine = new EmbeddedEngine()
+    mockTransportCall.mockResolvedValueOnce({ removed: 3, domain: "example.com" })
+    await expect(engine.clearCookies("example.com")).resolves.toEqual({ removed: 3 })
+    expect(mockTransportCall).toHaveBeenCalledWith("browser_cookie_clear", {
+      domain: "example.com",
+    })
+    mockTransportCall.mockResolvedValueOnce({ removed: 9 })
+    await expect(engine.clearCookies()).resolves.toEqual({ removed: 9 })
+    expect(mockTransportCall).toHaveBeenLastCalledWith("browser_cookie_clear_all", {})
+  })
+
+  it("refuses evaluate after a successful fill unless the call was approved", async () => {
+    const engine = new EmbeddedEngine()
+    mockFillCredential.mockResolvedValueOnce({ filled: false, username: null, reason: "no_match" })
+    await engine.fillCredential({})
+    expect(engine.credentialFilled).toBe(false)
+    await expect(engine.evaluate("1")).resolves.toEqual({ ok: true, value: "ok" })
+
+    mockFillCredential.mockResolvedValueOnce({ filled: true, username: "me" })
+    await engine.fillCredential({})
+    expect(engine.credentialFilled).toBe(true)
+    mockClient.embedEvaluate.mockClear()
+    await expect(
+      engine.evaluate("document.querySelector('[type=password]').value")
+    ).resolves.toEqual({
+      ok: false,
+      code: "browser_human_input_required",
+      error: expect.stringContaining("approval"),
+    })
+    expect(mockClient.embedEvaluate).not.toHaveBeenCalled()
+
+    await expect(
+      engine.evaluate("document.title", { credentialFillApproved: true })
+    ).resolves.toEqual({ ok: true, value: "ok" })
+    expect(mockClient.embedEvaluate).toHaveBeenCalledWith("document.title")
+
+    engine.resetCredentialFilled()
+    expect(engine.credentialFilled).toBe(false)
+  })
+
+  it("reports the lazy local session's post-fill lock as a value, not a method", async () => {
+    setLocalChromiumInstalled(true)
+    const route = routeEngine("https://example.com/")
+    expect(route.backend).toBe("local-chromium")
+    expect(route.engine.credentialFilled).toBe(false)
+  })
+
+  it("fills credentials through Rust and returns only the username", async () => {
+    mockFillCredential.mockResolvedValue({ filled: true, username: "me@example.com" })
+    await expect(new EmbeddedEngine().fillCredential({})).resolves.toEqual({
+      filled: true,
+      username: "me@example.com",
+      reason: null,
+    })
+    expect(mockFillCredential).toHaveBeenCalledWith({
+      target: "embedded",
+      credentialId: null,
+      url: "http://localhost/",
     })
   })
 
@@ -439,7 +659,7 @@ describe("embedded feature gaps", () => {
   it("names both the gap and the way out", () => {
     const message = embeddedUnsupportedMessage("setFiles")
     expect(message).toContain("File upload")
-    expect(message).toContain("remote-chromium")
+    expect(message).toContain("local Chromium")
     expect(message).toContain("Settings")
   })
 
@@ -452,8 +672,16 @@ describe("embedded feature gaps", () => {
           ["drag", () => engine.drag("a", "b")],
           ["handleDialog", () => engine.handleDialog({ accept: true })],
           ["setFiles", () => engine.setFiles("a", [])],
-          ["downloads", () => engine.downloads()],
+          ["closePage", () => engine.closePage("embedded")],
           ["scopedScreenshot", () => engine.screenshot({ scope: "fullPage" })],
+          ["pdf", () => engine.pdf()],
+          ["emulate", () => engine.emulate({ offline: true })],
+          ["listCookies", () => engine.listCookies()],
+          ["networkRequest", () => engine.networkRequest("r1")],
+          ["detectLoginForms", () => engine.detectLoginForms()],
+          ["extensions", () => engine.listExtensions()],
+          ["finalizeTabs", () => engine.finalizeTabs()],
+          ["downloadControl", () => engine.cancelDownload("d1")],
         ] as const
       ).map(async ([feature, call]) => {
         const error = await call().then(
@@ -471,5 +699,24 @@ describe("embedded feature gaps", () => {
     expect(thrown.map(([feature]) => feature).sort()).toEqual(
       Object.keys(EMBEDDED_UNSUPPORTED_FEATURES).sort()
     )
+  })
+})
+
+describe("redactNetworkHeaders", () => {
+  it("redacts credential-bearing headers case-insensitively", () => {
+    expect(
+      redactNetworkHeaders({
+        Authorization: "Bearer x",
+        cookie: "a=b",
+        "Set-Cookie": "c=d",
+        "content-type": "text/html",
+      })
+    ).toEqual({
+      Authorization: "[REDACTED]",
+      cookie: "[REDACTED]",
+      "Set-Cookie": "[REDACTED]",
+      "content-type": "text/html",
+    })
+    expect(redactNetworkHeaders(undefined)).toEqual({})
   })
 })

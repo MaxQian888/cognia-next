@@ -1,15 +1,27 @@
 /**
- * Agent-facing browser engine abstraction. Phase 1 ships only the embedded
- * webview and private WorkspaceRuntime Chromium engines behind the same router.
- * The trust tier (`resolveTrustTier`) decides routing and whether the page
- * content must be treated as untrusted. See ADR-0055.
+ * Agent-facing browser engine abstraction (ADR-0055). Four engines sit behind
+ * one router (ADR-0201): the embedded webview, the desktop's local Chromium
+ * and the user's own Chrome (both the workspace-runtime service on loopback),
+ * and the cloud WorkspaceRuntime Chromium (ADR-0085). The TARGET URL's trust
+ * tier (`resolveTrustTier`) decides routing and whether page content must be
+ * treated as untrusted.
  */
 import type { Screenshot } from "@/lib/automation/types"
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { browserClient } from "@/lib/browser/client"
+import { bestLocalDesktopBackend } from "@/lib/browser/backend-availability"
+import {
+  embeddedDownloadToSummary,
+  EMBEDDED_DOWNLOAD_EVENT,
+  type EmbeddedDownloadEvent,
+} from "@/lib/browser/downloads-client"
+import type { BrowserExtension } from "@/lib/browser/extensions-client"
+import { localBrowser } from "@/lib/browser/local-client"
+import { LocalChromiumEngine, type LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
+import { fillCredential, type CredentialFillReason } from "@/lib/browser/passwords"
 import { getActivePaneRect } from "@/lib/browser/pane-rect"
 import { SnapshotCache } from "@/lib/browser/snapshot-cache"
-import { isTauri } from "@/lib/tauri"
+import { isTauri, transport } from "@/lib/tauri"
 import { onTauriEvent } from "@/lib/tauri/events"
 import {
   BrowserSessionError,
@@ -19,6 +31,7 @@ import {
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import {
   BROWSER_EVENTS,
+  credentialFilledEvaluateRefusal,
   resolveTrustTier,
   type BrowserActionResult,
   type BrowserDialogState,
@@ -43,8 +56,14 @@ export interface BrowserEngine {
   pressKey(key: string, reference?: string): Promise<BrowserActionResult>
   /** Scroll an element into view (ref) or the page (direction/amount). */
   scroll(args: ScrollArgs): Promise<BrowserActionResult>
-  /** Evaluate a JS expression in the page (trust-gated by the caller). */
-  evaluate(expr: string): Promise<EvaluateResult>
+  /**
+   * Evaluate a JS expression in the page (trust-gated by the caller). Once
+   * {@link BrowserEngine.credentialFilled} is set the engine refuses with
+   * `browser_human_input_required` unless the caller passes
+   * `credentialFillApproved` for a person's per-call approval of THIS
+   * expression (ADR-0201).
+   */
+  evaluate(expr: string, options?: EvaluateOptions): Promise<EvaluateResult>
   readConsole(): Promise<ConsoleEntry[]>
   readNetwork(): Promise<NetworkEntry[]>
   back(): Promise<void | BrowserMutationResult>
@@ -69,7 +88,185 @@ export interface BrowserEngine {
   setZoom(zoom: number): Promise<BrowserZoomResult>
   find(query: string, options?: FindOptions): Promise<{ matches: number; index: number }>
   findClear(): Promise<void>
+
+  // ── ADR-0201 ─────────────────────────────────────────────────────────────
+  /** Which backend this engine drives. */
+  readonly backend: BrowserEngineBackend
+  /** Print the active page to a PDF in the downloads directory. */
+  pdf(options?: BrowserPdfOptions): Promise<BrowserPdfResult>
+  /** Device / viewport / locale / network emulation for the session. */
+  emulate(options: BrowserEmulateOptions): Promise<BrowserEmulateResult>
+  /** Cookie METADATA (never values), optionally for one domain. */
+  listCookies(domain?: string): Promise<BrowserCookieMeta[]>
+  clearCookies(domain?: string): Promise<{ removed: number }>
+  getStorage(area: BrowserStorageArea, key?: string): Promise<BrowserStorageResult>
+  setStorage(area: BrowserStorageArea, key: string, value: string): Promise<BrowserMutationResult>
+  clearStorage(area: BrowserStorageArea): Promise<BrowserMutationResult>
+  /** One request's headers and truncated body; auth headers redacted by the runtime. */
+  networkRequest(requestId: string): Promise<BrowserNetworkRequestDetail>
+  detectLoginForms(pageId?: string): Promise<BrowserLoginForm[]>
+  /**
+   * Rust fills the password; only `{filled, username}` comes back. A
+   * successful fill sets {@link BrowserEngine.credentialFilled}.
+   */
+  fillCredential(args: BrowserCredentialFillArgs): Promise<BrowserCredentialFillResult>
+  /**
+   * True once a vault credential was filled in this engine's session: the page
+   * may hold a password, so `evaluate` needs per-call approval. Absent on
+   * engines that cannot fill credentials (the cloud engine).
+   */
+  readonly credentialFilled?: boolean
+  listExtensions(): Promise<BrowserExtension[]>
+  openExtension(
+    extensionId: string,
+    page: "popup" | "options"
+  ): Promise<BrowserPageSummary | BrowserActionResult>
+  /** `user-chrome`: close the tabs this session opened, leave the user's alone. */
+  finalizeTabs(): Promise<{ closed: number }>
+  cancelDownload(downloadId: string): Promise<BrowserDownloadSummary>
+  deleteDownload(downloadId: string): Promise<{ deleted: boolean; id: string }>
+  /**
+   * Copy a finished download. Local Chromium / user Chrome ignore
+   * `targetPath`: the user picks the destination in a native save dialog.
+   */
+  saveDownload(downloadId: string, targetPath?: string): Promise<BrowserDownloadSummary>
 }
+
+/** Options for {@link BrowserEngine.evaluate}. */
+export interface EvaluateOptions {
+  /**
+   * A person approved this exact expression for this one call, after a vault
+   * credential was filled. Only the first-party browser tools set it, and only
+   * after their own confirmation dialog; the plugin engine facade drops it.
+   */
+  credentialFillApproved?: boolean
+}
+
+/** The engine-level backend names (the router's `EngineRoute.backend`). */
+export type BrowserEngineBackend = "embedded" | "local-chromium" | "user-chrome" | "remote-chromium"
+
+export interface BrowserPdfOptions {
+  /** Page to print; defaults to the active page. */
+  pageId?: string
+  landscape?: boolean
+  /** Default true. */
+  printBackground?: boolean
+  preferCSSPageSize?: boolean
+  /** 0.1–2. */
+  scale?: number
+  /** Inches, ≤ 100. */
+  paperWidth?: number
+  paperHeight?: number
+  /** Inches, ≤ 20. */
+  marginTop?: number
+  marginBottom?: number
+  marginLeft?: number
+  marginRight?: number
+  /** e.g. `"1-3, 5"`. */
+  pageRanges?: string
+  /** File name in the downloads directory (`.pdf` appended when missing). */
+  filename?: string
+}
+
+export interface BrowserPdfResult {
+  /** Absolute path in the downloads directory (desktop runtime). */
+  path?: string
+  download?: BrowserDownloadSummary
+}
+
+export interface BrowserEmulateOptions {
+  pageId?: string
+  /** Drop every override on the page. */
+  reset?: boolean
+  /** A Playwright device descriptor name (`iPhone 15`, `Pixel 7`, …). */
+  device?: string
+  viewport?: { width: number; height: number; deviceScaleFactor?: number }
+  userAgent?: string
+  colorScheme?: "light" | "dark" | "no-preference"
+  locale?: string
+  timezone?: string
+  /** `null` clears a previous override. */
+  geolocation?: { latitude: number; longitude: number; accuracy?: number } | null
+  offline?: boolean
+}
+
+export interface BrowserEmulateResult extends BrowserMutationResult {
+  /** Which overrides took effect (`viewport`, `userAgent`, `offline`, `reset`, …). */
+  applied?: string[]
+}
+
+export interface BrowserCookieMeta {
+  name: string
+  domain: string
+  path: string
+  /** Epoch seconds; null for a session cookie. */
+  expires: number | null
+  secure: boolean
+  httpOnly: boolean
+  sameSite?: string
+  /** Value length in bytes — the value itself never leaves the runtime. */
+  size?: number
+}
+
+export type BrowserStorageArea = "local" | "session"
+
+export interface BrowserStorageResult {
+  area: BrowserStorageArea
+  origin?: string
+  /**
+   * All entries (no `key`) or the one asked for. A `null` value is a real
+   * "absent" only when `valuesWithheld` is not set; see `exists` for a
+   * single-key read.
+   */
+  entries: Record<string, string | null>
+  /**
+   * The runtime withheld the values (a non-loopback origin on local
+   * Chromium): every value is `null` and says nothing about the real one.
+   */
+  valuesWithheld?: boolean
+  /** Single-key read: whether the key exists, reported even when its value is withheld. */
+  exists?: boolean
+}
+
+export interface BrowserNetworkRequestDetail {
+  id?: string
+  url: string
+  method: string
+  status: number | null
+  requestHeaders: Record<string, string>
+  responseHeaders: Record<string, string>
+  /** UTF-8 text, or base64 when `bodyEncoding` says so; null when withheld. */
+  body: string | null
+  bodyEncoding?: "utf8" | "base64" | null
+  truncated: boolean
+  bodyBytes?: number
+  /** True after human keyboard input or a credential fill: bodies are withheld. */
+  bodyRedacted?: boolean
+}
+
+export interface BrowserLoginForm {
+  ref: string
+  usernameRef?: string
+  passwordRef: string
+  origin: string
+}
+
+export interface BrowserCredentialFillArgs {
+  /** A vault credential id; omitted → the unique registrable-domain match. */
+  credentialId?: string
+  pageId?: string
+  /** The page URL to match against; defaults to the live page. */
+  url?: string
+}
+
+export interface BrowserCredentialFillResult {
+  filled: boolean
+  username: string | null
+  reason: CredentialFillReason | null
+}
+
+/** Re-exported: credential-header redaction lives with the wire types. */
+export { redactNetworkHeaders } from "@/lib/browser/protocol"
 
 export interface BrowserMutationResult extends BrowserDialogState {
   ok: boolean
@@ -205,11 +402,12 @@ export function embeddedSnapshotCacheStats() {
  * What the embedded webview cannot do, and what can.
  *
  * These are real gaps, not stubs: a single always-on-top child webview has no
- * tabs, no OS drag source, no native dialog channel, no file-chooser hook and
- * no download manager, and it can only be captured at its own viewport rect.
- * They are declared once so the refusal a model reads always says *why* and
- * *what enables it* — a bare "not supported" left the model retrying, and left
- * the human with no idea that a setting existed.
+ * tabs, no OS drag source, no native dialog channel, no file-chooser hook, no
+ * print-to-PDF, no emulation, no cookie jar introspection, no response bodies
+ * and no extension runtime, and it can only be captured at its own viewport
+ * rect. They are declared once so the refusal a model reads always says *why*
+ * and *what enables it* — a bare "not supported" left the model retrying, and
+ * left the human with no idea that a setting existed.
  *
  * Per working rule 7 this is the type-level half of that dormancy; the UI half
  * is the disabled control with a stated reason, and the test half pins this
@@ -217,24 +415,79 @@ export function embeddedSnapshotCacheStats() {
  */
 export const EMBEDDED_UNSUPPORTED_FEATURES = {
   createPage: "Creating pages",
+  closePage: "Closing the preview's only page",
   drag: "Drag and drop",
   handleDialog: "Native dialogs",
   setFiles: "File upload",
-  downloads: "Download quarantine",
   scopedScreenshot: "Scoped screenshots",
+  pdf: "Printing to PDF",
+  emulate: "Device and network emulation",
+  listCookies: "Listing cookies",
+  networkRequest: "Request and response details",
+  detectLoginForms: "Login form detection",
+  extensions: "Chrome extensions",
+  finalizeTabs: "Finalizing agent tabs",
+  downloadControl: "Cancelling, deleting or copying downloads",
 } as const
 
 export type EmbeddedUnsupportedFeature = keyof typeof EMBEDDED_UNSUPPORTED_FEATURES
 
 /** The refusal text for one of them, including the way out. */
 export function embeddedUnsupportedMessage(feature: EmbeddedUnsupportedFeature): string {
-  return `${EMBEDDED_UNSUPPORTED_FEATURES[feature]} is not supported by the embedded browser. It is available on the remote-chromium backend — enable the cloud browser in Settings → Companion and grant this domain.`
+  return `${EMBEDDED_UNSUPPORTED_FEATURES[feature]} is not supported by the embedded browser. It is available on the local Chromium backend — install it in Settings → Browser and call browser_open with backend "local-chromium" — or on the cloud browser (Settings → Companion, then grant this domain).`
+}
+
+function embeddedUnsupported(feature: EmbeddedUnsupportedFeature): BrowserSessionError {
+  return new BrowserSessionError("browser_feature_unsupported", embeddedUnsupportedMessage(feature))
+}
+
+/**
+ * Downloads the embedded webview reported this app session
+ * (`browser://download`, emitted by `src-tauri/src/browser/downloads.rs`).
+ * History across restarts is the Downloads panel's Dexie table; this map only
+ * answers `browser_downloads` for the agent.
+ */
+const embeddedDownloads = new Map<string, BrowserDownloadSummary>()
+let embeddedDownloadsInstalled = false
+
+function installEmbeddedDownloadFeed(): void {
+  if (embeddedDownloadsInstalled || !isTauri()) return
+  embeddedDownloadsInstalled = true
+  void onTauriEvent<EmbeddedDownloadEvent>(EMBEDDED_DOWNLOAD_EVENT, (event) => {
+    if (!event || typeof event.id !== "string") return
+    embeddedDownloads.set(
+      event.id,
+      embeddedDownloadToSummary(event, embeddedDownloads.get(event.id), Date.now())
+    )
+  }).catch(() => {
+    embeddedDownloadsInstalled = false
+  })
+}
+
+/** Test seam: forget embedded downloads and the listener registration. */
+export function resetEmbeddedDownloads(): void {
+  embeddedDownloads.clear()
+  embeddedDownloadsInstalled = false
+}
+
+/** A storage-area expression for the embedded page (`localStorage` / `sessionStorage`). */
+function storageObject(area: BrowserStorageArea): string {
+  return area === "session" ? "window.sessionStorage" : "window.localStorage"
+}
+
+async function evaluateOrThrow(expression: string): Promise<unknown> {
+  const result = await browserClient.embedEvaluate(expression)
+  if (!result.ok) throw new Error(result.error ?? "Page evaluation failed")
+  return result.value
 }
 
 /** Drives the in-app embedded webview via the Tauri `browser_embed_*` commands. */
 export class EmbeddedEngine implements BrowserEngine {
+  readonly backend = "embedded" as const
+  private credentialFilledInSession = false
   constructor() {
     installSnapshotInvalidation()
+    installEmbeddedDownloadFeed()
   }
   navigate(url: string) {
     emitAgentActivity(`navigate ${url}`)
@@ -271,7 +524,18 @@ export class EmbeddedEngine implements BrowserEngine {
     const { reference = "", ...rest } = args
     return browserClient.embedAct(reference, "scroll", rest as Record<string, unknown>)
   }
-  evaluate(expr: string) {
+  /** See {@link BrowserEngine.credentialFilled}. */
+  get credentialFilled(): boolean {
+    return this.credentialFilledInSession
+  }
+  /** Test seam / app-session reset: forget that a credential was filled. */
+  resetCredentialFilled(): void {
+    this.credentialFilledInSession = false
+  }
+  async evaluate(expr: string, options: EvaluateOptions = {}): Promise<EvaluateResult> {
+    if (this.credentialFilledInSession && options.credentialFillApproved !== true) {
+      return credentialFilledEvaluateRefusal()
+    }
     emitAgentActivity("evaluate")
     embeddedSnapshotCache.markDirty()
     return browserClient.embedEvaluate(expr)
@@ -317,37 +581,31 @@ export class EmbeddedEngine implements BrowserEngine {
       throw new BrowserSessionError("browser_page_not_found", "Browser page not found")
     }
   }
+  /**
+   * The embedded pane has exactly one page and the pane owns it. Closing it
+   * used to navigate to `about:blank`, which wiped whatever the user had open
+   * and reported success for a page that still existed (ADR-0201).
+   */
   async closePage(pageId: string): Promise<void> {
     await this.activatePage(pageId)
-    await this.stop()
-    await this.navigate("about:blank")
+    throw embeddedUnsupported("closePage")
   }
   async createPage(_url?: string): Promise<BrowserPageSummary> {
-    throw new BrowserSessionError(
-      "browser_feature_unsupported",
-      embeddedUnsupportedMessage("createPage")
-    )
+    throw embeddedUnsupported("createPage")
   }
   async drag(_sourceRef: string, _targetRef: string): Promise<BrowserActionResult> {
-    throw new BrowserSessionError("browser_feature_unsupported", embeddedUnsupportedMessage("drag"))
+    throw embeddedUnsupported("drag")
   }
   async handleDialog(_args: HandleDialogArgs): Promise<BrowserActionResult> {
-    throw new BrowserSessionError(
-      "browser_feature_unsupported",
-      embeddedUnsupportedMessage("handleDialog")
-    )
+    throw embeddedUnsupported("handleDialog")
   }
   async setFiles(_reference: string, _paths: string[]): Promise<void> {
-    throw new BrowserSessionError(
-      "browser_feature_unsupported",
-      embeddedUnsupportedMessage("setFiles")
-    )
+    throw embeddedUnsupported("setFiles")
   }
+  /** Downloads Rust routed into the downloads directory this app session. */
   async downloads(): Promise<BrowserDownloadSummary[]> {
-    throw new BrowserSessionError(
-      "browser_feature_unsupported",
-      embeddedUnsupportedMessage("downloads")
-    )
+    installEmbeddedDownloadFeed()
+    return [...embeddedDownloads.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
   }
   waitForText(text: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
     return pollUntil(() => browserClient.embedHasText(text), opts)
@@ -438,24 +696,131 @@ export class EmbeddedEngine implements BrowserEngine {
   findClear(): Promise<void> {
     return browserClient.embedFindClear()
   }
+  async pdf(_options?: BrowserPdfOptions): Promise<BrowserPdfResult> {
+    throw embeddedUnsupported("pdf")
+  }
+  async emulate(_options: BrowserEmulateOptions): Promise<BrowserEmulateResult> {
+    throw embeddedUnsupported("emulate")
+  }
+  async listCookies(_domain?: string): Promise<BrowserCookieMeta[]> {
+    throw embeddedUnsupported("listCookies")
+  }
+  /**
+   * Clear the embedded webview's cookies for one site (its registrable
+   * domain), or every public site when no domain is given. Local development
+   * hosts and the app's own origin are left alone by Rust.
+   */
+  async clearCookies(domain?: string): Promise<{ removed: number }> {
+    emitAgentActivity(domain ? `clear cookies ${domain}` : "clear cookies")
+    embeddedSnapshotCache.markDirty()
+    if (domain) {
+      const result = await transport.call<{ removed: number }>("browser_cookie_clear", { domain })
+      return { removed: result.removed }
+    }
+    return transport.call<{ removed: number }>("browser_cookie_clear_all", {})
+  }
+  async getStorage(area: BrowserStorageArea, key?: string): Promise<BrowserStorageResult> {
+    const store = storageObject(area)
+    const expression =
+      key === undefined
+        ? `(()=>{const s=${store};const o={};for(let i=0;i<s.length;i++){const k=s.key(i);if(k!==null)o[k]=s.getItem(k)}return {origin:location.origin,entries:o}})()`
+        : `({origin:location.origin,exists:${store}.getItem(${JSON.stringify(key)})!==null,entries:{[${JSON.stringify(key)}]:${store}.getItem(${JSON.stringify(key)})}})`
+    const value = (await evaluateOrThrow(expression)) as {
+      origin?: string
+      exists?: boolean
+      entries?: Record<string, string | null>
+    } | null
+    return {
+      area,
+      origin: value?.origin,
+      entries: value?.entries ?? {},
+      ...(key !== undefined && typeof value?.exists === "boolean" ? { exists: value.exists } : {}),
+    }
+  }
+  async setStorage(
+    area: BrowserStorageArea,
+    key: string,
+    value: string
+  ): Promise<BrowserMutationResult> {
+    emitAgentActivity(`storage set ${key}`)
+    embeddedSnapshotCache.markDirty()
+    await evaluateOrThrow(
+      `(${storageObject(area)}.setItem(${JSON.stringify(key)},${JSON.stringify(value)}),true)`
+    )
+    return { ok: true }
+  }
+  async clearStorage(area: BrowserStorageArea): Promise<BrowserMutationResult> {
+    emitAgentActivity(`storage clear ${area}`)
+    embeddedSnapshotCache.markDirty()
+    await evaluateOrThrow(`(${storageObject(area)}.clear(),true)`)
+    return { ok: true }
+  }
+  async networkRequest(_requestId: string): Promise<BrowserNetworkRequestDetail> {
+    throw embeddedUnsupported("networkRequest")
+  }
+  async detectLoginForms(_pageId?: string): Promise<BrowserLoginForm[]> {
+    throw embeddedUnsupported("detectLoginForms")
+  }
+  async fillCredential(args: BrowserCredentialFillArgs): Promise<BrowserCredentialFillResult> {
+    emitAgentActivity("fill credential")
+    embeddedSnapshotCache.markDirty()
+    const url = args.url ?? (await browserClient.embedGetUrl())
+    const result = await fillCredential({
+      target: "embedded",
+      credentialId: args.credentialId ?? null,
+      url,
+    })
+    if (result.filled === true) this.credentialFilledInSession = true
+    return {
+      filled: result.filled === true,
+      username: result.username ?? null,
+      reason: result.reason ?? null,
+    }
+  }
+  async listExtensions(): Promise<BrowserExtension[]> {
+    throw embeddedUnsupported("extensions")
+  }
+  async openExtension(
+    _extensionId: string,
+    _page: "popup" | "options"
+  ): Promise<BrowserPageSummary | BrowserActionResult> {
+    throw embeddedUnsupported("extensions")
+  }
+  async finalizeTabs(): Promise<{ closed: number }> {
+    throw embeddedUnsupported("finalizeTabs")
+  }
+  async cancelDownload(_downloadId: string): Promise<BrowserDownloadSummary> {
+    throw embeddedUnsupported("downloadControl")
+  }
+  async deleteDownload(_downloadId: string): Promise<{ deleted: boolean; id: string }> {
+    throw embeddedUnsupported("downloadControl")
+  }
+  async saveDownload(_downloadId: string, _targetPath: string): Promise<BrowserDownloadSummary> {
+    throw embeddedUnsupported("downloadControl")
+  }
 }
 
 const embedded = new EmbeddedEngine()
 
 export interface EngineRoute {
   engine: BrowserEngine
-  backend: "embedded" | "remote-chromium"
+  backend: BrowserEngineBackend
   tier: TrustTier
   /** Page content must be treated as untrusted (public origin). */
   untrusted: boolean
 }
 
+export type EngineBackendPreference =
+  "auto" | "embedded" | "remote-chromium" | "local-chromium" | "user-chrome"
+
 export interface EngineRoutingContext {
   hostProfile?: HostProfile
-  backendPreference?: "auto" | "embedded" | "remote-chromium"
+  backendPreference?: EngineBackendPreference
   remoteEnabled?: boolean
   remoteHealthy?: boolean
   domainAuthorized?: boolean
+  /** Override the primed "local Chromium is installed" snapshot. */
+  localChromiumInstalled?: boolean
 }
 
 let remoteEngine: BrowserEngine | null = null
@@ -470,40 +835,237 @@ export function configureRemoteBrowserEngine(
   remoteReadiness = readiness
 }
 
+// ── Desktop local runtime (ADR-0201) ─────────────────────────────────────────
+
+/** The session the browser pane is showing, when it shows a local backend. */
+let paneLocalEngine: LocalChromiumEngine | null = null
+/** A session the router created itself because no pane session was bound. */
+let agentLocalEngine: LocalChromiumEngine | null = null
+let localChromiumInstalled = false
+
+/** Window event the pane listens to so it can show a router-created session. */
+export const BROWSER_AGENT_LOCAL_SESSION_EVENT = "cognia:browser:agent-local-session"
+
+export interface BrowserAgentLocalSession {
+  sessionId: string
+  backend: LocalEngineBackend
+}
+
 /**
- * Resolve the host-neutral engine for a target URL. Desktop localhost remains
- * embedded by default; cloud/mobile/headless and explicitly-authorized public
- * origins use the currently-bound RemoteChromiumEngine. Active sessions never
- * migrate implicitly between backends.
+ * The browser pane binds (or, with `null`, unbinds) the local runtime session
+ * it is showing. While bound, the agent drives exactly that session — the page
+ * the user sees — for every URL, because the user chose that backend.
+ */
+export function configureLocalBrowserEngine(session: BrowserAgentLocalSession | null): void {
+  if (!session) {
+    paneLocalEngine = null
+    return
+  }
+  if (session.backend === "local-chromium") localChromiumInstalled = true
+  if (agentLocalEngine?.sessionId === session.sessionId) agentLocalEngine = null
+  paneLocalEngine = new LocalChromiumEngine(session.sessionId, session.backend)
+}
+
+/** Record whether the managed Chromium is installed (the pane / status poll feed this). */
+export function setLocalChromiumInstalled(installed: boolean): void {
+  localChromiumInstalled = installed
+  if (!installed) agentLocalEngine = null
+}
+
+/**
+ * Warm the routing snapshots `routeEngine` reads synchronously: the local
+ * Chromium install state. Safe to call repeatedly; a failed status read keeps
+ * the last known value.
+ */
+export async function primeLocalBrowserRouting(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const status = await localBrowser.status()
+    setLocalChromiumInstalled(status.installed)
+  } catch {
+    // No runtime command (older shell / web): keep the last known value.
+  }
+}
+
+/** Test seam: forget every local binding. */
+export function resetLocalBrowserRouting(): void {
+  paneLocalEngine = null
+  agentLocalEngine = null
+  localChromiumInstalled = false
+  lazyLocalPending = null
+}
+
+let lazyLocalPending: Promise<LocalChromiumEngine> | null = null
+
+function announceAgentLocalSession(session: BrowserAgentLocalSession): void {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return
+  window.dispatchEvent(
+    new CustomEvent<BrowserAgentLocalSession>(BROWSER_AGENT_LOCAL_SESSION_EVENT, {
+      detail: session,
+    })
+  )
+}
+
+/**
+ * Create (once) the router's own local Chromium session. Headless: no
+ * Chromium window pops up; the pane can still show it through the screencast
+ * once it adopts the session announced on `BROWSER_AGENT_LOCAL_SESSION_EVENT`.
+ */
+export async function ensureAgentLocalEngine(
+  backend: LocalEngineBackend = "local-chromium",
+  options: { headless?: boolean; browser?: string } = {}
+): Promise<LocalChromiumEngine> {
+  if (paneLocalEngine && paneLocalEngine.backend === backend) return paneLocalEngine
+  if (agentLocalEngine && agentLocalEngine.backend === backend) return agentLocalEngine
+  if (lazyLocalPending) {
+    const pending = await lazyLocalPending
+    if (pending.backend === backend) return pending
+  }
+  const sessionId = `agent-${backend}-${Math.random().toString(36).slice(2, 10)}`
+  lazyLocalPending = localBrowser
+    .createSession({
+      id: sessionId,
+      kind: backend === "user-chrome" ? "user-chrome" : "local",
+      headless: options.headless ?? true,
+      ...(backend === "user-chrome" && options.browser
+        ? { browser: options.browser as never }
+        : {}),
+    })
+    .then((created) => {
+      const engine = new LocalChromiumEngine(created?.id ?? sessionId, backend)
+      agentLocalEngine = engine
+      if (backend === "local-chromium") localChromiumInstalled = true
+      announceAgentLocalSession({ sessionId: engine.sessionId, backend })
+      return engine
+    })
+  try {
+    return await lazyLocalPending
+  } finally {
+    lazyLocalPending = null
+  }
+}
+
+/**
+ * A `BrowserEngine` whose first call creates the router's local session.
+ * `routeEngine` is synchronous; session creation is not — this bridges them
+ * without making every caller async.
+ */
+function lazyLocalEngine(backend: LocalEngineBackend): BrowserEngine {
+  const ready = () => ensureAgentLocalEngine(backend)
+  return new Proxy({ backend } as BrowserEngine, {
+    get(target, property) {
+      if (property === "backend") return backend
+      if (property === "then") return undefined
+      // A data property, not a method: report the session's post-fill lock
+      // once the session exists (none yet means nothing was filled).
+      if (property === "credentialFilled") {
+        return agentLocalEngine?.backend === backend ? agentLocalEngine.credentialFilled : false
+      }
+      return (...args: unknown[]) =>
+        ready().then((engine) => {
+          const method = (engine as unknown as Record<PropertyKey, unknown>)[property]
+          if (typeof method !== "function") {
+            throw new TypeError(`BrowserEngine has no method ${String(property)}`)
+          }
+          return (method as (...a: unknown[]) => unknown).apply(engine, args)
+        })
+    },
+  })
+}
+
+function localRoute(backend: LocalEngineBackend, tier: TrustTier): EngineRoute {
+  const engine =
+    paneLocalEngine?.backend === backend
+      ? paneLocalEngine
+      : agentLocalEngine?.backend === backend
+        ? agentLocalEngine
+        : lazyLocalEngine(backend)
+  return { engine, backend, tier, untrusted: tier === "public" }
+}
+
+/**
+ * Resolve the engine for a TARGET URL (ADR-0201). Callers pass the URL the
+ * next call will act on — for a navigation that is the destination, not the
+ * page being left.
+ *
+ * - Cloud / mobile / headless hosts use the bound remote engine.
+ * - An explicit preference is honoured, or refused with the reason.
+ * - A pane showing a local runtime session keeps the agent on that session.
+ * - A public URL the user authorized goes to the cloud browser when it is
+ *   ready; otherwise — and for every public URL — to the best desktop engine:
+ *   local Chromium once installed, the embedded webview before that.
+ * - Loopback URLs stay on the embedded webview.
+ *
+ * Active sessions never migrate implicitly between remote and local backends.
  */
 export function routeEngine(url: string, context: EngineRoutingContext = {}): EngineRoute {
   const tier = resolveTrustTier(url)
+  const untrusted = tier === "public"
   const preference = context.backendPreference ?? "auto"
   const remoteReady =
     !!remoteEngine &&
     (context.remoteEnabled ?? remoteReadiness.enabled) &&
     (context.remoteHealthy ?? remoteReadiness.healthy)
   const profile = context.hostProfile ?? (remoteEngine ? detectHostProfile() : "desktop")
-  const useRemote =
-    preference === "remote-chromium" ||
-    (preference === "auto" &&
-      (profile === "cloud-companion" ||
-        profile === "mobile-companion" ||
-        profile === "headless" ||
-        (tier === "public" && context.domainAuthorized === true)))
-  if (useRemote) {
+  const installed = context.localChromiumInstalled ?? localChromiumInstalled
+  const remoteRoute = (): EngineRoute => {
     if (!remoteReady || !remoteEngine) {
       throw new BrowserSessionError(
         "browser_feature_unsupported",
         "Remote browser is not enabled or healthy"
       )
     }
-    return {
-      engine: remoteEngine,
-      backend: "remote-chromium",
-      tier,
-      untrusted: tier === "public",
-    }
+    return { engine: remoteEngine, backend: "remote-chromium", tier, untrusted }
   }
-  return { engine: embedded, backend: "embedded", tier, untrusted: tier === "public" }
+  const embeddedRoute = (): EngineRoute => ({
+    engine: embedded,
+    backend: "embedded",
+    tier,
+    untrusted,
+  })
+
+  switch (preference) {
+    case "remote-chromium":
+      return remoteRoute()
+    case "embedded":
+      return embeddedRoute()
+    case "local-chromium":
+      if (!paneLocalEngine && !agentLocalEngine && !installed) {
+        throw new BrowserSessionError(
+          "browser_feature_unsupported",
+          "Local Chromium is not installed. Install it in Settings → Browser."
+        )
+      }
+      return localRoute("local-chromium", tier)
+    case "user-chrome":
+      if (
+        paneLocalEngine?.backend === "user-chrome" ||
+        agentLocalEngine?.backend === "user-chrome"
+      ) {
+        return localRoute("user-chrome", tier)
+      }
+      throw new BrowserSessionError(
+        "browser_feature_unsupported",
+        "No session is attached to your Chrome. Open the browser pane, choose “Your Chrome”, and allow the connection in Chrome."
+      )
+    case "auto":
+    default:
+      break
+  }
+
+  if (profile === "cloud-companion" || profile === "mobile-companion" || profile === "headless") {
+    return remoteRoute()
+  }
+  // The user chose a local runtime backend in the pane: drive what they see.
+  if (paneLocalEngine) return localRoute(paneLocalEngine.backend, tier)
+  if (tier === "trusted") return embeddedRoute()
+  if (context.domainAuthorized === true && remoteReady) return remoteRoute()
+  // Authorized-but-no-cloud and unauthorized public URLs alike: the best
+  // engine this desktop can run itself, instead of throwing.
+  if (agentLocalEngine?.backend === "user-chrome") return localRoute("user-chrome", tier)
+  // `profile` is the desktop here, so the shell half of the check holds.
+  return bestLocalDesktopBackend({ tauri: true, localChromiumInstalled: installed }) ===
+    "local-chromium"
+    ? localRoute("local-chromium", tier)
+    : embeddedRoute()
 }

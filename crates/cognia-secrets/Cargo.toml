@@ -47,10 +47,32 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 # Without these features keyring silently uses its mock store.
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "4", features = ["windows-native-keyring-store"] }
+# `user_presence`: Windows Hello (`UserConsentVerifier` + its window interop)
+# with the current-user credential prompt (`CredUIPromptForWindowsCredentialsW`
+# + `LogonUserW`) as the fallback. Same `windows` version as src-tauri.
+windows = { version = "0.62.2", features = [
+    "Foundation",
+    "Security_Credentials_UI",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_System_Com",
+    "Win32_System_WinRT",
+    "Win32_System_WindowsProgramming",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-future = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "4", features = ["apple-native-keyring-store"] }
 security-framework-sys = "2.17"
+# `user_presence`: LocalAuthentication's device-owner policy (Touch ID, Apple
+# Watch or the login password).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-local-authentication = { version = "0.3.2", default-features = false, features = ["std", "LAContext", "block2"] }
+block2 = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # `crypto-rust` encrypts the D-Bus session transfer with RustCrypto so no

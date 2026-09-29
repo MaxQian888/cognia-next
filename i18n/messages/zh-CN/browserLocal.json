@@ -1,0 +1,142 @@
+{
+  "address": {
+    "localFileFailed": "无法打开该本地文件：{message}"
+  },
+  "backend": {
+    "auto": "自动",
+    "chromiumHint": "Chromium（约 170 MB）只需下载一次，在本机运行，拥有独立的配置文件、标签页、下载和扩展。",
+    "copied": "已复制",
+    "copyInspectUrl": "复制地址",
+    "embedded": "内置预览",
+    "install": "安装 Chromium",
+    "installDone": "Chromium 已安装。",
+    "installExtracting": "正在解压 Chromium…",
+    "installFailed": "Chromium 安装失败：{message}",
+    "installProgress": "正在下载 Chromium… {received} / {total}",
+    "installProgressUnknown": "正在下载 Chromium… {received}",
+    "installing": "安装中…",
+    "label": "浏览器引擎",
+    "localChromium": "本地 Chromium",
+    "localChromiumMissing": "本地 Chromium（未安装）",
+    "recheck": "重新检测",
+    "remote": "云端浏览器",
+    "runtimeMissing": "此版本未包含本地浏览器运行时。",
+    "userChrome": "你的 Chrome",
+    "userChromeBrowser": "要连接的浏览器",
+    "userChromeConsent": "你的浏览器会在每次连接时请求你允许。Cognia 会在单独的窗口中打开标签页，并且只关闭它自己打开的标签页。",
+    "userChromeDisabled": "{browser} 未开启远程调试。请在其中打开 {url}，开启远程调试后重新检测。",
+    "userChromeNone": "本机未找到受支持的浏览器（Chrome、Edge、Brave）。",
+    "userChromeNotInstalled": "未安装 {browser}。",
+    "userChromeUnavailable": "你的 Chrome（不可用）"
+  },
+  "dialog": {
+    "accept": "确定",
+    "alert": "页面提示",
+    "beforeunload": "要离开此页面吗？",
+    "confirm": "页面询问",
+    "dismiss": "取消",
+    "failed": "无法响应页面对话框",
+    "prompt": "页面请求输入",
+    "promptLabel": "你的回答"
+  },
+  "downloads": {
+    "attach": "附加到对话",
+    "attachFailed": "无法将文件附加到对话",
+    "attached": "已附加到对话",
+    "button": "下载",
+    "buttonActive": "下载，{count, plural, other {# 个进行中}}",
+    "cancel": "取消下载",
+    "cancelFailed": "无法取消下载",
+    "clear": "清空列表",
+    "clearFailed": "无法清空列表",
+    "empty": "还没有下载任何内容。",
+    "noSession": "请先打开一个对话会话",
+    "open": "打开文件",
+    "openFailed": "无法打开文件",
+    "progress": "{received} / {total}",
+    "progressUnknown": "{received}",
+    "remove": "从列表中移除",
+    "removeFailed": "无法移除该条目",
+    "retry": "重新下载",
+    "reveal": "在文件夹中显示",
+    "revealFailed": "无法显示文件",
+    "saveAs": "另存为…",
+    "saveAsFailed": "无法保存文件副本",
+    "state": {
+      "attached": "已附加",
+      "cancelled": "已取消",
+      "completed": "已完成",
+      "failed": "失败",
+      "in_progress": "下载中",
+      "quarantined": "已隔离",
+      "saved": "已保存"
+    },
+    "title": "下载",
+    "tooLarge": "该文件超过 64 MB，无法附加到对话。",
+    "failedDetail": "下载失败：{message}",
+    "openBlocked": "此类文件不能在这里直接打开，请改用“在文件夹中显示”。"
+  },
+  "extensions": {
+    "button": "扩展"
+  },
+  "pane": {
+    "canvas": "本地浏览器页面",
+    "closeTab": "关闭标签页",
+    "closed": "浏览器会话已结束。",
+    "failed": "本地浏览器无法启动：{code}",
+    "newTab": "新标签页",
+    "restart": "重新启动",
+    "starting": "正在启动本地浏览器…",
+    "tabs": "标签页",
+    "untitled": "无标题"
+  },
+  "settings": {
+    "chromium": {
+      "installed": "已安装 · Chromium {version}",
+      "installedNoVersion": "已安装",
+      "notInstalled": "未安装",
+      "title": "本地 Chromium",
+      "uninstall": "卸载",
+      "uninstallFailed": "无法卸载 Chromium：{message}",
+      "uninstalled": "Chromium 已移除。"
+    },
+    "defaultBackend": "默认引擎",
+    "defaultBackendHint": "自动：安装后公共网站使用本地 Chromium，localhost 使用内置预览。",
+    "description": "浏览器面板使用的引擎、下载保存位置以及本地 Chromium 配置文件。",
+    "downloads": {
+      "askWhereToSave": "每次下载前询问保存位置",
+      "change": "更改…",
+      "defaultBadge": "默认",
+      "folder": "下载文件夹",
+      "loadFailed": "无法读取下载设置",
+      "reset": "使用系统下载文件夹",
+      "saveFailed": "无法保存下载设置",
+      "title": "下载",
+      "forbidden": "该文件夹不能用于存放下载内容。请选择主目录本身、系统文件夹或隐藏文件夹以外的文件夹。"
+    },
+    "extensions": {
+      "count": "{count, plural, =0 {未安装扩展} other {已安装 # 个扩展}}",
+      "description": "Chrome 扩展仅加载到本地 Chromium；你自己的 Chrome 保留它自己的扩展。",
+      "manage": "管理扩展",
+      "title": "扩展"
+    },
+    "passwords": {
+      "count": "{count, plural, =0 {没有保存的登录信息} other {已保存 # 条登录信息}}",
+      "description": "密码保存在系统钥匙串中，从不写入应用数据库。查看、复制或导出密码时需要验证你的身份。",
+      "manage": "管理密码",
+      "title": "密码"
+    },
+    "profile": {
+      "description": "本地 Chromium 将登录状态、历史记录和 Cookie 保存在独立的配置文件中，与 Cognia 内置预览分开。",
+      "reveal": "在文件夹中显示",
+      "title": "浏览器配置文件",
+      "revealFailed": "无法打开配置文件夹：{message}"
+    },
+    "title": "浏览器",
+    "webOnly": "本地浏览器仅在桌面应用中可用。"
+  },
+  "upload": {
+    "failed": "无法上传文件：{message}",
+    "singleFile": "此字段只接受一个文件，已仅上传 {name}。"
+  }
+}

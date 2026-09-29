@@ -1,0 +1,142 @@
+{
+  "address": {
+    "localFileFailed": "Could not open that local file: {message}"
+  },
+  "backend": {
+    "auto": "Automatic",
+    "chromiumHint": "Chromium (about 170 MB) is downloaded once and runs on this computer with its own profile, tabs, downloads and extensions.",
+    "copied": "Copied",
+    "copyInspectUrl": "Copy the address",
+    "embedded": "Built-in preview",
+    "install": "Install Chromium",
+    "installDone": "Chromium is installed.",
+    "installExtracting": "Unpacking Chromium…",
+    "installFailed": "Chromium could not be installed: {message}",
+    "installProgress": "Downloading Chromium… {received} of {total}",
+    "installProgressUnknown": "Downloading Chromium… {received}",
+    "installing": "Installing…",
+    "label": "Browser engine",
+    "localChromium": "Local Chromium",
+    "localChromiumMissing": "Local Chromium (not installed)",
+    "recheck": "Check again",
+    "remote": "Cloud browser",
+    "runtimeMissing": "This build does not include the local browser runtime.",
+    "userChrome": "Your Chrome",
+    "userChromeBrowser": "Browser to attach",
+    "userChromeConsent": "Your browser asks you to allow each connection. Cognia opens its tabs in a separate window and closes only the tabs it opened.",
+    "userChromeDisabled": "Remote debugging is off in {browser}. Open {url} in it, turn remote debugging on, then check again.",
+    "userChromeNone": "No supported browser (Chrome, Edge, Brave) was found on this computer.",
+    "userChromeNotInstalled": "{browser} is not installed.",
+    "userChromeUnavailable": "Your Chrome (unavailable)"
+  },
+  "dialog": {
+    "accept": "OK",
+    "alert": "The page says",
+    "beforeunload": "Leave this page?",
+    "confirm": "The page asks",
+    "dismiss": "Cancel",
+    "failed": "Could not answer the page's dialog",
+    "prompt": "The page asks for input",
+    "promptLabel": "Your answer"
+  },
+  "downloads": {
+    "attach": "Attach to chat",
+    "attachFailed": "Could not attach the file to the chat",
+    "attached": "Attached to the chat",
+    "button": "Downloads",
+    "buttonActive": "Downloads, {count, plural, one {# in progress} other {# in progress}}",
+    "cancel": "Cancel download",
+    "cancelFailed": "Could not cancel the download",
+    "clear": "Clear list",
+    "clearFailed": "Could not clear the list",
+    "empty": "Nothing downloaded yet.",
+    "noSession": "Open a chat session first",
+    "open": "Open file",
+    "openFailed": "Could not open the file",
+    "progress": "{received} of {total}",
+    "progressUnknown": "{received}",
+    "remove": "Remove from list",
+    "removeFailed": "Could not remove the entry",
+    "retry": "Download again",
+    "reveal": "Show in folder",
+    "revealFailed": "Could not show the file",
+    "saveAs": "Save as…",
+    "saveAsFailed": "Could not save a copy of the file",
+    "state": {
+      "attached": "Attached",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "failed": "Failed",
+      "in_progress": "Downloading",
+      "quarantined": "Quarantined",
+      "saved": "Saved"
+    },
+    "title": "Downloads",
+    "tooLarge": "This file is larger than 64 MB and can't be attached to the chat.",
+    "failedDetail": "Download failed: {message}",
+    "openBlocked": "This kind of file isn't opened from here. Use Show in folder instead."
+  },
+  "extensions": {
+    "button": "Extensions"
+  },
+  "pane": {
+    "canvas": "Local browser page",
+    "closeTab": "Close tab",
+    "closed": "The browser session ended.",
+    "failed": "The local browser could not start: {code}",
+    "newTab": "New tab",
+    "restart": "Start again",
+    "starting": "Starting the local browser…",
+    "tabs": "Tabs",
+    "untitled": "Untitled"
+  },
+  "settings": {
+    "chromium": {
+      "installed": "Installed · Chromium {version}",
+      "installedNoVersion": "Installed",
+      "notInstalled": "Not installed",
+      "title": "Local Chromium",
+      "uninstall": "Uninstall",
+      "uninstallFailed": "Could not uninstall Chromium: {message}",
+      "uninstalled": "Chromium was removed."
+    },
+    "defaultBackend": "Default engine",
+    "defaultBackendHint": "Automatic uses local Chromium for public sites once it is installed, and the built-in preview for localhost.",
+    "description": "Which engine the browser pane uses, where downloads go, and the local Chromium profile.",
+    "downloads": {
+      "askWhereToSave": "Ask where to save each file",
+      "change": "Change…",
+      "defaultBadge": "Default",
+      "folder": "Download folder",
+      "loadFailed": "Could not read the download settings",
+      "reset": "Use the system Downloads folder",
+      "saveFailed": "Could not save the download settings",
+      "title": "Downloads",
+      "forbidden": "That folder can't hold downloads. Choose one that isn't your home folder, a system folder or a hidden folder."
+    },
+    "extensions": {
+      "count": "{count, plural, =0 {No extensions installed} one {# extension installed} other {# extensions installed}}",
+      "description": "Chrome extensions load into local Chromium only; your own Chrome keeps its own.",
+      "manage": "Manage extensions",
+      "title": "Extensions"
+    },
+    "passwords": {
+      "count": "{count, plural, =0 {No saved sign-ins} one {# saved sign-in} other {# saved sign-ins}}",
+      "description": "Passwords are kept in the system keychain, never in the app's database. Revealing, copying or exporting one asks you to confirm it's you.",
+      "manage": "Manage passwords",
+      "title": "Passwords"
+    },
+    "profile": {
+      "description": "Local Chromium keeps its sign-ins, history and cookies in its own profile, separate from Cognia's built-in preview.",
+      "reveal": "Show in folder",
+      "title": "Browser profile",
+      "revealFailed": "Could not open the profile folder: {message}"
+    },
+    "title": "Browser",
+    "webOnly": "The local browser is available in the desktop app."
+  },
+  "upload": {
+    "failed": "Couldn't upload the file: {message}",
+    "singleFile": "This field takes one file, so only {name} was uploaded."
+  }
+}

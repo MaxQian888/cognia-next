@@ -72,7 +72,7 @@ describe("DesktopOnlyInitializers", () => {
     // WebviewHeartbeatInitializer and ExitConfirmationDialog moved up to
     // WindowLivenessInitializers. UpdateCheckInitializer moved out entirely:
     // the Update Center sweep covers every host, not just the desktop.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(24)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(25)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 

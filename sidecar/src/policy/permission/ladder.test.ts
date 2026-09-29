@@ -7,7 +7,13 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { decidePermission, firstHardDenial } from "./ladder.ts"
+import {
+  buildApprovalRequiredSet,
+  buildPerCallApprovalSet,
+  decidePermission,
+  firstHardDenial,
+  requiresPerCallApproval,
+} from "./ladder.ts"
 import type { LadderCall, LadderPolicy, LadderStep, RailProfile } from "./ladder.ts"
 
 const ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cognia-ladder-unit-")))
@@ -252,4 +258,82 @@ test("firstHardDenial runs only the checks it is given and never counts a doom c
   assert.deepEqual(firstHardDenial(rail, ["ruleset"], c), { code: "ruleset" })
   assert.equal(firstHardDenial(rail, ["interrupted"], c), undefined)
   assert.deepEqual(guard.seen, [])
+})
+
+// ADR-0201: a plugin tool that declared `requiresApproval` (browser_fill_credential)
+// asks a human on every call — no grant, ruleset allow, acceptEdits or bypass
+// may skip it, and dontAsk denies it.
+const FILL = "mcp__cognia-plugin-tools__browser_fill_credential"
+const NAVIGATE = "mcp__cognia-plugin-tools__browser_navigate"
+const SET_FILES = "mcp__cognia-plugin-tools__browser_set_files"
+const MANIFEST = [
+  { name: "browser_fill_credential", requiresApproval: true },
+  { name: "browser_set_files", requiresApproval: true },
+  { name: "browser_evaluate", requiresApproval: true },
+  { name: "browser_navigate", requiresApproval: false },
+  { name: "ask_user", requiresApproval: true },
+  { name: 42, requiresApproval: true },
+  null,
+]
+const PER_CALL = buildPerCallApprovalSet(MANIFEST)
+
+test("the per-call set keeps only listed plugin tools that declared requiresApproval", () => {
+  assert.deepEqual(
+    [...buildApprovalRequiredSet(MANIFEST)],
+    ["browser_fill_credential", "browser_set_files", "browser_evaluate"]
+  )
+  assert.deepEqual([...PER_CALL], ["browser_fill_credential", "browser_set_files"])
+  assert.equal(requiresPerCallApproval(SET_FILES, PER_CALL), true)
+  assert.deepEqual([...buildPerCallApprovalSet([{ name: "browser_set_files" }])], [])
+  // A name alone does not qualify: the manifest must declare it.
+  assert.deepEqual([...buildPerCallApprovalSet([{ name: "browser_fill_credential" }])], [])
+  assert.deepEqual([...buildPerCallApprovalSet(undefined)], [])
+  assert.equal(requiresPerCallApproval(FILL, PER_CALL), true)
+  assert.equal(requiresPerCallApproval(NAVIGATE, PER_CALL), false)
+  assert.equal(requiresPerCallApproval("mcp__other__browser_fill_credential", PER_CALL), false)
+  assert.equal(requiresPerCallApproval(FILL, null), false)
+})
+
+test("a per-call tool skips every allow shortcut and asks", () => {
+  const steps = profile(["bypass", "grants"], { acceptsEdit: () => true })
+  for (const tool of [FILL, SET_FILES]) {
+    for (const mode of ["bypassPermissions", "acceptEdits", "default"]) {
+      const granted = call(
+        tool,
+        { ref: "f", paths: ["a.txt"] },
+        {
+          policy: policy({
+            mode,
+            alwaysAllow: [tool],
+            suppress: [tool],
+            perCallApproval: PER_CALL,
+          }),
+        }
+      )
+      assert.deepEqual(decidePermission(steps, granted), { kind: "ask" })
+    }
+  }
+  // The same grants still allow a tool that did not declare it.
+  const other = call(
+    NAVIGATE,
+    {},
+    {
+      policy: policy({ alwaysAllow: [NAVIGATE], perCallApproval: PER_CALL }),
+    }
+  )
+  assert.deepEqual(decidePermission(steps, other), { kind: "allow" })
+})
+
+test("dontAsk denies a per-call tool even when granted", () => {
+  for (const tool of [FILL, SET_FILES]) {
+    const outcome = decidePermission(
+      profile(["dont-ask"]),
+      call(
+        tool,
+        {},
+        { policy: policy({ mode: "dontAsk", alwaysAllow: [tool], perCallApproval: PER_CALL }) }
+      )
+    )
+    assert.deepEqual(outcome, { kind: "deny", reason: { code: "dont-ask" } })
+  }
 })

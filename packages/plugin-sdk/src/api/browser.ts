@@ -30,3 +30,11 @@ export type {
   BrowserAnnotationRow,
   BrowserAnnotationSeverity,
 } from "@/lib/db/browser-annotations"
+
+/**
+ * The `browser_*` tool table (ADR-0201): names, agent-facing descriptions,
+ * input schemas and approval flags. Pure data, shared by the bundled Browser
+ * Tools plugin and the External Bridge MCP server so an external agent never
+ * sees a tool shape the in-app agent does not have.
+ */
+export * from "./browser-tool-definitions"

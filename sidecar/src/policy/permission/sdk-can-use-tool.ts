@@ -16,7 +16,13 @@ import { PLUGIN_TOOLS_SERVER_NAME, qualifiedToolName } from "../tool-catalog/nam
 import { restorePluginToolName } from "../tool-catalog/plugin-aliases.ts"
 import { awaitApproval } from "./approval.ts"
 import type { ApprovalAnswer, PendingApproval } from "./approval.ts"
-import { decidePermission, firstHardDenial } from "./ladder.ts"
+import {
+  buildApprovalRequiredSet,
+  buildPerCallApprovalSet,
+  decidePermission,
+  firstHardDenial,
+  requiresPerCallApproval,
+} from "./ladder.ts"
 import type {
   DenyReason,
   HardCheck,
@@ -79,6 +85,7 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     sandboxScope: sendOptions.builtinProcessSandbox,
     cwd: sendOptions.cwd,
     pluginAccess: buildPluginAccessMap(sendOptions.pluginTools),
+    perCallApproval: buildPerCallApprovalSet(sendOptions.pluginTools),
   }
 }
 
@@ -98,8 +105,9 @@ function renderDenial(reason: DenyReason, toolName: string): string {
       return `plan mode: tool "${toolName}" is not permitted (read-only tools only)`
     case "credential-path":
       return "denied: path escapes the workspace into a protected credential location"
-    // Not steps of this rail: the SDK enforces dontAsk itself, and a
-    // `canUseTool` call always has the renderer to ask.
+    // Not steps of this rail: the SDK enforces dontAsk itself (a per-call
+    // tool is refused below as defence in depth), and a `canUseTool` call
+    // always has the renderer to ask.
     case "dont-ask":
       return `dontAsk mode: tool "${toolName}" is not pre-approved`
     case "no-approval-channel":
@@ -199,6 +207,24 @@ export function createAnthropicCanUseTool({
     }
     if (outcome.kind === "allow") return Promise.resolve({ behavior: "allow", updatedInput: input })
 
+    const perCall = requiresPerCallApproval(
+      toolName,
+      buildPerCallApprovalSet(sendOptions.pluginTools)
+    )
+    // The SDK enforces dontAsk before calling here, so this is defence in
+    // depth: an approve-every-call tool is never asked about under dontAsk,
+    // it is denied (ADR-0201).
+    if (perCall && sendOptions.permissionMode === "dontAsk") {
+      return Promise.resolve({
+        behavior: "deny",
+        message: renderDenial({ code: "dont-ask" }, toolName),
+      })
+    }
+    // Declared `requiresApproval`: the auto-mode runner must defer to a human.
+    const declared = requiresPerCallApproval(
+      toolName,
+      buildApprovalRequiredSet(sendOptions.pluginTools)
+    )
     const requestId = randomUUID()
     // Boundary instrumentation (COGNIA_SIDECAR_VERBOSE=1): the Agent SDK path
     // forces a `canUseTool` round-trip for every gated tool, so when a turn
@@ -220,8 +246,11 @@ export function createAnthropicCanUseTool({
       blockedPath: ctx.blockedPath,
       decisionReason: ctx.decisionReason,
       suggestions: ctx.suggestions,
-      defaultToNo: ctx.defaultToNo,
-      suppressAlwaysAllowRule: ctx.suppressAlwaysAllowRule,
+      defaultToNo: perCall ? true : ctx.defaultToNo,
+      // A per-call tool must not be turned into a standing grant.
+      suppressAlwaysAllowRule: perCall ? true : ctx.suppressAlwaysAllowRule,
+      ...(declared ? { requiresApproval: true } : {}),
+      ...(perCall ? { requiresPerCallApproval: true } : {}),
       ...(sendOptions.remoteExecutionContext
         ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
         : {}),
@@ -241,7 +270,10 @@ export function createAnthropicCanUseTool({
       entry: {
         input,
         suggestions: ctx.suggestions,
-        suppressAlwaysAllowRule: ctx.suppressAlwaysAllowRule,
+        // A per-call tool's "always allow" must never persist the SDK's
+        // suggested rule: a stored allow rule would let the SDK skip this
+        // callback entirely on the next call (ADR-0201).
+        suppressAlwaysAllowRule: perCall ? true : ctx.suppressAlwaysAllowRule,
       },
       signal: ctx.signal,
       // A distinct terminal: the renderer learns the waiter is gone and can

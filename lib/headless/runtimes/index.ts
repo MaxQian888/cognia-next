@@ -124,6 +124,11 @@
  * - `session-import-watch-initializer` — owns a Tauri filesystem watcher over
  *   desktop external-agent history paths; its commands are client-local and
  *   internal-only in the canonical protocol manifest.
+ * - `browser-downloads-initializer` — persists desktop browser download events
+ *   (`browser://download` from the embedded webview, `download.updated` from the
+ *   local Chromium runtime, both re-emitted by Tauri) into the renderer's Dexie
+ *   history (ADR-0201). Only the desktop app hosts those browsers; a headless
+ *   host has neither the Tauri event source nor a browser to download from.
  * - `vector-credential-migration-initializer` — migrates browser localStorage
  *   secrets into the desktop OS keyring; headless hosts have neither source
  *   storage nor a renderer-owned credential settings store to rehydrate.

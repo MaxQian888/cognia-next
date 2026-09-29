@@ -1,0 +1,288 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "failed": "Something went wrong. Try again.",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "retry": "Retry"
+  },
+  "presence": {
+    "cancelled": "Verification was cancelled.",
+    "denied": "Your identity could not be verified. Nothing was revealed.",
+    "failed": "Identity verification failed. Nothing was revealed.",
+    "unavailable": "This device has no way to verify your identity (Touch ID, Windows Hello or a system password prompt), so saved passwords stay hidden."
+  },
+  "passwords": {
+    "actions": "Actions for {origin}",
+    "add": "Add password",
+    "copied": "Password copied. The clipboard clears in 30 seconds.",
+    "copy": "Copy password",
+    "count": "{count, plural, one {# saved password} other {# saved passwords}}",
+    "delete": "Delete",
+    "deleteConfirm": {
+      "confirm": "Delete password",
+      "description": "The password for {username} on {origin} is removed from this device. This cannot be undone.",
+      "title": "Delete this password?"
+    },
+    "deleted": "Password deleted.",
+    "description": "Passwords are kept in the operating system's secure store. Revealing, copying or exporting one asks you to verify it's you.",
+    "edit": "Edit",
+    "empty": "No saved passwords yet. Add one or import from another browser.",
+    "emptySearch": "No saved password matches “{query}”.",
+    "export": {
+      "action": "Export CSV",
+      "confirm": "Choose where to save",
+      "done": "Passwords exported.",
+      "failed": "Could not export passwords.",
+      "warning": "The exported file contains every password in plain text. Store it somewhere safe and delete it when you are done."
+    },
+    "form": {
+      "addTitle": "Add password",
+      "editPasswordHint": "Leave empty to keep the current password.",
+      "editTitle": "Edit password",
+      "invalidOrigin": "Enter a web address such as https://example.com.",
+      "note": "Note",
+      "origin": "Website",
+      "originPlaceholder": "https://example.com",
+      "password": "Password",
+      "passwordRequired": "Enter a password.",
+      "save": "Save",
+      "saved": "Password saved.",
+      "saving": "Saving…",
+      "updated": "Password updated.",
+      "username": "Username",
+      "usernameRequired": "Enter a username."
+    },
+    "hide": "Hide password",
+    "import": {
+      "action": "Import",
+      "appBound": "{count, plural, one {# password was} other {# passwords were}} protected by Chrome's App-Bound Encryption and skipped. Export them from Chrome as CSV (Settings → Passwords → Export) and import that file instead.",
+      "browserTab": "From a browser",
+      "chooseFile": "Choose CSV file…",
+      "csvTab": "From a CSV file",
+      "description": "Passwords are read on this device and written straight into the secure store. They never pass through this window.",
+      "errors": "{count, plural, one {# row could not be imported.} other {# rows could not be imported.}}",
+      "failed": "Import failed.",
+      "fileFilter": "CSV file",
+      "format": "File format",
+      "formats": {
+        "1password": "1Password",
+        "auto": "Detect automatically",
+        "bitwarden": "Bitwarden",
+        "chrome": "Chrome, Edge or Brave",
+        "firefox": "Firefox",
+        "generic": "Generic (url, username, password)",
+        "lastpass": "LastPass",
+        "safari": "Safari"
+      },
+      "importing": "Importing…",
+      "noSources": "No browser with saved passwords was found on this device.",
+      "primaryPasswordSet": "This Firefox profile is protected by a Primary Password, which Cognia cannot unlock. Export the passwords from Firefox as CSV and import that file instead.",
+      "profile": "Profile",
+      "reason": {
+        "not_installed": "Not installed",
+        "unsupported_os": "Not supported on this system"
+      },
+      "result": "Imported {imported}, updated {updated}, skipped {skipped}.",
+      "run": "Import passwords",
+      "source": "Browser",
+      "sourceWithReason": "{label} ({reason})",
+      "title": "Import passwords"
+    },
+    "lastUsed": "Last used {date}",
+    "loadFailed": "Could not load saved passwords.",
+    "reveal": "Show password",
+    "search": "Search passwords",
+    "searchPlaceholder": "Search by website or username",
+    "source": {
+      "csv": "CSV",
+      "import": "Imported",
+      "manual": "Added manually",
+      "saved": "Saved while browsing"
+    },
+    "title": "Passwords"
+  },
+  "autofill": {
+    "account": "Account",
+    "description": "Cognia fills the form directly. The password is never shown here.",
+    "dismiss": "Not now",
+    "failed": "Could not fill the sign-in form.",
+    "fill": "Fill",
+    "filled": "Signed-in details filled for {username}.",
+    "filling": "Filling…",
+    "reason": {
+      "ambiguous": "More than one saved password matches. Choose an account.",
+      "no_login_form": "The sign-in form is no longer on the page.",
+      "no_match": "No saved password matches this site."
+    },
+    "region": "Saved password available",
+    "title": "Sign in with a saved password"
+  },
+  "savePrompt": {
+    "dismiss": "Not now",
+    "failed": "Could not save the password.",
+    "more": "{count, plural, one {# more waiting} other {# more waiting}}",
+    "never": "Never for this site",
+    "region": "Save password",
+    "save": "Save",
+    "saved": "Password saved.",
+    "saveDescription": "Save the password for {username} on {origin}?",
+    "saveTitle": "Save password?",
+    "update": "Update",
+    "updateDescription": "Update the saved password for {username} on {origin}?",
+    "updated": "Password updated.",
+    "updateTitle": "Update password?"
+  },
+  "extensions": {
+    "cancel": "Cancel",
+    "checkUpdates": "Check for updates",
+    "checking": "Checking…",
+    "description": "Extensions run in the local Chromium browser. Enabling, disabling or installing one restarts open local sessions.",
+    "disable": "Disable {name}",
+    "empty": "No extensions installed.",
+    "enable": "Enable {name}",
+    "errors": {
+      "crx_id_mismatch": "The package's ID does not match the extension you asked for.",
+      "crx_invalid": "That file is not a valid Chrome extension package.",
+      "extension_not_found": "That extension is no longer installed.",
+      "extensions_unsupported_backend": "Extensions only run in the local Chromium browser.",
+      "manifest_invalid": "The extension's manifest is missing or invalid.",
+      "webstore_unavailable": "The Chrome Web Store could not be reached, or it does not offer that extension.",
+      "zip_path_traversal": "The extension package contains unsafe file paths and was rejected.",
+      "extension_install_expired": "That install was not confirmed in time. Start it again."
+    },
+    "failed": "The extension action failed.",
+    "hostPermissions": "{count, plural, one {# site} other {# sites}}",
+    "install": {
+      "crx": "Install .crx file…",
+      "done": "Installed {name}.",
+      "installing": "Installing…",
+      "label": "Chrome Web Store ID or link",
+      "placeholder": "Extension ID or chromewebstore.google.com link",
+      "unpacked": "Load unpacked folder…",
+      "webstore": "Install"
+    },
+    "loadFailed": "Could not load extensions.",
+    "loading": "Loading extensions…",
+    "noUpdates": "All extensions are up to date.",
+    "openOptions": "Options",
+    "openPopup": "Open popup",
+    "openRequiresSession": "Open a local Chromium session to use extension pages.",
+    "permissions": "{count, plural, one {# permission} other {# permissions}}",
+    "remove": "Remove",
+    "removeConfirm": {
+      "confirm": "Remove extension",
+      "description": "{name} and its local data are removed from Cognia's browser.",
+      "title": "Remove this extension?"
+    },
+    "removed": "Removed {name}.",
+    "retry": "Retry",
+    "source": {
+      "crx": "CRX file",
+      "unpacked": "Unpacked",
+      "webstore": "Web Store"
+    },
+    "title": "Extensions",
+    "unsupported": {
+      "embedded": "The built-in preview cannot run Chrome extensions. Switch the browser to local Chromium to use them. Installed extensions are listed below for reference.",
+      "remote": "The cloud browser does not load extensions from this device. Switch to local Chromium to use them.",
+      "title": "Extensions are not active here",
+      "userChrome": "Your own Chrome keeps its own extensions. Manage them in Chrome; Cognia's extension set applies only to its local Chromium."
+    },
+    "update": "Update to {version}",
+    "updated": "Updated {name}.",
+    "updatesAvailable": "{count, plural, one {# update available} other {# updates available}}",
+    "version": "Version {version}",
+    "installConfirm": {
+      "allSites": "All sites",
+      "confirm": "Install extension",
+      "description": "Version {version}. Review what this extension may access before you install it.",
+      "hostPermissions": "Sites it can read and change",
+      "none": "This extension asks for no special permissions.",
+      "permissions": "Permissions",
+      "title": "Install {name}?"
+    }
+  },
+  "cookieImport": {
+    "all": "All sites",
+    "allHint": "Every cookie in the profile is imported. Use this only for a profile you fully trust.",
+    "browser": "Browser",
+    "consent": {
+      "continue": "I understand, continue",
+      "description": "Cognia will read saved sign-in cookies from the browser profile you pick and add them to this browser.",
+      "localOnly": "Cookie values stay on this device and never enter this window, logs, or Cognia's servers.",
+      "title": "Allow local cookie access?"
+    },
+    "description": "Reuse sign-ins from another browser on this device.",
+    "domains": "Chosen sites",
+    "domainsCount": "{count, plural, one {# cookie} other {# cookies}}",
+    "domainsEmpty": "This profile has no cookies.",
+    "domainsLoadFailed": "Could not list this profile's sites.",
+    "domainsNoMatch": "No site matches “{query}”.",
+    "domainsSearch": "Search sites",
+    "domainsSelected": "{count, plural, one {# site selected} other {# sites selected}}",
+    "featureDisabled": "Enable browser cookie import in Settings → Desktop first.",
+    "fullDiskAccess": {
+      "description": "macOS protects Safari's cookies. Give Cognia Full Disk Access in System Settings → Privacy & Security → Full Disk Access, then restart Cognia.",
+      "open": "Open Full Disk Access settings",
+      "openFailed": "Could not open System Settings. Open Privacy & Security → Full Disk Access yourself."
+    },
+    "import": "Import",
+    "importing": "Importing…",
+    "keychainHint": "Your system may ask for permission to read the browser's saved keys. Denying it leaves this browser unchanged.",
+    "loadFailed": "Could not list browsers on this device.",
+    "noSources": "No supported browser was found on this device.",
+    "openSettings": "Open Desktop settings",
+    "profile": "Profile",
+    "reason": {
+      "full_disk_access_required": "Needs Full Disk Access",
+      "not_installed": "Not installed",
+      "unsupported_os": "Not supported on this system"
+    },
+    "result": {
+      "appBound": "{count, plural, one {# cookie was} other {# cookies were}} protected by Chrome's App-Bound Encryption and skipped. Sign in once in this browser, or use your own Chrome instead.",
+      "failed": "Cookie import failed. No cookie values were exposed.",
+      "fullDiskAccessRequired": "Cognia needs Full Disk Access to read Safari's cookies.",
+      "noMatchingCookies": "The selected profile has no cookies for that scope.",
+      "noProfile": "The selected browser profile is no longer available.",
+      "ok": "Imported {count, plural, one {# cookie} other {# cookies}}.",
+      "permissionDenied": "Access to the browser's saved keys was denied. No cookies were imported.",
+      "unsupported": "Cookie import is unavailable for this browser on this system."
+    },
+    "scope": "What to import",
+    "site": "This site ({host})",
+    "sourceWithReason": "{label} ({reason})",
+    "sink": {
+      "embedded": "Cookies are added to the built-in preview.",
+      "local": "Cookies are added to the local Chromium session.",
+      "localNoSession": "Open a local Chromium session first; cookies are added to a running session.",
+      "unsupported": "The cloud browser runs on another machine, so it cannot receive cookies from this device."
+    },
+    "title": "Import sign-in cookies"
+  },
+  "cookieAction": {
+    "chooseImport": "Choose what to import…",
+    "localClearDescription": "Remove {domain}'s cookies from the local Chromium session.",
+    "localCleared": "Cleared {domain}'s cookies and reloaded the page.",
+    "localNoSession": "Open a local Chromium session to manage its cookies.",
+    "userChromeClear": "This is your own Chrome profile. Manage its cookies in Chrome's settings."
+  },
+  "localContent": {
+    "devServers": "Local dev servers",
+    "devServersEmpty": "No local web servers are running.",
+    "devServersFailed": "Could not look for local servers.",
+    "openFile": "Open file…",
+    "openFolder": "Open folder…",
+    "openServer": "Open {url}",
+    "port": "Port {port}",
+    "portWithProcess": "Port {port} · {process}",
+    "serveFailed": "Could not open that file in the browser.",
+    "served": "Shared folders",
+    "servedDescription": "These folders are served only to this device while Cognia runs.",
+    "serving": "Opening…",
+    "stop": "Stop sharing",
+    "stopFailed": "Could not stop sharing that folder.",
+    "title": "Open local content"
+  }
+}

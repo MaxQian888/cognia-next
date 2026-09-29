@@ -82,6 +82,7 @@ import { isVideoPreprocessSettings } from "@/lib/chat/attachments/video/settings
 import { isContextSelectionRef } from "@/lib/chat/mentions/selection-guard"
 import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
+import { useBrowserDownloadAttachIntake } from "@/hooks/browser/use-browser-download-attach-intake"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
 import { useComposerVideoRoute } from "./composer/hooks/use-composer-video-route"
 import { ComposerBox } from "./composer/composer-box"
@@ -725,6 +726,7 @@ function ComposerInner(props: InnerProps) {
     captureSmartSnapshot,
     smartSnapshotPending,
     stageRemoteDoc,
+    acceptFiles,
   } = useAttachmentIntake({
     attachments,
     attachmentCitations,
@@ -753,6 +755,9 @@ function ComposerInner(props: InnerProps) {
   // and the footer chip agree with what a send actually runs in.
   const cwd = useEffectiveCwd(props.session)
   const sessionId = props.session?.id ?? null
+  // ADR-0201: an agent's `browser_download {action:"attach"}` for this chat
+  // lands here as a staged attachment, through the same intake gate.
+  useBrowserDownloadAttachIntake({ sessionId, acceptFiles })
   // Pending sends must settle against the draft that is currently mounted,
   // rather than the input/attachments captured before their first await.
   const currentDraftRef = useRef({

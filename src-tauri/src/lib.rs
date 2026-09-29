@@ -494,6 +494,12 @@ pub fn run() {
         .manage(webview_watchdog::RendererLifecycle::new())
         .manage(browser::embedded::EmbeddedBrowserLease::default())
         .manage(browser::cdp::NativeCdpGrants::default())
+        // ADR-0201 — local Chromium runtime, the shared Downloads directory and
+        // the loopback server for local files.
+        .manage(browser::local::LocalBrowserState::default())
+        .manage(browser::downloads::BrowserDownloadsState::default())
+        .manage(browser::local_content::LocalContentState::default())
+        .manage(browser::passwords::PasswordVaultState::default())
         // Arm the boot-time force-show safety net only after the initial main
         // document has finished loading. In dev, Next.js compiles `/` on its
         // first request and can legitimately take longer than the 8s grace;
@@ -1594,10 +1600,61 @@ pub fn run() {
             browser::embedded::browser_embed_set_frozen,
             browser::embedded::browser_embed_capture,
             browser::embedded::browser_embed_destroy,
-            browser::cookie_import::browser_cookie_import_available,
-            browser::cookie_import::browser_cookie_import,
+            browser::cookie_import::browser_cookie_sources,
+            browser::cookie_import::browser_cookie_domains,
+            browser::cookie_import::browser_cookie_import_v2,
+            browser::cookie_import::browser_open_full_disk_access_settings,
             browser::cookie_import::browser_cookie_clear,
             browser::cookie_import::browser_cookie_clear_all,
+            // ADR-0201 — local Chromium / the user's Chrome.
+            browser::local::browser_local_status,
+            browser::local::browser_local_install,
+            browser::local::browser_local_uninstall,
+            browser::local::browser_local_start,
+            browser::local::browser_local_stop,
+            browser::local::browser_local_rpc,
+            browser::local::browser_local_frames_subscribe,
+            browser::local::browser_local_frames_unsubscribe,
+            browser::local::browser_user_chrome_discover,
+            browser::local::browser_local_stage_upload,
+            // ADR-0201 — Chrome extension store (local Chromium).
+            browser::extensions::browser_extensions_list,
+            browser::extensions::browser_extension_install_webstore,
+            browser::extensions::browser_extension_install_crx,
+            browser::extensions::browser_extension_install_unpacked,
+            browser::extensions::browser_extension_set_enabled,
+            browser::extensions::browser_extension_remove,
+            browser::extensions::browser_extensions_check_updates,
+            browser::extensions::browser_extension_update,
+            browser::extensions::browser_extension_install_confirm,
+            browser::extensions::browser_extension_install_cancel,
+            // ADR-0201 — downloads (embedded + local) and local content.
+            browser::downloads::browser_downloads_dir_get,
+            browser::downloads::browser_downloads_dir_set,
+            browser::downloads::browser_downloads_dir_choose,
+            browser::downloads::browser_downloads_dir_reset,
+            browser::downloads::browser_download_save_as,
+            browser::downloads::browser_download_reveal,
+            browser::downloads::browser_download_open,
+            browser::downloads::browser_download_read,
+            browser::local_content::browser_local_file_serve,
+            browser::local_content::browser_local_file_stop,
+            browser::local_content::browser_dev_servers_detect,
+            // ADR-0201 — Rust-only password vault and autofill.
+            browser::passwords::browser_password_sources,
+            browser::passwords::browser_password_import_browser,
+            browser::passwords::browser_password_import_csv,
+            browser::passwords::browser_password_list,
+            browser::passwords::browser_password_matches,
+            browser::passwords::browser_password_save,
+            browser::passwords::browser_password_update,
+            browser::passwords::browser_password_delete,
+            browser::passwords::browser_password_reveal,
+            browser::passwords::browser_password_copy,
+            browser::passwords::browser_password_export,
+            browser::passwords::browser_password_pending_get,
+            browser::passwords::browser_password_pending_resolve,
+            browser::passwords::browser_credential_fill,
             // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
             codeserver::commands::codeserver_supported,
             codeserver::commands::codeserver_remote_relay_ensure,
@@ -1793,6 +1850,14 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<cli_bridge::CliBridgeServerState>();
                 cli_bridge::shutdown(state.inner());
+                // ADR-0201 — release the loopback file server's listeners. It
+                // is an in-process axum server, not a child, so it is not in
+                // `process_registry` (the local Chromium runtime is).
+                if let Some(local_content) =
+                    app_handle.try_state::<browser::local_content::LocalContentState>()
+                {
+                    tauri::async_runtime::block_on(local_content.inner().shutdown());
+                }
                 // ADR-0020 remote-target. Drop the cached driver connections
                 // and leave the containers running. A sandbox the user started
                 // is a machine they expect to still be there next launch, and

@@ -79,6 +79,13 @@ export interface PluginToolManifestEntry {
    * host declares rather than a plugin manifest.
    */
   manifestPath?: string
+  /**
+   * The plugin declared `requiresApproval: true`: the sidecar asks a human on
+   * every call — no remembered grant, mode or auto-answer may skip it
+   * (ADR-0201, `buildPerCallApprovalSet` in sidecar/src/policy/permission/ladder.ts).
+   * Absent when false, keeping the historical key set.
+   */
+  requiresApproval?: true
 }
 
 export interface BuildPluginToolsManifestOptions {
@@ -209,6 +216,7 @@ export function buildPluginToolsManifest(
         ...(plugin.path ? { manifestPath: `${plugin.path}/plugin.json` } : {}),
         ...(tool.definition.pathParams?.length ? { pathParams: tool.definition.pathParams } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(tool.definition.requiresApproval === true ? { requiresApproval: true as const } : {}),
       })
     }
   }

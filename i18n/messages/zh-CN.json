@@ -5191,13 +5191,6 @@
     },
     "cookieImport": {
       "action": "站点登录态",
-      "browser": {
-        "brave": "Brave",
-        "chrome": "Google Chrome",
-        "chromium": "Chromium",
-        "edge": "Microsoft Edge"
-      },
-      "browserLabel": "浏览器",
       "clear": {
         "action": "清除 Cookie",
         "clearing": "正在清除…",
@@ -5208,37 +5201,12 @@
         "title": "在预览中退出登录"
       },
       "close": "关闭",
-      "consent": {
-        "continue": "我已了解，继续",
-        "description": "Cognia 将从所选 Chromium 配置中读取当前站点保存的登录 Cookie，并注入此预览。",
-        "localOnly": "Cookie 值不会跨越 Cognia 的 IPC 边界，也不会进入其渲染进程、日志或上传到 Cognia；目标站点仍会正常收到自己的 Cookie。",
-        "title": "允许读取本机 Cookie？"
-      },
       "description": "选择要为当前站点复用登录态的本机浏览器配置。",
       "dialogDescription": "从本机 Chromium 配置复用登录态，或从内置预览中移除此站点的 Cookie。",
       "dialogTitle": "{host} 的登录态",
-      "import": "导入并刷新",
-      "importing": "正在导入…",
-      "keychainHint": "macOS 可能请求访问钥匙串；拒绝后预览不会发生变化。",
-      "openSettings": "打开桌面设置",
-      "profileLabel": "配置",
       "reason": {
-        "checkFailed": "无法检查本机 Chromium 配置，请重启桌面 App 后重试。",
-        "checking": "正在检查本机 Chromium 配置…",
-        "featureDisabled": "请先在「设置 → 桌面」中启用 Chromium Cookie 导入。",
-        "noProfiles": "这台 Mac 上未找到兼容的 Chromium 配置。",
         "openPage": "请先打开一个公网网页，再导入 Cookie。",
-        "remoteBackend": "复用登录态只适用于本机的内置预览，不适用于云端浏览器。",
-        "unsupported": "当前平台不支持 Cookie 导入。不会绕过 Windows App-Bound Encryption；请改用独立浏览器配置。"
-      },
-      "result": {
-        "failed": "Cookie 导入失败，Cookie 值未被暴露。",
-        "featureDisabled": "设置中未启用 Chromium Cookie 导入。",
-        "noMatchingCookies": "所选配置中没有当前站点的 Cookie。",
-        "noProfile": "所选浏览器配置已不可用。",
-        "ok": "已导入 {count} 条 Cookie 并刷新预览。",
-        "permissionDenied": "钥匙串访问被拒绝，未导入任何 Cookie。",
-        "unsupported": "当前平台不支持 Cookie 导入。"
+        "remoteBackend": "复用登录态只适用于本机的内置预览，不适用于云端浏览器。"
       },
       "title": "复用 Chromium 登录态"
     },
@@ -5428,6 +5396,436 @@
     "runtime": "Runtime",
     "title": "开发者模式",
     "valueTruncated": "结果已截断。"
+  },
+  "browserLocal": {
+    "address": {
+      "localFileFailed": "无法打开该本地文件：{message}"
+    },
+    "backend": {
+      "auto": "自动",
+      "chromiumHint": "Chromium（约 170 MB）只需下载一次，在本机运行，拥有独立的配置文件、标签页、下载和扩展。",
+      "copied": "已复制",
+      "copyInspectUrl": "复制地址",
+      "embedded": "内置预览",
+      "install": "安装 Chromium",
+      "installDone": "Chromium 已安装。",
+      "installExtracting": "正在解压 Chromium…",
+      "installFailed": "Chromium 安装失败：{message}",
+      "installProgress": "正在下载 Chromium… {received} / {total}",
+      "installProgressUnknown": "正在下载 Chromium… {received}",
+      "installing": "安装中…",
+      "label": "浏览器引擎",
+      "localChromium": "本地 Chromium",
+      "localChromiumMissing": "本地 Chromium（未安装）",
+      "recheck": "重新检测",
+      "remote": "云端浏览器",
+      "runtimeMissing": "此版本未包含本地浏览器运行时。",
+      "userChrome": "你的 Chrome",
+      "userChromeBrowser": "要连接的浏览器",
+      "userChromeConsent": "你的浏览器会在每次连接时请求你允许。Cognia 会在单独的窗口中打开标签页，并且只关闭它自己打开的标签页。",
+      "userChromeDisabled": "{browser} 未开启远程调试。请在其中打开 {url}，开启远程调试后重新检测。",
+      "userChromeNone": "本机未找到受支持的浏览器（Chrome、Edge、Brave）。",
+      "userChromeNotInstalled": "未安装 {browser}。",
+      "userChromeUnavailable": "你的 Chrome（不可用）"
+    },
+    "dialog": {
+      "accept": "确定",
+      "alert": "页面提示",
+      "beforeunload": "要离开此页面吗？",
+      "confirm": "页面询问",
+      "dismiss": "取消",
+      "failed": "无法响应页面对话框",
+      "prompt": "页面请求输入",
+      "promptLabel": "你的回答"
+    },
+    "downloads": {
+      "attach": "附加到对话",
+      "attachFailed": "无法将文件附加到对话",
+      "attached": "已附加到对话",
+      "button": "下载",
+      "buttonActive": "下载，{count, plural, other {# 个进行中}}",
+      "cancel": "取消下载",
+      "cancelFailed": "无法取消下载",
+      "clear": "清空列表",
+      "clearFailed": "无法清空列表",
+      "empty": "还没有下载任何内容。",
+      "failedDetail": "下载失败：{message}",
+      "noSession": "请先打开一个对话会话",
+      "open": "打开文件",
+      "openBlocked": "此类文件不能在这里直接打开，请改用“在文件夹中显示”。",
+      "openFailed": "无法打开文件",
+      "progress": "{received} / {total}",
+      "progressUnknown": "{received}",
+      "remove": "从列表中移除",
+      "removeFailed": "无法移除该条目",
+      "retry": "重新下载",
+      "reveal": "在文件夹中显示",
+      "revealFailed": "无法显示文件",
+      "saveAs": "另存为…",
+      "saveAsFailed": "无法保存文件副本",
+      "state": {
+        "attached": "已附加",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "failed": "失败",
+        "in_progress": "下载中",
+        "quarantined": "已隔离",
+        "saved": "已保存"
+      },
+      "title": "下载",
+      "tooLarge": "该文件超过 64 MB，无法附加到对话。"
+    },
+    "extensions": {
+      "button": "扩展"
+    },
+    "pane": {
+      "canvas": "本地浏览器页面",
+      "closeTab": "关闭标签页",
+      "closed": "浏览器会话已结束。",
+      "failed": "本地浏览器无法启动：{code}",
+      "newTab": "新标签页",
+      "restart": "重新启动",
+      "starting": "正在启动本地浏览器…",
+      "tabs": "标签页",
+      "untitled": "无标题"
+    },
+    "settings": {
+      "chromium": {
+        "installed": "已安装 · Chromium {version}",
+        "installedNoVersion": "已安装",
+        "notInstalled": "未安装",
+        "title": "本地 Chromium",
+        "uninstall": "卸载",
+        "uninstallFailed": "无法卸载 Chromium：{message}",
+        "uninstalled": "Chromium 已移除。"
+      },
+      "defaultBackend": "默认引擎",
+      "defaultBackendHint": "自动：安装后公共网站使用本地 Chromium，localhost 使用内置预览。",
+      "description": "浏览器面板使用的引擎、下载保存位置以及本地 Chromium 配置文件。",
+      "downloads": {
+        "askWhereToSave": "每次下载前询问保存位置",
+        "change": "更改…",
+        "defaultBadge": "默认",
+        "folder": "下载文件夹",
+        "forbidden": "该文件夹不能用于存放下载内容。请选择主目录本身、系统文件夹或隐藏文件夹以外的文件夹。",
+        "loadFailed": "无法读取下载设置",
+        "reset": "使用系统下载文件夹",
+        "saveFailed": "无法保存下载设置",
+        "title": "下载"
+      },
+      "extensions": {
+        "count": "{count, plural, =0 {未安装扩展} other {已安装 # 个扩展}}",
+        "description": "Chrome 扩展仅加载到本地 Chromium；你自己的 Chrome 保留它自己的扩展。",
+        "manage": "管理扩展",
+        "title": "扩展"
+      },
+      "passwords": {
+        "count": "{count, plural, =0 {没有保存的登录信息} other {已保存 # 条登录信息}}",
+        "description": "密码保存在系统钥匙串中，从不写入应用数据库。查看、复制或导出密码时需要验证你的身份。",
+        "manage": "管理密码",
+        "title": "密码"
+      },
+      "profile": {
+        "description": "本地 Chromium 将登录状态、历史记录和 Cookie 保存在独立的配置文件中，与 Cognia 内置预览分开。",
+        "reveal": "在文件夹中显示",
+        "revealFailed": "无法打开配置文件夹：{message}",
+        "title": "浏览器配置文件"
+      },
+      "title": "浏览器",
+      "webOnly": "本地浏览器仅在桌面应用中可用。"
+    },
+    "upload": {
+      "failed": "无法上传文件：{message}",
+      "singleFile": "此字段只接受一个文件，已仅上传 {name}。"
+    }
+  },
+  "browserVault": {
+    "autofill": {
+      "account": "账号",
+      "description": "Cognia 会直接填写表单，密码不会在这里显示。",
+      "dismiss": "暂不",
+      "failed": "无法填写登录表单。",
+      "fill": "填写",
+      "filled": "已为 {username} 填写登录信息。",
+      "filling": "填写中…",
+      "reason": {
+        "ambiguous": "有多个已保存的密码匹配，请选择账号。",
+        "no_login_form": "页面上已没有登录表单。",
+        "no_match": "没有与此网站匹配的已保存密码。"
+      },
+      "region": "有可用的已保存密码",
+      "title": "使用已保存的密码登录"
+    },
+    "common": {
+      "cancel": "取消",
+      "close": "关闭",
+      "failed": "出了点问题，请重试。",
+      "loading": "加载中…",
+      "refresh": "刷新",
+      "retry": "重试"
+    },
+    "cookieAction": {
+      "chooseImport": "选择要导入的内容…",
+      "localClearDescription": "从本地 Chromium 会话中移除 {domain} 的 Cookie。",
+      "localCleared": "已清除 {domain} 的 Cookie 并重新加载页面。",
+      "localNoSession": "请先打开一个本地 Chromium 会话以管理其 Cookie。",
+      "userChromeClear": "这是你自己的 Chrome 配置文件，请在 Chrome 的设置中管理其 Cookie。"
+    },
+    "cookieImport": {
+      "all": "所有网站",
+      "allHint": "将导入该配置文件中的全部 Cookie。仅对你完全信任的配置文件使用此选项。",
+      "browser": "浏览器",
+      "consent": {
+        "continue": "我已了解，继续",
+        "description": "Cognia 将从你选择的浏览器配置文件中读取已保存的登录 Cookie，并添加到此浏览器。",
+        "localOnly": "Cookie 值只保留在此设备上，不会进入此窗口、日志或 Cognia 的服务器。",
+        "title": "允许访问本地 Cookie？"
+      },
+      "description": "复用此设备上其他浏览器的登录状态。",
+      "domains": "选定的网站",
+      "domainsCount": "{count, plural, other {# 个 Cookie}}",
+      "domainsEmpty": "此配置文件中没有 Cookie。",
+      "domainsLoadFailed": "无法列出此配置文件的网站。",
+      "domainsNoMatch": "没有与“{query}”匹配的网站。",
+      "domainsSearch": "搜索网站",
+      "domainsSelected": "{count, plural, other {已选择 # 个网站}}",
+      "featureDisabled": "请先在 设置 → 桌面 中启用浏览器 Cookie 导入。",
+      "fullDiskAccess": {
+        "description": "macOS 会保护 Safari 的 Cookie。请在 系统设置 → 隐私与安全性 → 完全磁盘访问权限 中为 Cognia 授权，然后重启 Cognia。",
+        "open": "打开完全磁盘访问权限设置",
+        "openFailed": "无法打开系统设置。请手动前往 隐私与安全性 → 完全磁盘访问权限。"
+      },
+      "import": "导入",
+      "importing": "导入中…",
+      "keychainHint": "系统可能会请求读取浏览器已保存密钥的权限。拒绝后此浏览器不会有任何变化。",
+      "loadFailed": "无法列出此设备上的浏览器。",
+      "noSources": "此设备上没有找到受支持的浏览器。",
+      "openSettings": "打开桌面设置",
+      "profile": "配置文件",
+      "reason": {
+        "full_disk_access_required": "需要完全磁盘访问权限",
+        "not_installed": "未安装",
+        "unsupported_os": "当前系统不支持"
+      },
+      "result": {
+        "appBound": "{count, plural, other {# 个 Cookie}}受 Chrome 应用绑定加密保护，已跳过。请在此浏览器中登录一次，或改用你自己的 Chrome。",
+        "failed": "Cookie 导入失败，未暴露任何 Cookie 值。",
+        "fullDiskAccessRequired": "Cognia 需要完全磁盘访问权限才能读取 Safari 的 Cookie。",
+        "noMatchingCookies": "所选配置文件在该范围内没有 Cookie。",
+        "noProfile": "所选浏览器配置文件已不可用。",
+        "ok": "已导入 {count, plural, other {# 个 Cookie}}。",
+        "permissionDenied": "读取浏览器已保存密钥的权限被拒绝，未导入任何 Cookie。",
+        "unsupported": "当前系统不支持从该浏览器导入 Cookie。"
+      },
+      "scope": "导入内容",
+      "sink": {
+        "embedded": "Cookie 将添加到内置预览。",
+        "local": "Cookie 将添加到本地 Chromium 会话。",
+        "localNoSession": "请先打开一个本地 Chromium 会话，Cookie 会添加到正在运行的会话中。",
+        "unsupported": "云端浏览器运行在另一台机器上，无法接收此设备的 Cookie。"
+      },
+      "site": "此网站（{host}）",
+      "sourceWithReason": "{label}（{reason}）",
+      "title": "导入登录 Cookie"
+    },
+    "extensions": {
+      "cancel": "取消",
+      "checkUpdates": "检查更新",
+      "checking": "检查中…",
+      "description": "扩展在本地 Chromium 浏览器中运行。启用、停用或安装扩展会重启已打开的本地会话。",
+      "disable": "停用 {name}",
+      "empty": "尚未安装扩展。",
+      "enable": "启用 {name}",
+      "errors": {
+        "crx_id_mismatch": "扩展包的 ID 与你请求的扩展不一致。",
+        "crx_invalid": "该文件不是有效的 Chrome 扩展包。",
+        "extension_install_expired": "安装未及时确认，请重新开始。",
+        "extension_not_found": "该扩展已不再安装。",
+        "extensions_unsupported_backend": "扩展只能在本地 Chromium 浏览器中运行。",
+        "manifest_invalid": "扩展的 manifest 缺失或无效。",
+        "webstore_unavailable": "无法访问 Chrome 应用商店，或商店未提供该扩展。",
+        "zip_path_traversal": "扩展包包含不安全的文件路径，已被拒绝。"
+      },
+      "failed": "扩展操作失败。",
+      "hostPermissions": "{count, plural, other {# 个网站}}",
+      "install": {
+        "crx": "安装 .crx 文件…",
+        "done": "已安装 {name}。",
+        "installing": "安装中…",
+        "label": "Chrome 应用商店 ID 或链接",
+        "placeholder": "扩展 ID 或 chromewebstore.google.com 链接",
+        "unpacked": "加载已解压的文件夹…",
+        "webstore": "安装"
+      },
+      "installConfirm": {
+        "allSites": "所有网站",
+        "confirm": "安装扩展",
+        "description": "版本 {version}。安装前请确认此扩展可以访问的内容。",
+        "hostPermissions": "可读取和更改的网站",
+        "none": "此扩展未申请任何特殊权限。",
+        "permissions": "权限",
+        "title": "安装 {name}？"
+      },
+      "loadFailed": "无法加载扩展。",
+      "loading": "正在加载扩展…",
+      "noUpdates": "所有扩展均为最新版本。",
+      "openOptions": "选项",
+      "openPopup": "打开弹出页",
+      "openRequiresSession": "请先打开一个本地 Chromium 会话以使用扩展页面。",
+      "permissions": "{count, plural, other {# 项权限}}",
+      "remove": "移除",
+      "removeConfirm": {
+        "confirm": "移除扩展",
+        "description": "{name} 及其本地数据将从 Cognia 的浏览器中移除。",
+        "title": "移除此扩展？"
+      },
+      "removed": "已移除 {name}。",
+      "retry": "重试",
+      "source": {
+        "crx": "CRX 文件",
+        "unpacked": "已解压",
+        "webstore": "应用商店"
+      },
+      "title": "扩展",
+      "unsupported": {
+        "embedded": "内置预览无法运行 Chrome 扩展。请将浏览器切换到本地 Chromium 后使用。下方列出已安装的扩展以供参考。",
+        "remote": "云端浏览器不会加载此设备上的扩展。请切换到本地 Chromium 后使用。",
+        "title": "扩展在此处不可用",
+        "userChrome": "你自己的 Chrome 使用它自己的扩展，请在 Chrome 中管理。Cognia 的扩展集只作用于其本地 Chromium。"
+      },
+      "update": "更新到 {version}",
+      "updated": "已更新 {name}。",
+      "updatesAvailable": "{count, plural, other {有 # 个可用更新}}",
+      "version": "版本 {version}"
+    },
+    "localContent": {
+      "devServers": "本地开发服务器",
+      "devServersEmpty": "没有正在运行的本地 Web 服务器。",
+      "devServersFailed": "无法查找本地服务器。",
+      "openFile": "打开文件…",
+      "openFolder": "打开文件夹…",
+      "openServer": "打开 {url}",
+      "port": "端口 {port}",
+      "portWithProcess": "端口 {port} · {process}",
+      "serveFailed": "无法在浏览器中打开该文件。",
+      "served": "已共享的文件夹",
+      "servedDescription": "这些文件夹仅在 Cognia 运行期间向本机提供。",
+      "serving": "打开中…",
+      "stop": "停止共享",
+      "stopFailed": "无法停止共享该文件夹。",
+      "title": "打开本地内容"
+    },
+    "passwords": {
+      "actions": "{origin} 的操作",
+      "add": "添加密码",
+      "copied": "密码已复制，剪贴板将在 30 秒后清空。",
+      "copy": "复制密码",
+      "count": "{count, plural, other {# 个已保存的密码}}",
+      "delete": "删除",
+      "deleteConfirm": {
+        "confirm": "删除密码",
+        "description": "{origin} 上 {username} 的密码将从此设备移除，且无法撤销。",
+        "title": "删除此密码？"
+      },
+      "deleted": "密码已删除。",
+      "description": "密码保存在操作系统的安全存储中。显示、复制或导出密码时需要验证你的身份。",
+      "edit": "编辑",
+      "empty": "还没有保存的密码。可以手动添加，或从其他浏览器导入。",
+      "emptySearch": "没有与“{query}”匹配的密码。",
+      "export": {
+        "action": "导出 CSV",
+        "confirm": "选择保存位置",
+        "done": "密码已导出。",
+        "failed": "无法导出密码。",
+        "warning": "导出的文件以明文包含所有密码。请妥善保管，用完后删除。"
+      },
+      "form": {
+        "addTitle": "添加密码",
+        "editPasswordHint": "留空则保留当前密码。",
+        "editTitle": "编辑密码",
+        "invalidOrigin": "请输入网址，例如 https://example.com。",
+        "note": "备注",
+        "origin": "网站",
+        "originPlaceholder": "https://example.com",
+        "password": "密码",
+        "passwordRequired": "请输入密码。",
+        "save": "保存",
+        "saved": "密码已保存。",
+        "saving": "保存中…",
+        "updated": "密码已更新。",
+        "username": "用户名",
+        "usernameRequired": "请输入用户名。"
+      },
+      "hide": "隐藏密码",
+      "import": {
+        "action": "导入",
+        "appBound": "{count, plural, other {# 个密码}}受 Chrome 应用绑定加密保护，已跳过。请在 Chrome 中将其导出为 CSV（设置 → 密码 → 导出），再导入该文件。",
+        "browserTab": "从浏览器",
+        "chooseFile": "选择 CSV 文件…",
+        "csvTab": "从 CSV 文件",
+        "description": "密码在此设备上读取并直接写入安全存储，不会经过此窗口。",
+        "errors": "{count, plural, other {# 行无法导入。}}",
+        "failed": "导入失败。",
+        "fileFilter": "CSV 文件",
+        "format": "文件格式",
+        "formats": {
+          "1password": "1Password",
+          "auto": "自动识别",
+          "bitwarden": "Bitwarden",
+          "chrome": "Chrome、Edge 或 Brave",
+          "firefox": "Firefox",
+          "generic": "通用（url, username, password）",
+          "lastpass": "LastPass",
+          "safari": "Safari"
+        },
+        "importing": "导入中…",
+        "noSources": "此设备上没有找到保存了密码的浏览器。",
+        "primaryPasswordSet": "此 Firefox 配置文件设置了主密码，Cognia 无法解锁。请在 Firefox 中将密码导出为 CSV，再导入该文件。",
+        "profile": "配置文件",
+        "reason": {
+          "not_installed": "未安装",
+          "unsupported_os": "当前系统不支持"
+        },
+        "result": "已导入 {imported} 个，更新 {updated} 个，跳过 {skipped} 个。",
+        "run": "导入密码",
+        "source": "浏览器",
+        "sourceWithReason": "{label}（{reason}）",
+        "title": "导入密码"
+      },
+      "lastUsed": "上次使用：{date}",
+      "loadFailed": "无法加载已保存的密码。",
+      "reveal": "显示密码",
+      "search": "搜索密码",
+      "searchPlaceholder": "按网站或用户名搜索",
+      "source": {
+        "csv": "CSV",
+        "import": "已导入",
+        "manual": "手动添加",
+        "saved": "浏览时保存"
+      },
+      "title": "密码"
+    },
+    "presence": {
+      "cancelled": "已取消验证。",
+      "denied": "无法验证你的身份，未显示任何内容。",
+      "failed": "身份验证失败，未显示任何内容。",
+      "unavailable": "此设备无法验证你的身份（Touch ID、Windows Hello 或系统密码提示），已保存的密码将保持隐藏。"
+    },
+    "savePrompt": {
+      "dismiss": "暂不",
+      "failed": "无法保存密码。",
+      "more": "{count, plural, other {还有 # 个等待处理}}",
+      "never": "此网站永不保存",
+      "region": "保存密码",
+      "save": "保存",
+      "saveDescription": "要保存 {origin} 上 {username} 的密码吗？",
+      "saveTitle": "保存密码？",
+      "saved": "密码已保存。",
+      "update": "更新",
+      "updateDescription": "要更新 {origin} 上 {username} 已保存的密码吗？",
+      "updateTitle": "更新密码？",
+      "updated": "密码已更新。"
+    }
   },
   "canvas": {
     "action": {
@@ -20091,9 +20489,6 @@
         "branchScope": "分支",
         "claimKind": "类别",
         "contamination": "上下文信任",
-        "corroboration": "佐证",
-        "corroborationUnknown": "尚未计算",
-        "corroborationValue": "{percent}% · {sessions} 次对话",
         "created": "创建于",
         "evidence": "证据",
         "freshnessField": "新鲜度",
@@ -20121,7 +20516,6 @@
       "sections": {
         "activity": "活动",
         "content": "内容",
-        "history": "历史",
         "metrics": "指标",
         "origin": "归属",
         "projectClaim": "项目上下文",
@@ -20212,83 +20606,6 @@
       "unreviewed": "未审核",
       "verified": "已验证"
     },
-    "health": {
-      "checking": "检查中…",
-      "contradictionCheck": {
-        "disabled": "记忆关闭或处于临时模式时，矛盾检查不会运行。",
-        "no_vectors": "已跳过矛盾检查：没有可用的已存储向量。",
-        "ran": "矛盾检查使用了已存储的向量。"
-      },
-      "description": "指出值得查看的记忆。在你打开并操作之前，这里不会修改任何记忆。",
-      "empty": "未发现问题。",
-      "gone": "（已删除）",
-      "kinds": {
-        "cold_episodic": {
-          "description": "保留分数 {retention} 低于冷阈值；生命周期清理会压缩或合并它。",
-          "title": "已变冷"
-        },
-        "conflict_open": {
-          "description": "与另外 {count} 条记忆矛盾，在你做出决定前不会被召回。",
-          "title": "未解决的冲突"
-        },
-        "duplicate": {
-          "description": "同一范围内有 {count} 条记忆内容相同。",
-          "title": "重复"
-        },
-        "feedback_flagged": {
-          "description": "虽然被标记为无帮助或已过时，但仍处于启用状态（有帮助 {positive}，无帮助 {negative}）。",
-          "title": "被你标记"
-        },
-        "missing_evidence": {
-          "description": "支撑这条记忆的所有来源都已被删除。",
-          "title": "证据已失效"
-        },
-        "pending_instruction_aging": {
-          "description": "一条学到的工作偏好已等待你审核 {waitedDays} 天；批准前不会被使用。",
-          "title": "等待审核"
-        },
-        "pinned_expiring": {
-          "description": "置顶可以防止被遗忘，但它的过期时间（{daysUntilExpiry} 天）仍会让它失效。",
-          "title": "已置顶但会过期"
-        },
-        "stale": {
-          "description": "一条 {ageDays} 天前的情节记忆，从未被召回。",
-          "title": "从未使用"
-        },
-        "suspected_contradiction": {
-          "description": "两条关于同一主题的记忆（相似度 {similarity}），但并非重复。较新的一条排在前面。",
-          "title": "可能矛盾"
-        }
-      },
-      "open": "打开",
-      "refresh": "重新检查",
-      "scanned": "已检查 {count} 条记忆",
-      "severity": {
-        "info": "提示",
-        "warning": "警告"
-      },
-      "title": "记忆健康"
-    },
-    "history": {
-      "empty": "没有更早的版本。",
-      "reasons": {
-        "compaction": "已压缩",
-        "conflict-merge": "冲突已合并",
-        "consolidation": "合并了新细节",
-        "dedup-merge": "合并了重复项",
-        "edit": "已编辑",
-        "external-update": "由集成修改",
-        "restore": "被恢复操作替换"
-      },
-      "restore": "恢复",
-      "restoreConfirm": {
-        "cancel": "取消",
-        "confirm": "恢复",
-        "description": "当前文本会保留在历史中，之后可以再切换回来。",
-        "title": "恢复这个版本？"
-      },
-      "window": "{from} – {to}"
-    },
     "panel": {
       "accessedRelative": "{time}使用",
       "add": "新增",
@@ -20311,7 +20628,6 @@
       "clearFilters": "清除筛选",
       "clearTags": "清除标签",
       "clearedToast": "已删除 {count} 条记忆",
-      "compacted": "已压缩",
       "copied": "已复制",
       "copyText": "复制内容",
       "createdRelative": "{time}添加",
@@ -20386,8 +20702,7 @@
       "summary": "{active} 条活跃 · {pinned} 条置顶 · {conflicts} 条冲突 · 已建索引 {coverage}%",
       "tabs": {
         "app": "应用记忆",
-        "external": "外部 Agent 记忆",
-        "health": "健康"
+        "external": "外部 Agent 记忆"
       },
       "tagFilterLabel": "标签：",
       "title": "记忆",
@@ -24423,6 +24738,7 @@
         "codeServer": "Pro IDE（code-server）",
         "externalAgent": "外部 Agent",
         "headlessTerminal": "无头 Shell",
+        "localBrowser": "本地浏览器运行时",
         "mcpServer": "MCP 服务器",
         "pluginHost": "插件宿主",
         "tunnel": "隧道"
@@ -40318,6 +40634,10 @@
       "badgeIdle": "空闲",
       "badgeLive": "运行中",
       "badgeWeb": "web",
+      "browserApproval": {
+        "perCallReason": "{client} 想通过 {tool} 使用已保存的密码登录（{detail}）。密码由 Cognia 填入，不会交给 Agent。每次都会询问你。",
+        "reason": "{client} 想在 Cognia 浏览器中运行 {tool}（{detail}）。"
+      },
       "description": "把本应用的知识与运行时能力开放给外部 MCP 客户端。",
       "inbound": {
         "accept": "接受",
@@ -40410,6 +40730,7 @@
       "scopeDescriptions": {
         "agent:dispatch": "⚠ 允许外部代理无界面运行你的内置/插件子代理或角色（工具循环 + 模型调用）。返回文本经 PII 脱敏。默认关闭。",
         "agent:team": "⚠ 允许外部代理无界面启动智能体团队——它们本无法触及的多智能体编排。默认关闭。",
+        "browser:control": "允许外部 Agent 通过 browser_* 工具操控 Cognia 的浏览器：打开与导航页面、读取快照、点击与输入、管理标签页与下载、打印 PDF、模拟设备、查看 Cookie 元数据与网页存储，以及用已保存的密码登录。与任何角色的工具设置无关。应用内需要审批的工具（执行页面脚本、上传、下载、密码登录）每次调用仍会询问你，页面内容会被标记为不可信。默认关闭。",
         "inbound:write": "⚠ 允许外部代理提交经验、技能草稿与笔记。不会自动生效 —— 提交内容作为待审、不可信草稿进入审阅队列，由你接受或丢弃。默认关闭。",
         "inbox:connectors:read": "⚠ 只读收件箱自省 — 适配器、会话、草稿、审计。元数据可能包含会话句柄与近期消息片段。默认关闭。",
         "inbox:connectors:send": "⚠ 允许外部 Agent 向你的 IM 收件箱发送 AI 回复。与应用内聊天走同一管线（PII 门控、策略评估、出站队列）。默认关闭。",
@@ -40437,6 +40758,7 @@
         "grantedCount": "已授予 {granted}/{total}",
         "groups": {
           "agent": "Agent",
+          "browser": "浏览器",
           "inbound": "入站",
           "inbox": "收件箱",
           "mcp": "计算机操作",
@@ -41830,34 +42152,6 @@
           }
         }
       },
-      "maintenance": {
-        "coldThreshold": {
-          "description": "保留分数低于该值的情节视为冷记忆。数值越高，处理的记忆越多。",
-          "label": "冷阈值"
-        },
-        "compaction": {
-          "description": "把冷情节缩短为第一句话，以及其中提到的文件路径、错误码和标识符。",
-          "label": "压缩冷情节"
-        },
-        "dedup": {
-          "description": "把内容几乎相同的冷情节合并到你最常用的那一条，并保留其中任意一条提到的路径和标识符。",
-          "label": "合并近似重复的情节",
-          "noVectors": "需要开启混合检索并允许使用嵌入后端；在此之前会跳过这一步。"
-        },
-        "forgetting": {
-          "title": "遗忘"
-        },
-        "reinforcement": {
-          "description": "达到每个范围的上限时，你经常召回的记忆会更晚被遗忘。它只会让记忆保留更久，不会改变召回排序。",
-          "label": "访问强化",
-          "off": "关闭"
-        },
-        "sweep": {
-          "description": "每天处理一次很久没被用到的情节记忆。它从不删除：之前的文本保留在每条记忆的历史中，可以随时恢复。",
-          "gatedReason": "开启压缩或重复合并后才能使用清理。",
-          "title": "生命周期清理"
-        }
-      },
       "manage": "管理记忆",
       "maxIdle": {
         "label": "未使用后遗忘天数（0 为永不）"
@@ -41987,11 +42281,6 @@
         "label": "最低召回相关度"
       },
       "retrieval": {
-        "beliefWeight": {
-          "description": "让在多次对话中得到印证的记忆排得更靠前。关闭时排序不考虑佐证，但记忆检查器中仍会显示。",
-          "label": "佐证权重",
-          "off": "关闭"
-        },
         "gates": {
           "memoryOff": "请先开启长期记忆，再编辑检索控制项。",
           "recallOff": "请先开启记忆召回，再编辑这些控制项。"
@@ -42004,10 +42293,6 @@
           "description": "结合语义向量检索与关键词匹配。",
           "label": "混合检索"
         },
-        "llmRerank": {
-          "description": "每轮让工具模型对召回的前若干条记忆（最多 30 条）重新排序一次。发送前会先对查询脱敏；任何失败都会保留本地排序。",
-          "label": "使用工具模型重排"
-        },
         "queryExpansion": {
           "description": "使用相关词扩展关键词查询。",
           "label": "查询扩展"
@@ -42015,10 +42300,6 @@
         "relevanceFloor": {
           "description": "排除相关度分数低于此值的记忆。",
           "label": "最低相关度"
-        },
-        "sessionRecall": {
-          "description": "当你询问之前的对话（「上次」「last time」）时，优先召回情节记忆而不是一般事实。",
-          "label": "过往会话路由"
         },
         "tokenBudget": {
           "description": "每轮最多可注入的记忆 Token 数。",

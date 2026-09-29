@@ -1837,6 +1837,52 @@ describe("runAndCaptureAssistantReply", () => {
     await promise
   })
 
+  it("a per-call tool ignores a plugin modify and never persists an always-allow", async () => {
+    preToolUseMock.mockResolvedValueOnce({
+      action: "modify",
+      modifiedArgs: { credentialId: "other" },
+    } as never)
+    const responder = jest.fn(() => ({ decision: "allow_always" as const }))
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+    })
+    await flushUntilSubscribed()
+    fire({
+      ...permissionRequest("per-call", "mcp__cognia-plugin-tools__browser_fill_credential", {
+        credentialId: "c1",
+      }),
+      requiresPerCallApproval: true,
+    } as never)
+    await flushMicrotasks()
+    // The approver sees the model's own input, not the plugin's rewrite.
+    expect(responder).toHaveBeenCalledWith(
+      expect.objectContaining({ input: { credentialId: "c1" }, requiresPerCallApproval: true })
+    )
+    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "per-call", "allow", undefined, undefined)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+  })
+
+  it("a plugin can still deny a per-call tool", async () => {
+    preToolUseMock.mockResolvedValueOnce({ action: "deny", reason: "no" } as never)
+    const responder = jest.fn(() => ({ decision: "allow" as const }))
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+    })
+    await flushUntilSubscribed()
+    fire({
+      ...permissionRequest("per-call-deny", "mcp__cognia-plugin-tools__browser_set_files", {}),
+      requiresPerCallApproval: true,
+    } as never)
+    await flushMicrotasks()
+    expect(responder).not.toHaveBeenCalled()
+    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "per-call-deny", "deny", "no", undefined)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+  })
+
   it("owns response events until settlement and answers repeated asks only once", async () => {
     const responder = jest.fn(() => ({ decision: "allow" as const }))
     const promise = runAndCaptureAssistantReply(

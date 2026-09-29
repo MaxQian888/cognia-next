@@ -34,6 +34,11 @@ pub struct EmbeddedBrowserLease {
     /// `None` means no child WebView has been created. `Some(None)` records a
     /// direct WebView; `Some(Some(url))` records its immutable proxy endpoint.
     webview_proxy_url: parking_lot::Mutex<Option<Option<String>>>,
+    /// Last `document.title` the native webview reported through
+    /// `on_document_title_changed` (ADR-0201). `None` until the first report
+    /// for the current child webview; `browser_embed_get_title` then falls
+    /// back to evaluating `document.title`.
+    document_title: parking_lot::Mutex<Option<String>>,
 }
 
 impl EmbeddedBrowserLease {
@@ -108,6 +113,19 @@ impl EmbeddedBrowserLease {
 
     fn clear_webview_proxy(&self) {
         *self.webview_proxy_url.lock() = None;
+        *self.document_title.lock() = None;
+    }
+
+    fn record_document_title(&self, title: &str) {
+        *self.document_title.lock() = Some(title.to_string());
+    }
+
+    fn forget_document_title(&self) {
+        *self.document_title.lock() = None;
+    }
+
+    fn document_title(&self) -> Option<String> {
+        self.document_title.lock().clone()
     }
 
     pub(crate) fn release_window(&self, window_label: &str) {
@@ -332,7 +350,30 @@ fn add_embed_webview(
     let mut builder = WebviewBuilder::new(EMBED_LABEL, WebviewUrl::External(target))
         .initialization_script(overlay::AUTOMATION_CORE_JS)
         .initialization_script(overlay::OVERLAY_JS)
-        .on_navigation(move |url| handle_embed_navigation(&nav_app, &nav_label, url.as_str()));
+        .on_navigation(move |url| handle_embed_navigation(&nav_app, &nav_label, url.as_str()))
+        // ADR-0201: downloads land in the shared Downloads directory with
+        // collision-safe names and surface as `browser://download`.
+        .on_download(|webview, event| super::downloads::handle_embedded_download(&webview, event))
+        // Native document title (no eval round-trip, survives a busy page).
+        .on_document_title_changed(|webview, title| {
+            let app = webview.app_handle();
+            app.state::<EmbeddedBrowserLease>()
+                .record_document_title(&title);
+            let _ = app.emit(
+                "browser://title",
+                serde_json::json!({ "paneId": EMBED_LABEL, "title": title }),
+            );
+        })
+        // A new document starts untitled: drop the previous page's title so a
+        // title-less page never reports its predecessor's.
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview
+                    .app_handle()
+                    .state::<EmbeddedBrowserLease>()
+                    .forget_document_title();
+            }
+        });
     if let Some(proxy_url) = proxy_url {
         builder = builder.proxy_url(proxy_url);
     }
@@ -564,6 +605,41 @@ pub(crate) async fn eval_embed_with_result(app: &AppHandle, js: &str) -> Result<
         Ok(Ok(value)) => Ok(value),
         Ok(Err(_)) => Err("embedded eval channel closed".to_string()),
         Err(_) => Err("embedded eval timed out".to_string()),
+    }
+}
+
+/// Parse a JSON-serialized eval result into a value, peeling one extra layer
+/// when the page helper returned a JSON *string* (the overlay's convention —
+/// `eval_with_callback` only marshals strings reliably). Never echoes the raw
+/// payload in an error: the script may have carried a credential.
+pub(crate) fn parse_eval_json(raw: &str) -> Result<serde_json::Value, String> {
+    let value: serde_json::Value = serde_json::from_str(raw.trim())
+        .map_err(|_| "embedded eval returned a non-JSON result".to_string())?;
+    Ok(match value {
+        serde_json::Value::String(inner) => {
+            serde_json::from_str(&inner).unwrap_or(serde_json::Value::String(inner))
+        }
+        other => other,
+    })
+}
+
+/// Evaluate `script` in the embedded page and return its result as JSON
+/// (ADR-0201; used by the password vault's embedded autofill and cookie
+/// injection). Bypasses the renderer owner lease on purpose: only Rust calls
+/// it, with a script Rust built.
+pub(crate) async fn eval_json_in_embedded(
+    app: &AppHandle,
+    script: &str,
+) -> Result<serde_json::Value, String> {
+    #[cfg(desktop)]
+    {
+        let raw = eval_embed_with_result(app, script).await?;
+        parse_eval_json(&raw)
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, script);
+        Err("embedded browser is only available on desktop".to_string())
     }
 }
 
@@ -964,6 +1040,100 @@ pub async fn browser_embed_drain_record(
     }
 }
 
+#[cfg(desktop)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HistoryStep {
+    Back,
+    Forward,
+}
+
+/// The JS fallback for platforms whose webview history API Tauri does not
+/// expose. Runs in the top-level document, so an iframe's own history is never
+/// what moves.
+#[cfg(desktop)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn history_step_script(step: HistoryStep) -> &'static str {
+    match step {
+        HistoryStep::Back => "window.top.history.back()",
+        HistoryStep::Forward => "window.top.history.forward()",
+    }
+}
+
+/// Native back/forward: `WKWebView goBack` / `goForward` on macOS (the
+/// webview's own back-forward list, which also covers pages whose scripts
+/// replaced `history`), the JS fallback elsewhere. Stepping past either end
+/// is a no-op, like a browser's disabled button.
+#[cfg(desktop)]
+async fn embed_history_step(app: &AppHandle, step: HistoryStep) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_web_kit::WKWebView;
+        let webview = app
+            .get_webview(EMBED_LABEL)
+            .ok_or_else(|| "embedded preview is not open".to_string())?;
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        webview
+            .with_webview(move |platform| {
+                // SAFETY: on macOS `inner()` is the live `WKWebView` pointer
+                // owned by wry; this closure runs on the main thread.
+                unsafe {
+                    let view: &WKWebView = &*platform.inner().cast();
+                    match step {
+                        HistoryStep::Back if view.canGoBack() => {
+                            let _ = view.goBack();
+                        }
+                        HistoryStep::Forward if view.canGoForward() => {
+                            let _ = view.goForward();
+                        }
+                        _ => {}
+                    }
+                }
+                let _ = tx.send(());
+            })
+            .map_err(|error| error.to_string())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+            .await
+            .map_err(|_| "embedded history navigation timed out".to_string())?
+            .map_err(|_| "embedded history navigation was dropped".to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        eval_embed(app, history_step_script(step))
+    }
+}
+
+/// The native document title on macOS (`WKWebView.title`); `None` elsewhere.
+#[cfg(desktop)]
+async fn native_document_title(app: &AppHandle) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_web_kit::WKWebView;
+        let webview = app
+            .get_webview(EMBED_LABEL)
+            .ok_or_else(|| "embedded preview is not open".to_string())?;
+        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        webview
+            .with_webview(move |platform| {
+                // SAFETY: see `embed_history_step`.
+                let title = unsafe {
+                    let view: &WKWebView = &*platform.inner().cast();
+                    view.title().map(|title| title.to_string())
+                };
+                let _ = tx.send(title);
+            })
+            .map_err(|error| error.to_string())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+            .await
+            .map_err(|_| "embedded title read timed out".to_string())?
+            .map_err(|_| "embedded title read was dropped".to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
 #[tauri::command]
 pub async fn browser_embed_back(
     app: AppHandle,
@@ -974,7 +1144,7 @@ pub async fn browser_embed_back(
     lease.assert_owner(&owner_token, invoking_window.label())?;
     #[cfg(desktop)]
     {
-        eval_embed(&app, "window.history.back()")
+        embed_history_step(&app, HistoryStep::Back).await
     }
     #[cfg(not(desktop))]
     {
@@ -993,7 +1163,7 @@ pub async fn browser_embed_forward(
     lease.assert_owner(&owner_token, invoking_window.label())?;
     #[cfg(desktop)]
     {
-        eval_embed(&app, "window.history.forward()")
+        embed_history_step(&app, HistoryStep::Forward).await
     }
     #[cfg(not(desktop))]
     {
@@ -1077,6 +1247,12 @@ pub async fn browser_embed_get_title(
     lease.assert_owner(&owner_token, invoking_window.label())?;
     #[cfg(desktop)]
     {
+        if let Some(title) = native_document_title(&app).await? {
+            return Ok(title);
+        }
+        if let Some(title) = lease.document_title() {
+            return Ok(title);
+        }
         Ok(unwrap_js_string(
             eval_embed_with_result(&app, "String(document.title)").await?,
         ))
@@ -1848,6 +2024,55 @@ mod tests {
         assert!(call.contains("alert(1)"));
         // The break-out attempt stays inside the string literal.
         assert!(!call.contains(r#"a"});alert"#));
+    }
+
+    #[test]
+    fn eval_json_peels_the_helper_string_layer() {
+        assert_eq!(
+            parse_eval_json(r#""{\"filled\":true,\"username\":\"a\"}""#).unwrap(),
+            serde_json::json!({"filled": true, "username": "a"})
+        );
+        assert_eq!(
+            parse_eval_json(r#"{"forms":[]}"#).unwrap(),
+            serde_json::json!({"forms": []})
+        );
+        assert_eq!(parse_eval_json("true").unwrap(), serde_json::json!(true));
+        // A plain string result stays a string.
+        assert_eq!(
+            parse_eval_json(r#""hello""#).unwrap(),
+            serde_json::json!("hello")
+        );
+        // Never echo the raw payload (it may carry a credential).
+        let error = parse_eval_json("hunter2 {").unwrap_err();
+        assert!(!error.contains("hunter2"));
+    }
+
+    #[test]
+    fn lease_caches_the_document_title_per_webview() {
+        let lease = EmbeddedBrowserLease::default();
+        assert_eq!(lease.document_title(), None);
+        lease.record_document_title("Docs");
+        assert_eq!(lease.document_title().as_deref(), Some("Docs"));
+        lease.record_document_title("");
+        assert_eq!(lease.document_title().as_deref(), Some(""));
+        lease.clear_webview_proxy();
+        assert_eq!(lease.document_title(), None);
+        lease.record_document_title("Next");
+        lease.forget_document_title();
+        assert_eq!(lease.document_title(), None);
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn history_fallback_steps_the_top_document() {
+        assert_eq!(
+            history_step_script(HistoryStep::Back),
+            "window.top.history.back()"
+        );
+        assert_eq!(
+            history_step_script(HistoryStep::Forward),
+            "window.top.history.forward()"
+        );
     }
 
     #[test]

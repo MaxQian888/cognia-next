@@ -30,9 +30,15 @@ let mockContended = false
 let mockDevtoolsOptions: Record<string, unknown> | undefined
 const mockTakeLease = jest.fn()
 
+let mockDefaultBackend: string | undefined
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
-    selector({ settings: { remoteBrowserEnabled: mockRemoteBrowserEnabled } }),
+    selector({
+      settings: {
+        remoteBrowserEnabled: mockRemoteBrowserEnabled,
+        browserDefaultBackend: mockDefaultBackend,
+      },
+    }),
 }))
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
@@ -98,6 +104,72 @@ let mockPaneNavigateNonce: number | undefined
 const mockRefreshBounds = jest.fn()
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
+// ADR-0201 seams: the agent routing snapshot, the local runtime's status, the
+// download feed and the engines the pane can hand off to. Each is covered by
+// its own suite; here only the routing between them is under test.
+const mockSetLocalChromiumInstalled = jest.fn()
+const mockPrimeLocalBrowserRouting = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/browser/agent-engine", () => ({
+  setLocalChromiumInstalled: (...args: unknown[]) => mockSetLocalChromiumInstalled(...args),
+  primeLocalBrowserRouting: () => mockPrimeLocalBrowserRouting(),
+}))
+let mockLocalInstalled = false
+let mockUserChrome: Array<Record<string, unknown>> = []
+jest.mock("@/hooks/browser/use-local-browser", () => ({
+  useLocalBrowser: () => ({
+    supported: mockTauri,
+    status: {
+      installed: mockLocalInstalled,
+      installing: false,
+      chromiumVersion: null,
+      running: false,
+      runtimeStaged: true,
+      error: null,
+    },
+    progress: null,
+    userChrome: mockUserChrome,
+    busy: false,
+    error: null,
+    refresh: jest.fn(),
+    install: jest.fn(),
+    uninstall: jest.fn(),
+    discoverUserChrome: jest.fn(),
+  }),
+}))
+jest.mock("@/components/browser/browser-downloads-panel", () => ({
+  BrowserDownloadsButton: ({ chatSessionId }: { chatSessionId?: string }) => (
+    <div data-testid="downloads-button" data-chat={chatSessionId ?? ""} />
+  ),
+}))
+jest.mock("@/components/browser/local-chromium-preview", () => ({
+  LocalChromiumPreview: (props: Record<string, unknown>) => (
+    <div
+      data-testid="local-chromium-preview"
+      data-backend={String(props.backend)}
+      data-browser={String(props.userChromeBrowser ?? "")}
+      data-initial={String(props.initialUrl ?? "")}
+    />
+  ),
+}))
+jest.mock("@/components/browser/vault/browser-autofill-prompt", () => ({
+  BrowserAutofillPrompt: ({ backend, url }: { backend: string; url: string }) => (
+    <div data-testid="autofill-prompt" data-backend={backend} data-url={url} />
+  ),
+}))
+// On the desktop the empty state offers detected local content instead of
+// guessed ports; stand in with one dev server it "found".
+jest.mock("@/components/browser/local-content/browser-local-content-picker", () => ({
+  BrowserLocalContentPicker: ({ onOpen }: { onOpen: (url: string) => void }) => (
+    <button type="button" onClick={() => onOpen("http://localhost:5173")}>
+      localhost:5173
+    </button>
+  ),
+}))
+const mockServeLocalFile = jest.fn()
+jest.mock("@/lib/browser/local-content-client", () => ({
+  ...jest.requireActual("@/lib/browser/local-content-client"),
+  serveLocalFile: (...args: unknown[]) => mockServeLocalFile(...args),
+}))
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
 }))
@@ -288,6 +360,11 @@ const commitUrl = (value: string) => {
 
 beforeEach(() => {
   window.localStorage.clear()
+  mockLocalInstalled = false
+  mockUserChrome = []
+  mockDefaultBackend = undefined
+  mockServeLocalFile.mockReset()
+  mockSetLocalChromiumInstalled.mockClear()
   mockToolbarWidth = 0
   mockSelection = null
   mockNavigated = null
@@ -1620,5 +1697,142 @@ describe("re-requesting the address the pane already holds", () => {
       </TooltipProvider>
     )
     expect(mockPaneNavigateNonce).toBe(first)
+  })
+})
+
+// ADR-0201: four desktop engines behind one pane.
+describe("local engines", () => {
+  it("keeps an empty pane on the embedded webview even with Chromium installed", () => {
+    mockLocalInstalled = true
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
+    expect(screen.getByText("Preview a web page")).toBeInTheDocument()
+  })
+
+  it("hands a public page to local Chromium once it is installed", () => {
+    mockLocalInstalled = true
+    renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+    const local = screen.getByTestId("local-chromium-preview")
+    expect(local).toHaveAttribute("data-backend", "local-chromium")
+    expect(local).toHaveAttribute("data-initial", "https://example.com/")
+    // The native webview is never handed the address another engine shows.
+    expect(mockPaneUrl).toBeNull()
+    expect(mockWebviewVisible).toBe(false)
+  })
+
+  it("keeps localhost on the embedded webview", () => {
+    mockLocalInstalled = true
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000" />)
+    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
+    expect(mockPaneUrl).toBe("http://localhost:3000/")
+  })
+
+  it("stays embedded for a public page while Chromium is not installed", () => {
+    renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
+  })
+
+  it("attaches the user's Chrome when Settings default to it and it is reachable", () => {
+    mockDefaultBackend = "user-chrome"
+    mockUserChrome = [
+      { browser: "edge", label: "Edge", userDataDir: "/e", available: true, reason: null },
+    ]
+    renderPane(<BrowserPreviewPane />)
+    const local = screen.getByTestId("local-chromium-preview")
+    expect(local).toHaveAttribute("data-backend", "user-chrome")
+    expect(local).toHaveAttribute("data-browser", "edge")
+  })
+
+  it("switches engine from the toolbar's engine switch", () => {
+    mockLocalInstalled = true
+    renderPane(<BrowserPreviewPane />)
+    fireEvent.change(within(overflow()).getByRole("combobox", { name: "Browser engine" }), {
+      target: { value: "local-chromium" },
+    })
+    expect(screen.getByTestId("local-chromium-preview")).toBeInTheDocument()
+  })
+
+  it("keeps agent routing's install snapshot current and primes it once", () => {
+    mockLocalInstalled = true
+    renderPane(<BrowserPreviewPane />)
+    expect(mockSetLocalChromiumInstalled).toHaveBeenCalledWith(true)
+    expect(mockPrimeLocalBrowserRouting).toHaveBeenCalled()
+  })
+
+  it("offers the downloads panel (the history itself is fed app-wide)", () => {
+    renderPane(<BrowserPreviewPane sessionId="s1" />)
+    expect(screen.getByTestId("downloads-button")).toHaveAttribute("data-chat", "s1")
+  })
+
+  it("offers autofill above a committed web page, never over it", () => {
+    renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+    const prompt = screen.getByTestId("autofill-prompt")
+    expect(prompt).toHaveAttribute("data-backend", "embedded")
+    expect(prompt).toHaveAttribute("data-url", "https://example.com/")
+    expect(
+      within(screen.getByTestId("browser-reserved-region")).queryByTestId("autofill-prompt")
+    ).toBeNull()
+  })
+})
+
+describe("local files in the address bar", () => {
+  it("serves an absolute path through Rust and commits the served address", async () => {
+    mockServeLocalFile.mockResolvedValue({ url: "http://127.0.0.1:4000/abc/index.html", root: "r" })
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("/Users/me/site/index.html")
+    await waitFor(() => expect(urlBar()).toHaveValue("http://127.0.0.1:4000/abc/index.html"))
+    expect(mockServeLocalFile).toHaveBeenCalledWith("/Users/me/site/index.html")
+    expect(mockPaneUrl).toBe("http://127.0.0.1:4000/abc/index.html")
+  })
+
+  it("explains a path it could not serve", async () => {
+    mockServeLocalFile.mockRejectedValue(new Error("not_found"))
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("file:///missing.html")
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Could not open that local file: not_found")
+    )
+  })
+})
+
+describe("agent open requests (browser_open)", () => {
+  const request = (
+    url: string,
+    backend?: "embedded" | "local-chromium" | "user-chrome" | "remote"
+  ) => {
+    let claimed = false
+    act(() => {
+      claimed = requestBrowserUrl(url, { backend, source: "agent" })
+    })
+    return claimed
+  }
+
+  it("treats an empty address as 'just show the pane'", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(request("")).toBe(true)
+    expect(screen.getByText("Preview a web page")).toBeInTheDocument()
+    expect(urlBar()).toHaveValue("")
+  })
+
+  it("switches to a requested engine that can be served", () => {
+    mockLocalInstalled = true
+    renderPane(<BrowserPreviewPane />)
+    expect(request("", "local-chromium")).toBe(true)
+    expect(screen.getByTestId("local-chromium-preview")).toHaveAttribute(
+      "data-backend",
+      "local-chromium"
+    )
+  })
+
+  it("stays on the current engine when the requested one is unavailable", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(request("http://localhost:3000", "user-chrome")).toBe(true)
+    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
+    expect(urlBar()).toHaveValue("http://localhost:3000/")
+  })
+
+  it("still refuses an address it cannot parse", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(request("http://")).toBe(false)
   })
 })

@@ -22,6 +22,7 @@ import { TraySection } from "./tray-section"
 import { UsageDockCard } from "./usage-dock/usage-dock-card"
 import { TrayPanelSettings } from "./tray-panel/tray-panel-settings"
 import { SelectionToolbarSettings } from "./selection-toolbar-settings"
+import { BrowserLocalSettings } from "./browser/browser-local-settings"
 
 /**
  * Desktop-only preferences. Combined surface for autostart, system info, and
@@ -255,6 +256,8 @@ export function DesktopSection() {
           />
         </div>
       </section>
+
+      <BrowserLocalSettings />
 
       <section className="space-y-2 rounded-md border p-4">
         <Label className="text-sm">{t("system")}</Label>

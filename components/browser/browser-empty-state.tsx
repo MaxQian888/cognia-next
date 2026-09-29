@@ -6,15 +6,22 @@
  * The embedded pane had this; the web fallback had nothing at all — a blank
  * area with an `src`-less iframe and no way in, on the shell where a local dev
  * server is the whole point of the feature.
+ *
+ * On the desktop the three guessed ports are replaced by what is actually
+ * running (ADR-0201): the local-content picker lists detected dev servers and
+ * opens local files and folders. A web shell cannot look at the machine's
+ * listeners, so it keeps the common dev-server addresses as a best guess.
  */
 
 import { GlobeIcon, HistoryIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { historyLabel } from "@/components/browser/browser-history-menu"
+import { BrowserLocalContentPicker } from "@/components/browser/local-content/browser-local-content-picker"
 import { Button } from "@/components/ui/button"
+import { isTauri } from "@/lib/tauri"
 
-/** Common local dev-server addresses offered as one-click chips when empty. */
+/** Common local dev-server addresses offered as one-click chips on the web shell. */
 export const QUICK_OPEN_URLS = [
   "http://localhost:3000",
   "http://localhost:5173",
@@ -27,8 +34,11 @@ export const EMPTY_STATE_RECENT_LIMIT = 4
 export function BrowserEmptyState({
   onOpen,
   recent = [],
+  desktop = isTauri(),
 }: {
   onOpen: (url: string) => void
+  /** Show detected dev servers and local files instead of guessed ports. */
+  desktop?: boolean
   /**
    * Pages visited before, most recent first. A pane opened fresh used to offer
    * only three localhost ports, however often the user had come here for the
@@ -73,20 +83,26 @@ export function BrowserEmptyState({
           ))}
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <span className="text-xs text-muted-foreground">{t("empty.quickOpen")}</span>
-        {QUICK_OPEN_URLS.map((url) => (
-          <Button
-            key={url}
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-pill px-3 font-mono text-xs font-normal"
-            onClick={() => onOpen(url)}
-          >
-            {new URL(url).host}
-          </Button>
-        ))}
-      </div>
+      {desktop ? (
+        <div className="w-full max-w-md">
+          <BrowserLocalContentPicker onOpen={onOpen} />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="text-xs text-muted-foreground">{t("empty.quickOpen")}</span>
+          {QUICK_OPEN_URLS.map((url) => (
+            <Button
+              key={url}
+              size="sm"
+              variant="outline"
+              className="h-7 rounded-pill px-3 font-mono text-xs font-normal"
+              onClick={() => onOpen(url)}
+            >
+              {new URL(url).host}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

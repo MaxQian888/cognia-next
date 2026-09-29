@@ -5,7 +5,7 @@ description: "在 macOS 上，只把所选 Chrome、Edge、Brave 或 Chromium �
 
 # ADR-0073 — 为内嵌浏览器导入 Chromium Cookie
 
-**状态**：已采纳（2026-07-16）
+**状态**：已采纳（2026-07-16）。由 [ADR-0201](./0201-the-desktop-browser-runs-chromium-locally) 修订（覆盖所有桌面系统、Firefox 与 Safari 来源、多域名范围以及本地 Chromium 注入目标）。
 **作者**：Max Qian + Codex
 
 ## 背景

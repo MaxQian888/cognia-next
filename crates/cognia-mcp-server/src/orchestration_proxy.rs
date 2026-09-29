@@ -301,6 +301,9 @@ where
     F: FnOnce(ExecEvent) -> Result<(), String>,
 {
     let id = req.id.clone();
+    if let Some(message) = refused_command(&req.command, &req.args) {
+        return ProxyResponse::error(&id, message.to_string());
+    }
     let (tx, rx) = oneshot::channel();
     pending.lock().insert(id.clone(), tx);
 
@@ -337,6 +340,26 @@ where
             ProxyResponse::error(&id, "orchestration_proxy: renderer timeout".into())
         }
     }
+}
+
+/// The browser tool plugin, reachable from external agents only through the
+/// first-class `browser_*` tools (ADR-0201).
+pub const BROWSER_TOOLS_PLUGIN_ID: &str = "cognia-browser-tools";
+
+/// Defense in depth for ADR-0201: `plugin_tool_invoke` must not reach the
+/// browser plugin, because the generic seam skips the per-client browser
+/// session and the per-tool approval flag that `browser_tool` applies. The
+/// renderer refuses it too (`pluginToolInvokeCore`); refusing here means a
+/// sidecar that skipped its own check still never reaches the renderer.
+fn refused_command(command: &str, args: &Value) -> Option<&'static str> {
+    if command != "plugin_tool_invoke" {
+        return None;
+    }
+    let plugin_id = args.get("pluginId").and_then(Value::as_str)?;
+    (plugin_id == BROWSER_TOOLS_PLUGIN_ID).then_some(
+        "plugin_tool_invoke does not run the browser tools; call the dedicated browser_* tools \
+         (they need the `browser:control` scope)",
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +513,30 @@ mod tests {
             pending.lock().is_empty(),
             "timed-out entry must be cleaned up"
         );
+    }
+
+    #[tokio::test]
+    async fn plugin_tool_invoke_cannot_reach_the_browser_plugin() {
+        let pending: PendingMap = ParkingMutex::new(HashMap::new());
+        let mut request = req("b1", "plugin_tool_invoke");
+        request.args = json!({ "pluginId": "cognia-browser-tools", "toolName": "browser_navigate" });
+        let resp = dispatch_with_emit(request, &pending, Duration::from_secs(1), |_ev| {
+            panic!("a refused command must never reach the renderer")
+        })
+        .await;
+        assert!(!resp.ok);
+        assert!(resp.error.as_deref().unwrap_or_default().contains("browser_*"));
+        assert!(pending.lock().is_empty());
+    }
+
+    #[test]
+    fn only_plugin_tool_invoke_for_the_browser_plugin_is_refused() {
+        let browser = json!({ "pluginId": "cognia-browser-tools" });
+        assert!(refused_command("plugin_tool_invoke", &browser).is_some());
+        assert!(refused_command("plugin_tool_invoke", &json!({ "pluginId": "other" })).is_none());
+        assert!(refused_command("plugin_tool_invoke", &json!({})).is_none());
+        assert!(refused_command("browser_tool", &browser).is_none());
+        assert!(refused_command("agent_dispatch", &browser).is_none());
     }
 
     #[test]

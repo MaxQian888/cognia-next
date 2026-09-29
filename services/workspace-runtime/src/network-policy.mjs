@@ -132,3 +132,56 @@ export class NetworkPolicy {
     return [...mappings, "EXCLUDE localhost", "EXCLUDE 127.0.0.1", "EXCLUDE [::1]"].join(",")
   }
 }
+
+/**
+ * Local-mode navigation policy (ADR-0201). The desktop user's own browser may
+ * open any http(s) origin (loopback and LAN dev servers included); agent
+ * domain grants are enforced by the host tool layer, not here. Only the URL
+ * scheme is policed: `file:` needs the session's `allowFileUrls`, and
+ * `chrome-extension:` pages (popups/options of installed extensions) need a
+ * launched Chromium (`allowExtensionUrls`).
+ */
+export class LocalNetworkPolicy {
+  constructor({ allowFileUrls = false, allowExtensionUrls = false } = {}) {
+    this.allowFileUrls = allowFileUrls
+    this.allowExtensionUrls = allowExtensionUrls
+  }
+
+  async authorize(rawUrl) {
+    let url
+    try {
+      url = new URL(rawUrl)
+    } catch {
+      throw new DomainBlockedError("url_invalid", String(rawUrl))
+    }
+    const hostname = normalizedHostname(url.hostname)
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      const loopback =
+        hostname === "localhost" ||
+        hostname.endsWith(".localhost") ||
+        hostname === "::1" ||
+        (net.isIPv4(hostname) && inIpv4Cidr(hostname, "127.0.0.0", 8))
+      return { url: url.toString(), hostname, address: hostname, loopback }
+    }
+    if (url.href === "about:blank") {
+      return { url: url.href, hostname: "", address: "", loopback: false }
+    }
+    if (url.protocol === "file:") {
+      if (!this.allowFileUrls) throw new DomainBlockedError("file_url_blocked", url.href)
+      return { url: url.href, hostname: "", address: "", loopback: true }
+    }
+    if (url.protocol === "chrome-extension:") {
+      if (!this.allowExtensionUrls) throw new DomainBlockedError("url_scheme_blocked", url.href)
+      return { url: url.href, hostname, address: "", loopback: true }
+    }
+    throw new DomainBlockedError("url_scheme_blocked", url.protocol)
+  }
+
+  async authorizeRedirect(_fromUrl, toUrl) {
+    return this.authorize(toUrl)
+  }
+
+  async resolverRules() {
+    return ""
+  }
+}

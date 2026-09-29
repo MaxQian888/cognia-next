@@ -253,7 +253,10 @@ describe("secrets", () => {
     const engine = engineMock()
     const res = await replayFlow(flow([secretStep]), engine, { secrets: { PASSWORD: "hunter2" } })
     expect(res.ok).toBe(true)
-    expect(engine.act).toHaveBeenCalledWith("e7", "fill", { text: "hunter2" })
+    expect(engine.act).toHaveBeenCalledWith("e7", "fill", {
+      text: "hunter2",
+      humanProvidedSecret: true,
+    })
   })
 
   it("fails loudly when the secret was not supplied", async () => {

@@ -80,6 +80,7 @@ export const DEFAULTS: AppSettings = {
   // trees, so it never starts without an explicit switch.
   sessionImportWatch: { enabled: false },
   remoteBrowserEnabled: false,
+  browserDefaultBackend: "auto",
   cliBridge: { autoSync: false },
   webTools: { enabled: true },
   // Legacy dismissal stamp — read once by `lib/onboarding/migrate-legacy.ts`,

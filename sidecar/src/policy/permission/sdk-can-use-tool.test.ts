@@ -171,3 +171,56 @@ test("approval input rewrites are checked against the same hard authority", asyn
   entry.resolve({ behavior: "allow", updatedInput: { content: "private@example.com" } })
   assert.equal((await pending).behavior, "deny")
 })
+
+// ADR-0201: browser_set_files (like browser_fill_credential) asks on every
+// call. A ruleset allow, an always-allow grant or bypassPermissions must not
+// skip it, dontAsk denies it, and an "always allow" answer can never persist
+// the SDK's suggested rule.
+const SET_FILES_TOOL = "mcp__cognia-plugin-tools__browser_set_files"
+const SET_FILES_ENTRY = { name: "browser_set_files", requiresApproval: true }
+
+test("anthropic canUseTool asks for browser_set_files on every call whatever the grants", async () => {
+  for (const permissionMode of ["bypassPermissions", "acceptEdits", "default"]) {
+    const frames: Record<string, unknown>[] = []
+    const pendingApprovals = new Map<string, PendingApproval>()
+    const canUseTool = mkGate(
+      {
+        permissionMode,
+        permissionRuleset: { [SET_FILES_TOOL]: "allow" },
+        alwaysAllowTools: [SET_FILES_TOOL],
+        pluginTools: [SET_FILES_ENTRY],
+      },
+      { emit: (frame) => frames.push(frame), pendingApprovals }
+    )
+    const pending = canUseTool(
+      SET_FILES_TOOL,
+      { ref: "f", paths: ["a.txt"] },
+      { suggestions: [{ type: "addRules", destination: "session", rules: [], behavior: "allow" }] }
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(frames.length, 1, `${permissionMode}: the call round-trips`)
+    assert.equal(frames[0]?.requiresPerCallApproval, true)
+    assert.equal(frames[0]?.suppressAlwaysAllowRule, true)
+    const entry = [...pendingApprovals.values()][0]
+    assert.ok(entry)
+    assert.equal(entry.suppressAlwaysAllowRule, true)
+    entry.resolve({ behavior: "allow", updatedInput: { ref: "f", paths: ["a.txt"] } })
+    const res = await pending
+    assert.equal(res.behavior, "allow")
+  }
+})
+
+test("anthropic canUseTool denies browser_set_files under dontAsk", async () => {
+  const frames: Record<string, unknown>[] = []
+  const canUseTool = mkGate(
+    {
+      permissionMode: "dontAsk",
+      alwaysAllowTools: [SET_FILES_TOOL],
+      pluginTools: [SET_FILES_ENTRY],
+    },
+    { emit: (frame) => frames.push(frame) }
+  )
+  const res = await canUseTool(SET_FILES_TOOL, { ref: "f", paths: ["a.txt"] }, {})
+  assert.equal(res.behavior, "deny")
+  assert.equal(frames.length, 0)
+})

@@ -54,6 +54,8 @@ export const SETTINGS_SYNC = {
     rationale:
       "The desktop owns the remote-browser gate (profiles + granted domains live there). The phone only reads it to decide whether to render the remote preview pane, so it must flow down, never up.",
   },
+  browserDefaultBackend: { category: "desktop-only" },
+  browserUserChromeBrowser: { category: "desktop-only" },
   updatedAt: { category: "desktop-only" },
   profile: { category: "shared" },
   ocrSettings: { category: "desktop-only" },

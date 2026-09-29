@@ -32,6 +32,12 @@
 
 import { isTauri } from "@/lib/tauri"
 import { proxyToRenderer } from "@/lib/external-bridge/orchestration-proxy-client"
+import {
+  BROWSER_TOOLS_PLUGIN_ID,
+  browserToolCore,
+  isBrowserToolName,
+  type BrowserToolInput,
+} from "./browser"
 
 // ---------------------------------------------------------------------------
 // agent_dispatch
@@ -469,6 +475,19 @@ export async function pluginToolInvokeCore(
   if (!input.pluginId || !input.toolName) {
     return { ok: false, error: "plugin_tool_invoke requires pluginId and toolName" }
   }
+  // ADR-0201: the browser plugin is reachable only through the first-class
+  // `browser_*` tools, which bind a browser session per client and honour each
+  // tool's approval flag. The generic seam would skip both.
+  if (input.pluginId === BROWSER_TOOLS_PLUGIN_ID || isBrowserToolName(input.toolName)) {
+    return {
+      ok: false,
+      code: "use_browser_tools",
+      error:
+        "plugin_tool_invoke does not run the browser tools. Call the dedicated browser_* tools " +
+        "(browser_open, browser_navigate, browser_snapshot, …) instead; they need the " +
+        "`browser:control` scope in Settings → External Bridge.",
+    }
+  }
 
   try {
     const { invokePluginTool } = await import("@/lib/plugin/core/invoke-plugin-tool")
@@ -598,6 +617,8 @@ export async function runOrchestrationExec(
       return planRunCore(args as unknown as PlanRunInput)
     case "plugin_tool_invoke":
       return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
+    case "browser_tool":
+      return browserToolCore(args as unknown as BrowserToolInput)
     case "schedule_task":
       return (await import("./scheduling")).scheduleTaskCore(
         args as unknown as import("./scheduling").ScheduleTaskInput

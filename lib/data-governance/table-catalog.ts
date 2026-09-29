@@ -86,7 +86,10 @@ export const CORE_TABLE_NAMES = [
   "botInstallations",
   "botRunSteps",
   "browserAnnotations",
+  "browserCredentialMeta",
   "browserDomainGrants",
+  "browserDownloads",
+  "browserExtensionMirror",
   "browserHistory",
   "browserProfiles",
   "browserRecordings",
@@ -664,6 +667,11 @@ export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TAB
 const CACHE_TABLES = new Set<CoreTableName>([
   "a2uiSurfaces",
   "agentTeamBoard",
+  // ADR-0201. Metadata-only mirrors of the Rust-owned extension registry and
+  // password vault: re-read from Rust whenever the browser settings open, and
+  // never the place a secret or an install decision lives.
+  "browserCredentialMeta",
+  "browserExtensionMirror",
   "chatSearchState",
   "chatSearchText",
   "chatTranscriptIndexState",
@@ -1445,6 +1453,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     maxRows: 500,
     enforcement: "domain",
     reason: "The built-in browser's visit writer trims the oldest pages after each visit.",
+  },
+  browserDownloads: {
+    mode: "cap",
+    maxRows: 1_000,
+    enforcement: "domain",
+    reason:
+      "The browser download-history writer trims the oldest finished entries after each write; the files themselves stay in the user's Downloads folder.",
   },
   remoteControlAudit: {
     mode: "cap",

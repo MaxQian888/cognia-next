@@ -49,7 +49,7 @@ jest.mock("@/lib/db/browser-annotations", () => ({
 }))
 
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
-import { useSelectionToChat } from "./use-selection-to-chat"
+import { bytesToBase64, mediaTypeForFilename, useSelectionToChat } from "./use-selection-to-chat"
 
 const mockBuild = buildSendContent as jest.Mock
 
@@ -296,6 +296,72 @@ describe("sendText", () => {
     await result.current.sendText("go")
     expect(mockInterrupt).not.toHaveBeenCalled()
     expect(mockSend).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("sendFileBytes", () => {
+  const BYTES = new Uint8Array([104, 105])
+
+  it("sends a downloaded file as an attachment", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    const outcome = await result.current.sendFileBytes(BYTES, {
+      filename: "notes.txt",
+      mimeType: "text/plain",
+      sourceUrl: "https://example.com/notes.txt",
+    })
+    expect(outcome).toBe("sent")
+    const [text, files] = mockBuild.mock.calls[0]
+    expect(text).toContain("https://example.com/notes.txt")
+    expect(files).toEqual([
+      { url: "data:text/plain;base64,aGk=", mediaType: "text/plain", filename: "notes.txt" },
+    ])
+    expect(mockSend.mock.calls[0][2]).toEqual({ sessionId: "s1" })
+  })
+
+  it("infers an image media type from the filename", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.sendFileBytes(BYTES, { filename: "shot.PNG" })
+    expect(mockBuild.mock.calls[0][1][0].mediaType).toBe("image/png")
+    expect(mockBuild.mock.calls[0][0]).not.toContain("from")
+  })
+
+  it("reports a missing session without sending", async () => {
+    mockStoreState = { activeSessionId: null, sessions: {} }
+    const { result } = renderHook(() => useSelectionToChat())
+    expect(await result.current.sendFileBytes(BYTES, { filename: "a.txt" })).toBe("no-session")
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it("refuses a file the attachment pipeline rejected", async () => {
+    mockBuild.mockResolvedValueOnce({
+      content: "x",
+      rejected: [{ filename: "a.bin", reason: "unsupported-type" }],
+      tokens: 0,
+    })
+    const { result } = renderHook(() => useSelectionToChat())
+    expect(await result.current.sendFileBytes(BYTES, { filename: "a.bin" })).toBe("unsupported")
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it("interrupts a streaming session first, like a screenshot", async () => {
+    mockStoreState.sessions.s1.status = "streaming"
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.sendFileBytes(BYTES, { filename: "a.txt" }, { sessionId: "s1" })
+    expect(mockInterrupt).toHaveBeenCalledWith("s1")
+  })
+})
+
+describe("file helpers", () => {
+  it("maps image extensions and falls back to octet-stream", () => {
+    expect(mediaTypeForFilename("a.jpeg")).toBe("image/jpeg")
+    expect(mediaTypeForFilename("a.webp")).toBe("image/webp")
+    expect(mediaTypeForFilename("report.pdf")).toBe("application/octet-stream")
+    expect(mediaTypeForFilename("noext")).toBe("application/octet-stream")
+  })
+
+  it("base64-encodes bytes", () => {
+    expect(bytesToBase64(new Uint8Array([104, 105]))).toBe("aGk=")
+    expect(bytesToBase64(new Uint8Array(0x8001).fill(65))).toHaveLength(43_692)
   })
 })
 

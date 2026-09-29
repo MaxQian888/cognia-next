@@ -31,6 +31,7 @@ function makeTool(
     access?: "read" | "write"
     pathParams?: string[]
     retryable?: boolean
+    requiresApproval?: boolean
   }
 ): PluginTool {
   return {
@@ -48,6 +49,7 @@ function makeTool(
       access: opts?.access,
       pathParams: opts?.pathParams,
       retryable: opts?.retryable,
+      requiresApproval: opts?.requiresApproval,
     },
     execute: jest.fn(),
   }
@@ -258,6 +260,24 @@ describe("buildPluginToolsManifest", () => {
     expect(result.find((t) => t.name === "confined")?.pathParams).toEqual(["path", "output_dir"])
     // An empty/undefined list stays off the wire.
     expect("pathParams" in result.find((t) => t.name === "nokeys")!).toBe(false)
+  })
+
+  // ADR-0201: the flag used to be dropped here, so the sidecar never knew a
+  // plugin tool (browser_fill_credential) demanded per-call approval.
+  it("forwards requiresApproval only when the tool declared it", () => {
+    setStore({
+      p: makePlugin("p", {
+        tools: [
+          makeTool("gated", { requiresApproval: true }),
+          makeTool("free", { requiresApproval: false }),
+          makeTool("unset"),
+        ],
+      }),
+    })
+    const result = pluginsOnly(buildPluginToolsManifest())
+    expect(result.find((t) => t.name === "gated")?.requiresApproval).toBe(true)
+    expect("requiresApproval" in result.find((t) => t.name === "free")!).toBe(false)
+    expect("requiresApproval" in result.find((t) => t.name === "unset")!).toBe(false)
   })
 
   it("sizes the relay timeout to the resolved resilience budget + slack", () => {

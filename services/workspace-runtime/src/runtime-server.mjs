@@ -3,7 +3,7 @@ import http from "node:http"
 
 import { PRIVATE_PROTOCOL_VERSION, protocolEnvelope } from "./protocol.mjs"
 
-const MAX_CONTROL_BODY_BYTES = 1024 * 1024
+const MAX_CONTROL_BODY_BYTES = 4 * 1024 * 1024
 
 function authorized(request, secret) {
   const value = request.headers.authorization ?? ""
@@ -37,21 +37,53 @@ async function readJson(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"))
 }
 
+const SENSITIVE_EVENT_FIELDS = ["password"]
+
+/**
+ * In-memory event ring served by `GET /v1/events?after=N`.
+ *
+ * Events published with `sensitive: true` (local-mode `credential.submitted`)
+ * carry a secret for exactly one hand-off to the authenticated host: the
+ * secret fields are scrubbed as soon as a reader acknowledges the event by
+ * polling with `after >= event.sequence`, or after `sensitiveTtlMs`,
+ * whichever comes first. The `sensitive` marker itself is never served.
+ */
 export class RuntimeEventJournal {
-  constructor(maxEvents = 512) {
+  constructor(maxEvents = 512, { sensitiveTtlMs = 60_000, now = () => Date.now() } = {}) {
     this.maxEvents = maxEvents
+    this.sensitiveTtlMs = sensitiveTtlMs
+    this.now = now
     this.sequence = 0
     this.events = []
+    this.sensitive = new Map()
   }
 
   publish(event) {
+    const { sensitive, ...rest } = event
     this.sequence += 1
-    this.events.push({ sequence: this.sequence, timestamp: Date.now(), ...event })
-    if (this.events.length > this.maxEvents)
-      this.events.splice(0, this.events.length - this.maxEvents)
+    const entry = { sequence: this.sequence, timestamp: this.now(), ...rest }
+    this.events.push(entry)
+    if (sensitive === true) this.sensitive.set(entry.sequence, entry)
+    if (this.events.length > this.maxEvents) {
+      for (const dropped of this.events.splice(0, this.events.length - this.maxEvents)) {
+        this.scrub(dropped)
+      }
+    }
+  }
+
+  scrub(entry) {
+    if (!this.sensitive.delete(entry.sequence)) return
+    for (const field of SENSITIVE_EVENT_FIELDS) delete entry[field]
+    entry.scrubbed = true
   }
 
   after(sequence) {
+    const at = this.now()
+    for (const entry of [...this.sensitive.values()]) {
+      if (entry.sequence <= sequence || at - entry.timestamp >= this.sensitiveTtlMs) {
+        this.scrub(entry)
+      }
+    }
     return this.events.filter((event) => event.sequence > sequence)
   }
 }
@@ -65,6 +97,12 @@ function browserAuditMetadata(type, payload = {}) {
     metadata.grantedDomains = Array.isArray(payload.grants)
       ? payload.grants.filter((domain) => typeof domain === "string")
       : []
+    // Local-mode shape only; never host paths or the DevTools endpoint.
+    if (payload.kind === "local" || payload.kind === "user-chrome") metadata.kind = payload.kind
+    if (typeof payload.headless === "boolean") metadata.headless = payload.headless
+    if (Array.isArray(payload.extensionPaths))
+      metadata.extensionCount = payload.extensionPaths.length
+    if (typeof payload.allowFileUrls === "boolean") metadata.allowFileUrls = payload.allowFileUrls
   } else if (type === "browser.navigate" && typeof payload.url === "string") {
     try {
       metadata.navigationDomain = new URL(payload.url).hostname
@@ -73,8 +111,51 @@ function browserAuditMetadata(type, payload = {}) {
     }
   } else if (type === "browser.act" && typeof payload.action === "string") {
     metadata.action = payload.action
-  } else if (type === "browser.files.set") {
+  } else if (type === "browser.files.set" || type === "browser.filechooser.set") {
     metadata.fileCount = Array.isArray(payload.paths) ? payload.paths.length : 0
+  } else if (type === "browser.cookies.set") {
+    // Never the cookie names, values or domains — only how many were sent.
+    metadata.cookieCount = Array.isArray(payload.cookies) ? payload.cookies.length : 0
+  } else if (type === "browser.cookies.list" || type === "browser.cookies.clear") {
+    metadata.scoped = typeof payload.domain === "string" && payload.domain.length > 0
+  } else if (type === "browser.credential.fill") {
+    // Never the username or password.
+    metadata.pageScoped = typeof payload.pageId === "string"
+  } else if (
+    type === "browser.storage.get" ||
+    type === "browser.storage.set" ||
+    type === "browser.storage.clear"
+  ) {
+    // Never the key or value.
+    metadata.area = payload.area === "session" ? "session" : "local"
+  } else if (
+    type === "browser.download.cancel" ||
+    type === "browser.download.delete" ||
+    type === "browser.download.save"
+  ) {
+    if (typeof payload.downloadId === "string") metadata.downloadId = payload.downloadId
+  } else if (type === "browser.network.request") {
+    if (typeof payload.requestId === "string") metadata.requestId = payload.requestId
+  } else if (type === "browser.extension.open") {
+    if (typeof payload.extensionId === "string") metadata.extensionId = payload.extensionId
+    if (payload.page === "popup" || payload.page === "options")
+      metadata.extensionPage = payload.page
+  } else if (type === "browser.extensions.reload") {
+    metadata.extensionCount = Array.isArray(payload.extensionPaths)
+      ? payload.extensionPaths.length
+      : 0
+  } else if (type === "browser.emulate") {
+    metadata.emulated = [
+      "device",
+      "viewport",
+      "userAgent",
+      "colorScheme",
+      "locale",
+      "timezone",
+      "geolocation",
+      "offline",
+      "reset",
+    ].filter((field) => payload[field] !== undefined)
   }
   return metadata
 }
@@ -118,7 +199,36 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.wait.load": ({ sessionId, options }) => browser.waitForLoad(sessionId, options),
     "browser.screenshot": ({ sessionId, options }) => browser.screenshot(sessionId, options),
     "browser.files.set": ({ sessionId, ref, paths }) => browser.setFiles(sessionId, ref, paths),
+    "browser.filechooser.set": ({ sessionId, chooserId, paths }) =>
+      browser.setFileChooserFiles(sessionId, chooserId, paths),
     "browser.downloads": ({ sessionId }) => browser.listDownloads(sessionId),
+    "browser.download.cancel": ({ sessionId, downloadId }) =>
+      browser.cancelDownload(sessionId, downloadId),
+    "browser.download.delete": ({ sessionId, downloadId }) =>
+      browser.deleteDownload(sessionId, downloadId),
+    "browser.download.save": ({ sessionId, downloadId, targetPath }) =>
+      browser.saveDownload(sessionId, downloadId, targetPath),
+    "browser.extensions.reload": ({ extensionPaths }) => browser.reloadExtensions(extensionPaths),
+    "browser.extension.open": ({ sessionId, extensionId, page, path }) =>
+      browser.openExtensionPage(sessionId, { extensionId, page, path }),
+    "browser.cookies.set": ({ sessionId, cookies }) => browser.setCookies(sessionId, cookies),
+    "browser.cookies.list": ({ sessionId, domain }) => browser.listCookies(sessionId, { domain }),
+    "browser.cookies.clear": ({ sessionId, domain }) => browser.clearCookies(sessionId, { domain }),
+    "browser.forms.detect-login": ({ sessionId, pageId }) =>
+      browser.detectLoginForms(sessionId, { pageId }),
+    "browser.credential.fill": ({ sessionId, pageId, username, password, origin }) =>
+      browser.fillCredential(sessionId, { pageId, username, password, origin }),
+    "browser.pdf": ({ sessionId, options }) => browser.pdf(sessionId, options ?? {}),
+    "browser.emulate": ({ sessionId, ...options }) => browser.emulate(sessionId, options),
+    "browser.storage.get": ({ sessionId, area, key, pageId }) =>
+      browser.storageGet(sessionId, { area, key, pageId }),
+    "browser.storage.set": ({ sessionId, area, key, value, pageId }) =>
+      browser.storageSet(sessionId, { area, key, value, pageId }),
+    "browser.storage.clear": ({ sessionId, area, pageId }) =>
+      browser.storageClear(sessionId, { area, pageId }),
+    "browser.network.request": ({ sessionId, requestId }) =>
+      browser.networkRequest(sessionId, requestId),
+    "browser.tabs.finalize": ({ sessionId }) => browser.finalizeTabs(sessionId),
     "browser.set-zoom": ({ sessionId, zoom }) => browser.setZoom(sessionId, zoom),
     "browser.find": ({ sessionId, query, options }) => browser.find(sessionId, query, options),
     "browser.find.clear": ({ sessionId }) => browser.findClear(sessionId),
@@ -132,15 +242,19 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
       browser.ackScreencastFrame(sessionId, sequence),
     "browser.input": ({ sessionId, input }) => browser.dispatchInput(sessionId, input),
     "browser.cancel": ({ sessionId }) => browser.cancelAction(sessionId),
-    "agent.spawn": (payload) => supervisor.spawn(payload),
-    "agent.send": ({ id, message }) => supervisor.send(id, message),
-    "agent.kill": ({ id }) => supervisor.kill(id),
-    "agent.kill-all": () => supervisor.killAll(),
-    "agent.status": ({ id }) => supervisor.status(id),
-    "agent.list": () => supervisor.list(),
+    ...(supervisor
+      ? {
+          "agent.spawn": (payload) => supervisor.spawn(payload),
+          "agent.send": ({ id, message }) => supervisor.send(id, message),
+          "agent.kill": ({ id }) => supervisor.kill(id),
+          "agent.kill-all": () => supervisor.killAll(),
+          "agent.status": ({ id }) => supervisor.status(id),
+          "agent.list": () => supervisor.list(),
+        }
+      : {}),
   }
   return async (type, payload) => {
-    const operation = operations[type]
+    const operation = Object.hasOwn(operations, type) ? operations[type] : undefined
     if (!operation)
       throw Object.assign(new Error("unknown control operation"), { code: "unknown_operation" })
     const safePayload = payload ?? {}
@@ -193,10 +307,14 @@ class MediaLatestStore {
   }
 }
 
+/**
+ * `supervisor` is optional: the desktop's local-mode entrypoint (ADR-0201)
+ * hosts only the browser service, and then serves no `agent.*` operations.
+ */
 export function createRuntimeServer({
   secret,
   browserService,
-  supervisor,
+  supervisor = null,
   eventJournal = new RuntimeEventJournal(),
 }) {
   if (typeof secret !== "string" || secret.length < 32) {
@@ -216,7 +334,8 @@ export function createRuntimeServer({
           version: PRIVATE_PROTOCOL_VERSION,
           status: "ready",
           browser: "ready",
-          supervisor: "ready",
+          supervisor: supervisor ? "ready" : "absent",
+          ...(browserService.mode === "local" ? { mode: "local" } : {}),
         })
         return
       }
@@ -270,12 +389,16 @@ export function createRuntimeServer({
         server.listen(port, host, () => resolve(server.address()))
       })
     },
+    // Browsers first (so no Chromium outlives the runtime even if a later
+    // step stalls), then agents, then the listener. Open keep-alive and
+    // event-tail connections are dropped so `server.close` cannot hang.
     async close() {
       await browserService.closeAll()
-      await supervisor.killAll()
-      await new Promise((resolve, reject) =>
+      await supervisor?.killAll()
+      await new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
-      )
+        server.closeAllConnections?.()
+      })
     },
   }
 }

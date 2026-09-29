@@ -16,6 +16,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   useMemo,
   useEffect,
   useRef,
@@ -46,7 +47,7 @@ import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useRecentPages } from "@/hooks/browser/use-recent-pages"
 import { useFlowRecorder } from "@/hooks/browser/use-flow-recorder"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
-import { configureRemoteBrowserEngine } from "@/lib/browser/agent-engine"
+import { configureRemoteBrowserEngine, type BrowserEngine } from "@/lib/browser/agent-engine"
 import type { BrowserBackend } from "@/lib/browser/backend-availability"
 import { RemoteChromiumEngine } from "@/lib/browser/remote-chromium-engine"
 import { createEngineRecordingDriver } from "@/lib/browser/recording/engine-recording-driver"
@@ -129,6 +130,11 @@ export interface RemoteBrowserPreviewProps {
    * the pane remounted.
    */
   onBackendChange?: (backend: BrowserBackend) => void
+  /**
+   * The desktop's full engine switch (ADR-0201). Takes the place of the
+   * two-way select `onBackendChange` draws, which predates the local engines.
+   */
+  backendSwitcher?: ReactNode
   createStream?: (options: RemoteBrowserStreamOptions) => StreamLike
 }
 
@@ -158,13 +164,18 @@ function mouseButton(button: number): "left" | "middle" | "right" {
   return "left"
 }
 
-function RemoteRecorder({
+/**
+ * The flow recorder for a runtime-backed engine (cloud or local Chromium): the
+ * page is driven through the engine, so recording goes through it too rather
+ * than through the embedded webview's pane events.
+ */
+export function EngineRecorder({
   engine,
   pageUrl,
   onSendToChat,
   onRecordingChange,
 }: {
-  engine: RemoteChromiumEngine
+  engine: BrowserEngine
   pageUrl: string | null
   onSendToChat: (markdown: string) => void
   onRecordingChange: (steps: number | null) => void
@@ -203,6 +214,7 @@ export function RemoteBrowserPreview({
   requestedUrl,
   requestNonce,
   onBackendChange,
+  backendSwitcher,
   createStream = (options) => new RemoteBrowserStream(options),
 }: RemoteBrowserPreviewProps) {
   const t = useTranslations("browser.remote")
@@ -671,7 +683,9 @@ export function RemoteBrowserPreview({
           }
           collapsedActive={selectMode || findOpen || zoom !== 1}
           overflowExtras={
-            onBackendChange ? (
+            backendSwitcher ? (
+              backendSwitcher
+            ) : onBackendChange ? (
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">{browserT("backend.label")}</span>
                 <NativeSelect
@@ -974,7 +988,7 @@ export function RemoteBrowserPreview({
             problemCount={devtools.problemCount}
             failedRequests={devtools.failedRequests}
             recorder={
-              <RemoteRecorder
+              <EngineRecorder
                 engine={engine}
                 pageUrl={activePage?.url ?? null}
                 onSendToChat={(markdown) => void sendText(markdown, { sessionId: chatSessionId })}

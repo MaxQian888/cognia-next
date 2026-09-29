@@ -5562,6 +5562,76 @@ API_NAMESPACE_CONTRACTS = [
                     "kind": "none",
                 },
             },
+            {
+                "id": "browser.primeLocalRouting",
+                "name": "primeLocalRouting",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "browser.ensureLocalEngine",
+                "name": "ensureLocalEngine",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
+            },
+            {
+                "id": "browser.openPane",
+                "name": "openPane",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "browser.attachDownload",
+                "name": "attachDownload",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "browser.isSurfaceVisible",
+                "name": "isSurfaceVisible",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
         ],
     },
     {

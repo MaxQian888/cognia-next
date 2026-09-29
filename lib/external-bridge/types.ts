@@ -20,6 +20,7 @@ export {
 } from "@/types/wiki"
 
 import type { BridgeScope } from "@/types/wiki"
+import { BROWSER_TOOL_NAMES } from "@cognia/plugin-sdk/api/browser"
 
 /**
  * Result of a permission gate check. When `allowed === false`, `reason` is
@@ -91,6 +92,9 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   usage_query: "usage:read",
   session_health: "usage:read",
   optimization_findings: "usage:read",
+  // ADR-0201 first-class browser tools — one scope for the whole surface, so
+  // a grant is one decision; per-tool approval still applies per call.
+  ...Object.fromEntries(BROWSER_TOOL_NAMES.map((name) => [name, "browser:control" as const])),
 }
 
 /**

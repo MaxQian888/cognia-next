@@ -409,6 +409,19 @@ describe("pluginToolInvoke", () => {
     expect(out).toEqual({ ok: true, result: { rows: 3 } })
   })
 
+  it("refuses the browser plugin and points at the dedicated browser tools (ADR-0201)", async () => {
+    for (const input of [
+      { pluginId: "cognia-browser-tools", toolName: "browser_navigate" },
+      { pluginId: "other", toolName: "browser_fill_credential" },
+    ]) {
+      const out = await pluginToolInvoke(input)
+      expect(out).toMatchObject({ ok: false, code: "use_browser_tools" })
+      expect(out.error).toMatch(/browser_\*/)
+      expect(out.error).toMatch(/browser:control/)
+    }
+    expect(invokePluginToolMock).not.toHaveBeenCalled()
+  })
+
   it("surfaces the typed error code on failure", async () => {
     const err = Object.assign(new Error("denied"), { code: "permission-denied" })
     invokePluginToolMock.mockRejectedValue(err)
@@ -446,6 +459,33 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
     expect(
       await runOrchestrationExec("plugin_tool_invoke", { pluginId: "p", toolName: "q" })
     ).toMatchObject({ ok: true, result: { rows: 1 } })
+  })
+
+  it("routes browser_tool through the browser core", async () => {
+    const { __setBrowserBridgeDepsForTests, __resetBrowserBridgeForTests } =
+      await import("./browser")
+    __resetBrowserBridgeForTests()
+    const invoke = jest.fn(async () => ({ pages: [] }))
+    __setBrowserBridgeDepsForTests({
+      invoke,
+      requestConsent: jest.fn(async () => true),
+      isSurfaceVisible: () => true,
+      revealPane: () => true,
+      localChromiumInstalled: async () => false,
+      translate: async (key: string) => key,
+      redact: (text: string) => ({ text, redacted: false }),
+    })
+    expect(
+      await runOrchestrationExec("browser_tool", { tool: "browser_pages", clientId: "mcp:a" })
+    ).toEqual({ ok: true, result: { pages: [] } })
+    expect(invoke).toHaveBeenCalledWith(
+      "browser_pages",
+      {},
+      {
+        sessionId: "external-bridge:browser:mcp:a",
+      }
+    )
+    __setBrowserBridgeDepsForTests(null)
   })
 
   it("routes team_list through its core", async () => {

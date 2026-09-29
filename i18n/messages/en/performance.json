@@ -143,6 +143,7 @@
       "codeServer": "Pro IDE (code-server)",
       "externalAgent": "External agents",
       "headlessTerminal": "Headless shells",
+      "localBrowser": "Local browser runtime",
       "mcpServer": "MCP server",
       "pluginHost": "Plugin hosts",
       "tunnel": "Tunnel"

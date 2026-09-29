@@ -55,3 +55,47 @@ test("rejects wildcard grants because every authorized host must be DNS-pinned",
     (error) => error.code === "domain_grant_invalid"
   )
 })
+
+test("local policy allows any http(s) origin and polices only schemes", async () => {
+  const { LocalNetworkPolicy } = await import("./network-policy.mjs")
+  const policy = new LocalNetworkPolicy()
+  assert.equal((await policy.authorize("https://example.com/")).loopback, false)
+  assert.equal((await policy.authorize("http://127.0.0.2:5173/")).loopback, true)
+  assert.equal((await policy.authorize("http://app.localhost:3000/")).loopback, true)
+  assert.equal((await policy.authorize("http://192.168.1.20:8080/")).loopback, false)
+  await assert.doesNotReject(() => policy.authorize("about:blank"))
+  await assert.rejects(
+    () => policy.authorize("file:///etc/hosts"),
+    (error) => error.code === "file_url_blocked"
+  )
+  await assert.rejects(
+    () => policy.authorize("chrome-extension://abcdefghijklmnopabcdefghijklmnop/popup.html"),
+    (error) => error.code === "url_scheme_blocked"
+  )
+  await assert.rejects(
+    () => policy.authorize("javascript:alert(1)"),
+    (error) => error.code === "url_scheme_blocked"
+  )
+  await assert.rejects(
+    () => policy.authorize("chrome://settings"),
+    (error) => error.code === "url_scheme_blocked"
+  )
+  await assert.rejects(
+    () => policy.authorize("not a url"),
+    (error) => error.code === "url_invalid"
+  )
+  assert.equal(await policy.resolverRules(), "")
+})
+
+test("local policy opens file:// and extension pages only when allowed", async () => {
+  const { LocalNetworkPolicy } = await import("./network-policy.mjs")
+  const policy = new LocalNetworkPolicy({ allowFileUrls: true, allowExtensionUrls: true })
+  assert.equal((await policy.authorize("file:///tmp/index.html")).url, "file:///tmp/index.html")
+  await assert.doesNotReject(() =>
+    policy.authorize("chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html")
+  )
+  await assert.rejects(
+    () => policy.authorizeRedirect("https://a.example", "data:text/html,hi"),
+    (error) => error.code === "url_scheme_blocked"
+  )
+})

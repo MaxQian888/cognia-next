@@ -1,7 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { onBrowserUrlRequest, onBrowserUrlReveal, requestBrowserUrl } from "./open-url-request"
+import {
+  isBrowserSurfaceVisible,
+  onBrowserUrlRequest,
+  onBrowserUrlReveal,
+  requestBrowserUrl,
+} from "./open-url-request"
 
 describe("browser open-url request", () => {
   it("reports false when nothing is listening, so the caller can fall back", () => {
@@ -75,5 +80,37 @@ describe("browser open-url request", () => {
     expect(requestBrowserUrl("https://x.dev")).toBe(false)
     offPane()
     offHost()
+  })
+
+  it("carries the requested backend and source to pane and host (ADR-0201 browser_open)", () => {
+    const seen: unknown[] = []
+    const offPane = onBrowserUrlRequest((url, request) => {
+      seen.push(["pane", url, request.backend, request.source])
+      return false
+    })
+    const offHost = onBrowserUrlReveal((url, request) => {
+      seen.push(["host", url, request.backend, request.source])
+      return true
+    })
+    expect(requestBrowserUrl("https://x.dev", { backend: "local-chromium", source: "agent" })).toBe(
+      true
+    )
+    expect(seen).toEqual([
+      ["pane", "https://x.dev", "local-chromium", "agent"],
+      ["host", "https://x.dev", "local-chromium", "agent"],
+    ])
+    offPane()
+    offHost()
+  })
+})
+
+describe("isBrowserSurfaceVisible", () => {
+  it("follows the document visibility", () => {
+    const spy = jest.spyOn(document, "visibilityState", "get")
+    spy.mockReturnValue("visible")
+    expect(isBrowserSurfaceVisible()).toBe(true)
+    spy.mockReturnValue("hidden")
+    expect(isBrowserSurfaceVisible()).toBe(false)
+    spy.mockRestore()
   })
 })

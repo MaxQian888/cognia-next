@@ -35,6 +35,8 @@ describe("groupBridgeScopes", () => {
     expect(runtime?.scopes).toContain("runtime:skills")
     expect(runtime?.scopes).toContain("runtime:agent-teams")
     expect(groups.find((g) => g.id === "workflow")?.scopes).toEqual(["workflow:run"])
+    // ADR-0201: browser control is its own group, not an unrecognised extra.
+    expect(groups.find((g) => g.id === "browser")?.scopes).toEqual(["browser:control"])
   })
 
   it("renders a scope with an unrecognised prefix rather than dropping it", () => {
@@ -48,5 +50,7 @@ describe("groupBridgeScopes", () => {
     const ids = groupBridgeScopes().map((g) => g.id)
     expect(ids.indexOf("wiki")).toBeLessThan(ids.indexOf("rag"))
     expect(ids.indexOf("rag")).toBeLessThan(ids.indexOf("runtime"))
+    expect(ids.indexOf("workflow")).toBeLessThan(ids.indexOf("browser"))
+    expect(ids.indexOf("browser")).toBeLessThan(ids.indexOf("inbox"))
   })
 })

@@ -3,6 +3,8 @@
 //! - [`secret_store`] — the single-keychain encrypted store (one master key in
 //!   the OS keyring, everything else AES-256-GCM in one file).
 //! - [`keyring_secrets`] — namespaced plain-string secrets on top of it.
+//! - [`user_presence`] — OS user presence (LocalAuthentication, Windows
+//!   Hello, polkit) gating secret reveal/copy/export.
 //! - [`api_key`] — the in-process Anthropic provider env store pushed by the
 //!   frontend and injected into the sidecar environment at spawn.
 //!
@@ -17,5 +19,6 @@ pub mod api_key;
 pub mod keychain_access;
 pub mod keyring_secrets;
 pub mod secret_store;
+pub mod user_presence;
 
 pub mod telemetry;

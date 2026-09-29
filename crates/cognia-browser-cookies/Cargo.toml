@@ -1,16 +1,17 @@
-# ADR-0196 P6g — importing a site's cookies from a local Chromium profile:
-# find the profile's cookie database, decrypt the values with the browser's
-# Safe Storage passphrase, keep the target site's cookies. The passphrase
-# source (`Keychain`) and the destination (`CookieSink`) are traits; the
-# desktop's macOS keychain adapter and WebKit sink stay in
-# `src-tauri/src/browser/cookie_import`, with the command shells, so this crate
-# links neither Tauri nor the OS credential store.
+# ADR-0196 P6g / ADR-0201 — importing sign-ins from the browsers installed on
+# this machine: cookies from every Chromium browser (macOS Keychain, Windows
+# DPAPI, Linux Secret Service), Firefox and Safari; saved passwords from the
+# Chromium browsers, Firefox (NSS key4.db) and password-manager CSV exports;
+# and the Rust-only password vault on top of `cognia-secrets`. The macOS
+# Keychain passphrase and the destination of imported cookies are traits
+# (`Keychain`, `CookieSink`, `OsSecrets`) so this crate links neither Tauri
+# nor a webview.
 [package]
 name = "cognia-browser-cookies"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Chromium cookie import: profile discovery, Safe Storage decryption and site filtering, behind keychain and sink traits."
+description = "Browser sign-in import (Chromium, Firefox, Safari cookies and passwords) and the Rust-only password vault, behind OS-secret and sink traits."
 license.workspace = true
 publish.workspace = true
 
@@ -19,14 +20,19 @@ name = "cognia_browser_cookies"
 path = "src/lib.rs"
 
 [dependencies]
-# Chromium's v10 cookie values: AES-128-CBC, keyed by PBKDF2-HMAC-SHA1 over
-# the Safe Storage passphrase.
+# Chromium's v10/v11 values on macOS and Linux: AES-128-CBC keyed by
+# PBKDF2-HMAC-SHA1. Firefox NSS: PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC) and
+# the legacy PBE-SHA1-3DES scheme.
 aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
+des = "0.9"
+hmac.workspace = true
 pbkdf2 = "0.13"
 sha1 = "0.11"
+# Windows v10/v11 values: AES-256-GCM under the DPAPI-unwrapped profile key.
+aes-gcm = { workspace = true, features = ["aes"] }
 # The SHA-256 of the host key that cookie databases from version 24 on put in
-# front of each value.
+# front of each value, and NSS's PBES2 PRF.
 sha2.workspace = true
 # Registrable domain of the target site: `url` parses the host, `psl` holds the
 # public suffix list.
@@ -37,10 +43,31 @@ url.workspace = true
 rusqlite = { workspace = true, features = ["bundled"] }
 tempfile.workspace = true
 thiserror.workspace = true
+# `Local State` (profile names, the Windows os_crypt key) and Firefox's
+# `logins.json`; vault metadata entries.
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+base64.workspace = true
+dirs.workspace = true
+rand.workspace = true
+log.workspace = true
+# Password bytes are wiped when the holder drops.
+zeroize = "1"
+# The vault stores every password and its metadata as encrypted secret-store
+# entries; nothing is written to disk in plaintext.
+cognia-secrets = { path = "../cognia-secrets" }
+
+[target.'cfg(windows)'.dependencies]
+# DPAPI (`CryptUnprotectData`) unwraps Chromium's `os_crypt.encrypted_key`.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [dev-dependencies]
 # The key-derivation test compares against a documented hex digest.
 hex.workspace = true
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 
 [lints]
 workspace = true

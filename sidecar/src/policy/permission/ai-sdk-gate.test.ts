@@ -664,3 +664,42 @@ test("immutable sandbox roots reject outside writes before asking for unusable a
   )
   assert.equal(prompts, 0)
 })
+
+test("createToolPermissionGate: a requiresApproval plugin tool asks even under bypass (ADR-0201)", async () => {
+  const frames: Record<string, unknown>[] = []
+  const pending = new Map()
+  const gate = createToolPermissionGate({
+    emit: (ev) => {
+      frames.push(ev)
+      const { requestId } = ev
+      queueMicrotask(() => pending.get(requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s1",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysAllowTools: [
+        "mcp__cognia-plugin-tools__browser_fill_credential",
+        "mcp__cognia-plugin-tools__browser_set_files",
+      ],
+      pluginTools: [
+        { name: "browser_fill_credential", requiresApproval: true },
+        { name: "browser_set_files", requiresApproval: true },
+        { name: "browser_navigate" },
+        { name: "browser_evaluate", requiresApproval: true },
+      ],
+    },
+  })
+  await gate("mcp__cognia-plugin-tools__browser_fill_credential", { credentialId: "c1" })
+  await gate("mcp__cognia-plugin-tools__browser_set_files", { ref: "f", paths: ["a.txt"] })
+  await gate("mcp__cognia-plugin-tools__browser_navigate", { url: "https://a.test" })
+  // A declared-but-grantable tool keeps honouring bypass (no global behaviour change).
+  await gate("mcp__cognia-plugin-tools__browser_evaluate", { expression: "1" })
+  assert.equal(frames.length, 2, "only the per-call tools round-trip")
+  for (const frame of frames) {
+    assert.equal(frame.type, "permission_request")
+    assert.equal(frame.requiresPerCallApproval, true)
+    assert.equal(frame.requiresApproval, true)
+    assert.equal(frame.suppressAlwaysAllowRule, true)
+  }
+})

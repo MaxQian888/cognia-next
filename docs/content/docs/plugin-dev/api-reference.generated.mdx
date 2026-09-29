@@ -19,7 +19,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.automation` | 27 | `automation:read`, `automation:screenshot`, `automation:click`, `automation:pointer`, `automation:type`, `automation:window` | frontend, hybrid | internal |
 | `ctx.backup` | 6 | `backup:read`, `backup:write` | frontend, hybrid | internal |
 | `ctx.bots` | 16 | `agent:control` | frontend, hybrid, python | sensitive |
-| `ctx.browser` | 4 | `agent:control`, `session:read` | frontend, hybrid | sensitive |
+| `ctx.browser` | 9 | `agent:control`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
 | `ctx.characterPacks` | 3 | None | frontend, hybrid | internal |
@@ -265,6 +265,11 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `browser.primeDomainGrants` | `agent:control` | medium | Yes |
 | `browser.routeEngine` | `agent:control` | high | Yes |
 | `browser.saveAnnotation` | `agent:control`, `session:read` | high | No |
+| `browser.primeLocalRouting` | `agent:control` | low | Yes |
+| `browser.ensureLocalEngine` | `agent:control` | high | Yes |
+| `browser.openPane` | `agent:control` | medium | No |
+| `browser.attachDownload` | `agent:control` | medium | No |
+| `browser.isSurfaceVisible` | `agent:control` | low | Yes |
 
 ## `ctx.canvas`
 

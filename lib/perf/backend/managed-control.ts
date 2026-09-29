@@ -11,7 +11,8 @@
  *    state-management fix. Restart reuses `reconnect` (disconnect + connect with
  *    the existing config + orphan-reclaim logic).
  *  - **Rust-supervised subsystems** (chat sidecar, ACP + PTY terminals, headless
- *    shells, MCP server, Node plugin hosts, the cloudflared tunnel) are
+ *    shells, MCP server, Node plugin hosts, the cloudflared tunnel, the local
+ *    Chromium runtime) are
  *    controlled through the unified `control_managed_process` command, which
  *    dispatches to the owning subsystem's kill/stop path. New subsystems need
  *    no change here — they fall through to that default.

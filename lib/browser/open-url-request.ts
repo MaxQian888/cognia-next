@@ -12,10 +12,20 @@
  * the composer and the browser subsystem.
  */
 
+import type { BrowserBackend } from "@/lib/browser/backend-availability"
+
 export const BROWSER_OPEN_URL_EVENT = "cognia:browser:open-url"
 
 export interface BrowserOpenUrlRequest {
+  /** Empty string: show the pane on whatever it has open (`browser_open` without a URL). */
   url: string
+  /**
+   * The backend the requester wants the pane to use (ADR-0201 `browser_open`).
+   * Absent: the pane's own resolution (`resolveDesktopBackend`) decides.
+   */
+  backend?: BrowserBackend
+  /** Who asked — `agent` requests may come from an external MCP client. */
+  source?: "user" | "agent"
   /**
    * Set by a listener that actually opened it. Read back by the caller right
    * after `dispatchEvent` returns — event dispatch is synchronous, so this is a
@@ -45,12 +55,19 @@ export const BROWSER_REVEAL_URL_EVENT = "cognia:browser:reveal-url"
  * pane took it, or when a host revealed one for it. False means nothing on
  * this surface can show it and the caller should fall back to the OS browser.
  */
-export function requestBrowserUrl(url: string): boolean {
+export function requestBrowserUrl(
+  url: string,
+  options: { backend?: BrowserBackend; source?: "user" | "agent" } = {}
+): boolean {
   if (typeof window === "undefined") return false
-  const detail: BrowserOpenUrlRequest = { url, claimed: false }
+  const extra = {
+    ...(options.backend ? { backend: options.backend } : {}),
+    ...(options.source ? { source: options.source } : {}),
+  }
+  const detail: BrowserOpenUrlRequest = { url, ...extra, claimed: false }
   window.dispatchEvent(new CustomEvent(BROWSER_OPEN_URL_EVENT, { detail }))
   if (detail.claimed) return true
-  const reveal: BrowserOpenUrlRequest = { url, claimed: false }
+  const reveal: BrowserOpenUrlRequest = { url, ...extra, claimed: false }
   window.dispatchEvent(new CustomEvent(BROWSER_REVEAL_URL_EVENT, { detail: reveal }))
   return reveal.claimed
 }
@@ -65,7 +82,9 @@ export function requestBrowserUrl(url: string): boolean {
  * doing nothing. Claim only when the user will see the result — either the
  * pane is already visible, or it just revealed itself.
  */
-export function onBrowserUrlRequest(handler: (url: string) => boolean): () => void {
+export function onBrowserUrlRequest(
+  handler: (url: string, request: BrowserOpenUrlRequest) => boolean
+): () => void {
   return subscribe(BROWSER_OPEN_URL_EVENT, handler)
 }
 
@@ -79,17 +98,33 @@ export function onBrowserUrlRequest(handler: (url: string) => boolean): () => vo
  * the address on to the pane it mounts must return false and let the OS
  * browser have it.
  */
-export function onBrowserUrlReveal(handler: (url: string) => boolean): () => void {
+export function onBrowserUrlReveal(
+  handler: (url: string, request: BrowserOpenUrlRequest) => boolean
+): () => void {
   return subscribe(BROWSER_REVEAL_URL_EVENT, handler)
 }
 
-function subscribe(eventName: string, handler: (url: string) => boolean): () => void {
+function subscribe(
+  eventName: string,
+  handler: (url: string, request: BrowserOpenUrlRequest) => boolean
+): () => void {
   if (typeof window === "undefined") return () => {}
   const listener = (event: Event) => {
     const detail = (event as CustomEvent<BrowserOpenUrlRequest>).detail
     if (!detail || typeof detail.url !== "string" || detail.claimed) return
-    if (handler(detail.url)) detail.claimed = true
+    if (handler(detail.url, detail)) detail.claimed = true
   }
   window.addEventListener(eventName, listener)
   return () => window.removeEventListener(eventName, listener)
+}
+
+/**
+ * Whether a person can see this window right now. The External Bridge uses it
+ * to decide between revealing the browser pane and running a headless local
+ * Chromium session (ADR-0201): revealing a pane in a hidden window shows
+ * nobody anything.
+ */
+export function isBrowserSurfaceVisible(): boolean {
+  if (typeof document === "undefined") return false
+  return document.visibilityState === "visible"
 }

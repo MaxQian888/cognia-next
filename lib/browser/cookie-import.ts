@@ -1,63 +1,17 @@
+/**
+ * Renderer transport for importing sign-ins from other browsers (ADR-0073,
+ * amended by ADR-0201) and for signing the embedded preview out again.
+ * Cookie values never cross this boundary.
+ */
 import { transport } from "@/lib/tauri"
-
-export const CHROMIUM_BROWSERS = ["chrome", "edge", "brave", "chromium"] as const
-export type ChromiumBrowser = (typeof CHROMIUM_BROWSERS)[number]
-
-export type CookieImportAvailability = {
-  supported: boolean
-  profiles: string[]
-  reason: "feature_disabled" | "macos_only" | "no_profiles" | "probe_failed" | null
-}
-
-export type CookieImportResult =
-  | { kind: "ok"; injected: number; names: string[]; domains: string[] }
-  | { kind: "unsupported"; reason: "feature_disabled" | "macos_only" | string }
-  | { kind: "permission_denied" }
-  | { kind: "no_profile" }
-  | { kind: "no_matching_cookies" }
 
 /** What clearing a site's sign-in removed — counts only, never cookie data. */
 export type CookieClearResult = { removed: number; domain: string }
 
-export type CookieImportMessage = {
-  key: string
-  values?: { count: number }
-}
-
-const FEATURE_DISABLED: CookieImportAvailability = {
-  supported: false,
-  profiles: [],
-  reason: "feature_disabled",
-}
-
-export async function isChromeCookieImportAvailable(
-  browser: ChromiumBrowser,
-  featureEnabled: boolean
-): Promise<CookieImportAvailability> {
-  if (!featureEnabled) return FEATURE_DISABLED
-  return transport.call<CookieImportAvailability>("browser_cookie_import_available", { browser })
-}
-
-export async function importChromeCookies(args: {
-  browser: ChromiumBrowser
-  profile: string
-  domain: string
-  featureEnabled: boolean
-}): Promise<CookieImportResult> {
-  if (!args.featureEnabled) {
-    return { kind: "unsupported", reason: "feature_disabled" }
-  }
-  return transport.call<CookieImportResult>("browser_cookie_import", {
-    browser: args.browser,
-    profile: args.profile,
-    domain: args.domain,
-  })
-}
-
 /**
  * Remove the current site's cookies from the embedded preview.
  *
- * The way out of {@link importChromeCookies}, and deliberately not gated on the
+ * The way out of {@link importCookiesV2}, and deliberately not gated on the
  * import setting or consent: turning the feature off used to leave whatever it
  * had imported in place, with nothing anywhere that could remove it. `domain`
  * must be the host the preview is showing; its registrable domain is cleared.
@@ -75,19 +29,114 @@ export function clearAllSiteCookies(): Promise<{ removed: number }> {
   return transport.call<{ removed: number }>("browser_cookie_clear_all", {})
 }
 
-export function cookieImportMessage(result: CookieImportResult): CookieImportMessage {
+// ---------------------------------------------------------------------------
+// Import (ADR-0201): every desktop OS, Chromium browsers + Firefox + Safari, a
+// site / domain-set / all scope, and an embedded or local-Chromium sink.
+// Values still never leave Rust: these calls carry coordinates and return
+// counts and domain names only.
+// ---------------------------------------------------------------------------
+
+export const COOKIE_SOURCE_BROWSERS = [
+  "chrome",
+  "edge",
+  "brave",
+  "chromium",
+  "arc",
+  "vivaldi",
+  "opera",
+  "firefox",
+  "safari",
+] as const
+export type CookieSourceBrowser = (typeof COOKIE_SOURCE_BROWSERS)[number]
+
+export type CookieSourceKind = "chromium" | "firefox" | "safari"
+
+export type CookieSourceReason = "full_disk_access_required" | "not_installed" | "unsupported_os"
+
+export type CookieSource = {
+  browser: CookieSourceBrowser
+  label: string
+  kind: CookieSourceKind
+  profiles: { id: string; name: string }[]
+  supported: boolean
+  reason: CookieSourceReason | string | null
+}
+
+export type CookieDomainCount = { domain: string; count: number }
+
+export type CookieImportScope =
+  { kind: "site"; domain: string } | { kind: "domains"; domains: string[] } | { kind: "all" }
+
+export type CookieImportSink = "embedded" | "local"
+
+export type CookieImportV2Result =
+  | { kind: "ok"; injected: number; skippedAppBound: number; domains: string[] }
+  | { kind: "permission_denied" }
+  | { kind: "full_disk_access_required" }
+  | { kind: "no_profile" }
+  | { kind: "no_matching_cookies" }
+  | { kind: "unsupported"; reason: string }
+
+export type CookieImportV2Message = {
+  key:
+    | "result.ok"
+    | "result.permissionDenied"
+    | "result.fullDiskAccessRequired"
+    | "result.noProfile"
+    | "result.noMatchingCookies"
+    | "result.unsupported"
+  values?: { count: number; skipped: number }
+}
+
+export function listCookieSources(): Promise<CookieSource[]> {
+  return transport.call<CookieSource[]>("browser_cookie_sources", {})
+}
+
+/** A profile's sites and cookie counts, read without decrypting any value. */
+export function listCookieDomains(
+  browser: CookieSourceBrowser | string,
+  profile: string
+): Promise<CookieDomainCount[]> {
+  return transport.call<CookieDomainCount[]>("browser_cookie_domains", { browser, profile })
+}
+
+export function importCookiesV2(args: {
+  browser: CookieSourceBrowser | string
+  profile: string
+  scope: CookieImportScope
+  sink: CookieImportSink
+  sessionId?: string
+}): Promise<CookieImportV2Result> {
+  return transport.call<CookieImportV2Result>("browser_cookie_import_v2", {
+    browser: args.browser,
+    profile: args.profile,
+    scope: args.scope,
+    sink: args.sink,
+    sessionId: args.sessionId ?? null,
+  })
+}
+
+/** macOS only: open System Settings at Privacy → Full Disk Access. */
+export function openFullDiskAccessSettings(): Promise<void> {
+  return transport.call<void>("browser_open_full_disk_access_settings", {})
+}
+
+export function cookieImportV2Message(result: CookieImportV2Result): CookieImportV2Message {
   switch (result.kind) {
     case "ok":
-      return { key: "result.ok", values: { count: result.injected } }
-    case "unsupported":
       return {
-        key: result.reason === "feature_disabled" ? "result.featureDisabled" : "result.unsupported",
+        key: "result.ok",
+        values: { count: result.injected, skipped: result.skippedAppBound },
       }
     case "permission_denied":
       return { key: "result.permissionDenied" }
+    case "full_disk_access_required":
+      return { key: "result.fullDiskAccessRequired" }
     case "no_profile":
       return { key: "result.noProfile" }
     case "no_matching_cookies":
       return { key: "result.noMatchingCookies" }
+    case "unsupported":
+      return { key: "result.unsupported" }
   }
 }

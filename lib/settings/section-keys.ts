@@ -94,7 +94,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   // bearer tokens are stripped on profile export by `deepStripSecrets`.
   subscription: ["limitsQueryEnabledAccounts", "customLimitsSources"],
   about: ["updates"],
-  desktop: ["browserCookieImportEnabled"],
+  desktop: ["browserCookieImportEnabled", "browserDefaultBackend", "browserUserChromeBrowser"],
   // The WebRTC card lives in this section too, and its five keys were missing
   // from every section — so "reset this section" skipped them and the
   // changed-settings review never listed them, even though the card writes

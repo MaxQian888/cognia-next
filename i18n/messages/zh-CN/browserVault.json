@@ -1,0 +1,288 @@
+{
+  "common": {
+    "cancel": "取消",
+    "close": "关闭",
+    "failed": "出了点问题，请重试。",
+    "loading": "加载中…",
+    "refresh": "刷新",
+    "retry": "重试"
+  },
+  "presence": {
+    "cancelled": "已取消验证。",
+    "denied": "无法验证你的身份，未显示任何内容。",
+    "failed": "身份验证失败，未显示任何内容。",
+    "unavailable": "此设备无法验证你的身份（Touch ID、Windows Hello 或系统密码提示），已保存的密码将保持隐藏。"
+  },
+  "passwords": {
+    "actions": "{origin} 的操作",
+    "add": "添加密码",
+    "copied": "密码已复制，剪贴板将在 30 秒后清空。",
+    "copy": "复制密码",
+    "count": "{count, plural, other {# 个已保存的密码}}",
+    "delete": "删除",
+    "deleteConfirm": {
+      "confirm": "删除密码",
+      "description": "{origin} 上 {username} 的密码将从此设备移除，且无法撤销。",
+      "title": "删除此密码？"
+    },
+    "deleted": "密码已删除。",
+    "description": "密码保存在操作系统的安全存储中。显示、复制或导出密码时需要验证你的身份。",
+    "edit": "编辑",
+    "empty": "还没有保存的密码。可以手动添加，或从其他浏览器导入。",
+    "emptySearch": "没有与“{query}”匹配的密码。",
+    "export": {
+      "action": "导出 CSV",
+      "confirm": "选择保存位置",
+      "done": "密码已导出。",
+      "failed": "无法导出密码。",
+      "warning": "导出的文件以明文包含所有密码。请妥善保管，用完后删除。"
+    },
+    "form": {
+      "addTitle": "添加密码",
+      "editPasswordHint": "留空则保留当前密码。",
+      "editTitle": "编辑密码",
+      "invalidOrigin": "请输入网址，例如 https://example.com。",
+      "note": "备注",
+      "origin": "网站",
+      "originPlaceholder": "https://example.com",
+      "password": "密码",
+      "passwordRequired": "请输入密码。",
+      "save": "保存",
+      "saved": "密码已保存。",
+      "saving": "保存中…",
+      "updated": "密码已更新。",
+      "username": "用户名",
+      "usernameRequired": "请输入用户名。"
+    },
+    "hide": "隐藏密码",
+    "import": {
+      "action": "导入",
+      "appBound": "{count, plural, other {# 个密码}}受 Chrome 应用绑定加密保护，已跳过。请在 Chrome 中将其导出为 CSV（设置 → 密码 → 导出），再导入该文件。",
+      "browserTab": "从浏览器",
+      "chooseFile": "选择 CSV 文件…",
+      "csvTab": "从 CSV 文件",
+      "description": "密码在此设备上读取并直接写入安全存储，不会经过此窗口。",
+      "errors": "{count, plural, other {# 行无法导入。}}",
+      "failed": "导入失败。",
+      "fileFilter": "CSV 文件",
+      "format": "文件格式",
+      "formats": {
+        "1password": "1Password",
+        "auto": "自动识别",
+        "bitwarden": "Bitwarden",
+        "chrome": "Chrome、Edge 或 Brave",
+        "firefox": "Firefox",
+        "generic": "通用（url, username, password）",
+        "lastpass": "LastPass",
+        "safari": "Safari"
+      },
+      "importing": "导入中…",
+      "noSources": "此设备上没有找到保存了密码的浏览器。",
+      "primaryPasswordSet": "此 Firefox 配置文件设置了主密码，Cognia 无法解锁。请在 Firefox 中将密码导出为 CSV，再导入该文件。",
+      "profile": "配置文件",
+      "reason": {
+        "not_installed": "未安装",
+        "unsupported_os": "当前系统不支持"
+      },
+      "result": "已导入 {imported} 个，更新 {updated} 个，跳过 {skipped} 个。",
+      "run": "导入密码",
+      "source": "浏览器",
+      "sourceWithReason": "{label}（{reason}）",
+      "title": "导入密码"
+    },
+    "lastUsed": "上次使用：{date}",
+    "loadFailed": "无法加载已保存的密码。",
+    "reveal": "显示密码",
+    "search": "搜索密码",
+    "searchPlaceholder": "按网站或用户名搜索",
+    "source": {
+      "csv": "CSV",
+      "import": "已导入",
+      "manual": "手动添加",
+      "saved": "浏览时保存"
+    },
+    "title": "密码"
+  },
+  "autofill": {
+    "account": "账号",
+    "description": "Cognia 会直接填写表单，密码不会在这里显示。",
+    "dismiss": "暂不",
+    "failed": "无法填写登录表单。",
+    "fill": "填写",
+    "filled": "已为 {username} 填写登录信息。",
+    "filling": "填写中…",
+    "reason": {
+      "ambiguous": "有多个已保存的密码匹配，请选择账号。",
+      "no_login_form": "页面上已没有登录表单。",
+      "no_match": "没有与此网站匹配的已保存密码。"
+    },
+    "region": "有可用的已保存密码",
+    "title": "使用已保存的密码登录"
+  },
+  "savePrompt": {
+    "dismiss": "暂不",
+    "failed": "无法保存密码。",
+    "more": "{count, plural, other {还有 # 个等待处理}}",
+    "never": "此网站永不保存",
+    "region": "保存密码",
+    "save": "保存",
+    "saved": "密码已保存。",
+    "saveDescription": "要保存 {origin} 上 {username} 的密码吗？",
+    "saveTitle": "保存密码？",
+    "update": "更新",
+    "updateDescription": "要更新 {origin} 上 {username} 已保存的密码吗？",
+    "updated": "密码已更新。",
+    "updateTitle": "更新密码？"
+  },
+  "extensions": {
+    "cancel": "取消",
+    "checkUpdates": "检查更新",
+    "checking": "检查中…",
+    "description": "扩展在本地 Chromium 浏览器中运行。启用、停用或安装扩展会重启已打开的本地会话。",
+    "disable": "停用 {name}",
+    "empty": "尚未安装扩展。",
+    "enable": "启用 {name}",
+    "errors": {
+      "crx_id_mismatch": "扩展包的 ID 与你请求的扩展不一致。",
+      "crx_invalid": "该文件不是有效的 Chrome 扩展包。",
+      "extension_not_found": "该扩展已不再安装。",
+      "extensions_unsupported_backend": "扩展只能在本地 Chromium 浏览器中运行。",
+      "manifest_invalid": "扩展的 manifest 缺失或无效。",
+      "webstore_unavailable": "无法访问 Chrome 应用商店，或商店未提供该扩展。",
+      "zip_path_traversal": "扩展包包含不安全的文件路径，已被拒绝。",
+      "extension_install_expired": "安装未及时确认，请重新开始。"
+    },
+    "failed": "扩展操作失败。",
+    "hostPermissions": "{count, plural, other {# 个网站}}",
+    "install": {
+      "crx": "安装 .crx 文件…",
+      "done": "已安装 {name}。",
+      "installing": "安装中…",
+      "label": "Chrome 应用商店 ID 或链接",
+      "placeholder": "扩展 ID 或 chromewebstore.google.com 链接",
+      "unpacked": "加载已解压的文件夹…",
+      "webstore": "安装"
+    },
+    "loadFailed": "无法加载扩展。",
+    "loading": "正在加载扩展…",
+    "noUpdates": "所有扩展均为最新版本。",
+    "openOptions": "选项",
+    "openPopup": "打开弹出页",
+    "openRequiresSession": "请先打开一个本地 Chromium 会话以使用扩展页面。",
+    "permissions": "{count, plural, other {# 项权限}}",
+    "remove": "移除",
+    "removeConfirm": {
+      "confirm": "移除扩展",
+      "description": "{name} 及其本地数据将从 Cognia 的浏览器中移除。",
+      "title": "移除此扩展？"
+    },
+    "removed": "已移除 {name}。",
+    "retry": "重试",
+    "source": {
+      "crx": "CRX 文件",
+      "unpacked": "已解压",
+      "webstore": "应用商店"
+    },
+    "title": "扩展",
+    "unsupported": {
+      "embedded": "内置预览无法运行 Chrome 扩展。请将浏览器切换到本地 Chromium 后使用。下方列出已安装的扩展以供参考。",
+      "remote": "云端浏览器不会加载此设备上的扩展。请切换到本地 Chromium 后使用。",
+      "title": "扩展在此处不可用",
+      "userChrome": "你自己的 Chrome 使用它自己的扩展，请在 Chrome 中管理。Cognia 的扩展集只作用于其本地 Chromium。"
+    },
+    "update": "更新到 {version}",
+    "updated": "已更新 {name}。",
+    "updatesAvailable": "{count, plural, other {有 # 个可用更新}}",
+    "version": "版本 {version}",
+    "installConfirm": {
+      "allSites": "所有网站",
+      "confirm": "安装扩展",
+      "description": "版本 {version}。安装前请确认此扩展可以访问的内容。",
+      "hostPermissions": "可读取和更改的网站",
+      "none": "此扩展未申请任何特殊权限。",
+      "permissions": "权限",
+      "title": "安装 {name}？"
+    }
+  },
+  "cookieImport": {
+    "all": "所有网站",
+    "allHint": "将导入该配置文件中的全部 Cookie。仅对你完全信任的配置文件使用此选项。",
+    "browser": "浏览器",
+    "consent": {
+      "continue": "我已了解，继续",
+      "description": "Cognia 将从你选择的浏览器配置文件中读取已保存的登录 Cookie，并添加到此浏览器。",
+      "localOnly": "Cookie 值只保留在此设备上，不会进入此窗口、日志或 Cognia 的服务器。",
+      "title": "允许访问本地 Cookie？"
+    },
+    "description": "复用此设备上其他浏览器的登录状态。",
+    "domains": "选定的网站",
+    "domainsCount": "{count, plural, other {# 个 Cookie}}",
+    "domainsEmpty": "此配置文件中没有 Cookie。",
+    "domainsLoadFailed": "无法列出此配置文件的网站。",
+    "domainsNoMatch": "没有与“{query}”匹配的网站。",
+    "domainsSearch": "搜索网站",
+    "domainsSelected": "{count, plural, other {已选择 # 个网站}}",
+    "featureDisabled": "请先在 设置 → 桌面 中启用浏览器 Cookie 导入。",
+    "fullDiskAccess": {
+      "description": "macOS 会保护 Safari 的 Cookie。请在 系统设置 → 隐私与安全性 → 完全磁盘访问权限 中为 Cognia 授权，然后重启 Cognia。",
+      "open": "打开完全磁盘访问权限设置",
+      "openFailed": "无法打开系统设置。请手动前往 隐私与安全性 → 完全磁盘访问权限。"
+    },
+    "import": "导入",
+    "importing": "导入中…",
+    "keychainHint": "系统可能会请求读取浏览器已保存密钥的权限。拒绝后此浏览器不会有任何变化。",
+    "loadFailed": "无法列出此设备上的浏览器。",
+    "noSources": "此设备上没有找到受支持的浏览器。",
+    "openSettings": "打开桌面设置",
+    "profile": "配置文件",
+    "reason": {
+      "full_disk_access_required": "需要完全磁盘访问权限",
+      "not_installed": "未安装",
+      "unsupported_os": "当前系统不支持"
+    },
+    "result": {
+      "appBound": "{count, plural, other {# 个 Cookie}}受 Chrome 应用绑定加密保护，已跳过。请在此浏览器中登录一次，或改用你自己的 Chrome。",
+      "failed": "Cookie 导入失败，未暴露任何 Cookie 值。",
+      "fullDiskAccessRequired": "Cognia 需要完全磁盘访问权限才能读取 Safari 的 Cookie。",
+      "noMatchingCookies": "所选配置文件在该范围内没有 Cookie。",
+      "noProfile": "所选浏览器配置文件已不可用。",
+      "ok": "已导入 {count, plural, other {# 个 Cookie}}。",
+      "permissionDenied": "读取浏览器已保存密钥的权限被拒绝，未导入任何 Cookie。",
+      "unsupported": "当前系统不支持从该浏览器导入 Cookie。"
+    },
+    "scope": "导入内容",
+    "site": "此网站（{host}）",
+    "sink": {
+      "embedded": "Cookie 将添加到内置预览。",
+      "local": "Cookie 将添加到本地 Chromium 会话。",
+      "localNoSession": "请先打开一个本地 Chromium 会话，Cookie 会添加到正在运行的会话中。",
+      "unsupported": "云端浏览器运行在另一台机器上，无法接收此设备的 Cookie。"
+    },
+    "sourceWithReason": "{label}（{reason}）",
+    "title": "导入登录 Cookie"
+  },
+  "cookieAction": {
+    "chooseImport": "选择要导入的内容…",
+    "localClearDescription": "从本地 Chromium 会话中移除 {domain} 的 Cookie。",
+    "localCleared": "已清除 {domain} 的 Cookie 并重新加载页面。",
+    "localNoSession": "请先打开一个本地 Chromium 会话以管理其 Cookie。",
+    "userChromeClear": "这是你自己的 Chrome 配置文件，请在 Chrome 的设置中管理其 Cookie。"
+  },
+  "localContent": {
+    "devServers": "本地开发服务器",
+    "devServersEmpty": "没有正在运行的本地 Web 服务器。",
+    "devServersFailed": "无法查找本地服务器。",
+    "openFile": "打开文件…",
+    "openFolder": "打开文件夹…",
+    "openServer": "打开 {url}",
+    "port": "端口 {port}",
+    "portWithProcess": "端口 {port} · {process}",
+    "serveFailed": "无法在浏览器中打开该文件。",
+    "served": "已共享的文件夹",
+    "servedDescription": "这些文件夹仅在 Cognia 运行期间向本机提供。",
+    "serving": "打开中…",
+    "stop": "停止共享",
+    "stopFailed": "无法停止共享该文件夹。",
+    "title": "打开本地内容"
+  }
+}

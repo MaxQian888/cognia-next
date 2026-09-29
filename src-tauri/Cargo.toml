@@ -114,6 +114,7 @@ cognia-fleet = { path = "../crates/cognia-fleet", features = ["tauri-host"] }
 # ADR-0196 P6g — Chromium cookie import; `browser/cookie_import` keeps the
 # command shells, the macOS keychain adapter and the WebKit sink.
 cognia-browser-cookies = { path = "../crates/cognia-browser-cookies" }
+cognia-local-browser = { path = "../crates/cognia-local-browser" }
 # ADR-0196 P6b — Codex App dispatch; `codex_app_dispatch.rs` keeps the command
 # shells and the `AppHandle`-backed `CodexAppHost`.
 cognia-codex-app = { path = "../crates/cognia-codex-app" }

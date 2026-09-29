@@ -1,10 +1,17 @@
-import { resolveBrowserBackend, resolveDesktopBackend } from "./backend-availability"
+import {
+  bestLocalDesktopBackend,
+  resolveBrowserBackend,
+  resolveDesktopBackend,
+  type BrowserBackendInputs,
+} from "./backend-availability"
 
-const inputs = (over: Partial<Parameters<typeof resolveBrowserBackend>[0]> = {}) => ({
+const inputs = (over: Partial<BrowserBackendInputs> = {}): BrowserBackendInputs => ({
   tauri: true,
   remoteBrowserEnabled: false,
   remoteHostActive: false,
   webCompanionTarget: false,
+  localChromiumInstalled: false,
+  userChromeAvailable: false,
   ...over,
 })
 
@@ -13,6 +20,8 @@ describe("resolveBrowserBackend", () => {
     expect(resolveBrowserBackend(inputs())).toEqual({
       backend: "embedded",
       remoteReachable: false,
+      localReachable: false,
+      userChromeReachable: false,
       reason: "remote-disabled",
     })
   })
@@ -24,12 +33,10 @@ describe("resolveBrowserBackend", () => {
     })
   })
 
-  // The whole point: shell was the wrong question. A desktop attached to a
-  // remote Cognia host can reach the cloud browser; one that is not, cannot.
   it("reaches the cloud browser through an attached remote host", () => {
     expect(
       resolveBrowserBackend(inputs({ remoteBrowserEnabled: true, remoteHostActive: true }))
-    ).toEqual({ backend: "remote", remoteReachable: true, reason: "remote-ready" })
+    ).toMatchObject({ backend: "remote", remoteReachable: true, reason: "remote-ready" })
   })
 
   it("reaches it through this shell's own pairing", () => {
@@ -41,7 +48,7 @@ describe("resolveBrowserBackend", () => {
   })
 
   it("says so when it is switched on with nothing to talk to", () => {
-    expect(resolveBrowserBackend(inputs({ remoteBrowserEnabled: true }))).toEqual({
+    expect(resolveBrowserBackend(inputs({ remoteBrowserEnabled: true }))).toMatchObject({
       backend: "embedded",
       remoteReachable: false,
       reason: "no-remote-host",
@@ -50,17 +57,46 @@ describe("resolveBrowserBackend", () => {
       resolveBrowserBackend(inputs({ tauri: false, remoteBrowserEnabled: true }))
     ).toMatchObject({ backend: "web-fallback", reason: "no-remote-host" })
   })
+
+  it("never reports local backends as reachable off the desktop", () => {
+    expect(
+      resolveBrowserBackend(
+        inputs({ tauri: false, localChromiumInstalled: true, userChromeAvailable: true })
+      )
+    ).toMatchObject({ localReachable: false, userChromeReachable: false })
+  })
 })
 
 describe("resolveDesktopBackend", () => {
   const reachable = inputs({ remoteBrowserEnabled: true, remoteHostActive: true })
 
-  it("keeps the embedded webview as the desktop default even when remote is reachable", () => {
+  it("keeps the embedded webview as the default while nothing is installed", () => {
     expect(resolveDesktopBackend(reachable, null)).toMatchObject({
       backend: "embedded",
       remoteReachable: true,
       reason: "embedded-host",
     })
+    expect(resolveDesktopBackend(inputs(), null)).toMatchObject({
+      backend: "embedded",
+      reason: "remote-disabled",
+    })
+  })
+
+  it("makes local Chromium the default for public and unknown pages once installed", () => {
+    const installed = inputs({ localChromiumInstalled: true })
+    expect(resolveDesktopBackend(installed, null)).toMatchObject({
+      backend: "local-chromium",
+      reason: "local-ready",
+    })
+    expect(resolveDesktopBackend({ ...installed, targetTier: "public" }, null)).toMatchObject({
+      backend: "local-chromium",
+    })
+  })
+
+  it("keeps loopback previews on the embedded webview even when installed", () => {
+    expect(
+      resolveDesktopBackend(inputs({ localChromiumInstalled: true, targetTier: "trusted" }), null)
+    ).toMatchObject({ backend: "embedded" })
   })
 
   it("honours an explicit switch to the cloud browser", () => {
@@ -75,11 +111,50 @@ describe("resolveDesktopBackend", () => {
   })
 
   it("honours an explicit switch back to the embedded webview", () => {
-    expect(resolveDesktopBackend(reachable, "embedded")).toMatchObject({ backend: "embedded" })
+    expect(
+      resolveDesktopBackend(inputs({ localChromiumInstalled: true }), "embedded")
+    ).toMatchObject({ backend: "embedded", reason: "embedded-host" })
+  })
+
+  it("serves an explicit local Chromium choice only once installed", () => {
+    expect(
+      resolveDesktopBackend(inputs({ localChromiumInstalled: true }), "local-chromium")
+    ).toMatchObject({ backend: "local-chromium", reason: "local-ready" })
+    expect(resolveDesktopBackend(inputs(), "local-chromium")).toMatchObject({
+      backend: "embedded",
+      reason: "local-not-installed",
+    })
+  })
+
+  it("attaches the user's Chrome only when chosen and available", () => {
+    const available = inputs({ userChromeAvailable: true, localChromiumInstalled: true })
+    expect(resolveDesktopBackend(available, null).backend).toBe("local-chromium")
+    expect(resolveDesktopBackend(available, "user-chrome")).toMatchObject({
+      backend: "user-chrome",
+      reason: "user-chrome-ready",
+    })
+    expect(
+      resolveDesktopBackend(inputs({ localChromiumInstalled: true }), "user-chrome")
+    ).toMatchObject({ backend: "local-chromium", reason: "user-chrome-unavailable" })
+    expect(resolveDesktopBackend(inputs(), "user-chrome")).toMatchObject({
+      backend: "embedded",
+      reason: "user-chrome-unavailable",
+    })
   })
 
   it("leaves non-desktop shells to the plain resolver", () => {
     const web = inputs({ tauri: false, remoteBrowserEnabled: true, webCompanionTarget: true })
     expect(resolveDesktopBackend(web, "embedded")).toMatchObject({ backend: "remote" })
+    expect(resolveDesktopBackend(web, "local-chromium")).toMatchObject({ backend: "remote" })
+  })
+})
+
+describe("bestLocalDesktopBackend", () => {
+  it("prefers the installed local Chromium, else the embedded webview", () => {
+    expect(bestLocalDesktopBackend({ tauri: true, localChromiumInstalled: true })).toBe(
+      "local-chromium"
+    )
+    expect(bestLocalDesktopBackend({ tauri: true, localChromiumInstalled: false })).toBe("embedded")
+    expect(bestLocalDesktopBackend({ tauri: false, localChromiumInstalled: true })).toBe("embedded")
   })
 })
