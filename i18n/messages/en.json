@@ -28270,6 +28270,20 @@
       "resolved": "Resolved ({count})",
       "title": "Threads"
     },
+    "continue": {
+      "coordinatorTitle": "Project coordinator",
+      "done": "This conversation is now a project thread; the coordinator is planning what remains.",
+      "doneNotSeeded": "This conversation is now a project thread. Tell the coordinator what to plan next.",
+      "failed": "Could not continue as a project: {error}",
+      "menu": "Continue as project",
+      "refused": {
+        "already-project": "This conversation is already part of a project.",
+        "busy": "Wait for the current reply to finish, then try again.",
+        "linked": "A branch or side conversation can't become a project thread.",
+        "missing": "This conversation no longer exists.",
+        "no-workspace": "Move this conversation into a workspace first."
+      }
+    },
     "entry": {
       "coordinatorTitle": "Project coordinator",
       "description": "One conversation that splits work into threads, runs them in the background, and collects their results.",

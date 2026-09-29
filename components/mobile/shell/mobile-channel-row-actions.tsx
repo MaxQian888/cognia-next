@@ -35,6 +35,7 @@ import type {
   ConversationRowExtraActions,
 } from "@/hooks/chat/use-conversation-row-actions"
 import { useSessionWorkspaceMoveMenu } from "@/hooks/workspace/use-move-session-workspace"
+import { useContinueAsProjectMenu } from "@/hooks/project-coordinator/use-continue-as-project-menu"
 import { assignableFolders } from "@/lib/chat/conversation-list-model"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
@@ -124,6 +125,7 @@ function ActionsBody({
   // Row vocabulary shared with the desktop row menu.
   const tRow = useTranslations("desktop.sessionRow")
   const workspaceMove = useSessionWorkspaceMoveMenu(session)
+  const { onContinueAsProject } = useContinueAsProjectMenu(session)
   const title = sessionDisplayTitle(session.title, {
     untitled: tRow("untitled"),
     placeholder: tRow("placeholderTitle"),
@@ -154,6 +156,7 @@ function ActionsBody({
           onMarkRead={bind(extraActions.onMarkRead)}
           onMarkUnread={bind(extraActions.onMarkUnread)}
           onBranch={bind(extraActions.onBranch)}
+          onContinueAsProject={onContinueAsProject}
           onCopyLink={bind(extraActions.onCopyLink)}
           onExportShare={bind(extraActions.onExportShare)}
           onArchive={bind(rowActions.onArchive)}

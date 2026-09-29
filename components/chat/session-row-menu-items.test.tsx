@@ -104,6 +104,25 @@ test("disables every conversation write on a handed-off row and says why", () =>
   expect(screen.getByTestId("session-row-dropdown-handoff-s-1")).toHaveTextContent("handoffStatus")
 })
 
+test("offers Continue as project only when the row can take it", () => {
+  const onContinueAsProject = jest.fn()
+  renderDropdown({ onContinueAsProject })
+  fireEvent.click(screen.getByTestId("session-row-dropdown-continue-as-project-s-1"))
+  expect(onContinueAsProject).toHaveBeenCalled()
+})
+
+test("hides Continue as project without a handler", () => {
+  renderDropdown({})
+  expect(screen.queryByTestId("session-row-dropdown-continue-as-project-s-1")).toBeNull()
+})
+
+test("disables Continue as project on a handed-off row", () => {
+  renderDropdown({ session: { ...session, handoffLock: LOCK }, onContinueAsProject: jest.fn() })
+  expect(screen.getByTestId("session-row-dropdown-continue-as-project-s-1")).toHaveAttribute(
+    "data-disabled"
+  )
+})
+
 test("switches archive for unarchive on an archived row", () => {
   const onUnarchive = jest.fn()
   renderDropdown({ session: { ...session, archivedAt: 5 }, onArchive: jest.fn(), onUnarchive })

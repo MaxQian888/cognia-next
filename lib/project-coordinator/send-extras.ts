@@ -7,10 +7,14 @@ import {
 } from "@/lib/claude/project-coordinator-builtin-tools"
 import { useChatStore } from "@/stores/chat"
 import { sessionStatusOf } from "@/hooks/chat/steer-runtime"
-import { projectRoleToolsApply } from "./config"
+import { projectRoleToolsApply, resolveCoordinatorConfig } from "./config"
 import { buildCoordinatorContextSection, type DigestThreadInput } from "./digest"
 import { PROJECT_COORDINATOR_PROTOCOL, PROJECT_THREAD_PROTOCOL } from "./protocol"
 import { listProjectThreads } from "./thread-runtime"
+import { updateCoordinator } from "./project-access"
+import { buildSetupRecommendationsSection, shouldOfferSetup } from "./setup-recommendations"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import type { ScheduledTask } from "@/types/scheduler"
 import { listSessionPrObservationsByProject } from "@/lib/db/session-pr-observations"
 import type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
 
@@ -34,6 +38,8 @@ export interface SendExtrasDeps {
   prStatuses: (projectId: string) => Promise<ReadonlyMap<string, PrDerivedStatus>>
   threadInput: (thread: ChatSession) => Omit<DigestThreadInput, "pr">
   now: () => number
+  listSchedules: (projectId: string) => Promise<ScheduledTask[]>
+  markSetupOffered: (projectId: string, at: number) => void
 }
 
 function defaultDeps(): SendExtrasDeps {
@@ -51,6 +57,10 @@ function defaultDeps(): SendExtrasDeps {
       pendingApprovals: useChatStore.getState().sessions[thread.id]?.pendingApprovals.length ?? 0,
     }),
     now: Date.now,
+    listSchedules: (projectId) => schedulerDb.getTasksByProject(projectId),
+    markSetupOffered: (projectId, at) => {
+      updateCoordinator(projectId, { setupOfferedAt: at })
+    },
   }
 }
 
@@ -67,13 +77,30 @@ export async function resolveProjectRoleSendExtras(
     deps.listThreads(session.id),
     session.projectId ? deps.prStatuses(session.projectId) : new Map<string, PrDerivedStatus>(),
   ])
+  const status = buildCoordinatorContextSection(
+    project,
+    threads.map((thread) => ({ ...deps.threadInput(thread), pr: prStatuses.get(thread.id) })),
+    deps.now()
+  )
+  const setup = await setupSection(session.projectId, project, threads.length, deps)
   return {
     pluginTools: buildProjectCoordinatorManifestEntries(),
     protocol: PROJECT_COORDINATOR_PROTOCOL,
-    dynamicSection: buildCoordinatorContextSection(
-      project,
-      threads.map((thread) => ({ ...deps.threadInput(thread), pr: prStatuses.get(thread.id) })),
-      deps.now()
-    ),
+    dynamicSection: setup ? `${status}\n\n${setup}` : status,
   }
+}
+
+/** The one-off setup offer, recorded as offered the moment it is included. */
+async function setupSection(
+  projectId: string | undefined,
+  project: Pick<Project, "coordinator"> & Partial<Pick<Project, "roots">>,
+  threadCount: number,
+  deps: SendExtrasDeps
+): Promise<string | undefined> {
+  const { setupOfferedAt } = resolveCoordinatorConfig(project)
+  if (!projectId || !shouldOfferSetup({ setupOfferedAt, threadCount })) return undefined
+  // A schedule read that fails leaves the list out; the offer stands.
+  const schedules = await deps.listSchedules(projectId).catch(() => [])
+  deps.markSetupOffered(projectId, deps.now())
+  return buildSetupRecommendationsSection({ project, schedules })
 }

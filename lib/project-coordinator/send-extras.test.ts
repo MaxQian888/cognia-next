@@ -9,8 +9,11 @@ const deps: SendExtrasDeps = {
   prStatuses: async () => new Map([["t1", "ci_failed" as const]]),
   threadInput: (thread) => ({ thread, status: "streaming", pendingApprovals: 0 }),
   now: () => 5,
+  listSchedules: jest.fn(async () => []),
+  markSetupOffered: jest.fn(),
 }
-const on = { coordinator: { enabled: true } }
+// Setup already offered, so these cases see only the status digest.
+const on = { coordinator: { enabled: true, setupOfferedAt: 1 } }
 
 describe("projectRoleToolsApply", () => {
   it("needs a role and coordination switched on", () => {
@@ -46,5 +49,55 @@ describe("resolveProjectRoleSendExtras", () => {
     await expect(
       resolveProjectRoleSendExtras({ id: "c", projectRole: "coordinator" }, {}, deps)
     ).resolves.toBeUndefined()
+  })
+
+  it("offers setup once, on a new project's first coordinator turn", async () => {
+    const fresh = {
+      coordinator: { enabled: true },
+      roots: [{ id: "r1", path: "/src/app", isPrimary: true }],
+    }
+    const empty: SendExtrasDeps = {
+      ...deps,
+      listThreads: jest.fn(async () => []),
+      listSchedules: jest.fn(async () => [
+        { name: "Nightly deps", status: "active" },
+      ]) as unknown as SendExtrasDeps["listSchedules"],
+      markSetupOffered: jest.fn(),
+    }
+    const extras = await resolveProjectRoleSendExtras(
+      { id: "c", projectRole: "coordinator", projectId: "p1" },
+      fresh,
+      empty
+    )
+    expect(extras?.dynamicSection).toContain("## Project status")
+    expect(extras?.dynamicSection).toContain("## Project setup (first turn only)")
+    expect(extras?.dynamicSection).toContain("- Nightly deps (active)")
+    expect(empty.markSetupOffered).toHaveBeenCalledWith("p1", 5)
+  })
+
+  it("does not offer setup once threads exist, or when schedules cannot be read", async () => {
+    const markSetupOffered = jest.fn()
+    const extras = await resolveProjectRoleSendExtras(
+      { id: "c", projectRole: "coordinator", projectId: "p1" },
+      { coordinator: { enabled: true } },
+      { ...deps, markSetupOffered }
+    )
+    expect(extras?.dynamicSection).not.toContain("Project setup")
+    expect(markSetupOffered).not.toHaveBeenCalled()
+
+    const failing = await resolveProjectRoleSendExtras(
+      { id: "c", projectRole: "coordinator", projectId: "p1" },
+      { coordinator: { enabled: true } },
+      {
+        ...deps,
+        listThreads: async () => [],
+        listSchedules: async () => {
+          throw new Error("db closed")
+        },
+        markSetupOffered,
+      }
+    )
+    expect(failing?.dynamicSection).toContain("Project setup")
+    expect(markSetupOffered).toHaveBeenCalled()
   })
 })

@@ -28270,6 +28270,20 @@
       "resolved": "已解决（{count}）",
       "title": "线程"
     },
+    "continue": {
+      "coordinatorTitle": "项目协调者",
+      "done": "此对话已成为项目线程，协调者正在规划剩余工作。",
+      "doneNotSeeded": "此对话已成为项目线程。请告诉协调者接下来要规划什么。",
+      "failed": "无法作为项目继续：{error}",
+      "menu": "作为项目继续",
+      "refused": {
+        "already-project": "此对话已经属于某个项目。",
+        "busy": "请等待当前回复完成后再试。",
+        "linked": "分支或旁支对话不能成为项目线程。",
+        "missing": "此对话已不存在。",
+        "no-workspace": "请先把此对话移到某个工作区。"
+      }
+    },
     "entry": {
       "coordinatorTitle": "项目协调者",
       "description": "一个对话把工作拆成多个线程，在后台并行运行并汇总结果。",

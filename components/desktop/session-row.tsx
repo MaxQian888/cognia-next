@@ -34,6 +34,7 @@ import {
 } from "@/lib/chat/conversation-timestamp"
 import { assignableFolders } from "@/lib/chat/conversation-list-model"
 import { useSessionWorkspaceMoveMenu } from "@/hooks/workspace/use-move-session-workspace"
+import { useContinueAsProjectMenu } from "@/hooks/project-coordinator/use-continue-as-project-menu"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
@@ -429,6 +430,7 @@ function SessionRowImpl({
   // Attribution is correctable from where a misplaced conversation is noticed:
   // the list (shared with the mobile action sheet).
   const workspaceMove = useSessionWorkspaceMoveMenu(session)
+  const continueAsProjectMenu = useContinueAsProjectMenu(session)
 
   const handleArchive = () => {
     log.info("session archive", { sessionId: session.id })
@@ -573,6 +575,7 @@ function SessionRowImpl({
       ? (folderId) => void onAssignToFolder(session.id, folderId)
       : undefined,
     ...workspaceMove,
+    ...continueAsProjectMenu,
     onHandoff: () => setHandoffDialogOpen(true),
     desktop: isTauri()
       ? {

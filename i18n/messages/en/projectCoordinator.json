@@ -175,5 +175,19 @@
       "effort": "{role} effort",
       "useDefault": "Use default"
     }
+  },
+  "continue": {
+    "menu": "Continue as project",
+    "coordinatorTitle": "Project coordinator",
+    "done": "This conversation is now a project thread; the coordinator is planning what remains.",
+    "doneNotSeeded": "This conversation is now a project thread. Tell the coordinator what to plan next.",
+    "failed": "Could not continue as a project: {error}",
+    "refused": {
+      "missing": "This conversation no longer exists.",
+      "no-workspace": "Move this conversation into a workspace first.",
+      "already-project": "This conversation is already part of a project.",
+      "linked": "A branch or side conversation can't become a project thread.",
+      "busy": "Wait for the current reply to finish, then try again."
+    }
   }
 }

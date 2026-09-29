@@ -13,7 +13,7 @@
  * probe, the Codex dispatch spinner) and every handler; this component only
  * decides what is offered and in which order:
  *
- *   selection · rename · pin · read state · branch
+ *   selection · rename · pin · read state · branch · continue as project
  *   copy link · export & share
  *   archive · folder · workspace · device handoff · Codex / terminal
  *   delete
@@ -47,6 +47,7 @@ import {
   Share2Icon,
   TerminalIcon,
   Trash2Icon,
+  WorkflowIcon,
 } from "lucide-react"
 
 import type { MenuKit } from "@/components/shared/menu-kit"
@@ -70,6 +71,8 @@ export interface SessionRowMenuItemsProps {
   onMarkRead?: () => void
   onMarkUnread?: () => void
   onBranch?: () => void
+  /** Turn this conversation into a project's first thread (ADR-0204). */
+  onContinueAsProject?: () => void
   onCopyLink?: () => void
   onExportShare?: () => void
   onArchive?: () => void
@@ -106,6 +109,7 @@ export function SessionRowMenuItems({
   onMarkRead,
   onMarkUnread,
   onBranch,
+  onContinueAsProject,
   onCopyLink,
   onExportShare,
   onArchive,
@@ -121,6 +125,7 @@ export function SessionRowMenuItems({
   onDelete,
 }: SessionRowMenuItemsProps) {
   const t = useTranslations("desktop.sessionRow")
+  const tProject = useTranslations("projectCoordinator.continue")
   const { Item, Label, Separator, Sub, SubTrigger, SubContent, Shortcut } = kit
   const locked = Boolean(session.handoffLock)
   const isArchived = session.archivedAt != null
@@ -169,6 +174,16 @@ export function SessionRowMenuItems({
         <Item onSelect={onBranch} disabled={locked} data-testid={testId("branch")}>
           <GitBranchPlusIcon className="mr-2 size-4" />
           {t("branch")}
+        </Item>
+      ) : null}
+      {onContinueAsProject ? (
+        <Item
+          onSelect={onContinueAsProject}
+          disabled={locked}
+          data-testid={testId("continue-as-project")}
+        >
+          <WorkflowIcon className="mr-2 size-4" />
+          {tProject("menu")}
         </Item>
       ) : null}
       {onCopyLink || onExportShare ? <Separator /> : null}
