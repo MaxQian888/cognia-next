@@ -196,6 +196,7 @@
     "0198-a-runs-capabilities-are-granted-not-patched",
     "0199-an-agent-variant-follows-its-base",
     "0200-files-is-a-view-that-keeps-what-you-keep",
-    "0201-the-desktop-browser-runs-chromium-locally"
+    "0201-the-desktop-browser-runs-chromium-locally",
+    "0204-a-project-coordinator-runs-threads-in-the-background"
   ]
 }
