@@ -35,6 +35,7 @@ export function toUnifiedFromTaskExecution(exec: TaskExecution): UnifiedExecutio
     logs: exec.logs.map(mapTaskExecLog),
     triggerSource: exec.triggerSource,
     ...(exec.terminalReason ? { terminalReason: exec.terminalReason } : {}),
+    ...(exec.phases && exec.phases.length > 0 ? { phases: exec.phases } : {}),
     origin: { tableName: "scheduledTaskRuns", nativeId: exec.id },
   }
 }

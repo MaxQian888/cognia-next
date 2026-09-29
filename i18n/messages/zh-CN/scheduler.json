@@ -1268,6 +1268,23 @@
     "runningNow": "这次运行仍在进行中。",
     "stop": "停止运行"
   },
+  "runPhases": {
+    "title": "耗时分布",
+    "outcome": {
+      "reused": "已复用",
+      "joined": "已合并"
+    },
+    "names": {
+      "fire-delay": "触发延迟",
+      "executor-load": "加载执行器",
+      "session": "会话",
+      "send-options": "智能体选项",
+      "workspace-lease": "工作区",
+      "environment-setup": "环境初始化",
+      "first-response": "首次响应",
+      "turn": "智能体回合"
+    }
+  },
   "unifiedNames": {
     "backup": "自动备份",
     "backupDescription": "加密备份到 {path}",

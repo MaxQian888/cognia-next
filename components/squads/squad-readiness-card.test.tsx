@@ -41,6 +41,8 @@ jest.mock("@/lib/db/project-environments", () => ({
   createProjectEnvironmentVersion: (...a: unknown[]) =>
     createProjectEnvironmentVersion(...(a as [{ id: string }])),
   putProjectEnvironment: (...a: unknown[]) => putProjectEnvironment(...(a as [])),
+  versionMatchesEnvironment: jest.requireActual("@/lib/db/project-environments")
+    .versionMatchesEnvironment,
 }))
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: (query: () => Promise<unknown>, deps: unknown[], initial: unknown) => {
@@ -164,7 +166,14 @@ describe("SquadReadinessCard", () => {
       evaluatedAt: 1,
     }
     environments = [{ id: "env-1", name: "Dev", isEnabled: true }]
-    listProjectEnvironmentVersions.mockResolvedValue([{ id: "env-1:v3", name: "Dev" }])
+    listProjectEnvironmentVersions.mockResolvedValue([
+      {
+        id: "env-1:v3",
+        environmentId: "env-1",
+        name: "Dev",
+        policy: { requiredRuntimeCapabilities: [] },
+      },
+    ])
     render(<SquadReadinessCard squadId="t1" />)
     await waitFor(() => screen.getByTestId("squad-readiness-bind-environment"))
     fireEvent.click(screen.getByTestId("squad-readiness-bind-environment"))
@@ -175,6 +184,41 @@ describe("SquadReadinessCard", () => {
       })
     )
     expect(createProjectEnvironmentVersion).not.toHaveBeenCalled()
+  })
+
+  it("snapshots a new version when the environment changed since its latest one", async () => {
+    readiness = {
+      ready: false,
+      loading: false,
+      blockers: [{ code: "missing_environment_ref", action: "configure_environment" }],
+      evaluatedAt: 1,
+    }
+    environments = [
+      {
+        id: "env-1",
+        name: "Dev",
+        isEnabled: true,
+        setupReuse: { enabled: true, inputs: ["pnpm-lock.yaml"], outputs: ["node_modules"] },
+      } as (typeof environments)[number],
+    ]
+    listProjectEnvironmentVersions.mockResolvedValue([
+      {
+        id: "env-1:v3",
+        environmentId: "env-1",
+        name: "Dev",
+        policy: { requiredRuntimeCapabilities: [] },
+      },
+    ])
+    render(<SquadReadinessCard squadId="t1" />)
+    await waitFor(() => screen.getByTestId("squad-readiness-bind-environment"))
+    fireEvent.click(screen.getByTestId("squad-readiness-bind-environment"))
+    await waitFor(() =>
+      expect(useAgentTeamStore.getState().teams.t1?.config.environmentRef).toEqual({
+        environmentId: "env-1",
+        versionId: "env-1:v1",
+      })
+    )
+    expect(createProjectEnvironmentVersion).toHaveBeenCalledTimes(1)
   })
 
   it("creates a default environment when the workspace has none, then binds it", async () => {

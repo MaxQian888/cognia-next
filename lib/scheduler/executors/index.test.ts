@@ -40,7 +40,9 @@ const approveToolMock = jest.fn(async (..._args: unknown[]) => undefined)
 const sendPromptMock = jest.fn(async (..._args: unknown[]) => undefined)
 const onClaudeMessageMock = jest.fn()
 const interruptSessionMock = jest.fn(async (..._args: unknown[]) => undefined)
+const ensureSidecarReadyMock = jest.fn(async () => ({ ready: true }))
 jest.mock("@/lib/claude/ipc", () => ({
+  ensureSidecarReady: () => ensureSidecarReadyMock(),
   sendPrompt: (sessionId: string, prompt: string, options?: unknown) =>
     sendPromptMock(sessionId, prompt, options),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
@@ -251,7 +253,10 @@ import {
   withPayloadBuiltinTools,
   applyPayloadDirectories,
   alignConfinementRoots,
+  prewarmChatLikeTask,
+  CHAT_LIKE_PREWARM_TYPES,
 } from "./index"
+import { getTaskPrewarmer, unregisterTaskPrewarmer } from "../prewarm"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { Project } from "@/types"
 import type { SendOptions } from "@cognia/agent-config-types"
@@ -395,6 +400,40 @@ describe("registerBuiltInExecutors", () => {
     const firstCount = registerTaskExecutorMock.mock.calls.length
     registerBuiltInExecutors()
     expect(registerTaskExecutorMock.mock.calls.length).toBe(firstCount)
+  })
+
+  it("registers the chat prewarmer for every chat-style type", () => {
+    registerBuiltInExecutors()
+    for (const type of CHAT_LIKE_PREWARM_TYPES) {
+      expect(getTaskPrewarmer(type)).toBe(prewarmChatLikeTask)
+    }
+    expect(getTaskPrewarmer("backup")).toBeUndefined()
+  })
+})
+
+describe("prewarmChatLikeTask", () => {
+  afterAll(() => {
+    for (const type of CHAT_LIKE_PREWARM_TYPES) unregisterTaskPrewarmer(type)
+  })
+
+  beforeEach(() => ensureSidecarReadyMock.mockClear())
+
+  it("starts the agent host on a host that runs chat tasks", async () => {
+    await prewarmChatLikeTask(makeTask(), makeSignal())
+    expect(ensureSidecarReadyMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does nothing on a host without the sidecar", async () => {
+    hostState.tauri = false
+    await prewarmChatLikeTask(makeTask(), makeSignal())
+    expect(ensureSidecarReadyMock).not.toHaveBeenCalled()
+  })
+
+  it("does nothing once aborted", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await prewarmChatLikeTask(makeTask(), controller.signal)
+    expect(ensureSidecarReadyMock).not.toHaveBeenCalled()
   })
 })
 
@@ -845,6 +884,91 @@ describe("executeChatTask", () => {
     expect(sendPromptMock).toHaveBeenCalled()
     expect(result.success).toBe(true)
   })
+  it("records where a scheduled chat run's time went", async () => {
+    getProjectEnvironmentMock.mockResolvedValue({
+      id: "env-1",
+      projectId: "project-1",
+      name: "Development",
+      isEnabled: true,
+      setupScript: { default: "pnpm install" },
+      actions: [],
+      variables: {},
+      keyringReferences: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    executeProjectEnvironmentMock.mockResolvedValue({
+      success: true,
+      bypassed: false,
+      reused: true,
+    })
+    emitTerminalResult()
+    const execution = makeExecution()
+
+    await executeChatTask(
+      makeTask({
+        payload: {
+          prompt: "hi",
+          executionContext: {
+            location: "local",
+            projectId: "project-1",
+            projectRoot: "/repo",
+            environmentId: "env-1",
+            taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+          },
+        },
+      }),
+      execution,
+      makeSignal()
+    )
+
+    expect(execution.phases?.map((phase) => phase.name)).toEqual([
+      "session",
+      "send-options",
+      "workspace-lease",
+      "environment-setup",
+      "first-response",
+      "turn",
+    ])
+    expect(execution.phases?.find((phase) => phase.name === "environment-setup")?.outcome).toBe(
+      "reused"
+    )
+  })
+
+  it("starts the settings read before the session step finishes", async () => {
+    let releaseSession: () => void = () => undefined
+    createSessionMock.mockImplementationOnce(
+      (input: unknown) =>
+        new Promise((resolve) => {
+          releaseSession = () =>
+            resolve({ id: "session-created", ...((input as Record<string, unknown>) ?? {}) })
+        })
+    )
+    getSettingsMock.mockClear()
+    emitTerminalResult()
+
+    const run = executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(getSettingsMock).toHaveBeenCalled()
+    releaseSession()
+
+    await expect(run).resolves.toEqual(expect.objectContaining({ success: true }))
+  })
+
+  it("records no turn phases when the run fails before sending", async () => {
+    resolveSendOptionsMock.mockRejectedValueOnce(new Error("resolver down"))
+    const execution = makeExecution()
+
+    await executeChatTask(makeTask({ payload: { prompt: "hi" } }), execution, makeSignal())
+
+    const names = execution.phases?.map((phase) => phase.name)
+    expect(names).toEqual(["session", "send-options"])
+  })
+
   it("hands payload.allowedTools to the resolver as a grant instead of patching after it", async () => {
     resolveSendOptionsMock.mockResolvedValueOnce({ allowedTools: ["Read"] } as Record<
       string,

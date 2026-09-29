@@ -18,6 +18,7 @@ import {
   putProjectEnvironment,
   rollbackProjectEnvironmentVersion,
   updateProjectEnvironmentInitialization,
+  versionMatchesEnvironment,
 } from "./project-environments"
 
 const environment = (overrides: Partial<ProjectEnvironment> = {}): ProjectEnvironment => ({
@@ -187,6 +188,61 @@ describe("project environments persistence", () => {
     expect(restored.runtime).toEqual(runtime)
     const cleared = await rollbackProjectEnvironmentVersion(plain.id, 40)
     expect(cleared).not.toHaveProperty("runtime")
+  })
+
+  it("snapshots, compares and rolls back setup reuse only when one is set", async () => {
+    const setupReuse = { enabled: true, inputs: ["pnpm-lock.yaml"], outputs: ["node_modules"] }
+    const plain = await createProjectEnvironmentVersion(
+      environment(),
+      { requiredRuntimeCapabilities: ["filesystem"] },
+      10
+    )
+    expect(plain).not.toHaveProperty("setupReuse")
+
+    const reusing = await createProjectEnvironmentVersion(
+      environment({ setupReuse }),
+      { requiredRuntimeCapabilities: ["filesystem"] },
+      20
+    )
+    expect(reusing.setupReuse).toEqual(setupReuse)
+    expect(compareProjectEnvironmentVersions(plain, reusing)).toEqual([
+      { field: "setupReuse", before: undefined, after: setupReuse },
+    ])
+
+    expect((await rollbackProjectEnvironmentVersion(reusing.id, 30)).setupReuse).toEqual(setupReuse)
+    expect(await rollbackProjectEnvironmentVersion(plain.id, 40)).not.toHaveProperty("setupReuse")
+  })
+
+  it("tells whether a version still snapshots its environment", async () => {
+    const policy = { requiredRuntimeCapabilities: ["filesystem" as const] }
+    const version = await createProjectEnvironmentVersion(environment(), policy, 10)
+    expect(versionMatchesEnvironment(version, environment(), policy)).toBe(true)
+    expect(
+      versionMatchesEnvironment(
+        version,
+        environment({ setupReuse: { enabled: true, inputs: [], outputs: [] } }),
+        policy
+      )
+    ).toBe(false)
+    expect(
+      versionMatchesEnvironment(
+        version,
+        environment({ setupScript: { default: "npm ci" } }),
+        policy
+      )
+    ).toBe(false)
+    expect(
+      versionMatchesEnvironment(version, environment(), { requiredRuntimeCapabilities: [] })
+    ).toBe(false)
+    expect(versionMatchesEnvironment(version, environment({ id: "other" }), policy)).toBe(false)
+  })
+
+  it("refuses to store a setup reuse path that leaves the execution root", async () => {
+    await expect(
+      putProjectEnvironment(
+        environment({ setupReuse: { enabled: true, inputs: ["../secrets"], outputs: [] } })
+      )
+    ).rejects.toThrow(/inside the execution root/)
   })
 
   it("refuses to store a malformed runtime selection", async () => {

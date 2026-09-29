@@ -42,6 +42,14 @@ import {
 import { notifyTaskEvent } from "./notification-integration"
 import { emitSchedulerEvent } from "./event-integration"
 import { SchedulerError } from "./errors"
+import { recordPhase, summarizePhases } from "./execution-phases"
+import {
+  PREWARM_TIMEOUT_MS,
+  getTaskPrewarmer,
+  parsePrewarmAlarmId,
+  planPrewarmAt,
+  prewarmAlarmId,
+} from "./prewarm"
 import { hasTaskExecutorOwner, loadTaskExecutorOwner } from "./executor-owners"
 import { RendererTimingDriver } from "./timing/renderer-driver"
 import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
@@ -299,6 +307,12 @@ interface ExecuteTaskContext {
   scheduledFor?: Date
   deferNextRunUpdate?: boolean
   scheduledSlotClaimed?: boolean
+  /**
+   * The (jittered) instant the timing driver was armed for. Present only for
+   * alarm fires; it anchors the `fire-delay` phase, which is how late the
+   * alarm and any buffering made the run relative to when it was due to start.
+   */
+  armedAtMs?: number
 }
 
 /** A buffered start waiting for the running execution to finish (queue-one / queue-all). */
@@ -307,6 +321,7 @@ interface QueuedStart {
   scheduledFor?: Date
   deferNextRunUpdate?: boolean
   scheduledSlotClaimed?: boolean
+  armedAtMs?: number
 }
 
 class TaskSchedulerImpl {
@@ -314,6 +329,10 @@ class TaskSchedulerImpl {
   private armedTaskIds: Set<string> = new Set()
   /** Canonical (un-jittered) armed slot per task — `scheduledFor` always uses this. */
   private armedCanonicalMs: Map<string, number> = new Map()
+  /** Prewarm alarms armed per task id (see `./prewarm`), mirroring driver state. */
+  private armedPrewarms: Map<string, number> = new Map()
+  /** Prewarms in flight, aborted when their task is unscheduled or the scheduler stops. */
+  private prewarmControllers: Map<string, AbortController> = new Map()
   /** Running executions per task (executionId → execution); >1 entry under "allow". */
   private runningByTask: Map<string, Map<string, TaskExecution>> = new Map()
   /** Abort controllers per running execution (cancel-previous + timeout share them). */
@@ -533,9 +552,17 @@ class TaskSchedulerImpl {
       }
       const driver = this.driver
 
-      // A task becomes due → execute it through the normal pipeline.
-      driver.onDue((taskId, firedAtMs) => {
-        void this.handleTaskDue(taskId, firedAtMs, version)
+      // A task becomes due → execute it through the normal pipeline. A prewarm
+      // alarm shares the driver under its own id; only one this instance armed
+      // is routed as a prewarm, so a task id that merely looks like one still
+      // fires as a task.
+      driver.onDue((alarmId, firedAtMs) => {
+        const prewarmTaskId = parsePrewarmAlarmId(alarmId)
+        if (prewarmTaskId !== null && this.armedPrewarms.has(prewarmTaskId)) {
+          void this.handlePrewarmDue(prewarmTaskId, version)
+          return
+        }
+        void this.handleTaskDue(alarmId, firedAtMs, version)
       })
       await driver.start()
       if (version !== this.lifecycleVersion) {
@@ -847,6 +874,7 @@ class TaskSchedulerImpl {
       triggerSource: "schedule",
       scheduledFor,
       scheduledSlotClaimed: true,
+      armedAtMs: firedAtMs,
     }).catch((err) => {
       log.error(`Error executing scheduled task ${claimedTask.name}:`, err)
     })
@@ -1174,6 +1202,10 @@ class TaskSchedulerImpl {
     for (const controller of this.executionControllers.values()) {
       controller.abort("scheduler-stopped")
     }
+    for (const controller of this.prewarmControllers.values()) {
+      controller.abort("scheduler-stopped")
+    }
+    this.prewarmControllers.clear()
     for (const timers of this.retryTimers.values()) {
       for (const timer of timers) clearTimeout(timer)
     }
@@ -1197,6 +1229,7 @@ class TaskSchedulerImpl {
     // event listener) and forget armed ids.
     this.driver?.stop()
     this.armedTaskIds.clear()
+    this.armedPrewarms.clear()
 
     // Clear periodic check
     if (this.checkInterval) {
@@ -1834,9 +1867,83 @@ class TaskSchedulerImpl {
       this.armedCanonicalMs.delete(task.id)
       return
     }
-    await driver.arm(task.id, applyJitter(canonicalMs, task.trigger.jitterMs, this.rng))
+    const armedAtMs = applyJitter(canonicalMs, task.trigger.jitterMs, this.rng)
+    await driver.arm(task.id, armedAtMs)
+    await this.armPrewarm(driver, task, armedAtMs)
 
     log.debug(`Scheduled task ${task.name} for ${nextRun.toISOString()}`)
+  }
+
+  /**
+   * Arm (or clear) the prewarm alarm for a task armed to fire at `armedAtMs`.
+   * Only task types with something to warm get one: a registered prewarmer,
+   * or an executor that is not loaded yet but has an owner that can load it.
+   */
+  private async armPrewarm(
+    driver: SchedulerTimingDriver,
+    task: ScheduledTask,
+    armedAtMs: number
+  ): Promise<void> {
+    const hasWork =
+      getTaskPrewarmer(task.type) !== undefined ||
+      (!executors.has(task.type) && hasTaskExecutorOwner(task.type))
+    const prewarmAt = hasWork ? planPrewarmAt(armedAtMs, Date.now()) : null
+    if (prewarmAt === null) {
+      this.disarmPrewarm(task.id)
+      return
+    }
+    this.armedPrewarms.set(task.id, prewarmAt)
+    await driver.arm(prewarmAlarmId(task.id), prewarmAt)
+  }
+
+  private disarmPrewarm(taskId: string): void {
+    if (this.armedPrewarms.delete(taskId)) {
+      void this.driver?.disarm(prewarmAlarmId(taskId))
+    }
+    const inFlight = this.prewarmControllers.get(taskId)
+    if (inFlight) {
+      inFlight.abort("prewarm-cancelled")
+      this.prewarmControllers.delete(taskId)
+    }
+  }
+
+  /**
+   * Warm a task that is about to come due. Never records an execution and
+   * never throws: whatever it does not finish, the run does itself.
+   */
+  private async handlePrewarmDue(taskId: string, version: number): Promise<void> {
+    if (version !== this.lifecycleVersion) return
+    this.armedPrewarms.delete(taskId)
+    if (!this.isTimingAuthority()) return
+    const task = await schedulerDb.getTask(taskId).catch(() => null)
+    if (version !== this.lifecycleVersion) return
+    if (!task || task.status !== "active" || task.promotion) return
+
+    this.prewarmControllers.get(taskId)?.abort("prewarm-superseded")
+    const controller = new AbortController()
+    this.prewarmControllers.set(taskId, controller)
+    const timer = setTimeout(() => controller.abort("prewarm-timeout"), PREWARM_TIMEOUT_MS)
+    unrefTimer(timer)
+    const startedAt = Date.now()
+    try {
+      if (!executors.has(task.type) && hasTaskExecutorOwner(task.type)) {
+        await loadTaskExecutorOwner(task.type)
+      }
+      const prewarmer = getTaskPrewarmer(task.type)
+      if (prewarmer && !controller.signal.aborted) {
+        await prewarmer(task, controller.signal)
+      }
+      log.debug(`Prewarmed ${task.name} in ${Date.now() - startedAt}ms`)
+    } catch (err) {
+      log.debug(`Prewarm for ${task.name} did not complete; the run will do the work`, {
+        err: String(err),
+      })
+    } finally {
+      clearTimeout(timer)
+      if (this.prewarmControllers.get(taskId) === controller) {
+        this.prewarmControllers.delete(taskId)
+      }
+    }
   }
 
   /**
@@ -1848,6 +1955,7 @@ class TaskSchedulerImpl {
     }
     this.armedCanonicalMs.delete(taskId)
     void this.driver?.disarm(taskId)
+    this.disarmPrewarm(taskId)
   }
 
   /**
@@ -1905,6 +2013,7 @@ class TaskSchedulerImpl {
             scheduledFor: context.scheduledFor,
             deferNextRunUpdate: context.deferNextRunUpdate,
             scheduledSlotClaimed: context.scheduledSlotClaimed,
+            armedAtMs: context.armedAtMs,
             blockedBy: "overlap",
           })
         }
@@ -1973,6 +2082,7 @@ class TaskSchedulerImpl {
           scheduledFor: context.scheduledFor,
           deferNextRunUpdate: context.deferNextRunUpdate,
           scheduledSlotClaimed: context.scheduledSlotClaimed,
+          armedAtMs: context.armedAtMs,
           blockedBy: "concurrency",
         })
       }
@@ -1999,6 +2109,9 @@ class TaskSchedulerImpl {
       triggerSource,
       startedAt: startTime,
       logs: [this.createLog("info", `Starting task execution (attempt ${retryAttempt + 1})`)],
+    }
+    if (context.armedAtMs !== undefined) {
+      recordPhase(execution, "fire-delay", context.armedAtMs, startTime.getTime())
     }
 
     let shouldRetry = false
@@ -2029,6 +2142,8 @@ class TaskSchedulerImpl {
       // chunk, so shortly after scheduler start a persisted task can come due
       // before its executor exists — wait (bounded) instead of failing.
       let executor = executors.get(task.type)
+      const executorLoadStartedAt = Date.now()
+      const executorWasRegistered = executor !== undefined
       // A type with a declared owner is loaded rather than waited for: the boot
       // that registers it may never run in this context (`executor-owners.ts`).
       if (!executor && hasTaskExecutorOwner(task.type)) {
@@ -2058,6 +2173,11 @@ class TaskSchedulerImpl {
           await waitForTaskExecutor(task.type, graceRemaining, controller.signal)
           executor = executors.get(task.type)
         }
+      }
+      // Only a lookup that had to load or wait is a phase worth showing; an
+      // executor already registered costs a map read.
+      if (!executorWasRegistered) {
+        recordPhase(execution, "executor-load", executorLoadStartedAt, Date.now())
       }
       if (!executor) {
         throw SchedulerError.executorNotFound(task.type)
@@ -2282,6 +2402,8 @@ class TaskSchedulerImpl {
       // Update task statistics
       await this.updateTaskStats(task, execution, context.scheduledSlotClaimed === true)
     } finally {
+      const timing = summarizePhases(execution.phases)
+      if (timing) execution.logs.push(this.createLog("info", `Timing: ${timing}`))
       this.untrackRunning(execution)
       this.executionControllers.delete(executionId)
       await schedulerDb.updateExecution(execution)
@@ -2423,6 +2545,7 @@ class TaskSchedulerImpl {
       scheduledFor?: Date
       deferNextRunUpdate?: boolean
       scheduledSlotClaimed?: boolean
+      armedAtMs?: number
       blockedBy: "overlap" | "concurrency"
     }
   ): Promise<TaskExecution> {
@@ -2437,6 +2560,7 @@ class TaskSchedulerImpl {
       scheduledFor: options.scheduledFor,
       deferNextRunUpdate: options.deferNextRunUpdate,
       scheduledSlotClaimed: options.scheduledSlotClaimed,
+      ...(options.armedAtMs !== undefined ? { armedAtMs: options.armedAtMs } : {}),
     }
 
     if (overlapPolicy === "queue-one") {
@@ -2549,6 +2673,7 @@ class TaskSchedulerImpl {
         scheduledFor: next.scheduledFor,
         deferNextRunUpdate: next.deferNextRunUpdate,
         scheduledSlotClaimed: next.scheduledSlotClaimed,
+        armedAtMs: next.armedAtMs,
       }).catch((err) => {
         log.error(`Error executing buffered start for task ${taskId}:`, err)
       })

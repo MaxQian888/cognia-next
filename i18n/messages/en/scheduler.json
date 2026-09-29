@@ -1268,6 +1268,23 @@
     "runningNow": "This run is still going.",
     "stop": "Stop run"
   },
+  "runPhases": {
+    "title": "Where the time went",
+    "outcome": {
+      "reused": "reused",
+      "joined": "joined"
+    },
+    "names": {
+      "fire-delay": "Fire delay",
+      "executor-load": "Executor load",
+      "session": "Session",
+      "send-options": "Agent options",
+      "workspace-lease": "Workspace",
+      "environment-setup": "Environment setup",
+      "first-response": "First response",
+      "turn": "Agent turn"
+    }
+  },
   "unifiedNames": {
     "backup": "Automatic backup",
     "backupDescription": "Encrypted backup to {path}",

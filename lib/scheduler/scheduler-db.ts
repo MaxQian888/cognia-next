@@ -29,7 +29,9 @@ import type {
   ScheduledTaskStatus,
   TaskFilter,
   TaskStatistics,
+  TaskExecutionPhase,
 } from "@/types/scheduler"
+import { isTaskExecutionPhaseName } from "@/types/scheduler/execution-phases"
 import type { DBScheduledTask, DBTaskExecution } from "@/lib/db/scheduled-task-types"
 import { getDb } from "@/lib/db/schema"
 import { loggers } from "@cognia/logging"
@@ -745,6 +747,9 @@ function serializeExecution(execution: TaskExecution): DBTaskExecution {
         timestamp: log.timestamp.toISOString(),
       }))
     ),
+    ...(execution.phases && execution.phases.length > 0
+      ? { phases: JSON.stringify(execution.phases) }
+      : {}),
   }
 }
 
@@ -773,7 +778,33 @@ function deserializeExecution(dbExecution: DBTaskExecution): TaskExecution {
       ...entry,
       timestamp: new Date(entry.timestamp as string),
     })),
+    ...deserializePhases(dbExecution.phases),
   }
+}
+
+/**
+ * Phases are advisory. A malformed or partially unknown list drops the entries
+ * it cannot read instead of failing the whole execution row, which would hide
+ * the run from its history.
+ */
+function deserializePhases(raw: string | undefined): { phases?: TaskExecutionPhase[] } {
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!Array.isArray(parsed)) return {}
+  const phases = parsed.filter(
+    (entry): entry is TaskExecutionPhase =>
+      typeof entry === "object" &&
+      entry !== null &&
+      isTaskExecutionPhaseName((entry as TaskExecutionPhase).name) &&
+      Number.isFinite((entry as TaskExecutionPhase).startOffsetMs) &&
+      Number.isFinite((entry as TaskExecutionPhase).durationMs)
+  )
+  return phases.length > 0 ? { phases } : {}
 }
 
 function safeDeserializeExecution(dbExecution: DBTaskExecution): TaskExecution | null {

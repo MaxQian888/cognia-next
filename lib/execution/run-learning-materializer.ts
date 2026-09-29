@@ -251,6 +251,10 @@ export async function applyRunLearningProposalEffect(
         variables: (patch.variables ?? current.variables) as typeof current.variables,
         keyringReferences: (patch.keyringReferences ??
           current.keyringReferences) as typeof current.keyringReferences,
+        // Not proposal-editable: carried so the new version keeps the runtime
+        // selection and setup reuse of the one it replaces.
+        ...(current.runtime ? { runtime: structuredClone(current.runtime) } : {}),
+        ...(current.setupReuse ? { setupReuse: structuredClone(current.setupReuse) } : {}),
         createdAt: current.createdAt,
         updatedAt: Date.now(),
       },

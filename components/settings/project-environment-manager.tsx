@@ -27,6 +27,10 @@ import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { ProjectEnvironmentProvisioning } from "./project-environment-provisioning"
 import { ProjectEnvironmentRepoConfig } from "./project-environment-repo-config"
 import { ProjectEnvironmentRuntime } from "./project-environment-runtime"
+import {
+  ProjectEnvironmentSetupReuseFields,
+  finalizeSetupReuse,
+} from "./project-environment-setup-reuse"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
   ProjectEnvironment,
@@ -171,8 +175,11 @@ export function ProjectEnvironmentManager({
     setMessage(null)
     try {
       const now = Date.now()
+      const { setupReuse: _draftReuse, ...rest } = draft
+      const setupReuse = finalizeSetupReuse(draft.setupReuse)
       const next: ProjectEnvironment = {
-        ...draft,
+        ...rest,
+        ...(setupReuse ? { setupReuse } : {}),
         name: draft.name.trim(),
         variables: Object.fromEntries(
           variables.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value])
@@ -230,6 +237,9 @@ export function ProjectEnvironmentManager({
       surface: "interactive",
       actionId,
       bypassOnFailure,
+      // Pressing "Run setup" means run it: never answered by a reused or
+      // in-flight setup, and it records a fresh success for later reuse.
+      force: actionId === undefined,
     })
     setMessage(
       result.success
@@ -328,6 +338,12 @@ export function ProjectEnvironmentManager({
               ids={`${draft.id}-setup`}
             />
           </div>
+
+          <ProjectEnvironmentSetupReuseFields
+            value={draft.setupReuse}
+            onChange={(setupReuse) => setDraft({ ...draft, setupReuse })}
+            ids={`${draft.id}-reuse`}
+          />
 
           <div className="space-y-1.5">
             <Label className="text-xs">{t("variables")}</Label>

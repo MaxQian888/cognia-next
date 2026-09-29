@@ -5,6 +5,11 @@ import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { putRunRetrospectiveBundle } from "@/lib/db/run-retrospectives"
 import {
+  createProjectEnvironmentVersion,
+  getProjectEnvironmentVersion,
+} from "@/lib/db/project-environments"
+import {
+  applyRunLearningProposalEffect,
   approveRunLearningProposal,
   rejectRunLearningProposal,
   retryRunLearningProposal,
@@ -95,5 +100,45 @@ describe("run learning materializer", () => {
     await seed("proposal-reject")
     const rejected = await rejectRunLearningProposal("proposal-reject", 10)
     expect(rejected.status).toBe("rejected")
+  })
+
+  it("keeps runtime and setup reuse on the environment version a proposal creates", async () => {
+    const setupReuse = { enabled: true, inputs: ["pnpm-lock.yaml"], outputs: ["node_modules"] }
+    const runtime = { source: { kind: "auto" as const }, updatedAt: 1 }
+    const base = await createProjectEnvironmentVersion(
+      {
+        id: "env-1",
+        projectId: "project-1",
+        name: "Node",
+        isEnabled: true,
+        setupScript: { default: "pnpm install" },
+        actions: [],
+        variables: {},
+        keyringReferences: [],
+        runtime,
+        setupReuse,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      { requiredRuntimeCapabilities: [] },
+      1
+    )
+
+    const effect = await applyRunLearningProposalEffect({
+      id: "proposal-env",
+      retrospectiveId: "retro-env",
+      runId: "run-1",
+      targetKind: "project-environment",
+      targetId: base.id,
+      title: "Use pnpm ci",
+      after: JSON.stringify({ setupScript: { default: "pnpm ci" } }),
+      status: "pending",
+      evidenceRefs: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    const created = await getProjectEnvironmentVersion(effect.id)
+    expect(created).toMatchObject({ setupScript: { default: "pnpm ci" }, runtime, setupReuse })
   })
 })

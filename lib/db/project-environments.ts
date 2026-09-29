@@ -1,4 +1,5 @@
 import { assertRuntimeSelection } from "@/lib/project-environment/runtime-selection"
+import { assertSetupReuse, canonicalJson } from "@/lib/project-environment/setup-reuse"
 import type {
   ProjectEnvironment,
   ProjectEnvironmentPolicy,
@@ -52,6 +53,7 @@ function assertEnvironmentBoundary(environment: ProjectEnvironment): void {
   }
 
   if (environment.runtime !== undefined) assertRuntimeSelection(environment.runtime)
+  if (environment.setupReuse !== undefined) assertSetupReuse(environment.setupReuse)
 }
 
 export async function putProjectEnvironment(environment: ProjectEnvironment): Promise<void> {
@@ -133,6 +135,7 @@ export async function createProjectEnvironmentVersion(
       policy: structuredClone(policy),
       // Spread only when set: a project that never opted in snapshots exactly as before.
       ...(environment.runtime ? { runtime: structuredClone(environment.runtime) } : {}),
+      ...(environment.setupReuse ? { setupReuse: structuredClone(environment.setupReuse) } : {}),
       createdAt,
     }
     await db.projectEnvironmentVersions.add(row)
@@ -171,11 +174,43 @@ export function compareProjectEnvironmentVersions(
     "keyringReferences",
     "policy",
     "runtime",
+    "setupReuse",
   ] as const
   return fields.flatMap((field) =>
     JSON.stringify(left[field]) === JSON.stringify(right[field])
       ? []
       : [{ field, before: left[field], after: right[field] }]
+  )
+}
+
+/** Every field a version snapshots from its environment (see `createProjectEnvironmentVersion`). */
+const VERSIONED_ENVIRONMENT_FIELDS = [
+  "name",
+  "setupScript",
+  "actions",
+  "variables",
+  "keyringReferences",
+  "runtime",
+  "setupReuse",
+] as const
+
+/**
+ * Whether `version` still snapshots `environment` as it stands, with `policy`
+ * as the policy a new version would be given. A binding that reuses a version
+ * whose source has since changed pins a team to a definition nobody sees in
+ * settings any more, so a divergence means "snapshot again", not "reuse".
+ */
+export function versionMatchesEnvironment(
+  version: ProjectEnvironmentVersion,
+  environment: ProjectEnvironment,
+  policy: ProjectEnvironmentPolicy
+): boolean {
+  if (version.environmentId !== environment.id) return false
+  const same = (left: unknown, right: unknown) =>
+    canonicalJson(left ?? null) === canonicalJson(right ?? null)
+  return (
+    VERSIONED_ENVIRONMENT_FIELDS.every((field) => same(version[field], environment[field])) &&
+    same(version.policy, policy)
   )
 }
 
@@ -197,6 +232,7 @@ export async function rollbackProjectEnvironmentVersion(
       variables: structuredClone(target.variables),
       keyringReferences: structuredClone(target.keyringReferences),
       ...(target.runtime ? { runtime: structuredClone(target.runtime) } : {}),
+      ...(target.setupReuse ? { setupReuse: structuredClone(target.setupReuse) } : {}),
       createdAt: target.createdAt,
       updatedAt: createdAt,
     },

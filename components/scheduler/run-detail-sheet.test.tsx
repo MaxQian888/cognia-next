@@ -306,4 +306,18 @@ describe("RunDetailSheet · stopping a run from where it is read", () => {
     rerender(<RunDetailSheet open onOpenChange={jest.fn()} run={makeRun({ status: "running" })} />)
     expect(screen.queryByTestId("run-sheet-stop")).not.toBeInTheDocument()
   })
+
+  it("shows the phase breakdown only for a run that measured phases", () => {
+    const { rerender } = render(<RunDetailSheet open onOpenChange={() => {}} run={makeRun()} />)
+    expect(screen.queryByTestId("run-phase-breakdown")).not.toBeInTheDocument()
+
+    rerender(
+      <RunDetailSheet
+        open
+        onOpenChange={() => {}}
+        run={makeRun({ phases: [{ name: "turn", startOffsetMs: 0, durationMs: 4_000 }] })}
+      />
+    )
+    expect(screen.getByTestId("run-phase-breakdown")).toHaveTextContent("Agent turn")
+  })
 })

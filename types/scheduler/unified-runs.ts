@@ -13,6 +13,7 @@
  */
 
 import type { RunStatus } from "@/types/workflow/visual"
+import type { TaskExecutionPhase } from "./execution-phases"
 import type { ScheduledItemKind } from "./unified"
 
 /**
@@ -67,6 +68,8 @@ export interface UnifiedExecutionRun {
    * `needs-approval` for a `failed` run that stopped for want of an approver.
    */
   terminalReason?: string
+  /** Latency breakdown (app-task executions only); see `TaskExecutionPhase`. */
+  phases?: TaskExecutionPhase[]
   origin: {
     tableName: string
     nativeId: string

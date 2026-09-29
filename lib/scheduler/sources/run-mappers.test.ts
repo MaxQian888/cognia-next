@@ -28,6 +28,13 @@ describe("scheduler run mappers", () => {
     expect(filterRunsByKind([run], "app")).toEqual([])
   })
 
+  it("carries phase timings when the run measured any", () => {
+    const phases = [{ name: "turn" as const, startOffsetMs: 0, durationMs: 900 }]
+    expect(toUnifiedFromTaskExecution({ ...execution, phases })).toMatchObject({ phases })
+    expect(toUnifiedFromTaskExecution(execution)).not.toHaveProperty("phases")
+    expect(toUnifiedFromTaskExecution({ ...execution, phases: [] })).not.toHaveProperty("phases")
+  })
+
   it("carries the terminal reason so a run list can tell why it ended", () => {
     const run = toUnifiedFromTaskExecution({
       ...execution,

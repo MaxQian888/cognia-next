@@ -33,6 +33,7 @@ import { runApprovalRequest, type UnifiedExecutionRun } from "@/types/scheduler/
 import { KindIcon } from "./kind-visuals"
 import { RunArtifactLinks } from "./run-artifact-links"
 import { RunOutcomePill } from "./run-row"
+import { RunPhaseBreakdown } from "./run-phase-breakdown"
 
 /**
  * Payload / result dumps are arbitrarily large. Bounded height + in-place
@@ -241,6 +242,7 @@ export function RunDetailSheet({
                 {run.status === "running" ? tSheet("stillRunning") : formatDuration(run.durationMs)}
               </FactRow>
             </FactList>
+            {run.phases && run.phases.length > 0 ? <RunPhaseBreakdown phases={run.phases} /> : null}
           </section>
 
           {run.payload !== undefined ? (

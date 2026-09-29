@@ -6,6 +6,7 @@
 import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 import type { GoalConfig } from "@/types/goal"
+import type { TaskExecutionPhase } from "./execution-phases"
 
 // Task trigger types
 export type TaskTriggerType = "cron" | "interval" | "once" | "event"
@@ -773,6 +774,8 @@ export interface TaskExecution {
   completedAt?: Date
   /** Logs from execution */
   logs: TaskExecutionLog[]
+  /** Where the run's time went, in start order. Absent on runs that predate it. */
+  phases?: TaskExecutionPhase[]
 }
 
 /**
@@ -1156,6 +1159,14 @@ export {
 
 // Task dependency graph model (derived from `trigger.dependsOn[]`).
 export type { DependencyNode, DependencyEdge, DependencyGraph } from "./dependency"
+
+// Per-execution latency breakdown.
+export type {
+  TaskExecutionPhase,
+  TaskExecutionPhaseName,
+  TaskExecutionPhaseOutcome,
+} from "./execution-phases"
+export { TASK_EXECUTION_PHASE_NAMES, isTaskExecutionPhaseName } from "./execution-phases"
 
 // Pluggable timing-source contracts (Rust alarm daemon vs renderer timers).
 export type {

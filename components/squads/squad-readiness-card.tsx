@@ -40,6 +40,7 @@ import {
   listProjectEnvironmentVersions,
   listProjectEnvironments,
   putProjectEnvironment,
+  versionMatchesEnvironment,
 } from "@/lib/db/project-environments"
 import { settingsHref } from "@/lib/settings/deep-link"
 import { cn } from "@/lib/utils"
@@ -128,13 +129,15 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
       if (!team) return
       setBusy(true)
       try {
+        const policy = environment.policy ?? { requiredRuntimeCapabilities: [] }
         const [latest] = await listProjectEnvironmentVersions(environment.id)
+        // Reuse the latest snapshot only while it still matches the environment;
+        // an edit made in settings since then (a new script, setup reuse turned
+        // on) would otherwise never reach the team.
         const version =
-          latest ??
-          (await createProjectEnvironmentVersion(
-            environment,
-            environment.policy ?? { requiredRuntimeCapabilities: [] }
-          ))
+          latest && versionMatchesEnvironment(latest, environment, policy)
+            ? latest
+            : await createProjectEnvironmentVersion(environment, policy)
         updateTeam(team.id, {
           config: {
             ...team.config,

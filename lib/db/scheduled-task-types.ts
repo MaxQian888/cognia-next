@@ -78,4 +78,5 @@ export interface DBTaskExecution {
   startedAt: string // ISO date string
   completedAt?: string // ISO date string
   logs: string // JSON serialized TaskExecutionLog[]
+  phases?: string // JSON serialized TaskExecutionPhase[] (non-indexed)
 }

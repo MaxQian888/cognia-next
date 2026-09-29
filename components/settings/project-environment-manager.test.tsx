@@ -202,3 +202,69 @@ describe("the runtime environment section", () => {
     expect(putMock.mock.calls.at(-1)?.[0]).not.toHaveProperty("runtime")
   })
 })
+
+describe("setup reuse", () => {
+  const stored = {
+    id: "env-1",
+    projectId: "project-1",
+    name: "Node",
+    isEnabled: true,
+    setupScript: { default: "pnpm install" },
+    actions: [],
+    variables: {},
+    keyringReferences: [],
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  it("saves a reuse declaration with blank lines dropped", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByDisplayValue("Node")
+
+    fireEvent.click(screen.getByRole("switch", { name: "Reuse setup when nothing changed" }))
+    fireEvent.change(screen.getByLabelText("Input files (one per line)"), {
+      target: { value: "pnpm-lock.yaml\n\n" },
+    })
+    fireEvent.change(screen.getByLabelText("Required outputs (one per line)"), {
+      target: { value: " node_modules " },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        setupReuse: { enabled: true, inputs: ["pnpm-lock.yaml"], outputs: ["node_modules"] },
+      })
+    )
+  })
+
+  it("saves an environment that never opted in without a declaration", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByDisplayValue("Node")
+
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls[0][0]).not.toHaveProperty("setupReuse")
+  })
+
+  it("forces a manual setup run but not an action", async () => {
+    listMock.mockResolvedValue([
+      { ...stored, actions: [{ id: "test", name: "Test", script: { default: "pnpm test" } }] },
+    ])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByDisplayValue("Node")
+
+    fireEvent.click(screen.getByRole("button", { name: "Run setup" }))
+    await waitFor(() => expect(executeMock).toHaveBeenCalledTimes(1))
+    expect(executeMock).toHaveBeenLastCalledWith(expect.objectContaining({ force: true }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Test" }))
+    await waitFor(() => expect(executeMock).toHaveBeenCalledTimes(2))
+    expect(executeMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ actionId: "test", force: false })
+    )
+  })
+})

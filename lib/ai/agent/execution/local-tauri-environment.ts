@@ -109,6 +109,7 @@ function asMutableEnvironment(profile: ProjectEnvironmentVersion): ProjectEnviro
     variables: profile.variables,
     keyringReferences: profile.keyringReferences,
     policy: profile.policy,
+    ...(profile.setupReuse ? { setupReuse: profile.setupReuse } : {}),
     createdAt: profile.createdAt,
     updatedAt: profile.createdAt,
   }

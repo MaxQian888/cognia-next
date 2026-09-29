@@ -50,6 +50,7 @@ import type {
   ScheduledTask,
   SkillTaskPayload,
   TaskExecution,
+  TaskExecutionPhaseOutcome,
   TaskExecutorResult,
 } from "@/types/scheduler"
 import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
@@ -63,7 +64,12 @@ import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-pro
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { remapExactRoots } from "@/lib/task-workspace/root-aliases"
 import type { Project } from "@/types"
-import { executeProjectEnvironment } from "@/lib/project-environment/executor"
+import {
+  executeProjectEnvironment,
+  type ProjectEnvironmentExecutionResult,
+} from "@/lib/project-environment/executor"
+import { measurePhase, recordPhase } from "../execution-phases"
+import { registerTaskPrewarmer } from "../prewarm"
 import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
 import { registerTaskExecutor, type TaskExecutor } from "../task-scheduler"
 import { BUILT_IN_EXECUTOR_TASK_TYPES, type BuiltInExecutorTaskType } from "../executor-owners"
@@ -86,7 +92,13 @@ import { executePlanTask } from "./plan-executor"
 import { executeBotTask } from "./bot-executor"
 import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
 import { executeScript } from "../script-executor"
-import { sendPrompt, onClaudeMessage, interruptSession, approveTool } from "@/lib/claude/ipc"
+import {
+  sendPrompt,
+  onClaudeMessage,
+  interruptSession,
+  approveTool,
+  ensureSidecarReady,
+} from "@/lib/claude/ipc"
 import {
   createUnattendedPermissionResponder,
   needsApprovalSummary,
@@ -584,6 +596,63 @@ function workspaceTrustOutput(trust: ScheduledWorkspaceTrust): Record<string, un
 }
 
 // =============================================================================
+// Run timing — overlap independent reads and record where the time went
+// =============================================================================
+
+/**
+ * Start a read now and await it later. The no-op handler keeps a rejection
+ * from surfacing as unhandled when an earlier step returns before the result
+ * is awaited; awaiting the returned promise still rejects as usual.
+ */
+function inFlight<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => undefined)
+  return promise
+}
+
+/**
+ * The session step: the bound agent is checked before a session is minted for
+ * it, and an appended-to session's own agent binding is checked after.
+ */
+async function prepareRunSession(
+  task: ScheduledTask,
+  payload: ChatLikeTaskPayload,
+  characterId: string | undefined,
+  runId: string
+): Promise<PreparedSession | { error: string }> {
+  const missingAgent = await assertAgentAvailable(characterId)
+  if (missingAgent) return { error: missingAgent }
+  const sessionResult = await resolveOrCreateSession(task, payload, { characterId, runId })
+  if ("error" in sessionResult) return sessionResult
+  if (!characterId) {
+    // An appended-to session carries its own agent binding.
+    const missingSessionAgent = await assertAgentAvailable(sessionResult.session.characterId)
+    if (missingSessionAgent) return { error: missingSessionAgent }
+  }
+  return sessionResult
+}
+
+function environmentSetupPhaseOutcome(
+  setup: ProjectEnvironmentExecutionResult
+): TaskExecutionPhaseOutcome | undefined {
+  if (setup.reused) return "reused"
+  if (setup.joined) return "joined"
+  return undefined
+}
+
+/** `first-response` only when the host answered at all; `turn` always. */
+function recordTurnPhases(
+  execution: TaskExecution,
+  promptSentAt: number,
+  firstEventAt: number | null,
+  settledAt: number
+): void {
+  if (firstEventAt !== null) {
+    recordPhase(execution, "first-response", promptSentAt, firstEventAt)
+  }
+  recordPhase(execution, "turn", promptSentAt, settledAt)
+}
+
+// =============================================================================
 // Core chat-style runner — used by chat, agent, and skill executors
 // =============================================================================
 
@@ -608,35 +677,51 @@ async function runChatPrompt(
     return { success: false, error: "Empty prompt" }
   }
 
+  // Settings do not depend on anything the session step decides, so the read
+  // starts now and overlaps it instead of queueing behind it.
+  const settingsRead = inFlight(
+    getSettings().catch((err): AppSettings | null => {
+      log.warn("Scheduler: getSettings failed; continuing with no app defaults", {
+        err: String(err),
+      })
+      return null
+    })
+  )
+
   // 1. Resolve / create the session. The bound agent is checked first so a
   // deleted agent fails the run before a session is minted for it.
-  const missingAgent = await assertAgentAvailable(options.characterId)
-  if (missingAgent) return { success: false, error: missingAgent }
-  const sessionResult = await resolveOrCreateSession(task, payload, {
-    characterId: options.characterId,
-    runId: execution.id,
-  })
+  const sessionResult = await measurePhase(execution, "session", () =>
+    prepareRunSession(task, payload, options.characterId, execution.id)
+  )
   if ("error" in sessionResult) {
     return { success: false, error: sessionResult.error }
   }
   const { session } = sessionResult
   const sessionId = session.id
-  if (!options.characterId) {
-    // An appended-to session carries its own agent binding.
-    const missingSessionAgent = await assertAgentAvailable(session.characterId)
-    if (missingSessionAgent) return { success: false, error: missingSessionAgent }
-  }
+
+  // Real schedule producers persist the owning session id, not a second copy
+  // of its execution binding. Prefer an explicit frozen payload context for
+  // migrated rows, otherwise use the resolved session's canonical binding.
+  // Known as soon as the session is, so the bundle and environment reads it
+  // names start here and overlap the send-options work below.
+  const executionContext = payload.executionContext ?? session.executionContext
+  const canonicalExecution = executionContext?.execution
+  const canonicalManaged = canonicalExecution && canonicalExecution.mode !== "local"
+  const canonicalBundleRead = inFlight(
+    canonicalManaged && canonicalExecution.bundleId
+      ? getWorkspaceBundle(canonicalExecution.bundleId).catch(() => null)
+      : Promise.resolve(null)
+  )
+  const environmentRead = inFlight(
+    executionContext?.environmentId
+      ? getProjectEnvironment(executionContext.environmentId)
+      : Promise.resolve(undefined)
+  )
 
   // 2. Pull AppSettings and resolve full SendOptions through the same
   // pipeline the interactive composer uses.
-  let appSettings: AppSettings | null = null
-  try {
-    appSettings = await getSettings()
-  } catch (err) {
-    log.warn("Scheduler: getSettings failed; continuing with no app defaults", {
-      err: String(err),
-    })
-  }
+  const sendOptionsStartedAt = Date.now()
+  const appSettings = await settingsRead
 
   const agentMode = resolveAgentMode(task.id, payload.agentModeId)
 
@@ -654,11 +739,18 @@ async function runChatPrompt(
   const sessionProjectId = sessionResult.created ? task.projectId : session.projectId
   const owningProjectId = payload.executionContext?.projectId ?? sessionProjectId ?? null
   const capabilityScope: WorkspaceCapabilityScope = { projectId: owningProjectId }
+  // Independent reads: the workspace load overlaps the skill check. The skill
+  // verdict is still read first, so a missing skill fails the run exactly as
+  // before, and the workspace load never throws (it degrades to Restricted).
+  const owningRead = inFlight(loadOwningWorkspace(owningProjectId, { taskId: task.id }))
   if (options.skillId) {
     const missingSkill = await assertTaskSkillAvailable(options.skillId, capabilityScope)
-    if (missingSkill) return { success: false, error: missingSkill }
+    if (missingSkill) {
+      recordPhase(execution, "send-options", sendOptionsStartedAt, Date.now())
+      return { success: false, error: missingSkill }
+    }
   }
-  const owning = await loadOwningWorkspace(owningProjectId, { taskId: task.id })
+  const owning = await owningRead
   const activeProject = owning.project
   // Same gate, same workspace as an interactive turn: a schedule must not be
   // the way around Restricted Mode for a checkout the user never trusted.
@@ -682,11 +774,13 @@ async function runChatPrompt(
       trustedWorkspaceRoots: workspaceTrust.trustedRoots,
     })
   } catch (err) {
+    recordPhase(execution, "send-options", sendOptionsStartedAt, Date.now())
     return {
       success: false,
       error: err instanceof Error ? err.message : String(err),
     }
   }
+  recordPhase(execution, "send-options", sendOptionsStartedAt, Date.now())
 
   // 3. Path scope only; every capability knob went through the resolver.
   let finalOptions = applyPayloadDirectories(resolved, payload)
@@ -695,17 +789,7 @@ async function runChatPrompt(
   // there is nobody present to approve bypassing failed isolation/setup. The
   // durable workspaceKey binds subsequent schedule fires to the same chat
   // worktree while each execution still gets its own versioned TaskRun.
-  // Real schedule producers persist the owning session id, not a second copy
-  // of its execution binding. Prefer an explicit frozen payload context for
-  // migrated rows, otherwise use the resolved session's canonical binding.
-  const executionContext = payload.executionContext ?? session.executionContext
-  const canonicalExecution = executionContext?.execution
-  const canonicalManaged = canonicalExecution && canonicalExecution.mode !== "local"
-  const canonicalBundle = canonicalManaged
-    ? canonicalExecution.bundleId
-      ? await getWorkspaceBundle(canonicalExecution.bundleId).catch(() => null)
-      : null
-    : null
+  const canonicalBundle = await canonicalBundleRead
   if (
     canonicalManaged &&
     (!canonicalBundle ||
@@ -757,18 +841,20 @@ async function runChatPrompt(
       }
     : null
   const taskLease = taskLeaseInput
-    ? canonicalManaged
-      ? await openWorkspaceBundleTurnLease(
-          canonicalBundle!,
-          canonicalPrimary!.logicalRootId,
-          taskLeaseInput
-        )
-      : await openScheduledWritableBundle(
-          task,
-          execution,
-          boundWorkspaceRoot!,
-          "scheduled-chat"
-        ).catch(() => null)
+    ? await measurePhase(execution, "workspace-lease", () =>
+        canonicalManaged
+          ? openWorkspaceBundleTurnLease(
+              canonicalBundle!,
+              canonicalPrimary!.logicalRootId,
+              taskLeaseInput
+            )
+          : openScheduledWritableBundle(
+              task,
+              execution,
+              boundWorkspaceRoot!,
+              "scheduled-chat"
+            ).catch(() => null)
+      )
     : null
   if (executionContext && !taskLease) {
     return { success: false, error: "Scheduled workspace isolation is unavailable" }
@@ -802,7 +888,7 @@ async function runChatPrompt(
   }
 
   if (executionContext?.environmentId) {
-    const environment = await getProjectEnvironment(executionContext.environmentId)
+    const environment = await environmentRead
     if (!environment || environment.projectId !== executionContext.projectId) {
       if (taskLease) await taskLease.settle("failed").catch(() => undefined)
       return { success: false, error: "Scheduled project environment is unavailable" }
@@ -817,12 +903,18 @@ async function runChatPrompt(
       surface: "scheduled",
       ...(executionContext.projectId ? { projectId: executionContext.projectId } : {}),
     })
-    const setup = await executeProjectEnvironment({
-      environment: resolved.environment,
-      executionRoot,
-      scope: executionContext.location,
-      surface: "scheduled",
-    })
+    const setup = await measurePhase(
+      execution,
+      "environment-setup",
+      () =>
+        executeProjectEnvironment({
+          environment: resolved.environment,
+          executionRoot,
+          scope: executionContext.location,
+          surface: "scheduled",
+        }),
+      { outcome: environmentSetupPhaseOutcome }
+    )
     if (!setup.success) {
       if (taskLease) await taskLease.settle("failed").catch(() => undefined)
       return { success: false, error: setup.error ?? "Scheduled project environment setup failed" }
@@ -842,6 +934,10 @@ async function runChatPrompt(
   // tools named, instead of the desktop's silent auto-deny or the headless
   // brain's five-minute hang that surfaced as "timeout or cancellation".
   const permissions = createUnattendedPermissionResponder("scheduled task")
+  // Set when the prompt is handed to the agent host; the first event for this
+  // session after that closes the `first-response` phase.
+  let promptSentAt: number | null = null
+  let firstEventAt: number | null = null
   const unlisten = await onClaudeMessage((evt: ClaudeEvent) => {
     if (
       (evt as { sessionId?: string }).sessionId &&
@@ -849,6 +945,7 @@ async function runChatPrompt(
     ) {
       return
     }
+    if (promptSentAt !== null && firstEventAt === null) firstEventAt = Date.now()
     collected.push(evt)
     const evtType = (evt as { type?: string }).type
     if (evtType === "permission_request") {
@@ -953,13 +1050,16 @@ async function runChatPrompt(
       teamId: payload.teamId,
       agentModeId: payload.agentModeId,
     })
+    promptSentAt = Date.now()
     await sendPrompt(sessionId, payload.prompt, finalOptions)
     const result = await finished
+    recordTurnPhases(execution, promptSentAt, firstEventAt, Date.now())
     if (taskLease) {
       await taskLease.settle(result.success ? "ready" : "failed").catch(() => undefined)
     }
     return result
   } catch (err) {
+    if (promptSentAt !== null) recordTurnPhases(execution, promptSentAt, firstEventAt, Date.now())
     if (taskLease) await taskLease.settle("failed").catch(() => undefined)
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
@@ -1259,12 +1359,33 @@ let registered = false
  * — calling twice (e.g. from HMR, or `initSchedulerSystem` after the scheduler
  * already loaded this module for a due task) won't double-register.
  */
+/**
+ * Warm a chat-style task before it fires: start the agent host, the step every
+ * such run otherwise pays first when nothing has chatted since launch (the
+ * unattended overnight run in a tray-minimised app is the common case).
+ *
+ * Deliberately stops there. Environment setup writes into the run's leased
+ * workspace root, which only the run's own turn may touch, and the resolved
+ * send options would go stale between the prewarm and the fire.
+ */
+export async function prewarmChatLikeTask(task: ScheduledTask, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return
+  if (assertTaskTypeSupportedOnHost(task.type)) return
+  await ensureSidecarReady()
+}
+
+/** The task types whose runs start the agent host through `runChatPrompt`. */
+export const CHAT_LIKE_PREWARM_TYPES = ["chat", "agent", "skill"] as const
+
 export function registerBuiltInExecutors(): void {
   if (registered) return
   registered = true
 
   for (const type of BUILT_IN_EXECUTOR_TASK_TYPES) {
     registerTaskExecutor(type, BUILT_IN_EXECUTORS[type])
+  }
+  for (const type of CHAT_LIKE_PREWARM_TYPES) {
+    registerTaskPrewarmer(type, prewarmChatLikeTask)
   }
 
   log.info(`Built-in scheduler executors registered: ${BUILT_IN_EXECUTOR_TASK_TYPES.join(", ")}`)

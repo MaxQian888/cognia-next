@@ -15,6 +15,12 @@ import {
   TaskSchedulerImpl,
 } from "./task-scheduler"
 import { NodeTimingDriver } from "./timing/node-driver"
+import {
+  PREWARM_LEAD_MS,
+  prewarmAlarmId,
+  registerTaskPrewarmer,
+  unregisterTaskPrewarmer,
+} from "./prewarm"
 import { RendererTimingDriver } from "./timing/renderer-driver"
 import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
 
@@ -2163,8 +2169,10 @@ describe("TaskScheduler", () => {
         trigger: { type: "interval", intervalMs: 60_000 },
       })
 
-      expect(driver.arm).toHaveBeenCalledTimes(1)
-      expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+      // One task alarm; the `plugin` type's executor is not loaded yet, so a
+      // prewarm alarm is armed beside it under its own id.
+      const taskArms = (driver.arm as jest.Mock).mock.calls.filter(([id]) => id === task.id)
+      expect(taskArms).toHaveLength(1)
       sched.stop()
     })
 
@@ -2226,8 +2234,193 @@ describe("TaskScheduler", () => {
       expect(driver.disarm).toHaveBeenCalledWith(task.id)
 
       mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+      const armsBeforeResume = (driver.arm as jest.Mock).mock.calls.length
       await expect(sched.resumeTask(task.id)).resolves.toBe(true)
-      expect(driver.arm).toHaveBeenLastCalledWith(task.id, expect.any(Number))
+      const resumedArms = (driver.arm as jest.Mock).mock.calls.slice(armsBeforeResume)
+      expect(resumedArms).toContainEqual([task.id, expect.any(Number)])
+      sched.stop()
+    })
+
+    describe("prewarm", () => {
+      afterEach(() => {
+        unregisterTaskPrewarmer("test")
+        unregisterTaskExecutor("test")
+      })
+
+      function prewarmTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+        return {
+          id: "warm-task",
+          name: "Warm Task",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60 * 60_000 },
+          config: { maxRetries: 0, retryDelay: 1000, timeout: 30000, runMissedOnStartup: false },
+          notification: { onStart: false, onComplete: false, onError: false },
+          status: "active",
+          runCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...overrides,
+        }
+      }
+
+      it("arms a prewarm alarm ahead of the fire for a type with a prewarmer", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        registerTaskPrewarmer("test", jest.fn().mockResolvedValue(undefined))
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const fireAt = Date.now() + 60 * 60_000
+        const task = prewarmTask({ nextRunAt: new Date(fireAt) })
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+        await sched.resumeTask(task.id)
+
+        expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+        expect(driver.arm).toHaveBeenCalledWith(prewarmAlarmId(task.id), expect.any(Number))
+        const [, prewarmAt] = (driver.arm as jest.Mock).mock.calls.find(
+          ([id]) => id === prewarmAlarmId(task.id)
+        )!
+        const [, taskAt] = (driver.arm as jest.Mock).mock.calls.find(([id]) => id === task.id)!
+        expect(taskAt - prewarmAt).toBe(PREWARM_LEAD_MS)
+        sched.stop()
+      })
+
+      it("arms no prewarm for a loaded type without a prewarmer", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const task = prewarmTask({ nextRunAt: new Date(Date.now() + 60 * 60_000) })
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+        await sched.resumeTask(task.id)
+
+        expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+        expect(driver.arm).not.toHaveBeenCalledWith(prewarmAlarmId(task.id), expect.any(Number))
+        sched.stop()
+      })
+
+      it("runs the prewarmer on its alarm without executing or claiming the task", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        const prewarmer = jest.fn().mockResolvedValue(undefined)
+        registerTaskExecutor("test", executor)
+        registerTaskPrewarmer("test", prewarmer)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const task = prewarmTask({ nextRunAt: new Date(Date.now() + 60 * 60_000) })
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+        await sched.resumeTask(task.id)
+
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        driver.fire(prewarmAlarmId(task.id), Date.now())
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(prewarmer).toHaveBeenCalledWith(
+          expect.objectContaining({ id: task.id }),
+          expect.any(AbortSignal)
+        )
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.claimTaskSlot).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.createExecution).not.toHaveBeenCalled()
+        sched.stop()
+      })
+
+      it("swallows a failing prewarm", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        registerTaskPrewarmer("test", jest.fn().mockRejectedValue(new Error("host down")))
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const task = prewarmTask({ nextRunAt: new Date(Date.now() + 60 * 60_000) })
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+        await sched.resumeTask(task.id)
+
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        driver.fire(prewarmAlarmId(task.id), Date.now())
+        await expect(jest.advanceTimersByTimeAsync(10)).resolves.not.toThrow()
+        sched.stop()
+      })
+
+      it("disarms the prewarm and aborts one in flight when the task is paused", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        let seenSignal: AbortSignal | undefined
+        registerTaskPrewarmer(
+          "test",
+          jest.fn((_task: ScheduledTask, signal: AbortSignal) => {
+            seenSignal = signal
+            return new Promise<void>(() => undefined)
+          })
+        )
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const task = prewarmTask({ nextRunAt: new Date(Date.now() + 60 * 60_000) })
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+        await sched.resumeTask(task.id)
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        driver.fire(prewarmAlarmId(task.id), Date.now())
+        await jest.advanceTimersByTimeAsync(10)
+        expect(seenSignal?.aborted).toBe(false)
+
+        mockSchedulerDb.getTask.mockResolvedValueOnce(task)
+        await sched.pauseTask(task.id)
+
+        expect(seenSignal?.aborted).toBe(true)
+        sched.stop()
+      })
+
+      it("fires an ordinary task whose id merely looks like a prewarm alarm", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const task = prewarmTask({ id: "prewarm:odd" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockSchedulerDb.claimTaskSlot.mockResolvedValue(task)
+
+        driver.fire(task.id, Date.now())
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalled()
+        sched.stop()
+      })
+    })
+
+    it("records the fire delay and a timing summary on an alarm-fired run", async () => {
+      registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task: ScheduledTask = {
+        id: "timed-task",
+        name: "Timed Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60000 },
+        config: { maxRetries: 0, retryDelay: 1000, timeout: 30000, runMissedOnStartup: true },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      mockSchedulerDb.claimTaskSlot.mockResolvedValue(task)
+
+      driver.fire(task.id, Date.now() - 250)
+      await jest.advanceTimersByTimeAsync(10)
+
+      const settled = mockSchedulerDb.updateExecution.mock.calls
+        .map(([execution]) => execution)
+        .pop()
+      const fireDelay = settled?.phases?.find((phase) => phase.name === "fire-delay")
+      expect(fireDelay?.durationMs).toBeGreaterThanOrEqual(250)
+      expect(settled?.logs.some((log) => log.message.startsWith("Timing: fire-delay"))).toBe(true)
+      unregisterTaskExecutor("test")
       sched.stop()
     })
 

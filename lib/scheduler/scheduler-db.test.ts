@@ -363,6 +363,48 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.status).toBe("completed")
     })
 
+    it("round-trips an execution's phase timings", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "task-phases" }))
+      const phases = [
+        { name: "fire-delay" as const, startOffsetMs: -40, durationMs: 40 },
+        {
+          name: "environment-setup" as const,
+          startOffsetMs: 12,
+          durationMs: 3,
+          outcome: "reused" as const,
+        },
+      ]
+      await schedulerDb.createExecution(
+        createMockExecution("task-phases", { id: "exec-phases", phases })
+      )
+
+      expect((await schedulerDb.getExecution("exec-phases"))?.phases).toEqual(phases)
+    })
+
+    it("omits phases on a run that measured none and drops unreadable entries", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "task-no-phases" }))
+      await schedulerDb.createExecution(createMockExecution("task-no-phases", { id: "exec-none" }))
+      expect(await schedulerDb.getExecution("exec-none")).not.toHaveProperty("phases")
+
+      const row = await getDb().scheduledTaskRuns.get("exec-none")
+      await getDb().scheduledTaskRuns.put({
+        ...row!,
+        phases: JSON.stringify([
+          { name: "turn", startOffsetMs: 0, durationMs: 5 },
+          { name: "not-a-phase", startOffsetMs: 0, durationMs: 1 },
+          { name: "session", startOffsetMs: "x", durationMs: 1 },
+        ]),
+      })
+      expect((await schedulerDb.getExecution("exec-none"))?.phases).toEqual([
+        { name: "turn", startOffsetMs: 0, durationMs: 5 },
+      ])
+
+      await getDb().scheduledTaskRuns.put({ ...row!, phases: "{not json" })
+      const garbled = await schedulerDb.getExecution("exec-none")
+      expect(garbled).not.toBeNull()
+      expect(garbled).not.toHaveProperty("phases")
+    })
+
     it("should get recent executions", async () => {
       const task = createMockTask({ id: "task-recent" })
       await schedulerDb.createTask(task)
