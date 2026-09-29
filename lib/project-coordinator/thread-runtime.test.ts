@@ -4,6 +4,8 @@ import type { ChatStatus } from "@/stores/chat/chat-store"
 import {
   checkThreadCreation,
   countActiveThreads,
+  reopenThread,
+  resolveThread,
   resumeProjectThreads,
   sendToThread,
   startThread,
@@ -49,6 +51,9 @@ function setup(
   const deps: ThreadRuntimeDeps = {
     getProject: () => ({ id: "p1", coordinator }) as Project,
     getSession: async (id) => table.get(id),
+    updateSession: jest.fn(async (id, patch) => {
+      table.set(id, { ...table.get(id)!, ...patch })
+    }),
     listThreads: async () => [...table.values()],
     markRunning: jest.fn(async (id) => patchChild(id, "running")),
     interrupt: jest.fn(async (id) => patchChild(id, "interrupted")),
@@ -202,5 +207,21 @@ describe("resumeProjectThreads", () => {
     })
     await resumeProjectThreads("coord", deps)
     expect(deps.send).not.toHaveBeenCalled()
+  })
+})
+
+describe("resolveThread / reopenThread", () => {
+  it("stamps the resolution, releases the hold, and a follow-up reopens it", async () => {
+    const { deps, table, held } = setup([thread("t1", { spawnedTask: { mode: "aside" } })])
+    held.add("t1")
+    await expect(resolveThread("t1", "user", deps)).resolves.toBe(true)
+    expect(table.get("t1")?.projectThread).toMatchObject({ resolvedAt: NOW, resolvedBy: "user" })
+    expect(held.has("t1")).toBe(false)
+
+    await sendToThread("t1", "one more thing", deps)
+    expect(table.get("t1")?.projectThread?.resolvedAt).toBeUndefined()
+    expect(table.get("t1")?.projectThread?.resolvedBy).toBeUndefined()
+    await expect(resolveThread("missing", "user", deps)).resolves.toBe(false)
+    await reopenThread("t1", deps)
   })
 })

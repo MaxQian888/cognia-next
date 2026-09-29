@@ -88,6 +88,11 @@ import {
   type SessionPeerToolRunDeps,
 } from "./session-peer-builtin-tools"
 import {
+  isProjectCoordinatorBuiltinTool,
+  runProjectCoordinatorBuiltinTool,
+  type ProjectCoordinatorToolDeps,
+} from "./project-coordinator-builtin-tools"
+import {
   isAttachmentBuiltinTool,
   resolveAttachmentToolDeps,
   runAttachmentBuiltinTool,
@@ -216,6 +221,20 @@ async function resolveSessionPeerToolDeps(): Promise<SessionPeerToolRunDeps> {
       })),
     send: sendSessionPeerMessage,
   }
+}
+
+let projectCoordinatorDepsOverride: (() => ProjectCoordinatorToolDeps) | null = null
+
+export function __setProjectCoordinatorToolDepsForTesting(
+  fn: (() => ProjectCoordinatorToolDeps) | null
+): void {
+  projectCoordinatorDepsOverride = fn
+}
+
+async function resolveProjectCoordinatorDeps(): Promise<ProjectCoordinatorToolDeps> {
+  if (projectCoordinatorDepsOverride) return projectCoordinatorDepsOverride()
+  const { resolveProjectCoordinatorToolDeps } = await import("@/lib/project-coordinator/tool-deps")
+  return resolveProjectCoordinatorToolDeps()
 }
 
 /** Inject web-tool deps (tests / CLI host). Pass `null` to restore default. */
@@ -672,6 +691,15 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         await resolveSessionPeerToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    if (isProjectCoordinatorBuiltinTool(request.name)) {
+      const result = await runProjectCoordinatorBuiltinTool(
+        request.name,
+        request.args,
+        await resolveProjectCoordinatorDeps(),
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

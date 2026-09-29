@@ -1,7 +1,7 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import { useChatStore } from "@/stores/chat"
-import { getSession, listSessionBranches } from "@/lib/db/sessions"
+import { getSession, listSessionBranches, updateSession } from "@/lib/db/sessions"
 import {
   consumeStagedPrompt,
   interruptAttachedSession,
@@ -40,6 +40,7 @@ export const THREAD_HOLDER_ID = "project-thread"
 
 export interface ThreadRuntimeDeps extends Pick<ProjectAccess, "getProject"> {
   getSession: (id: string) => Promise<ChatSession | undefined>
+  updateSession: (id: string, patch: Partial<ChatSession>) => Promise<unknown>
   listThreads: (coordinatorSessionId: string) => Promise<ChatSession[]>
   markRunning: (threadId: string) => Promise<void>
   interrupt: (threadId: string, ownerSessionId: string) => Promise<void>
@@ -60,6 +61,7 @@ export function defaultThreadRuntimeDeps(): ThreadRuntimeDeps {
   return {
     getProject: projectAccess.getProject,
     getSession,
+    updateSession,
     listThreads: async (coordinatorSessionId) =>
       (await listSessionBranches(coordinatorSessionId)).filter(isThreadOf(coordinatorSessionId)),
     markRunning: (threadId) => markAttachedSessionRunning(threadId),
@@ -183,6 +185,7 @@ export async function sendToThread(
     return false
   }
   if (thread.attachedChild?.status !== "running") await deps.markRunning(threadId)
+  if (thread.projectThread?.resolvedAt) await reopenThread(threadId, deps)
   return true
 }
 
@@ -212,6 +215,35 @@ export async function stopThread(
   } finally {
     stopping.delete(threadId)
   }
+}
+
+/**
+ * Mark a thread resolved (done from the coordinator's point of view). Its
+ * branch, worktree and transcript are untouched; a new message reopens it.
+ */
+export async function resolveThread(
+  threadId: string,
+  by: NonNullable<ChatSession["projectThread"]>["resolvedBy"],
+  deps: ThreadRuntimeDeps = defaultThreadRuntimeDeps()
+): Promise<boolean> {
+  const thread = await deps.getSession(threadId)
+  if (thread?.projectRole !== "thread" || !thread.projectThread) return false
+  await deps.updateSession(threadId, {
+    projectThread: { ...thread.projectThread, resolvedAt: deps.now(), resolvedBy: by },
+  })
+  deps.release(threadId)
+  return true
+}
+
+/** Clear a resolution — a resolved thread the user or coordinator picks back up. */
+export async function reopenThread(
+  threadId: string,
+  deps: ThreadRuntimeDeps = defaultThreadRuntimeDeps()
+): Promise<void> {
+  const thread = await deps.getSession(threadId)
+  if (!thread?.projectThread?.resolvedAt) return
+  const { resolvedAt: _resolvedAt, resolvedBy: _resolvedBy, ...rest } = thread.projectThread
+  await deps.updateSession(threadId, { projectThread: rest })
 }
 
 /**

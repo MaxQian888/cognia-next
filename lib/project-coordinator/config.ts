@@ -86,6 +86,18 @@ export function isCoordinatorEnabled(project: Pick<Project, "coordinator"> | nul
   return project?.coordinator?.enabled === true
 }
 
+/**
+ * A coordinator or thread gets its project tools, protocol and goal only while
+ * coordination is on for its workspace — turning it off returns every such
+ * conversation to an ordinary one without touching the rows.
+ */
+export function projectRoleToolsApply(
+  session: { projectRole?: "coordinator" | "thread" } | null | undefined,
+  project: Pick<Project, "coordinator"> | null | undefined
+): boolean {
+  return Boolean(session?.projectRole) && isCoordinatorEnabled(project)
+}
+
 /** Workspace is paused (ADR-0204): no turn in it may start until resumed. */
 export function isProjectPausedConfig(
   project: Pick<Project, "coordinator"> | null | undefined

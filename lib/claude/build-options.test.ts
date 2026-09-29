@@ -14,6 +14,16 @@ jest.mock("@/lib/gateway/mint-session-ticket", () => ({
   prepareExternalAgentGatewayRoute: (...args: unknown[]) => mockPrepareSdkGatewayRoute(...args),
 }))
 
+// Project coordination reads its threads from Dexie; the digest only needs a list.
+jest.mock("@/lib/project-coordinator/thread-runtime", () => ({
+  ...jest.requireActual("@/lib/project-coordinator/thread-runtime"),
+  defaultThreadRuntimeDeps: () => ({
+    listThreads: async () => [
+      { id: "t1", title: "Fix login", createdAt: 1, updatedAt: 1, projectRole: "thread" },
+    ],
+  }),
+}))
+
 jest.mock("@/lib/db/characters", () => ({
   // ADR-0030: build-options switched to resolveCharacterById so plugin-
   // overlay characters resolve through the same path as Dexie rows.
@@ -6115,6 +6125,54 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / sessi
     } finally {
       mobile.mockReturnValue(false)
     }
+  })
+
+  describe("project coordination (ADR-0204)", () => {
+    const coordinated = (goal?: string) => ({
+      ...makeProject([{ path: "/repo", isPrimary: true }]),
+      coordinator: { enabled: true, ...(goal ? { goal } : {}) },
+    })
+
+    it("gives a coordinator its tools, protocol, goal and live project status", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "coord", projectId: "ws1", projectRole: "coordinator" }),
+        activeProject: coordinated("Ship the checkout rewrite"),
+      })
+      expect(toolNames(opts)).toEqual(
+        expect.arrayContaining(["spawn_thread", "message_thread", "list_threads"])
+      )
+      expect(toolNames(opts)).not.toContain("report_to_coordinator")
+      expect(opts.systemPrompt).toContain("## Project goal\n\nShip the checkout rewrite")
+      expect(opts.appendSystemPrompt).toContain("## Project coordinator")
+      expect(opts.dynamicSystemPrompt).toContain("- Fix login (t1)")
+      expect(opts.permissionRuleset?.set_project_preference).toBe("ask")
+    })
+
+    it("gives a thread only its report tool", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "t1", projectId: "ws1", projectRole: "thread" }),
+        activeProject: coordinated(),
+      })
+      expect(toolNames(opts)).toContain("report_to_coordinator")
+      expect(toolNames(opts)).not.toContain("spawn_thread")
+      expect(opts.appendSystemPrompt).toContain("## Project thread")
+    })
+
+    it("adds nothing to ordinary sessions or when coordination is off", async () => {
+      const plain = await resolveSendOptions({
+        session: makeSession({ id: "s1", projectId: "ws1" }),
+        activeProject: coordinated("x"),
+      })
+      const off = await resolveSendOptions({
+        session: makeSession({ id: "coord", projectId: "ws1", projectRole: "coordinator" }),
+        activeProject: { ...coordinated("x"), coordinator: { enabled: false, goal: "x" } },
+      })
+      for (const opts of [plain, off]) {
+        expect(toolNames(opts)).not.toContain("spawn_thread")
+        expect(opts.systemPrompt ?? "").not.toContain("## Project goal")
+        expect(opts.permissionRuleset?.spawn_thread).toBeUndefined()
+      }
+    })
   })
 
   it("appends independent-session discovery and messaging only when opted in", async () => {

@@ -11,6 +11,7 @@ import {
   __setVectorToolDepsForTesting,
   __setProjectHistoryToolDepsForTesting,
   __setSpawnTaskToolDepsForTesting,
+  __setProjectCoordinatorToolDepsForTesting,
   __setSessionPeerToolDepsForTesting,
   __setTemplateToolDepsForTesting,
   handlePluginToolExec,
@@ -103,6 +104,27 @@ describe("handlePluginToolExec", () => {
     __setSpawnTaskToolDepsForTesting(null)
     __setSessionPeerToolDepsForTesting(null)
     __setTemplateToolDepsForTesting(null)
+    __setProjectCoordinatorToolDepsForTesting(null)
+  })
+
+  it("routes project-coordinator tools to the host runner before the plugin registry", async () => {
+    const execute = jest.fn().mockResolvedValue({ from: "plugin" })
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "some-plugin", execute }),
+    })
+    const coordinator = { id: "session-1", projectId: "p1", projectRole: "coordinator" }
+    __setProjectCoordinatorToolDepsForTesting(
+      () =>
+        ({
+          getSession: async (id: string) => (id === "session-1" ? coordinator : undefined),
+          listThreads: async () => [],
+          statusOf: () => "idle",
+        }) as never
+    )
+    const response = await handlePluginToolExec(makeRequest({ name: "list_threads", args: {} }))
+    expect(execute).not.toHaveBeenCalled()
+    expect(response.error).toBeUndefined()
+    expect(response.result).toEqual({ ok: true, threads: [] })
   })
 
   it("routes the template and squad tools to the host runner before the plugin registry", async () => {

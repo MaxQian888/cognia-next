@@ -25,6 +25,10 @@ import { buildLiveVoiceContext, type LiveVoiceContextLimits } from "./context"
 import { mapRealtimeTools, type DroppedTool, type PluginToolEntry } from "./tools"
 import type { RealtimeToolExecutionRequest, RealtimeToolExecutionResult } from "./tool-runtime"
 import type { LiveVoiceCapabilities } from "./types"
+import {
+  PROJECT_COORDINATOR_TOOL_NAMES,
+  PROJECT_THREAD_TOOL_NAMES,
+} from "@/lib/claude/project-coordinator-builtin-tools"
 
 export interface LiveVoiceRuntimeDeps {
   listMessages(sessionId: string): Promise<UIMessage[]>
@@ -88,6 +92,8 @@ const NON_CANCELLABLE_LIVE_VOICE_TOOLS = new Set([
   "twin_knowledge_search",
   "team_post_to_chat",
   "team_propose_decision",
+  ...Object.values(PROJECT_COORDINATOR_TOOL_NAMES),
+  ...Object.values(PROJECT_THREAD_TOOL_NAMES),
 ])
 
 function liveVoiceToolIsCancellable(entry: PluginToolEntry): boolean {

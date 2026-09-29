@@ -11,6 +11,8 @@ import { getAllProviders } from "@cognia/provider-types/provider"
 import { additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import { buildWorkspaceInstructionsSection } from "@/lib/workspace/workspace-instructions"
+import { buildProjectGoalSection } from "@/lib/project-coordinator/protocol"
+import { projectRoleToolsApply } from "@/lib/project-coordinator/config"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
@@ -2471,6 +2473,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // The turn's own workspace (`activeProject` is `resolveSessionWorkspace`),
     // not whichever one is on screen.
     buildWorkspaceInstructionsSection(ctx.activeProject),
+    // A coordinated project's goal (ADR-0204), for its coordinator and threads.
+    projectRoleToolsApply(session, ctx.activeProject)
+      ? buildProjectGoalSection(ctx.activeProject)
+      : "",
     memorySection,
     projectContinuitySection,
     projectKnowledgeSection,
@@ -2605,12 +2611,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.selfInvokeTools?.pet === true && (await import("@/lib/tauri")).isTauri()
   const { buildTemplateToolRuleset } = await import("@/lib/claude/permissions/template-tool-rules")
   const { buildPetToolRuleset } = await import("@/lib/claude/permissions/pet-tool-rules")
+  const projectRoleToolsSurfaced = projectRoleToolsApply(session, ctx.activeProject)
+  const { buildProjectCoordinatorToolRuleset } =
+    await import("@/lib/claude/permissions/project-coordinator-tool-rules")
   const mergedRuleset = mergeRulesets(
     editorWriteToolsSurfaced ? buildEditorToolRuleset() : undefined,
     sitesToolsSurfaced ? buildSiteToolRuleset() : undefined,
     artifactAuthoringEnabled ? buildArtifactToolRuleset() : undefined,
     templateToolsEnabled ? buildTemplateToolRuleset() : undefined,
     petToolsSurfaced ? buildPetToolRuleset() : undefined,
+    projectRoleToolsSurfaced ? buildProjectCoordinatorToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
   )
@@ -3675,6 +3685,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
     } catch (err) {
       loggers.app.warn("failed to append vector built-in tools", { error: String(err) })
+    }
+  }
+  // Project coordination (ADR-0204): the coordinator's routing tools + per-turn
+  // project status, or a thread's report tool. Same gate as the ruleset above.
+  if (projectRoleToolsSurfaced && session && ctx.activeProject) {
+    try {
+      const { resolveProjectRoleSendExtras } = await import("@/lib/project-coordinator/send-extras")
+      const extras = await resolveProjectRoleSendExtras(session, ctx.activeProject)
+      if (extras) {
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...extras.pluginTools]
+        const existing = opts.appendSystemPrompt?.trim() ?? ""
+        opts.appendSystemPrompt = existing ? `${existing}\n\n${extras.protocol}` : extras.protocol
+        if (extras.dynamicSection) dynamicTailSections.push(extras.dynamicSection)
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append project-coordinator built-in tools", {
+        error: String(err),
+      })
     }
   }
   // Team-collaboration tools — only on a team dispatch session, opt-in. Lets a
