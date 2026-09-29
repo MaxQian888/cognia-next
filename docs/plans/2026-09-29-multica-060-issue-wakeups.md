@@ -119,6 +119,14 @@ deliverable,linkedAt}`, `lib/issues/deliverables.ts` (label-keyed
   active run through `steerIssueRun`, the same path joined wakeups use: no
   third steer path. A run whose adapter reports no live session says its
   engine takes no input instead of offering a send it would refuse.
+- **Verify results** (2026-09-30): (1) the IM permission ceiling never
+  gated run start, it only narrows tools; shared sessions were already
+  refused, but an issue card's Move/Run ran for anyone in the chat. Clicks
+  now answer to the sender half of the trigger policy
+  (`senderTriggerRefusal`, ADR-0132). (2) Notification Center history was
+  bounded (count + age + coalescing, pruned on every write), but the
+  in-memory feed kept pruned rows until reload; it now evicts them.
+  (3) Paused-reason display was already covered.
 - **Not built:** Phases 5 and 6 (gated on demand by this plan); `until-pr`
   `checks` and wakeup expiry (`expires-in` / `on-timeout`); holding a
   parent's children-done wakeup while the parent sits in backlog; a
