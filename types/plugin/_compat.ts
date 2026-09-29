@@ -307,6 +307,54 @@ export interface Project {
     accepted: string[]
     reviewed: string[]
   }
+  /**
+   * Project coordination (ADR-0204): one long-lived coordinator conversation
+   * that starts worker threads. Absent = never enabled. Read through
+   * `resolveCoordinatorConfig` (`lib/project-coordinator/config.ts`), which
+   * owns the defaults. Budget and notification preferences deliberately live
+   * in their own policies (`CostBudgetPolicy.perProject`,
+   * `NotificationPreferences.perProject`), not here — one source of truth each.
+   */
+  coordinator?: ProjectCoordinatorConfig
+}
+
+/** Where a new project thread runs. `auto` = managed worktree iff the root is a git repo. */
+export type ProjectThreadExecution = "auto" | "managedWorktree" | "local"
+
+export interface ProjectCoordinatorModelChoice {
+  modelId: string
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
+}
+
+export interface ProjectCoordinatorPreferences {
+  /** Soft limit the coordinator is asked to respect; not a hard cap. */
+  maxConcurrentThreads?: number
+  /** Coordinator proposes threads and waits for the user to start them. */
+  proposeBeforeStart?: boolean
+  /** Hard cap on threads created per local day; enforced at admission. */
+  dailyThreadCap?: number
+  /** Deliver PR nudges (CI failed, review comments, conflicts) into the thread. */
+  autoFixPr?: boolean
+}
+
+export interface ProjectCoordinatorConfig {
+  enabled: boolean
+  /** The coordinator conversation, once created. */
+  sessionId?: string
+  /** One line the coordinator works toward. PII-gated on save and on injection. */
+  goal?: string
+  threadExecution?: ProjectThreadExecution
+  preferences?: ProjectCoordinatorPreferences
+  /** Present while paused: no turn in this workspace starts until resumed. */
+  paused?: { at: number; reason?: string }
+  model?: {
+    coordinator?: ProjectCoordinatorModelChoice
+    threads?: ProjectCoordinatorModelChoice
+  }
+  /** Shown beside the workspace name; an emoji. */
+  icon?: string
+  /** Set once the one-off setup recommendations have been offered. */
+  setupOfferedAt?: number
 }
 
 export interface CreateProjectInput {

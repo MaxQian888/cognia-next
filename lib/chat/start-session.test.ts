@@ -294,6 +294,41 @@ describe("startNewSession", () => {
     })
   })
 
+  it("keeps the workspace defaults untouched when rememberChoice is false", async () => {
+    const updateProject = jest.fn()
+    const project = {
+      id: "p_thread",
+      name: "Thread host",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+      updateProject,
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({
+      executionLocation: "managedWorktree",
+      executionBase: { kind: "localHead" },
+      environmentId: "",
+      rememberChoice: false,
+      activate: false,
+    })
+
+    expect(session.executionContext).toMatchObject({ location: "managedWorktree" })
+    expect(updateProject).not.toHaveBeenCalled()
+    expect(session).not.toHaveProperty("rememberChoice")
+  })
+
   it("binds a per-chat environment, root and worktree name into the context", async () => {
     const updateProject = jest.fn()
     const project = {

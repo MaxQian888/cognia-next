@@ -2261,6 +2261,41 @@ export type AttachedSessionStatus = "staged" | "running" | "completed" | "interr
 
 export type CrossSessionInboundPolicy = "accept" | "hold" | "refuse"
 
+/** ADR-0204 — a workspace's coordinating conversation, or a worker it started. */
+export type ProjectSessionRole = "coordinator" | "thread"
+
+/**
+ * A state a thread declares about itself (via `report_to_coordinator`) that the
+ * transcript alone cannot show. PR-derived states win over it once a pull
+ * request is observed.
+ */
+export type ProjectThreadDeclaredState = "ready-for-review" | "landing" | "blocked"
+
+export interface ProjectThreadPrRef {
+  /** `owner/name` on github.com. */
+  repo: string
+  branch: string
+  number?: number
+  url?: string
+}
+
+/** Durable per-thread bookkeeping for the project coordinator (ADR-0204). */
+export interface ProjectThreadState {
+  coordinatorSessionId: string
+  /** The rendered, PII-gated brief the thread was started with. */
+  brief: string
+  /** Workspace root the thread works in; absent = the primary root. */
+  rootId?: string
+  proposedBy: "coordinator" | "user"
+  /** Set when the user, the coordinator, or the idle sweep resolves the thread. */
+  resolvedAt?: number
+  resolvedBy?: "user" | "coordinator" | "auto"
+  /** Last time this thread's result was delivered to the coordinator. */
+  lastReportAt?: number
+  declaredState?: ProjectThreadDeclaredState
+  prRef?: ProjectThreadPrRef
+}
+
 /** Durable parent-owned lifecycle for a Codex-style attached child chat. */
 export interface AttachedChildSession {
   parentSessionId: string
@@ -2567,6 +2602,16 @@ export interface ChatSession {
   attachedChild?: AttachedChildSession
   /** Receiver-owned policy for independent-session messages. Defaults to hold. */
   crossSessionInboundPolicy?: CrossSessionInboundPolicy
+  /**
+   * Role in a workspace's project coordination (ADR-0204). Absent on every
+   * ordinary conversation. Both roles stay `kind: "direct"` and fully exposed:
+   * a coordinator is the workspace's long-lived routing conversation, a thread
+   * is a worker it started. Non-indexed — threads are found through
+   * `parentSessionId`.
+   */
+  projectRole?: ProjectSessionRole
+  /** Coordinator-owned bookkeeping; present only when `projectRole === "thread"`. */
+  projectThread?: ProjectThreadState
   /** The source message id (in the parent session) this branch was taken at. */
   branchedFromMessageId?: string
   /** How the branch was created: a verbatim copy or an LLM summary seed. */

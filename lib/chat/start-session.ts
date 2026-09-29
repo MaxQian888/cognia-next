@@ -92,6 +92,13 @@ export interface NewSessionInput extends SessionSeed {
    * is the same kind of object either way. Only the focus move is skipped.
    */
   activate?: boolean
+  /**
+   * Remember this conversation's execution location / environment as the
+   * workspace default for the next new chat. Default `true` — the new-chat
+   * selector's contract. A machine-started conversation (a project thread,
+   * ADR-0204) passes `false`: its placement is its own, not a user's pick.
+   */
+  rememberChoice?: boolean
 }
 
 /**
@@ -111,8 +118,15 @@ export interface NewSessionInput extends SessionSeed {
  * given, so a conversation is usable without picking a character first.
  */
 export async function startNewSession(partial?: NewSessionInput): Promise<ChatSession> {
-  const { executionLocation, executionBase, environmentId, rootId, worktreeName, ...sessionSeed } =
-    partial ?? {}
+  const {
+    executionLocation,
+    executionBase,
+    environmentId,
+    rootId,
+    worktreeName,
+    rememberChoice = true,
+    ...sessionSeed
+  } = partial ?? {}
 
   // Name the owning workspace explicitly instead of letting `createSession`
   // resolve it. `resolveScopeProjectId` reads the PERSISTED
@@ -298,7 +312,7 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
         }
       }
     }
-  } else if (ownerProjectId) {
+  } else if (ownerProjectId && rememberChoice) {
     // The remembered default belongs to the workspace this conversation runs
     // in, not to whichever one the UI happens to be showing.
     updateProject(ownerProjectId, {
@@ -306,12 +320,12 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
     })
   }
 
-  if (ownerProjectId && executionLocation) {
+  if (ownerProjectId && executionLocation && rememberChoice) {
     updateProject(ownerProjectId, { defaultExecutionLocation: executionLocation })
   }
   // Same remember-the-choice contract as the location: a per-chat environment
   // pick becomes the workspace default for the next new chat. "" clears it.
-  if (ownerProjectId && environmentId !== undefined) {
+  if (ownerProjectId && environmentId !== undefined && rememberChoice) {
     updateProject(ownerProjectId, { defaultEnvironmentId: environmentId || undefined })
   }
 
