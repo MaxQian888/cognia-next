@@ -8,6 +8,10 @@ import type { ChatSession } from "@cognia/agent-config-types"
 let liveThread: ChatSession | null | undefined
 jest.mock("@/hooks/data", () => ({ useClientLiveQuery: () => liveThread }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn() }))
+jest.mock("@/hooks/project-coordinator/use-project-threads", () => ({
+  ...jest.requireActual("@/hooks/project-coordinator/use-project-threads"),
+  useThreadPrStatuses: () => new Map(),
+}))
 jest.mock("@/components/project-coordinator/thread-row", () => ({
   ProjectThreadRow: ({ row }: { row: { thread: ChatSession; state: string } }) => (
     <span data-testid="row">{`${row.thread.title}:${row.state}`}</span>

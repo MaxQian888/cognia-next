@@ -11,6 +11,8 @@ import { projectRoleToolsApply } from "./config"
 import { buildCoordinatorContextSection, type DigestThreadInput } from "./digest"
 import { PROJECT_COORDINATOR_PROTOCOL, PROJECT_THREAD_PROTOCOL } from "./protocol"
 import { listProjectThreads } from "./thread-runtime"
+import { listSessionPrObservationsByProject } from "@/lib/db/session-pr-observations"
+import type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
 
 /**
  * What a coordinator or thread turn adds to its send options (ADR-0204) —
@@ -29,13 +31,20 @@ export interface ProjectRoleSendExtras {
 
 export interface SendExtrasDeps {
   listThreads: (coordinatorSessionId: string) => Promise<ChatSession[]>
-  threadInput: (thread: ChatSession) => DigestThreadInput
+  prStatuses: (projectId: string) => Promise<ReadonlyMap<string, PrDerivedStatus>>
+  threadInput: (thread: ChatSession) => Omit<DigestThreadInput, "pr">
   now: () => number
 }
 
 function defaultDeps(): SendExtrasDeps {
   return {
     listThreads: listProjectThreads,
+    prStatuses: async (projectId) =>
+      new Map(
+        (await listSessionPrObservationsByProject(projectId)).map(
+          (row) => [row.sessionId, row.derivedStatus] as const
+        )
+      ),
     threadInput: (thread) => ({
       thread,
       status: sessionStatusOf(thread.id),
@@ -46,7 +55,7 @@ function defaultDeps(): SendExtrasDeps {
 }
 
 export async function resolveProjectRoleSendExtras(
-  session: Pick<ChatSession, "id" | "projectRole">,
+  session: Pick<ChatSession, "id" | "projectRole" | "projectId">,
   project: Pick<Project, "coordinator">,
   deps: SendExtrasDeps = defaultDeps()
 ): Promise<ProjectRoleSendExtras | undefined> {
@@ -54,13 +63,16 @@ export async function resolveProjectRoleSendExtras(
   if (session.projectRole === "thread") {
     return { pluginTools: buildProjectThreadManifestEntries(), protocol: PROJECT_THREAD_PROTOCOL }
   }
-  const threads = await deps.listThreads(session.id)
+  const [threads, prStatuses] = await Promise.all([
+    deps.listThreads(session.id),
+    session.projectId ? deps.prStatuses(session.projectId) : new Map<string, PrDerivedStatus>(),
+  ])
   return {
     pluginTools: buildProjectCoordinatorManifestEntries(),
     protocol: PROJECT_COORDINATOR_PROTOCOL,
     dynamicSection: buildCoordinatorContextSection(
       project,
-      threads.map(deps.threadInput),
+      threads.map((thread) => ({ ...deps.threadInput(thread), pr: prStatuses.get(thread.id) })),
       deps.now()
     ),
   }

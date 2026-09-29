@@ -12,7 +12,10 @@ import type { ToolUIPart } from "ai"
 import { useNow, useTranslations } from "next-intl"
 import { useClientLiveQuery } from "@/hooks/data"
 import { getSession } from "@/lib/db/sessions"
-import { useProjectThreadRows } from "@/hooks/project-coordinator/use-project-threads"
+import {
+  useProjectThreadRows,
+  useThreadPrStatuses,
+} from "@/hooks/project-coordinator/use-project-threads"
 import { ProjectThreadRow } from "@/components/project-coordinator/thread-row"
 import { useParsedOutput } from "./common"
 
@@ -31,7 +34,12 @@ export function ProjectThreadCard({ part }: { part: ToolUIPart; sessionId?: stri
     [threadId],
     null
   )
-  const rows = useProjectThreadRows(thread ? [thread] : thread === null ? [] : undefined, now)
+  const prStatuses = useThreadPrStatuses(thread?.projectId)
+  const rows = useProjectThreadRows(
+    thread ? [thread] : thread === null ? [] : undefined,
+    now,
+    prStatuses
+  )
   if (!threadId) return null
   if (thread === null) {
     return (

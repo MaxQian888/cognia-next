@@ -8,6 +8,7 @@ import type { ProjectThreadRow } from "@/hooks/project-coordinator/use-project-t
 let rows: ProjectThreadRow[] | undefined
 jest.mock("@/hooks/project-coordinator/use-project-threads", () => ({
   useProjectThreads: jest.fn(() => []),
+  useThreadPrStatuses: jest.fn(() => new Map()),
   useProjectThreadRows: () => rows,
 }))
 jest.mock("./thread-row", () => ({
@@ -29,20 +30,20 @@ const row = (id: string, state: ProjectThreadRow["state"]): ProjectThreadRow => 
 describe("ProjectThreadsBoard", () => {
   it("loads the coordinator's threads and shows a loading state", () => {
     rows = undefined
-    render(<ProjectThreadsBoard coordinatorSessionId="coord" />)
+    render(<ProjectThreadsBoard projectId="p1" coordinatorSessionId="coord" />)
     expect(useProjectThreads).toHaveBeenCalledWith("coord")
     expect(screen.getByRole("status", { name: "Loading threads" })).toBeInTheDocument()
   })
 
   it("says when there are no threads", () => {
     rows = []
-    render(<ProjectThreadsBoard coordinatorSessionId="coord" />)
+    render(<ProjectThreadsBoard projectId="p1" coordinatorSessionId="coord" />)
     expect(screen.getByTestId("project-threads-empty")).toBeInTheDocument()
   })
 
   it("groups open threads by state and folds resolved ones away", () => {
     rows = [row("a", "waiting"), row("b", "working"), row("c", "waiting"), row("d", "resolved")]
-    render(<ProjectThreadsBoard coordinatorSessionId="coord" />)
+    render(<ProjectThreadsBoard projectId="p1" coordinatorSessionId="coord" />)
     const waiting = screen.getByTestId("project-threads-group-waiting")
     expect(waiting.textContent).toContain("Task a")
     expect(waiting.textContent).toContain("Task c")

@@ -438,8 +438,11 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
 
             <div className="grid items-start gap-3.5 @3xl/workspace-pane:grid-cols-2">
               {workspaceId ? <ProjectCoordinatorEntry workspaceId={workspaceId} /> : null}
-              {coordinatorSessionId ? (
-                <ProjectThreadsBoard coordinatorSessionId={coordinatorSessionId} />
+              {workspaceId && coordinatorSessionId ? (
+                <ProjectThreadsBoard
+                  projectId={workspaceId}
+                  coordinatorSessionId={coordinatorSessionId}
+                />
               ) : null}
               <WorkspaceRecentConversations workspaceId={workspaceId} />
               <WorkspaceContextSummary workspace={workspace ?? null} onEdit={openManage} />

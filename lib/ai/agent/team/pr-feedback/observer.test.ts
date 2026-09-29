@@ -5,7 +5,7 @@ import {
   type PrObservationRecord,
   type TimerHandle,
 } from "./observer"
-import type { TeammatePrBinding } from "./binding"
+import { teammateIdentity, type TeammatePrBinding } from "./binding"
 import type { NudgeIntent, PrNudge } from "./reactions"
 import type { PrObservation } from "@/lib/github/pr-observe/types"
 
@@ -113,6 +113,7 @@ function makeController(over: Partial<PrFeedbackDeps>) {
   const captured: PrNudge[] = []
   const persisted: PrObservationRecord[] = []
   const deps: PrFeedbackDeps = {
+    identify: teammateIdentity,
     ...h.timerDeps,
     pollIntervalMs: 1000,
     fetch: async () => mkObs(),
@@ -340,5 +341,20 @@ describe("createRealPrFeedbackTimers", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("PrFeedbackController.untrack", () => {
+  it("cancels the pending poll and forgets the binding", async () => {
+    const fetch = jest.fn(async () => mkObs())
+    const { controller, run, pending } = makeController({ fetch })
+    controller.track(binding)
+    expect(controller.tracked()).toBe(1)
+    controller.untrack(binding)
+    controller.untrack(binding)
+    expect(controller.tracked()).toBe(0)
+    expect(pending()).toBe(0)
+    await run()
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

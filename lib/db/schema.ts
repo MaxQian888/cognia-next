@@ -310,6 +310,7 @@ import type {
 } from "@/types/workflow/quality"
 import type { WorkflowAppApiKey } from "@/types/workflow/api-key"
 import type { TeamPrObservationRow } from "./team-pr-observations"
+import type { SessionPrObservationRow } from "./session-pr-observations"
 import type { AgentTeamBoardRow } from "./agent-team-board"
 import type {
   TemplateDefinitionRow,
@@ -418,7 +419,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 232
+export const CURRENT_SCHEMA_VERSION = 233
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -609,6 +610,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
     "&id, projectId, fileId, vectorDocId, generationId, [projectId+fileId], [projectId+generationId], [projectId+createdAt]",
   opticalArchives: "&id, sessionId, createdAt, [sessionId+createdAt]",
   teamPrObservations: "&id, teamId, [teamId+updatedAt], runId, derivedStatus",
+  sessionPrObservations: "&id, sessionId, projectId, derivedStatus, updatedAt",
   agentTeamBoard: "&id, teamId, [teamId+updatedAt], updatedAt, kind, status",
   fleetSessions: "&id, [agent+sessionId], startedAt, endedAt, agent, outcome",
   codeAdoptionTurns: "&id, runId, sessionId, workspaceRoot, ts, [sessionId+ts]",
@@ -1431,6 +1433,8 @@ export class CogniaDB extends Dexie {
   backgroundTasks!: Table<BackgroundTaskJournalRow, string>
   // v103 — Agent Team PR feedback observations. See `lib/db/team-pr-observations.ts`.
   teamPrObservations!: Table<TeamPrObservationRow, string>
+  // v233 — project-thread PR observations (ADR-0204). See `lib/db/session-pr-observations.ts`.
+  sessionPrObservations!: Table<SessionPrObservationRow, string>
   // v104 — Agent-Team board projection (one-way store→Dexie mirror for mobile
   // sync). See `lib/db/agent-team-board.ts`.
   agentTeamBoard!: Table<AgentTeamBoardRow, string>

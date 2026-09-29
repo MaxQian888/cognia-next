@@ -9,6 +9,7 @@
  * - watches thread turns and reports each one that ends to the coordinator;
  * - reconciles after a reload (redeliver unsent briefs, mark dead turns);
  * - keeps the coordinator live while its threads work, so reports wake it;
+ * - watches each live thread's pull request (ADR-0204 PR watch);
  * - resolves threads that sat quiet for a week.
  */
 
@@ -27,6 +28,7 @@ import {
   resumeProjectThreads,
 } from "@/lib/project-coordinator/thread-runtime"
 import { watchProjectThreadTurns } from "@/lib/project-coordinator/thread-watcher"
+import { getProjectPrWatch } from "@/lib/project-coordinator/pr-watch"
 
 export const COORDINATOR_HOLDER_ID = "project-runtime"
 export const AUTO_RESOLVE_INTERVAL_MS = 60 * 60 * 1000
@@ -45,6 +47,16 @@ export function ProjectCoordinatorHost() {
     [projects]
   )
   const coordinatorKey = coordinatorIds.join(",")
+  const pausedCoordinators = useMemo(
+    () =>
+      new Set(
+        projects
+          .map((project) => resolveCoordinatorConfig(project))
+          .filter((config) => config.enabled && config.sessionId && config.paused)
+          .map((config) => config.sessionId as string)
+      ),
+    [projects]
+  )
 
   const threadsByCoordinator = useClientLiveQuery(
     () =>
@@ -95,6 +107,23 @@ export function ProjectCoordinatorHost() {
       }
     }
   }, [threadsByCoordinator, statuses])
+
+  // Watch the pull requests of every live thread; a paused project's are dropped.
+  useEffect(() => {
+    const watched = (threadsByCoordinator ?? EMPTY)
+      .filter(([coordinatorId]) => !pausedCoordinators.has(coordinatorId))
+      .flatMap(([, threads]) => threads)
+    void getProjectPrWatch()
+      .sync(watched)
+      .catch((error) => console.warn("project thread PR watch sync failed", error))
+  }, [threadsByCoordinator, pausedCoordinators])
+  useEffect(
+    () => () =>
+      getProjectPrWatch()
+        .sync([])
+        .catch(() => undefined),
+    []
+  )
 
   useEffect(() => {
     const sweep = () => {

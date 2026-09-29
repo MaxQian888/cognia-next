@@ -1,6 +1,7 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { ChatStatus } from "@/stores/chat/chat-store"
+import type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
 import { resolveCoordinatorConfig } from "./config"
 import { deriveThreadState, type ThreadBoardState } from "./thread-state"
 
@@ -35,6 +36,7 @@ export interface DigestThreadInput {
   thread: ChatSession
   status: ChatStatus
   pendingApprovals: number
+  pr?: PrDerivedStatus
 }
 
 export function buildCoordinatorContextSection(
@@ -48,6 +50,7 @@ export function buildCoordinatorContextSection(
       thread: input.thread,
       status: input.status,
       pendingApprovals: input.pendingApprovals,
+      pr: input.pr,
       now,
     }),
   }))
@@ -59,11 +62,13 @@ export function buildCoordinatorContextSection(
     .filter(({ state }) => state !== "resolved")
     .sort((a, b) => b.thread.updatedAt - a.thread.updatedAt)
     .slice(0, DIGEST_MAX_THREADS)
-    .map(({ thread, state }) => {
+    .map(({ thread, state, pr: prStatus }) => {
       const branch = thread.executionContext?.branch
         ? ` · branch ${thread.executionContext.branch}`
         : ""
-      const pr = thread.projectThread?.prRef?.url ? ` · PR ${thread.projectThread.prRef.url}` : ""
+      const pr = thread.projectThread?.prRef?.url
+        ? ` · PR ${thread.projectThread.prRef.url}${prStatus ? ` (${prStatus})` : ""}`
+        : ""
       const result = thread.attachedChild?.result?.summary
       return [
         `- ${thread.title} (${thread.id}) — ${state}${branch}${pr}`,

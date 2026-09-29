@@ -7,6 +7,7 @@ import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
 import { sessionHref } from "@/lib/issues/run/agent-task-adapter"
 import type { ProjectThreadRow as Row } from "@/hooks/project-coordinator/use-project-threads"
 import { ThreadActions } from "./thread-actions"
+import { ThreadPrActions } from "./thread-pr-actions"
 import { ThreadStateBadge } from "./thread-state-badge"
 
 /** One thread: open it, see its state and branch, act on it. */
@@ -31,6 +32,7 @@ export function ProjectThreadRow({ row }: { row: Row }) {
         </span>
       ) : null}
       <ThreadStateBadge state={state} />
+      <ThreadPrActions thread={thread} pr={row.pr} />
       <ThreadActions threadId={thread.id} title={title} state={state} />
     </div>
   )

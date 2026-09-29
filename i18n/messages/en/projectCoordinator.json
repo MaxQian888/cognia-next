@@ -16,9 +16,44 @@
     "open": "Open coordinator",
     "title": "Project coordination"
   },
+  "pr": {
+    "addressComments": "Address comments",
+    "create": "Create PR",
+    "createFailed": "The pull request could not be opened: {error}",
+    "created": "Pull request opened.",
+    "fixCi": "Fix CI",
+    "instruction": {
+      "address-comments": "Your pull request has review comments. Address each one on this branch, push, and summarise how you resolved them.",
+      "fix-ci": "CI failed on your pull request. Read the failing checks, fix the cause on this branch, push, and report what you changed.",
+      "resolve-conflicts": "Your pull request has merge conflicts with the base branch. Rebase or merge the base into this branch, resolve the conflicts, run the checks, and push."
+    },
+    "merge": "Merge",
+    "mergeCancel": "Cancel",
+    "mergeConfirmBody": "“{title}” will be squash-merged into the default branch on GitHub.",
+    "mergeConfirmTitle": "Merge this pull request?",
+    "mergeFailed": "The pull request could not be merged: {error}",
+    "merged": "Pull request merged.",
+    "resolveConflicts": "Resolve conflicts",
+    "review": "Review PR",
+    "sendFailed": "The thread could not take the instruction now.",
+    "status": {
+      "approved": "Approved",
+      "changes_requested": "Changes requested",
+      "ci_failed": "CI failed",
+      "ci_pending": "CI running",
+      "closed": "Closed",
+      "draft": "Draft PR",
+      "merge_conflict": "Merge conflict",
+      "mergeable": "Ready to merge",
+      "merged": "Merged",
+      "none": "No PR",
+      "pr_open": "PR open",
+      "review_pending": "Awaiting review"
+    }
+  },
   "row": {
-    "actions": "Thread actions for {title}",
     "actionFailed": "The thread action failed: {error}",
+    "actions": "Thread actions for {title}",
     "refused": {
       "daily-cap": "The project reached its daily thread limit.",
       "disabled": "Project coordination is off for this workspace.",

@@ -1561,6 +1561,17 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v233 adds project-thread PR observations keyed by session", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(233)
+    expect(db.sessionPrObservations.schema.primKey.name).toBe("id")
+    expect(db.sessionPrObservations.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sessionId", "projectId", "derivedStatus", "updatedAt"])
+    )
+  })
+
   it("v232 adds the browser download history and vault / extension metadata mirrors", async () => {
     const db = getDb()
     await db.open()

@@ -14,7 +14,11 @@ jest.mock("@/lib/gateway/mint-session-ticket", () => ({
   prepareExternalAgentGatewayRoute: (...args: unknown[]) => mockPrepareSdkGatewayRoute(...args),
 }))
 
-// Project coordination reads its threads from Dexie; the digest only needs a list.
+// Project coordination reads its threads and their PR state from Dexie; the
+// digest only needs lists.
+jest.mock("@/lib/db/session-pr-observations", () => ({
+  listSessionPrObservationsByProject: async () => [],
+}))
 jest.mock("@/lib/project-coordinator/thread-runtime", () => ({
   ...jest.requireActual("@/lib/project-coordinator/thread-runtime"),
   listProjectThreads: async () => [

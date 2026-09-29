@@ -12,6 +12,10 @@ jest.mock("@/lib/project-coordinator/thread-runtime", () => ({
   resolveThread: jest.fn(async () => true),
   resumeProjectThreads: jest.fn(async () => undefined),
 }))
+const prSync = jest.fn(async () => undefined)
+jest.mock("@/lib/project-coordinator/pr-watch", () => ({
+  getProjectPrWatch: () => ({ sync: prSync }),
+}))
 jest.mock("@/lib/project-coordinator/thread-watcher", () => ({
   watchProjectThreadTurns: jest.fn(() => jest.fn()),
 }))
@@ -58,6 +62,23 @@ beforeEach(() => {
 })
 
 describe("ProjectCoordinatorHost", () => {
+  it("watches the PRs of live threads and drops a paused project's", () => {
+    threads = [["coord", [thread("t1")]]]
+    const { rerender, unmount } = render(<ProjectCoordinatorHost />)
+    expect(prSync).toHaveBeenLastCalledWith([expect.objectContaining({ id: "t1" })])
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "p1",
+          coordinator: { enabled: true, sessionId: "coord", paused: { at: 1 } },
+        } as Project,
+      ],
+    })
+    rerender(<ProjectCoordinatorHost />)
+    expect(prSync).toHaveBeenLastCalledWith([])
+    unmount()
+  })
+
   it("installs the watcher once and reconciles each enabled coordinator", () => {
     threads = [["coord", [thread("t1")]]]
     const { rerender } = render(<ProjectCoordinatorHost />)

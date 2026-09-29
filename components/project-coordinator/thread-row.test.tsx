@@ -12,6 +12,7 @@ jest.mock("next/link", () => ({
     </a>
   ),
 }))
+jest.mock("./thread-pr-actions", () => ({ ThreadPrActions: () => null }))
 jest.mock("./thread-actions", () => ({
   ThreadActions: ({ state }: { state: string }) => <span data-testid="actions">{state}</span>,
 }))

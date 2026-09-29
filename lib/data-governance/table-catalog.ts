@@ -326,6 +326,7 @@ export const CORE_TABLE_NAMES = [
   "sessionPeerMessages",
   "sessionState",
   "sessionUsage",
+  "sessionPrObservations",
   "sessions",
   "settings",
   "sharedLinks",

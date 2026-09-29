@@ -19,7 +19,7 @@ import {
 import { fetchPrObservation } from "@/lib/github/pr-observe/fetch"
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
 import type { AgentTeamConfig } from "@/types/agent/agent-team"
-import { bindingRef, type TeammatePrBinding } from "./binding"
+import { bindingRef, teammateIdentity, type TeammatePrBinding } from "./binding"
 import {
   createRealPrFeedbackTimers,
   PrFeedbackController,
@@ -163,7 +163,8 @@ export function buildTeamPrFeedback(params: BuildTeamPrFeedbackParams): TeamPrFe
 
   const reviewer = config.reviewer?.enabled && runReview ? createPrReviewer(runReview) : undefined
 
-  const controller = new PrFeedbackController({
+  const controller = new PrFeedbackController<TeammatePrBinding>({
+    identify: teammateIdentity,
     ...timers,
     pollIntervalMs: config.pollIntervalMs ?? 30_000,
     fetch: (binding, prev) =>

@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   useProjectThreadRows,
   useProjectThreads,
+  useThreadPrStatuses,
   type ProjectThreadRow as Row,
 } from "@/hooks/project-coordinator/use-project-threads"
 import { THREAD_BOARD_ORDER, type ThreadBoardState } from "@/lib/project-coordinator/thread-state"
@@ -21,6 +22,7 @@ import { ProjectThreadRow } from "./thread-row"
 import { ThreadStateBadge } from "./thread-state-badge"
 
 export interface ProjectThreadsBoardProps {
+  projectId: string
   coordinatorSessionId: string
 }
 
@@ -33,11 +35,11 @@ function groupRows(rows: readonly Row[]): Array<[ThreadBoardState, Row[]]> {
   ])
 }
 
-export function ProjectThreadsBoard({ coordinatorSessionId }: ProjectThreadsBoardProps) {
+export function ProjectThreadsBoard({ projectId, coordinatorSessionId }: ProjectThreadsBoardProps) {
   const t = useTranslations("projectCoordinator.board")
   const now = useNow({ updateInterval: 60_000 }).getTime()
   const threads = useProjectThreads(coordinatorSessionId)
-  const rows = useProjectThreadRows(threads, now)
+  const rows = useProjectThreadRows(threads, now, useThreadPrStatuses(projectId))
   const [showResolved, setShowResolved] = useState(false)
   const groups = rows ? groupRows(rows) : undefined
   const open = groups?.filter(([state]) => state !== "resolved") ?? []

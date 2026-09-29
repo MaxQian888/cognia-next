@@ -1,4 +1,4 @@
-import { bindingKey, bindingRef, type TeammatePrBinding } from "./binding"
+import { bindingKey, bindingRef, teammateIdentity, type TeammatePrBinding } from "./binding"
 
 function mk(over: Partial<TeammatePrBinding> = {}): TeammatePrBinding {
   return {
@@ -25,5 +25,20 @@ describe("bindingRef", () => {
   })
   it("falls back to discovery by branch", () => {
     expect(bindingRef(mk())).toEqual({ branch: "agent/run-1/dev/t1" })
+  })
+})
+
+describe("teammateIdentity", () => {
+  it("keys by run/member/task and names the member as recipient", () => {
+    expect(
+      teammateIdentity({
+        runId: "r",
+        teamId: "t",
+        memberId: "m",
+        taskId: "k",
+        repo: "o/n",
+        branch: "b",
+      })
+    ).toEqual({ key: "r:m:k", recipient: "m" })
   })
 })

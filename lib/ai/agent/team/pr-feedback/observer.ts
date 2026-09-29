@@ -14,7 +14,7 @@
  * that opens its PR mid-run is picked up on a later tick.
  */
 
-import { bindingKey, type TeammatePrBinding } from "./binding"
+import type { PrWatchIdentity, PrWatchTarget, TeammatePrBinding } from "./binding"
 import { derivePrStatus } from "./derive-status"
 import {
   PrReactionEngine,
@@ -25,8 +25,8 @@ import {
 import type { PrDerivedStatus, PrObservation } from "@/lib/github/pr-observe/types"
 
 /** A persisted observation record (facts + cached derivation + dedup ledger). */
-export interface PrObservationRecord {
-  binding: TeammatePrBinding
+export interface PrObservationRecord<B extends PrWatchTarget = TeammatePrBinding> {
+  binding: B
   observation: PrObservation
   derivedStatus: PrDerivedStatus
   signature: PrReactionSignature
@@ -37,37 +37,39 @@ export interface TimerHandle {
   cancelled: boolean
 }
 
-export interface PrFeedbackDeps {
+export interface PrFeedbackDeps<B extends PrWatchTarget = TeammatePrBinding> {
+  /** Tracking key + nudge recipient for a binding (`teammateIdentity` for teams). */
+  identify: (binding: B) => PrWatchIdentity
   now: () => number
   setTimer: (fn: () => void, ms: number) => TimerHandle
   clearTimer: (h: TimerHandle) => void
   pollIntervalMs: number
   /** Fetch one observation for a binding, given the previous snapshot. */
-  fetch: (binding: TeammatePrBinding, prev: PrObservation | undefined) => Promise<PrObservation>
+  fetch: (binding: B, prev: PrObservation | undefined) => Promise<PrObservation>
   /** Persist a changed observation record. */
-  persist: (record: PrObservationRecord) => void | Promise<void>
+  persist: (record: PrObservationRecord<B>) => void | Promise<void>
   /** Deliver a passed nudge (notifier + team mailbox). */
-  deliver: (binding: TeammatePrBinding, nudge: PrNudge) => void
+  deliver: (binding: B, nudge: PrNudge) => void
   /** Hydrate the persisted dedup ledger for a binding (restart-safe). */
   loadSignature?: (
-    binding: TeammatePrBinding
+    binding: B
   ) => PrReactionSignature | undefined | Promise<PrReactionSignature | undefined>
   /**
    * Internal reviewer pass. Invoked at most once per new head commit for an open
    * PR; returns a nudge intent when it requests changes, else null. Its intent is
    * routed through the same engine so it shares dedup + the hourly cap.
    */
-  reviewer?: (binding: TeammatePrBinding, obs: PrObservation) => Promise<NudgeIntent | null>
+  reviewer?: (binding: B, obs: PrObservation) => Promise<NudgeIntent | null>
   /** Surface a fetch/persist error without killing the loop. */
-  onError?: (binding: TeammatePrBinding, err: unknown) => void
+  onError?: (binding: B, err: unknown) => void
   /** Last tool-activity timestamp for the busy-signal guard. */
-  lastToolActivityAt?: (binding: TeammatePrBinding) => number | undefined
+  lastToolActivityAt?: (binding: B) => number | undefined
   maxPerHour?: number
   busyWindowMs?: number
 }
 
-interface TrackState {
-  binding: TeammatePrBinding
+interface TrackState<B extends PrWatchTarget> {
+  binding: B
   engine: PrReactionEngine
   prev?: PrObservation
   handle: TimerHandle | null
@@ -83,14 +85,14 @@ interface SettleWaiter {
   needFirstPoll: boolean
 }
 
-export class PrFeedbackController {
-  private readonly states = new Map<string, TrackState>()
+export class PrFeedbackController<B extends PrWatchTarget = TeammatePrBinding> {
+  private readonly states = new Map<string, TrackState<B>>()
   private readonly handles = new Set<TimerHandle>()
   private disposed = false
   private settleWaiter: SettleWaiter | null = null
   private settleTimer: TimerHandle | null = null
 
-  constructor(private readonly deps: PrFeedbackDeps) {}
+  constructor(private readonly deps: PrFeedbackDeps<B>) {}
 
   /**
    * Resolve when every tracked PR is terminal (merged/closed), or — with
@@ -136,17 +138,17 @@ export class PrFeedbackController {
     w.resolve()
   }
 
-  /** Begin observing a teammate's PR. Idempotent per (run, member, task). */
-  track(binding: TeammatePrBinding): void {
+  /** Begin observing a PR. Idempotent per binding identity. */
+  track(binding: B): void {
     if (this.disposed) return
-    const key = bindingKey(binding)
+    const { key } = this.deps.identify(binding)
     if (this.states.has(key)) return
     const engine = new PrReactionEngine({
       now: this.deps.now,
       maxPerHour: this.deps.maxPerHour,
       busyWindowMs: this.deps.busyWindowMs,
     })
-    const state: TrackState = {
+    const state: TrackState<B> = {
       binding,
       engine,
       handle: null,
@@ -157,6 +159,21 @@ export class PrFeedbackController {
     }
     this.states.set(key, state)
     this.schedule(state, 0) // immediate first poll
+  }
+
+  /** Stop observing one binding; its pending poll is cancelled. Idempotent. */
+  untrack(binding: B): void {
+    const { key } = this.deps.identify(binding)
+    const state = this.states.get(key)
+    if (!state) return
+    state.terminal = true
+    if (state.handle) {
+      this.deps.clearTimer(state.handle)
+      this.handles.delete(state.handle)
+      state.handle = null
+    }
+    this.states.delete(key)
+    this.trySettle()
   }
 
   /** Tracked binding count (diagnostics / tests). */
@@ -173,7 +190,7 @@ export class PrFeedbackController {
     this.finishSettle() // never leave an awaiting settle hanging
   }
 
-  private schedule(state: TrackState, ms: number): void {
+  private schedule(state: TrackState<B>, ms: number): void {
     if (this.disposed || state.terminal) return
     const h = this.deps.setTimer(async () => {
       this.handles.delete(h)
@@ -184,7 +201,7 @@ export class PrFeedbackController {
     this.handles.add(h)
   }
 
-  private async pollOnce(state: TrackState): Promise<void> {
+  private async pollOnce(state: TrackState<B>): Promise<void> {
     if (this.disposed || state.terminal) return
     try {
       if (!state.hydrated) {
@@ -203,7 +220,7 @@ export class PrFeedbackController {
     }
   }
 
-  private async process(state: TrackState, obs: PrObservation): Promise<void> {
+  private async process(state: TrackState<B>, obs: PrObservation): Promise<void> {
     const changed = !state.prev || obs.changed.metadata || obs.changed.ci || obs.changed.review
     // Remember the discovered PR url so persistence keys stay stable.
     if (obs.pr.url && !state.binding.prUrl) {
@@ -213,7 +230,7 @@ export class PrFeedbackController {
     if (!changed) return
 
     const ctx = {
-      memberId: state.binding.memberId,
+      memberId: this.deps.identify(state.binding).recipient,
       lastToolActivityAt: this.deps.lastToolActivityAt?.(state.binding),
       deliver: (n: PrNudge) => this.deps.deliver(state.binding, n),
     }

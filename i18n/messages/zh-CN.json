@@ -28272,6 +28272,41 @@
       "open": "打开协调者",
       "title": "项目协调"
     },
+    "pr": {
+      "addressComments": "处理评论",
+      "create": "创建 PR",
+      "createFailed": "无法创建拉取请求：{error}",
+      "created": "已创建拉取请求。",
+      "fixCi": "修复 CI",
+      "instruction": {
+        "address-comments": "你的拉取请求收到了审阅评论。请在这个分支上逐条处理并推送，然后总结每条是如何解决的。",
+        "fix-ci": "你的拉取请求 CI 失败了。请阅读失败的检查，在这个分支上修复根因并推送，然后说明你改了什么。",
+        "resolve-conflicts": "你的拉取请求与基础分支存在合并冲突。请将基础分支 rebase 或合并到本分支，解决冲突、运行检查并推送。"
+      },
+      "merge": "合并",
+      "mergeCancel": "取消",
+      "mergeConfirmBody": "“{title}” 将以 squash 方式合并到 GitHub 上的默认分支。",
+      "mergeConfirmTitle": "合并这个拉取请求？",
+      "mergeFailed": "无法合并拉取请求：{error}",
+      "merged": "拉取请求已合并。",
+      "resolveConflicts": "解决冲突",
+      "review": "查看 PR",
+      "sendFailed": "线程暂时无法接收该指令。",
+      "status": {
+        "approved": "已批准",
+        "changes_requested": "需要修改",
+        "ci_failed": "CI 失败",
+        "ci_pending": "CI 运行中",
+        "closed": "已关闭",
+        "draft": "草稿 PR",
+        "merge_conflict": "合并冲突",
+        "mergeable": "可合并",
+        "merged": "已合并",
+        "none": "无 PR",
+        "pr_open": "PR 已打开",
+        "review_pending": "等待审阅"
+      }
+    },
     "row": {
       "actionFailed": "线程操作失败：{error}",
       "actions": "{title} 的线程操作",

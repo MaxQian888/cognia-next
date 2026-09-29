@@ -6,6 +6,7 @@ const deps: SendExtrasDeps = {
   listThreads: jest.fn(async () => [
     { id: "t1", title: "Fix login", createdAt: 1, updatedAt: 1 } as ChatSession,
   ]),
+  prStatuses: async () => new Map([["t1", "ci_failed" as const]]),
   threadInput: (thread) => ({ thread, status: "streaming", pendingApprovals: 0 }),
   now: () => 5,
 }
