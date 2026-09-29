@@ -100,10 +100,14 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
       {/* Router + Fusion action (ADR-0188 D3). Auto — the default — leaves the
           node exactly as it was; the other modes run the step as a fusion run. */}
       <Field label={tFusion("field.label")} htmlFor="ai-fusion-action" name="action">
+        {/* No `projectId`: a workflow run is stamped with the active project
+            at admission, so the active project is the one to ask. */}
         <FusionActionField
           id="ai-fusion-action"
           value={params.action}
           onChange={(value) => onChange(patchParam(params, "action", value))}
+          delivery={params.delegateDelivery}
+          onDeliveryChange={(value) => onChange(patchParam(params, "delegateDelivery", value))}
         />
       </Field>
       {v2 ? (

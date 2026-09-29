@@ -88,9 +88,11 @@ import type { ExecutionRunOrigin } from "@/types/execution/run"
  * the cockpit should call the place they came from.
  *
  * `null` means the work already owns an execution run — a routed chat turn is
- * still that turn's run, an `ai.prompt` node is still the workflow's — so
- * projecting a second row would double-count one piece of work in every list
- * that reads the account database. Only the external Run API arrives with
+ * still that turn's run, an `ai.prompt` node is still the workflow's, a Squad
+ * member's turn is still the team's — so projecting a second row would
+ * double-count one piece of work in every list that reads the account
+ * database. A delegate among them that parks on a person raises its approval
+ * on that owning run instead (`agents/agent-fusion-run.ts`). Only the external Run API arrives with
  * nothing behind it — and a chat cascade or panel (B3), which the orchestrator
  * drives instead of a sidecar turn; see `projectedOriginOf`.
  */
@@ -488,9 +490,15 @@ export class FusionLedgerStore {
    * run advancing — with the approval's id as the interrupt's, so the id the
    * surface sends back names exactly the digest that was approved (API-08).
    *
-   * A run whose execution run belongs to another engine is skipped rather than
-   * failed: its own surface owns the gate. Delegate only reaches here from the
-   * Run API and the companion, both of which project.
+   * A run whose execution run belongs to another engine is skipped here
+   * rather than failed. Delegate reaches this from three places: the Run API
+   * and the companion, which project their own row and get the interrupt
+   * from this effect; and `agentsWorkflows` (a workflow node, a Squad
+   * member), which is not projected — the workflow or team run that owns the
+   * step already is a row — so the caller raises the same `fusion_approval`
+   * interrupt on THAT run while it waits (`agents/agent-fusion-run.ts`).
+   * Either way the id is the approval's and the builder is one
+   * (`fusionApprovalInterrupt` in `outbox-appliers.ts`).
    */
   private async projectRunInterrupt(
     run: FusionRunRow,
@@ -840,7 +848,12 @@ export class FusionLedgerStore {
       run.pausedAt = this.now()
       await this.transition(run, to)
       if (extra.approval) {
-        await this.event(run, "approval.requested", {
+        // The contract's own event type (`approval.required`), so a Run API
+        // client reads it as the approval it is rather than as a phase change.
+        // The graph announced the same approval a moment earlier; both carry
+        // `approval_id`, which is what a client keys the decision on, and this
+        // one is written with the status change it describes.
+        await this.event(run, "approval.required", {
           approval_id: extra.approval.approvalId,
           request_digest: extra.approval.requestDigest,
           kind: extra.approval.kind,

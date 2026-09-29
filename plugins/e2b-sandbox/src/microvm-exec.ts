@@ -1,9 +1,12 @@
 /** Owner-scoped E2B microVM adapter for `SandboxSessionRuntime`. */
 
 import type {
+  MicrovmConfinement,
   MicrovmExecAdapter,
   MicrovmExecPayload,
+  MicrovmFileRead,
   MicrovmResult,
+  MicrovmWorkspaceAcceptance,
 } from "@cognia/plugin-sdk/api/sandbox"
 import { MicrovmAdapterError } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BSandboxPool, type E2BSandboxLease } from "./sandbox-pool"
@@ -48,10 +51,83 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
       }
     },
 
+    accepts(ownerRef, workspaceRoot, requirements): MicrovmWorkspaceAcceptance {
+      // Exactly the question `preflight` answers, asked without claiming: the
+      // pool refuses an ordinary local directory because it only knows the
+      // handle paths a remote clone minted.
+      const refusal = workspaceRoot
+        ? opts.pool.claimRefusal(ownerRef, workspaceRoot, requirements?.ownerGroup ?? ownerRef)
+        : "E2B microVM execution requires an existing remote workspace handle."
+      if (refusal) {
+        return { accepted: false, code: "workspace-unavailable", reason: refusal }
+      }
+      // Egress is fixed when the instance is created. A workspace cloned with
+      // network on cannot be made network-off for one call, so a caller that
+      // needs "no network" enforced cannot use it.
+      const network = opts.pool.networkOf(workspaceRoot)
+      if (requirements?.network === "off" && network !== "off") {
+        return {
+          accepted: false,
+          code: "policy-not-attested",
+          reason: `E2B workspace ${workspaceRoot} was provisioned with network=${network ?? "unknown"}; network=off cannot be enforced after creation.`,
+        }
+      }
+      return { accepted: true }
+    },
+
+    async readFile(ownerRef, path, maxBytes): Promise<MicrovmFileRead> {
+      const lease = leaseForOwner(opts.pool, ownerRef)
+      // Lexical first, so a `..` never reaches the machine; the realpath check
+      // inside the machine then refuses a symlink that leads out.
+      if (!isInsideWorkspace(path, lease.workspacePath)) {
+        return {
+          kind: "refused",
+          code: "workspace-boundary",
+          message: `E2B file read is outside the bound remote workspace: ${path}`,
+        }
+      }
+      const cap = Math.max(0, Math.floor(maxBytes))
+      let result: { stdout: string; stderr: string; exitCode: number }
+      try {
+        result = await lease.sandbox.exec({
+          cmd: buildReadFileCommand(lease.workspacePath, path, cap),
+        })
+      } catch (error) {
+        return {
+          kind: "refused",
+          code: "READ_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
+      switch (result.exitCode) {
+        case 0:
+          return { kind: "ok", content: result.stdout }
+        case READ_EXIT.missing:
+          return { kind: "missing" }
+        case READ_EXIT.tooLarge:
+          return { kind: "too_large" }
+        case READ_EXIT.escape:
+          return {
+            kind: "refused",
+            code: "workspace-boundary",
+            message: `E2B file read resolves outside the bound remote workspace: ${path}`,
+          }
+        case READ_EXIT.notFile:
+          return { kind: "refused", code: "NOT_A_FILE", message: `${path} is not a regular file` }
+        default:
+          return {
+            kind: "refused",
+            code: "READ_FAILED",
+            message: result.stderr || `exit ${result.exitCode}`,
+          }
+      }
+    },
+
     async execute(ownerRef, payload): Promise<MicrovmResult> {
       const lease = leaseForOwner(opts.pool, ownerRef)
       assertSupportedPolicy(payload, lease.workspacePath, lease.network)
       const started = now()
+      const confinement = attestedConfinement(lease.network)
       try {
         const result = await lease.sandbox.exec({
           cmd: buildBashCommand(payload),
@@ -68,6 +144,7 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
           timed_out: false,
           stdout_truncated: stdout.truncated,
           stderr_truncated: stderr.truncated,
+          confinement,
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -80,6 +157,7 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
           timed_out: /timed?[ _-]?out/i.test(message),
           stdout_truncated: false,
           stderr_truncated: stderr.truncated,
+          confinement,
         }
       }
     },
@@ -92,6 +170,48 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
       return opts.pool.dispose()
     },
   }
+}
+
+/**
+ * What this adapter can honestly attest. Egress is decided by E2B when the
+ * instance is created (`allowInternetAccess`), so an instance created without
+ * it really has no network for every call. CPU, memory and process ceilings
+ * are not enforced per call here, so they are attested as absent.
+ */
+function attestedConfinement(network: "off" | "on"): MicrovmConfinement {
+  return {
+    networkEnforced: network === "off",
+    backend: "e2b",
+    maxMemoryMb: null,
+    maxCpuSeconds: null,
+    maxProcesses: null,
+    platform: "linux",
+  }
+}
+
+/** Exit codes the read command uses for its non-content answers. */
+const READ_EXIT = { missing: 64, tooLarge: 65, escape: 66, notFile: 67 } as const
+
+/**
+ * One command that resolves the path inside the machine, refuses anything
+ * that leaves the workspace or is not a regular file, refuses (rather than
+ * cuts) a file past the cap, and only then prints it.
+ */
+function buildReadFileCommand(workspaceRoot: string, path: string, maxBytes: number): string {
+  return [
+    // Plain `realpath` after an existence check, not `realpath -e`: the flag
+    // is GNU-only, and a template on BusyBox must not turn every read into a
+    // refusal.
+    `[ -d ${escapeShellArg(workspaceRoot)} ] || exit ${READ_EXIT.escape}`,
+    `root=$(realpath -- ${escapeShellArg(workspaceRoot)}) || exit ${READ_EXIT.escape}`,
+    `[ -e ${escapeShellArg(path)} ] || exit ${READ_EXIT.missing}`,
+    `f=$(realpath -- ${escapeShellArg(path)}) || exit ${READ_EXIT.missing}`,
+    `case "$f" in "$root"/*) ;; *) exit ${READ_EXIT.escape} ;; esac`,
+    `[ -f "$f" ] || exit ${READ_EXIT.notFile}`,
+    `n=$(wc -c < "$f") || exit 1`,
+    `[ "$n" -le ${maxBytes} ] || exit ${READ_EXIT.tooLarge}`,
+    `cat -- "$f"`,
+  ].join("; ")
 }
 
 function truncateUtf8(text: string, cap: number): { text: string; truncated: boolean } {

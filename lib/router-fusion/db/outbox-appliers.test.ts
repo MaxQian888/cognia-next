@@ -11,7 +11,11 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createSession, getSession } from "@/lib/db/sessions"
 
 import type { OutboxContext } from "./outbox"
-import { accountDatabaseAppliers, usageRowFromOutbox } from "./outbox-appliers"
+import {
+  accountDatabaseAppliers,
+  fusionApprovalInterrupt,
+  usageRowFromOutbox,
+} from "./outbox-appliers"
 import { answerMessageId, inputMessageId } from "./session-transcript"
 import type { FusionOutboxRow } from "./types"
 
@@ -258,6 +262,109 @@ describe("account database outbox appliers", () => {
         await accountDatabaseAppliers.execution_run_projection(projection("running"), NO_ARTIFACTS)
       ).toBe("skipped")
       expect((await getExecutionRun("run-9"))?.status).toBe("cancelled")
+    })
+
+    it("parks the row on a delegate approval, titled by its kind rather than English prose", async () => {
+      await accountDatabaseAppliers.execution_run_projection(projection("queued"), NO_ARTIFACTS)
+      const waiting = projection("waiting", {
+        interrupt: {
+          id: "approval-9",
+          type: "fusion_approval",
+          requestDigest: "d".repeat(64),
+          kind: "workspace_apply",
+          revision: "rev-3",
+          logicalStepId: "delegate:apply",
+          summary: { paths: ["src/a.ts"], fileCount: 1 },
+          expiresAt: 1_900_000_000_000,
+        },
+      })
+      expect(await accountDatabaseAppliers.execution_run_projection(waiting, NO_ARTIFACTS)).toBe(
+        "applied"
+      )
+      // A replay raises nothing twice: the id is the digest's.
+      expect(await accountDatabaseAppliers.execution_run_projection(waiting, NO_ARTIFACTS)).toBe(
+        "applied"
+      )
+      const interrupts = await getDb()
+        .executionRunInterrupts.where("runId")
+        .equals("run-9")
+        .toArray()
+      expect(interrupts).toHaveLength(1)
+      expect(interrupts[0]).toMatchObject({
+        id: "approval-9",
+        type: "fusion_approval",
+        status: "pending",
+        title: "workspace_apply",
+        requestDigest: "d".repeat(64),
+        subject: {
+          kind: "workspace_apply",
+          revision: "rev-3",
+          logicalStepId: "delegate:apply",
+          paths: ["src/a.ts"],
+          fileCount: 1,
+          fusionRunId: "run-9",
+        },
+      })
+      expect((await getExecutionRun("run-9"))?.status).toBe("waiting")
+    })
+
+    it("titles a reconciliation hand-off by its code", async () => {
+      await accountDatabaseAppliers.execution_run_projection(projection("queued"), NO_ARTIFACTS)
+      await accountDatabaseAppliers.execution_run_projection(
+        projection("waiting", {
+          interrupt: {
+            id: "handoff-9",
+            type: "human_handoff",
+            kind: "SIDE_EFFECT_OUTCOME_UNKNOWN",
+            revision: "",
+            logicalStepId: "delegate:apply",
+            summary: { side_effect: "workspace_apply" },
+            expiresAt: 1_900_000_000_000,
+          },
+        }),
+        NO_ARTIFACTS
+      )
+      expect(await getDb().executionRunInterrupts.get("handoff-9")).toMatchObject({
+        type: "human_handoff",
+        title: "SIDE_EFFECT_OUTCOME_UNKNOWN",
+      })
+    })
+  })
+
+  describe("fusionApprovalInterrupt", () => {
+    it("names the fusion run it approves when it rides on its caller's run", () => {
+      const interrupt = fusionApprovalInterrupt({
+        executionRunId: "execution:workflow:wf-1",
+        fusionRunId: "fusion-7",
+        approvalId: "approval-7",
+        kind: "scope_expansion",
+        requestDigest: "e".repeat(64),
+        revision: "rev-1",
+        logicalStepId: "delegate:scope",
+        // A summary can never overwrite what the decision is bound to.
+        summary: { paths: ["tests/a.ts"], kind: "forged", fusionRunId: "other" },
+        expiresAt: 5,
+        createdAt: 1,
+        projectId: "project-1",
+      })
+      expect(interrupt).toEqual({
+        id: "approval-7",
+        runId: "execution:workflow:wf-1",
+        projectId: "project-1",
+        type: "fusion_approval",
+        status: "pending",
+        title: "scope_expansion",
+        requestDigest: "e".repeat(64),
+        subject: {
+          paths: ["tests/a.ts"],
+          kind: "scope_expansion",
+          revision: "rev-1",
+          logicalStepId: "delegate:scope",
+          fusionRunId: "fusion-7",
+        },
+        expiresAt: 5,
+        createdAt: 1,
+      })
     })
   })
 })

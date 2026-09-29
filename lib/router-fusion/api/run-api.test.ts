@@ -19,6 +19,7 @@ import {
 import { fusionContentCodec } from "../db/content-codec"
 import { FusionDB } from "../db/fusion-db"
 import { FusionLedgerStore } from "../db/ledger-store"
+import { recordApprovalRequest } from "../db/delegate-store"
 import { decodeRunInput } from "../db/run-input"
 import { __resetArtifactTokenKeyForTesting } from "./artifact-tokens"
 import {
@@ -433,6 +434,65 @@ describe("createRunFromApi", () => {
   })
 })
 
+describe("the x-cognia extension of a run request", () => {
+  const DELEGATE_POLICY: RunRequestPolicy = {
+    ...POLICY,
+    workspaceAuthorized: () => true,
+    acceptanceProfileExists: () => true,
+  }
+  const delegateBody = (extension?: unknown) => ({
+    ...body({
+      mode: "delegate",
+      allowed_modes: ["delegate"],
+      workspace_id: uuidFromName("project:1"),
+      acceptance_profile_id: "unit",
+    }),
+    ...(extension !== undefined ? { "x-cognia": extension } : {}),
+  })
+
+  it("passes a delegate delivery to the run it creates", async () => {
+    const { deps, created } = harness({ policy: () => DELEGATE_POLICY })
+    const outcome = await createRunFromApi(deps, {
+      actor: KEY_A,
+      body: delegateBody({ delegate_delivery: "workspace_updated" }),
+    })
+    expect(outcome.ok).toBe(true)
+    expect(created[0]?.delegateDelivery).toBe("workspace_updated")
+    expect(created[0]?.request).not.toHaveProperty("x-cognia")
+  })
+
+  it("leaves a request without it exactly a contract request", async () => {
+    const { deps, created } = harness({ policy: () => DELEGATE_POLICY })
+    await createRunFromApi(deps, { actor: KEY_A, body: delegateBody() })
+    expect(created[0]).not.toHaveProperty("delegateDelivery")
+  })
+
+  it("refuses an option it does not know, rather than ignoring it", async () => {
+    const { deps, created } = harness({ policy: () => DELEGATE_POLICY })
+    await expect(
+      createRunFromApi(deps, { actor: KEY_A, body: delegateBody({ force: true }) })
+    ).resolves.toMatchObject({ ok: false, error: { status: 422, code: "UNSUPPORTED_PARAMETER" } })
+    await expect(
+      createRunFromApi(deps, {
+        actor: KEY_A,
+        body: delegateBody({ delegate_delivery: "overwrite" }),
+      })
+    ).resolves.toMatchObject({ ok: false, error: { status: 422, code: "SCHEMA_INVALID" } })
+    expect(created).toHaveLength(0)
+  })
+
+  it("refuses a workspace delivery on a request that can never run delegate", async () => {
+    const { deps, created } = harness()
+    await expect(
+      createRunFromApi(deps, {
+        actor: KEY_A,
+        body: { ...body(), "x-cognia": { delegate_delivery: "workspace_updated" } },
+      })
+    ).resolves.toMatchObject({ ok: false, error: { status: 422, code: "UNSUPPORTED_PARAMETER" } })
+    expect(created).toHaveLength(0)
+  })
+})
+
 describe("reading a run", () => {
   it("[ACC:AUTH-03] tells another key the run does not exist, rather than that it may not see it", async () => {
     const { deps } = harness()
@@ -505,6 +565,55 @@ describe("reading a run", () => {
         createdAt: NOW,
       }).payload
     ).toEqual({ a: 1 })
+  })
+
+  it("carries a parked approval as the contract's approval.required, whatever the journal called it", () => {
+    for (const type of ["approval.required", "approval.requested"]) {
+      const event = contractEventOf({
+        runId: runIdOf(1),
+        seq: 4,
+        type,
+        payload: { approval_id: runIdOf(9), kind: "workspace_apply" },
+        createdAt: NOW,
+      })
+      expect(RunEventSchema.parse(event)).toEqual(event)
+      expect(event).toMatchObject({
+        event_type: "approval.required",
+        payload: { approval_id: runIdOf(9), kind: "workspace_apply" },
+      })
+      expect(event.payload).not.toHaveProperty("event")
+    }
+  })
+
+  it("[ACC:API-08] names the approval a parked run waits on in its snapshot", async () => {
+    const { deps, store } = harness()
+    const { run_id } = await accept(deps)
+    const before = await getRunFromApi(deps, { actor: KEY_A, runId: run_id })
+    expect(before).toMatchObject({ ok: true, value: { snapshot: { pending_approval_id: null } } })
+
+    const approval = await recordApprovalRequest(store.db, {
+      runId: run_id,
+      projectId: null,
+      kind: "workspace_apply",
+      requestDigest: "a".repeat(64),
+      revision: "rev-1",
+      logicalStepId: "delegate:apply",
+      summary: { paths: ["src/a.ts"], fileCount: 1 } as never,
+      requestedBy: "runtime",
+      now: NOW,
+    })
+    const run = (await store.getRun(run_id))!
+    await store.db.fusionRuns.put({ ...run, status: "waiting_for_approval" })
+
+    const read = await getRunFromApi(deps, { actor: KEY_A, runId: run_id })
+    if (!read.ok) throw new Error(read.error.code)
+    expect(read.value.snapshot.pending_approval_id).toBe(approval.id)
+    expect(RunSnapshotSchema.parse(read.value.snapshot)).toEqual(read.value.snapshot)
+
+    // Answered, it is no longer pending, and the snapshot says so.
+    await store.db.fusionRuns.put({ ...run, status: "running" })
+    const after = await getRunFromApi(deps, { actor: KEY_A, runId: run_id })
+    expect(after).toMatchObject({ ok: true, value: { snapshot: { pending_approval_id: null } } })
   })
 
   it("[ACC:SSE-04] answers 410 once the journal is gone, and still serves the snapshot", async () => {

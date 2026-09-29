@@ -47,17 +47,42 @@ import { changeKindLabelKey, changesAreComplete } from "@/lib/execution/run-deta
 import { runKindLabelKey } from "@/lib/execution/cockpit-model"
 import type { RunControlActions, RunControlOutcome } from "@/hooks/agent-runs/use-agent-run-actions"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
-import type {
-  ExecutionRunInterrupt,
-  RunControlAction,
-  RunVerificationConclusion,
-  SquadReviewDecision,
+import {
+  fusionApprovalRunIdOf,
+  type ExecutionRunInterrupt,
+  type RunControlAction,
+  type RunVerificationConclusion,
+  type SquadReviewDecision,
 } from "@/types/execution/run"
 import { ExecutionStatusPill } from "./agent-run-status-pill"
 import { SquadReviewForm, isRenderableSquadReview } from "./squad-review-form"
 import { DelegateReviewPane, isFusionApprovalInterrupt } from "./delegate-review-pane"
 import { DiffViewer } from "@/components/source-control/diff-viewer"
 import type { BotWorkspaceSnapshot } from "@/lib/plugin/workspace/bot-run"
+
+/** The kinds of Router + Fusion approval the cockpit has words for. */
+const FUSION_APPROVAL_KINDS = new Set(["scope_expansion", "workspace_apply"])
+
+/**
+ * What an interrupt is called in the approvals list.
+ *
+ * An interrupt's `title` is a closed-vocabulary code its producer chose (a
+ * tool name, a Squad review kind), stored untranslated so every surface —
+ * cockpit, IM card, island — reads the same thing. A Router + Fusion approval
+ * stores its approval kind there; the cockpit translates it, and names it a
+ * Router + Fusion approval for a kind this build has no words for.
+ */
+export function interruptTitleOf(
+  interrupt: Pick<ExecutionRunInterrupt, "type" | "title" | "subject">,
+  t: ReturnType<typeof useTranslations<"agentRuns">>
+): string {
+  if (interrupt.type !== "fusion_approval") return interrupt.title
+  const kind =
+    typeof interrupt.subject?.kind === "string" ? interrupt.subject.kind : interrupt.title
+  return FUSION_APPROVAL_KINDS.has(kind)
+    ? t(`approvals.fusionApproval.${kind}`)
+    : t("approvals.fusionApproval.other")
+}
 
 /** Verbs the pane offers, in the order they are shown. */
 const CONTROL_ORDER: readonly RunControlAction[] = [
@@ -151,6 +176,20 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       interrupt.status === "pending" &&
       interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id
   )
+  // The fusion run whose delegate review this pane shows. A `fusion` row IS
+  // one. A workflow or Squad run carries one when a delegate step parked its
+  // approval on it (ADR-0188 B4): the pending one while it waits, otherwise the
+  // newest it ever raised, whose record stays reviewable.
+  const carriedFusionApproval =
+    row.kind === "fusion"
+      ? undefined
+      : (pendingFusionApproval ?? interrupts.filter(isFusionApprovalInterrupt).at(-1))
+  const delegateReviewRunId =
+    row.kind === "fusion"
+      ? row.runId
+      : carriedFusionApproval
+        ? fusionApprovalRunIdOf(carriedFusionApproval)
+        : undefined
   const botEvidence = botDetailRecord(botResult?.output) ?? pendingBotApproval?.approvalDetail
   const botSnapshot = botSnapshotFrom(botEvidence)
   const botTests = botTestsFrom(botEvidence)
@@ -243,13 +282,14 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         </section>
       )}
 
-      {/* A Router + Fusion run (`kind: "fusion"`). The pane renders nothing
-          unless the run is a delegation and Router + Fusion is switched on —
-          it reads that behind the gate — so every other run keeps this pane
-          exactly as it was. */}
-      {row.kind === "fusion" && row.runId && (
+      {/* A Router + Fusion run (`kind: "fusion"`), or a workflow / Squad run
+          one of whose delegate steps raised its approval here. The pane
+          renders nothing unless the run is a delegation and Router + Fusion
+          is switched on — it reads that behind the gate — so every other run
+          keeps this pane exactly as it was. */}
+      {delegateReviewRunId && (
         <DelegateReviewPane
-          runId={row.runId}
+          runId={delegateReviewRunId}
           interrupt={pendingFusionApproval ?? null}
           busy={busy}
           onDecide={(action) => void dispatch(action)}
@@ -579,7 +619,9 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
                     <Badge variant="outline" className="shrink-0 text-[10px]">
                       {t(`approvals.${interrupt.status}`)}
                     </Badge>
-                    <span className="min-w-0 flex-1 truncate">{interrupt.title}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {interruptTitleOf(interrupt, t)}
+                    </span>
                     <span className="shrink-0 text-muted-foreground">
                       {format.relativeTime(new Date(interrupt.createdAt), now)}
                     </span>

@@ -33,9 +33,11 @@
  * cancel), and never while it is parked `waiting_for_approval` — a resumed run
  * re-snapshots only if the workspace is still at its base revision.
  *
- * `hostPorts.journal` is in memory until WP-D4 adds `fusionDelegateSteps`
- * (the table shape is specified in `delegate-step-journal.ts`); pass
- * `journalStore` to make it durable. Everything else is production-wired.
+ * `hostPorts.journal` is durable when `journalStore` is passed — production
+ * passes the `fusionDelegateSteps` store (`db/delegate-store.ts`,
+ * `createFusionDelegateStepStore`), so a resumed run replays the steps it
+ * committed. Without one (a test) it is kept in memory. Everything else is
+ * production-wired.
  *
  * A run with no `workspaceRoot` must not reach here: delegate needs a
  * workspace, and the router excludes it without one.

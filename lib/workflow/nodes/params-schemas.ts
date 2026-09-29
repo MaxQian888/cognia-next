@@ -11,7 +11,10 @@
  */
 
 import { z } from "zod"
-import { FUSION_ACTION_CHOICES } from "@/lib/router-fusion/gate/explicit-run"
+import {
+  DELEGATE_DELIVERY_CHOICES,
+  FUSION_ACTION_CHOICES,
+} from "@/lib/router-fusion/gate/explicit-run"
 import { TEAM_EXECUTION_PATTERNS } from "@/types/agent/agent-team"
 import {
   OPEN_PLAN_STATUSES,
@@ -1404,6 +1407,13 @@ const AiPromptParams = z.object({
    * again at execution time (`lib/workflow/nodes/ai/fusion-action.ts`).
    */
   action: z.enum(FUSION_ACTION_CHOICES).optional(),
+  /**
+   * How a `delegate` action delivers its verified change. `patch_only` (or
+   * absent) hands back a patch; `workspace_updated` writes it into the run's
+   * project checkout after a person approves exactly that patch on exactly
+   * that base (ADR-0188 B4, DEL-04). Read only when `action` is `delegate`.
+   */
+  delegateDelivery: z.enum(DELEGATE_DELIVERY_CHOICES).optional(),
 })
 
 const AiClassifyParams = z.object({

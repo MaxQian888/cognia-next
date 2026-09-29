@@ -76,24 +76,88 @@ describe("runAiPromptFusionAction", () => {
       runAiPromptFusionAction(ctx({ userPrompt: "hi", action: "delegate" }), {
         settings: ON,
         loadHost: loadHost(async () => ANSWER),
+        workspaceRootOf: async () => null,
       })
     ).rejects.toMatchObject({ retryable: false })
   })
 
-  it("runs delegate when the run carries a workspace", async () => {
+  it("refuses delegate when the run's project has no checkout, like the inspector does", async () => {
+    // The same source both sides ask: the project the run is attributed to,
+    // and whether it has a primary root. A project id alone is not a workspace.
+    const host = jest.fn()
+    await expect(
+      runAiPromptFusionAction(
+        ctx({ userPrompt: "hi", action: "delegate" }, { projectId: "project-empty" }),
+        { settings: ON, loadHost: host as never, workspaceRootOf: async () => null }
+      )
+    ).rejects.toMatchObject({ retryable: false })
+    expect(host).not.toHaveBeenCalled()
+  })
+
+  it("runs delegate in the run's project checkout, parked approvals on the workflow run", async () => {
     const calls: Array<Record<string, unknown>> = []
+    const roots: Array<string | null> = []
     const result = await runAiPromptFusionAction(
-      ctx({ userPrompt: "fix the failing test", action: "delegate" }, { projectId: "project-1" }),
+      ctx(
+        {
+          userPrompt: "fix the failing test",
+          action: "delegate",
+          delegateDelivery: "workspace_updated",
+        },
+        { projectId: "project-1" }
+      ),
       {
         settings: ON,
         loadHost: loadHost(async (input) => {
           calls.push(input)
           return { ...ANSWER, mode: "delegate" as const }
         }),
+        workspaceRootOf: async (projectId) => {
+          roots.push(projectId)
+          return "/repo/project-1"
+        },
       }
     )
     expect(result?.output).toMatchObject({ fusion: { mode: "delegate" } })
-    expect(calls[0]).toMatchObject({ mode: "delegate", workspaceId: "project-1" })
+    expect(roots).toEqual(["project-1"])
+    expect(calls[0]).toMatchObject({
+      mode: "delegate",
+      workspaceId: "project-1",
+      workspaceRoot: "/repo/project-1",
+      parentExecutionRunId: "execution:workflow:r1",
+      delegateDelivery: "workspace_updated",
+    })
+  })
+
+  it("delivers a patch only unless the node asked for the workspace", async () => {
+    const calls: Array<Record<string, unknown>> = []
+    await runAiPromptFusionAction(
+      ctx({ userPrompt: "fix it", action: "delegate" }, { projectId: "project-1" }),
+      {
+        settings: ON,
+        loadHost: loadHost(async (input) => {
+          calls.push(input)
+          return { ...ANSWER, mode: "delegate" as const }
+        }),
+        workspaceRootOf: async () => "/repo/project-1",
+      }
+    )
+    expect(calls[0]).toMatchObject({ delegateDelivery: "patch_only" })
+  })
+
+  it("never asks for a checkout for a mode that does not edit files", async () => {
+    const rootOf = jest.fn(async () => "/repo")
+    const calls: Array<Record<string, unknown>> = []
+    await runAiPromptFusionAction(ctx({ userPrompt: "compare", action: "panel" }), {
+      settings: ON,
+      loadHost: loadHost(async (input) => {
+        calls.push(input)
+        return ANSWER
+      }),
+      workspaceRootOf: rootOf,
+    })
+    expect(rootOf).not.toHaveBeenCalled()
+    expect(calls[0]).not.toHaveProperty("delegateDelivery")
   })
 
   it("runs the chosen mode and reports the run's usage and cost on the step", async () => {
@@ -156,6 +220,52 @@ describe("runAiPromptFusionAction", () => {
     ).rejects.toMatchObject({ code: "ROUTE_NO_SOLUTION" })
   })
 
+  describe("onSchemaViolation, honoured exactly as the ordinary path does", () => {
+    const schema = {
+      type: "object",
+      properties: { verdict: { type: "string" } },
+      required: ["verdict"],
+    }
+    const run = (text: string, onSchemaViolation?: "fail" | "soft") =>
+      runAiPromptFusionAction(
+        ctx({
+          userPrompt: "judge",
+          action: "panel",
+          responseFormat: "json",
+          outputSchema: schema,
+          ...(onSchemaViolation ? { onSchemaViolation } : {}),
+        }),
+        { settings: ON, loadHost: loadHost(async () => ({ ...ANSWER, text })) }
+      )
+
+    it("fails the step by default when the answer breaks the schema", async () => {
+      await expect(run('{"score": 3}')).rejects.toMatchObject({ name: "SchemaViolationError" })
+    })
+
+    it("fails the step by default when the answer is not JSON at all", async () => {
+      await expect(run("not json")).rejects.toMatchObject({ name: "SchemaViolationError" })
+    })
+
+    it("fails the step under an explicit fail", async () => {
+      await expect(run('{"score": 3}', "fail")).rejects.toMatchObject({
+        name: "SchemaViolationError",
+      })
+    })
+
+    it("returns the answer marked invalid under soft", async () => {
+      const result = await run('{"score": 3}', "soft")
+      expect(result?.output).toMatchObject({ schemaValid: false })
+      expect((result?.output as { schemaErrors?: string[] }).schemaErrors?.length).toBeGreaterThan(
+        0
+      )
+    })
+
+    it("passes a valid answer through", async () => {
+      const result = await run('{"verdict": "ship"}')
+      expect(result?.output).toMatchObject({ schemaValid: true, structured: { verdict: "ship" } })
+    })
+  })
+
   it("[ACC:INV-09] scopes every node of one workflow run together", async () => {
     const seen: Array<{ hasFusionAncestor?: boolean }> = []
     await runAiPromptFusionAction(ctx({ userPrompt: "outer", action: "panel" }), {
@@ -182,6 +292,19 @@ describe("the action as part of the node's configuration", () => {
     expect(schema.safeParse({ userPrompt: "hi", action: "auto" }).success).toBe(true)
     expect(schema.safeParse({ userPrompt: "hi" }).success).toBe(true)
     expect(schema.safeParse({ userPrompt: "hi", action: "supercascade" }).success).toBe(false)
+  })
+
+  it("accepts a delegate delivery, and only the two the run understands", () => {
+    const schema = paramsSchemaFor("ai.prompt")!
+    for (const delegateDelivery of ["patch_only", "workspace_updated"]) {
+      expect(
+        schema.safeParse({ userPrompt: "hi", action: "delegate", delegateDelivery }).success
+      ).toBe(true)
+    }
+    expect(
+      schema.safeParse({ userPrompt: "hi", action: "delegate", delegateDelivery: "force_push" })
+        .success
+    ).toBe(false)
   })
 
   /**

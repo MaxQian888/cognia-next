@@ -958,6 +958,14 @@ export interface TeammateConfig {
    * `"auto"`. See `lib/ai/agent/team/teammate/member-fusion-turn.ts`.
    */
   fusionAction?: import("@/lib/router-fusion/gate/explicit-run").FusionActionChoice
+  /**
+   * How a `"delegate"` member delivers its verified change. `"patch_only"` —
+   * the default — hands back a patch; `"workspace_updated"` writes it into the
+   * team project's checkout after a person approves exactly that patch on
+   * exactly that base, in the cockpit, on the team run. Ignored by every other
+   * `fusionAction`.
+   */
+  fusionDelegateDelivery?: import("@/lib/router-fusion/gate/explicit-run").DelegateDeliveryChoice
   /** Custom metadata */
   metadata?: Record<string, unknown>
   /**

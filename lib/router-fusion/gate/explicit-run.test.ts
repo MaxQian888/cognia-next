@@ -6,7 +6,10 @@ import { __resetBreakerForTesting, recordFusionFault } from "./breaker"
 import { RouterFusionInfrastructureError, RouterFusionRefusalError } from "./faults"
 import {
   __resetFusionScopesForTesting,
+  DELEGATE_DELIVERY_CHOICES,
+  delegateDeliveryOf,
   FUSION_ACTION_CHOICES,
+  fusionWorkspaceRootOf,
   fusionActionAvailability,
   fusionActionChoiceOf,
   fusionActionRequested,
@@ -142,6 +145,23 @@ describe("validateFusionActionChoice", () => {
   })
 })
 
+describe("delegate delivery", () => {
+  it("reads anything but an explicit workspace delivery as a patch", () => {
+    expect(DELEGATE_DELIVERY_CHOICES).toEqual(["patch_only", "workspace_updated"])
+    expect(delegateDeliveryOf("workspace_updated")).toBe("workspace_updated")
+    for (const value of [undefined, null, "patch_only", "overwrite", 1]) {
+      expect(delegateDeliveryOf(value)).toBe("patch_only")
+    }
+  })
+})
+
+describe("fusionWorkspaceRootOf", () => {
+  it("answers null for a caller with no project, without looking anything up", async () => {
+    await expect(fusionWorkspaceRootOf(null)).resolves.toBeNull()
+    await expect(fusionWorkspaceRootOf(undefined)).resolves.toBeNull()
+  })
+})
+
 describe("runExplicitAgentFusionTurn", () => {
   it("[ACC:OFF-AGENTS] skips, and loads nothing, while the surface is off", async () => {
     const loadHost = jest.fn(hostWith(async () => ANSWER))
@@ -195,6 +215,39 @@ describe("runExplicitAgentFusionTurn", () => {
     )
     expect(outcome).toMatchObject({ kind: "answered", mode: "delegate" })
     expect(seen[0]?.mode).toBe("delegate")
+  })
+
+  it("hands the host the caller's run and the delegate delivery", async () => {
+    const seen: Array<Record<string, unknown>> = []
+    await runExplicitAgentFusionTurn(
+      turn({
+        mode: "delegate",
+        workspaceId: "project-1",
+        workspaceRoot: "/repo",
+        parentExecutionRunId: "execution:workflow:wf-1",
+        delegateDelivery: "workspace_updated",
+        loadHost: hostWith(async (call) => {
+          seen.push(call as Record<string, unknown>)
+          return { ...ANSWER, mode: "delegate" as const }
+        }),
+      })
+    )
+    expect(seen[0]).toMatchObject({
+      workspaceRoot: "/repo",
+      parentExecutionRunId: "execution:workflow:wf-1",
+      delegateDelivery: "workspace_updated",
+    })
+    // Without them the host is told there is no parent and no delivery choice.
+    await runExplicitAgentFusionTurn(
+      turn({
+        loadHost: hostWith(async (call) => {
+          seen.push(call as Record<string, unknown>)
+          return ANSWER
+        }),
+      })
+    )
+    expect(seen[1]).toMatchObject({ parentExecutionRunId: null })
+    expect(seen[1]).not.toHaveProperty("delegateDelivery")
   })
 
   it("[ACC:ISO-03] fails explicitly on a tripped surface instead of answering some other way", async () => {

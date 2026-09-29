@@ -10,7 +10,53 @@ export interface MicrovmResult {
   stdout_truncated?: boolean
   /** True when stderr exceeded the per-stream transport cap. */
   stderr_truncated?: boolean
+  /**
+   * What the adapter ATTESTS it enforced for this call, as opposed to what the
+   * request asked for. Omitted by an adapter that attests nothing; a consumer
+   * that needs a guarantee (the Router + Fusion acceptance run needs
+   * "no network") treats an absent or `networkEnforced: false` block as no
+   * guarantee at all.
+   */
+  confinement?: MicrovmConfinement | null
 }
+
+/** A microVM adapter's attestation of the confinement one call ran under. */
+export interface MicrovmConfinement {
+  /** True only when the machine itself had no egress while the call ran. */
+  networkEnforced: boolean
+  backend?: string | null
+  /** Null when the adapter does not enforce (or cannot attest) the ceiling. */
+  maxMemoryMb?: number | null
+  maxCpuSeconds?: number | null
+  maxProcesses?: number | null
+  platform?: string | null
+}
+
+/** Requirements a caller puts on a workspace before choosing the microVM tier. */
+export interface MicrovmWorkspaceRequirements {
+  /**
+   * The ownership group the caller will pass to `preflight`. Defaults to the
+   * owner ref, exactly as `preflight` does.
+   */
+  ownerGroup?: string
+  /** The caller will ask for `network: "off"` and needs the machine to enforce it. */
+  network?: "off" | "on"
+}
+
+/** Answer of {@link MicrovmExecAdapter.accepts}: never throws, always says why not. */
+export type MicrovmWorkspaceAcceptance =
+  { accepted: true } | { accepted: false; code: MicrovmAdapterErrorCode; reason: string }
+
+/**
+ * Answer of {@link MicrovmExecAdapter.readFile}. A file past the cap is refused
+ * rather than cut, so a consumer never half-parses it.
+ */
+export type MicrovmFileRead =
+  | { kind: "ok"; content: string }
+  /** No such file: the ordinary "the command wrote nothing" answer. */
+  | { kind: "missing" }
+  | { kind: "too_large" }
+  | { kind: "refused"; code: string; message?: string }
 
 export interface MicrovmCommand {
   argv: string[]
@@ -58,7 +104,29 @@ export class MicrovmAdapterError extends Error {
 
 export interface MicrovmExecAdapter {
   preflight?(ownerRef: string, workspaceRoot?: string, ownerGroup?: string): Promise<void> | void
+  /**
+   * Whether `preflight(ownerRef, workspaceRoot, requirements.ownerGroup)` would
+   * succeed AND the bound machine can meet `requirements`, without claiming
+   * anything. A caller choosing between tiers asks this first, so a workspace
+   * the adapter cannot run in (an ordinary local directory, for an adapter that
+   * only isolates into existing remote workspaces) makes the tier ineligible
+   * instead of failing the run after it was chosen. An adapter without it
+   * cannot be chosen by such a caller.
+   */
+  accepts?(
+    ownerRef: string,
+    workspaceRoot: string,
+    requirements?: MicrovmWorkspaceRequirements
+  ): Promise<MicrovmWorkspaceAcceptance> | MicrovmWorkspaceAcceptance
   execute(ownerRef: string, payload: MicrovmExecPayload): Promise<MicrovmResult>
+  /**
+   * Read one file from inside the machine `ownerRef` is bound to (after
+   * `preflight`, before `release`). `path` is absolute in the machine and must
+   * resolve inside the bound workspace; anything else is `refused`. Needed by
+   * a caller whose command leaves its result in a file: that file lives in the
+   * machine, not on the host.
+   */
+  readFile?(ownerRef: string, path: string, maxBytes: number): Promise<MicrovmFileRead>
   release?(ownerRef: string): Promise<void> | void
   dispose?(): Promise<void> | void
 }

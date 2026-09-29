@@ -110,6 +110,35 @@ describe("routeAction", () => {
     expect(candidate(noSandbox, "delegate_code").exclusion_reasons).toContain("SANDBOX_UNAVAILABLE")
   })
 
+  it("[Rule 7] keeps cascade_code dormant while no answer verifier offers code_fixture, and delegate running", () => {
+    // What a host with no runtime verifier offers: every profile but code_fixture.
+    const answerProfiles = fixtureRouteRequest().capabilities.verifierProfiles.filter(
+      (profile) => profile !== "code_fixture"
+    )
+    const result = routeAction(
+      config,
+      fixtureRouteRequest({
+        requestedMode: "auto",
+        allowedModes: ["cascade", "delegate"],
+        features: fixtureFeatures({
+          task: "code.debug",
+          scope: "multi_file",
+          verification_kinds: ["code_test"],
+        }),
+        approvedRuleRows: ["cascade_verifiable", "delegate_multifile"],
+        deliversChange: true,
+        capabilities: { ...fixtureRouteRequest().capabilities, verifierProfiles: answerProfiles },
+      })
+    )
+    expect(candidate(result, "cascade_code").exclusion_reasons).toContain("VERIFIER_UNAVAILABLE")
+    expect(result.decision.selected_action_id).not.toBe("cascade_code")
+    // Delegate's code_fixture is its acceptance runner's, gated on the sandbox
+    // and the approved profile — not on the answer verifier's list.
+    expect(candidate(result, "delegate_code").exclusion_reasons).not.toContain(
+      "VERIFIER_UNAVAILABLE"
+    )
+  })
+
   it("[ACC:ROUTE-02] excludes the cheapest deployment that cannot read the input modality before comparing cost", () => {
     const registry = fakeTierRegistry()
     registry.deployments = registry.deployments.map((d) =>

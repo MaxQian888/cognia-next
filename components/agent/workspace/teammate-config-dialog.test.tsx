@@ -567,6 +567,59 @@ describe("teammate Router + Fusion action", () => {
     )
   })
 
+  it("asks the TEAM's project for a checkout, the one the runtime works in", async () => {
+    // One source on both sides: `member-fusion-turn.ts` refuses a delegate turn
+    // unless `team.projectId` has a primary root, and the picker asks the same.
+    const { useProjectStore } = await import("@/stores/project/project-store")
+    useProjectStore.setState({
+      activeProjectId: "someone-elses",
+      projects: [
+        { id: "team-project", roots: [{ path: "/repo/team", isPrimary: true }] },
+        { id: "someone-elses", roots: [{ path: "/repo/other", isPrimary: true }] },
+        { id: "no-folder", roots: [] },
+      ] as never,
+    })
+    const { rerender } = render(
+      <TeammateConfigDialog
+        open
+        onOpenChange={() => {}}
+        teammate={{ ...teammate, config: { fusionAction: "delegate" } }}
+        team={{ ...team, projectId: "team-project" }}
+      />
+    )
+    expect(screen.queryByRole("alert")).toBeNull()
+    rerender(
+      <TeammateConfigDialog
+        open
+        onOpenChange={() => {}}
+        teammate={{ ...teammate, config: { fusionAction: "delegate" } }}
+        team={{ ...team, projectId: "no-folder" }}
+      />
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent("errors.workspaceRequired")
+  })
+
+  it("persists a delegate member's delivery onto its config", async () => {
+    render(
+      <TeammateConfigDialog
+        open
+        onOpenChange={() => {}}
+        teammate={{ ...teammate, config: { fusionAction: "delegate" } }}
+        team={team}
+      />
+    )
+    fireEvent.click(screen.getByTestId("fusion-delivery-trigger"))
+    fireEvent.click(
+      await screen.findByRole("option", { name: /delivery\.values\.workspace_updated/ })
+    )
+    expect(updateTeammateMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        config: expect.objectContaining({ fusionDelegateDelivery: "workspace_updated" }),
+      })
+    )
+  })
+
   it("[ACC:OFF-AGENTS] offers nothing but Auto while the surface is off", async () => {
     mockSettings.settings = {
       routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } },

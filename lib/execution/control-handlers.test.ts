@@ -332,6 +332,59 @@ describe("routed run control", () => {
     installed.dispose()
   })
 
+  it("answers a delegate approval raised on a workflow run, for the fusion run it names", async () => {
+    await createExecutionRun({
+      id: "execution:workflow:wf-1",
+      kind: "workflow",
+      sourceId: "wf-1",
+      title: "Nightly fixer",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+      initiator: { remoteUserId: "operator-1" },
+    })
+    const { createRunInterrupt } = await import("./run-control")
+    await createRunInterrupt({
+      id: "approval-1",
+      runId: "execution:workflow:wf-1",
+      type: "fusion_approval",
+      status: "pending",
+      title: "scope_expansion",
+      subject: { kind: "scope_expansion", fusionRunId: "fusion-run-7" },
+      expiresAt: Date.now() + 60_000,
+      createdAt: Date.now(),
+    })
+    const decideRouterFusionApproval = jest.fn(async () => undefined)
+    const routerFusionRunSurface = jest.fn(async () => "agentsWorkflows" as const)
+    const installed = installExecutionRunControlHandlers({
+      decideRouterFusionApproval,
+      routerFusionRunSurface,
+    })
+
+    // Through the gate: the workflow kind's own handler knows nothing about
+    // fusion digests, so the interrupt's type routes it to the fusion one.
+    const run = await getExecutionRun("execution:workflow:wf-1")
+    const result = await executeRunControlCommand({
+      runId: "execution:workflow:wf-1",
+      action: "approve",
+      interruptId: "approval-1",
+      idempotencyKey: "approve-delegate-1",
+      expectedRevision: run!.currentRevision,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(true)
+    expect(routerFusionRunSurface).toHaveBeenCalledWith("fusion-run-7")
+    expect(decideRouterFusionApproval).toHaveBeenCalledWith("fusion-run-7", "approve", {
+      surface: "agentsWorkflows",
+      interruptId: "approval-1",
+    })
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled()
+    expect((await getDb().executionRunInterrupts.get("approval-1"))?.status).toBe("approved")
+    installed.dispose()
+  })
+
   it("has no steer, pause or resume to offer, and loads nothing to say so", async () => {
     const cancelRouterFusionRun = jest.fn()
     const installed = installExecutionRunControlHandlers({ cancelRouterFusionRun })

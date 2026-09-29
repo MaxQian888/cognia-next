@@ -91,6 +91,19 @@ export interface HostCapabilities {
   sandboxTier: string | null
   /** A trusted acceptance profile (command + report) exists for the workspace. */
   acceptanceProfileAvailable: boolean
+  /**
+   * The profiles this host's ANSWER verifier can produce for a direct,
+   * cascade or panel action. An action whose profile is missing here is
+   * excluded with `VERIFIER_UNAVAILABLE`.
+   *
+   * `code_fixture` belongs here only once the host supplies a runtime
+   * verifier (`AnswerVerifierPorts.runtimeVerifier`); none does yet, so a
+   * `cascade_code` action is intentionally dormant — the router never selects
+   * it, and the settings catalog labels it "Not chosen yet". A delegate
+   * action is not checked against this list: its `code_fixture` is served by
+   * the delegate workflow's own acceptance runner, gated by
+   * {@link sandboxTier} and {@link acceptanceProfileAvailable}.
+   */
   verifierProfiles: VerifierProfile[]
   webToolsAvailable: boolean
 }
@@ -363,7 +376,10 @@ export function routeAction(
         exclusions.push("ACCEPTANCE_PROFILE_MISSING")
     }
     const actionProfile = cfg.verifier_profile as VerifierProfile
-    if (!request.capabilities.verifierProfiles.includes(actionProfile))
+    // A delegate action verifies with its acceptance runner, whose two
+    // prerequisites are the exclusions right above; `verifierProfiles` is what
+    // the answer verifier can produce for every other mode.
+    if (cfg.mode !== "delegate" && !request.capabilities.verifierProfiles.includes(actionProfile))
       exclusions.push("VERIFIER_UNAVAILABLE")
     const resolution = resolveAcceptanceProfile({
       actionProfile,

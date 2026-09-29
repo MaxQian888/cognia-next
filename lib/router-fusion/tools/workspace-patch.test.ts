@@ -9,8 +9,59 @@ import {
   gitWorkspaceRevision,
   stagedRevisionId,
   WORKSPACE_REVISION_COMMANDS,
+  isUnknownWorkspaceCommand,
   type DelegateWorkspaceHost,
 } from "./workspace-patch"
+
+// The default host's bridges, so the command-vs-fallback routing can be driven
+// without a desktop. By default this is a host with no local workspace at all:
+// the plain-browser transport and a filesystem bridge that is not there.
+const mockTransportCall = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
+}))
+const mockWriteWorkspaceFile = jest.fn()
+const mockDeleteWorkspaceEntry = jest.fn()
+const mockReadWorkspaceFile = jest.fn()
+const mockWalkWorkspace = jest.fn()
+const mockStatWorkspaceFile = jest.fn()
+jest.mock("@/lib/files/workspace-fs", () => ({
+  writeWorkspaceFile: (...args: unknown[]) => mockWriteWorkspaceFile(...args),
+  deleteWorkspaceEntry: (...args: unknown[]) => mockDeleteWorkspaceEntry(...args),
+  readWorkspaceFile: (...args: unknown[]) => mockReadWorkspaceFile(...args),
+  walkWorkspace: (...args: unknown[]) => mockWalkWorkspace(...args),
+  statWorkspaceFile: (...args: unknown[]) => mockStatWorkspaceFile(...args),
+}))
+const mockGitIsRepo = jest.fn()
+const mockGitLog = jest.fn()
+const mockGitStatus = jest.fn()
+jest.mock("@/lib/git/commands", () => ({
+  gitIsRepo: (...args: unknown[]) => mockGitIsRepo(...args),
+  gitLog: (...args: unknown[]) => mockGitLog(...args),
+  gitStatus: (...args: unknown[]) => mockGitStatus(...args),
+}))
+const mockSettleTaskWorkspaceRun = jest.fn()
+const mockApplyTaskWorkspace = jest.fn()
+jest.mock("@/lib/task-workspace/client", () => ({
+  settleTaskWorkspaceRun: (...args: unknown[]) => mockSettleTaskWorkspaceRun(...args),
+  applyTaskWorkspace: (...args: unknown[]) => mockApplyTaskWorkspace(...args),
+}))
+
+const webModeRefusal = (name: string) => new Error(`tauri-only command from web mode: ${name}`)
+
+beforeEach(() => {
+  mockTransportCall.mockImplementation((name: string) => Promise.reject(webModeRefusal(name)))
+  mockWalkWorkspace.mockRejectedValue(webModeRefusal("fs_walk_workspace"))
+  mockReadWorkspaceFile.mockRejectedValue(webModeRefusal("fs_read_workspace_file"))
+  mockStatWorkspaceFile.mockRejectedValue(webModeRefusal("fs_stat_workspace_file"))
+  mockWriteWorkspaceFile.mockResolvedValue(undefined)
+  mockDeleteWorkspaceEntry.mockResolvedValue(undefined)
+  mockGitIsRepo.mockResolvedValue(false)
+  mockGitLog.mockResolvedValue([])
+  mockGitStatus.mockResolvedValue({ staged: [], changes: [], merge: [] })
+  mockSettleTaskWorkspaceRun.mockResolvedValue(undefined)
+  mockApplyTaskWorkspace.mockResolvedValue({ state: "applied" })
+})
 
 const WORK = "/work/repo"
 
@@ -226,6 +277,193 @@ describe("the host commands this port calls", () => {
     await expect(defaultDelegateWorkspaceHost().revision("/nowhere")).rejects.toThrow(
       /cannot read a local workspace revision/
     )
+  })
+})
+
+describe("isUnknownWorkspaceCommand", () => {
+  const get = WORKSPACE_REVISION_COMMANDS.get
+
+  it("recognises each transport's answer for a command it does not carry", () => {
+    // Tauri 2 rejects an invoke no handler claims with a bare string.
+    expect(isUnknownWorkspaceCommand(`Command ${get} not found`, get)).toBe(true)
+    expect(isUnknownWorkspaceCommand(webModeRefusal(get), get)).toBe(true)
+    expect(
+      isUnknownWorkspaceCommand(new Error(`StdioTransport: unsupported command "${get}"`), get)
+    ).toBe(true)
+  })
+
+  it("treats every refusal, and another command's absence, as a refusal", () => {
+    for (const refusal of [
+      // Tauri's ACL denials: the command exists, this window may not call it.
+      `Command ${get} not allowed by ACL`,
+      `${get} not allowed. Permissions associated with this command: allow-${get}`,
+      `${get} not allowed. Command not found`,
+      "workspace root is not authorized for this account",
+      "not authorized",
+      "unknown command",
+      "not implemented",
+      // A paired device refuses a client-only command; it does not lack it.
+      `"${get}" runs on the local client and cannot be answered by a paired host`,
+      // Someone else's command missing says nothing about this one.
+      "Command task_workspace_revision_apply not found",
+    ]) {
+      expect(isUnknownWorkspaceCommand(new Error(refusal), get)).toBe(false)
+    }
+  })
+})
+
+describe("defaultDelegateWorkspaceHost command routing", () => {
+  const unauthorized = `${WORKSPACE_REVISION_COMMANDS.apply} not allowed. Permissions associated with this command: allow-task-workspace-revision`
+  const patch = patchOf("wsrev1:base", { "src/a.ts": "next\n", "old.ts": null })
+
+  describe("revision", () => {
+    it("answers with the host's CAS revision without touching git", async () => {
+      mockTransportCall.mockResolvedValue({ revision: "wsrev1:abc", fileCount: 3 })
+      await expect(defaultDelegateWorkspaceHost().revision(WORK)).resolves.toBe("wsrev1:abc")
+      expect(mockTransportCall).toHaveBeenCalledWith(WORKSPACE_REVISION_COMMANDS.get, {
+        root: WORK,
+      })
+      expect(mockGitIsRepo).not.toHaveBeenCalled()
+    })
+
+    it("falls back to the git revision only when the command is unknown", async () => {
+      // Tauri's own rejection is a bare string, not an Error.
+      mockTransportCall.mockRejectedValue(`Command ${WORKSPACE_REVISION_COMMANDS.get} not found`)
+      mockGitIsRepo.mockResolvedValue(true)
+      mockGitLog.mockResolvedValue([{ hash: "c0ffee" }])
+      await expect(defaultDelegateWorkspaceHost().revision(WORK)).resolves.toBe("git:c0ffee")
+    })
+
+    it.each([
+      `${WORKSPACE_REVISION_COMMANDS.get} not allowed. Command not found`,
+      `Command ${WORKSPACE_REVISION_COMMANDS.get} not allowed by ACL`,
+      "workspace root is not authorized for this account",
+    ])("propagates a refusal instead of computing a revision: %s", async (refusal) => {
+      mockTransportCall.mockRejectedValue(new Error(refusal))
+      mockGitIsRepo.mockResolvedValue(true)
+      mockGitLog.mockResolvedValue([{ hash: "c0ffee" }])
+      await expect(defaultDelegateWorkspaceHost().revision(WORK)).rejects.toThrow(refusal)
+      expect(mockGitIsRepo).not.toHaveBeenCalled()
+      expect(mockWalkWorkspace).not.toHaveBeenCalled()
+    })
+
+    it("refuses an answer that carries no revision rather than guessing one", async () => {
+      mockTransportCall.mockResolvedValue({ fileCount: 0 })
+      mockGitIsRepo.mockResolvedValue(true)
+      await expect(defaultDelegateWorkspaceHost().revision(WORK)).rejects.toThrow(
+        /answered without a revision/
+      )
+      expect(mockGitIsRepo).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("readFile", () => {
+    it("propagates a refused read instead of reading around the confinement", async () => {
+      mockTransportCall.mockRejectedValue(
+        new Error(`${WORKSPACE_REVISION_COMMANDS.read} not allowed. Command not found`)
+      )
+      mockReadWorkspaceFile.mockResolvedValue("should not be read")
+      await expect(defaultDelegateWorkspaceHost().readFile(WORK, "a.ts", 100)).rejects.toThrow(
+        /not allowed/
+      )
+      expect(mockReadWorkspaceFile).not.toHaveBeenCalled()
+    })
+
+    it("reads through the guarded bridge when the command is unknown", async () => {
+      mockReadWorkspaceFile.mockResolvedValue("content")
+      await expect(defaultDelegateWorkspaceHost().readFile(WORK, "a.ts", 100)).resolves.toBe(
+        "content"
+      )
+      expect(mockReadWorkspaceFile).toHaveBeenCalledWith(WORK, "a.ts", 100)
+    })
+  })
+
+  describe("applyPatch", () => {
+    const input = (taskRunId: string | null) => ({
+      workspaceRoot: WORK,
+      stagedRoot: "/staged/run",
+      taskRunId,
+      patch,
+      baseRevision: "wsrev1:base",
+      approvalId: "approval-1",
+    })
+
+    it("maps the host's CAS outcome", async () => {
+      mockTransportCall.mockResolvedValue({
+        status: "conflict",
+        baseRevision: "wsrev1:base",
+        currentRevision: "wsrev1:moved",
+        written: [],
+        deleted: [],
+        refusal: null,
+      })
+      await expect(defaultDelegateWorkspaceHost().applyPatch(input(null))).resolves.toEqual({
+        status: "conflict",
+        currentRevision: "wsrev1:moved",
+      })
+      expect(mockTransportCall).toHaveBeenCalledWith(WORKSPACE_REVISION_COMMANDS.apply, {
+        root: WORK,
+        patch,
+      })
+    })
+
+    it.each([null, "task-run-1"])(
+      "propagates an unauthorized CAS and writes nothing (task run %s)",
+      async (taskRunId) => {
+        mockTransportCall.mockRejectedValue(new Error(unauthorized))
+        await expect(defaultDelegateWorkspaceHost().applyPatch(input(taskRunId))).rejects.toThrow(
+          unauthorized
+        )
+        expect(mockWriteWorkspaceFile).not.toHaveBeenCalled()
+        expect(mockDeleteWorkspaceEntry).not.toHaveBeenCalled()
+        expect(mockSettleTaskWorkspaceRun).not.toHaveBeenCalled()
+        expect(mockApplyTaskWorkspace).not.toHaveBeenCalled()
+      }
+    )
+
+    it("writes whole files through the guarded bridge when the command is unknown", async () => {
+      mockTransportCall.mockRejectedValue(`Command ${WORKSPACE_REVISION_COMMANDS.apply} not found`)
+      await expect(defaultDelegateWorkspaceHost().applyPatch(input(null))).resolves.toEqual({
+        status: "applied",
+      })
+      expect(mockWriteWorkspaceFile).toHaveBeenCalledWith(WORK, "src/a.ts", "next\n")
+      expect(mockDeleteWorkspaceEntry).toHaveBeenCalledWith(WORK, "old.ts", false)
+    })
+
+    it("adopts through the task-workspace turn when the command is unknown and one staged", async () => {
+      await expect(defaultDelegateWorkspaceHost().applyPatch(input("task-run-1"))).resolves.toEqual(
+        { status: "applied" }
+      )
+      expect(mockSettleTaskWorkspaceRun).toHaveBeenCalledWith("task-run-1", "ready")
+      expect(mockApplyTaskWorkspace).toHaveBeenCalledWith("task-run-1", [], false)
+      expect(mockWriteWorkspaceFile).not.toHaveBeenCalled()
+    })
+
+    it("surfaces an unauthorized CAS as PATCH_REFUSED from applyPatchCAS, workspace untouched", async () => {
+      const world = fakeHost(FILES)
+      const workspace = createDelegateWorkspacePort({
+        runId: "run-1",
+        workspaceRoot: WORK,
+        host: { ...world.host, applyPatch: defaultDelegateWorkspaceHost().applyPatch },
+      })
+      const base = await workspace.currentRevision()
+      const { patch: staged } = await stage(workspace, { "src/users/list.ts": "guarded\n" }, base)
+      const before = world.workspaceFiles()
+      mockTransportCall.mockRejectedValue(new Error(unauthorized))
+      const refused = await workspace.applyPatchCAS({
+        runId: "run-1",
+        logicalStepId: "delegate:deliver:apply",
+        patch: staged,
+        baseRevision: base,
+        approvalId: "approval-1",
+        signal,
+      })
+      expect(refused).toMatchObject({ ok: false, code: "PATCH_REFUSED" })
+      expect(refused.ok === false && refused.message).toContain("not allowed")
+      expect(world.workspaceFiles()).toEqual(before)
+      expect(mockWriteWorkspaceFile).not.toHaveBeenCalled()
+      expect(mockApplyTaskWorkspace).not.toHaveBeenCalled()
+    })
   })
 })
 

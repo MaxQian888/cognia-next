@@ -47,6 +47,28 @@ export function isDrivingRun(runId: string): boolean {
 }
 
 /**
+ * Mark a run as driven by a caller that executes it itself, so {@link driveRun}
+ * joins nothing for it while the caller holds it.
+ *
+ * An `agentsWorkflows` delegate run is executed by the workflow step or Squad
+ * member that asked for it, which waits across an approval and resumes the
+ * run itself (`agents/agent-fusion-run.ts`). The cockpit's decision calls
+ * `driveRun` for every run it resumes; without this hold that would start a
+ * second executor next to the caller's in the same window. The returned
+ * release is idempotent.
+ */
+export function holdRunDriver(runId: string): () => void {
+  if (driving.has(runId)) return () => {}
+  driving.add(runId)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    driving.delete(runId)
+  }
+}
+
+/**
  * The boot sweep's hook for an orchestrated run whose worker went away. A run
  * whose surface is switched on is driven again here, from the ledger: steps
  * that finished replay, and the new lease holder settles whatever was in

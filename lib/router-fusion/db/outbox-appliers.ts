@@ -146,6 +146,61 @@ export function projectedExecutionRun(p: ProjectionPayload) {
   }
 }
 
+/**
+ * The `fusion_approval` interrupt a parked delegate run raises (ADR-0188 B4).
+ *
+ * One builder for both places it is raised:
+ *
+ * - on the run's OWN projected execution run (a Run API or companion run,
+ *   `executionRunId === fusionRunId`), through the outbox above;
+ * - on the CALLER's execution run — the workflow run or Squad run an
+ *   `agentsWorkflows` delegate belongs to (`agents/agent-fusion-run.ts`).
+ *   Those runs are not projected as rows of their own (they would be a second
+ *   row for one piece of work), so the decision rides on the run that owns
+ *   the step, and `subject.fusionRunId` says which fusion run it approves.
+ *
+ * `id` is the fusion approval's own id, derived from the request digest, so
+ * the id a surface sends back names exactly what was approved (API-08).
+ *
+ * `title` is the approval KIND (`scope_expansion` / `workspace_apply`), a
+ * closed vocabulary like every other interrupt's title (a Squad review's kind,
+ * a tool name) — never English prose. The cockpit renders it translated
+ * (`agentRuns.approvals.fusionApproval.*`); a surface that does not know the
+ * type shows the code.
+ */
+export function fusionApprovalInterrupt(input: {
+  executionRunId: string
+  fusionRunId: string
+  approvalId: string
+  kind: string
+  requestDigest?: string
+  revision: string
+  logicalStepId: string
+  summary: Record<string, unknown>
+  expiresAt: number
+  createdAt: number
+  projectId?: string | null
+}): ExecutionRunInterrupt {
+  return {
+    id: input.approvalId,
+    runId: input.executionRunId,
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+    type: "fusion_approval",
+    status: "pending",
+    title: input.kind,
+    ...(input.requestDigest ? { requestDigest: input.requestDigest } : {}),
+    subject: {
+      ...input.summary,
+      kind: input.kind,
+      revision: input.revision,
+      logicalStepId: input.logicalStepId,
+      fusionRunId: input.fusionRunId,
+    },
+    expiresAt: input.expiresAt,
+    createdAt: input.createdAt,
+  }
+}
+
 export const accountDatabaseAppliers: OutboxAppliers = {
   session_message(row, context) {
     return applySessionMessage(row, context, {
@@ -185,22 +240,39 @@ export const accountDatabaseAppliers: OutboxAppliers = {
       const { createRunInterrupt } = await import("@/lib/execution/run-control")
       const existingInterrupt = await getDb().executionRunInterrupts.get(p.interrupt.id)
       if (existingInterrupt) return "applied"
-      await createRunInterrupt({
-        id: p.interrupt.id,
-        runId: p.runId,
-        type: p.interrupt.type,
-        status: "pending",
-        title: "Router + Fusion approval",
-        ...(p.interrupt.requestDigest ? { requestDigest: p.interrupt.requestDigest } : {}),
-        subject: {
-          kind: p.interrupt.kind,
-          revision: p.interrupt.revision,
-          logicalStepId: p.interrupt.logicalStepId,
-          ...p.interrupt.summary,
-        },
-        expiresAt: p.interrupt.expiresAt,
-        createdAt: Date.now(),
-      })
+      await createRunInterrupt(
+        p.interrupt.type === "fusion_approval"
+          ? fusionApprovalInterrupt({
+              executionRunId: p.runId,
+              fusionRunId: p.runId,
+              approvalId: p.interrupt.id,
+              kind: p.interrupt.kind,
+              ...(p.interrupt.requestDigest ? { requestDigest: p.interrupt.requestDigest } : {}),
+              revision: p.interrupt.revision,
+              logicalStepId: p.interrupt.logicalStepId,
+              summary: p.interrupt.summary,
+              expiresAt: p.interrupt.expiresAt,
+              createdAt: Date.now(),
+            })
+          : {
+              id: p.interrupt.id,
+              runId: p.runId,
+              type: p.interrupt.type,
+              status: "pending",
+              // A closed-vocabulary code (the reconciliation code), never
+              // free text: the cockpit renders it, it does not translate it.
+              title: p.interrupt.kind,
+              ...(p.interrupt.requestDigest ? { requestDigest: p.interrupt.requestDigest } : {}),
+              subject: {
+                kind: p.interrupt.kind,
+                revision: p.interrupt.revision,
+                logicalStepId: p.interrupt.logicalStepId,
+                ...p.interrupt.summary,
+              },
+              expiresAt: p.interrupt.expiresAt,
+              createdAt: Date.now(),
+            }
+      )
       return "applied"
     }
     const type: RunEventType =

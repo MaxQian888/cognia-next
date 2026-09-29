@@ -34,7 +34,7 @@ import {
   decideIdempotency,
   FeedbackRequestSchema,
   idempotencyRequestHash,
-  parseRunRequest,
+  parseRunApiRequest,
   ResumeRequestSchema,
   RUN_EVENT_TYPES,
   usdToMicrousd,
@@ -56,6 +56,7 @@ import {
 
 import type { FusionLedgerStore } from "../db/ledger-store"
 import { IDEMPOTENCY_TTL_MS } from "../db/retention"
+import { pendingApprovalOf } from "../db/delegate-store"
 import { decodeRunInput, encodeRunInput } from "../db/run-input"
 import type { FusionArtifactRow, FusionRunEventRow, FusionRunRow } from "../db/types"
 import { issueArtifactReadToken, verifyArtifactReadToken } from "./artifact-tokens"
@@ -188,6 +189,12 @@ export interface CreateRunFromApiInput {
   capMicrousd: number
   /** The encrypted artifact holding `messages` and the request's options. */
   inputArtifactId: string
+  /**
+   * How a delegate run delivers its change, from the request's Cognia
+   * extension (`x-cognia.delegate_delivery`). Persisted only on a run the
+   * router actually sent to delegate; `patch_only` when omitted.
+   */
+  delegateDelivery?: "patch_only" | "workspace_updated"
 }
 
 function error(
@@ -341,6 +348,8 @@ export interface AcceptRunInput {
    * caller cannot name a workspace or answer an approval (D13).
    */
   executableModes?: readonly ExecutionMode[]
+  /** See {@link CreateRunFromApiInput.delegateDelivery}. */
+  delegateDelivery?: "patch_only" | "workspace_updated"
 }
 
 /**
@@ -433,6 +442,7 @@ export async function acceptRun(
     sessionVersion,
     capMicrousd: usdToMicrousd(input.request.budget.max_cost_usd),
     inputArtifactId: inputArtifact.artifactId,
+    ...(input.delegateDelivery ? { delegateDelivery: input.delegateDelivery } : {}),
   })
   if (!created.ok) return created
   // Bind the input to its run, so retention and ownership checks see it.
@@ -472,18 +482,23 @@ export async function createRunFromApi(
 ): Promise<RunApiResult<RunCreated>> {
   const scopeError = requireScope(input.actor, "runs:create")
   if (scopeError) return { ok: false, error: scopeError }
-  const parsed = parseRunRequest(
+  // The contract request, plus Cognia's extension beside it (`x-cognia`):
+  // the vendored contract stays byte-identical, and the idempotency hash still
+  // covers the whole body the caller sent.
+  const parsed = parseRunApiRequest(
     input.body,
     await deps.policy({ workspaceId: peekWorkspaceId(input.body) })
   )
   if (!parsed.ok) return { ok: false, error: issuesToError(parsed.issues) }
+  const { request, extension } = parsed.value
   return acceptRun(deps, {
     actor: input.actor,
-    request: parsed.value,
-    messages: messagesOf(parsed.value),
+    request,
+    messages: messagesOf(request),
     jsonSchema: null,
     body: input.body,
     endpoint: "POST /v1/runs",
+    ...(extension.delegate_delivery ? { delegateDelivery: extension.delegate_delivery } : {}),
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
   })
 }
@@ -599,7 +614,12 @@ export async function snapshotOf(
           trace_id: run.runId,
         }
       : null,
-    pending_approval_id: null,
+    // The approval the run is parked on — its id is what `POST .../resume`
+    // must present (API-08). Null whenever the run is not waiting on one.
+    pending_approval_id:
+      run.status === "waiting_for_approval"
+        ? ((await pendingApprovalOf(store.db, run.runId))?.id ?? null)
+        : null,
     trace_id: run.runId,
   }
 }
@@ -638,18 +658,29 @@ export async function getRunFromApi(
 const CONTRACT_EVENT_TYPES: ReadonlySet<string> = new Set(RUN_EVENT_TYPES)
 
 /**
+ * Journal types that ARE a contract event under another name. A journal
+ * written before the ledger used the contract's name for a parked approval
+ * still says `approval.requested`; it is the contract's `approval.required`,
+ * and a client must be able to read it as one.
+ */
+const CONTRACT_EVENT_ALIASES: Readonly<Record<string, RunEventType>> = {
+  "approval.requested": "approval.required",
+}
+
+/**
  * One journal row as the contract's `RunEvent`. The journal also records what
  * the contract has no type for — a rejected candidate, a degraded run, a
  * verification request — and those travel as `phase.changed` with the original
  * type in the payload, so a strict client parses every event and loses nothing.
  */
 export function contractEventOf(row: FusionRunEventRow): RunEvent {
-  const known = CONTRACT_EVENT_TYPES.has(row.type)
+  const alias = CONTRACT_EVENT_ALIASES[row.type]
+  const known = alias !== undefined || CONTRACT_EVENT_TYPES.has(row.type)
   return {
     schema_version: CONTRACT_SCHEMA_VERSION,
     run_id: row.runId,
     seq: row.seq,
-    event_type: (known ? row.type : "phase.changed") as RunEventType,
+    event_type: (alias ?? (known ? row.type : "phase.changed")) as RunEventType,
     timestamp: iso(row.createdAt),
     payload: known ? row.payload : { ...row.payload, event: row.type },
   }

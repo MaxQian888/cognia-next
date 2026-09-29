@@ -25,6 +25,7 @@ import type { CockpitStatusGroup } from "@/lib/execution/cockpit-model"
 import type { UnifiedExecutionStatus } from "@/lib/execution/monitor-model"
 import type { RunControlOutcomeReason } from "@/hooks/agent-runs/use-agent-run-actions"
 import type { SteerDegradedReason } from "@/lib/execution/run-control"
+import type { DelegateApprovalKind } from "@cognia/router-fusion"
 import type {
   ExecutionRunInterruptStatus,
   RunActivityCategory,
@@ -70,6 +71,10 @@ const _activityStatuses: Covers<RunActivityStatus, typeof ACTIVITY_STATUSES> = t
 
 const INTERRUPT_STATUSES = ["pending", "approved", "denied", "expired"] as const
 const _interruptStatuses: Covers<ExecutionRunInterruptStatus, typeof INTERRUPT_STATUSES> = true
+
+/** A Router + Fusion approval's title is its kind, translated in the approvals list. */
+const FUSION_APPROVAL_KINDS = ["scope_expansion", "workspace_apply"] as const
+const _fusionApprovalKinds: Covers<DelegateApprovalKind, typeof FUSION_APPROVAL_KINDS> = true
 
 const CONCLUSIONS = ["passed", "failed", "inconclusive"] as const
 const _conclusions: Covers<RunVerificationConclusion, typeof CONCLUSIONS> = true
@@ -134,6 +139,7 @@ void [
   _categories,
   _activityStatuses,
   _interruptStatuses,
+  _fusionApprovalKinds,
   _conclusions,
   _degraded,
   _outcomes,
@@ -191,6 +197,12 @@ describe("cockpit dynamic translation keys", () => {
 
   it("covers every approval status and verification conclusion", () => {
     expectKeys(en.approvals, zh.approvals, INTERRUPT_STATUSES, "agentRuns.approvals")
+    expectKeys(
+      en.approvals.fusionApproval,
+      zh.approvals.fusionApproval,
+      [...FUSION_APPROVAL_KINDS, "other"],
+      "agentRuns.approvals.fusionApproval"
+    )
     expectKeys(en.tests, zh.tests, CONCLUSIONS, "agentRuns.tests")
   })
 

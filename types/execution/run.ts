@@ -629,6 +629,21 @@ export interface ExecutionRunInterrupt {
   decision?: SquadReviewDecision & { outcome: "approve" | "deny" }
 }
 
+/**
+ * The Router + Fusion run a `fusion_approval` interrupt approves.
+ *
+ * A Run API or companion run carries the interrupt on its own projected
+ * execution run, so the two ids are the same. An `agentsWorkflows` delegate
+ * (a workflow node, a Squad member) raises it on the CALLER's execution run
+ * instead and names itself in `subject.fusionRunId` (ADR-0188 B4).
+ */
+export function fusionApprovalRunIdOf(
+  interrupt: Pick<ExecutionRunInterrupt, "runId" | "subject">
+): string {
+  const named = interrupt.subject?.fusionRunId
+  return typeof named === "string" && named.length > 0 ? named : interrupt.runId
+}
+
 /** The interrupt type each Squad review kind parks on. */
 export const SQUAD_REVIEW_INTERRUPT_TYPES: Record<SquadReviewKind, ExecutionRunInterrupt["type"]> =
   {

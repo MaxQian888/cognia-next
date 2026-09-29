@@ -20,15 +20,29 @@
  *   - the inspector disables what the account cannot run and says why;
  *   - this module refuses at execution time, because settings change between
  *     authoring and the 3 a.m. cron run that uses them.
+ *
+ * The workspace a `delegate` step works in has ONE source on both sides: the
+ * project the run is attributed to. The run stamps it from the active project
+ * at admission (`ctx.projectId`); the inspector reads the active project; both
+ * ask whether that project has a checkout the same way
+ * (`fusionWorkspaceRootOf` / `approvalKeyFor`).
+ *
+ * A delegate step that parks on a person (a write outside its allowed paths,
+ * or applying its patch into the checkout) waits: the approval is raised on
+ * this workflow run's execution run, answered in the cockpit, and the step
+ * resumes when it is.
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 import {
+  delegateDeliveryOf,
   fusionActionChoiceOf,
   fusionActionRequested,
+  fusionWorkspaceRootOf,
   runExplicitAgentFusionTurn,
   validateFusionActionChoice,
+  type DelegateDeliveryChoice,
   type ExplicitFusionTurnInput,
   type FusionActionChoice,
 } from "@/lib/router-fusion/gate/explicit-run"
@@ -36,11 +50,14 @@ import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 
 import { nonRetryable } from "../shared/executor-support"
 import { buildJsonInstruction, parseStructured } from "./structured"
-import { validateAgainstJsonSchema } from "./schema-validate"
+import { isValidatableObjectSchema, validateAgainstJsonSchema } from "./schema-validate"
+import { SchemaViolationError } from "./structured-turn"
 
 /** The `ai.prompt` params this module reads; the rest belong to the ordinary executor. */
 export interface FusionActionParams {
   action?: FusionActionChoice
+  /** How a `delegate` action delivers its change; `patch_only` when unset. */
+  delegateDelivery?: DelegateDeliveryChoice
   systemPrompt?: string
   userPrompt?: string
   responseFormat?: "text" | "json"
@@ -74,6 +91,8 @@ export interface RunFusionActionDeps {
   settings?: ExplicitFusionTurnInput["settings"]
   /** Test seam. */
   loadHost?: ExplicitFusionTurnInput["loadHost"]
+  /** Test seam: the checkout of a project (`fusionWorkspaceRootOf`). */
+  workspaceRootOf?: (projectId: string | null) => Promise<string | null>
 }
 
 /**
@@ -101,10 +120,15 @@ export async function runAiPromptFusionAction(
       await import("@/lib/router-fusion/gate/current-settings")
     ).currentRouterFusionGateSettings())
   const workspaceId = ctx.projectId ?? null
+  // Only a delegate choice needs a checkout, so only it pays for the lookup.
+  const workspaceRoot =
+    action === "delegate"
+      ? await (deps.workspaceRootOf ?? fusionWorkspaceRootOf)(workspaceId)
+      : null
   const issue = validateFusionActionChoice({
     action,
     settings,
-    hasWorkspace: Boolean(workspaceId),
+    hasWorkspace: action === "delegate" ? workspaceRoot !== null : Boolean(workspaceId),
   })
   // Off is not a configuration error: D37 says a switched-off surface runs the
   // existing code, byte for byte. The inspector is where an author is told
@@ -116,7 +140,9 @@ export async function runAiPromptFusionAction(
 
   const jsonMode = params.responseFormat === "json"
   const outputSchema = params.outputSchema
-  const enforceSchema = jsonMode && !!outputSchema && Object.keys(outputSchema).length > 0
+  // The same test the ordinary path enforces with (`runStructuredTurn`): a
+  // schema that describes no object has nothing to hold the answer to.
+  const enforceSchema = jsonMode && isValidatableObjectSchema(outputSchema)
   const schemaHint = enforceSchema ? JSON.stringify(outputSchema, null, 2) : params.jsonSchema
   const systemPrompt = jsonMode
     ? [params.systemPrompt, buildJsonInstruction(schemaHint)].filter(Boolean).join("\n\n")
@@ -143,6 +169,15 @@ export async function runAiPromptFusionAction(
     ],
     ...(enforceSchema ? { jsonSchema: outputSchema } : {}),
     workspaceId,
+    ...(workspaceRoot ? { workspaceRoot } : {}),
+    // A parked delegate asks its question on this workflow run's own
+    // execution run, which is where the cockpit already shows the step.
+    parentExecutionRunId: (await import("@/lib/execution/workflow-bridge")).workflowExecutionRunId(
+      ctx.runId
+    ),
+    ...(action === "delegate"
+      ? { delegateDelivery: delegateDeliveryOf(params.delegateDelivery) }
+      : {}),
     // Every node of one workflow run shares the run's scope, so a node that
     // runs inside a fusion run is refused with FUSION_RECURSION (INV-09).
     scopeId: ctx.runId,
@@ -188,16 +223,25 @@ export async function runAiPromptFusionAction(
   }
   if (!jsonMode) return { output: base }
   const parsed = parseStructured(outcome.text)
-  const schemaFields = enforceSchema
-    ? parsed.error
-      ? { schemaValid: false }
-      : (() => {
-          const validation = validateAgainstJsonSchema(outputSchema, parsed.value)
-          return validation.ok
-            ? { schemaValid: true }
-            : { schemaValid: false, schemaErrors: validation.errors }
-        })()
-    : {}
+  let schemaFields: { schemaValid?: boolean; schemaErrors?: string[] } = {}
+  if (enforceSchema) {
+    const validation = parsed.error
+      ? { ok: false as const, errors: [`(root): ${parsed.error}`] }
+      : validateAgainstJsonSchema(outputSchema, parsed.value)
+    if (!validation.ok) {
+      // Exactly the ordinary path's rule (`runStructuredTurn`): `fail` — the
+      // default — fails the step; only an author who chose `soft` gets the
+      // answer back marked invalid. The fusion run already verified what it
+      // could; a second fix-up round would be a second run the author never
+      // priced, so there is no auto-fix retry here.
+      if ((params.onSchemaViolation ?? "fail") === "fail") {
+        throw new SchemaViolationError(validation.errors)
+      }
+      schemaFields = { schemaValid: false, schemaErrors: validation.errors }
+    } else {
+      schemaFields = { schemaValid: true }
+    }
+  }
   return {
     output: {
       ...base,

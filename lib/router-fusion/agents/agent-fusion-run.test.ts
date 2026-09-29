@@ -36,7 +36,8 @@ jest.mock("../runtime/orchestrator-host", () => ({
   },
 }))
 
-import { runAgentsWorkflowsFusion } from "./agent-fusion-run"
+import { isDrivingRun } from "../runtime/run-driver"
+import { runAgentsWorkflowsFusion, type AgentFusionApprovalSurface } from "./agent-fusion-run"
 
 type Ref = { providerId: string; modelId: string }
 const MINI: Ref = { providerId: "openai", modelId: "gpt-5-mini" }
@@ -231,5 +232,166 @@ describe("runAgentsWorkflowsFusion", () => {
     script = async () => ({ kind: "cancelled" })
     const outcome = await runAgentsWorkflowsFusion(input())
     expect(outcome).toMatchObject({ kind: "refused", code: "RUN_CANCELLED" })
+  })
+
+  describe("a run that parks on a person", () => {
+    const APPROVAL = {
+      approvalId: "11111111-2222-4333-8444-555555555555",
+      kind: "scope_expansion" as const,
+      requestDigest: "d".repeat(64),
+      revision: "rev-0",
+      logicalStepId: "delegate:scope",
+      args: {},
+      summary: { paths: ["tests/a.ts"], fileCount: 1 } as never,
+    }
+
+    function recorder(raises = true) {
+      const raised: unknown[] = []
+      const withdrawn: unknown[] = []
+      const surface: AgentFusionApprovalSurface = {
+        raise: async (call) => {
+          raised.push(call)
+          return raises
+        },
+        withdraw: async (call) => {
+          withdrawn.push(call)
+        },
+      }
+      return { surface, raised, withdrawn }
+    }
+
+    const parked = async () => ({
+      kind: "waiting" as const,
+      code: "WAITING_FOR_APPROVAL" as const,
+      message: "waiting",
+      approval: APPROVAL,
+    })
+
+    it("asks on the caller's run, then drives the resumed run on to its answer", async () => {
+      const { surface, raised } = recorder()
+      let calls = 0
+      let heldWhileWaiting = false
+      script = async (runId) => {
+        calls += 1
+        heldWhileWaiting = isDrivingRun(runId)
+        return calls === 1 ? parked() : seal(runId, "Fixed.")
+      }
+      const outcome = await runAgentsWorkflowsFusion(
+        input({ parentExecutionRunId: "execution:workflow:wf-1" }),
+        { approvals: surface, approvalPollMs: 1, sleep: async () => {} }
+      )
+      expect(outcome).toMatchObject({ kind: "answered", text: "Fixed." })
+      expect(raised).toEqual([
+        expect.objectContaining({
+          parentExecutionRunId: "execution:workflow:wf-1",
+          approval: APPROVAL,
+        }),
+      ])
+      // The caller held the run's driver, so a cockpit `driveRun` joined nothing.
+      expect(heldWhileWaiting).toBe(true)
+      if (outcome.kind === "answered") expect(isDrivingRun(outcome.runId)).toBe(false)
+    })
+
+    it("keeps waiting while the run is parked, and gives up at the approval's expiry", async () => {
+      const { surface, withdrawn } = recorder()
+      let now = Date.now()
+      script = async (runId) => {
+        const run = (await store.getRun(runId))!
+        await store.db.fusionRuns.put({ ...run, status: "waiting_for_approval" })
+        return parked()
+      }
+      const sleeps: number[] = []
+      const outcome = await runAgentsWorkflowsFusion(
+        input({ parentExecutionRunId: "execution:team:t-1" }),
+        {
+          approvals: surface,
+          approvalPollMs: 7,
+          now: () => now,
+          sleep: async (ms) => {
+            sleeps.push(ms)
+            now += 60 * 60 * 1000
+          },
+        }
+      )
+      expect(outcome).toMatchObject({ kind: "refused", code: "APPROVAL_EXPIRED" })
+      expect(sleeps.length).toBeGreaterThan(0)
+      expect(sleeps.every((ms) => ms === 7)).toBe(true)
+      expect(withdrawn).toEqual([
+        { parentExecutionRunId: "execution:team:t-1", approvalId: APPROVAL.approvalId },
+      ])
+      if (outcome.kind === "refused") {
+        expect((await store.getRun(outcome.runId!))?.status).toBe("cancelled")
+      }
+    })
+
+    it("cancels a parked run whose caller's run cannot carry the question", async () => {
+      const { surface } = recorder(false)
+      script = async () => parked()
+      const outcome = await runAgentsWorkflowsFusion(
+        input({ parentExecutionRunId: "execution:workflow:gone" }),
+        { approvals: surface }
+      )
+      expect(outcome).toMatchObject({ kind: "refused", code: "APPROVAL_UNREACHABLE" })
+      if (outcome.kind === "refused") {
+        expect((await store.getRun(outcome.runId!))?.status).toBe("cancelled")
+      }
+    })
+
+    it("reads back the seal of a run another window drove after the decision", async () => {
+      const { surface } = recorder()
+      let calls = 0
+      script = async () => {
+        calls += 1
+        if (calls === 1) return parked()
+        return { kind: "busy" as const }
+      }
+      let sealedElsewhere = false
+      const outcome = await runAgentsWorkflowsFusion(
+        input({ parentExecutionRunId: "execution:workflow:wf-2" }),
+        {
+          approvals: surface,
+          sleep: async () => {
+            if (sealedElsewhere) return
+            sealedElsewhere = true
+            const runId = (await store.db.fusionRuns.toArray())[0]!.runId
+            // Another worker's seal, with the result record the orchestrator writes.
+            const lease = await store.acquireLease(runId, "window:other", 60_000)
+            if (!lease.ok) throw new Error(lease.code)
+            await store.startRun(runId, lease.fencingToken)
+            const artifacts = store.artifactStore(runId)
+            const answer = await artifacts.put("From elsewhere.", "text/plain", `a/${runId}`)
+            const record = await artifacts.put(
+              JSON.stringify({
+                answer_artifact_id: answer.artifactId,
+                answer_sha256: answer.contentSha256,
+                mode_executed: "delegate",
+                quality_status: "accepted",
+                verification: {
+                  schema_version: "1.0.0",
+                  report_id: uuidFromName(`report:${runId}`),
+                  status: "passed",
+                  level: "tool_verified",
+                  checks: [],
+                  revision: null,
+                  verifier_version: "v",
+                  artifact_refs: [],
+                },
+                delivery: "patch_only",
+                artifact_ids: [],
+                warnings: [],
+              }),
+              "application/json",
+              `r/${runId}`
+            )
+            await store.finalizeRun(runId, lease.fencingToken, {
+              status: "succeeded",
+              resultArtifactId: answer.artifactId,
+              resultRecordArtifactId: record.artifactId,
+            })
+          },
+        }
+      )
+      expect(outcome).toMatchObject({ kind: "answered", text: "From elsewhere." })
+    })
   })
 })

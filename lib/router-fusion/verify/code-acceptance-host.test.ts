@@ -21,11 +21,13 @@ import {
   type AcceptanceDockerClient,
   type AcceptanceRunSpec,
   type AcceptanceSandboxHost,
+  type AcceptanceSandboxTarget,
 } from "./code-acceptance-host"
 
 const WORKTREE = "/staged/1"
 const REVISION = "staged:abc"
 const PINNED_IMAGE = `registry.test/acceptance@sha256:${"d".repeat(64)}`
+const TARGET = { runId: "run-1", logicalStepId: "delegate:verify:1", worktreeRoot: WORKTREE }
 
 const PROFILE: ApprovedAcceptanceProfile = {
   projectId: "project-1",
@@ -72,11 +74,17 @@ function spec(overrides: Partial<AcceptanceRunSpec> = {}): AcceptanceRunSpec {
 function fakeSandbox(
   availability: { microvm: boolean; container: boolean; os: boolean },
   outcome: AcceptanceCommandOutcome | ((spec: AcceptanceRunSpec) => AcceptanceCommandOutcome)
-): AcceptanceSandboxHost & { runs: AcceptanceRunSpec[] } {
+): AcceptanceSandboxHost & {
+  runs: AcceptanceRunSpec[]
+  targets: Array<AcceptanceSandboxTarget | undefined>
+} {
   const runs: AcceptanceRunSpec[] = []
+  const targets: Array<AcceptanceSandboxTarget | undefined> = []
   return {
     runs,
-    async availability() {
+    targets,
+    async availability(target) {
+      targets.push(target)
       return availability
     },
     async run(request) {
@@ -231,6 +239,10 @@ describe("createDelegateAcceptancePort", () => {
     const port = acceptancePort(sandbox, { image: PINNED_IMAGE })
     const outcome = await port.runProfile(request())
 
+    // Tiers are asked about THIS worktree, under the run's owner identity.
+    expect(sandbox.targets).toEqual([
+      { runId: "run-1", logicalStepId: "delegate:verify:1", worktreeRoot: WORKTREE },
+    ])
     expect(sandbox.runs).toHaveLength(1)
     expect(sandbox.runs[0]).toMatchObject({
       tier: "container",
@@ -608,14 +620,36 @@ describe("createAcceptanceSandboxHost", () => {
       container: false,
       os: true,
     })
+    const accepting = {
+      execute: async () => ({}),
+      accepts: async () => ({ accepted: true as const }),
+      readFile: async () => ({ kind: "missing" as const }),
+    }
     await expect(
       world
         .host({
-          microvm: async () => ({ execute: async () => ({}) }),
+          microvm: async () => accepting,
           container: { available: async () => true, run: async () => passing },
         })
-        .availability()
+        .availability(TARGET)
     ).resolves.toEqual({ microvm: true, container: true, os: true })
+    // A device-level probe names no workspace, so the microVM tier (which
+    // only runs a workspace it accepted) is not counted.
+    await expect(world.host({ microvm: async () => accepting }).availability()).resolves.toEqual({
+      microvm: false,
+      container: false,
+      os: true,
+    })
+    // An adapter that cannot say whether it takes the workspace, or cannot
+    // read the report back out of the machine, is not a tier for this run.
+    await expect(
+      world.host({ microvm: async () => ({ execute: async () => ({}) }) }).availability(TARGET)
+    ).resolves.toMatchObject({ microvm: false })
+    await expect(
+      world
+        .host({ microvm: async () => ({ ...accepting, readFile: undefined }) })
+        .availability(TARGET)
+    ).resolves.toMatchObject({ microvm: false })
     // Windows has no OS tier: WP-D6's runner refuses `network: "off"` there.
     await expect(world.host({ platform: async () => "windows" }).availability()).resolves.toEqual({
       microvm: false,
@@ -647,8 +681,53 @@ describe("createAcceptanceSandboxHost", () => {
             throw new Error("no platform")
           },
         })
-        .availability()
+        .availability(TARGET)
     ).resolves.toEqual({ microvm: false, container: false, os: false })
+  })
+
+  it("asks the microVM adapter about this worktree, with network off required", async () => {
+    const world = bridges()
+    const asked: unknown[] = []
+    const refusing = world.host({
+      microvm: async () => ({
+        execute: async () => ({}),
+        accepts: async (ownerRef: string, root: string, requirements: unknown) => {
+          asked.push({ ownerRef, root, requirements })
+          return {
+            accepted: false as const,
+            code: "workspace-unavailable" as const,
+            reason: "not an E2B workspace handle",
+          }
+        },
+        readFile: async () => ({ kind: "missing" as const }),
+      }),
+    })
+    await expect(refusing.availability(TARGET)).resolves.toEqual({
+      microvm: false,
+      container: false,
+      os: true,
+    })
+    expect(asked).toEqual([
+      {
+        ownerRef: "router-fusion-delegate:run-1:delegate:verify:1",
+        root: WORKTREE,
+        requirements: { network: "off" },
+      },
+    ])
+    // An adapter that throws while answering is a no, never "assume yes".
+    await expect(
+      world
+        .host({
+          microvm: async () => ({
+            execute: async () => ({}),
+            accepts: async () => {
+              throw new Error("pool is gone")
+            },
+            readFile: async () => ({ kind: "missing" as const }),
+          }),
+        })
+        .availability(TARGET)
+    ).resolves.toMatchObject({ microvm: false })
   })
 
   it("runs the OS tier with the network-off payload and collects the report from the worktree", async () => {
@@ -764,14 +843,28 @@ describe("createAcceptanceSandboxHost", () => {
     ])
   })
 
-  it("runs the microVM tier through the registered adapter and reads the report back", async () => {
+  it("runs the microVM tier through the registered adapter and reads the report inside it", async () => {
     const calls: Array<{ ownerRef: string; argv: string[] }> = []
     const released: string[] = []
+    const reads: Array<{ ownerRef: string; path: string; maxBytes: number; released: boolean }> = []
     const world = bridges()
+    // The host copy of the report must not be what is read: the command wrote
+    // its report inside the machine.
+    world.files.set(`${WORKTREE}/reports/junit.xml`, FAIL_XML)
+    const hostReads: string[] = []
     const outcome = await world
       .host({
+        readReport: async (root: string, relPath: string) => {
+          hostReads.push(`${root}/${relPath}`)
+          return { kind: "ok" as const, content: FAIL_XML }
+        },
         microvm: async () => ({
           preflight: async () => undefined,
+          accepts: async () => ({ accepted: true as const }),
+          readFile: async (ownerRef: string, path: string, maxBytes: number) => {
+            reads.push({ ownerRef, path, maxBytes, released: released.length > 0 })
+            return { kind: "ok" as const, content: PASS_XML }
+          },
           execute: async (ownerRef: string, payload: { command: { argv: string[] } }) => {
             calls.push({ ownerRef, argv: payload.command.argv })
             return {
@@ -792,6 +885,173 @@ describe("createAcceptanceSandboxHost", () => {
     expect(released).toEqual(["router-fusion-delegate:run-1:delegate:verify:1"])
     expect(outcome.report).toEqual({ content: PASS_XML, truncated: false })
     expect(outcome.confinement).toMatchObject({ networkEnforced: true, backend: "microvm" })
+    expect(reads).toEqual([
+      {
+        ownerRef: "router-fusion-delegate:run-1:delegate:verify:1",
+        path: `${WORKTREE}/reports/junit.xml`,
+        maxBytes: ACCEPTANCE_REPORT_MAX_BYTES,
+        released: false,
+      },
+    ])
+    expect(hostReads).toEqual([])
+  })
+
+  it("maps the microVM report read like the host read, and refuses an adapter that cannot read", async () => {
+    const world = bridges()
+    const adapter = (readFile: unknown) => ({
+      preflight: async () => undefined,
+      accepts: async () => ({ accepted: true as const }),
+      readFile,
+      execute: async () => ({
+        exit_code: 1,
+        stdout: "",
+        stderr: "",
+        duration: 1,
+        timed_out: false,
+        confinement: { ...ATTESTED, backend: "e2b", platform: "linux" },
+      }),
+      release: async () => undefined,
+    })
+    await expect(
+      world
+        .host({ microvm: async () => adapter(async () => ({ kind: "too_large" as const })) })
+        .run(spec({ tier: "microvm" }))
+    ).resolves.toMatchObject({ report: { content: null, truncated: true } })
+    await expect(
+      world
+        .host({
+          microvm: async () =>
+            adapter(async () => ({ kind: "refused" as const, code: "workspace-boundary" })),
+        })
+        .run(spec({ tier: "microvm" }))
+    ).resolves.toMatchObject({ report: { content: null, truncated: false } })
+    await expect(
+      world
+        .host({
+          microvm: async () =>
+            adapter(async () => {
+              throw new Error("sandbox gone")
+            }),
+        })
+        .run(spec({ tier: "microvm" }))
+    ).resolves.toMatchObject({ report: { content: null, truncated: false } })
+    await expect(
+      world.host({ microvm: async () => adapter(undefined) }).run(spec({ tier: "microvm" }))
+    ).rejects.toThrow("cannot read the acceptance report")
+  })
+})
+
+describe("acceptance tier selection over a registered microVM adapter", () => {
+  function osHost(microvm: unknown, execs: unknown[] = []) {
+    return createAcceptanceSandboxHost({
+      microvm: async () => microvm as never,
+      osConfined: async () => true,
+      platform: async () => "linux",
+      execOs: async (payload) => {
+        execs.push(payload)
+        return {
+          exit_code: 0,
+          stdout: "2 passed",
+          stderr: "",
+          duration: 1,
+          timed_out: false,
+          confinement: { ...ATTESTED, platform: "linux" },
+        }
+      },
+      readReport: async (root, relPath) =>
+        `${root}/${relPath}` === `${WORKTREE}/packages/api/reports/junit.xml` ||
+        `${root}/${relPath}` === `${WORKTREE}/reports/junit.xml`
+          ? { kind: "ok" as const, content: PASS_XML }
+          : { kind: "missing" as const },
+      container: null,
+    })
+  }
+
+  it("falls back to the next tier when the microVM adapter refuses the local worktree", async () => {
+    const executed: string[] = []
+    const preflighted: string[] = []
+    const execs: unknown[] = []
+    const refusing = {
+      preflight: async (_ownerRef: string, root?: string) => {
+        preflighted.push(root ?? "")
+        throw new Error("The microVM tier runs inside an existing E2B workspace")
+      },
+      accepts: async (_ownerRef: string, root: string) => ({
+        accepted: false as const,
+        code: "workspace-unavailable" as const,
+        reason: `no live E2B workspace exists at ${root}`,
+      }),
+      readFile: async () => ({ kind: "missing" as const }),
+      execute: async (ownerRef: string) => {
+        executed.push(ownerRef)
+        return {}
+      },
+    }
+    const outcome = await acceptancePort(osHost(refusing, execs)).runProfile(request())
+
+    if (outcome.kind !== "report") throw new Error(`expected a report, got ${outcome.kind}`)
+    expect(outcome.report.status).toBe("passed")
+    expect(judgeRuntimeAcceptance(outcome.report, REVISION).tier).toBe<SandboxTier>("os")
+    // The microVM was never started: no preflight, no execute.
+    expect(preflighted).toEqual([])
+    expect(executed).toEqual([])
+    expect(execs).toHaveLength(1)
+  })
+
+  it("uses the microVM tier when the adapter accepts the worktree, reading the report through it", async () => {
+    const execs: unknown[] = []
+    const reads: string[] = []
+    const accepting = {
+      preflight: async () => undefined,
+      accepts: async () => ({ accepted: true as const }),
+      readFile: async (_ownerRef: string, path: string) => {
+        reads.push(path)
+        return { kind: "ok" as const, content: PASS_XML }
+      },
+      execute: async () => ({
+        exit_code: 0,
+        stdout: "2 passed",
+        stderr: "",
+        duration: 1,
+        timed_out: false,
+        confinement: { ...ATTESTED, backend: "e2b", platform: "linux" },
+      }),
+      release: async () => undefined,
+    }
+    const outcome = await acceptancePort(osHost(accepting, execs)).runProfile(request())
+
+    if (outcome.kind !== "report") throw new Error(`expected a report, got ${outcome.kind}`)
+    expect(outcome.report.status).toBe("passed")
+    expect(judgeRuntimeAcceptance(outcome.report, REVISION).tier).toBe<SandboxTier>("microvm")
+    expect(reads).toEqual([`${WORKTREE}/reports/junit.xml`])
+    expect(execs).toEqual([])
+  })
+
+  it("refuses with SANDBOX_UNAVAILABLE when the microVM refuses and no other tier exists", async () => {
+    const host = createAcceptanceSandboxHost({
+      microvm: async () => ({
+        execute: async () => {
+          throw new Error("must not run")
+        },
+        accepts: async () => ({
+          accepted: false as const,
+          code: "workspace-unavailable" as const,
+          reason: "local worktree",
+        }),
+        readFile: async () => ({ kind: "missing" as const }),
+      }),
+      osConfined: async () => false,
+      platform: async () => "linux",
+      execOs: async () => {
+        throw new Error("must not run")
+      },
+      readReport: async () => ({ kind: "missing" as const }),
+      container: null,
+    })
+    await expect(acceptancePort(host).runProfile(request())).resolves.toMatchObject({
+      kind: "refused",
+      code: "SANDBOX_UNAVAILABLE",
+    })
   })
 })
 
@@ -922,5 +1182,37 @@ describe("defaultAcceptanceSandboxHost", () => {
       kind: "refused",
       code: "SANDBOX_UNAVAILABLE",
     })
+  })
+
+  it("forwards the registered adapter's accepts and readFile, so its answer decides the tier", async () => {
+    const { setMicrovmExec, __resetMicrovmBridgeForTesting } =
+      await import("@/lib/sandbox/microvm-bridge")
+    const asked: string[] = []
+    try {
+      setMicrovmExec({
+        execute: async () => ({
+          exit_code: 0,
+          stdout: "",
+          stderr: "",
+          duration: 0,
+          timed_out: false,
+        }),
+        accepts: (_ownerRef, root) => {
+          asked.push(root)
+          return root === WORKTREE
+            ? { accepted: true }
+            : { accepted: false, code: "workspace-unavailable", reason: "not a handle" }
+        },
+        readFile: async () => ({ kind: "missing" }),
+      })
+      const host = defaultAcceptanceSandboxHost()
+      await expect(host.availability(TARGET)).resolves.toMatchObject({ microvm: true })
+      await expect(
+        host.availability({ ...TARGET, worktreeRoot: "/Users/me/checkout" })
+      ).resolves.toMatchObject({ microvm: false })
+      expect(asked).toEqual([WORKTREE, "/Users/me/checkout"])
+    } finally {
+      __resetMicrovmBridgeForTesting()
+    }
   })
 })

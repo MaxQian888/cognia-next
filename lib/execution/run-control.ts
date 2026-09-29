@@ -449,7 +449,11 @@ async function executeRunControlCommandUnlocked(
     }
   }
 
-  const handler = handlers.get(run.kind)
+  // A Router + Fusion approval is answered by the fusion handler whatever
+  // run carries it: an `agentsWorkflows` delegate parks its question on the
+  // workflow or team run that owns the step (ADR-0188 B4), and that kind's
+  // own handler knows nothing about fusion digests.
+  const handler = handlers.get(interrupt?.type === "fusion_approval" ? "fusion" : run.kind)
   if (!handler) return reject(command, "unsupported", run.currentRevision)
   let outcome: void | RunControlHandlerOutcome
   try {

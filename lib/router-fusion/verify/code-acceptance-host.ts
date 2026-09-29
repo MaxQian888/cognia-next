@@ -14,9 +14,13 @@
  *   so a test that writes files cannot touch a person's work, and a report
  *   about v1 cannot be presented for v2 (DEL-03 is then enforced in the
  *   package by `judgeRuntimeAcceptance`).
- * - **It runs in the strongest tier this device has**, microVM → container →
- *   OS sandbox, and the tier is recorded in the report. No tier is
- *   `SANDBOX_UNAVAILABLE`: delegated code is not run unconfined, ever.
+ * - **It runs in the strongest tier that can take this worktree**, microVM →
+ *   container → OS sandbox, and the tier is recorded in the report. A tier
+ *   is eligible only when it can run THIS workspace: a registered microVM
+ *   adapter that only isolates into existing remote workspaces refuses an
+ *   ordinary local worktree through `accepts`, and the next tier is taken.
+ *   No eligible tier is `SANDBOX_UNAVAILABLE`: delegated code is not run
+ *   unconfined, ever.
  * - **With no network and bounded resources** (SAFE-02): the container spec
  *   carries `--network none`, no docker socket, no home or credential mount,
  *   a cpu, memory and pids ceiling and a wall-clock timeout; the OS and
@@ -47,6 +51,7 @@ import {
 } from "@cognia/router-fusion"
 
 import type { ArtifactStore } from "@cognia/router-fusion"
+import type { MicrovmFileRead, MicrovmWorkspaceAcceptance } from "@cognia/plugin-sdk/api/sandbox"
 
 import { normalizeDelegateHostPath } from "../tools/delegate-tool-policy"
 import { WORKSPACE_REVISION_COMMANDS, type ConfinedFileReadAnswer } from "../tools/workspace-patch"
@@ -145,7 +150,15 @@ export interface AcceptanceCommandOutcome {
   confinement?: AcceptanceConfinement | null
 }
 
-/** What a tier can do on this device right now. */
+/** The workspace a run needs a tier for, and the owner ref it will run under. */
+export interface AcceptanceSandboxTarget {
+  runId: string
+  logicalStepId: string
+  /** The staged worktree of the revision under test. */
+  worktreeRoot: string
+}
+
+/** Which tiers can run the target on this device right now. */
 export interface AcceptanceSandboxAvailability {
   microvm: boolean
   container: boolean
@@ -171,14 +184,25 @@ export function confinementSummary(
 }
 
 export interface AcceptanceSandboxHost {
-  availability(): Promise<AcceptanceSandboxAvailability>
+  /**
+   * Which tiers can run THIS target. A tier that is present but cannot take
+   * the workspace is `false`, so selection falls through to the next one
+   * instead of choosing a tier whose run is certain to fail.
+   *
+   * Without a target (a device-level probe such as `hostSandboxTier`) the
+   * microVM tier is `false`: it only runs a workspace it has accepted, and
+   * there is none to ask about, so it is not counted as a tier this device
+   * can offer.
+   */
+  availability(target?: AcceptanceSandboxTarget): Promise<AcceptanceSandboxAvailability>
   run(spec: AcceptanceRunSpec): Promise<AcceptanceCommandOutcome>
 }
 
 /**
- * The strongest tier available, or null. Order is the contract's, strongest
- * first (`SANDBOX_TIERS`), and a tier that reports itself unavailable is
- * skipped rather than tried and fallen back from — a fallback after a failed
+ * The strongest eligible tier, or null. Order is the contract's, strongest
+ * first (`SANDBOX_TIERS`). Eligibility is decided before anything runs — a
+ * tier that is unavailable, or that cannot accept the target workspace, is
+ * skipped rather than tried and fallen back from: a fallback after a failed
  * start would run the same code under weaker isolation than was chosen.
  */
 export function selectSandboxTier(availability: AcceptanceSandboxAvailability): SandboxTier | null {
@@ -479,13 +503,32 @@ export interface AcceptanceContainerRuntime {
   ): Promise<AcceptanceCommandOutcome>
 }
 
+/** The part of a registered microVM adapter the acceptance run drives. */
+export interface AcceptanceMicrovmAdapter {
+  execute: (ownerRef: string, payload: AcceptanceExecPayload) => Promise<AcceptanceExecResult>
+  preflight?: (ownerRef: string, workspaceRoot?: string) => Promise<void> | void
+  /**
+   * Whether the adapter can run this workspace with network off enforced,
+   * without claiming it (`MicrovmExecAdapter.accepts`). An adapter without it
+   * is never chosen: nothing else says whether its preflight will refuse.
+   */
+  accepts?: (
+    ownerRef: string,
+    workspaceRoot: string,
+    requirements: { network: "off" }
+  ) => Promise<MicrovmWorkspaceAcceptance> | MicrovmWorkspaceAcceptance
+  /**
+   * Read the report from inside the machine (`MicrovmExecAdapter.readFile`).
+   * The report is written in the microVM, not on this host, so an adapter
+   * without it cannot produce an acceptance report and is never chosen.
+   */
+  readFile?: (ownerRef: string, path: string, maxBytes: number) => Promise<MicrovmFileRead>
+  release?: (ownerRef: string) => Promise<void> | void
+}
+
 export interface AcceptanceSandboxBridges {
   /** The registered microVM exec adapter (`lib/sandbox/microvm-bridge`), or null. */
-  microvm: () => Promise<{
-    execute: (ownerRef: string, payload: AcceptanceExecPayload) => Promise<AcceptanceExecResult>
-    preflight?: (ownerRef: string, workspaceRoot?: string) => Promise<void> | void
-    release?: (ownerRef: string) => Promise<void> | void
-  } | null>
+  microvm: () => Promise<AcceptanceMicrovmAdapter | null>
   /** Whether this device's OS sandbox is actively confining (`runtime-availability`). */
   osConfined: () => Promise<boolean>
   /**
@@ -507,22 +550,37 @@ export interface AcceptanceSandboxBridges {
 /** Platforms whose OS tier can enforce "no network" (WP-D6). */
 export const OS_TIER_PLATFORMS: ReadonlySet<string> = new Set(["macos", "darwin", "linux"])
 
-function ownerRefFor(spec: AcceptanceRunSpec): string {
-  return `router-fusion-delegate:${spec.runId}:${spec.logicalStepId}`
+function ownerRefFor(target: { runId: string; logicalStepId: string }): string {
+  return `router-fusion-delegate:${target.runId}:${target.logicalStepId}`
+}
+
+/**
+ * Whether the registered microVM adapter can run this target. Every doubt is
+ * a no: an adapter that cannot say, cannot read the report back, refuses the
+ * workspace or throws while answering is not a tier for this run.
+ */
+async function microvmAccepts(
+  adapter: AcceptanceMicrovmAdapter | null,
+  target: AcceptanceSandboxTarget | undefined
+): Promise<boolean> {
+  if (!target || !adapter?.accepts || !adapter.readFile) return false
+  try {
+    const answer = await adapter.accepts(ownerRefFor(target), target.worktreeRoot, {
+      network: "off",
+    })
+    return answer.accepted === true
+  } catch {
+    return false
+  }
 }
 
 /** The acceptance sandbox over this device's tiers. Every bridge is injected. */
 export function createAcceptanceSandboxHost(
   bridges: AcceptanceSandboxBridges
 ): AcceptanceSandboxHost {
-  const readReport = async (
-    root: string,
-    relPath: string,
-    maxBytes: number
-  ): Promise<{ content: string | null; truncated: boolean }> => {
-    const read = await bridges
-      .readReport(root, relPath, maxBytes)
-      .catch((): AcceptanceReportRead => ({ kind: "missing" }))
+  const collected = (
+    read: AcceptanceReportRead
+  ): { content: string | null; truncated: boolean } => {
     switch (read.kind) {
       case "ok":
         return { content: read.content, truncated: false }
@@ -535,6 +593,17 @@ export function createAcceptanceSandboxHost(
         return { content: null, truncated: false }
     }
   }
+
+  const readReport = async (
+    root: string,
+    relPath: string,
+    maxBytes: number
+  ): Promise<{ content: string | null; truncated: boolean }> =>
+    collected(
+      await bridges
+        .readReport(root, relPath, maxBytes)
+        .catch((): AcceptanceReportRead => ({ kind: "missing" }))
+    )
 
   const confinementOf = (
     tier: SandboxTier,
@@ -581,10 +650,10 @@ export function createAcceptanceSandboxHost(
   }
 
   return {
-    async availability(): Promise<AcceptanceSandboxAvailability> {
+    async availability(target?: AcceptanceSandboxTarget): Promise<AcceptanceSandboxAvailability> {
       const [microvm, container, osConfined, platform] = await Promise.all([
         bridges.microvm().then(
-          (adapter) => adapter !== null,
+          (adapter) => microvmAccepts(adapter, target),
           () => false
         ),
         bridges.container?.available().catch(() => false) ?? Promise.resolve(false),
@@ -627,17 +696,21 @@ export function createAcceptanceSandboxHost(
 
       const adapter = await bridges.microvm()
       if (!adapter) throw new Error("no microVM exec adapter is registered")
+      const readFile = adapter.readFile
+      if (!readFile) {
+        throw new Error("the microVM exec adapter cannot read the acceptance report back")
+      }
       const ownerRef = ownerRefFor(spec)
       try {
         await adapter.preflight?.(ownerRef, spec.worktreeRoot)
         const result = await adapter.execute(ownerRef, payload)
-        // The report lives inside the microVM, and the same guarded read runs
-        // there: WP-D6's `read_report_file` on the worktree root.
-        return execOutcome(
-          "microvm",
-          result,
-          await readReport(spec.worktreeRoot, spec.reportPath, spec.reportMaxBytes)
-        )
+        // The report was written inside the microVM, so it is read there,
+        // through the adapter and before the release, at the same path the
+        // command ran under. The host path would be a different file, or none.
+        const read = await readFile
+          .call(adapter, ownerRef, `${spec.worktreeRoot}/${spec.reportPath}`, spec.reportMaxBytes)
+          .catch((): MicrovmFileRead => ({ kind: "missing" }))
+        return execOutcome("microvm", result, collected(read))
       } finally {
         await adapter.release?.(ownerRef)
       }
@@ -673,6 +746,18 @@ export function defaultAcceptanceSandboxHost(
               ? {
                   preflight: (ownerRef: string, root?: string) =>
                     adapter.preflight!(ownerRef, root),
+                }
+              : {}),
+            ...(adapter.accepts
+              ? {
+                  accepts: (ownerRef: string, root: string, requirements: { network: "off" }) =>
+                    adapter.accepts!(ownerRef, root, requirements),
+                }
+              : {}),
+            ...(adapter.readFile
+              ? {
+                  readFile: (ownerRef: string, path: string, maxBytes: number) =>
+                    adapter.readFile!(ownerRef, path, maxBytes),
                 }
               : {}),
             ...(adapter.release
@@ -968,7 +1053,11 @@ export function createDelegateAcceptancePort(input: DelegateAcceptancePortInput)
 
       let availability: AcceptanceSandboxAvailability
       try {
-        availability = await input.sandbox.availability()
+        availability = await input.sandbox.availability({
+          runId: request.runId,
+          logicalStepId: request.logicalStepId,
+          worktreeRoot,
+        })
       } catch (error) {
         return refused(
           "SANDBOX_UNAVAILABLE",
@@ -985,7 +1074,7 @@ export function createDelegateAcceptancePort(input: DelegateAcceptancePortInput)
       if (!tier) {
         return refused(
           "SANDBOX_UNAVAILABLE",
-          "this device has no microVM, container or OS sandbox, and delegated code is not run unconfined"
+          "no microVM, container or OS sandbox on this device can run this worktree, and delegated code is not run unconfined"
         )
       }
 

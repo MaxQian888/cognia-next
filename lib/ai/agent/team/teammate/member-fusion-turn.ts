@@ -21,6 +21,12 @@
  *    so the one accounting authority books it against that child — the run's
  *    step reservation at team level — instead of a second root budget.
  *
+ * A `delegate` member works in the TEAM's project: the picker allows it only
+ * when that project has a checkout, and this module asks the same question of
+ * the same project before anything is spent (`fusionWorkspaceRootOf`), so the
+ * two cannot disagree. A delegate turn that parks on a person raises its
+ * approval on the team run's execution run and waits for the answer.
+ *
  * Returns `null` when the member asked for nothing (or the `agentsWorkflows`
  * surface is off), and the caller runs the channel it always ran.
  */
@@ -28,9 +34,13 @@
 import type { AgentTeammate } from "@/types/agent/agent-team"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import {
+  delegateDeliveryOf,
   fusionActionRequested,
+  fusionWorkspaceRootOf,
   runExplicitAgentFusionTurn,
+  validateFusionActionChoice,
   type ExplicitFusionTurnInput,
+  type FusionActionIssue,
 } from "@/lib/router-fusion/gate/explicit-run"
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 
@@ -54,6 +64,14 @@ export interface MemberFusionTurnInput {
   settings?: ExplicitFusionTurnInput["settings"]
   /** Test seam. */
   loadHost?: ExplicitFusionTurnInput["loadHost"]
+  /** Test seam: the checkout of a project (`fusionWorkspaceRootOf`). */
+  workspaceRootOf?: (projectId: string | null) => Promise<string | null>
+}
+
+/** The refusal code each configuration issue is reported with. */
+const ISSUE_CODE: Record<Exclude<FusionActionIssue, "surfaceOff">, string> = {
+  modeDormant: "FUSION_MODE_UNAVAILABLE",
+  workspaceRequired: "WORKSPACE_REQUIRED",
 }
 
 export type MemberFusionTurn = { text: string; usage?: TokenUsage }
@@ -74,6 +92,25 @@ export async function runMemberFusionTurn(
     (await (
       await import("@/lib/router-fusion/gate/current-settings")
     ).currentRouterFusionGateSettings())
+  const projectId = input.projectId ?? null
+  // Only a delegate member needs a checkout, so only it pays for the lookup.
+  const projectRoot =
+    action === "delegate" ? await (input.workspaceRootOf ?? fusionWorkspaceRootOf)(projectId) : null
+  const issue = validateFusionActionChoice({
+    action,
+    settings,
+    hasWorkspace: action === "delegate" ? projectRoot !== null : true,
+  })
+  // D37: a switched-off surface is the member's ordinary channel, unchanged.
+  if (issue === "surfaceOff") return null
+  if (issue) {
+    throw new RouterFusionRefusalError(
+      ISSUE_CODE[issue],
+      `Router + Fusion cannot run ${input.teammate.name}'s ${action} turn: ${ISSUE_CODE[issue]}`,
+      { reasons: [`config:${issue}`], teammateId: input.teammate.id, taskId: input.taskId }
+    )
+  }
+  const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
   const outcome = await runExplicitAgentFusionTurn({
     mode: action,
     origin: "agent",
@@ -84,8 +121,15 @@ export async function runMemberFusionTurn(
         : []),
       { role: "user" as const, content: input.prompt.trim() || "(no text)" },
     ],
-    workspaceId: input.projectId ?? null,
-    workspaceRoot: input.workingDir ?? null,
+    workspaceId: projectId,
+    // A panel may read the dispatch's own directory; a delegate works in the
+    // project's checkout, which the route resolves from `workspaceId`.
+    workspaceRoot: input.workingDir ?? projectRoot,
+    // A parked delegate asks its question on the team run the cockpit shows.
+    parentExecutionRunId: agentTeamExecutionRunId(input.runId),
+    ...(action === "delegate"
+      ? { delegateDelivery: delegateDeliveryOf(input.teammate.config?.fusionDelegateDelivery) }
+      : {}),
     // Every member turn of one team run shares the run's scope, so a member
     // dispatched from inside a fusion run is refused with FUSION_RECURSION
     // rather than nesting one orchestrated run inside another (INV-09).

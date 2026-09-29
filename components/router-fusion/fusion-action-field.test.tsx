@@ -8,6 +8,7 @@ import type { AppSettings } from "@cognia/agent-config-types"
 
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
+import type { Project } from "@/types"
 
 import { FusionActionField } from "./fusion-action-field"
 
@@ -15,9 +16,20 @@ function setSettings(routerFusion: unknown): void {
   useSettingsStore.setState({ settings: { routerFusion } as unknown as AppSettings })
 }
 
+function project(id: string, root: string | null): Project {
+  return {
+    id,
+    name: id,
+    roots: root ? [{ path: root, isPrimary: true }] : [],
+  } as unknown as Project
+}
+
 beforeEach(() => {
   setSettings({ enabled: true, surfaces: { agentsWorkflows: true } })
-  useProjectStore.setState({ activeProjectId: "project-1" })
+  useProjectStore.setState({
+    activeProjectId: "project-1",
+    projects: [project("project-1", "/repo/one"), project("project-empty", null)],
+  })
 })
 
 describe("FusionActionField", () => {
@@ -41,7 +53,7 @@ describe("FusionActionField", () => {
   it("disables delegate, with the reason, when there is no workspace", async () => {
     useProjectStore.setState({ activeProjectId: null })
     render(<FusionActionField id="f" value="delegate" onChange={jest.fn()} />)
-    expect(screen.getByRole("alert")).toHaveTextContent(/needs a workspace/)
+    expect(screen.getByRole("alert")).toHaveTextContent(/needs a project with a folder/)
     await userEvent.click(screen.getByTestId("fusion-action-trigger"))
     expect(screen.getByRole("option", { name: /Delegate/ })).toHaveAttribute(
       "aria-disabled",
@@ -73,14 +85,55 @@ describe("FusionActionField", () => {
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
-  it("takes the workspace from the caller when it names one", () => {
+  it("does not count a project without a folder as a workspace", async () => {
+    // The runtime asks the same thing of the same project: its primary root.
+    useProjectStore.setState({ activeProjectId: "project-empty" })
+    render(<FusionActionField id="f" value="delegate" onChange={jest.fn()} />)
+    expect(screen.getByRole("alert")).toHaveTextContent(/needs a project with a folder/)
+  })
+
+  it("takes the project from the caller when it names one", () => {
     useProjectStore.setState({ activeProjectId: null })
     const { rerender } = render(
-      <FusionActionField id="f" value="panel" onChange={jest.fn()} hasWorkspace />
+      <FusionActionField id="f" value="delegate" onChange={jest.fn()} projectId="project-1" />
     )
     expect(screen.queryByRole("alert")).toBeNull()
-    rerender(<FusionActionField id="f" value="panel" onChange={jest.fn()} hasWorkspace={false} />)
-    // `panel` needs no workspace, so neither reading refuses it.
+    // A caller with no project at all does not fall back to the active one.
+    useProjectStore.setState({ activeProjectId: "project-1" })
+    rerender(<FusionActionField id="f" value="delegate" onChange={jest.fn()} projectId={null} />)
+    expect(screen.getByRole("alert")).toHaveTextContent(/needs a project with a folder/)
+    // `panel` needs no workspace, so it is never refused for want of one.
+    rerender(<FusionActionField id="f" value="panel" onChange={jest.fn()} projectId={null} />)
     expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("offers the delegate delivery only for delegate, defaulting to a patch", async () => {
+    const onDeliveryChange = jest.fn()
+    const { rerender } = render(
+      <FusionActionField
+        id="f"
+        value="panel"
+        onChange={jest.fn()}
+        onDeliveryChange={onDeliveryChange}
+      />
+    )
+    expect(screen.queryByTestId("fusion-delivery-trigger")).toBeNull()
+    rerender(
+      <FusionActionField
+        id="f"
+        value="delegate"
+        onChange={jest.fn()}
+        onDeliveryChange={onDeliveryChange}
+      />
+    )
+    expect(screen.getByTestId("fusion-delivery-trigger")).toHaveTextContent("Patch only")
+    await userEvent.click(screen.getByTestId("fusion-delivery-trigger"))
+    await userEvent.click(screen.getByRole("option", { name: "Apply to workspace" }))
+    expect(onDeliveryChange).toHaveBeenCalledWith("workspace_updated")
+  })
+
+  it("shows no delivery choice for a host that does not store one", () => {
+    render(<FusionActionField id="f" value="delegate" onChange={jest.fn()} />)
+    expect(screen.queryByTestId("fusion-delivery-trigger")).toBeNull()
   })
 })

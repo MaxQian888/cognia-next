@@ -26,16 +26,30 @@ import { loadRouterFusionHost, type RouterFusionHost } from "./load-engine"
  * `projectedOriginOf` in `db/ledger-store.ts`): Run API runs (`gateway-api`
  * rows), chat cascade and panel runs (`local` rows, B3) and companion runs
  * (`local` rows too, B4 — a paired device is the same person at another
- * screen). Every other Router + Fusion run is stopped through the engine that
- * owns it.
+ * screen).
  */
 export const PROJECTED_RUN_SURFACES = ["gatewayRuns", "chat", "companion"] as const
-export type ProjectedRunSurface = (typeof PROJECTED_RUN_SURFACES)[number]
+
+/**
+ * Every surface whose runs the cockpit controls through this module: the
+ * projected ones, plus `agentsWorkflows`.
+ *
+ * An `agentsWorkflows` run (a workflow node's, a Squad member's) is NOT a row
+ * of its own — the workflow or team run that owns the step already is one —
+ * but a delegate among them can park on a person. Its `fusion_approval`
+ * interrupt rides on that owner's execution run, and approve / deny reach
+ * {@link decideRouterFusionApproval} from there, gated by the
+ * `agentsWorkflows` switch. Stopping one is stopping its owner: the caller's
+ * signal cancels the run. Every other Router + Fusion run is controlled
+ * through the engine that owns it.
+ */
+export const CONTROLLED_RUN_SURFACES = [...PROJECTED_RUN_SURFACES, "agentsWorkflows"] as const
+export type ControlledRunSurface = (typeof CONTROLLED_RUN_SURFACES)[number]
 
 export interface CancelRouterFusionRunDeps {
   settings: RouterFusionGateSettings | null | undefined
   /** The surface the run belongs to; a Run API run when omitted. */
-  surface?: ProjectedRunSurface
+  surface?: ControlledRunSurface
   /** Test seam. */
   loadHost?: () => Promise<RouterFusionHost>
 }
@@ -60,8 +74,8 @@ export async function projectedRunSurfaceOf(
     settings: RouterFusionGateSettings | null | undefined
     loadHost?: () => Promise<RouterFusionHost>
   }
-): Promise<ProjectedRunSurface | null> {
-  const readable = PROJECTED_RUN_SURFACES.some(
+): Promise<ControlledRunSurface | null> {
+  const readable = CONTROLLED_RUN_SURFACES.some(
     (surface) => routerFusionGate(deps.settings, surface) === "on"
   )
   if (!readable) return null
@@ -70,8 +84,8 @@ export async function projectedRunSurfaceOf(
     const store = await host.currentFusionStore()
     const run = await store.getRun(runId)
     const surface = run?.surface
-    return surface && (PROJECTED_RUN_SURFACES as readonly string[]).includes(surface)
-      ? (surface as ProjectedRunSurface)
+    return surface && (CONTROLLED_RUN_SURFACES as readonly string[]).includes(surface)
+      ? (surface as ControlledRunSurface)
       : null
   } catch {
     // Reading which surface a run belongs to is a hint, not the control. A
@@ -145,7 +159,7 @@ export async function decideRouterFusionApproval(
     throw new Error("Router + Fusion runs are switched off for this host")
   }
   const load = deps.loadHost ?? loadRouterFusionHost
-  await runExplicitFusion<void>({
+  const refusal = await runExplicitFusion<string | null>({
     surface,
     threshold: breakerThresholdOf(deps.settings),
     fusion: async () => {
@@ -157,20 +171,27 @@ export async function decideRouterFusionApproval(
         approvalId: deps.interruptId ?? null,
         decision,
       })
-      if (!outcome.ok) {
-        // A refusal the person can act on, not a silent no-op: the control
-        // plane turns a throw into `source_rejected` with this message.
-        throw new Error(`the decision was refused: ${outcome.code}`)
-      }
+      // A refusal is an answer about the run, not a fault of the engine: it
+      // is reported below, OUTSIDE the guard, so a stale decision never
+      // counts towards the surface's breaker.
+      if (!outcome.ok) return outcome.code
       // The resumed run must be driven by something; the cockpit is not a
       // worker. `run-driver.ts` takes the lease and carries on from the
-      // journal, replaying the steps that already happened.
+      // journal, replaying the steps that already happened. A caller that
+      // drives its own run (an `agentsWorkflows` step waiting on this very
+      // decision) holds the driver, so this joins nothing for it.
       if (deps.drive) deps.drive(runId)
       else {
         const { liveSettingsReader } = await import("../calls/live-settings")
         host.driveRun(runId, liveSettingsReader(null))
       }
       await host.drainAccountOutbox(store).catch(() => undefined)
+      return null
     },
   })
+  if (refusal) {
+    // A refusal the person can act on, not a silent no-op: the control plane
+    // turns a throw into `source_rejected` with this message.
+    throw new Error(`the decision was refused: ${refusal}`)
+  }
 }

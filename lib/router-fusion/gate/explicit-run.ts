@@ -14,8 +14,10 @@
  *   surface off       → `{ kind: "skipped" }` as well (D37).
  *   surface tripped   → `RouterFusionUnavailableError`. Explicitly chosen fusion
  *                       work is never answered by something else (§2.1.3, D38).
- *   dormant mode      → a refusal with `FUSION_MODE_UNAVAILABLE`; `delegate` is
- *                       offered but inert until WP-D4 wires its sandbox.
+ *   dormant mode      → a refusal with `FUSION_MODE_UNAVAILABLE` for a mode
+ *                       listed in `FUSION_ACTION_CHOICES` but not in
+ *                       `WIRED_FUSION_ACTION_MODES`. There is none today:
+ *                       `delegate` has run since WP-D4 wired its sandbox.
  *   otherwise         → the run, through `runExplicitFusion`: an infrastructure
  *                       fault becomes `ROUTER_FUSION_UNAVAILABLE` and counts
  *                       towards the surface breaker; a refusal is a value.
@@ -138,6 +140,45 @@ export function validateFusionActionChoice(input: {
   return null
 }
 
+/**
+ * How a `delegate` choice delivers its verified change
+ * (`FusionRunRow.delegateDelivery`). `patch_only` — the default, and what an
+ * unset or unknown value reads as — hands back a patch and leaves the
+ * checkout alone. `workspace_updated` writes the patch into the project's
+ * checkout, but only after a person approves exactly that patch on exactly
+ * that base (a `workspace_apply` approval, DEL-04).
+ */
+export const DELEGATE_DELIVERY_CHOICES = ["patch_only", "workspace_updated"] as const
+export type DelegateDeliveryChoice = (typeof DELEGATE_DELIVERY_CHOICES)[number]
+
+export function delegateDeliveryOf(value: unknown): DelegateDeliveryChoice {
+  return value === "workspace_updated" ? "workspace_updated" : "patch_only"
+}
+
+/**
+ * The checkout a `delegate` choice would work in, for a caller attributed to
+ * `projectId`: that project's primary root, or null when it has none.
+ *
+ * This is THE answer to "does this caller have a workspace for delegate" —
+ * the pickers ask it (synchronously, of the project row they already hold,
+ * through the same `approvalKeyFor`) and the runtime asks it here before it
+ * spends anything. It is the same root the router stages from and approves
+ * the acceptance profile against (`routing/delegate-capabilities.ts`), so a
+ * choice the picker allowed is a choice the run can execute. Loaded only when
+ * a delegate choice is actually being validated.
+ */
+export async function fusionWorkspaceRootOf(
+  projectId: string | null | undefined
+): Promise<string | null> {
+  if (!projectId) return null
+  try {
+    const { delegateProjectRoot } = await import("../routing/delegate-capabilities")
+    return await delegateProjectRoot(projectId)
+  } catch {
+    return null
+  }
+}
+
 /** Whether a stored choice asks for a fusion run at all (one property read). */
 export function fusionActionRequested(value: unknown): value is FusionActionMode {
   return isFusionActionChoice(value) && value !== "auto"
@@ -191,6 +232,13 @@ export interface ExplicitFusionTurnInput {
   jsonSchema?: Record<string, unknown> | null
   workspaceId?: string | null
   workspaceRoot?: string | null
+  /**
+   * The execution run the caller's work belongs to, where a parked delegate
+   * run raises its approval (see `AgentFusionRunInput.parentExecutionRunId`).
+   */
+  parentExecutionRunId?: string | null
+  /** How a delegate run delivers its change; `patch_only` when omitted. */
+  delegateDelivery?: DelegateDeliveryChoice
   /**
    * The conversation or run this turn belongs to. Turns that share a scope
    * nest: one started while the scope already runs a fusion turn has a fusion
@@ -253,6 +301,8 @@ export async function runExplicitAgentFusionTurn(
           jsonSchema: input.jsonSchema ?? null,
           workspaceId: input.workspaceId ?? null,
           workspaceRoot: input.workspaceRoot ?? null,
+          parentExecutionRunId: input.parentExecutionRunId ?? null,
+          ...(input.delegateDelivery ? { delegateDelivery: input.delegateDelivery } : {}),
           hasFusionAncestor,
           // Every caller hands the gate the full account settings; the gate type
           // only names the part it reads.

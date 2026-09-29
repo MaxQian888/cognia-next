@@ -3,9 +3,12 @@ import {
   idempotencyRequestHash,
   isVirtualRouterModel,
   parseChatCompatRequest,
+  parseRunApiRequest,
   parseRunRequest,
+  RUN_REQUEST_EXTENSION_FIELD,
   type RunRequestPolicy,
 } from "./request-rules"
+import { RunRequestSchema } from "../contracts/schemas"
 
 const POLICY: RunRequestPolicy = {
   trackedBudgetEnabled: true,
@@ -176,5 +179,79 @@ describe("chat compat subset", () => {
       ok: false,
       issues: [{ code: "SCHEMA_INVALID" }],
     })
+  })
+})
+
+describe("parseRunApiRequest (Cognia's x-cognia extension)", () => {
+  const delegate = (extension?: unknown) => ({
+    ...runBody({
+      mode: "delegate",
+      allowed_modes: ["delegate"],
+      workspace_id: "66666666-6666-4666-8666-666666666666",
+      acceptance_profile_id: "tests",
+      budget: { max_cost_usd: "1.000000", mode: "strict" },
+    }),
+    ...(extension !== undefined ? { [RUN_REQUEST_EXTENSION_FIELD]: extension } : {}),
+  })
+
+  it("keeps the vendored contract strict: the field is not part of RunRequest", () => {
+    expect(RunRequestSchema.safeParse(delegate({ delegate_delivery: "patch_only" })).success).toBe(
+      false
+    )
+    expect(parseRunRequest(delegate({ delegate_delivery: "patch_only" }), POLICY)).toMatchObject({
+      ok: false,
+      issues: [{ code: "UNSUPPORTED_PARAMETER" }],
+    })
+  })
+
+  it("parses the contract request and the extension beside it", () => {
+    const parsed = parseRunApiRequest(delegate({ delegate_delivery: "workspace_updated" }), POLICY)
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { extension: { delegate_delivery: "workspace_updated" } },
+    })
+    if (parsed.ok) expect(parsed.value.request).not.toHaveProperty(RUN_REQUEST_EXTENSION_FIELD)
+  })
+
+  it("reads a body without the field as exactly a contract request", () => {
+    const parsed = parseRunApiRequest(delegate(), POLICY)
+    expect(parsed).toMatchObject({ ok: true, value: { extension: {} } })
+    expect(parseRunApiRequest(runBody({ unknown: 1 }), POLICY)).toEqual(
+      parseRunRequest(runBody({ unknown: 1 }), POLICY)
+    )
+  })
+
+  it("refuses an unknown option and an unknown delivery", () => {
+    expect(parseRunApiRequest(delegate({ push: true }), POLICY)).toMatchObject({
+      ok: false,
+      issues: [{ code: "UNSUPPORTED_PARAMETER", details: { fields: ["x-cognia.push"] } }],
+    })
+    expect(parseRunApiRequest(delegate({ delegate_delivery: "overwrite" }), POLICY)).toMatchObject({
+      ok: false,
+      issues: [{ code: "SCHEMA_INVALID" }],
+    })
+    expect(parseRunApiRequest(delegate("workspace_updated"), POLICY)).toMatchObject({
+      ok: false,
+      issues: [{ code: "SCHEMA_INVALID" }],
+    })
+  })
+
+  it("refuses a workspace delivery on a request that can never run delegate", () => {
+    expect(
+      parseRunApiRequest(
+        { ...runBody(), [RUN_REQUEST_EXTENSION_FIELD]: { delegate_delivery: "workspace_updated" } },
+        POLICY
+      )
+    ).toMatchObject({ ok: false, issues: [{ code: "UNSUPPORTED_PARAMETER" }] })
+    // `auto` that allows delegate may end up there, so it may ask.
+    expect(
+      parseRunApiRequest(
+        {
+          ...runBody({ mode: "auto", allowed_modes: ["panel", "delegate"] }),
+          [RUN_REQUEST_EXTENSION_FIELD]: { delegate_delivery: "workspace_updated" },
+        },
+        POLICY
+      )
+    ).toMatchObject({ ok: true })
   })
 })

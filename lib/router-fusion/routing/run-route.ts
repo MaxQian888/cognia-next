@@ -123,28 +123,25 @@ export type RunRoute =
   | ChatRouteRefusal
 
 /**
- * Profiles this host can produce for a Run API run.
+ * Profiles this host's answer verifier can produce for a Run API run.
  *
- * `code_fixture` is offered only when this device can BOTH confine the command
- * and find an approved one to run (B4): a profile with no runtime verifier can
- * only ever be inconclusive, and offering it would let the router pick an
- * action it cannot accept.
+ * `code_fixture` is never offered here. It is the profile of two actions:
+ * `delegate_code`, whose check is the delegate workflow's own acceptance
+ * runner (the router gates it on `sandboxTier` / `acceptanceProfileAvailable`,
+ * not on this list), and `cascade_code`, whose check would need a runtime
+ * verifier in the answer verifier (`AnswerVerifierPorts.runtimeVerifier`).
+ * No host supplies one, so `code_fixture` here could only ever come back
+ * inconclusive — and offering it would let `auto` pick `cascade_code` for a
+ * request it cannot accept. `cascade_code` is therefore dormant by design:
+ * documented here and at `HostCapabilities.verifierProfiles`, labelled "Not
+ * chosen yet" in the action catalog, and pinned by `run-route.test.ts`.
  */
-export function runVerifierProfiles(
-  jsonSchema: Record<string, unknown> | null,
-  delegate: Pick<
-    DelegateCapabilities,
-    "sandboxTier" | "acceptanceProfileAvailable"
-  > = DELEGATE_UNAVAILABLE
-): VerifierProfile[] {
+export function runVerifierProfiles(jsonSchema: Record<string, unknown> | null): VerifierProfile[] {
   return [
     "text_basic",
     "text_review",
     "evidence_review",
     ...(jsonSchema ? (["schema_fixture"] as VerifierProfile[]) : []),
-    ...(delegate.sandboxTier !== null && delegate.acceptanceProfileAvailable
-      ? (["code_fixture"] as VerifierProfile[])
-      : []),
   ]
 }
 
@@ -327,7 +324,7 @@ export async function routeRunRequest(
     capabilities: {
       sandboxTier: delegate.sandboxTier,
       acceptanceProfileAvailable: delegate.acceptanceProfileAvailable,
-      verifierProfiles: runVerifierProfiles(input.jsonSchema, delegate),
+      verifierProfiles: runVerifierProfiles(input.jsonSchema),
       webToolsAvailable: input.webToolsAvailable,
     },
   }

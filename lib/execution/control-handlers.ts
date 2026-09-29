@@ -1,9 +1,14 @@
 import { adoptExecutionRun, getExecutionRun, listChildExecutionRuns } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
-import type { ExecutionRun, ExecutionRunStatus, RunControlCommand } from "@/types/execution/run"
+import {
+  fusionApprovalRunIdOf,
+  type ExecutionRun,
+  type ExecutionRunStatus,
+  type RunControlCommand,
+} from "@/types/execution/run"
 // Type-only: erased at build time, so the gate boundary is untouched and no
 // Router + Fusion code is loaded on the off path.
-import type { ProjectedRunSurface } from "@/lib/router-fusion/gate/run-control"
+import type { ControlledRunSurface } from "@/lib/router-fusion/gate/run-control"
 import {
   registerRunControlHandler,
   type RunControlHandler,
@@ -80,7 +85,7 @@ export interface ExecutionRunControlHandlerDeps {
    * direct call so a test can drive the handler without the fusion engine, and
    * so this shared module keeps its ONE Router + Fusion import at the gate.
    */
-  cancelRouterFusionRun?: (runId: string, surface: ProjectedRunSurface) => Promise<boolean>
+  cancelRouterFusionRun?: (runId: string, surface: ControlledRunSurface) => Promise<boolean>
   /**
    * Answer the approval a parked Router + Fusion delegate run is waiting on
    * (ADR-0188 B4). The interrupt id IS the approval's, derived from the
@@ -89,14 +94,14 @@ export interface ExecutionRunControlHandlerDeps {
   decideRouterFusionApproval?: (
     runId: string,
     decision: "approve" | "deny",
-    input: { surface: ProjectedRunSurface; interruptId?: string }
+    input: { surface: ControlledRunSurface; interruptId?: string }
   ) => Promise<void>
   /**
    * Which surface a projected fusion run belongs to. Two of them project as
    * `local` — a chat cascade/panel and a companion run — and they are gated by
    * different switches, so the origin alone cannot say.
    */
-  routerFusionRunSurface?: (runId: string) => Promise<ProjectedRunSurface | null>
+  routerFusionRunSurface?: (runId: string) => Promise<ControlledRunSurface | null>
 }
 
 /**
@@ -641,16 +646,32 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
    * external Run API asked for (`origin: "gateway-api"`), or a chat cascade or
    * panel (`origin: "local"`).
    *
-   * Stop only, which is what `allowedActions` already offers for the kind:
-   * there is no live input lane to steer, no coordinator to pause, and a retry
-   * is a new `POST /v1/runs` with its own idempotency key rather than a second
-   * life for this one.
+   * Stop, and approve / deny of a parked delegate run, which is what
+   * `allowedActions` offers for the kind: there is no live input lane to
+   * steer, no coordinator to pause, and a retry is a new `POST /v1/runs` with
+   * its own idempotency key rather than a second life for this one.
+   *
+   * It also answers every `fusion_approval` interrupt raised on ANOTHER
+   * kind's run: an `agentsWorkflows` delegate (a workflow node, a Squad
+   * member) parks its question on the workflow or team run that owns the
+   * step, and the control gate routes that interrupt here. The fusion run it
+   * approves is the one the interrupt names (`fusionApprovalRunIdOf`).
    */
   const fusion: RunControlHandler = async (command) => {
     if (command.action === "open_details") return
     if (command.action !== "stop" && command.action !== "approve" && command.action !== "deny") {
       throw new UnsupportedForKindError(command.action, "fusion")
     }
+    // The fusion run this command is about: the row's own for a projected
+    // run, the one the interrupt names for a decision raised on its caller.
+    const approvalInterrupt =
+      (command.action === "approve" || command.action === "deny") && command.interruptId
+        ? await getDb().executionRunInterrupts.get(command.interruptId)
+        : undefined
+    const fusionRunId =
+      approvalInterrupt?.type === "fusion_approval"
+        ? fusionApprovalRunIdOf(approvalInterrupt)
+        : command.runId
     // The run's own surface wins over the projected origin: `chat` and
     // `companion` both project as `local` and are gated by different switches,
     // so guessing from the origin would check the wrong one. The origin is the
@@ -664,16 +685,20 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
         ])
         return projectedRunSurfaceOf(runId, { settings: await currentRouterFusionGateSettings() })
       })
-    const surface: ProjectedRunSurface =
-      (await resolveSurface(command.runId)) ??
-      ((await getExecutionRun(command.runId))?.origin === "local" ? "chat" : "gatewayRuns")
+    const surface: ControlledRunSurface =
+      (await resolveSurface(fusionRunId)) ??
+      (fusionRunId !== command.runId
+        ? "agentsWorkflows"
+        : (await getExecutionRun(command.runId))?.origin === "local"
+          ? "chat"
+          : "gatewayRuns")
     if (command.action === "approve" || command.action === "deny") {
       const decide =
         deps.decideRouterFusionApproval ??
         (async (
           runId: string,
           decision: "approve" | "deny",
-          input: { surface: ProjectedRunSurface; interruptId?: string }
+          input: { surface: ControlledRunSurface; interruptId?: string }
         ) => {
           const [{ decideRouterFusionApproval }, { currentRouterFusionGateSettings }] =
             await Promise.all([
@@ -686,7 +711,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
             ...(input.interruptId ? { interruptId: input.interruptId } : {}),
           })
         })
-      await decide(command.runId, command.action, {
+      await decide(fusionRunId, command.action, {
         surface,
         ...(command.interruptId ? { interruptId: command.interruptId } : {}),
       })
@@ -694,7 +719,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     }
     const cancel =
       deps.cancelRouterFusionRun ??
-      (async (runId: string, runSurface: ProjectedRunSurface) => {
+      (async (runId: string, runSurface: ControlledRunSurface) => {
         const [{ cancelRouterFusionRun }, { currentRouterFusionGateSettings }] = await Promise.all([
           import("@/lib/router-fusion/gate/run-control"),
           import("@/lib/router-fusion/gate/current-settings"),

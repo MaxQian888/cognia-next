@@ -135,6 +135,21 @@ describe("RouterFusionActionCatalog", () => {
     expect(screen.queryByTestId("router-fusion-action-check-dormant-cascade_code")).toBeNull()
   })
 
+  it("opens a delegate action's editor with its code check described, not dormant", async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByRole("button", { name: "Edit delegate_code" }))
+    const editor = screen.getByTestId("router-fusion-action-editor-delegate_code")
+    // `code_fixture` is the one check a delegate action may carry, and the
+    // delegate workflow's acceptance runner is what runs it.
+    expect(within(editor).getByRole("combobox", { name: "Verified by" })).toHaveTextContent(
+      "Code tests"
+    )
+    expect(editor).toHaveTextContent("approved test command in a sandbox")
+    expect(editor).not.toHaveTextContent("Needs a runtime verifier")
+    expect(screen.queryByTestId("router-fusion-action-check-dormant-delegate_code")).toBeNull()
+  })
+
   it("sets and clears an action's own run cap", async () => {
     const user = userEvent.setup()
     render(<Harness />)

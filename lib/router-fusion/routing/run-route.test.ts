@@ -560,21 +560,14 @@ describe("routeRunRequest with the LLM classifier (D18)", () => {
 })
 
 describe("runVerifierProfiles", () => {
-  it("claims a schema check only with a schema, and a code fixture only with both halves", () => {
+  it("claims a schema check only with a schema, and never a code fixture", () => {
     expect(runVerifierProfiles(null)).toEqual(["text_basic", "text_review", "evidence_review"])
     expect(runVerifierProfiles({})).toContain("schema_fixture")
-    // A code fixture needs a sandbox AND an approved command; one alone is not
-    // a verifier, and offering it would let the router pick what it cannot accept.
+    // Rule 7: `cascade_code` is dormant until a host supplies a runtime
+    // verifier. Offering `code_fixture` to the answer verifier would let auto
+    // pick an action whose check can only come back inconclusive.
+    expect(runVerifierProfiles(null)).not.toContain("code_fixture")
     expect(runVerifierProfiles({})).not.toContain("code_fixture")
-    expect(
-      runVerifierProfiles(null, { sandboxTier: "os", acceptanceProfileAvailable: false })
-    ).not.toContain("code_fixture")
-    expect(
-      runVerifierProfiles(null, { sandboxTier: null, acceptanceProfileAvailable: true })
-    ).not.toContain("code_fixture")
-    expect(
-      runVerifierProfiles(null, { sandboxTier: "os", acceptanceProfileAvailable: true })
-    ).toContain("code_fixture")
   })
 })
 
@@ -677,6 +670,36 @@ describe("routeRunRequest for delegate", () => {
     expect(route.kind).toBe("selected")
     if (route.kind !== "selected") return
     expect(route.acceptanceProfileId).toBe("e2e")
+  })
+
+  it("never selects cascade_code, even on a device that can serve delegate", async () => {
+    const { host } = makeHost({
+      settings: { approvedRuleRows: ["cascade_verifiable", "delegate_multifile"] },
+    })
+    const route = await routeRunRequest(
+      host,
+      delegateInput(
+        {},
+        {
+          request: delegateRequest({
+            mode: "auto",
+            allowed_modes: ["cascade", "delegate"],
+            input_messages: [
+              { role: "user", content: "Make the failing unit test in users.test.ts pass." },
+            ],
+          }),
+        }
+      )
+    )
+    const decision = route.decision
+    expect(decision).not.toBeNull()
+    const cascadeCode = decision?.candidates.find((c) => c.action_id === "cascade_code")
+    expect(cascadeCode?.eligible).toBe(false)
+    expect(cascadeCode?.exclusion_reasons).toContain("VERIFIER_UNAVAILABLE")
+    if (route.kind === "selected") expect(route.actionId).not.toBe("cascade_code")
+    // The delegate action is not gated on the answer verifier's list.
+    const delegate = decision?.candidates.find((c) => c.action_id === "delegate_code")
+    expect(delegate?.exclusion_reasons ?? []).not.toContain("VERIFIER_UNAVAILABLE")
   })
 
   it("carries no project, checkout or profile on a route that is not delegate", async () => {

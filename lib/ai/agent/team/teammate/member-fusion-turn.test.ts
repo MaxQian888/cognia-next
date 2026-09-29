@@ -23,7 +23,10 @@ const ANSWER = {
   warnings: [],
 }
 
-function teammate(fusionAction?: AgentTeammate["config"]["fusionAction"]): AgentTeammate {
+function teammate(
+  fusionAction?: AgentTeammate["config"]["fusionAction"],
+  extra: Partial<AgentTeammate["config"]> = {}
+): AgentTeammate {
   return {
     id: "tm1",
     teamId: "team1",
@@ -31,7 +34,7 @@ function teammate(fusionAction?: AgentTeammate["config"]["fusionAction"]): Agent
     description: "does work",
     role: "teammate",
     status: "idle",
-    config: fusionAction ? { fusionAction } : {},
+    config: fusionAction ? { fusionAction, ...extra } : { ...extra },
     completedTaskIds: [],
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     progress: 0,
@@ -102,13 +105,67 @@ describe("runMemberFusionTurn", () => {
       featureId: "teammate:tm1",
       workspaceId: "project-1",
       workspaceRoot: "/repo",
+      parentExecutionRunId: "execution:team:run1",
       hasFusionAncestor: false,
     })
+    expect(calls[0]).not.toHaveProperty("delegateDelivery")
     expect(calls[0]?.messages).toEqual([
       { role: "system", content: "You are a focused teammate." },
       { role: "user", content: "Summarise the tariff changes" },
     ])
     expect(captured).toEqual([{ type: "text-delta", delta: "the member's checked answer" }])
+  })
+
+  it("refuses a delegate member whose team project has no checkout, before anything runs", async () => {
+    // The picker asks the same question of the same project (the team's), so
+    // a choice it allowed is one this can run — and one it would not allow is
+    // refused here instead of failing deep inside the run.
+    const loadHost = jest.fn()
+    await expect(
+      runMemberFusionTurn(
+        input({
+          teammate: teammate("delegate"),
+          projectId: "project-without-root",
+          workingDir: "/tmp/dispatch",
+          loadHost: loadHost as never,
+          workspaceRootOf: async () => null,
+        })
+      )
+    ).rejects.toMatchObject({ code: "WORKSPACE_REQUIRED" })
+    expect(loadHost).not.toHaveBeenCalled()
+  })
+
+  it("refuses a delegate member of a team with no project at all", async () => {
+    await expect(
+      runMemberFusionTurn(
+        input({ teammate: teammate("delegate"), workspaceRootOf: async (id) => (id ? "/r" : null) })
+      )
+    ).rejects.toMatchObject({ code: "WORKSPACE_REQUIRED" })
+  })
+
+  it("runs a delegate member in the team's project, with its delivery and the team run as parent", async () => {
+    const calls: Array<Record<string, unknown>> = []
+    await runMemberFusionTurn(
+      input({
+        teammate: teammate("delegate", { fusionDelegateDelivery: "workspace_updated" }),
+        projectId: "project-1",
+        workspaceRootOf: async () => "/repo/project-1",
+        loadHost: async () =>
+          ({
+            runAgentsWorkflowsFusion: async (call: Record<string, unknown>) => {
+              calls.push(call)
+              return { ...ANSWER, mode: "delegate" }
+            },
+          }) as never,
+      })
+    )
+    expect(calls[0]).toMatchObject({
+      mode: "delegate",
+      workspaceId: "project-1",
+      workspaceRoot: "/repo/project-1",
+      parentExecutionRunId: "execution:team:run1",
+      delegateDelivery: "workspace_updated",
+    })
   })
 
   it("[ACC:INV-09] scopes every member of one team run together, so a nested member is refused", async () => {

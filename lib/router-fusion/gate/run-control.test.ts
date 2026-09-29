@@ -1,7 +1,13 @@
 import { __resetBreakerForTesting, getBreakerSnapshot } from "./breaker"
 import { RouterFusionInfrastructureError, RouterFusionUnavailableError } from "./faults"
 import type { RouterFusionHost } from "./load-engine"
-import { cancelRouterFusionRun } from "./run-control"
+import {
+  CONTROLLED_RUN_SURFACES,
+  PROJECTED_RUN_SURFACES,
+  cancelRouterFusionRun,
+  decideRouterFusionApproval,
+  projectedRunSurfaceOf,
+} from "./run-control"
 
 const ON = { routerFusion: { enabled: true, surfaces: { gatewayRuns: true } } }
 const OFF = { routerFusion: { enabled: false, surfaces: { gatewayRuns: true } } }
@@ -107,5 +113,72 @@ describe("cancelRouterFusionRun", () => {
       })
     ).rejects.toBeInstanceOf(RouterFusionUnavailableError)
     expect(getBreakerSnapshot("gatewayRuns").consecutiveFaults).toBe(1)
+  })
+})
+
+describe("agentsWorkflows runs in the cockpit", () => {
+  const AGENTS_ONLY = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+
+  function hostWithRun(surface: string) {
+    return async () =>
+      ({
+        currentFusionStore: async () => ({
+          getRun: async (runId: string) => ({ runId, surface }),
+        }),
+        drainAccountOutbox,
+      }) as unknown as RouterFusionHost
+  }
+
+  it("is controlled here but never projected as a row of its own", () => {
+    expect(CONTROLLED_RUN_SURFACES).toContain("agentsWorkflows")
+    expect(PROJECTED_RUN_SURFACES as readonly string[]).not.toContain("agentsWorkflows")
+  })
+
+  it("reads an agentsWorkflows run's surface with only that switch on", async () => {
+    await expect(
+      projectedRunSurfaceOf("run-a", {
+        settings: AGENTS_ONLY,
+        loadHost: hostWithRun("agentsWorkflows"),
+      })
+    ).resolves.toBe("agentsWorkflows")
+    // A surface this module does not control is still not guessed at.
+    await expect(
+      projectedRunSurfaceOf("run-u", { settings: AGENTS_ONLY, loadHost: hostWithRun("utility") })
+    ).resolves.toBeNull()
+  })
+
+  it("gates a delegate decision on the agentsWorkflows switch, not the Run API's", async () => {
+    const loadHost = jest.fn()
+    await expect(
+      decideRouterFusionApproval("run-a", "approve", {
+        settings: ON,
+        surface: "agentsWorkflows",
+        interruptId: "approval-1",
+        loadHost,
+      })
+    ).rejects.toThrow(/switched off/)
+    expect(loadHost).not.toHaveBeenCalled()
+  })
+
+  it("decides through the engine and hands the resumed run to a driver", async () => {
+    const drive = jest.fn()
+    const resumeRun = jest.fn()
+    const loadHost = async () =>
+      ({
+        currentFusionStore: async () => ({ getRun: async () => undefined, resumeRun }),
+        drainAccountOutbox,
+      }) as unknown as RouterFusionHost
+    // The run is gone: the refusal is reported, and nothing is driven.
+    await expect(
+      decideRouterFusionApproval("run-a", "approve", {
+        settings: AGENTS_ONLY,
+        surface: "agentsWorkflows",
+        interruptId: "approval-1",
+        loadHost,
+        drive,
+      })
+    ).rejects.toThrow(/RUN_NOT_FOUND/)
+    expect(drive).not.toHaveBeenCalled()
+    expect(resumeRun).not.toHaveBeenCalled()
   })
 })

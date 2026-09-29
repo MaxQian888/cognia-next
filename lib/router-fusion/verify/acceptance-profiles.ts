@@ -26,12 +26,14 @@
  *   that was on screen, `revokeAcceptanceProfile`, and
  *   `setProjectAcceptanceProfiles` for the project override.
  *
- * # Dormancy (Rule 7)
+ * # Who asks
  *
- * Only delegate needs a profile, and delegate stays dormant until WP-D4 wires
- * this in: documented on `WIRED_RULE_ROWS` / `EDITABLE_ACTION_MODES` in the
- * package, labelled "Later release" in the action catalog, pinned by their
- * tests. Until then `run-route.ts` passes `acceptanceProfileAvailable: false`.
+ * Only delegate needs a profile. Since WP-D4 the router asks per request:
+ * `routing/delegate-capabilities.ts` reads this module for the request's
+ * project, and `run-route.ts` passes its answer as
+ * `acceptanceProfileAvailable` (with the approved profile ids), so a delegate
+ * action is excluded with `ACCEPTANCE_PROFILE_MISSING` whenever the project
+ * has no approved command to run.
  *
  * # Failing closed
  *

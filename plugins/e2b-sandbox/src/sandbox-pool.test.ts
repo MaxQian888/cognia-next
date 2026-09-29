@@ -261,4 +261,36 @@ describe("E2BSandboxPool", () => {
 
     await expect(pool.dispose()).rejects.toThrow("solo failure")
   })
+
+  it("answers claimRefusal exactly as claim would, without claiming", async () => {
+    const pool = new E2BSandboxPool()
+    const vm = sandbox("vm-1")
+    pool.addWorkspace("/remote/a", vm, "off")
+    const version = pool.getVersion()
+
+    expect(pool.claimRefusal("runtime:a", "/remote/a", "session:a")).toBeNull()
+    expect(pool.claimRefusal("runtime:a", "/Users/me/checkout")).toMatch(/no live E2B workspace/)
+    // Pure: nothing claimed, nothing emitted.
+    expect(pool.snapshot()[0].ownerRefs).toEqual([])
+    expect(pool.getVersion()).toBe(version)
+
+    pool.claim("runtime:a", "/remote/a", "session:a")
+    expect(pool.claimRefusal("runtime:a", "/remote/a", "session:a")).toBeNull()
+    expect(pool.claimRefusal("runtime:a", "/remote/b")).toMatch(/already bound to \/remote\/a/)
+    expect(pool.claimRefusal("runtime:x", "/remote/a", "session:x")).toMatch(
+      /owned by another runtime session/
+    )
+
+    await pool.removeWorkspace("/remote/a")
+    expect(pool.claimRefusal("runtime:y", "/remote/a", "session:a")).toMatch(/was released/)
+  })
+
+  it("reports the network a tracked workspace was created with", () => {
+    const pool = new E2BSandboxPool()
+    pool.addWorkspace("/remote/off", sandbox("vm-off"), "off")
+    pool.addWorkspace("/remote/on", sandbox("vm-on"), "on")
+    expect(pool.networkOf("/remote/off")).toBe("off")
+    expect(pool.networkOf("/remote/on")).toBe("on")
+    expect(pool.networkOf("/Users/me/checkout")).toBeNull()
+  })
 })

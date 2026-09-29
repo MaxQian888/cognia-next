@@ -271,7 +271,16 @@ export function TeammateConfigDialog({
                       <FusionActionField
                         id="teammate-fusion-action"
                         value={teammate.config.fusionAction}
-                        hasWorkspace={Boolean(team.projectId)}
+                        // The member runs in the TEAM's project; the runtime
+                        // asks the same project for its checkout before a
+                        // delegate turn spends anything.
+                        projectId={team.projectId ?? null}
+                        delivery={teammate.config.fusionDelegateDelivery}
+                        onDeliveryChange={(value) => {
+                          updateTeammate(teammate.id, {
+                            config: { ...teammate.config, fusionDelegateDelivery: value },
+                          })
+                        }}
                         onChange={(value) => {
                           updateTeammate(teammate.id, {
                             config: { ...teammate.config, fusionAction: value },

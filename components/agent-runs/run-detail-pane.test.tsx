@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { RunDetailPane } from "./run-detail-pane"
+import { interruptTitleOf, RunDetailPane } from "./run-detail-pane"
 import type { RunControlActions } from "@/hooks/agent-runs/use-agent-run-actions"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 import type { RunDetailProjection } from "@/lib/execution/run-detail-model"
@@ -724,6 +724,88 @@ describe("RunDetailPane", () => {
     })
   })
 
+  it("reviews a workflow step's delegate run on the workflow row it asked on", async () => {
+    detailState = {
+      ...detailState,
+      run: {
+        id: "execution:workflow:wf-1",
+        kind: "workflow",
+        sourceId: "wf-1",
+        title: "Nightly fixer",
+        status: "waiting_input",
+        currentRevision: 3,
+        startedAt: 1,
+        updatedAt: 2,
+        latestSnapshot: {
+          runId: "execution:workflow:wf-1",
+          revision: 3,
+          status: "waiting_input",
+          elapsedMs: 1,
+          artifacts: [],
+          allowedActions: ["approve", "deny", "stop", "open_details"],
+          pendingInterrupt: { id: "fusion-approval-2", title: "scope_expansion" },
+        },
+      } as never,
+      interrupts: [
+        {
+          id: "fusion-approval-2",
+          runId: "execution:workflow:wf-1",
+          type: "fusion_approval",
+          title: "scope_expansion",
+          status: "pending",
+          subject: { kind: "scope_expansion", fusionRunId: "fusion-run-5" },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        } as never,
+      ],
+    }
+    const dispatch = jest.fn().mockResolvedValue({ accepted: true })
+    render(
+      <RunDetailPane
+        row={row({
+          kind: "workflow",
+          runId: "execution:workflow:wf-1",
+          allowedActions: ["approve", "deny", "stop", "open_details"],
+        })}
+        actions={makeActions({ dispatch })}
+      />
+    )
+    // The review reads the FUSION run the interrupt names, and owns the verbs.
+    expect(screen.getByTestId("delegate-review-pane")).toHaveTextContent(
+      "pane:fusion-run-5:fusion-approval-2"
+    )
+    expect(screen.queryByRole("button", { name: "actions.approve" })).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByTestId("delegate-review-pane"))
+    expect(dispatch).toHaveBeenCalledWith(expect.anything(), "approve", {
+      reviewedRun: detailState.run,
+    })
+  })
+
+  it("keeps a settled step's delegate record reviewable on its workflow row", () => {
+    detailState = {
+      ...detailState,
+      interrupts: [
+        {
+          id: "fusion-approval-3",
+          runId: "execution:workflow:wf-2",
+          type: "fusion_approval",
+          title: "workspace_apply",
+          status: "approved",
+          subject: { kind: "workspace_apply", fusionRunId: "fusion-run-6" },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        } as never,
+      ],
+    }
+    render(
+      <RunDetailPane
+        row={row({ kind: "workflow", runId: "execution:workflow:wf-2", status: "done" })}
+        actions={makeActions()}
+      />
+    )
+    expect(screen.getByTestId("delegate-review-pane")).toHaveTextContent("pane:fusion-run-6:none")
+  })
+
   it("does not load delegate artifacts for a fusion row without a run id", () => {
     render(
       <RunDetailPane row={row({ kind: "fusion", runId: undefined })} actions={makeActions()} />
@@ -829,4 +911,30 @@ it("formats past start and completion timestamps as elapsed time", () => {
   )
   expect(screen.getAllByText(/5 minutes ago/).length).toBeGreaterThanOrEqual(2)
   expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument()
+})
+
+describe("interruptTitleOf", () => {
+  const t = ((key: string) => `t:${key}`) as never
+
+  it("translates a Router + Fusion approval by its kind", () => {
+    expect(
+      interruptTitleOf(
+        { type: "fusion_approval", title: "workspace_apply", subject: { kind: "workspace_apply" } },
+        t
+      )
+    ).toBe("t:approvals.fusionApproval.workspace_apply")
+    expect(interruptTitleOf({ type: "fusion_approval", title: "scope_expansion" }, t)).toBe(
+      "t:approvals.fusionApproval.scope_expansion"
+    )
+  })
+
+  it("names a kind this build has no words for, instead of showing the code", () => {
+    expect(interruptTitleOf({ type: "fusion_approval", title: "future_kind" }, t)).toBe(
+      "t:approvals.fusionApproval.other"
+    )
+  })
+
+  it("shows every other interrupt's own title", () => {
+    expect(interruptTitleOf({ type: "tool_approval", title: "Bash" }, t)).toBe("Bash")
+  })
 })

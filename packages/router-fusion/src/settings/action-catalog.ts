@@ -57,10 +57,12 @@ export const EDITABLE_ACTION_MODES: readonly ExecutionMode[] = [
  * this device has. It is the ONLY profile a delegate action may carry, which
  * `config/compile.ts` also enforces, so the two cannot drift.
  *
- * It stays off the cascade list: `cascade_code` would need the same workspace
- * and approval a delegate run has, and a cascade run carries neither, so the
- * router still never chooses it (`run-route.ts` offers `code_fixture` only for
- * a request whose project has both).
+ * It stays off the cascade list: `cascade_code` would need a runtime verifier
+ * in the answer verifier, which no host supplies, so it is dormant by design —
+ * `run-route.ts` never offers `code_fixture` to the answer verifier (see
+ * `HostCapabilities.verifierProfiles`), and the catalog labels the action
+ * "Not chosen yet". A delegate action's `code_fixture` is served by its own
+ * acceptance runner instead.
  */
 export const EDITABLE_PROFILES_BY_MODE: Record<ExecutionMode, readonly VerifierProfile[]> = {
   direct: ["text_basic", "text_review", "schema_fixture"],

@@ -262,6 +262,12 @@ export async function createRoutedRun(
     ...(route.projectId ? { projectId: route.projectId } : {}),
     ...(route.workspaceRoot ? { workspaceRoot: route.workspaceRoot } : {}),
     ...(route.acceptanceProfileId ? { acceptanceProfileId: route.acceptanceProfileId } : {}),
+    // How the change is delivered, as the request's `x-cognia` extension asked.
+    // Only a run the router actually sent to delegate carries it: an `auto`
+    // request that allowed delegate but routed to a panel delivers an answer.
+    ...(route.mode === "delegate" && input.delegateDelivery
+      ? { delegateDelivery: input.delegateDelivery }
+      : {}),
     // Driven from its stored input: a worker that finds it after a crash carries on.
     driver: "orchestrator",
   })

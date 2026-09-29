@@ -143,6 +143,101 @@ export function parseRunRequest(body: unknown, policy: RunRequestPolicy): Parsed
   return issues.length > 0 ? { ok: false, issues } : { ok: true, value: request }
 }
 
+// ── Cognia's extension of a Run API request ────────────────────────────────────
+
+/**
+ * The top-level field a Run API body carries Cognia-only options in.
+ *
+ * The contract (`contracts/spec/*`) is vendored and its `RunRequest` is strict
+ * (`additionalProperties: false`), so an option this app adds cannot live
+ * inside it without forking the spec every other implementation reads. It
+ * travels BESIDE the contract object instead — the same shape the config
+ * uses, where Cognia's `ActionExtension` sits beside the contract's
+ * `ActionConfig` — under the OpenAPI vendor-extension prefix, so no future
+ * contract field can collide with it. The contract part is still parsed by
+ * the strict mirror, exactly as before; a body without this field is exactly
+ * a contract request.
+ */
+export const RUN_REQUEST_EXTENSION_FIELD = "x-cognia" as const
+
+/**
+ * The extension's own schema, strict like the contract's: an option this
+ * build does not know is refused, never ignored.
+ *
+ * `delegate_delivery` — how a delegate run delivers its verified change.
+ * `patch_only` (the default) hands back a patch; `workspace_updated` writes it
+ * into the workspace, but only after a person approves exactly that patch on
+ * exactly that base (DEL-04). Only a request that may run delegate may ask.
+ */
+export const RunRequestExtensionSchema = z.strictObject({
+  delegate_delivery: z.enum(["patch_only", "workspace_updated"]).optional(),
+})
+export type RunRequestExtension = z.infer<typeof RunRequestExtensionSchema>
+
+export interface ParsedRunApiRequest {
+  request: RunRequest
+  extension: RunRequestExtension
+}
+
+/**
+ * Parse a `/v1/runs` body: the contract request, validated exactly as
+ * {@link parseRunRequest} validates it, plus Cognia's extension beside it.
+ */
+export function parseRunApiRequest(
+  body: unknown,
+  policy: RunRequestPolicy
+): Parsed<ParsedRunApiRequest> {
+  let contractBody = body
+  let rawExtension: unknown = undefined
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const { [RUN_REQUEST_EXTENSION_FIELD]: extensionValue, ...rest } = body as Record<
+      string,
+      unknown
+    >
+    if (RUN_REQUEST_EXTENSION_FIELD in (body as Record<string, unknown>)) {
+      contractBody = rest
+      rawExtension = extensionValue
+    }
+  }
+  const issues: ApiIssue[] = []
+  let extension: RunRequestExtension = {}
+  if (rawExtension !== undefined) {
+    const parsedExtension = RunRequestExtensionSchema.safeParse(rawExtension)
+    if (parsedExtension.success) {
+      extension = parsedExtension.data
+    } else {
+      const extra = unknownKeys(parsedExtension.error)
+      issues.push(
+        extra.length > 0
+          ? issue("UNSUPPORTED_PARAMETER", `unsupported fields: ${extra.join(", ")}`, {
+              fields: extra.map((field) => `${RUN_REQUEST_EXTENSION_FIELD}.${field}`),
+            })
+          : issue("SCHEMA_INVALID", `the request's ${RUN_REQUEST_EXTENSION_FIELD} is invalid`, {
+              paths: parsedExtension.error.issues.map((i) =>
+                [RUN_REQUEST_EXTENSION_FIELD, ...i.path].join(".")
+              ),
+            })
+      )
+    }
+  }
+  const parsed = parseRunRequest(contractBody, policy)
+  if (!parsed.ok) return { ok: false, issues: [...parsed.issues, ...issues] }
+  const request = parsed.value
+  const delegatePossible =
+    request.mode === "delegate" ||
+    (request.mode === "auto" && request.allowed_modes.includes("delegate"))
+  if (extension.delegate_delivery === "workspace_updated" && !delegatePossible) {
+    issues.push(
+      issue(
+        "UNSUPPORTED_PARAMETER",
+        "delegate_delivery applies only to a request that may run delegate",
+        { fields: [`${RUN_REQUEST_EXTENSION_FIELD}.delegate_delivery`] }
+      )
+    )
+  }
+  return issues.length > 0 ? { ok: false, issues } : { ok: true, value: { request, extension } }
+}
+
 /**
  * Idempotency hash over tenant scope, endpoint and the exact request body.
  * Whitespace inside strings is significant; key order is not.

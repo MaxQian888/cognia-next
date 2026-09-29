@@ -38,10 +38,18 @@
  * where `fs_read_workspace_file` / `fs_write_workspace_file` canonicalize root
  * and target and refuse a real location outside the root.
  *
- * WP-D6 is adding a Rust-side revision CAS to the task-workspace apply. Until
- * it lands, the window between the check here and the write is the size of one
- * apply call; the check is still what makes an overwrite of a moved workspace
- * impossible in every case the host can observe.
+ * The compare-and-swap itself runs in Rust (`task_workspace_revision_apply`,
+ * WP-D6): capture, compare and publish happen inside one call, so on the
+ * desktop there is no window between the check and the write. Only a host that
+ * does not carry the command at all falls back — the web stub, the CLI's stdio
+ * transport, or a desktop build that never registered it (Tauri answers
+ * `Command <name> not found`); see {@link isUnknownWorkspaceCommand}. That
+ * fallback adopts through the task-workspace turn when this run staged through
+ * one, and otherwise writes whole files through the guarded bridge after the
+ * caller's own revision check, which leaves a window the size of one apply
+ * call. Every other failure — an ACL denial, an unauthorized root, a Rust
+ * refusal — propagates: a host that refused is never retried through a weaker,
+ * non-atomic path.
  */
 
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -338,7 +346,7 @@ export function defaultDelegateWorkspaceHost(): DelegateWorkspaceHost {
         if (answer.status === "missing") throw new Error(`read ${relPath}: no such file`)
         throw new Error(answer.refusal?.message ?? `read ${relPath}: ${answer.status}`)
       } catch (error) {
-        if (!isUnknownCommand(error)) throw error
+        if (!isUnknownWorkspaceCommand(error, WORKSPACE_REVISION_COMMANDS.read)) throw error
       }
       const { readWorkspaceFile } = await import("@/lib/files/workspace-fs")
       return readWorkspaceFile(root, relPath, maxBytes)
@@ -386,11 +394,20 @@ export function defaultDelegateWorkspaceHost(): DelegateWorkspaceHost {
           WORKSPACE_REVISION_COMMANDS.get,
           { root }
         )
-        if (answer?.revision) return answer.revision
-      } catch {
-        // No such command on this host (the CLI's stdio transport, an older
-        // desktop): fall back to the git computation rather than inventing a
-        // constant. A host with no local workspace at all fails below.
+        if (!answer?.revision) {
+          throw new Error(
+            `${WORKSPACE_REVISION_COMMANDS.get} answered without a revision for ${root}`
+          )
+        }
+        return answer.revision
+      } catch (error) {
+        // Only a host that does not carry the command (the web stub, the CLI's
+        // stdio transport, a desktop that never registered it) falls back to
+        // the git computation rather than inventing a constant. A host that
+        // has the command and refused — an ACL denial, a root it will not
+        // read — is answered, not worked around. A host with no local
+        // workspace at all fails below.
+        if (!isUnknownWorkspaceCommand(error, WORKSPACE_REVISION_COMMANDS.get)) throw error
       }
       try {
         return await gitWorkspaceRevision(root, defaultDelegateWorkspaceHost())
@@ -464,9 +481,12 @@ export function defaultDelegateWorkspaceHost(): DelegateWorkspaceHost {
             : {}),
         }
       } catch (error) {
-        if (!isUnknownCommand(error)) {
-          return { status: "refused", refusal: messageOf(error) }
-        }
+        // A host that carries the CAS and failed it — an ACL denial, an
+        // unauthorized root, an I/O error — must not be retried through the
+        // non-atomic paths below: that would write a workspace the atomic
+        // apply just declined to touch. `applyPatchCAS` turns the throw into
+        // `PATCH_REFUSED` with nothing written.
+        if (!isUnknownWorkspaceCommand(error, WORKSPACE_REVISION_COMMANDS.apply)) throw error
       }
       if (taskRunId) {
         // The task-workspace turn that staged the tree owns the adoption path,
@@ -494,10 +514,31 @@ export function defaultDelegateWorkspaceHost(): DelegateWorkspaceHost {
   }
 }
 
-/** A host that does not carry the command at all, as opposed to one that refused. */
-function isUnknownCommand(error: unknown): boolean {
-  return /unknown command|not implemented|tauri-only|unsupported command|not authorized/i.test(
-    messageOf(error)
+/**
+ * Whether `error` says the host does not carry `command` at all, as opposed to
+ * carrying it and refusing. Only the first may fall back to another path.
+ *
+ * The recognised answers are exact, per transport, and name the command:
+ *
+ * - Tauri 2 (`tauri::webview::Webview::on_message`): an invoke that no
+ *   handler claims rejects with `Command <name> not found`.
+ * - The plain-browser stub (`lib/tauri/transport-web.ts`):
+ *   `tauri-only command from web mode: <name>`.
+ * - The CLI's stdio transport (`cli/src/runtime/protocol.ts`):
+ *   `StdioTransport: unsupported command "<name>"`.
+ *
+ * Everything else is a refusal and must propagate. In particular Tauri's ACL
+ * denial (`<name> not allowed…` / `Command <name> not allowed by ACL`) means
+ * the command exists and this window may not call it, and a paired device's
+ * `command_transport_forbidden` means the command must not run there — neither
+ * is a licence to write the workspace some other way.
+ */
+export function isUnknownWorkspaceCommand(error: unknown, command: string): boolean {
+  const message = messageOf(error).trim()
+  return (
+    message === `Command ${command} not found` ||
+    message === `tauri-only command from web mode: ${command}` ||
+    message === `StdioTransport: unsupported command "${command}"`
   )
 }
 

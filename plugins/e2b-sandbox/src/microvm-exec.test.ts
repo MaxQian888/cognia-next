@@ -1,3 +1,8 @@
+import { execFile } from "node:child_process"
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import type {
   MicrovmCeiling,
   MicrovmExecPayload,
@@ -292,5 +297,215 @@ describe("buildMicrovmExec", () => {
     expect(result.stderr).not.toContain("�")
     expect(result.stdout_truncated).toBe(true)
     expect(result.stderr_truncated).toBe(true)
+  })
+
+  it("attests network-off confinement only for an instance created without egress", async () => {
+    const pool = new E2BSandboxPool()
+    pool.addWorkspace("/remote/off", makeSandbox("vm-off"), "off")
+    pool.addWorkspace("/remote/on", makeSandbox("vm-on"), "on")
+    const adapter = buildMicrovmExec({ pool })
+    await adapter.preflight?.("runtime:off", "/remote/off")
+    await adapter.preflight?.("runtime:on", "/remote/on")
+
+    const off = await adapter.execute("runtime:off", {
+      ...payload({ network: "off" }),
+      command: { ...payload().command, cwd: "/remote/off" },
+    })
+    const on = await adapter.execute("runtime:on", {
+      ...payload(),
+      command: { ...payload().command, cwd: "/remote/on" },
+    })
+    expect(off.confinement).toEqual({
+      networkEnforced: true,
+      backend: "e2b",
+      maxMemoryMb: null,
+      maxCpuSeconds: null,
+      maxProcesses: null,
+      platform: "linux",
+    })
+    expect(on.confinement).toMatchObject({ networkEnforced: false, backend: "e2b" })
+
+    // A failed exec is still a call that ran on that instance.
+    const vm = makeSandbox("vm-fail")
+    vm.exec.mockRejectedValueOnce(new Error("boom"))
+    pool.addWorkspace("/remote/fail", vm, "off")
+    await adapter.preflight?.("runtime:fail", "/remote/fail")
+    await expect(
+      adapter.execute("runtime:fail", {
+        ...payload({ network: "off" }),
+        command: { ...payload().command, cwd: "/remote/fail" },
+      })
+    ).resolves.toMatchObject({ exit_code: -1, confinement: { networkEnforced: true } })
+  })
+
+  describe("accepts", () => {
+    it("refuses an ordinary local worktree without claiming anything", async () => {
+      const pool = new E2BSandboxPool()
+      pool.addWorkspace("/remote/work", makeSandbox("vm"), "off")
+      const adapter = buildMicrovmExec({ pool })
+
+      expect(adapter.accepts?.("runtime:a", "/Users/me/checkout")).toMatchObject({
+        accepted: false,
+        code: "workspace-unavailable",
+        reason: expect.stringMatching(/no live E2B workspace/),
+      })
+      expect(adapter.accepts?.("runtime:a", "")).toMatchObject({
+        accepted: false,
+        code: "workspace-unavailable",
+      })
+      // Nothing was claimed: the pool still has no owner for the ref.
+      expect(pool.snapshot()[0].ownerRefs).toEqual([])
+    })
+
+    it("accepts exactly what preflight would claim, and still claims nothing", async () => {
+      const pool = new E2BSandboxPool()
+      pool.addWorkspace("/remote/work", makeSandbox("vm"), "off")
+      const adapter = buildMicrovmExec({ pool })
+
+      expect(adapter.accepts?.("runtime:a", "/remote/work", { network: "off" })).toEqual({
+        accepted: true,
+      })
+      expect(pool.snapshot()[0].ownerRefs).toEqual([])
+
+      // Another session owns it: preflight would refuse, so accepts does too.
+      await adapter.preflight?.("runtime:b", "/remote/work", "session:b")
+      expect(adapter.accepts?.("runtime:a", "/remote/work")).toMatchObject({
+        accepted: false,
+        code: "workspace-unavailable",
+        reason: expect.stringMatching(/owned by another runtime session/),
+      })
+      expect(adapter.accepts?.("runtime:c", "/remote/work", { ownerGroup: "session:b" })).toEqual({
+        accepted: true,
+      })
+    })
+
+    it("refuses a caller that needs network off on an instance created with egress", async () => {
+      const pool = new E2BSandboxPool()
+      pool.addWorkspace("/remote/work", makeSandbox("vm"), "on")
+      const adapter = buildMicrovmExec({ pool })
+      expect(adapter.accepts?.("runtime:a", "/remote/work", { network: "off" })).toMatchObject({
+        accepted: false,
+        code: "policy-not-attested",
+        reason: expect.stringMatching(/network=on/),
+      })
+      expect(adapter.accepts?.("runtime:a", "/remote/work", { network: "on" })).toEqual({
+        accepted: true,
+      })
+      expect(adapter.accepts?.("runtime:a", "/remote/work")).toEqual({ accepted: true })
+    })
+  })
+
+  describe("readFile", () => {
+    function scripted(exitCode: number, stdout = "", stderr = "") {
+      const vm = makeSandbox("vm")
+      vm.exec.mockResolvedValue({ stdout, stderr, exitCode })
+      return vm
+    }
+
+    async function adapterWith(vm: ReturnType<typeof makeSandbox>) {
+      const pool = new E2BSandboxPool()
+      pool.addWorkspace("/remote/work", vm, "off")
+      const adapter = buildMicrovmExec({ pool })
+      await adapter.preflight?.("runtime:a", "/remote/work")
+      return adapter
+    }
+
+    it("reads the file inside the bound machine, with the cap in the command", async () => {
+      const vm = scripted(0, "<testsuites/>")
+      const adapter = await adapterWith(vm)
+      await expect(
+        adapter.readFile?.("runtime:a", "/remote/work/reports/junit.xml", 4096)
+      ).resolves.toEqual({ kind: "ok", content: "<testsuites/>" })
+      const cmd = vm.exec.mock.calls[0][0].cmd
+      expect(cmd).toContain("'/remote/work/reports/junit.xml'")
+      expect(cmd).toContain("-le 4096")
+      expect(cmd).toContain("realpath -- '/remote/work'")
+    })
+
+    it.each([
+      [64, { kind: "missing" }],
+      [65, { kind: "too_large" }],
+      [66, { kind: "refused", code: "workspace-boundary" }],
+      [67, { kind: "refused", code: "NOT_A_FILE" }],
+      [2, { kind: "refused", code: "READ_FAILED" }],
+    ])("maps exit %i to its answer", async (exitCode, expected) => {
+      const adapter = await adapterWith(scripted(exitCode, "", "cat: denied"))
+      await expect(
+        adapter.readFile?.("runtime:a", "/remote/work/report.json", 10)
+      ).resolves.toMatchObject(expected)
+    })
+
+    it("refuses a path outside the workspace before asking the machine", async () => {
+      const vm = scripted(0, "secret")
+      const adapter = await adapterWith(vm)
+      await expect(
+        adapter.readFile?.("runtime:a", "/remote/work/../../etc/passwd", 10)
+      ).resolves.toMatchObject({ kind: "refused", code: "workspace-boundary" })
+      expect(vm.exec).not.toHaveBeenCalled()
+    })
+
+    it("answers refused when the machine cannot be reached, and needs a bound owner", async () => {
+      const vm = makeSandbox("vm")
+      vm.exec.mockRejectedValueOnce(new Error("sandbox gone"))
+      const adapter = await adapterWith(vm)
+      await expect(
+        adapter.readFile?.("runtime:a", "/remote/work/report.json", 10)
+      ).resolves.toMatchObject({ kind: "refused", code: "READ_FAILED", message: "sandbox gone" })
+      await expect(
+        adapter.readFile?.("runtime:unbound", "/remote/work/report.json", 10)
+      ).rejects.toMatchObject({ code: "runtime-unbound" })
+    })
+
+    const posixOnly = process.platform === "win32" ? it.skip : it
+    posixOnly("runs a command bash really executes with the promised answers", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "e2b-read-"))
+      try {
+        const root = join(dir, "work")
+        await mkdir(join(root, "reports"), { recursive: true })
+        await writeFile(join(root, "reports", "junit.xml"), "<ok/>")
+        await writeFile(join(root, "big.json"), "x".repeat(32))
+        await writeFile(join(dir, "outside.txt"), "secret")
+        await symlink(join(dir, "outside.txt"), join(root, "escape.txt"))
+        const bash = {
+          id: "local-bash",
+          exec: jest.fn(
+            (opts: { cmd: string }) =>
+              new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+                execFile("bash", ["-c", opts.cmd], (error, stdout, stderr) => {
+                  const code = error ? ((error as { code?: number }).code ?? 1) : 0
+                  resolve({ stdout, stderr, exitCode: typeof code === "number" ? code : 1 })
+                })
+              })
+          ),
+          close: jest.fn(async () => undefined),
+        }
+        const pool = new E2BSandboxPool()
+        pool.addWorkspace(root, bash, "off")
+        const adapter = buildMicrovmExec({ pool })
+        await adapter.preflight?.("runtime:a", root)
+
+        await expect(
+          adapter.readFile?.("runtime:a", `${root}/reports/junit.xml`, 1024)
+        ).resolves.toEqual({ kind: "ok", content: "<ok/>" })
+        await expect(
+          adapter.readFile?.("runtime:a", `${root}/reports/none.xml`, 1024)
+        ).resolves.toEqual({ kind: "missing" })
+        await expect(adapter.readFile?.("runtime:a", `${root}/big.json`, 16)).resolves.toEqual({
+          kind: "too_large",
+        })
+        await expect(adapter.readFile?.("runtime:a", `${root}/big.json`, 32)).resolves.toEqual({
+          kind: "ok",
+          content: "x".repeat(32),
+        })
+        await expect(
+          adapter.readFile?.("runtime:a", `${root}/escape.txt`, 1024)
+        ).resolves.toMatchObject({ kind: "refused", code: "workspace-boundary" })
+        await expect(
+          adapter.readFile?.("runtime:a", `${root}/reports`, 1024)
+        ).resolves.toMatchObject({ kind: "refused", code: "NOT_A_FILE" })
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
   })
 })

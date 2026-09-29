@@ -22,7 +22,7 @@ jest.mock("../chat/store-provider", () => ({ currentFusionStore: async () => ({}
 jest.mock("../db/outbox-appliers", () => ({ accountDatabaseAppliers: {} }))
 jest.mock("../chat/chat-run-deps", () => ({ windowLeaseOwner: () => "window:test" }))
 
-import { driveRun, isDrivingRun, orchestratedRunResumer } from "./run-driver"
+import { driveRun, holdRunDriver, isDrivingRun, orchestratedRunResumer } from "./run-driver"
 
 const SNAPSHOT = { routerFusion: { enabled: true } } as unknown as AppSettings
 
@@ -67,6 +67,35 @@ describe("driveRun", () => {
     )
     expect(isDrivingRun("run-b")).toBe(false)
     error.mockRestore()
+  })
+})
+
+describe("holdRunDriver", () => {
+  it("keeps driveRun from starting a second executor for a run its caller drives", async () => {
+    executed.length = 0
+    const release = holdRunDriver("held-run")
+    expect(isDrivingRun("held-run")).toBe(true)
+    // What the cockpit's decision does for every run it resumes.
+    driveRun("held-run", () => SNAPSHOT)
+    await settle()
+    expect(executed.filter((call) => call.runId === "held-run")).toHaveLength(0)
+
+    release()
+    release()
+    expect(isDrivingRun("held-run")).toBe(false)
+    driveRun("held-run", () => SNAPSHOT)
+    await settle()
+    expect(executed.filter((call) => call.runId === "held-run")).toHaveLength(1)
+  })
+
+  it("does not take over a run this process is already driving", async () => {
+    driveRun("busy-run", () => SNAPSHOT)
+    const release = holdRunDriver("busy-run")
+    release()
+    // The drive that was already running still owns the mark until it ends.
+    expect(isDrivingRun("busy-run")).toBe(true)
+    await settle()
+    expect(isDrivingRun("busy-run")).toBe(false)
   })
 })
 

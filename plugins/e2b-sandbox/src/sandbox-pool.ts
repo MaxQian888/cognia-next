@@ -61,27 +61,45 @@ export class E2BSandboxPool {
     return entry
   }
 
-  claim(ownerRef: string, workspacePath: string, ownerGroup = ownerRef): E2BSandboxLease {
+  /**
+   * Why `claim(ownerRef, workspacePath, ownerGroup)` would throw, or null when
+   * it would succeed. Pure: it reads the pool and changes nothing, so a caller
+   * can decide whether a workspace is eligible before committing to it. It is
+   * also what `claim` itself runs, so the two can never disagree.
+   */
+  claimRefusal(ownerRef: string, workspacePath: string, ownerGroup = ownerRef): string | null {
     const existingPath = this.workspaceByOwner.get(ownerRef)
     if (existingPath) {
       if (existingPath !== workspacePath) {
-        throw new Error(`E2B runtime ${ownerRef} is already bound to ${existingPath}.`)
+        return `E2B runtime ${ownerRef} is already bound to ${existingPath}.`
       }
-      const existing = this.byWorkspace.get(existingPath)
-      if (!existing) throw new Error(`E2B runtime ${ownerRef} is not bound to a live workspace.`)
-      return existing
+      return this.byWorkspace.has(existingPath)
+        ? null
+        : `E2B runtime ${ownerRef} is not bound to a live workspace.`
     }
     const entry = this.byWorkspace.get(workspacePath)
     if (!entry) {
-      throw new Error(
-        `E2B microVM requires an existing remote workspace; no live E2B workspace exists at ${workspacePath}.`
-      )
+      return `E2B microVM requires an existing remote workspace; no live E2B workspace exists at ${workspacePath}.`
     }
-    if (entry.handleReleased) throw new Error(`E2B workspace ${workspacePath} was released.`)
-    if (entry.closing) throw new Error(`E2B workspace ${workspacePath} is closing.`)
+    if (entry.handleReleased) return `E2B workspace ${workspacePath} was released.`
+    if (entry.closing) return `E2B workspace ${workspacePath} is closing.`
     if (entry.ownerGroup && entry.ownerGroup !== ownerGroup) {
-      throw new Error(`E2B workspace ${workspacePath} is owned by another runtime session.`)
+      return `E2B workspace ${workspacePath} is owned by another runtime session.`
     }
+    return null
+  }
+
+  /** The network a tracked workspace was created with, or null when untracked. */
+  networkOf(workspacePath: string): E2BNetworkMode | null {
+    return this.byWorkspace.get(workspacePath)?.network ?? null
+  }
+
+  claim(ownerRef: string, workspacePath: string, ownerGroup = ownerRef): E2BSandboxLease {
+    const refusal = this.claimRefusal(ownerRef, workspacePath, ownerGroup)
+    if (refusal) throw new Error(refusal)
+    const existingPath = this.workspaceByOwner.get(ownerRef)
+    if (existingPath) return this.byWorkspace.get(existingPath)!
+    const entry = this.byWorkspace.get(workspacePath)!
     entry.ownerGroup = ownerGroup
     entry.ownerRefs.add(ownerRef)
     this.workspaceByOwner.set(ownerRef, workspacePath)

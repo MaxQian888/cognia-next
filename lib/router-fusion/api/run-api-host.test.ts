@@ -312,6 +312,39 @@ describe("createRoutedRun", () => {
     expect((await store.getRun(RUN_ID))?.writesSessionAnswer).toBeUndefined()
   })
 
+  it("persists the requested delivery on a run the router sent to delegate, and only there", async () => {
+    const { decision } = routeAction(
+      config,
+      fixtureRouteRequest({ runId: RUN_ID, decisionId: uuidFromName("host-decision") })
+    )
+    routeMock.mockResolvedValue(
+      selected({
+        decision,
+        actionId: "delegate_code",
+        mode: "delegate",
+        roles: { lead: "openai::gpt-5", worker: "openai::gpt-5-mini" },
+        task: "code.debug",
+        acceptanceProfile: "code_fixture",
+        projectId: uuidFromName("project"),
+        workspaceRoot: "/repo",
+        acceptanceProfileId: "unit",
+      })
+    )
+    await createRoutedRun(input({ delegateDelivery: "workspace_updated" }), APP, { newId: ids() })
+    expect(await store.getRun(RUN_ID)).toMatchObject({
+      mode: "delegate",
+      delegateDelivery: "workspace_updated",
+      workspaceRoot: "/repo",
+      acceptanceProfileId: "unit",
+    })
+
+    // An auto request that allowed delegate but routed to a panel delivers an answer.
+    freshStore()
+    routeMock.mockResolvedValue(selected())
+    await createRoutedRun(input({ delegateDelivery: "workspace_updated" }), APP, { newId: ids() })
+    expect((await store.getRun(RUN_ID))?.delegateDelivery).toBeUndefined()
+  })
+
   it("hands the route everything it decides from", async () => {
     const schema = { type: "object" }
     await createRoutedRun(
