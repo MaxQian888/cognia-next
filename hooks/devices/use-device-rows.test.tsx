@@ -82,8 +82,10 @@ jest.mock("@/stores/settings", () => ({
     ),
 }))
 
+const consoleLabelMock = jest.fn(async () => "This Mac")
 jest.mock("@/lib/device/device-identity", () => ({
   getFriendlyDeviceLabel: () => "This Mac",
+  getLocalDeviceConsoleLabel: () => consoleLabelMock(),
 }))
 
 jest.mock("@/lib/companion/device-presence-registry", () => ({
@@ -124,6 +126,14 @@ describe("useDeviceRows", () => {
       ])
     )
     expect(result.current.summary).toMatchObject({ total: 1, online: 1 })
+  })
+
+  it("names this device by the hardware model once the native shell reports it", async () => {
+    // A phone read "Linux browser": the label came from the user agent alone.
+    consoleLabelMock.mockResolvedValueOnce("HUAWEI PLR-AL00")
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows[0]?.label).toBe("HUAWEI PLR-AL00"))
+    expect(result.current.rows[0]).toMatchObject({ ref: "local", isSelf: true })
   })
 
   it("projects the shared runtime availability into local shell tiers", async () => {

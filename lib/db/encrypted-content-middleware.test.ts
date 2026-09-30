@@ -603,3 +603,82 @@ it("finishes the read when the transaction can no longer be held open", async ()
   raw.close()
   db.close()
 })
+
+/**
+ * fake-indexeddb never deactivates a transaction between tasks, so on its own
+ * it cannot show the failure a real engine (the Android WebView, Chrome) hits:
+ * a request issued from a task that is not one of the transaction's own event
+ * dispatches throws `TransactionInactiveError`. This makes it behave to spec
+ * for the duration of a callback: after each dispatched request, once the
+ * current task and its microtasks are done, the transaction goes inactive
+ * again until its next request event.
+ */
+async function withSpecTransactionActivity<T>(run: () => Promise<T>): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const FDBTransaction = require("fake-indexeddb/lib/FDBTransaction") as {
+    prototype: { _start(this: { _state: string }): void }
+  }
+  const proto = FDBTransaction.prototype
+  const original = proto._start
+  proto._start = function (this: { _state: string }) {
+    original.call(this)
+    setImmediate(() => {
+      if (this._state === "active") this._state = "inactive"
+    })
+  }
+  try {
+    return await run()
+  } finally {
+    proto._start = original
+  }
+}
+
+it("iterates encrypted rows by cursor on a transaction that deactivates between tasks", async () => {
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
+  )
+  const db = new CogniaDB(DATABASE_NAME, "encrypted-content-test")
+  await db.open()
+  try {
+    await db.messages.bulkPut(
+      ["a", "b", "c"].map((suffix, index) => ({
+        id: `inactive_${suffix}`,
+        sessionId: index < 2 ? "inactive_keep" : "inactive_other",
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: `row ${suffix}` }],
+        createdAt: 100 + index,
+      }))
+    )
+
+    await withSpecTransactionActivity(async () => {
+      // `anyOf` walks a cursor (it is an algorithm, not a plain range): the
+      // shape of the session-delete cascade's `where("id").anyOf(...)` read,
+      // followed by writes in the same readwrite transaction.
+      const read = await db.transaction("rw", db.messages, async () => {
+        const rows = await db.messages.where("id").anyOf(["inactive_a", "inactive_c"]).toArray()
+        await db.messages.where("sessionId").equals("inactive_other").delete()
+        return rows
+      })
+      expect(read.map((row) => row.parts)).toEqual([
+        [{ type: "text", text: "row a" }],
+        [{ type: "text", text: "row c" }],
+      ])
+
+      // `each()` and a filtered read outside any explicit transaction.
+      const seen: string[] = []
+      await db.messages.each((row) => {
+        seen.push(row.id)
+      })
+      expect(seen.sort()).toEqual(["inactive_a", "inactive_b"])
+      await expect(
+        db.messages
+          .where("sessionId")
+          .equals("inactive_keep")
+          .filter((row) => row.parts.some((part) => part.type === "text" && part.text === "row b"))
+          .toArray()
+      ).resolves.toMatchObject([{ id: "inactive_b" }])
+    })
+  } finally {
+    db.close()
+  }
+})

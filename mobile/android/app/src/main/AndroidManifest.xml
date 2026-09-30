@@ -72,6 +72,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Capacitor's BridgeWebChromeClient.onPermissionRequest asks for
+         MODIFY_AUDIO_SETTINGS together with RECORD_AUDIO whenever the WebView
+         requests audio capture (getUserMedia: live voice, mic picker) and
+         denies the capture unless BOTH come back granted. An undeclared
+         permission always comes back denied, so it must be declared here. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />

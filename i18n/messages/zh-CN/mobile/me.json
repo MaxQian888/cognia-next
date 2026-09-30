@@ -52,8 +52,8 @@
     "appVersion": "应用版本",
     "battery": "电量",
     "batteryCharging": "{level}% · 充电中",
-    "biometricEnrollHint": "请在系统设置中录入 Face ID / 指纹后使用。",
-    "biometricLabel": "生物识别（Face ID / 指纹）",
+    "biometricEnrollHint": "请先在系统设置中录入面部或指纹后使用。",
+    "biometricLabel": "生物识别（面部或指纹）",
     "biometricStatus": {
       "available": "就绪",
       "unavailable": "未录入",
@@ -185,7 +185,7 @@
   "settingsLink": "应用设置",
   "signOut": {
     "biometricDescription": "清除配对前重新验证身份。",
-    "biometricHelp": "退出本机登录前要求 Face ID / 指纹。",
+    "biometricHelp": "退出本机登录前要求面部或指纹验证。",
     "biometricLabel": "退出前要求生物识别",
     "biometricReason": "请验证以退出 cognia",
     "biometricTitle": "退出登录",
@@ -279,14 +279,16 @@
       "failing": "{count, plural, other {# 张表需要处理}}",
       "partial": "部分已同步",
       "never": "尚未同步",
-      "empty": "没有可同步的表"
+      "empty": "没有可同步的表",
+      "noHost": "尚未配对宿主"
     },
     "overallHint": {
       "healthy": "{synced}/{total} 张表已是最新 · 上次同步 {time}",
       "failing": "{synced}/{total} 张表已是最新 · 请在下方重试失败的表。",
       "partial": "{synced}/{total} 张表已是最新 · 其余将在下次回到前台时拉取。",
       "never": "拉取一次，把桌面数据镜像到此设备。",
-      "empty": "同步编排器尚未注册任何处理器。"
+      "empty": "同步编排器尚未注册任何处理器。",
+      "noHost": "此设备镜像的是桌面宿主的数据。先配对一台宿主再开始同步。"
     },
     "retry": "重试",
     "statusError": "失败",
@@ -297,9 +299,13 @@
     "tablesDescription": "{synced}/{total} 已是最新",
     "tablesTitle": "同步表",
     "title": "同步状态",
-    "toastAllSynced": "已发起同步。",
+    "toastAllSynced": "全部已同步。",
     "toastError": "同步失败：{reason}",
-    "toastTableSynced": "已同步 {table}"
+    "toastTableSynced": "已同步 {table}",
+    "pairHost": "配对宿主",
+    "toastSomeFailed": "{total} 张表中有 {failed} 张同步失败。",
+    "toastTableFailed": "无法同步 {table}：{reason}",
+    "toastNoHost": "尚未配对宿主，没有可同步的来源。请先配对一台宿主。"
   },
   "syncRow": "同步状态",
   "teamsRow": "团队",

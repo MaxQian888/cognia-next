@@ -14,6 +14,7 @@ jest.mock("./sampling", () => ({
 }))
 
 import {
+  OPAQUE_SCRIPT_ERROR_WINDOW_MS,
   installGlobalErrorHandlers,
   resetGlobalErrorHandlersForTest,
 } from "./global-error-handlers"
@@ -280,5 +281,91 @@ describe("installGlobalErrorHandlers", () => {
     expect(typeof cleanup).toBe("function")
     cleanup() // inert — must not throw
     expect(appLogger.fatal).not.toHaveBeenCalled()
+  })
+})
+
+describe('opaque cross-origin "Script error." folding', () => {
+  // What a muted error looks like: the literal text and nothing else.
+  const opaque = (target: FakeTarget) =>
+    target.fire("error", { message: "Script error.", error: null, filename: "", lineno: 0, target })
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it("logs the first occurrence once, as an error rather than a fatal, bypassing the 5 s dedupe", () => {
+    const target = new FakeTarget()
+    const cleanup = installGlobalErrorHandlers({ target })
+    opaque(target)
+
+    expect(appLogger.fatal).not.toHaveBeenCalled()
+    expect(checkDedupe).not.toHaveBeenCalled()
+    expect(appLogger.error).toHaveBeenCalledTimes(1)
+    const [message, error, data] = appLogger.error.mock.calls[0]
+    expect(message).toMatch(/^Uncaught error: Script error\. \(opaque/)
+    expect(error).toBeUndefined()
+    expect(data).toEqual({ source: "window.onerror", opaque: true })
+    cleanup()
+  })
+
+  it("folds a storm into one counted entry per window instead of flooding the log", () => {
+    const target = new FakeTarget()
+    const cleanup = installGlobalErrorHandlers({ target })
+    opaque(target)
+    for (let i = 0; i < 250; i++) opaque(target)
+    expect(appLogger.error).toHaveBeenCalledTimes(1)
+
+    jest.advanceTimersByTime(OPAQUE_SCRIPT_ERROR_WINDOW_MS)
+    expect(appLogger.error).toHaveBeenCalledTimes(2)
+    const [message, , data] = appLogger.error.mock.calls[1]
+    expect(message).toContain("250×")
+    expect(data).toMatchObject({ opaque: true, duplicateCount: 250 })
+
+    // The window re-opened: more repeats are still counted, not logged.
+    opaque(target)
+    expect(appLogger.error).toHaveBeenCalledTimes(2)
+    jest.advanceTimersByTime(OPAQUE_SCRIPT_ERROR_WINDOW_MS)
+    expect(appLogger.error).toHaveBeenCalledTimes(3)
+    expect(appLogger.error.mock.calls[2][2]).toMatchObject({ opaque: true })
+
+    // A quiet window ends the cycle; the next occurrence is reported at once.
+    jest.advanceTimersByTime(OPAQUE_SCRIPT_ERROR_WINDOW_MS)
+    expect(appLogger.error).toHaveBeenCalledTimes(3)
+    opaque(target)
+    expect(appLogger.error).toHaveBeenCalledTimes(4)
+    cleanup()
+  })
+
+  it("reports what an open window counted when the handlers are torn down", () => {
+    const target = new FakeTarget()
+    const cleanup = installGlobalErrorHandlers({ target })
+    opaque(target)
+    opaque(target)
+    opaque(target)
+    cleanup()
+    expect(appLogger.error).toHaveBeenCalledTimes(2)
+    expect(appLogger.error.mock.calls[1][2]).toMatchObject({ duplicateCount: 2 })
+    jest.advanceTimersByTime(OPAQUE_SCRIPT_ERROR_WINDOW_MS)
+    expect(appLogger.error).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves a "Script error." that carries a file, line or Error on the normal path', () => {
+    const target = new FakeTarget()
+    const cleanup = installGlobalErrorHandlers({ target })
+    target.fire("error", {
+      message: "Script error.",
+      error: null,
+      filename: "https://localhost/_next/static/chunks/app.js",
+      lineno: 12,
+      target,
+    })
+    target.fire("error", { message: "Script error.", error: new Error("Script error."), target })
+    expect(appLogger.fatal).toHaveBeenCalledTimes(2)
+    expect(appLogger.error).not.toHaveBeenCalled()
+    cleanup()
   })
 })

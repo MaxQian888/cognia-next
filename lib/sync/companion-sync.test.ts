@@ -882,7 +882,83 @@ describe("cursor persistence (Wave 4 / ADR-0026)", () => {
     expect(persisted?.lastError).toContain("mock-transport")
     expect(persisted?.since).toBe(0)
   })
+
+  it("records nothing for a pull refused because there is no host", async () => {
+    // A phone that never paired painted Characters and Twins red with
+    // `tauri-only command from web mode: sync_pull`, persisted it, and kept it
+    // across restarts. The pull never ran; there is nothing to say about the
+    // table, and the outcome alone tells the caller why.
+    await whenSeeded()
+    const handler = jest.fn().mockResolvedValue({
+      ok: false,
+      failure: { table: "characters", reason: "no_host", message: "companion not paired" },
+    })
+
+    const outcomes = await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(outcomes[0]).toMatchObject({ ok: false, failure: { reason: "no_host" } })
+    expect(getSyncStateFor("characters")).toMatchObject({ lastError: null, lastSyncAt: null })
+    expect(await getDb().hostSyncCursors.get(["", "characters"])).toBeUndefined()
+  })
+
+  it("does not carry an error filed under the unpaired key into a new run", async () => {
+    await whenSeeded()
+    await getDb().hostSyncCursors.put({
+      serverKey: "",
+      table: "twins",
+      since: 3,
+      lastSyncAt: null,
+      lastError: "tauri-only command from web mode: sync_pull",
+    })
+    const handler = jest.fn().mockResolvedValue({
+      ok: false,
+      failure: { table: "twins", reason: "no_host", message: "no host" },
+    })
+
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "twins" as const, run: handler }],
+    })
+
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 3 })
+    expect(getSyncStateFor("twins").lastError).toBeNull()
+  })
+
+  it("keeps a persisted error recorded against a paired host", async () => {
+    companionConfig = { deviceId: "host-a" }
+    await whenSeeded()
+    const key = (
+      await import("@/lib/companion/credential-book/legacy-migration")
+    ).companionCursorNamespace(companionConfig as never)
+    await getDb().hostSyncCursors.put({
+      serverKey: key,
+      table: "skills",
+      since: 1,
+      lastSyncAt: null,
+      lastError: "schema drift",
+    })
+    const handler = jest.fn(
+      () => new Promise<SyncOutcome>(() => undefined) // never settles: read state mid-run
+    )
+    void runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "skills" as const, run: handler }],
+    })
+    await waitForCall(handler)
+
+    expect(getSyncStateFor("skills").lastError).toBe("schema drift")
+  })
 })
+
+async function waitForCall(fn: jest.Mock): Promise<void> {
+  for (let i = 0; i < 50 && fn.mock.calls.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 2))
+  }
+}
 
 describe("installNetworkSync", () => {
   it("triggers runSyncDown on network connected=true", async () => {

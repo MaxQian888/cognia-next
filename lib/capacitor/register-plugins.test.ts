@@ -166,4 +166,42 @@ describe("registerNativePlugins", () => {
       expect.objectContaining({ error: "no core" })
     )
   })
+
+  it("bridges the clipboard once the native Clipboard plugin is registered", async () => {
+    setMobile([{ name: "Clipboard" }, { name: "Camera" }])
+    const installClipboardBridge = jest.fn()
+    await registerNativePlugins({
+      registerFn: jest.fn(),
+      installClipboardBridge,
+      win: window as Win,
+    })
+    expect(installClipboardBridge).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves the clipboard alone when the native runtime has no Clipboard plugin", async () => {
+    setMobile([{ name: "Camera" }])
+    const installClipboardBridge = jest.fn()
+    await registerNativePlugins({
+      registerFn: jest.fn(),
+      installClipboardBridge,
+      win: window as Win,
+    })
+    expect(installClipboardBridge).not.toHaveBeenCalled()
+  })
+
+  it("logs and survives a clipboard bridge failure", async () => {
+    setMobile([{ name: "Clipboard" }])
+    const out = await registerNativePlugins({
+      registerFn: jest.fn(),
+      installClipboardBridge: () => {
+        throw new Error("frozen navigator")
+      },
+      win: window as Win,
+    })
+    expect(out.kind).toBe("registered")
+    expect(logWarn).toHaveBeenCalledWith(
+      "capacitor: clipboard bridge install failed",
+      expect.objectContaining({ error: "frozen navigator" })
+    )
+  })
 })

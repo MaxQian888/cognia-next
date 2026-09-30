@@ -32,7 +32,10 @@ const KEYWORD_RULES: ReadonlyArray<{ re: RegExp; category: string }> = [
   },
   { re: /rate[_ ]?limit(?:ed|_error)?|too many requests/i, category: "rateLimited" },
   {
-    re: /\bunauthorized\b|authentication[_ ]?error|invalid[_ ]api[_ ]key/i,
+    // The last three are how providers word a rejected key when the status is
+    // not in the text: Anthropic's "invalid x-api-key", OpenAI's "Incorrect
+    // API key provided", and gateways' "API key is invalid." / "… expired".
+    re: /\bunauthorized\b|authentication[_ ]?error|invalid[_ -]?(?:x-)?api[_ -]?key|incorrect api[_ -]?key|\bapi[_ -]?key (?:is |was |has been |has )?(?:invalid|incorrect|expired|revoked|not valid)\b/i,
     category: "unauthorized",
   },
   { re: /\bforbidden\b|permission[_ ]?error|permission denied/i, category: "forbidden" },

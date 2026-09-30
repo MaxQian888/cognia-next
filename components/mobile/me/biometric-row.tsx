@@ -9,9 +9,18 @@ export interface BiometricRowProps {
   checked: boolean
   onChange: (next: boolean) => void
   testid: string
+  /** Hold the switch while its change is being confirmed (e.g. a permission prompt). */
+  disabled?: boolean
 }
 
-export function BiometricRow({ label, help, checked, onChange, testid }: BiometricRowProps) {
+export function BiometricRow({
+  label,
+  help,
+  checked,
+  onChange,
+  testid,
+  disabled,
+}: BiometricRowProps) {
   return (
     <Item size="sm" className="px-0">
       <ItemContent>
@@ -22,6 +31,7 @@ export function BiometricRow({ label, help, checked, onChange, testid }: Biometr
         <Switch
           checked={checked}
           onCheckedChange={onChange}
+          disabled={disabled}
           data-testid={testid}
           aria-label={label}
         />

@@ -20,6 +20,7 @@ import type { OutboundJobRow, ConnectorAuditRow } from "@/lib/db/connector-types
 import type { MobileOutboundCommand, MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import type { SeededWorkflowKind } from "./workflow-fixtures"
 import type { ChatPerfMediaOptions } from "./chat-perf-fixtures"
+import type { StagedConversation, StagedConversationScript } from "./demo-stage-seed"
 
 export type MockBaseUrls = {
   anthropic?: string
@@ -115,6 +116,17 @@ declare global {
       planText?: string
       stepTitles?: string[]
     }) => Promise<string>
+    /**
+     * Create a session and arm a staged conversation over it
+     * (`demo-stage-seed.ts`). Nothing is written until the first
+     * `__cogniaAdvanceStage`; the website's recorder opens `/?session=<id>`
+     * first so the camera sees every stage land in the real renderers.
+     */
+    __cogniaSeedStagedConversation?: (
+      script: StagedConversationScript
+    ) => Promise<{ sessionId: string; stageCount: number }>
+    /** Play the next stage of a staged conversation to completion. */
+    __cogniaAdvanceStage?: (sessionId: string) => Promise<{ index: number; done: boolean }>
     __cogniaSeedConnectorDraft?: (draft: {
       adapterId: string
       conversationKey: string
@@ -526,7 +538,7 @@ export function ExposeTestGlobals(): null {
         return { sessionId: session.id, messageIds: messages.map((m) => m.id), imageBytes }
       }
 
-      window.__cogniaSeedPlan = async (draft) => {
+      const seedPlan: NonNullable<Window["__cogniaSeedPlan"]> = async (draft) => {
         const { createPlan, appendPlanEvent } = await import("@/lib/db/plans")
         const { materializeSteps, linearAgentTurnSteps } = await import("@/lib/agent/plan/steps")
         const { computePlanCounts, DEFAULT_PLAN_CONFIG } = await import("@/types/agent/plan")
@@ -560,6 +572,56 @@ export function ExposeTestGlobals(): null {
           },
         })
         return plan.id
+      }
+      window.__cogniaSeedPlan = seedPlan
+
+      const stagedConversations = new Map<string, StagedConversation>()
+      window.__cogniaSeedStagedConversation = async (script) => {
+        const [
+          { createSession },
+          { commitMessageDelta },
+          { useChatStore },
+          { useArtifactStore },
+          { createStagedConversation },
+        ] = await Promise.all([
+          import("@/lib/db/sessions"),
+          import("@/lib/db/messages"),
+          import("@/stores/chat/chat-store"),
+          import("@/stores/artifact/artifact-store"),
+          import("./demo-stage-seed"),
+        ])
+        // Same readiness rule as `__cogniaSeedSquad`: until the account is
+        // unlocked the session would land in the pre-unlock database, and the
+        // chat list the camera films would never show it.
+        const { useAccountStore } = await import("@/stores/account/account-store")
+        const readyBy = Date.now() + 20_000
+        while (!useAccountStore.getState().unlockedAccountId && Date.now() < readyBy) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        if (!useAccountStore.getState().unlockedAccountId) {
+          throw new Error("Staged conversation: the account did not unlock within 20s")
+        }
+        const session = await createSession({ title: script.title })
+        const conversation = createStagedConversation(session.id, script, {
+          persist: (sessionId, upserts) =>
+            commitMessageDelta(sessionId, { upserts: upserts as never }),
+          publish: (sessionId, messages) =>
+            useChatStore.getState().replaceMessagesForSession(sessionId, messages as never),
+          seedPlan: (draft) =>
+            seedPlan({ ...draft, status: "awaiting_approval", source: "exit_plan_mode" }),
+          requestApproval: (approval) => useChatStore.getState().pushApproval(approval),
+          createArtifact: (params) =>
+            useArtifactStore.getState().createArtifact(params as never).id,
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now(),
+        })
+        stagedConversations.set(session.id, conversation)
+        return { sessionId: session.id, stageCount: conversation.stageCount }
+      }
+      window.__cogniaAdvanceStage = async (sessionId) => {
+        const conversation = stagedConversations.get(sessionId)
+        if (!conversation) throw new Error(`No staged conversation for session ${sessionId}`)
+        return conversation.advance()
       }
 
       window.__cogniaSeedTeam = async (draft) => {
@@ -1008,6 +1070,8 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaSeedSquadRun
       delete window.__cogniaSeedSkill
       delete window.__cogniaSeedConnectorDraft
+      delete window.__cogniaSeedStagedConversation
+      delete window.__cogniaAdvanceStage
       delete window.__cogniaReadMobileOutbound
       delete window.__cogniaEnqueueOutbound
       delete window.__cogniaSeedRun

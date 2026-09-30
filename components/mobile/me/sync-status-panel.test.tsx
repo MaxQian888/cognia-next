@@ -22,6 +22,16 @@ jest.mock("@/lib/sync/companion-sync", () => ({
   }),
 }))
 
+const configMock = jest.fn((): object | null => ({ deviceId: "dev" }))
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  loadCompanionConfig: () => configMock(),
+}))
+
+const pushMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
 const toastMock = { success: jest.fn(), error: jest.fn() }
 jest.mock("sonner", () => ({
   toast: {
@@ -38,7 +48,19 @@ const asSnapshot = (o: Record<string, { lastSyncAt: number | null; lastError: st
     Object.entries(o).map(([k, v]) => [k, { ...v, since: 0 }])
   ) as unknown as Snapshot
 
+const failed = (table: string, reason: string, message = "boom") => ({
+  ok: false as const,
+  failure: { table, reason, message },
+})
+const synced = (table: string) => ({
+  ok: true as const,
+  result: { table, applied: 0, nextSince: 1 },
+})
+
 beforeEach(() => {
+  configMock.mockReset()
+  configMock.mockReturnValue({ deviceId: "dev" })
+  pushMock.mockReset()
   runSyncMock.mockReset()
   runSyncMock.mockResolvedValue([])
   toastMock.success.mockReset()
@@ -153,6 +175,59 @@ describe("<SyncStatusPanel />", () => {
     render(<SyncStatusPanel />)
     fireEvent.click(screen.getByTestId("sync-row-retry-messages"))
     await waitFor(() => expect(runSyncMock).toHaveBeenCalledWith({ only: ["messages"] }))
+  })
+
+  it("reports a retry that failed again as a failure, never as 'Synced'", async () => {
+    // The orchestrator resolves with per-table outcomes instead of rejecting,
+    // so a toast keyed on "the promise resolved" said "Synced characters"
+    // over a row that stayed red.
+    runSyncMock.mockResolvedValueOnce([failed("characters", "transport", "host said no")])
+    render(<SyncStatusPanel />)
+    fireEvent.click(screen.getByTestId("sync-row-retry-characters"))
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith("Could not sync Characters: host said no")
+    )
+    expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
+  it("names the table in words when a single-table retry succeeds", async () => {
+    runSyncMock.mockResolvedValueOnce([synced("messages")])
+    render(<SyncStatusPanel />)
+    fireEvent.click(screen.getByTestId("sync-row-retry-messages"))
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith("Synced Messages."))
+  })
+
+  it("counts the failed tables when 'Sync all' partly fails", async () => {
+    runSyncMock.mockResolvedValueOnce([synced("sessions"), failed("messages", "schema")])
+    render(<SyncStatusPanel />)
+    fireEvent.click(screen.getByTestId("sync-status-run-all"))
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith("1 table of 2 failed to sync.")
+    )
+    expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
+  it("says there is no host when the pull was refused for want of one", async () => {
+    runSyncMock.mockResolvedValueOnce([failed("messages", "no_host")])
+    render(<SyncStatusPanel />)
+    fireEvent.click(screen.getByTestId("sync-row-retry-messages"))
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(
+        "No host is paired, so there is nothing to sync from. Pair a host first."
+      )
+    )
+  })
+
+  it("offers pairing instead of retries on a device with no host", () => {
+    configMock.mockReturnValue(null)
+    render(<SyncStatusPanel />)
+    const summary = screen.getByTestId("sync-status-summary")
+    expect(summary).toHaveAttribute("data-sync-overall", "noHost")
+    expect(screen.getByTestId("sync-status-headline")).toHaveTextContent("No host paired")
+    expect(screen.queryByTestId("sync-status-run-all")).toBeNull()
+    expect(screen.getByTestId("sync-row-retry-messages")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("sync-status-pair"))
+    expect(pushMock).toHaveBeenCalledWith("/pair")
   })
 
   it("surfaces sync errors via toast.error", async () => {

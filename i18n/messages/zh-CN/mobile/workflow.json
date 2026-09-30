@@ -100,6 +100,8 @@
   "pinned": "置顶",
   "pinned_added": "已置顶。",
   "pinned_removed": "已取消置顶。",
+  "queuedBadge": "待发送",
+  "runAlreadyQueued": "已在队列中 — 桌面联线后只会运行一次。",
   "runButton": "运行",
   "runFailed": "触发失败：{message}",
   "runQueued": "已加入队列，桌面联线后将触发。",
@@ -115,6 +117,7 @@
   "swipe": {
     "favorite": "置顶",
     "run": "运行",
+    "runAlreadyQueued": "{name} 已在队列中",
     "runQueued": "已加入队列：{name}",
     "unfavorite": "取消置顶"
   },

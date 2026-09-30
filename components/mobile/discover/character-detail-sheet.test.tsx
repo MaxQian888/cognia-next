@@ -98,6 +98,58 @@ describe("CharacterDetailSheet", () => {
     await waitFor(() => expect(updateCharacterMock).toHaveBeenCalledWith("c1", expect.anything()))
   })
 
+  it("paints an oklch avatar colour in the swatch instead of black", () => {
+    render(
+      <CharacterDetailSheet
+        open
+        character={mkChar({ avatarColor: "oklch(0.74 0.16 90)" })}
+        onOpenChange={() => undefined}
+      />
+    )
+    const swatch = screen.getByTestId("character-avatar-color") as HTMLInputElement
+    expect(swatch.value).toMatch(/^#[0-9a-f]{6}$/)
+    expect(swatch.value).not.toBe("#000000")
+  })
+
+  it("keeps the stored oklch colour when the user saves without picking one", async () => {
+    render(
+      <CharacterDetailSheet
+        open
+        character={mkChar({ avatarColor: "oklch(0.74 0.16 90)" })}
+        onOpenChange={() => undefined}
+      />
+    )
+    fireEvent.click(screen.getByTestId("character-save"))
+    await waitFor(() =>
+      expect(updateCharacterMock).toHaveBeenCalledWith(
+        "c1",
+        expect.objectContaining({ avatarColor: "oklch(0.74 0.16 90)" })
+      )
+    )
+  })
+
+  it("shows the catalog display name under a raw default-model id", () => {
+    render(
+      <CharacterDetailSheet
+        open
+        character={mkChar({ model: "claude-haiku-4-5-20251001" })}
+        onOpenChange={() => undefined}
+      />
+    )
+    expect(screen.getByTestId("character-default-model-hint")).toHaveTextContent(/Haiku 4\.5/)
+  })
+
+  it("adds no name line for a model id the catalog does not know", () => {
+    render(
+      <CharacterDetailSheet
+        open
+        character={mkChar({ model: "my-private-model" })}
+        onOpenChange={() => undefined}
+      />
+    )
+    expect(screen.queryByTestId("character-default-model-hint")).not.toBeInTheDocument()
+  })
+
   it("deletes a non-built-in character", async () => {
     const onOpenChange = jest.fn()
     render(<CharacterDetailSheet open character={mkChar()} onOpenChange={onOpenChange} />)

@@ -66,10 +66,14 @@ export async function getAppInfo(
  *
  * Registering a `backButton` listener DISABLES the Capacitor App plugin's
  * default handling (WebView history back, exit at root), so the installed
- * policy must cover both branches itself:
- *   - `canGoBack` → `window.history.back()`. Open sheets/dialogs push a
- *     marker history entry (`useBackDismiss`), so this both dismisses
- *     overlays and pops SPA routes — identical to the old default.
+ * policy must cover both branches itself (the handler lives in
+ * `CompanionBootProvider`):
+ *   - an open overlay first closes as Escape would close it
+ *     (`dismissTopmostOverlayOnBack`), since most sheets/dialogs push no
+ *     history entry and the press would otherwise act on the page under them.
+ *   - `canGoBack` → `window.history.back()`. `useBackDismiss` overlays push a
+ *     marker history entry, so this both dismisses those and pops SPA
+ *     routes — identical to the old default.
  *   - at the history root → `App.minimizeApp()` instead of the default
  *     exit, matching standard Android launcher-app UX.
  *

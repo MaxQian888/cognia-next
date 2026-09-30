@@ -3,6 +3,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 
 import { WorkflowRowActionsSheet } from "./workflow-row-actions-sheet"
 import type { WorkflowRow } from "@/types/workflow/visual"
@@ -20,6 +21,7 @@ jest.mock("next-intl", () => ({
       graphViewerEmpty: "This workflow has no nodes yet.",
       delete: "Delete",
       runQueued: `Triggered ${name} — queued for desktop.`,
+      runAlreadyQueued: `${name} is already queued.`,
       resume: "Resume schedule",
       pauseQueued: `Pausing schedule of ${name}.`,
       resumeQueued: `Resuming schedule of ${name}.`,
@@ -37,8 +39,13 @@ jest.mock("sonner", () => ({
 jest.mock("@/hooks/ui/use-back-dismiss", () => ({ useBackDismiss: jest.fn() }))
 
 const enqueueMock = jest.fn(async (..._a: unknown[]) => ({}))
+const enqueueUnlessQueuedMock = jest.fn(async (..._a: unknown[]) => ({
+  row: {},
+  alreadyQueued: false,
+}))
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (...a: unknown[]) => enqueueMock(...a),
+  enqueueUnlessQueued: (...a: unknown[]) => enqueueUnlessQueuedMock(...a),
 }))
 
 const saveMock = jest.fn(async (..._a: unknown[]) => undefined)
@@ -81,6 +88,7 @@ function makeWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
 
 beforeEach(() => {
   enqueueMock.mockClear()
+  enqueueUnlessQueuedMock.mockClear()
   saveMock.mockClear()
 })
 
@@ -189,19 +197,35 @@ describe("<WorkflowRowActionsSheet />", () => {
     )
   })
 
-  it("enqueues workflow_trigger_manual on Run now", async () => {
+  it("enqueues workflow_trigger_manual on Run now, labelled for the queue sheet", async () => {
     const user = userEvent.setup()
     render(<WorkflowRowActionsSheet workflow={makeWorkflow()} onOpenChange={jest.fn()} />)
 
     await user.click(screen.getByTestId("workflow-action-run"))
 
     await waitFor(() =>
-      expect(enqueueMock).toHaveBeenCalledWith(
+      expect(enqueueUnlessQueuedMock).toHaveBeenCalledWith(
         expect.objectContaining({
           command: "workflow_trigger_manual",
           payload: { workflowId: "wf-1" },
+          label: makeWorkflow().name,
         })
       )
+    )
+    expect(toast.success).toHaveBeenCalledWith(
+      `Triggered ${makeWorkflow().name} — queued for desktop.`
+    )
+  })
+
+  it("says a run is already queued instead of stacking another", async () => {
+    enqueueUnlessQueuedMock.mockResolvedValueOnce({ row: {}, alreadyQueued: true })
+    const user = userEvent.setup()
+    render(<WorkflowRowActionsSheet workflow={makeWorkflow()} onOpenChange={jest.fn()} />)
+
+    await user.click(screen.getByTestId("workflow-action-run"))
+
+    await waitFor(() =>
+      expect(toast.message).toHaveBeenCalledWith(`${makeWorkflow().name} is already queued.`)
     )
   })
 })

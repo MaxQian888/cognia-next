@@ -37,7 +37,11 @@ const CONTENT_POLICY_PATTERNS: ReadonlyArray<RegExp> = [
 
 const AUTH_PATTERNS: ReadonlyArray<RegExp> = [
   /unauthori[sz]ed/i,
-  /invalid[_ ]?api[_ ]?key/i,
+  /invalid[_ -]?(?:x-)?api[_ -]?key/i,
+  // A rejected key worded without a status: OpenAI's "Incorrect API key
+  // provided", and gateways' "API key is invalid." / "… has expired".
+  /incorrect api[_ -]?key/i,
+  /\bapi[_ -]?key (?:is |was |has been |has )?(?:invalid|incorrect|expired|revoked|not valid)\b/i,
   /missing[_ ]credential/i,
   /\b40[13]\b/,
   /authentication/i,

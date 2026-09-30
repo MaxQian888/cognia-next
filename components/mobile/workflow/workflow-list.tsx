@@ -14,7 +14,7 @@ import { EmptyState } from "@/components/mobile/empty-state"
 import { LongPress } from "@/components/interactions/long-press"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { SwipeRow } from "@/components/interactions/swipe-row"
-import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
+import { enqueueUnlessQueued } from "@/lib/db/mobile-outbound-queue"
 import { listChildFolders, getFolderPath } from "@/lib/db/workflow-folders"
 import {
   getRecentlyFailedWorkflowIds,
@@ -100,8 +100,9 @@ export function WorkflowList({ className }: WorkflowListProps) {
     ) ?? []
   // Manual triggers tapped on this device live in the outbound queue until the
   // desktop runs them and the run row syncs back — surface them so the list
-  // reflects the "sending" state instead of looking inert after a tap.
-  const pendingTriggerIds = usePendingWorkflowTriggers()
+  // reflects the queue ("Queued" while waiting for the Host, "Sending" while
+  // on the wire) instead of looking inert after a tap.
+  const pendingTriggers = usePendingWorkflowTriggers()
 
   const visible = useMemo(() => {
     if (!folderWorkflows) return undefined
@@ -256,10 +257,25 @@ export function WorkflowList({ className }: WorkflowListProps) {
                         id: "run",
                         label: t("swipe.run"),
                         onSelect: () => {
-                          void enqueueOutbound({
+                          // One queued run per workflow: a second swipe while the
+                          // first is still waiting says so instead of stacking a
+                          // duplicate that would fire twice when the Host is back.
+                          void enqueueUnlessQueued({
                             command: "workflow_trigger_manual",
                             payload: { workflowId: wf.id },
-                          }).then(() => toast.success(t("swipe.runQueued", { name: wf.name })))
+                            label: wf.name,
+                          }).then(
+                            ({ alreadyQueued }) =>
+                              alreadyQueued
+                                ? toast.message(t("swipe.runAlreadyQueued", { name: wf.name }))
+                                : toast.success(t("swipe.runQueued", { name: wf.name })),
+                            (error: unknown) =>
+                              toast.error(
+                                t("runFailed", {
+                                  message: error instanceof Error ? error.message : String(error),
+                                })
+                              )
+                          )
                         },
                       },
                       {
@@ -303,13 +319,17 @@ export function WorkflowList({ className }: WorkflowListProps) {
                                 >
                                   ● {t("activeBadge")}
                                 </Badge>
-                              ) : pendingTriggerIds.has(wf.id) ? (
+                              ) : pendingTriggers.has(wf.id) ? (
                                 <Badge
                                   variant="outline"
                                   className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-300"
                                   data-testid={`workflow-sending-${wf.id}`}
+                                  data-state={pendingTriggers.get(wf.id)}
                                 >
-                                  ● {t("sending")}
+                                  ●{" "}
+                                  {pendingTriggers.get(wf.id) === "sending"
+                                    ? t("sending")
+                                    : t("queuedBadge")}
                                 </Badge>
                               ) : null}
                             </div>

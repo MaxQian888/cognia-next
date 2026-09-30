@@ -4,7 +4,23 @@ import {
   CONSOLE_BRIDGE_ORIGINALS,
   type ConsoleBridgeOriginals,
 } from "./console-bridge-state"
+import { isCapacitorNativeShell, serializeConsoleData } from "./transports/console-transport"
 import type { Logger } from "./types"
+
+/**
+ * Render one console argument as text for a sink that keeps only text.
+ *
+ * Inside a Capacitor native shell the WebView hands each `console.*` argument
+ * to the platform log as its string form, so `console.warn("delete failed",
+ * err)` reached logcat as `delete failed [object Object]` for any error that is
+ * not a plain `Error`, and plain data objects always did. Strings pass through
+ * untouched; everything else becomes JSON that keeps an error's name, message
+ * and stack.
+ */
+function toConsoleText(value: unknown): unknown {
+  if (typeof value === "string" || typeof value !== "object" || value === null) return value
+  return serializeConsoleData(value)
+}
 
 interface ConsoleBridgeTarget {
   warn: (...args: unknown[]) => void
@@ -14,6 +30,12 @@ interface ConsoleBridgeTarget {
 export interface InstallConsoleBridgeOptions {
   console?: ConsoleBridgeTarget
   logger?: Logger
+  /**
+   * Whether the console sink keeps only text (see `toConsoleText`). Defaults
+   * to detecting a Capacitor native shell at call time, since the Capacitor
+   * runtime may finish installing after this bridge does.
+   */
+  flattensObjects?: () => boolean
 }
 
 interface InstalledBridge {
@@ -35,6 +57,7 @@ export function installConsoleBridge(options: InstallConsoleBridgeOptions = {}):
   if (existing) return existing.cleanup
 
   const logger = options.logger ?? createLogger(CONSOLE_BRIDGE_MODULE)
+  const flattensObjects = options.flattensObjects ?? isCapacitorNativeShell
   const originalWarn = target.warn
   const originalError = target.error
   let forwarding = false
@@ -50,7 +73,7 @@ export function installConsoleBridge(options: InstallConsoleBridgeOptions = {}):
     // per-module `minLevel` above the call, or the sampler. Every one of those
     // used to turn a `console.error` into silence, which is exactly the wrong
     // outcome for the startup crashes this window contains.
-    original.apply(target, args)
+    original.apply(target, flattensObjects() ? args.map(toConsoleText) : args)
     if (forwarding) return
 
     forwarding = true

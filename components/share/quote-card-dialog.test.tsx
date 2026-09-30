@@ -77,6 +77,19 @@ describe("QuoteCardDialog", () => {
     expect(doc).toContain("Amiya")
   })
 
+  it("scrolls only the body, so the title, the close button and the actions stay on screen", () => {
+    open()
+    const dialog = screen.getByRole("dialog")
+    const body = screen.getByTestId("quote-card-body")
+    expect(dialog).not.toHaveClass("overflow-y-auto")
+    expect(body).toHaveClass("overflow-y-auto")
+    expect(body).toContainElement(screen.getByTestId("quote-card-preview"))
+    const close = screen.getByRole("button", { name: "Close" })
+    expect(body).not.toContainElement(close)
+    expect(body).not.toContainElement(screen.getByTestId("quote-card-download"))
+    expect(body).not.toContainElement(screen.getByRole("heading"))
+  })
+
   it("renders the theme gallery", () => {
     open()
     expect(screen.getByTestId("theme-gallery")).toBeInTheDocument()

@@ -248,7 +248,12 @@ export function MobileCanvas({
 
   return (
     <div
-      className="wf-touch-canvas relative h-full w-full overflow-hidden bg-muted/30"
+      // Opaque on purpose. `bg-muted/30` was 70% see-through, so with a
+      // wallpaper on (scope "all" paints it on `body`) the whole image showed
+      // behind the dot grid, the edges and the node labels. The mix below is
+      // the same colour `muted/30` paints over the plain page, made solid, so
+      // the canvas looks unchanged without a wallpaper and stays readable with one.
+      className="wf-touch-canvas relative h-full w-full overflow-hidden bg-[color-mix(in_oklch,var(--muted)_30%,var(--background))]"
       data-testid="mobile-canvas"
       {...longPress}
     >

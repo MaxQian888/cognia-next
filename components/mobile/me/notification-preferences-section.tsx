@@ -17,7 +17,9 @@
  * forward-only edit surface, matching the Wave-2 `composerBehavior` precedent.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
 import { MeSection } from "@/components/mobile/me/me-section"
@@ -34,6 +36,8 @@ import { Slider } from "@/components/ui/slider"
 import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { parseHmToMinutes } from "@/lib/appearance/auto-mode"
+import { openAppSettings } from "@/lib/capacitor/app-settings"
+import { ensureDeviceChannelReady } from "@/lib/notifications/device-channel-gate"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import { useSettingsStore } from "@/stores/settings"
 import {
@@ -90,12 +94,39 @@ export function NotificationPreferencesSection() {
   )
 
   const hasChannel = (c: NotificationChannel) => prefs.globalDefaultChannels.includes(c)
-  const toggleChannel = (c: NotificationChannel, on: boolean) => {
+  // The channel whose ON switch is waiting on a permission prompt / push
+  // registration; its switch is held until the platform answers.
+  const [pendingChannel, setPendingChannel] = useState<NotificationChannel | null>(null)
+  const applyChannel = (c: NotificationChannel, on: boolean) => {
     const set = new Set(prefs.globalDefaultChannels)
     if (on) set.add(c)
     else set.delete(c)
     set.add("center") // center is always on
     patch({ globalDefaultChannels: [...set] })
+  }
+  const toggleChannel = async (c: NotificationChannel, on: boolean) => {
+    if (!on) {
+      applyChannel(c, false)
+      return
+    }
+    // System / push notifications have to be delivered by THIS phone: turning
+    // one on asks Android first, and a refusal or a device that cannot deliver
+    // it leaves the switch off and says why (no silent fake-ON switch).
+    setPendingChannel(c)
+    try {
+      const gate = await ensureDeviceChannelReady(c)
+      if (gate.kind === "allowed") {
+        applyChannel(c, true)
+      } else if (gate.kind === "denied") {
+        toast.error(t("channelDenied"), {
+          action: { label: t("openSettings"), onClick: () => void openAppSettings() },
+        })
+      } else {
+        toast.error(t(c === "push" ? "pushUnavailable" : "osUnavailable"))
+      }
+    } finally {
+      setPendingChannel(null)
+    }
   }
 
   const sourceEnabled = (s: NotificationSource) => prefs.perSource[s]?.enabled !== false
@@ -116,7 +147,8 @@ export function NotificationPreferencesSection() {
             label={t(`channel.${c}`)}
             help={t(`channelHelp.${c}`)}
             checked={hasChannel(c)}
-            onChange={(v) => toggleChannel(c, v)}
+            onChange={(v) => void toggleChannel(c, v)}
+            disabled={pendingChannel === c}
             testid={`notification-channel-${c}`}
           />
         ))}

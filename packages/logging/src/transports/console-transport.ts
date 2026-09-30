@@ -62,6 +62,31 @@ export interface ConsoleEnvironment {
   noColor: boolean
   /** `FORCE_COLOR` / `CLICOLOR_FORCE` is set to anything but `0`. */
   forceColor: boolean
+  /**
+   * The console sink keeps only TEXT, so every non-string argument must be
+   * serialized before it is handed over. True inside a Capacitor native shell:
+   * Android's WebView forwards `console.*` to logcat through
+   * `WebChromeClient.onConsoleMessage`, which receives each object argument as
+   * its `String()` — a structured log's data object arrived as the bare text
+   * `[object Object]`, and with it every error name, message and id. (iOS
+   * JSON-stringifies instead, which still empties an `Error`.) Optional so a
+   * hand-built environment means "an ordinary console".
+   */
+  flattensObjects?: boolean
+}
+
+/**
+ * Whether this page runs inside a Capacitor native shell. Read structurally
+ * from the global the Capacitor runtime installs, so the zero-dependency
+ * logging package takes no import on `@capacitor/core`.
+ */
+export function isCapacitorNativeShell(): boolean {
+  const capacitor = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+  try {
+    return typeof capacitor?.isNativePlatform === "function" && capacitor.isNativePlatform()
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -70,7 +95,13 @@ export interface ConsoleEnvironment {
  */
 export function detectConsoleEnvironment(): ConsoleEnvironment {
   if (typeof window !== "undefined") {
-    return { browser: true, tty: false, noColor: false, forceColor: false }
+    return {
+      browser: true,
+      tty: false,
+      noColor: false,
+      forceColor: false,
+      flattensObjects: isCapacitorNativeShell(),
+    }
   }
   const proc = typeof process !== "undefined" ? process : undefined
   const env: Readonly<Record<string, string | undefined>> = proc?.env ?? {}
@@ -155,12 +186,40 @@ export function resolveColorMode(
 const consoleApi = globalThis.console
 
 /**
+ * One text rendering of an entry's `data` for a sink that cannot keep objects.
+ *
+ * The logger core has already normalized `data` (errors become
+ * `{name, message, stack}`, dates ISO strings), so this is JSON in the normal
+ * case. It still guards the two things `JSON.stringify` throws on — a cycle
+ * and a bigint — because a log line must never be what fails.
+ */
+export function serializeConsoleData(data: unknown): string {
+  const seen = new WeakSet<object>()
+  try {
+    return JSON.stringify(data, (_key, value: unknown) => {
+      if (typeof value === "bigint") return `${value.toString()}n`
+      if (value instanceof Error) {
+        return { name: value.name, message: value.message, stack: value.stack }
+      }
+      if (typeof value === "object" && value !== null) {
+        if (seen.has(value)) return "[Circular]"
+        seen.add(value)
+      }
+      return value
+    })
+  } catch {
+    return String(data)
+  }
+}
+
+/**
  * Console transport implementation
  */
 export class ConsoleTransport implements Transport {
   name = "console"
   private options: ConsoleTransportOptions
   private colorMode: ConsoleColorMode
+  private flattensObjects: boolean
 
   constructor(
     options?: ConsoleTransportOptions,
@@ -173,6 +232,7 @@ export class ConsoleTransport implements Transport {
     // supervised pipe the whole `resolveConsoleTransportOptions` bare-line
     // path exists to keep plain.
     this.colorMode = resolveColorMode(options?.useColors, env)
+    this.flattensObjects = env.flattensObjects === true
   }
 
   log(entry: StructuredLogEntry): void {
@@ -208,7 +268,8 @@ export class ConsoleTransport implements Transport {
 
     const prefix = parts.join(" ")
     const consoleMethod = this.getConsoleMethod(level)
-    const extra = opts.compact || !data ? [] : [data]
+    const extra: unknown[] =
+      opts.compact || !data ? [] : [this.flattensObjects ? serializeConsoleData(data) : data]
 
     // Only the prefix is painted; the message stays readable when the output
     // is later grepped or re-wrapped by a supervisor.

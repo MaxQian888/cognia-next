@@ -92,6 +92,15 @@ export function VirtualizedLogList({
     count: filteredLogs.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
+    // Key the measurement cache by log id, the same key React renders the row
+    // under. The default key is the INDEX, and this list is newest-first: every
+    // arriving entry shifts all rows down one index while the mounted row
+    // elements (keyed by id) keep their size, so ResizeObserver never fires to
+    // correct the cache. Each row then inherited its predecessor's measured
+    // height — a tall wrapped agent.trace row was laid out at a one-line
+    // height and the next row painted over its message (with a matching blank
+    // gap wherever a short row inherited a tall height).
+    getItemKey: (index) => filteredLogs[index]?.id ?? index,
     overscan: 10,
   })
 

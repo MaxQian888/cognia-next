@@ -354,6 +354,18 @@ describe("resolveMobileRowMetadata", () => {
     ).toEqual([{ kind: "workspace", value: "Alpha" }])
   })
 
+  it("names a dated catalog model by its display name, not its raw id", () => {
+    const [item] = resolveMobileRowMetadata({
+      session: { ...baseSession, model: "claude-haiku-4-5-20251001" },
+      fields: ["model"],
+      defaultProvider: "anthropic",
+      groupAxis: null,
+    })
+    expect(item?.kind).toBe("model")
+    expect(item?.value).not.toBe("claude-haiku-4-5-20251001")
+    expect(item?.value).toMatch(/Haiku 4\.5/)
+  })
+
   it("skips a field with nothing to say", () => {
     expect(
       resolveMobileRowMetadata({ session: baseSession, fields: ["agent", "workspace"], groupAxis: null })

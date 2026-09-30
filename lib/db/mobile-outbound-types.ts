@@ -173,11 +173,13 @@ export interface MobileOutboundJobRow {
    */
   label?: string
   /**
-   * When `claimNext` flipped this row to `sending`.
+   * When `claimNext` flipped this row to `sending`, re-stamped by the holding
+   * dispatcher every `CLAIM_RENEW_INTERVAL_MS` for as long as it works on it.
    *
-   * Lets a startup reclaim tell a claim abandoned by a killed process from one
-   * a concurrently running dispatcher is still awaiting. Absent on rows claimed
-   * before this field existed, which are treated as abandoned.
+   * Lets the reclaim sweep (every drain) and the queue sheet tell a claim
+   * abandoned by a killed process from one a live dispatcher still holds — see
+   * `isAbandonedClaim`. Absent on rows claimed before this field existed, which
+   * are treated as abandoned.
    */
   claimedAt?: number
   /** Absent on v25-v167 rows, which are interpreted as legacy RPC jobs. */

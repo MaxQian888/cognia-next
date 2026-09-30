@@ -39,6 +39,7 @@ import {
   Upload as ImportIcon,
   History as HistoryIcon,
   MoreVertical as MoreIcon,
+  Check as CheckIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -51,7 +52,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { enqueueUnlessQueued } from "@/lib/db/mobile-outbound-queue"
 import { impact } from "@/lib/capacitor/haptics"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
@@ -149,13 +150,14 @@ export function MobileEditorTopbar({
       // then enqueue a manual trigger for the paired desktop to execute.
       if (store.getState().dirty) await persistEditorWorkflow(store)
       const { id, name: wfName } = store.getState().baseWorkflow
-      await enqueue({
+      const { alreadyQueued } = await enqueueUnlessQueued({
         command: "workflow_trigger_manual",
         payload: { workflowId: id },
         label: wfName,
       })
       void impact("light")
-      toast.success(tRun("runQueued"))
+      if (alreadyQueued) toast.message(tRun("runAlreadyQueued"))
+      else toast.success(tRun("runQueued"))
     } catch (err) {
       toast.error(tRun("runFailed", { message: err instanceof Error ? err.message : String(err) }))
     } finally {
@@ -227,37 +229,45 @@ export function MobileEditorTopbar({
         </Link>
       </Button>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <h1 className="truncate text-sm font-semibold leading-tight">{name}</h1>
-          <Badge
-            variant="outline"
-            className={cn(
-              "shrink-0 text-[10px]",
-              dirty ? "text-amber-600 dark:text-amber-300" : "text-muted-foreground"
-            )}
-            data-testid="mobile-editor-dirty"
-          >
-            {dirty ? t("dirty") : t("savedBadge")}
-          </Badge>
-        </div>
+      {/* Name over status, both inside the one column that is allowed to
+          shrink. The badge used to sit beside the name as `shrink-0`: once the
+          action row claimed the whole width this column collapsed to 0px, the
+          name vanished and the badge overflowed onto the mode toggle. */}
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+        <h1 className="w-full truncate text-sm font-semibold leading-tight" title={name}>
+          {name}
+        </h1>
+        <Badge
+          variant="outline"
+          className={cn(
+            "max-w-full truncate px-1.5 py-0 text-[10px]",
+            dirty ? "text-amber-600 dark:text-amber-300" : "text-muted-foreground"
+          )}
+          data-testid="mobile-editor-dirty"
+        >
+          {dirty ? t("dirty") : t("savedBadge")}
+        </Badge>
       </div>
 
+      {/* Below `sm` (every phone) the row carries up to eight 44px targets,
+          which is wider than the screen. There the mode toggle drops its word
+          (kept for screen readers) and the select-mode and Workbench buttons
+          move into the overflow menu, so the name column always keeps room. */}
       <Button
         type="button"
         variant={mode === "edit" ? "default" : "outline"}
         size="sm"
-        className="min-h-11 shrink-0"
+        className="min-h-11 shrink-0 max-sm:size-11 max-sm:px-0"
         onClick={onToggleMode}
         aria-pressed={mode === "edit"}
         data-testid="mobile-editor-mode-toggle"
       >
         {mode === "edit" ? (
-          <EditIcon className="mr-1 size-4" aria-hidden="true" />
+          <EditIcon className="size-4 sm:mr-1" aria-hidden="true" />
         ) : (
-          <ReadIcon className="mr-1 size-4" aria-hidden="true" />
+          <ReadIcon className="size-4 sm:mr-1" aria-hidden="true" />
         )}
-        {mode === "edit" ? t("modeEdit") : t("modeRead")}
+        <span className="max-sm:sr-only">{mode === "edit" ? t("modeEdit") : t("modeRead")}</span>
       </Button>
 
       {mode !== "read" ? (
@@ -265,7 +275,7 @@ export function MobileEditorTopbar({
           type="button"
           variant={mode === "select" ? "default" : "ghost"}
           size="icon"
-          className="size-11 shrink-0"
+          className="size-11 shrink-0 max-sm:hidden"
           onClick={onToggleSelectMode}
           aria-pressed={mode === "select"}
           aria-label={t("selectMode")}
@@ -293,7 +303,7 @@ export function MobileEditorTopbar({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-11 shrink-0"
+        className="size-11 shrink-0 max-sm:hidden"
         onClick={onOpenWorkbench}
         aria-label={tWorkbench("mobileTitle")}
         data-testid="mobile-editor-workbench"
@@ -340,6 +350,30 @@ export function MobileEditorTopbar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
+          {/* The phone-width homes of the two top-bar buttons hidden below
+              `sm` (see the mode toggle above). */}
+          {mode !== "read" ? (
+            <DropdownMenuItem
+              onSelect={onToggleSelectMode}
+              className="sm:hidden"
+              data-testid="mobile-editor-menu-select-mode"
+            >
+              <SelectIcon className="mr-2 size-4" aria-hidden="true" />
+              {t("selectMode")}
+              {mode === "select" ? (
+                <CheckIcon className="ml-auto size-4" aria-hidden="true" />
+              ) : null}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem
+            onSelect={onOpenWorkbench}
+            className="sm:hidden"
+            data-testid="mobile-editor-menu-workbench"
+          >
+            <WorkbenchIcon className="mr-2 size-4" aria-hidden="true" />
+            {tWorkbench("mobileTitle")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator className="sm:hidden" />
           <DropdownMenuItem onSelect={onOpenCopilot} data-testid="mobile-editor-copilot">
             <CopilotIcon className="mr-2 size-4" aria-hidden="true" />
             {t("copilot")}

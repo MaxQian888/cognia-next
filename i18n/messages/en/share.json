@@ -5,7 +5,7 @@
   "createdHelp": "Anyone with this link can view the content. The decryption key is in the link after “#”.",
   "createdTitle": "Your share link is ready",
   "creating": "Creating…",
-  "dialogDescription": "Create a public link. The contents are end-to-end encrypted in your browser — the server only ever stores ciphertext.",
+  "dialogDescription": "Create a public link. The contents are end-to-end encrypted on this device before upload — the server only ever stores ciphertext.",
   "dialogTitle": "Share via link",
   "done": "Done",
   "errorGeneric": "Could not create the share link.",

@@ -47,7 +47,7 @@ import { readHostPerson } from "@/lib/identity/host-person"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
-import { getFriendlyDeviceLabel } from "@/lib/device/device-identity"
+import { getFriendlyDeviceLabel, getLocalDeviceConsoleLabel } from "@/lib/device/device-identity"
 import { isTauri, transport } from "@/lib/tauri"
 import {
   getWanWakeOverrides,
@@ -285,6 +285,18 @@ export function useDeviceRows(): UseDeviceRowsResult {
    * re-run when nothing else changed, so a device would sit "online" forever.
    */
   const [now, setNow] = useState(() => Date.now())
+  // The generic label paints first; on the native shell the hardware model
+  // replaces it once `@capacitor/device` answers.
+  const [localLabel, setLocalLabel] = useState(getFriendlyDeviceLabel)
+  useEffect(() => {
+    let cancelled = false
+    void getLocalDeviceConsoleLabel().then((label) => {
+      if (!cancelled) setLocalLabel(label)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     const generation = ++refreshGeneration.current
@@ -393,7 +405,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     const deviceRows = buildDeviceRows({
       local: {
         ref: "local",
-        label: getFriendlyDeviceLabel(),
+        label: localLabel,
         platform: detectPlatform(),
         appVersion: APP_VERSION,
         capabilities: detectLocalCapabilities(),
@@ -463,6 +475,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     runtimeAvailability.microvm.available,
     runtimeAvailability.os.available,
     now,
+    localLabel,
   ])
 
   return {

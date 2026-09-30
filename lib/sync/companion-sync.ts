@@ -556,7 +556,11 @@ async function ensureHydrated(): Promise<void> {
         since: row.since,
         ...(row.cursor === undefined ? {} : { cursor: row.cursor }),
         lastSyncAt: row.lastSyncAt,
-        lastError: row.lastError,
+        // An error filed under the unpaired key was recorded while no host was
+        // paired, and builds before the `no_host` outcome persisted exactly
+        // that refusal. It describes no table on any host, so it is not
+        // carried into this run; the next real attempt re-derives it.
+        lastError: serverKey === "" ? null : row.lastError,
       })
     }
   })()
@@ -1136,6 +1140,13 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
           outcome = await run(t, guardedCursor())
           if (hostChanged()) return staleHost
         }
+        // No host to pull from (unpaired, or a runtime with no companion
+        // transport). The pull never ran, so there is nothing true to record
+        // about this table: persisting the refusal as `lastError` is what left
+        // a phone that had never paired showing tables "failed" with
+        // `tauri-only command from web mode: sync_pull`, forever, across
+        // restarts. The outcome still reaches the caller, which says so.
+        if (!outcome.ok && outcome.failure.reason === "no_host") return outcome
         const progress = outcome.ok ? outcome.result : outcome.failure.progress
         if (progress && progress.nextSince >= state.since) {
           state.since = progress.nextSince

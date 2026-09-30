@@ -1,4 +1,4 @@
-import { WebStubTransport } from "./transport-web"
+import { NO_HOST_TRANSPORT_CODE, WebStubTransport } from "./transport-web"
 
 describe("WebStubTransport", () => {
   let transport: WebStubTransport
@@ -24,6 +24,15 @@ describe("WebStubTransport", () => {
       await expect(transport.call("any_cmd", { foo: 1, bar: "two" })).rejects.toThrow(
         "tauri-only command from web mode: any_cmd"
       )
+    })
+
+    it("tags the refusal with a code so callers need not match the message", async () => {
+      // The sync orchestrator reads this to tell "nothing here can answer"
+      // from a host that answered with an error.
+      await expect(transport.call("sync_pull")).rejects.toMatchObject({
+        code: NO_HOST_TRANSPORT_CODE,
+      })
+      expect(NO_HOST_TRANSPORT_CODE).toBe("no_host_transport")
     })
 
     it("returns a Promise (never throws synchronously)", () => {

@@ -16,6 +16,7 @@
       "push": "Push notifications",
       "toast": "In-app toasts"
     },
+    "channelDenied": "Cognia isn't allowed to post notifications. Allow them in the app's system settings, then turn this on again.",
     "channelHelp": {
       "os": "Show native OS notifications.",
       "push": "Deliver to this device when the app is closed.",
@@ -38,8 +39,11 @@
     "minOsLevelHelp": "Only fire system notifications at or above this severity.",
     "minPushLevel": "Minimum push level",
     "minPushLevelHelp": "Only send push notifications at or above this severity.",
+    "openSettings": "Open settings",
+    "osUnavailable": "System notifications aren't available on this device.",
     "perSourceHelp": "Mute notifications from a specific subsystem.",
     "perSourceTitle": "By source",
+    "pushUnavailable": "Push notifications can't be set up on this device, for example because it has no Google Play services.",
     "quietHoursEnabled": "Quiet hours",
     "quietHoursEnabledHelp": "Silence non-critical notifications during a daily window.",
     "quietHoursEnd": "End time",

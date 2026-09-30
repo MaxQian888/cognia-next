@@ -44,3 +44,21 @@ export function useCoarsePointer(): boolean {
   const getSnapshot = useCallback(() => getQuerySnapshot(COARSE_POINTER_QUERY), [])
   return useSyncExternalStore(subscribe, getSnapshot, () => false)
 }
+
+/**
+ * Whether keyboard-shortcut hints ("⌘/Ctrl+Enter", "Esc to interrupt",
+ * "↑↓ navigate", "Shift+Tab") belong on screen.
+ *
+ * A phone has no Esc, no ⌘ and no arrow keys, so the hints are noise there at
+ * best and instructions that cannot be followed at worst. The gate is the input
+ * hardware rather than the runtime: a Capacitor shell, a phone browser and a
+ * touch-only tablet all lack the keyboard, and a laptop browser has one. A
+ * hover-capable, fine primary pointer is the signal a physical keyboard is
+ * attached; either half missing hides the hints. SSR renders them (desktop
+ * default, matching {@link useHasHover}).
+ */
+export function useShowKeyboardHints(): boolean {
+  const hasHover = useHasHover()
+  const coarsePointer = useCoarsePointer()
+  return hasHover && !coarsePointer
+}

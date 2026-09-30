@@ -12,8 +12,8 @@ import { readText as capReadText, writeText as capWriteText } from "@/lib/capaci
 
 /**
  * Read the system clipboard as text. Routes Tauri → desktop plugin, Capacitor
- * mobile → native pasteboard, browser → `navigator.clipboard`. Returns `null`
- * if no backend is available. The Capacitor wrapper self-gates to mobile, so
+ * mobile → native pasteboard, browser → `navigator.clipboard`. Returns `""`
+ * for an empty clipboard and `null` if no backend could read it. The Capacitor wrapper self-gates to mobile, so
  * the call is a fast `unsupported` no-op on web / Tauri.
  */
 export async function readClipboardText(): Promise<string | null> {
@@ -27,6 +27,10 @@ export async function readClipboardText(): Promise<string | null> {
   }
   const cap = await capReadText()
   if (cap.kind === "ok") return cap.value
+  // The native plugin rejects an empty pasteboard instead of resolving "".
+  // Report it as empty ("") so callers can tell "nothing copied" apart from
+  // "could not read" (null).
+  if (cap.kind === "error" && /no data on the clipboard/i.test(cap.message)) return ""
   if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
     try {
       return await navigator.clipboard.readText()

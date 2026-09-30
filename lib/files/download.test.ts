@@ -1,6 +1,17 @@
 /**
  * @jest-environment jsdom
  */
+const isCapacitorMock = jest.fn(() => false)
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isCapacitor: () => isCapacitorMock(),
+}))
+
+const shareContentMock = jest.fn()
+jest.mock("@/lib/capacitor/share", () => ({
+  shareContent: (...args: unknown[]) => shareContentMock(...args),
+}))
+
 import { downloadBlob, downloadFile, downloadFromUrl, copyBlobToClipboard } from "./download"
 
 describe("download helpers", () => {
@@ -63,9 +74,9 @@ describe("download helpers", () => {
   })
 
   describe("downloadBlob", () => {
-    it("creates an object URL, clicks the anchor, and revokes after", () => {
+    it("creates an object URL, clicks the anchor, and revokes after", async () => {
       const blob = new Blob(["abc"], { type: "image/svg+xml" })
-      downloadBlob(blob, "diagram.svg")
+      await expect(downloadBlob(blob, "diagram.svg")).resolves.toEqual({ kind: "downloaded" })
 
       expect(createObjectURL).toHaveBeenCalledWith(blob)
       expect(click).toHaveBeenCalledTimes(1)
@@ -79,6 +90,54 @@ describe("download helpers", () => {
       const blob = new Blob(["x"])
       expect(() => downloadBlob(blob, "f")).toThrow("nope")
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:test")
+    })
+  })
+
+  describe("mobile (Capacitor) hand-off", () => {
+    beforeEach(() => {
+      isCapacitorMock.mockReturnValue(true)
+      shareContentMock.mockReset()
+    })
+    afterEach(() => isCapacitorMock.mockReturnValue(false))
+
+    it("hands the file to the native share sheet instead of a dead anchor", async () => {
+      shareContentMock.mockResolvedValue({ kind: "shared" })
+      const blob = new Blob(["a,b"], { type: "text/csv" })
+      await expect(downloadBlob(blob, "table.csv")).resolves.toEqual({ kind: "shared" })
+      expect(click).not.toHaveBeenCalled()
+      const opts = shareContentMock.mock.calls[0][0] as { files: File[]; dialogTitle: string }
+      expect(opts.files[0].name).toBe("table.csv")
+      expect(opts.files[0].type).toBe("text/csv")
+      expect(opts.dialogTitle).toBe("table.csv")
+    })
+
+    it("reports cancellation and failures", async () => {
+      shareContentMock.mockResolvedValueOnce({ kind: "cancelled" })
+      await expect(downloadFile("a.txt", "x")).resolves.toEqual({ kind: "cancelled" })
+      shareContentMock.mockResolvedValueOnce({ kind: "error", message: "disk full" })
+      await expect(downloadFile("a.txt", "x")).resolves.toEqual({
+        kind: "error",
+        message: "disk full",
+      })
+      shareContentMock.mockResolvedValueOnce({ kind: "unsupported" })
+      await expect(downloadFile("a.txt", "x")).resolves.toEqual({
+        kind: "error",
+        message: "native share is unavailable",
+      })
+    })
+
+    it("fetches a URL download on mobile even without fetchAsBlob", async () => {
+      shareContentMock.mockResolvedValue({ kind: "shared" })
+      const blob = new Blob(["mp3"], { type: "audio/mpeg" })
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        blob: jest.fn().mockResolvedValue(blob),
+      }) as unknown as typeof fetch
+      await expect(downloadFromUrl("https://example.com/a.mp3", "a.mp3")).resolves.toEqual({
+        kind: "shared",
+      })
+      expect(global.fetch).toHaveBeenCalledWith("https://example.com/a.mp3")
+      expect(click).not.toHaveBeenCalled()
     })
   })
 

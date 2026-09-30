@@ -204,13 +204,17 @@ export function CompanionOutboundRunnerProvider({
         return (await ensureOutboundApproval(row.command)) !== "blocked"
       },
     })
-    const kick = () => {
-      void runner.kick().catch((error) => {
+    const kick = (options?: { thaw?: boolean }) => {
+      void runner.kick(options).catch((error) => {
         console.warn("companion-outbound-runner: kick failed", error)
       })
     }
-    const unsubscribePendingJobs = subscribeToPendingJobs(scope, kick)
-    const unsubscribeRuntime = subscribeRuntimeSnapshot(kick)
+    // A row the gate refused is held out of the runner for a short while; the
+    // pending-jobs subscription fires on the runner's own release of it, so it
+    // must NOT lift that hold. A new Host manifest (the snapshot) and an
+    // approval can change the gate's answer, so those two do.
+    const unsubscribePendingJobs = subscribeToPendingJobs(scope, () => kick())
+    const unsubscribeRuntime = subscribeRuntimeSnapshot(() => kick({ thaw: true }))
     // The approval is answered on someone else's screen. Without this the
     // frozen rows would sit until the refusal cooldown lapsed and something
     // else happened to kick the runner, so a message the user watched being
@@ -218,7 +222,7 @@ export function CompanionOutboundRunnerProvider({
     const unsubscribeConsent = subscribeToHostConsent((request) => {
       if (request.state !== "approved") return
       clearOutboundApproval()
-      kick()
+      kick({ thaw: true })
     })
     const unregisterTransitionParticipant = registerRuntimeTargetTransitionParticipant({
       id: "companion-outbound-runner",

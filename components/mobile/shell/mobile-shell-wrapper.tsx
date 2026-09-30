@@ -168,7 +168,17 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         // (iOS ignoring `interactiveWidget`, plugin not registered), the
         // visualViewport overlap is > 0 and lifting the content by exactly
         // that amount keeps the composer / focused input above the keyboard.
-        style={keyboard.keyboardHeight > 0 ? { paddingBottom: keyboard.keyboardHeight } : undefined}
+        //
+        // Only while the keyboard is actually up (or no tab bar reserves the
+        // bottom). An inline `padding-bottom` beats the reserve class, so a
+        // lingering visual-viewport overlap with the keyboard closed (a pinch
+        // zoom, a late viewport restore) swapped the 56px + inset reserve for
+        // a few pixels and left the last row of every page under the bar.
+        style={
+          keyboard.keyboardHeight > 0 && (keyboard.isVisible || !showTabBar)
+            ? { paddingBottom: keyboard.keyboardHeight }
+            : undefined
+        }
       >
         <OfflineBanner />
         {/* The mobile half of the mount in `DesktopAppShell` — the first-run

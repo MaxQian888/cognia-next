@@ -52,8 +52,8 @@
     "appVersion": "App version",
     "battery": "Battery",
     "batteryCharging": "{level}% · charging",
-    "biometricEnrollHint": "Enroll Face ID / fingerprint in system settings to use it.",
-    "biometricLabel": "Biometric (Face ID / fingerprint)",
+    "biometricEnrollHint": "Enroll a face or fingerprint in system settings to use it.",
+    "biometricLabel": "Biometric (face or fingerprint)",
     "biometricStatus": {
       "available": "Ready",
       "unavailable": "Not enrolled",
@@ -185,7 +185,7 @@
   "settingsLink": "App settings",
   "signOut": {
     "biometricDescription": "Re-prompts before clearing the pairing JWT.",
-    "biometricHelp": "Require Face ID / fingerprint before signing this phone out.",
+    "biometricHelp": "Require face or fingerprint unlock before signing this phone out.",
     "biometricLabel": "Confirm before sign-out",
     "biometricReason": "Confirm to sign out of cognia",
     "biometricTitle": "Sign out",
@@ -279,14 +279,16 @@
       "failing": "{count, plural, =1 {1 table needs attention} other {# tables need attention}}",
       "partial": "Partially synced",
       "never": "Not synced yet",
-      "empty": "No syncable tables"
+      "empty": "No syncable tables",
+      "noHost": "No host paired"
     },
     "overallHint": {
       "healthy": "{synced} of {total} tables up to date · last synced {time}",
       "failing": "{synced} of {total} tables up to date · retry the failed ones below.",
       "partial": "{synced} of {total} tables up to date · the rest pull on the next foreground.",
       "never": "Pull once to mirror the desktop onto this device.",
-      "empty": "The sync orchestrator has not registered any handlers."
+      "empty": "The sync orchestrator has not registered any handlers.",
+      "noHost": "This device mirrors a desktop host's data. Pair one to start syncing."
     },
     "retry": "Retry",
     "statusError": "Failed",
@@ -297,9 +299,13 @@
     "tablesDescription": "{synced} of {total} up to date",
     "tablesTitle": "Tables",
     "title": "Companion sync",
-    "toastAllSynced": "Sync requested.",
+    "toastAllSynced": "Everything is in sync.",
     "toastError": "Sync failed: {reason}",
-    "toastTableSynced": "Synced {table}."
+    "toastTableSynced": "Synced {table}.",
+    "pairHost": "Pair a host",
+    "toastSomeFailed": "{failed, plural, =1 {1 table} other {# tables}} of {total} failed to sync.",
+    "toastTableFailed": "Could not sync {table}: {reason}",
+    "toastNoHost": "No host is paired, so there is nothing to sync from. Pair a host first."
   },
   "syncRow": "Sync status",
   "teamsRow": "Teams",

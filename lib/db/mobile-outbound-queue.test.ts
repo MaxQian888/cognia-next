@@ -11,16 +11,20 @@ import {
   enqueueCollabMutation,
   enqueueHostStateAction,
   enqueueHostStateIntentIfAvailable,
+  enqueueUnlessQueued,
   hostStateSessionIntentAvailable,
+  isAbandonedClaim,
   listByStatus,
   markHostStateResult,
   markCollabConflict,
+  nextQueueWakeAt,
   recordFailure,
   releaseClaim,
   releaseStaleClaims,
   rebaseCollabConflict,
+  renewClaim,
   retryDeadletter,
-  withdrawPending,
+  withdrawQueuedAction,
 } from "./mobile-outbound-queue"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
 import {
@@ -104,17 +108,54 @@ describe("mobile outbound queue target isolation", () => {
 
   it("withdraws a standalone action that has not started sending", async () => {
     const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
-    await expect(withdrawPending(row.id)).resolves.toBe(true)
+    await expect(withdrawQueuedAction(row.id, 2)).resolves.toBe("withdrawn")
     await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeUndefined()
   })
 
-  it("refuses to withdraw a row the runner already claimed", async () => {
+  it("withdraws a row backing off between attempts, but says an attempt may have landed", async () => {
     const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
     await claimNext(1, scope)
-    await expect(withdrawPending(row.id)).resolves.toBe(false)
+    await recordFailure({ id: row.id, error: new Error("host unreachable"), nowMs: 2 })
+
+    await expect(withdrawQueuedAction(row.id, 3)).resolves.toBe("withdrawn-unconfirmed")
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeUndefined()
+  })
+
+  it("refuses to withdraw a row a live dispatcher is holding", async () => {
+    const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
+    await claimNext(1, scope)
+    await expect(withdrawQueuedAction(row.id, 1 + CLAIM_ABANDONED_AFTER_MS - 1)).resolves.toBe(
+      "in-flight"
+    )
     await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toMatchObject({
       status: "sending",
     })
+  })
+
+  /**
+   * The restart case: the process that claimed it died, so nothing will ever
+   * finish the send, and refusing left "Sending" on screen with no way out.
+   */
+  it("withdraws a sending row whose claim was abandoned", async () => {
+    const row = await enqueue({
+      command: "workflow_trigger_manual",
+      payload: {},
+      ...scope,
+      nowMs: 1,
+    })
+    await claimNext(1, scope)
+    await expect(withdrawQueuedAction(row.id, 1 + CLAIM_ABANDONED_AFTER_MS)).resolves.toBe(
+      "withdrawn-unconfirmed"
+    )
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeUndefined()
+  })
+
+  it("answers gone for a row that is no longer queued, and refuses terminal rows", async () => {
+    await expect(withdrawQueuedAction("missing")).resolves.toBe("gone")
+    const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
+    await getDb().mobileOutboundQueue.update(row.id, { status: "deadlettered" })
+    await expect(withdrawQueuedAction(row.id)).resolves.toBe("not-withdrawable")
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeDefined()
   })
 
   it("refuses to withdraw a conversation send, whose copy is already on screen", async () => {
@@ -132,8 +173,177 @@ describe("mobile outbound queue target isolation", () => {
       createdAt: 100,
       action: { kind: "draft.replace", text: "draft", attachments: [] },
     })
-    await expect(withdrawPending(row.id)).resolves.toBe(false)
+    await expect(withdrawQueuedAction(row.id)).resolves.toBe("not-withdrawable")
     await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeDefined()
+  })
+
+  it("renews a live claim, and never resurrects one that has ended", async () => {
+    const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
+    await claimNext(1, scope)
+    await renewClaim(row.id, 500)
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toMatchObject({
+      status: "sending",
+      claimedAt: 500,
+    })
+    await releaseClaim(row.id)
+    await renewClaim(row.id, 900)
+    const released = await getDb().mobileOutboundQueue.get(row.id)
+    expect(released?.status).toBe("pending")
+    expect(released?.claimedAt).toBeUndefined()
+  })
+
+  it("tells an abandoned claim from a live one by its last renewal", () => {
+    expect(isAbandonedClaim({ status: "pending" }, 10)).toBe(false)
+    expect(isAbandonedClaim({ status: "sending" }, 10)).toBe(true)
+    expect(
+      isAbandonedClaim({ status: "sending", claimedAt: 10 }, 10 + CLAIM_ABANDONED_AFTER_MS - 1)
+    ).toBe(false)
+    expect(
+      isAbandonedClaim({ status: "sending", claimedAt: 10 }, 10 + CLAIM_ABANDONED_AFTER_MS)
+    ).toBe(true)
+  })
+
+  it("names the next moment only the clock can move: a backoff expiry or a claim going stale", async () => {
+    await expect(nextQueueWakeAt(scope, 1_000)).resolves.toBeNull()
+    const ready = await enqueue({
+      command: "connector_send",
+      payload: { n: 1 },
+      ...scope,
+      nowMs: 1,
+    })
+    // Ready now: a write already announced it, so it asks for no timer.
+    await expect(nextQueueWakeAt(scope, 1_000)).resolves.toBeNull()
+    await getDb().mobileOutboundQueue.update(ready.id, { nextAttemptAt: 9_000 })
+    await expect(nextQueueWakeAt(scope, 1_000)).resolves.toBe(9_000)
+
+    const claimed = await enqueue({
+      command: "connector_send",
+      payload: { n: 2 },
+      ...scope,
+      nowMs: 1,
+    })
+    await getDb().mobileOutboundQueue.update(claimed.id, { status: "sending", claimedAt: 500 })
+    await expect(nextQueueWakeAt(scope, 1_000)).resolves.toBe(
+      Math.min(9_000, 500 + CLAIM_ABANDONED_AFTER_MS)
+    )
+    // Another target's rows are someone else's runner's business.
+    await expect(nextQueueWakeAt({ ...scope, targetId: "other-host" }, 1_000)).resolves.toBeNull()
+  })
+
+  describe("enqueueUnlessQueued", () => {
+    it("returns the waiting run instead of stacking a second one", async () => {
+      const first = await enqueueUnlessQueued({
+        command: "workflow_trigger_manual",
+        payload: { workflowId: "wf-1", inputs: { a: 1, b: 2 } },
+        label: "Daily digest",
+        ...scope,
+      })
+      expect(first.alreadyQueued).toBe(false)
+      // Same payload, keys in another order.
+      const again = await enqueueUnlessQueued({
+        command: "workflow_trigger_manual",
+        payload: { inputs: { b: 2, a: 1 }, workflowId: "wf-1" },
+        ...scope,
+      })
+      expect(again).toEqual({
+        row: expect.objectContaining({ id: first.row.id }),
+        alreadyQueued: true,
+      })
+      await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(1)
+    })
+
+    it("also counts a run that is on the wire right now", async () => {
+      const first = await enqueueUnlessQueued({
+        command: "workflow_trigger_manual",
+        payload: { workflowId: "wf-1" },
+        ...scope,
+        nowMs: 1,
+      })
+      await claimNext(1, scope)
+      await expect(
+        enqueueUnlessQueued({
+          command: "workflow_trigger_manual",
+          payload: { workflowId: "wf-1" },
+          ...scope,
+        })
+      ).resolves.toMatchObject({
+        alreadyQueued: true,
+        row: { id: first.row.id, status: "sending" },
+      })
+    })
+
+    it("queues a new request once the earlier one has left the queue's hands", async () => {
+      const first = await enqueueUnlessQueued({
+        command: "workflow_trigger_manual",
+        payload: { workflowId: "wf-1" },
+        ...scope,
+      })
+      await getDb().mobileOutboundQueue.update(first.row.id, { status: "sent" })
+      const second = await enqueueUnlessQueued({
+        command: "workflow_trigger_manual",
+        payload: { workflowId: "wf-1" },
+        ...scope,
+      })
+      expect(second.alreadyQueued).toBe(false)
+      expect(second.row.id).not.toBe(first.row.id)
+    })
+
+    it("keeps different workflows, commands and targets apart", async () => {
+      await enqueueUnlessQueued({
+        command: "workflow_trigger_manual",
+        payload: { workflowId: "wf-1" },
+        ...scope,
+      })
+      const results = await Promise.all([
+        enqueueUnlessQueued({
+          command: "workflow_trigger_manual",
+          payload: { workflowId: "wf-2" },
+          ...scope,
+        }),
+        enqueueUnlessQueued({
+          command: "bot_run_manual",
+          payload: { workflowId: "wf-1" },
+          ...scope,
+        }),
+        enqueueUnlessQueued({
+          command: "workflow_trigger_manual",
+          payload: { workflowId: "wf-1" },
+          ...scope,
+          targetId: "other-host",
+        }),
+      ])
+      expect(results.map((result) => result.alreadyQueued)).toEqual([false, false, false])
+      await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(4)
+    })
+
+    it("lets exactly one of two simultaneous taps through", async () => {
+      const [a, b] = await Promise.all([
+        enqueueUnlessQueued({
+          command: "workflow_trigger_manual",
+          payload: { workflowId: "wf-1" },
+          ...scope,
+        }),
+        enqueueUnlessQueued({
+          command: "workflow_trigger_manual",
+          payload: { workflowId: "wf-1" },
+          ...scope,
+        }),
+      ])
+      expect([a.alreadyQueued, b.alreadyQueued].sort()).toEqual([false, true])
+      expect(a.row.id).toBe(b.row.id)
+      await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(1)
+    })
+
+    it("refuses conversation sends, which are ordered and never deduplicated", async () => {
+      await expect(
+        enqueueUnlessQueued({
+          command: "host_state_submit",
+          payload: {},
+          channel: "cognia://target/desktop-studio/sessions/s1",
+          ...scope,
+        })
+      ).rejects.toThrow(/standalone actions/)
+    })
   })
 
   it("returns a policy-frozen claim to pending without incrementing attempts", async () => {

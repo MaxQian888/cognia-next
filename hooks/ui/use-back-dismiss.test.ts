@@ -1,10 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { renderHook } from "@testing-library/react"
-import { act } from "react"
+import { render, renderHook, screen } from "@testing-library/react"
+import { act, createElement, useState } from "react"
 
-import { useBackDismiss } from "./use-back-dismiss"
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
+
+import { dismissTopmostOverlayOnBack, useBackDismiss } from "./use-back-dismiss"
 
 /** Let the microtask a closing overlay waits on run. */
 async function afterCommit() {
@@ -170,5 +172,138 @@ describe("useBackDismiss", () => {
         replaceSpy.mockRestore()
       }
     })
+  })
+})
+
+describe("dismissTopmostOverlayOnBack", () => {
+  function ControlledSheet({ label }: { label: string }) {
+    const [open, setOpen] = useState(true)
+    return createElement(
+      Sheet,
+      { open, onOpenChange: setOpen },
+      createElement(
+        SheetContent,
+        null,
+        createElement(SheetTitle, null, label),
+        createElement(SheetDescription, null, label)
+      )
+    )
+  }
+
+  it("dispatches nothing and reports false when no overlay is open", () => {
+    const onKey = jest.fn()
+    document.addEventListener("keydown", onKey)
+    try {
+      expect(dismissTopmostOverlayOnBack()).toBe(false)
+      expect(onKey).not.toHaveBeenCalled()
+    } finally {
+      document.removeEventListener("keydown", onKey)
+    }
+  })
+
+  it("closes an open Radix sheet the way Escape does", async () => {
+    render(createElement(ControlledSheet, { label: "Job Center" }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    let consumed = false
+    act(() => {
+      consumed = dismissTopmostOverlayOnBack()
+    })
+    expect(consumed).toBe(true)
+    expect(screen.queryByRole("dialog", { name: "Job Center" })).not.toBeInTheDocument()
+  })
+
+  it("reports false when the open overlay does not answer Escape", () => {
+    const custom = document.createElement("div")
+    custom.setAttribute("role", "dialog")
+    custom.setAttribute("data-state", "open")
+    document.body.appendChild(custom)
+    try {
+      expect(dismissTopmostOverlayOnBack()).toBe(false)
+    } finally {
+      custom.remove()
+    }
+  })
+
+  it("keeps the press when the overlay refuses to close", () => {
+    const guarded = document.createElement("div")
+    guarded.setAttribute("role", "alertdialog")
+    guarded.setAttribute("data-state", "open")
+    document.body.appendChild(guarded)
+    const refuse = (event: KeyboardEvent) => event.preventDefault()
+    document.addEventListener("keydown", refuse, { capture: true })
+    try {
+      expect(dismissTopmostOverlayOnBack()).toBe(true)
+    } finally {
+      document.removeEventListener("keydown", refuse, { capture: true })
+      guarded.remove()
+    }
+  })
+
+  describe("a tooltip over the overlay", () => {
+    function mount(role: string, attrs: Record<string, string>) {
+      const el = document.createElement("div")
+      el.setAttribute("role", role)
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
+      document.body.appendChild(el)
+      return el
+    }
+
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it("gives the overlay the Escape once the tooltip that took the first one is gone", () => {
+      const dialog = mount("dialog", { "data-state": "open" })
+      const tooltip = mount("tooltip", { "data-slot": "tooltip-content" })
+      const seen = jest.fn((event: KeyboardEvent) => event.preventDefault())
+      document.addEventListener("keydown", seen, { capture: true })
+      try {
+        expect(dismissTopmostOverlayOnBack()).toBe(true)
+        expect(seen).toHaveBeenCalledTimes(1)
+        // Still animating out: wait.
+        jest.advanceTimersByTime(50)
+        expect(seen).toHaveBeenCalledTimes(1)
+        tooltip.remove()
+        jest.advanceTimersByTime(50)
+        expect(seen).toHaveBeenCalledTimes(2)
+      } finally {
+        document.removeEventListener("keydown", seen, { capture: true })
+        dialog.remove()
+        tooltip.remove()
+      }
+    })
+
+    it("sends no second Escape when the first one already closed an overlay", () => {
+      const dialog = mount("dialog", { "data-state": "open" })
+      const tooltip = mount("tooltip", { "data-slot": "tooltip-content" })
+      const seen = jest.fn((event: KeyboardEvent) => event.preventDefault())
+      document.addEventListener("keydown", seen, { capture: true })
+      try {
+        dismissTopmostOverlayOnBack()
+        tooltip.remove()
+        dialog.setAttribute("data-state", "closed")
+        jest.advanceTimersByTime(100)
+        expect(seen).toHaveBeenCalledTimes(1)
+      } finally {
+        document.removeEventListener("keydown", seen, { capture: true })
+        dialog.remove()
+      }
+    })
+  })
+
+  it("does not reach element-level Escape handlers such as the composer's", () => {
+    render(createElement(ControlledSheet, { label: "Sheet" }))
+    const input = document.createElement("textarea")
+    document.body.appendChild(input)
+    input.focus()
+    const onInputKey = jest.fn()
+    input.addEventListener("keydown", onInputKey)
+    try {
+      act(() => {
+        dismissTopmostOverlayOnBack()
+      })
+      expect(onInputKey).not.toHaveBeenCalled()
+    } finally {
+      input.remove()
+    }
   })
 })

@@ -44,6 +44,97 @@ function pushOrTakeOverMarker(): void {
 }
 
 /**
+ * Open Radix-family overlays that answer Escape: Dialog / Sheet / vaul Drawer /
+ * Popover content (`role="dialog"`), AlertDialog, DropdownMenu / ContextMenu /
+ * Menubar (`role="menu"`) and Select (`role="listbox"`). Radix stamps
+ * `data-state="open"` on each while it is up and flips it to `closed` for the
+ * exit animation, so a closing overlay does not count.
+ */
+const OPEN_OVERLAY_SELECTOR = [
+  '[role="dialog"][data-state="open"]',
+  '[role="alertdialog"][data-state="open"]',
+  '[role="menu"][data-state="open"]',
+  '[role="listbox"][data-state="open"]',
+].join(",")
+
+/**
+ * A Radix tooltip is a dismissable layer too, and the one on top whenever it is
+ * up. A dialog focuses its first control on open, and a control with a tooltip
+ * opens that tooltip on focus (touch has no hover, so on a phone focus is the
+ * only way one opens) — so the image viewer, for one, opens with its first
+ * tool's tooltip showing, and an Escape there closes the tooltip, not the
+ * viewer. Mounted until its exit animation ends.
+ */
+const TOOLTIP_SELECTOR = '[data-slot="tooltip-content"]'
+
+/** How long to wait for a dismissed tooltip to unmount before giving up. */
+const TOOLTIP_SETTLE_POLL_MS = 16
+const TOOLTIP_SETTLE_MAX_POLLS = 40
+
+function dispatchEscape(doc: Document): boolean {
+  const event = new KeyboardEvent("keydown", {
+    key: "Escape",
+    code: "Escape",
+    keyCode: 27,
+    bubbles: true,
+    cancelable: true,
+  })
+  doc.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
+/**
+ * The press went to a tooltip sitting over `overlays`. Once the tooltip has
+ * unmounted (and its layer left Radix's stack), give the overlay the Escape the
+ * press was meant for — unless one of them already closed, in which case the
+ * press did its job and a second Escape would close a layer too many.
+ */
+function redispatchAfterTooltip(doc: Document, overlays: Element[], polls = 0): void {
+  setTimeout(() => {
+    if (doc.querySelector(TOOLTIP_SELECTOR)) {
+      if (polls < TOOLTIP_SETTLE_MAX_POLLS) redispatchAfterTooltip(doc, overlays, polls + 1)
+      return
+    }
+    const stillOpen = overlays.every(
+      (overlay) => overlay.isConnected && overlay.matches(OPEN_OVERLAY_SELECTOR)
+    )
+    if (stillOpen) dispatchEscape(doc)
+  }, TOOLTIP_SETTLE_POLL_MS)
+}
+
+/**
+ * Dismiss the topmost open overlay the way the Escape key would, for the
+ * Android hardware back button. Returns `true` when an overlay took the press.
+ *
+ * Only overlays that opt into {@link useBackDismiss} push a history marker, so
+ * before this every other sheet, dialog, drawer and menu let a back press fall
+ * through to `history.back()` — or, with nothing behind it, `minimizeApp()`,
+ * which backgrounded the app with the overlay still open. Every one of those
+ * overlays already closes on Escape (Radix `DismissableLayer`, which only
+ * listens on its highest layer and calls `preventDefault()` when it dismisses),
+ * so one synthetic Escape covers all of them without each opting in, and an
+ * overlay that refuses to close (its `onEscapeKeyDown` prevents default, e.g. a
+ * discard confirmation) keeps the press too, as it would the key.
+ *
+ * The key is dispatched on the document, not the focused element: Radix listens
+ * there in the capture phase, while element-level Escape handlers (the
+ * composer's "Esc stops the run") are exactly what a back press must not reach.
+ * With no open overlay nothing is dispatched at all. A tooltip over the overlay
+ * takes the first Escape; see {@link redispatchAfterTooltip}.
+ *
+ * A `useBackDismiss` overlay that is not a Radix layer does not consume the key
+ * and returns `false`, so the caller's `history.back()` still pops its marker.
+ */
+export function dismissTopmostOverlayOnBack(doc: Document = document): boolean {
+  const overlays = Array.from(doc.querySelectorAll(OPEN_OVERLAY_SELECTOR))
+  if (overlays.length === 0) return false
+  const tooltipUp = doc.querySelector(TOOLTIP_SELECTOR) !== null
+  const consumed = dispatchEscape(doc)
+  if (consumed && tooltipUp) redispatchAfterTooltip(doc, overlays)
+  return consumed
+}
+
+/**
  * Close an overlay (Sheet / Drawer / dialog) on Android hardware back or
  * browser back instead of letting the navigation rip the route out from
  * under it.

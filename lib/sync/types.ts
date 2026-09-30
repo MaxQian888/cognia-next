@@ -79,6 +79,15 @@ export interface SyncFailure {
      * spent the rest of the run being refused in turn.
      */
     | "rate_limited"
+    /**
+     * There is no host to pull from: the companion is not paired, or this
+     * runtime has no companion transport at all (a plain browser holding the
+     * web stub). Like `rate_limited` it says nothing about the table — the pull
+     * was never attempted — so the orchestrator records neither an error nor a
+     * cursor for it, and the UI says "pair a host" instead of painting the
+     * table red.
+     */
+    | "no_host"
   message: string
   /**
    * How long the host asked this client to wait, when it said so.

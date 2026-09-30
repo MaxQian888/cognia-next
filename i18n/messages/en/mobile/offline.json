@@ -9,26 +9,31 @@
   "queueAwaitingApprovalNoCode": "Waiting for approval on the host.",
   "queueNeedsAttention": "{count, plural, one {# action needs your attention} other {# actions need your attention}}",
   "queuePending": "{count} queued",
+  "queuePendingWithSending": "{count} queued · {sending} sending",
   "queueSheet": {
-    "description": "Waiting for your host. Anything that has not started sending can be withdrawn.",
+    "alreadyGone": "It is no longer in the queue.",
+    "description": "Waiting for your host. Anything not being sent right now can be withdrawn.",
     "discard": "Discard",
     "discarded": "Discarded.",
     "empty": "Nothing is queued.",
     "inOrder": "Part of a conversation, so it sends in order with the rest.",
+    "notWithdrawable": "This one can no longer be withdrawn.",
     "retry": "Retry",
     "retrying": "Queued to try again.",
     "status": {
       "conflicted": "Conflicts with a newer change",
       "deadlettered": "Gave up after retries",
-      "pending": "Waiting to send",
+      "pending": "Queued",
       "rejected": "Refused by the host",
-      "sending": "Sending…"
+      "sending": "Sending…",
+      "stuck": "Stuck — the send stopped without an answer"
     },
     "title": "Queued actions",
     "tooLate": "Already sending, so it can no longer be withdrawn.",
     "unlabeled": "Queued action",
     "withdraw": "Withdraw",
-    "withdrawn": "Withdrawn — it will not be sent."
+    "withdrawn": "Withdrawn — it will not be sent.",
+    "withdrawnUnconfirmed": "Withdrawn. An earlier attempt may already have reached the host, so it could still run there."
   },
   "review": "Review",
   "staleWarning": "{count} messages waiting > 30 min."

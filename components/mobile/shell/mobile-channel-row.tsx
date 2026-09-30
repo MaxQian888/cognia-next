@@ -50,7 +50,8 @@ import { LongPress } from "@/components/interactions/long-press"
 import { SwipeRow, type SwipeAction } from "@/components/interactions/swipe-row"
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
-import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
+import { getProviderDisplayName } from "@/lib/ai/icons"
+import { resolveModelDisplayName } from "@/lib/ai/model-options"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { useInlineRename } from "@/hooks/ui/use-inline-rename"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
@@ -160,14 +161,17 @@ export function resolveMobileRowMetadata({
   defaultProvider?: string
   groupAxis: ConversationGroupAxis | null
 }): MobileChannelRowMetadataItem[] {
+  const providerId =
+    session.providerOverride ?? character?.providerId ?? defaultProvider ?? "anthropic"
   const values: Record<ConversationSidebarMetadata, string | undefined> = {
     agent: session.kind === "team" ? team?.name : character?.name,
-    model: getModelDisplayName(
+    // Catalog-backed, provider-scoped: the alias table alone missed dated ids
+    // such as `claude-haiku-4-5-20251001`, so the row printed the raw id.
+    model: resolveModelDisplayName(
+      providerId,
       session.model ?? character?.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
     ),
-    provider: getProviderDisplayName(
-      session.providerOverride ?? character?.providerId ?? defaultProvider ?? "anthropic"
-    ),
+    provider: getProviderDisplayName(providerId),
     workspace: workspaceName,
   }
   return fields.flatMap((kind) => {

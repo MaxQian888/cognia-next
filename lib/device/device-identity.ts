@@ -12,6 +12,7 @@
 
 import { isTauri } from "@/lib/tauri"
 import { getDevicePlatform } from "@/components/connectivity/pair/pair-helpers"
+import { getDeviceInfo } from "@/lib/capacitor/device"
 
 const WEB_DEVICE_ID_STORAGE = "cognia-device-id-v1"
 const DESKTOP_STORE_FILE = "cognia-device.json"
@@ -84,16 +85,56 @@ export function getFriendlyDeviceLabel(): string {
   const platform = getDevicePlatform()
   if (platform === "ios") return "iOS device"
   if (platform === "android") return "Android device"
-  const ua = typeof navigator !== "undefined" ? (navigator.userAgent ?? "") : ""
-  const os = /Windows/i.test(ua)
-    ? "Windows"
-    : /Mac OS|Macintosh/i.test(ua)
-      ? "macOS"
-      : /Linux/i.test(ua)
-        ? "Linux"
-        : null
+  const os = osFromUserAgent(typeof navigator !== "undefined" ? (navigator.userAgent ?? "") : "")
   if (isTauri()) return os ? `${os} desktop` : "Desktop"
   return os ? `${os} browser` : "Web browser"
+}
+
+/**
+ * The OS family a user agent names. Mobile families are tested FIRST: every
+ * Android user agent also says "Linux" and every iOS one says "like Mac OS X",
+ * so testing the desktop names first labelled an Android phone "Linux browser"
+ * and an iPhone "macOS browser". iPadOS 13+ reports itself as a Macintosh and
+ * is only told apart by touch support.
+ */
+function osFromUserAgent(ua: string): string | null {
+  if (/Android/i.test(ua)) return "Android"
+  if (/iPhone|iPad|iPod/i.test(ua)) return "iOS"
+  if (/Windows/i.test(ua)) return "Windows"
+  if (/Mac OS|Macintosh/i.test(ua)) {
+    const touch = typeof navigator !== "undefined" && (navigator.maxTouchPoints ?? 0) > 1
+    return touch ? "iPadOS" : "macOS"
+  }
+  if (/CrOS/i.test(ua)) return "ChromeOS"
+  if (/Linux/i.test(ua)) return "Linux"
+  return null
+}
+
+/**
+ * Label for THIS device in the device console, where the user is looking at
+ * their own hardware: the manufacturer and model the native shell reports
+ * ("HUAWEI PLR-AL00") on a Capacitor build, else the generic
+ * {@link getFriendlyDeviceLabel}.
+ *
+ * Deliberately separate from the friendly label, which is written cleartext
+ * into backup manifests and must stay generic. `getDeviceInfo` resolves to
+ * `unsupported` off the native shell, which is the fallback path too.
+ */
+export async function getLocalDeviceConsoleLabel(
+  readInfo: typeof getDeviceInfo = getDeviceInfo
+): Promise<string> {
+  const fallback = getFriendlyDeviceLabel()
+  if (getDevicePlatform() !== "android" && getDevicePlatform() !== "ios") return fallback
+  const outcome = await readInfo()
+  if (outcome.kind !== "ok") return fallback
+  const model = outcome.value.model?.trim()
+  if (!model) return fallback
+  const manufacturer = outcome.value.manufacturer?.trim()
+  // iOS reports "Apple" + "iPhone15,2"; Android often repeats the brand inside
+  // the model ("Pixel 8" from "Google"), so only prefix when it adds something.
+  return manufacturer && !model.toLowerCase().startsWith(manufacturer.toLowerCase())
+    ? `${manufacturer} ${model}`
+    : model
 }
 
 /** Normalized platform string for the manifest: ios / android / desktop / web. */

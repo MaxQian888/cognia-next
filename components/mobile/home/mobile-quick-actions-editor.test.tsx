@@ -118,4 +118,30 @@ describe("MobileQuickActionsEditor", () => {
     })
     expect(screen.getByTestId("mobile-home-editor-active-newChat")).toBeInTheDocument()
   })
+
+  it("switches the activity dashboard through its own welcomeStats setting", () => {
+    render(<MobileQuickActionsEditor />)
+    const toggle = screen.getByTestId("mobile-home-editor-section-toggle-activity")
+    // Shown by default (welcomeStats.enabled defaults to true).
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(toggle)
+    const patch = saveMock.mock.calls.at(-1)?.[0] as { welcomeStats?: { enabled: boolean } }
+    expect(patch.welcomeStats?.enabled).toBe(false)
+  })
+
+  it("brings a dashboard dismissed with its ✕ back", () => {
+    useSettingsStore.setState({
+      settings: {
+        mobileHomeLayout: { quickActions: ["newChat"], hiddenSections: [] },
+        welcomeStats: { enabled: false },
+      } as never,
+      save: saveMock as never,
+    })
+    render(<MobileQuickActionsEditor />)
+    const toggle = screen.getByTestId("mobile-home-editor-section-toggle-activity")
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(toggle)
+    const patch = saveMock.mock.calls.at(-1)?.[0] as { welcomeStats?: { enabled: boolean } }
+    expect(patch.welcomeStats?.enabled).toBe(true)
+  })
 })

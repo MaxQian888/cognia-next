@@ -269,6 +269,7 @@
   "web": {
     "baseUrlLocked": "服务器地址由部署方预设",
     "clearPayload": "清空",
+    "clipboardEmpty": "剪贴板是空的。请先复制完整的 cgnp3 邀请，再点「粘贴」。",
     "clipboardReadFailed": "浏览器无法读取剪贴板，请手动粘贴完整配对邀请。",
     "clipboardWriteFailed": "浏览器无法复制命令，请手动选择并复制。",
     "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 伴侣 中复制。",

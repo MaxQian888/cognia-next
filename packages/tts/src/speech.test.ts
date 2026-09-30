@@ -1,4 +1,10 @@
-import { DEFAULT_SPEECH_LANGUAGE, SPEECH_LANGUAGES, getSpeechLanguage } from "./speech"
+import {
+  DEFAULT_SPEECH_LANGUAGE,
+  SPEECH_LANGUAGES,
+  getSpeechLanguage,
+  resolveSttLanguage,
+  speechLanguageForLocale,
+} from "./speech"
 
 describe("speech language catalogue", () => {
   it("ships every documented BCP-47 language", () => {
@@ -39,5 +45,36 @@ describe("getSpeechLanguage", () => {
 
   it("default code resolves to a real language", () => {
     expect(getSpeechLanguage(DEFAULT_SPEECH_LANGUAGE).code).toBe(DEFAULT_SPEECH_LANGUAGE)
+  })
+})
+
+describe("speechLanguageForLocale", () => {
+  it("maps an app locale to its catalogue code", () => {
+    expect(speechLanguageForLocale("zh-CN")).toBe("zh-CN")
+    expect(speechLanguageForLocale("en")).toBe("en-US")
+    expect(speechLanguageForLocale("ja")).toBe("ja-JP")
+    expect(speechLanguageForLocale("pt_PT")).toBe("pt-BR")
+  })
+
+  it("falls back to the default for an unknown or missing locale", () => {
+    expect(speechLanguageForLocale("xx")).toBe(DEFAULT_SPEECH_LANGUAGE)
+    expect(speechLanguageForLocale(undefined)).toBe(DEFAULT_SPEECH_LANGUAGE)
+    expect(speechLanguageForLocale("")).toBe(DEFAULT_SPEECH_LANGUAGE)
+  })
+})
+
+describe("resolveSttLanguage", () => {
+  it("follows the app locale when the user has not chosen a language", () => {
+    // A zh-CN UI dictated in en-US: the fallback ignored the locale.
+    expect(resolveSttLanguage(undefined, "zh-CN")).toBe("zh-CN")
+    expect(resolveSttLanguage(null, "en")).toBe("en-US")
+  })
+
+  it("keeps an explicit choice over the locale", () => {
+    expect(resolveSttLanguage("en-GB", "zh-CN")).toBe("en-GB")
+  })
+
+  it("ignores a stored value that is not a catalogue code", () => {
+    expect(resolveSttLanguage("klingon", "zh-CN")).toBe("zh-CN")
   })
 })

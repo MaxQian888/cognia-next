@@ -60,6 +60,7 @@
   "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
   "sections": {
     "activeRuns": "运行中",
+    "activity": "使用统计",
     "quickActions": "快捷操作",
     "recents": "最近会话"
   },

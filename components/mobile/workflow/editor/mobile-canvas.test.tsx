@@ -230,6 +230,15 @@ describe("<MobileCanvas />", () => {
     expect(screen.getByTestId("mobile-canvas")).toHaveClass("wf-touch-canvas")
   })
 
+  // A see-through canvas let an app wallpaper show behind the grid, edges and
+  // node labels. The ground must be a solid colour, never an alpha utility.
+  it("paints an opaque canvas ground so a wallpaper cannot show through", () => {
+    renderCanvas("edit")
+    const canvas = screen.getByTestId("mobile-canvas")
+    expect(canvas).toHaveClass("bg-[color-mix(in_oklch,var(--muted)_30%,var(--background))]")
+    expect(canvas.className).not.toMatch(/\bbg-[a-z-]+\/\d+/)
+  })
+
   it("names the rooted output in the connect banner (error path)", () => {
     const store = createEditorStore(buildWorkflow())
     store.getState().beginConnection({ sourceId: "n1", sourceHandle: "error" })

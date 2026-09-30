@@ -14,7 +14,11 @@
  *     first wins and the user is told it is already on its way.
  *   - pending in a conversation channel: nothing — its optimistic copy is on
  *     screen in order, and dropping it would strand that copy.
- *   - sending: nothing; the Host may already have it.
+ *   - sending, with a dispatcher still renewing its claim: nothing; the Host
+ *     may already have it.
+ *   - sending, but abandoned (its dispatcher died — the app was killed or
+ *     restarted mid-send): shown as stuck, not "Sending…", and withdrawable.
+ *     It used to read "Sending…" forever with no control at all.
  *   - dead-lettered: Retry (same idempotency key) or Discard.
  *   - rejected: Discard. Conflicted (collab): Discard, as the Issues conflict
  *     panel does.
@@ -29,11 +33,13 @@ import { useClientLiveQuery } from "@/hooks/data"
 import {
   deleteRow,
   discardCollabConflict,
+  isAbandonedClaim,
   listByStatus,
   retryDeadletter,
-  withdrawPending,
+  withdrawQueuedAction,
 } from "@/lib/db/mobile-outbound-queue"
 import type { MobileOutboundJobRow, MobileOutboundStatus } from "@/lib/db/mobile-outbound-types"
+import { cn } from "@/lib/utils"
 
 /** Everything the user can still see or act on; `sent` rows are history. */
 export const QUEUE_SHEET_STATUSES: readonly MobileOutboundStatus[] = [
@@ -45,6 +51,8 @@ export const QUEUE_SHEET_STATUSES: readonly MobileOutboundStatus[] = [
 ]
 
 type QueueRowStatus = "pending" | "sending" | "deadlettered" | "rejected" | "conflicted"
+/** What a row reads as. `stuck` is a `sending` row whose claim was abandoned. */
+type QueueRowDisplay = QueueRowStatus | "stuck"
 
 export interface OutboundQueueSheetProps {
   open: boolean
@@ -74,9 +82,24 @@ export function OutboundQueueSheet({ open, onOpenChange }: OutboundQueueSheetPro
 
   const withdraw = async (row: MobileOutboundJobRow) => {
     try {
-      const withdrawn = await withdrawPending(row.id)
-      if (withdrawn) toast.success(t("withdrawn"))
-      else toast.message(t("tooLate"))
+      const outcome = await withdrawQueuedAction(row.id)
+      switch (outcome) {
+        case "withdrawn":
+          toast.success(t("withdrawn"))
+          break
+        case "withdrawn-unconfirmed":
+          toast.success(t("withdrawnUnconfirmed"))
+          break
+        case "in-flight":
+          toast.message(t("tooLate"))
+          break
+        case "gone":
+          toast.message(t("alreadyGone"))
+          break
+        case "not-withdrawable":
+          toast.message(t("notWithdrawable"))
+          break
+      }
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause))
     }
@@ -138,18 +161,23 @@ function QueueRow({
   const format = useFormatter()
   const now = useNow({ updateInterval: 30_000 })
   const status = row.status as QueueRowStatus
-  const withdrawable = status === "pending" && !row.channel
+  const stuck = isAbandonedClaim(row, now.getTime())
+  const display: QueueRowDisplay = stuck ? "stuck" : status
+  // A live claim is the only in-flight state that is off limits: the Host may
+  // be receiving it right now. A pending row, or a claim whose dispatcher died,
+  // can be taken back.
+  const withdrawable = (status === "pending" || stuck) && !row.channel
 
   return (
     <li
       className="flex items-start gap-3 px-4 py-3"
       data-testid={`outbound-queue-row-${row.id}`}
-      data-status={status}
+      data-status={display}
     >
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{row.label?.trim() || t("unlabeled")}</p>
-        <p className="text-xs text-muted-foreground">
-          {t(`status.${status}`)} · {format.relativeTime(new Date(row.createdAt), now)}
+        <p className={cn("text-xs", stuck ? "text-destructive" : "text-muted-foreground")}>
+          {t(`status.${display}`)} · {format.relativeTime(new Date(row.createdAt), now)}
         </p>
         {status === "pending" && row.channel ? (
           <p className="text-xs text-muted-foreground">{t("inOrder")}</p>
@@ -160,7 +188,7 @@ function QueueRow({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {withdrawable ? (
-          <Button size="sm" variant="outline" onClick={onWithdraw}>
+          <Button size="sm" variant="outline" className="min-h-11" onClick={onWithdraw}>
             {t("withdraw")}
           </Button>
         ) : null}

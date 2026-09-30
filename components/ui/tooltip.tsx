@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Tooltip as TooltipPrimitive } from "radix-ui"
 
+import { useCannotHover } from "@/hooks/ui/use-cannot-hover"
 import { cn } from "@/lib/utils"
 
 function TooltipProvider({
@@ -18,8 +19,46 @@ function TooltipProvider({
   )
 }
 
-function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+/**
+ * A tooltip is a hover affordance, and a device that cannot hover never gets
+ * the gesture that dismisses one. Radix opens on FOCUS as well as on hover, and
+ * a tap focuses the button it lands on, so on a phone every tapped toolbar
+ * button raised its tooltip and kept it up for as long as the button held
+ * focus: over the file picker's return, behind the popover the tap opened, and
+ * after that popover handed focus back to its trigger on close.
+ *
+ * So an uncontrolled tooltip stays closed where the primary pointer reports it
+ * cannot hover. A caller that controls `open` itself (a tap-to-explain hint)
+ * has asked for the tooltip explicitly and is left alone. Everything a tooltip
+ * says on these controls is also their accessible name.
+ */
+function Tooltip({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  const cannotHover = useCannotHover()
+  const controlled = open !== undefined
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false)
+  const handleOpenChange = React.useCallback(
+    (next: boolean) => {
+      if (!controlled) {
+        if (next && cannotHover) return
+        setUncontrolledOpen(next)
+      }
+      onOpenChange?.(next)
+    },
+    [controlled, cannotHover, onOpenChange]
+  )
+  return (
+    <TooltipPrimitive.Root
+      data-slot="tooltip"
+      open={controlled ? open : uncontrolledOpen && !cannotHover}
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  )
 }
 
 function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {

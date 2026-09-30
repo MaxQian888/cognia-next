@@ -72,7 +72,86 @@ function throwStreamPartError(part: unknown): void {
   const value = part as { type?: string; error?: unknown }
   if (value.type !== "error") return
   if (value.error instanceof Error) throw value.error
-  throw new Error(value.error === undefined ? "Provider stream failed." : String(value.error))
+  if (value.error === undefined) throw new Error("Provider stream failed.")
+  if (typeof value.error === "object" && value.error !== null) {
+    // A provider error BODY rather than an Error (`{ type, message }` or
+    // `{ error: { type, message } }`): keep its words — `String()` of it is
+    // "[object Object]" — and the object itself as the cause, so any status it
+    // carries still reaches `providerHttpMetaOf`.
+    const body = value.error as { message?: unknown; error?: { message?: unknown } }
+    const message =
+      typeof body.message === "string"
+        ? body.message
+        : typeof body.error?.message === "string"
+          ? body.error.message
+          : JSON.stringify(value.error)
+    throw new Error(message, { cause: value.error })
+  }
+  throw new Error(String(value.error))
+}
+
+/**
+ * The HTTP status and Retry-After a provider failure carried, when it carried
+ * them.
+ *
+ * The sidecar threads these onto `session_ended` (`extractHttpErrorMeta`), and
+ * the renderer classifies on them before it ever reads the message. This
+ * engine used to send the message alone, so on the phone a provider 401 whose
+ * body said only "API key is invalid." matched no auth wording and the chat
+ * card called it an unexpected error, with no way to the credentials. The AI
+ * SDK's `APICallError` has `statusCode` + `responseHeaders`; a `RetryError`
+ * wraps the last attempt in `lastError`; and an `Error` may hold the real one
+ * in `cause`. The first of those with a status wins.
+ */
+export function providerHttpMetaOf(
+  error: unknown,
+  now: () => number = Date.now
+): { httpStatus?: number; retryAfterMs?: number } {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current)
+    const record = current as {
+      statusCode?: unknown
+      status?: unknown
+      responseHeaders?: unknown
+      lastError?: unknown
+      cause?: unknown
+    }
+    const status =
+      typeof record.statusCode === "number"
+        ? record.statusCode
+        : typeof record.status === "number"
+          ? record.status
+          : undefined
+    if (status !== undefined && Number.isInteger(status) && status >= 400 && status <= 599) {
+      const retryAfterMs = retryAfterMsFromHeaders(record.responseHeaders, now)
+      return {
+        httpStatus: status,
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      }
+    }
+    current = record.lastError ?? record.cause
+  }
+  return {}
+}
+
+function retryAfterMsFromHeaders(headers: unknown, now: () => number): number | undefined {
+  if (!headers || typeof headers !== "object") return undefined
+  let raw: unknown
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() === "retry-after") raw = value
+  }
+  if (typeof raw !== "string" && typeof raw !== "number") return undefined
+  const text = String(raw).trim()
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const ms = Math.round(Number(text) * 1000)
+    return ms > 0 ? ms : undefined
+  }
+  const at = Date.parse(text)
+  if (!Number.isFinite(at)) return undefined
+  const delta = at - now()
+  return delta > 0 ? delta : undefined
 }
 
 /**
@@ -246,6 +325,7 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
       type: "session_ended",
       sessionId,
       error: message,
+      ...providerHttpMetaOf(err),
       ...(err instanceof ProviderResolutionError
         ? {
             providerUnresolved: {

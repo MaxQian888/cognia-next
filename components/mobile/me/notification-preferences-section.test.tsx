@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import enMessages from "@/i18n/messages/en.json"
 import zhMessages from "@/i18n/messages/zh-CN.json"
@@ -32,6 +32,12 @@ jest.mock("@/stores/settings", () => ({
       },
     }),
 }))
+
+jest.mock("@/lib/notifications/device-channel-gate", () => ({
+  ensureDeviceChannelReady: jest.fn(async () => ({ kind: "allowed" })),
+}))
+jest.mock("@/lib/capacitor/app-settings", () => ({ openAppSettings: jest.fn() }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
 
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (arg: unknown) => enqueueMock(arg),
@@ -142,8 +148,7 @@ describe("NotificationPreferencesSection", () => {
   it("toggling a channel merges it, keeping center", async () => {
     render(<NotificationPreferencesSection />)
     fireEvent.click(screen.getByTestId("notification-channel-os"))
-    await Promise.resolve()
-    await Promise.resolve()
+    await waitFor(() => expect(saveMock).toHaveBeenCalled())
     const prefs = lastPrefs()
     expect(prefs?.globalDefaultChannels).toEqual(expect.arrayContaining(["center", "toast", "os"]))
     // Host mirroring moved into the persistence funnel
@@ -151,6 +156,73 @@ describe("NotificationPreferencesSection", () => {
     // that embed a desktop settings section. A second enqueue here would send
     // every edit twice.
     expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it("asks the device before switching system notifications on", async () => {
+    const { ensureDeviceChannelReady } = jest.requireMock(
+      "@/lib/notifications/device-channel-gate"
+    ) as { ensureDeviceChannelReady: jest.Mock }
+    ensureDeviceChannelReady.mockClear()
+    render(<NotificationPreferencesSection />)
+    fireEvent.click(screen.getByTestId("notification-channel-os"))
+    await waitFor(() => expect(saveMock).toHaveBeenCalled())
+    expect(ensureDeviceChannelReady).toHaveBeenCalledWith("os")
+  })
+
+  it("leaves a refused channel off and points at the app settings", async () => {
+    const { ensureDeviceChannelReady } = jest.requireMock(
+      "@/lib/notifications/device-channel-gate"
+    ) as { ensureDeviceChannelReady: jest.Mock }
+    const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+    const { openAppSettings } = jest.requireMock("@/lib/capacitor/app-settings") as {
+      openAppSettings: jest.Mock
+    }
+    toast.error.mockClear()
+    ensureDeviceChannelReady.mockResolvedValueOnce({ kind: "denied" })
+    render(<NotificationPreferencesSection />)
+    fireEvent.click(screen.getByTestId("notification-channel-os"))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "channelDenied",
+        expect.objectContaining({ action: expect.objectContaining({ label: "openSettings" }) })
+      )
+    )
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("notification-channel-os")).not.toBeChecked()
+    ;(toast.error.mock.calls[0][1] as { action: { onClick: () => void } }).action.onClick()
+    expect(openAppSettings).toHaveBeenCalled()
+  })
+
+  it("says push is unavailable on a device that cannot register for it", async () => {
+    const { ensureDeviceChannelReady } = jest.requireMock(
+      "@/lib/notifications/device-channel-gate"
+    ) as { ensureDeviceChannelReady: jest.Mock }
+    const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+    toast.error.mockClear()
+    let resolveGate: (v: unknown) => void = () => undefined
+    ensureDeviceChannelReady.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveGate = resolve))
+    )
+    render(<NotificationPreferencesSection />)
+    fireEvent.click(screen.getByTestId("notification-channel-push"))
+    // Held while the registration is in flight.
+    await waitFor(() => expect(screen.getByTestId("notification-channel-push")).toBeDisabled())
+    await act(async () => resolveGate({ kind: "unavailable", reason: "no GMS" }))
+    expect(toast.error).toHaveBeenCalledWith("pushUnavailable")
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("notification-channel-push")).not.toBeDisabled()
+  })
+
+  it("switches a channel off without asking the device", async () => {
+    const { ensureDeviceChannelReady } = jest.requireMock(
+      "@/lib/notifications/device-channel-gate"
+    ) as { ensureDeviceChannelReady: jest.Mock }
+    ensureDeviceChannelReady.mockClear()
+    render(<NotificationPreferencesSection />)
+    fireEvent.click(screen.getByTestId("notification-channel-toast"))
+    await waitFor(() => expect(saveMock).toHaveBeenCalled())
+    expect(ensureDeviceChannelReady).not.toHaveBeenCalled()
+    expect(lastPrefs()?.globalDefaultChannels).not.toContain("toast")
   })
 
   it("changing the minimum OS level persists minOsLevel", async () => {

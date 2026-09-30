@@ -10,6 +10,7 @@
     "resume": "恢复计划",
     "resumeQueued": "正在恢复 {name} 的计划 — 已加入桌面端队列。",
     "run": "立即运行",
+    "runAlreadyQueued": "{name} 已在桌面端队列中 — 只会运行一次。",
     "runQueued": "已触发 {name} — 已加入桌面端队列。",
     "title": "工作流操作",
     "unpin": "取消置顶",

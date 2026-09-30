@@ -7,7 +7,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { enqueueUnlessQueued } from "@/lib/db/mobile-outbound-queue"
 import { impact } from "@/lib/capacitor/haptics"
 
 export interface TriggerButtonProps {
@@ -23,8 +23,9 @@ export interface TriggerButtonProps {
  * Mobile workflow manual-trigger button (Wave 3.1).
  *
  * Enqueues a `workflow_trigger_manual` outbound job (the runner dispatches
- * via `transport.call` once the desktop is reachable). Surfaces a toast
- * with the i18n queued message and bumps a haptic.
+ * via `transport.call` once the desktop is reachable), unless a run of the
+ * same workflow is already waiting — then it says so instead of queueing a
+ * duplicate. Surfaces a toast with the i18n queued message and bumps a haptic.
  */
 export function TriggerButton({
   workflowId,
@@ -39,13 +40,16 @@ export function TriggerButton({
     if (busy) return
     setBusy(true)
     try {
-      await enqueue({
+      const { alreadyQueued } = await enqueueUnlessQueued({
         command: "workflow_trigger_manual",
         payload: { workflowId },
         label: queueLabel ?? workflowName,
       })
       void impact("light")
-      toast.success(t("runQueued"))
+      // A run still waiting for the Host is not joined by a second one: each
+      // tap used to queue another, and all of them fired on reconnect.
+      if (alreadyQueued) toast.message(t("runAlreadyQueued"))
+      else toast.success(t("runQueued"))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error(t("runFailed", { message }))

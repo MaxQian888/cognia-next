@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import {
+  asNonThenable,
   dataUrlToBase64,
   detectNativePlatform,
   isMobile,
@@ -108,5 +109,95 @@ describe("makeDefaultLoader", () => {
     // withPlugin in real usage).
     const loader = makeDefaultLoader("@nonexistent/plugin", "Plugin")
     await expect(loader()).rejects.toBeDefined()
+  })
+})
+
+describe("asNonThenable", () => {
+  it("hides `then` so an awaited plugin proxy resolves instead of hanging", async () => {
+    // Shape of `@capacitor/core`'s plugin proxy: every property — `then`
+    // included — answers with a method wrapper. Awaiting it directly calls the
+    // bogus `then`, which never resolves.
+    const calls: string[] = []
+    const capacitorLikeProxy = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") {
+            return () => Promise.reject(new Error('"Clipboard.then()" is not implemented'))
+          }
+          return (...args: unknown[]) => {
+            calls.push(`${String(prop)}:${JSON.stringify(args)}`)
+            return Promise.resolve({ value: "native" })
+          }
+        },
+      }
+    ) as { read: () => Promise<{ value: string }> }
+
+    const resolved = await (async () => asNonThenable(capacitorLikeProxy))()
+    expect((resolved as unknown as { then?: unknown }).then).toBeUndefined()
+    await expect(resolved.read()).resolves.toEqual({ value: "native" })
+    expect(calls).toEqual(["read:[]"])
+  })
+
+  it("returns primitives and nullish values unchanged", () => {
+    expect(asNonThenable(null)).toBeNull()
+    expect(asNonThenable(undefined)).toBeUndefined()
+    expect(asNonThenable(3)).toBe(3)
+  })
+})
+
+describe("makeDefaultLoader with a registered @capacitor/core plugin", () => {
+  const win = globalThis as unknown as Record<string, unknown>
+  let savedCapacitor: unknown
+
+  beforeEach(() => {
+    savedCapacitor = win.Capacitor
+  })
+  afterEach(() => {
+    win.Capacitor = savedCapacitor
+    delete win.androidBridge
+  })
+
+  it("resolves the proxy registerPlugin() put on window.Capacitor.Plugins", async () => {
+    // Recreate the Android boot: the native bridge publishes PluginHeaders and
+    // the transport, then `registerNativePlugins()` calls core's
+    // `registerPlugin`, replacing the injected object with core's proxy.
+    const nativePromise = jest.fn((plugin: string, method: string) =>
+      Promise.resolve({ value: `${plugin}.${method}` })
+    )
+    win.androidBridge = {}
+    win.Capacitor = {
+      Plugins: {},
+      PluginHeaders: [
+        {
+          name: "Clipboard",
+          methods: [
+            { name: "read", rtype: "promise" },
+            { name: "write", rtype: "promise" },
+          ],
+        },
+      ],
+      nativePromise,
+    }
+    let registerPlugin: (name: string) => unknown = () => undefined
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      registerPlugin = require("@capacitor/core").registerPlugin
+    })
+    registerPlugin("Clipboard")
+
+    const loader = makeDefaultLoader<{ read: () => Promise<{ value: string }> }>(
+      "@capacitor/clipboard",
+      "Clipboard"
+    )
+    const settled = await Promise.race([
+      loader().then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 200)),
+    ])
+    expect(settled).toBe("resolved")
+
+    const plugin = await loader()
+    await expect(plugin.read()).resolves.toEqual({ value: "Clipboard.read" })
+    expect(nativePromise).toHaveBeenCalledWith("Clipboard", "read", undefined)
   })
 })

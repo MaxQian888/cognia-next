@@ -60,10 +60,14 @@ export async function saveExport(opts: SaveExportOptions): Promise<SaveExportOut
     if (isTauri()) return await saveViaTauri(opts)
     if (isCapacitor()) {
       const outcome = await saveViaCapacitor(opts)
-      // Capacitor reports "unsupported" only when the native plugin is missing
-      // (e.g. running the mobile bundle in a plain browser) — fall back to a
-      // web download so the export still completes.
-      if (outcome.kind !== "unsupported") return outcome
+      // `isCapacitor()` is only true inside the native shell, so "unsupported"
+      // means the Filesystem plugin is missing from this build. A web download
+      // is a silent no-op in that WebView, so falling back to it reported a
+      // file that was never written — say the save failed instead.
+      if (outcome.kind === "unsupported") {
+        return { kind: "error", message: "native file system is unavailable" }
+      }
+      return outcome
     }
     return saveViaWeb(opts)
   } catch (err) {
@@ -125,7 +129,7 @@ function saveViaWeb(opts: SaveExportOptions): SaveExportOutcome {
     opts.data instanceof Blob
       ? opts.data
       : new Blob([opts.data as BlobPart], { type: opts.mimeType })
-  downloadBlob(blob, opts.filename)
+  void downloadBlob(blob, opts.filename)
   return { kind: "saved", platform: "web", location: "downloads", filename: opts.filename }
 }
 

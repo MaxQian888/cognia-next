@@ -14,10 +14,12 @@ import {
 import { getDb } from "@/lib/db/schema"
 
 const toastSuccess = jest.fn()
+const toastMessage = jest.fn()
 const toastError = jest.fn()
 jest.mock("sonner", () => ({
   toast: {
     success: (...a: unknown[]) => toastSuccess(...a),
+    message: (...a: unknown[]) => toastMessage(...a),
     error: (...a: unknown[]) => toastError(...a),
   },
 }))
@@ -29,6 +31,7 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (key === "runQueued") return "Queued"
+    if (key === "runAlreadyQueued") return "Already queued"
     if (key === "runFailed") return `Failed: ${(vars?.message as string) ?? ""}`
     if (key === "runButton") return "Run"
     return key
@@ -43,6 +46,7 @@ jest.mock("next-intl", () => ({
 // up here rather than mocking the queue.
 beforeEach(async () => {
   toastSuccess.mockReset()
+  toastMessage.mockReset()
   toastError.mockReset()
   setActiveRuntimeTargetContext("local_acct_a", "host-1")
   const all = await listAll()
@@ -77,5 +81,23 @@ describe("<TriggerButton />", () => {
       const q = await listByStatus("pending")
       expect(q.find((r) => r.command === "workflow_trigger_manual")?.label).toBe("cron-fired")
     })
+  })
+
+  /**
+   * Each tap used to queue another run with a fresh idempotency key, so a Run
+   * pressed three times while the desktop was away fired three times on
+   * reconnect and the banner read "3 queued".
+   */
+  it("does not stack a second run of a workflow that is still queued", async () => {
+    const user = userEvent.setup()
+    render(<TriggerButton workflowId="wf-3" workflowName="Daily Digest" />)
+    const button = screen.getByTestId("workflow-trigger-wf-3")
+    await user.click(button)
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Queued"))
+    await waitFor(() => expect(button).not.toBeDisabled())
+    await user.click(button)
+    await waitFor(() => expect(toastMessage).toHaveBeenCalledWith("Already queued"))
+    expect(await listByStatus("pending")).toHaveLength(1)
+    expect(toastSuccess).toHaveBeenCalledTimes(1)
   })
 })

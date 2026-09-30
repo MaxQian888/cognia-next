@@ -6,6 +6,7 @@ import {
   type MeEntry,
 } from "./me-entries"
 import { MOBILE_SPOT_ICON_NAMES } from "../mobile-spot-icon"
+import { getSurfaceContractForRoute } from "@/lib/runtime/surface-contract"
 
 // A `t` that echoes the label key as its own "translation" so matching is
 // deterministic without next-intl.
@@ -55,6 +56,24 @@ describe("me-entries registry", () => {
       labelKey: "sourceControlRow",
       pairedOnly: true,
     })
+  })
+
+  it("never marks a row desktop-only when its surface contract runs standalone", () => {
+    // The row label and the route's own contract are two gates on one page;
+    // they disagreed for Issues / Delivery projects / Workspace, which opened
+    // fine without a desktop under a "Requires desktop" row.
+    // Only a contract declared for the row's own route counts: `/me/*` pages
+    // inherit the `/me` hub's contract by prefix and gate themselves with
+    // `PairedOnly` in the page body.
+    const contradictions = ME_ENTRIES.filter((entry) => {
+      if (!entry.pairedOnly) return false
+      const contract = getSurfaceContractForRoute(entry.href)
+      return contract?.route === entry.href && contract.standalone === "full"
+    }).map((entry) => entry.id)
+    expect(contradictions).toEqual([])
+    for (const id of ["issues", "issue-projects", "workspace"]) {
+      expect(ME_ENTRIES.find((entry) => entry.id === id)?.pairedOnly).toBeUndefined()
+    }
   })
 
   it("makes the new rows findable by what a user would actually type", () => {

@@ -32,7 +32,7 @@ jest.mock("@/hooks/use-runtime-snapshot", () => ({
 
 interface TestQueueSummary {
   pending: number
-  failed: number
+  sending: number
   deadlettered: number
   rejected: number
   conflicted: number
@@ -40,7 +40,7 @@ interface TestQueueSummary {
 
 const EMPTY_SUMMARY: TestQueueSummary = {
   pending: 0,
-  failed: 0,
+  sending: 0,
   deadlettered: 0,
   rejected: 0,
   conflicted: 0,
@@ -52,7 +52,7 @@ const getQueueSummaryMock = jest.fn(async (): Promise<TestQueueSummary> => EMPTY
 // banner's two branches pass while the real split was wrong.
 jest.mock("@/lib/queue/outbound-queue", () => ({
   getQueueSummary: () => getQueueSummaryMock(),
-  inFlight: (summary: TestQueueSummary) => summary.pending + summary.failed,
+  inFlight: (summary: TestQueueSummary) => summary.pending + summary.sending,
   needsAttention: (summary: TestQueueSummary) =>
     summary.deadlettered + summary.rejected + summary.conflicted,
 }))
@@ -98,6 +98,7 @@ jest.mock("next-intl", () => ({
     const map: Record<string, string> = {
       bannerOffline: "Offline mode",
       queuePending: `${(vars?.count as number) ?? 0} queued`,
+      queuePendingWithSending: `${(vars?.count as number) ?? 0} queued · ${(vars?.sending as number) ?? 0} sending`,
       queueNeedsAttention: `${(vars?.count as number) ?? 0} need attention`,
       queueAwaitingApproval: `Waiting for approval on the host — code ${String(vars?.code ?? "")}`,
       queueAwaitingApprovalNoCode: "Waiting for approval on the host.",
@@ -186,13 +187,25 @@ describe("<OfflineBanner />", () => {
   })
 
   it("shows pending-queue copy when network is up but queue has rows", async () => {
-    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 4, failed: 1 })
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 5 })
     render(<OfflineBanner />)
     await waitFor(() => expect(screen.queryByTestId("offline-banner")).toBeInTheDocument())
     const banner = screen.getByTestId("offline-banner")
     expect(banner).toHaveAttribute("data-offline", "false")
     expect(banner).toHaveAttribute("data-stuck", "false")
     expect(screen.getByText("5 queued")).toBeInTheDocument()
+  })
+
+  /**
+   * "2 queued" over a workflow card reading "Sending" looked like two accounts
+   * of one action. The count still covers every row on its way; the rows on
+   * the wire are named as such.
+   */
+  it("names the rows being sent right now inside the queued count", async () => {
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 1, sending: 1 })
+    render(<OfflineBanner />)
+    expect(await screen.findByText("2 queued · 1 sending")).toBeInTheDocument()
+    expect(screen.getByTestId("offline-banner-review")).toBeInTheDocument()
   })
 
   /**

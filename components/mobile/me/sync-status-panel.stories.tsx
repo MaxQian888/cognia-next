@@ -23,7 +23,7 @@ const meta = {
   component: SyncStatusPanel,
   parameters: { layout: "fullscreen" },
   args: {
-    trigger: fn(async () => undefined),
+    trigger: fn(async () => []),
   },
   decorators: [
     (Story) => (

@@ -202,7 +202,7 @@ function encryptedTable(databaseName: string, table: DBCoreTable): DBCoreTable {
     async openCursor(request) {
       cipher()
       const cursor = await table.openCursor(request)
-      return cursor ? wrapCursor(cursor, decryptRow) : null
+      return cursor ? wrapCursor(cursor, table.name, decryptRow) : null
     },
     count(request) {
       cipher()
@@ -222,8 +222,115 @@ function carriesEnvelope(row: unknown): boolean {
   return isRecord(row) && isEncryptedEnvelope(row[ENCRYPTED_CONTENT_FIELD])
 }
 
+/**
+ * The IndexedDB transaction under a DBCore cursor, when there is one.
+ *
+ * Dexie's IndexedDB core stamps the native `IDBTransaction` onto every cursor
+ * it opens (`cursor.trans = trans`). The DBCore type only promises `abort()`,
+ * so this checks for the one method the keep-alive below needs rather than
+ * trusting a cast: a core that is not IndexedDB-backed simply gets no bridge.
+ */
+function nativeTransactionOf(cursor: DBCoreCursor): IDBTransaction | null {
+  const trans = cursor.trans as unknown
+  if (
+    typeof trans === "object" &&
+    trans !== null &&
+    typeof (trans as IDBTransaction).objectStore === "function"
+  ) {
+    return trans as IDBTransaction
+  }
+  return null
+}
+
+/**
+ * Deliver a decrypted cursor row back to Dexie from inside an ACTIVE window of
+ * the cursor's own IndexedDB transaction.
+ *
+ * Decryption is WebCrypto, which settles in a later task. A transaction is only
+ * active while one of its request events is being dispatched (and the
+ * microtasks that follow it), so resuming iteration straight from the
+ * decryption promise calls `IDBCursor.continue()` on an inactive transaction:
+ *
+ *     TransactionInactiveError: Failed to execute 'continue' on 'IDBCursor':
+ *     The transaction is not active.
+ *
+ * That is what failed every cursor-driven read of an encrypted table on a real
+ * engine — `anyOf()`, `filter()`, `each()`, `modify()` over a non-plain range —
+ * so deleting a conversation (its cascade reads `sessions` with `anyOf`)
+ * rolled back. Plaintext rows never showed it: an async function that awaits
+ * nothing settles in a microtask of the same task, while the transaction is
+ * still active, which is why data written before encryption (most desktop
+ * installs) iterated fine and a fresh encrypted profile (the phone) did not.
+ * fake-indexeddb never deactivates a transaction between tasks, so the jest
+ * suite could not see it either.
+ *
+ * The whole-iteration `Dexie.waitFor` hold keeps the transaction from
+ * COMMITTING, but it cannot make it active for us: its keep-alive only drains
+ * Dexie's own private wait queue. So each encrypted row runs its own
+ * keep-alive, the same trick Dexie uses — a no-op `get(-Infinity)` re-issued
+ * from its own success event until the decryption settles — and hands the row
+ * to Dexie from inside that success event, where `continue()` is legal. The
+ * keep-alive is bound to the cursor's own `IDBTransaction`, never to whichever
+ * transaction Dexie's zone happens to name at that moment, so concurrent
+ * queries cannot cross-wire (the reason the whole-iteration hold is taken only
+ * once, in `start()`).
+ */
+function deliverInActiveTransaction(
+  cursor: DBCoreCursor,
+  storeName: string,
+  decrypted: Promise<unknown>,
+  deliver: (value: unknown) => void
+): void {
+  const fail = (error: unknown) =>
+    cursor.fail(error instanceof Error ? error : new Error(String(error)))
+  const idbtrans = nativeTransactionOf(cursor)
+  if (!idbtrans) {
+    // Not IndexedDB underneath: nothing to keep active, deliver as it settles.
+    decrypted.then(deliver, fail)
+    return
+  }
+  let settled: { ok: true; value: unknown } | { ok: false; error: unknown } | null = null
+  decrypted.then(
+    (value) => {
+      settled = { ok: true, value }
+    },
+    (error: unknown) => {
+      settled = { ok: false, error }
+    }
+  )
+  let store: IDBObjectStore
+  try {
+    // Still inside the cursor's own success event, so the transaction is
+    // active and this cannot throw unless the transaction is already gone.
+    store = idbtrans.objectStore(storeName)
+  } catch (error) {
+    fail(error)
+    return
+  }
+  const spin = () => {
+    const outcome = settled
+    if (outcome) {
+      if (outcome.ok) deliver(outcome.value)
+      else fail(outcome.error)
+      return
+    }
+    let keepAlive: IDBRequest
+    try {
+      keepAlive = store.get(-Infinity)
+    } catch (error) {
+      fail(error)
+      return
+    }
+    keepAlive.onsuccess = spin
+    keepAlive.onerror = () =>
+      fail(keepAlive.error ?? new Error("Cursor keep-alive request failed."))
+  }
+  spin()
+}
+
 function wrapCursor(
   cursor: DBCoreCursor,
+  storeName: string,
   decryptRow: (row: unknown, explicitKey?: unknown) => Promise<unknown>
 ): DBCoreCursor {
   let currentValue: unknown
@@ -246,14 +353,28 @@ function wrapCursor(
         // scope. Later native cursor callbacks can run in another concurrent
         // query's scope; acquiring per-row holds there can deadlock the queries.
         const work = cursor.start(() => {
-          void decryptRow(cursor.value, cursor.primaryKey)
-            .then((value) => {
+          const raw = cursor.value
+          if (!carriesEnvelope(raw)) {
+            // Nothing to decrypt: stay synchronous inside the native event, as
+            // an unwrapped cursor would. The underlying start() already routes
+            // a throwing callback into cursor.fail().
+            currentValue = raw
+            callback()
+            return
+          }
+          deliverInActiveTransaction(
+            cursor,
+            storeName,
+            decryptRow(raw, cursor.primaryKey),
+            (value) => {
               currentValue = value
-              callback()
-            })
-            .catch((error: unknown) =>
-              cursor.fail(error instanceof Error ? error : new Error(String(error)))
-            )
+              try {
+                callback()
+              } catch (error) {
+                cursor.fail(error instanceof Error ? error : new Error(String(error)))
+              }
+            }
+          )
         })
         const hold = tryHoldTransaction(work)
         if (!hold.ok) {

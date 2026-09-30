@@ -442,13 +442,16 @@ export function PairStep({
       clipboard = null
     }
     if (!clipboard?.trim()) {
+      // `""` is a clipboard that was read and holds nothing; `null` is one
+      // that could not be read at all. They need different next steps.
+      const message = clipboard === null ? t("web.clipboardReadFailed") : t("web.clipboardEmpty")
       setPhase({
         kind: "error",
         failure: {
           stage: "decode",
           kind: "clipboard_unavailable",
-          detail: t("web.clipboardReadFailed"),
-          bodyText: t("web.clipboardReadFailed"),
+          detail: message,
+          bodyText: message,
           remedies: [],
           retryable: false,
           invitationSpent: false,

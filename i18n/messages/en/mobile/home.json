@@ -60,6 +60,7 @@
   "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",
   "sections": {
     "activeRuns": "Active runs",
+    "activity": "Activity",
     "quickActions": "Quick actions",
     "recents": "Recent chats"
   },

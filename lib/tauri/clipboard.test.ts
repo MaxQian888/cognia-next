@@ -107,6 +107,20 @@ describe("lib/tauri/clipboard", () => {
       await expect(readClipboardText()).resolves.toBeNull()
     })
 
+    it("reports an empty native pasteboard as '' rather than a read failure", async () => {
+      capReadText.mockResolvedValueOnce({
+        kind: "error",
+        message: "There is no data on the clipboard",
+      })
+      const navReadText = jest.fn()
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { readText: navReadText },
+      })
+      await expect(readClipboardText()).resolves.toBe("")
+      expect(navReadText).not.toHaveBeenCalled()
+    })
+
     it("uses the native Capacitor clipboard on mobile", async () => {
       capReadText.mockResolvedValueOnce({ kind: "ok", value: "from native" })
       const navReadText = jest.fn()

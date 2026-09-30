@@ -43,6 +43,8 @@ import {
   type MobileHomeSectionId,
 } from "@/types/shell/mobile-home"
 import { useMobileHomeLayout } from "./use-mobile-home-layout"
+import { useSettingsStore } from "@/stores/settings"
+import { resolveWelcomeStatsPrefs } from "@/lib/chat/welcome-stats-prefs"
 
 /**
  * Sections the user can toggle: all of them.
@@ -72,6 +74,13 @@ export function MobileQuickActionsEditor(): React.ReactElement {
     isSectionHidden,
     reset,
   } = useMobileHomeLayout()
+  // The activity dashboard is not a `mobileHomeLayout` section: it already has
+  // its own on/off (`welcomeStats.enabled`, the ✕ on the dashboard), shared
+  // with the desktop welcome. The switch reads and writes that one setting, so
+  // there is a single answer to "is it shown" and a way back after the ✕.
+  const storedWelcomeStats = useSettingsStore((s) => s.settings?.welcomeStats)
+  const saveSettings = useSettingsStore((s) => s.save)
+  const welcomeStats = resolveWelcomeStatsPrefs(storedWelcomeStats)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -174,6 +183,20 @@ export function MobileQuickActionsEditor(): React.ReactElement {
               </li>
             )
           })}
+          <li
+            className="flex items-center gap-2 rounded border bg-card px-3 py-2"
+            data-testid="mobile-home-editor-section-activity"
+          >
+            <span className="flex-1 truncate text-sm">{tSections("activity")}</span>
+            <Switch
+              checked={welcomeStats.enabled}
+              onCheckedChange={(next) =>
+                void saveSettings({ welcomeStats: { ...welcomeStats, enabled: next } })
+              }
+              aria-label={tSections("activity")}
+              data-testid="mobile-home-editor-section-toggle-activity"
+            />
+          </li>
         </ul>
       </ListSection>
     </div>

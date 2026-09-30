@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { WorkflowGraphViewer, type WorkflowGraph } from "./workflow-graph-viewer"
-import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
+import { enqueue as enqueueOutbound, enqueueUnlessQueued } from "@/lib/db/mobile-outbound-queue"
 import { useSettingsStore } from "@/stores/settings"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
@@ -72,11 +72,15 @@ export function WorkflowRowActionsSheet({ workflow, onOpenChange }: WorkflowRowA
 
   async function handleRun() {
     if (!workflow) return
-    await enqueueOutbound({
+    // One queued run per workflow — see `enqueueUnlessQueued`. A repeat tap
+    // while the first is still waiting for the Host is told so, not stacked.
+    const { alreadyQueued } = await enqueueUnlessQueued({
       command: "workflow_trigger_manual",
       payload: { workflowId: workflow.id },
+      label: workflow.name,
     })
-    toast.success(t("runQueued", { name: workflow.name }))
+    if (alreadyQueued) toast.message(t("runAlreadyQueued", { name: workflow.name }))
+    else toast.success(t("runQueued", { name: workflow.name }))
     onOpenChange(false)
   }
 

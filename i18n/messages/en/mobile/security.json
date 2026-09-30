@@ -3,7 +3,7 @@
     "help": "Ask for biometric before revoking a device's pairing.",
     "label": "Revoke a paired device"
   },
-  "description": "Require Face ID / fingerprint before sensitive actions.",
+  "description": "Require face or fingerprint unlock before sensitive actions.",
   "exportBackup": {
     "help": "Ask for biometric before writing a backup file.",
     "label": "Export encrypted backup"

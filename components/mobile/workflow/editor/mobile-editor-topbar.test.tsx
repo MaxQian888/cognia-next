@@ -18,11 +18,13 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 const toastWarning = jest.fn()
+const toastMessage = jest.fn()
 jest.mock("sonner", () => ({
   toast: {
     success: (...a: unknown[]) => toastSuccess(...a),
     error: (...a: unknown[]) => toastError(...a),
     warning: (...a: unknown[]) => toastWarning(...a),
+    message: (...a: unknown[]) => toastMessage(...a),
   },
 }))
 
@@ -112,6 +114,7 @@ beforeEach(async () => {
   toastSuccess.mockReset()
   toastError.mockReset()
   toastWarning.mockReset()
+  toastMessage.mockReset()
   persistEditorWorkflow.mockClear()
   downloadWorkflowJson.mockClear()
   setActiveRuntimeTargetContext("local_acct_a", "host-1")
@@ -162,6 +165,74 @@ describe("<MobileEditorTopbar />", () => {
     expect(onOpenSearch).toHaveBeenCalledTimes(1)
   })
 
+  // A phone-width bar holds more 44px targets than the screen is wide. The name
+  // column is the only thing that may shrink, so the status badge lives inside
+  // it (a `shrink-0` sibling overflowed onto the mode toggle once the column
+  // hit 0px), and the lower-priority buttons hand over to the overflow menu.
+  describe("phone-width layout", () => {
+    it("keeps the status badge inside the shrinkable name column", () => {
+      renderTopbar()
+      const column = screen.getByRole("heading", { name: "Daily Digest" }).parentElement
+      expect(column).toHaveClass("min-w-0", "flex-1")
+      expect(column).toContainElement(screen.getByTestId("mobile-editor-dirty"))
+      expect(screen.getByTestId("mobile-editor-dirty")).toHaveClass("max-w-full", "truncate")
+    })
+
+    it("collapses the mode toggle to an icon but keeps its accessible name", () => {
+      renderTopbar("edit")
+      const toggle = screen.getByTestId("mobile-editor-mode-toggle")
+      expect(toggle).toHaveClass("max-sm:size-11")
+      expect(screen.getByText("modeEdit")).toHaveClass("max-sm:sr-only")
+      expect(toggle).toHaveAccessibleName("modeEdit")
+    })
+
+    it("hides select mode and Workbench from the bar below sm", () => {
+      renderTopbar("edit")
+      expect(screen.getByTestId("mobile-editor-select-mode")).toHaveClass("max-sm:hidden")
+      expect(screen.getByTestId("mobile-editor-workbench")).toHaveClass("max-sm:hidden")
+    })
+
+    it("offers Workbench and select mode from the overflow menu instead", async () => {
+      const user = userEvent.setup()
+      const store: EditorStore = createEditorStore(buildWorkflow())
+      const onOpenWorkbench = jest.fn()
+      const onToggleSelectMode = jest.fn()
+      render(
+        <MobileEditorTopbar
+          store={store}
+          reactFlowInstance={null}
+          mode="select"
+          onToggleMode={jest.fn()}
+          onOpenCopilot={jest.fn()}
+          onOpenSearch={jest.fn()}
+          onOpenWorkbench={onOpenWorkbench}
+          orientationLocked={true}
+          onToggleOrientationLock={jest.fn()}
+          onToggleSelectMode={onToggleSelectMode}
+        />
+      )
+      await user.click(screen.getByTestId("mobile-editor-menu"))
+      const selectItem = await screen.findByTestId("mobile-editor-menu-select-mode")
+      expect(selectItem).toHaveClass("sm:hidden")
+      await user.click(selectItem)
+      expect(onToggleSelectMode).toHaveBeenCalledTimes(1)
+
+      await user.click(screen.getByTestId("mobile-editor-menu"))
+      const workbenchItem = await screen.findByTestId("mobile-editor-menu-workbench")
+      expect(workbenchItem).toHaveClass("sm:hidden")
+      await user.click(workbenchItem)
+      expect(onOpenWorkbench).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not offer select mode in the menu while reading", async () => {
+      const user = userEvent.setup()
+      renderTopbar("read")
+      await user.click(screen.getByTestId("mobile-editor-menu"))
+      await screen.findByTestId("mobile-editor-menu-workbench")
+      expect(screen.queryByTestId("mobile-editor-menu-select-mode")).not.toBeInTheDocument()
+    })
+  })
+
   it("disables Save when clean and persists once dirty", async () => {
     const user = userEvent.setup()
     const { store } = renderTopbar()
@@ -203,6 +274,17 @@ describe("<MobileEditorTopbar />", () => {
     expect(toastSuccess).toHaveBeenCalledWith("runQueued")
     // Clean store → Run should not persist.
     expect(persistEditorWorkflow).not.toHaveBeenCalled()
+  })
+
+  it("does not queue a second run while the first is still waiting", async () => {
+    const user = userEvent.setup()
+    renderTopbar()
+    await user.click(screen.getByTestId("mobile-editor-run"))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("runQueued"))
+    await waitFor(() => expect(screen.getByTestId("mobile-editor-run")).not.toBeDisabled())
+    await user.click(screen.getByTestId("mobile-editor-run"))
+    await waitFor(() => expect(toastMessage).toHaveBeenCalledWith("runAlreadyQueued"))
+    expect(await listByStatus("pending")).toHaveLength(1)
   })
 
   it("persists imported JSON before queueing Run", async () => {

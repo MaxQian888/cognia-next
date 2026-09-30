@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
 
+import { dismissTopmostOverlayOnBack } from "@/hooks/ui/use-back-dismiss"
 import { usePlatform } from "@/hooks/use-platform"
 import { useSettingsStore } from "@/stores/settings"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -562,11 +563,15 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
 
       // Android hardware back. Registering the listener disables the App
       // plugin's default (history back / exit at root), so re-implement it:
-      // history back keeps `useBackDismiss` sheets and SPA routes working
-      // exactly as before; at the root, minimize instead of exiting.
+      // an open overlay closes first, exactly as the Escape key would close
+      // it (most sheets, dialogs and menus push no history marker, so without
+      // this the press navigated or backgrounded the app under them); then
+      // history back keeps `useBackDismiss` sheets and SPA routes working; at
+      // the root, minimize instead of exiting.
       // Must sit BEFORE the standalone/unpaired early-returns — the back
       // button has to work on /welcome and /pair too.
       const backUnsub = await subscribeBackButton(({ canGoBack }) => {
+        if (dismissTopmostOverlayOnBack()) return
         if (canGoBack) {
           window.history.back()
         } else {

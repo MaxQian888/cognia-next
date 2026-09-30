@@ -96,6 +96,22 @@ describe("toDiagnostic — text fallback", () => {
     expect(out.meta?.httpStatus).toBe(503)
   })
 
+  it("classifies a rejected API key as unauthorized with a way to the credentials", () => {
+    // The phone's direct-fetch turn ends with only the provider's text; before
+    // it threaded the status, this wording fell through to `unknown`.
+    const byText = toDiagnostic("API key is invalid.", { ...ctx, source: "provider" })
+    expect(byText.code).toBe("unauthorized")
+    expect(byText.actions).toContainEqual({ kind: "open-settings", section: "ai-connections" })
+
+    // Any wording at all, once the real 401 rides along.
+    const byStatus = toDiagnostic("the provider refused the request", {
+      ...ctx,
+      source: "provider",
+      meta: { httpStatus: 401 },
+    })
+    expect(byStatus.code).toBe("unauthorized")
+  })
+
   it("turns a real Retry-After into a countdown action", () => {
     const out = toDiagnostic(new Error("slow down"), {
       ...ctx,

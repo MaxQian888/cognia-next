@@ -6,16 +6,17 @@ import React, { createRef } from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { useTranslations } from "next-intl"
 
+const mockVirtualizerOptions: Array<{ getItemKey?: (index: number) => string | number }> = []
+
 jest.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({
-    count,
-    estimateSize,
-    getScrollElement,
-  }: {
+  useVirtualizer: (options: {
     count: number
     estimateSize: () => number
     getScrollElement: () => HTMLElement | null
+    getItemKey?: (index: number) => string | number
   }) => {
+    const { count, estimateSize, getScrollElement } = options
+    mockVirtualizerOptions.push(options)
     // Invoke the inline arrow callbacks so they register coverage.
     estimateSize?.()
     getScrollElement?.()
@@ -244,6 +245,20 @@ describe("VirtualizedLogList", () => {
       expect(screen.getByTestId("memoized-log-0")).toBeInTheDocument()
       expect(screen.getByTestId("memoized-log-4")).toBeInTheDocument()
       expect(screen.queryByTestId("memoized-log-5")).not.toBeInTheDocument()
+    })
+
+    it("keys the measurement cache by log id, not by index", () => {
+      // Newest-first: a new entry shifts every row down one index. Index keys
+      // would hand each row its predecessor's measured height (rows overlap).
+      const logs = [makeLog("newest"), makeLog("older"), makeLog("oldest")]
+      mockVirtualizerOptions.length = 0
+      render(<Harness filteredLogs={logs} />)
+      const options = mockVirtualizerOptions[mockVirtualizerOptions.length - 1]
+      expect(options.getItemKey?.(0)).toBe("newest")
+      expect(options.getItemKey?.(2)).toBe("oldest")
+      // Out-of-range lookups (the virtualizer may probe during a shrink) fall
+      // back to the index instead of throwing.
+      expect(options.getItemKey?.(7)).toBe(7)
     })
 
     it("ignores groupedLogs when groupByTraceId is false", () => {

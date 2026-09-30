@@ -269,6 +269,7 @@
   "web": {
     "baseUrlLocked": "Server URL is set by this deployment",
     "clearPayload": "Clear",
+    "clipboardEmpty": "The clipboard is empty. Copy the full cgnp3 invitation first, then tap Paste again.",
     "clipboardReadFailed": "The browser could not read the clipboard. Paste the full invitation manually.",
     "clipboardWriteFailed": "The browser could not copy the command. Select it and copy it manually.",
     "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",

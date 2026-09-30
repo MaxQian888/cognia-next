@@ -31,6 +31,8 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaSeedSquadRun",
   "__cogniaSeedSkill",
   "__cogniaSeedConnectorDraft",
+  "__cogniaSeedStagedConversation",
+  "__cogniaAdvanceStage",
   "__cogniaSeedRun",
   "__cogniaSetMockBaseUrls",
   "__cogniaMockBaseUrls",
@@ -110,6 +112,8 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSeedSkill).toBe("function")
     expect(typeof window.__cogniaSeedPlan).toBe("function")
     expect(typeof window.__cogniaSeedConnectorDraft).toBe("function")
+    expect(typeof window.__cogniaSeedStagedConversation).toBe("function")
+    expect(typeof window.__cogniaAdvanceStage).toBe("function")
     expect(typeof window.__cogniaSeedRun).toBe("function")
     expect(typeof window.__cogniaSetMockBaseUrls).toBe("function")
     expect(typeof window.__cogniaSaveCompanionConfig).toBe("function")
@@ -415,6 +419,111 @@ describe("ExposeTestGlobals", () => {
         metadata: { idempotencyKey: expect.any(String) },
       },
     })
+  })
+
+  it("plays a staged conversation into storage, the live store, plans and artifacts", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    activateAccountDatabase("acct_e2e_vault")
+    // The seam waits for an unlocked account before it creates the session.
+    const { useAccountStore } = await import("@/stores/account/account-store")
+    useAccountStore.setState({ unlockedAccountId: "acct_e2e_vault" })
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+
+    const { sessionId, stageCount } = await window.__cogniaSeedStagedConversation!({
+      title: "Release 2.4.0",
+      stages: [
+        {
+          kind: "append",
+          message: { id: "u1", role: "user", parts: [{ type: "text", text: "Fix it" }] },
+        },
+        { kind: "append", message: { id: "a1", role: "assistant", parts: [] } },
+        { kind: "stream", messageId: "a1", text: "On it.", chunkSize: 2, intervalMs: 0 },
+        {
+          kind: "addPart",
+          messageId: "a1",
+          part: {
+            type: "tool-Bash",
+            toolCallId: "t1",
+            state: "input-available",
+            input: { command: "pnpm test" },
+          },
+        },
+        {
+          kind: "patchPart",
+          messageId: "a1",
+          toolCallId: "t1",
+          patch: { state: "output-error", errorText: "1 failed" },
+        },
+        { kind: "plan", title: "Ship 2.4.0", stepTitles: ["Fix", "Push"] },
+        {
+          kind: "artifact",
+          messageId: "a1",
+          title: "launch-notes.md",
+          content: "# 2.4.0",
+          artifactType: "document",
+          language: "markdown",
+        },
+        {
+          kind: "approval",
+          toolCallId: "t1",
+          toolName: "Bash",
+          input: { command: "pnpm test" },
+          title: "Run the check",
+        },
+      ],
+    })
+    expect(stageCount).toBe(8)
+
+    let last = { index: -1, done: false }
+    while (!last.done) last = await window.__cogniaAdvanceStage!(sessionId)
+    expect(last.index).toBe(7)
+
+    // Read back in transcript order, which is what a reload of the session shows.
+    const { listMessages } = await import("@/lib/db/messages")
+    const stored = await listMessages(sessionId)
+    expect(stored.map((m) => m.id)).toEqual(["u1", "a1"])
+    const storedParts = stored[1].parts as Array<Record<string, unknown>>
+    expect(storedParts.map((p) => p.type)).toEqual(["text", "tool-Bash", "artifact"])
+    expect(storedParts[0]).toMatchObject({ text: "On it." })
+
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    const state = useChatStore.getState()
+    const live = state.sessions[sessionId]?.messages ?? []
+    const liveParts = (live[1]?.parts ?? []) as Array<Record<string, unknown>>
+    expect(liveParts.find((p) => p.toolCallId === "t1")).toMatchObject({ state: "output-error" })
+    expect(state.sessions[sessionId]?.pendingApprovals).toEqual([
+      expect.objectContaining({
+        sessionId,
+        requestId: "demo-approval-t1",
+        toolUseID: "t1",
+        toolName: "Bash",
+        title: "Run the check",
+      }),
+    ])
+    const artifactPart = liveParts.find((p) => p.type === "artifact")
+    expect(artifactPart).toMatchObject({ title: "launch-notes.md", kind: "document" })
+
+    const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
+    const artifact = useArtifactStore.getState().artifacts[artifactPart!.artifactId as string]
+    expect(artifact).toMatchObject({ sessionId, title: "launch-notes.md", content: "# 2.4.0" })
+
+    const { listPlansBySession } = await import("@/lib/db/plans")
+    const plans = await listPlansBySession(sessionId)
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({
+      title: "Ship 2.4.0",
+      status: "awaiting_approval",
+      source: "exit_plan_mode",
+    })
+
+    await expect(window.__cogniaAdvanceStage!("missing")).rejects.toThrow(
+      "No staged conversation for session missing"
+    )
+    useAccountStore.setState({ unlockedAccountId: null })
   })
 
   it("removes every global on unmount", async () => {

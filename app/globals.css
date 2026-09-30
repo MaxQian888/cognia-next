@@ -1235,6 +1235,17 @@ html[data-bg-preview="all"] [data-bg-target] {
   --surface-tonality-translucent: 70%;
   --surface-tonality-glass: 55%;
   --surface-tonality-frosted: 40%;
+  /* Content surfaces that float OVER other content — popovers, menus, select
+     lists, toasts, and the overlay tier (`--surface-tonality-overlay`), plus
+     dialogs, sheets and drawers (`--surface-tonality-modal`). The tiers above
+     are tuned for chrome that sits over the wallpaper alone; over live UI they
+     let the text underneath read straight through the panel. Legibility cannot
+     be left to the blur either: Android WebViews report `backdrop-filter`
+     support yet paint many overlays unblurred, so at 40-60% a sheet's text
+     collided with the page it covered. These keep a hint of the wallpaper's
+     tint while leaving whatever sits behind illegible without any blur. */
+  --surface-tonality-overlay: 94%;
+  --surface-tonality-modal: 96%;
   --surface-blur-subtle: 6px;
   --surface-blur-regular: 10px;
   --surface-blur-strong: 14px;
@@ -1254,6 +1265,8 @@ html[data-bg-preview="all"] [data-bg-target] {
   --surface-tonality-translucent: 75%;
   --surface-tonality-glass: 60%;
   --surface-tonality-frosted: 45%;
+  --surface-tonality-overlay: 95%;
+  --surface-tonality-modal: 97%;
 }
 
 /* Fallback: when backdrop-filter isn't supported, push opacity up since we
@@ -1264,11 +1277,15 @@ html[data-bg-preview="all"] [data-bg-target] {
     --surface-tonality-translucent: 85%;
     --surface-tonality-glass: 80%;
     --surface-tonality-frosted: 70%;
+    --surface-tonality-overlay: 98%;
+    --surface-tonality-modal: 98%;
   }
   .dark {
     --surface-tonality-translucent: 88%;
     --surface-tonality-glass: 83%;
     --surface-tonality-frosted: 73%;
+    --surface-tonality-overlay: 98%;
+    --surface-tonality-modal: 98%;
   }
 }
 
@@ -1281,6 +1298,8 @@ html[data-bg-preview="all"] [data-bg-target] {
     --surface-tonality-translucent: 100%;
     --surface-tonality-glass: 100%;
     --surface-tonality-frosted: 100%;
+    --surface-tonality-overlay: 100%;
+    --surface-tonality-modal: 100%;
     --surface-blur-subtle: 0px;
     --surface-blur-regular: 0px;
     --surface-blur-strong: 0px;
@@ -1351,7 +1370,7 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] {
   );
   --surface-bg-overlay: color-mix(
     in oklch,
-    var(--popover) var(--surface-tonality-glass),
+    var(--popover) var(--surface-tonality-overlay),
     transparent
   );
   --surface-blur: var(--surface-blur-subtle);
@@ -1363,7 +1382,7 @@ body[data-bg-enabled="true"][data-bg-scope="all"],
 body[data-bg-enabled="true"][data-bg-scope="global"] {
   --surface-bg-overlay: color-mix(
     in oklch,
-    var(--popover) var(--surface-tonality-glass),
+    var(--popover) var(--surface-tonality-overlay),
     transparent
   );
   --surface-blur: var(--surface-blur-regular);
@@ -1566,12 +1585,18 @@ body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="navigation-menu-vi
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="navigation-menu-viewport"],
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="command"],
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="command"] {
-  background-color: color-mix(in oklch, var(--popover) var(--surface-tonality-glass), transparent);
+  background-color: color-mix(
+    in oklch,
+    var(--popover) var(--surface-tonality-overlay),
+    transparent
+  );
   backdrop-filter: blur(var(--surface-blur-regular));
   -webkit-backdrop-filter: blur(var(--surface-blur-regular));
 }
 
-/* Modal content — frosted --background, strong blur. */
+/* Modal content — near-opaque --background, strong blur. It covers live UI,
+ * so it takes the modal tier rather than `frosted`: a sheet or dialog at 40%
+ * let the page beneath read through every field. */
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="dialog-content"],
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="dialog-content"],
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="alert-dialog-content"],
@@ -1582,7 +1607,7 @@ body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="drawer-content"],
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="drawer-content"] {
   background-color: color-mix(
     in oklch,
-    var(--background) var(--surface-tonality-frosted),
+    var(--background) var(--surface-tonality-modal),
     transparent
   );
   backdrop-filter: blur(var(--surface-blur-strong));
@@ -1605,13 +1630,13 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="drawer-overlay"
   -webkit-backdrop-filter: blur(var(--surface-blur-regular));
 }
 
-/* Tooltip — translucent --foreground, subtle blur. Tooltip colors are
+/* Tooltip — overlay-tier --foreground, subtle blur. Tooltip colors are
  * inverted (dark bg, light text) so we mix into --foreground not --popover. */
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="tooltip-content"],
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="tooltip-content"] {
   background-color: color-mix(
     in oklch,
-    var(--foreground) var(--surface-tonality-translucent),
+    var(--foreground) var(--surface-tonality-overlay),
     transparent
   );
   backdrop-filter: blur(var(--surface-blur-subtle));
@@ -1623,7 +1648,7 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="tooltip-content
  * Sonner's own emitted [data-sonner-toast] element. */
 body[data-bg-enabled="true"][data-bg-scope="all"],
 body[data-bg-enabled="true"][data-bg-scope="global"] {
-  --normal-bg: color-mix(in oklch, var(--popover) var(--surface-tonality-glass), transparent);
+  --normal-bg: color-mix(in oklch, var(--popover) var(--surface-tonality-overlay), transparent);
 }
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-sonner-toast],
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-sonner-toast] {

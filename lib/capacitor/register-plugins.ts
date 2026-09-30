@@ -1,6 +1,7 @@
 "use client"
 
 import { detectNativePlatform } from "./_shared"
+import { installNativeClipboardBridge } from "./clipboard"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
@@ -34,6 +35,13 @@ const log = loggers.shell
  * bundle it. The dynamic `import("@capacitor/core")` below is a mobile-only
  * lazy chunk — it is gated behind `detectNativePlatform() === "mobile"`, so the
  * web and Tauri shells never fetch or evaluate it.
+ *
+ * Note: `registerPlugin` REPLACES whatever sits at `Plugins[name]` with core's
+ * proxy, and that proxy answers every property — `then` included. It must
+ * never be returned from an `async` function or awaited directly; the shared
+ * loader hands out a non-thenable view (`asNonThenable` in `_shared.ts`).
+ * Before that view existed, every wrapper call after this registration hung
+ * forever on device.
  */
 
 interface PluginHeader {
@@ -88,6 +96,12 @@ export async function registerNativePlugins(
     registerFn?: RegisterPluginFn
     coreLoader?: CoreLoader
     win?: WinWithCapacitor
+    /**
+     * Bridge `navigator.clipboard` to the native Clipboard plugin once it is
+     * registered (see {@link installNativeClipboardBridge}). Injectable for
+     * tests; defaults to the real installer.
+     */
+    installClipboardBridge?: () => void
   } = {}
 ): Promise<RegisterNativePluginsResult> {
   if (detectNativePlatform() !== "mobile") {
@@ -127,6 +141,18 @@ export async function registerNativePlugins(
     } catch (err) {
       log.warn("capacitor: registerPlugin failed", {
         plugin: header.name,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  // The WebView's own async Clipboard API fails on device; point the direct
+  // `navigator.clipboard.*` call sites at the native pasteboard instead.
+  if (registered.includes("Clipboard")) {
+    try {
+      ;(opts.installClipboardBridge ?? (() => void installNativeClipboardBridge()))()
+    } catch (err) {
+      log.warn("capacitor: clipboard bridge install failed", {
         error: err instanceof Error ? err.message : String(err),
       })
     }

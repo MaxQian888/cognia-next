@@ -565,6 +565,23 @@ describe("<MobileShellWrapper />", () => {
     expect(inner.style.paddingBottom).toBe("")
   })
 
+  it("keeps the tab-bar reserve when a viewport overlap lingers with the keyboard closed", () => {
+    // Native keyboard says hidden, but the visual viewport still reports an
+    // overlap (pinch zoom / late restore). The bar is showing, so its reserve
+    // must win over the overlap, or the last row sits under the bar.
+    keyboardRef.value = { keyboardHeight: 24, isVisible: false }
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>reading</div>
+      </MobileShellWrapper>
+    )
+    const inner = container.querySelector(
+      "[data-testid='mobile-shell-wrapper'] > div"
+    ) as HTMLElement
+    expect(inner.className).toContain("pb-[calc(theme(spacing.14)")
+    expect(inner.style.paddingBottom).toBe("")
+  })
+
   it("restores the tab bar and bottom reserve when the keyboard closes", () => {
     keyboardRef.value = { keyboardHeight: 320, isVisible: true }
     const { container, rerender } = render(

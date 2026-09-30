@@ -291,6 +291,21 @@ it("summarises a pasted invitation and folds the blob away behind it", async () 
   expect(screen.queryByTestId("pair-invitation-card")).not.toBeInTheDocument()
 })
 
+it.each([
+  ["an empty clipboard", "", "web.clipboardEmpty"],
+  ["an unreadable clipboard", null, "web.clipboardReadFailed"],
+])("tells %s apart when Paste finds nothing", async (_label, clipboard, message) => {
+  mockReadClipboardText.mockResolvedValue(null)
+  const user = userEvent.setup()
+  render(<PairStep isCredentialStoreReady={readyStore} webMode onPaired={jest.fn()} />)
+  await waitFor(() => expect(mockReadClipboardText).toHaveBeenCalled())
+  mockReadClipboardText.mockResolvedValue(clipboard)
+
+  await user.click(screen.getByTestId("pair-paste-clipboard"))
+
+  expect((await screen.findAllByText(message)).length).toBeGreaterThan(0)
+})
+
 it("marks the invitation spent rather than leaving a 'ready' summary beside the error", async () => {
   // The old screen rendered the green summary from the decoded payload alone,
   // so a spent invitation showed "ready", "locked" and "spent" at once.

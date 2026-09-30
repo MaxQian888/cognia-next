@@ -23,15 +23,18 @@
  */
 
 import {
+  CLAIM_RENEW_INTERVAL_MS,
   claimNext,
   deleteRow,
   listByStatus,
   markHostStateResult,
   markCollabConflict,
   markSent,
+  nextQueueWakeAt,
   recordFailure,
   releaseClaim,
   releaseStaleClaims,
+  renewClaim,
   vacuumSent,
 } from "@/lib/db/mobile-outbound-queue"
 import { acknowledgeMobileStepResultChunk } from "@/lib/db/mobile-step-receipts"
@@ -40,6 +43,78 @@ import { isHostStateAction, isHostStateSubmitResponse } from "@cognia/agent-conf
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import type { RuntimeTargetScope } from "@/lib/runtime/runtime-target-context"
+import { transportCommandTimeoutMs } from "@/lib/tauri/transport-types"
+
+/**
+ * Headroom past a command's own transport deadline before the runner stops
+ * waiting on it. The transport arms its timeout only once it starts the
+ * request; anything awaited before that (routing, credentials, a native
+ * bridge) had no bound at all, and one promise that never settled left its row
+ * `sending` and the whole drain parked behind it for the life of the app.
+ */
+export const DISPATCH_DEADLINE_GRACE_MS = 15_000
+
+/**
+ * The longest the pre-flight gate (`canDispatch`: rollout policy, the
+ * interactive-approval lease) may take before the row is treated as not
+ * dispatchable right now. It asks the Host for a lease over the same transport,
+ * so it inherits the same unbounded prefix.
+ */
+export const PREFLIGHT_DEADLINE_MS = 45_000
+
+/**
+ * How long a row the pre-flight gate refused stays out of the runner's claims.
+ *
+ * A refused row is released back to `pending`, and that write is exactly what
+ * the pending-jobs subscription kicks the runner on. Without a hold the runner
+ * reclaimed it at once, was refused again and released it again — a tight
+ * claim/release loop against IndexedDB for as long as the refusal lasted, with
+ * the row flickering between "Queued" and "Sending" under the user's finger.
+ * `kick({ thaw: true })` lifts every hold early for the events that can change
+ * the answer (an approval, a new Host manifest).
+ */
+export const FROZEN_RECHECK_MS = 15_000
+
+/** Floor for a scheduled wake-up, so a clock at the boundary cannot spin. */
+const MIN_WAKE_DELAY_MS = 250
+/** `setTimeout` clamps anything longer to an immediate fire. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
+/** A dispatch or pre-flight that produced no answer within its deadline. */
+export class OutboundDeadlineError extends Error {
+  constructor(
+    readonly command: string,
+    readonly phase: "dispatch" | "preflight",
+    readonly afterMs: number
+  ) {
+    super(`outbound ${phase} of ${command} got no answer within ${Math.round(afterMs / 1000)}s`)
+    this.name = "OutboundDeadlineError"
+  }
+}
+
+/** The dispatch deadline for one command: its transport deadline plus grace. */
+export function dispatchDeadlineMs(command: string): number {
+  return transportCommandTimeoutMs(command) + DISPATCH_DEADLINE_GRACE_MS
+}
+
+/**
+ * Settle with `work`, or reject with {@link OutboundDeadlineError} once
+ * `afterMs` passes. A late settlement of `work` is swallowed: the caller has
+ * already moved the row on, and must not also see an unhandled rejection.
+ */
+function withDeadline<T>(
+  work: Promise<T>,
+  command: string,
+  phase: "dispatch" | "preflight",
+  afterMs: number
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new OutboundDeadlineError(command, phase, afterMs)), afterMs)
+  })
+  work.catch(() => undefined)
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer))
+}
 
 export interface OutboundDispatcher {
   /** Resolves with the RPC return body. Throws on transport failure. */
@@ -68,11 +143,29 @@ export interface RunnerOptions {
   vacuumKeepMs?: number
   /** Leave a claimed row pending when rollout/capability policy freezes it. */
   canDispatch?: (row: MobileOutboundJobRow) => boolean | Promise<boolean>
+  /** Test seam — defaults to {@link dispatchDeadlineMs}. */
+  dispatchDeadlineMs?: (command: string) => number
+  /** Test seam — defaults to {@link PREFLIGHT_DEADLINE_MS}. */
+  preflightDeadlineMs?: number
+  /** Test seam — defaults to {@link FROZEN_RECHECK_MS}. */
+  frozenRecheckMs?: number
+  /** Test seam — defaults to `CLAIM_RENEW_INTERVAL_MS`. */
+  claimRenewIntervalMs?: number
+}
+
+export interface OutboundKickOptions {
+  /**
+   * Lift every pre-flight hold ({@link FROZEN_RECHECK_MS}) before draining. For
+   * events that can change the gate's answer — an approval granted elsewhere, a
+   * new Host manifest — not for the pending-jobs subscription, whose own
+   * release writes would otherwise re-arm the claim/release loop.
+   */
+  thaw?: boolean
 }
 
 export interface OutboundRunner {
   /** Kick a single drain pass — useful immediately after enqueue. */
-  kick(): Promise<void>
+  kick(options?: OutboundKickOptions): Promise<void>
   /** Stop accepting work and await any in-flight dispatch + completion write. */
   quiesce(): Promise<void>
   /** Tear down listeners and await quiescence. Idempotent. */
@@ -83,12 +176,23 @@ export interface OutboundRunner {
 
 const DEFAULT_OPTS: Pick<
   Required<RunnerOptions>,
-  "now" | "random" | "enforceMobile" | "vacuumKeepMs"
+  | "now"
+  | "random"
+  | "enforceMobile"
+  | "vacuumKeepMs"
+  | "dispatchDeadlineMs"
+  | "preflightDeadlineMs"
+  | "frozenRecheckMs"
+  | "claimRenewIntervalMs"
 > = {
   now: () => Date.now(),
   random: Math.random,
   enforceMobile: true,
   vacuumKeepMs: 24 * 60 * 60 * 1000,
+  dispatchDeadlineMs,
+  preflightDeadlineMs: PREFLIGHT_DEADLINE_MS,
+  frozenRecheckMs: FROZEN_RECHECK_MS,
+  claimRenewIntervalMs: CLAIM_RENEW_INTERVAL_MS,
 }
 
 /**
@@ -97,7 +201,19 @@ const DEFAULT_OPTS: Pick<
  * itself; consumers don't have to plumb online/offline.
  */
 export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
-  const { dispatcher, scope, now, random, enforceMobile, vacuumKeepMs, canDispatch } = {
+  const {
+    dispatcher,
+    scope,
+    now,
+    random,
+    enforceMobile,
+    vacuumKeepMs,
+    canDispatch,
+    dispatchDeadlineMs: deadlineFor,
+    preflightDeadlineMs,
+    frozenRecheckMs,
+    claimRenewIntervalMs,
+  } = {
     ...DEFAULT_OPTS,
     ...opts,
   }
@@ -106,16 +222,10 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
   let stopped = false
   let unsubNetwork: (() => void) | null = null
   let activeDrain: Promise<void> | null = null
-  /**
-   * Rows a predecessor left mid-dispatch are reclaimed once, on the first
-   * drain. A `sending` row now holds its channel's head, so leaving one behind
-   * blocks every later action on that session forever.
-   *
-   * The flag is per-runner, so it cannot by itself keep a second runner off a
-   * row this one is mid-dispatch on — `releaseStaleClaims` decides that by the
-   * age of the claim, not by who is asking.
-   */
-  let staleClaimsReleased = false
+  /** Rows the pre-flight gate refused, and when each may be asked about again. */
+  const frozenUntil = new Map<string, number>()
+  /** The one pending wake-up (backoff expiry, abandoned claim, frozen recheck). */
+  let wakeTimer: ReturnType<typeof setTimeout> | null = null
 
   void (async () => {
     unsubNetwork = await subscribeNetwork((status) => {
@@ -134,6 +244,33 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     }
   })()
 
+  function clearWake(): void {
+    if (wakeTimer !== null) {
+      clearTimeout(wakeTimer)
+      wakeTimer = null
+    }
+  }
+
+  /**
+   * Arm one timer for the next thing only the clock can move. Everything else
+   * that makes a row ready is a write or an event, and already kicks a drain.
+   */
+  async function scheduleWake(): Promise<void> {
+    clearWake()
+    if (stopped) return
+    const at = now()
+    let wakeAt = await nextQueueWakeAt(scope, at).catch(() => null)
+    for (const until of frozenUntil.values()) {
+      if (until > at && (wakeAt === null || until < wakeAt)) wakeAt = until
+    }
+    if (wakeAt === null || stopped) return
+    const delay = Math.min(MAX_TIMER_DELAY_MS, Math.max(MIN_WAKE_DELAY_MS, wakeAt - at))
+    wakeTimer = setTimeout(() => {
+      wakeTimer = null
+      void drain().catch(() => undefined)
+    }, delay)
+  }
+
   function drain(): Promise<void> {
     if (stopped) return Promise.resolve()
     if (enforceMobile && detectNativePlatform() !== "mobile") return Promise.resolve()
@@ -141,31 +278,87 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     activeDrain = (async () => {
       draining = true
       try {
-        if (!staleClaimsReleased) {
-          staleClaimsReleased = true
-          await releaseStaleClaims(scope, now()).catch(() => 0)
-        }
+        // Every drain, not just the first. `releaseStaleClaims` only frees a
+        // claim nobody has renewed for `CLAIM_ABANDONED_AFTER_MS`, and every
+        // live dispatcher renews its own (see `holdClaim`), so this can never
+        // take a row out from under a dispatch that is still running. Doing it
+        // once per runner left a claim abandoned shortly before a restart
+        // "Sending" for as long as the app then stayed open.
+        await releaseStaleClaims(scope, now()).catch(() => 0)
         // Vacuum opportunistically; cheap if nothing to do.
         await vacuumSent(vacuumKeepMs).catch(() => 0)
-        const frozenIds = new Set<string>()
         // Drain until no more ready rows. Once quiescing begins, finish only
         // the already-claimed row so its terminal write lands in the old DB.
+        // Refused in this pass: never asked twice in one drain, whatever the
+        // clock says (the hold below is what spans drains).
+        const refusedThisDrain = new Set<string>()
         while (!stopped) {
-          const claimed = await claimNext(now(), scope, frozenIds)
-          if (!claimed) break
-          if (canDispatch && !(await canDispatch(claimed))) {
-            await releaseClaim(claimed.id)
-            frozenIds.add(claimed.id)
-            continue
+          const at = now()
+          for (const [id, until] of frozenUntil) {
+            if (until <= at) frozenUntil.delete(id)
           }
-          await dispatchOne(claimed)
+          const claimed = await claimNext(
+            at,
+            scope,
+            new Set([...refusedThisDrain, ...frozenUntil.keys()])
+          )
+          if (!claimed) break
+          await holdClaim(claimed.id, async () => {
+            if (canDispatch && !(await preflight(claimed))) {
+              await releaseClaim(claimed.id)
+              refusedThisDrain.add(claimed.id)
+              frozenUntil.set(claimed.id, now() + frozenRecheckMs)
+              return
+            }
+            await dispatchOne(claimed)
+          })
         }
       } finally {
         draining = false
         activeDrain = null
       }
+      await scheduleWake()
     })()
     return activeDrain
+  }
+
+  /**
+   * Keep a claim visibly alive while `work` runs, so `releaseStaleClaims` — in
+   * this runner or another for the same scope — can tell it from one whose
+   * process died.
+   */
+  async function holdClaim(id: string, work: () => Promise<void>): Promise<void> {
+    const renewal = setInterval(() => {
+      void renewClaim(id, now()).catch(() => undefined)
+    }, claimRenewIntervalMs)
+    try {
+      await work()
+    } finally {
+      clearInterval(renewal)
+    }
+  }
+
+  /**
+   * The pre-flight gate, bounded. No answer in time, or a gate that threw, is
+   * a "not now": the row goes back to `pending` with its attempts untouched.
+   * A throw used to escape the drain with the row still claimed, leaving it
+   * "Sending" until the claim aged out.
+   */
+  async function preflight(row: MobileOutboundJobRow): Promise<boolean> {
+    if (!canDispatch) return true
+    try {
+      return await withDeadline(
+        Promise.resolve().then(() => canDispatch(row)),
+        row.command,
+        "preflight",
+        preflightDeadlineMs
+      )
+    } catch (error) {
+      if (!(error instanceof OutboundDeadlineError)) {
+        console.warn("outbound-queue: pre-flight gate failed; holding the row", error)
+      }
+      return false
+    }
   }
 
   async function dispatchOne(row: MobileOutboundJobRow): Promise<void> {
@@ -175,7 +368,12 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         const { normalizeLegacyBotWriteKey } = await import("@/lib/bot/control-writes/remote")
         idempotencyKey = await normalizeLegacyBotWriteKey(row)
       }
-      const result = await dispatcher.call(row.command, row.payload, { idempotencyKey })
+      const result = await withDeadline(
+        dispatcher.call(row.command, row.payload, { idempotencyKey }),
+        row.command,
+        "dispatch",
+        deadlineFor(row.command)
+      )
       if (row.protocol === "host-state") {
         const receipt = hostStateReceipt(result, row.actionId)
         if (!receipt) throw new Error("host_state_malformed_response")
@@ -230,10 +428,12 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
   }
 
   return {
-    async kick() {
+    async kick(options) {
+      if (options?.thaw) frozenUntil.clear()
       await drain()
     },
     async quiesce() {
+      clearWake()
       if (!stopped) {
         stopped = true
         if (unsubNetwork) {
@@ -247,6 +447,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
       await activeDrain
     },
     async stop() {
+      clearWake()
       if (stopped) {
         await activeDrain
         return

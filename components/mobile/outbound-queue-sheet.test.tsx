@@ -72,20 +72,72 @@ describe("OutboundQueueSheet", () => {
     renderSheet()
     const item = await screen.findByTestId(`outbound-queue-row-${row.id}`)
     expect(item).toHaveTextContent("Trigger workflow Daily Digest")
-    expect(item).toHaveTextContent("Waiting to send")
+    // The same word the banner ("1 queued") and the workflow list use.
+    expect(item).toHaveTextContent("Queued")
     fireEvent.click(screen.getByRole("button", { name: "Withdraw" }))
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith("Withdrawn — it will not be sent.")
+    )
     await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeUndefined()
     expect(await screen.findByTestId("outbound-queue-empty")).toBeInTheDocument()
   })
 
   it("offers nothing to take back once a row is sending", async () => {
     const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
-    await claimNext(1, scope)
+    // Claimed just now, so a live dispatcher holds it.
+    await claimNext(Date.now(), scope)
     renderSheet()
     const item = await screen.findByTestId(`outbound-queue-row-${row.id}`)
     expect(item).toHaveAttribute("data-status", "sending")
     expect(item.querySelector("button")).toBeNull()
+  })
+
+  /**
+   * The restart case: the process that claimed the row died mid-send. It used
+   * to read "Sending…" forever with no control; now it reads as stuck and can
+   * be withdrawn, with a warning that the Host may still have received it.
+   */
+  it("shows an abandoned send as stuck and lets the user withdraw it", async () => {
+    await getDb().mobileOutboundQueue.put({
+      id: "orphan",
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+      command: "workflow_trigger_manual",
+      payload: { workflowId: "w" },
+      label: "Untitled workflow",
+      status: "sending",
+      attempts: 0,
+      createdAt: 1,
+      nextAttemptAt: 1,
+      idempotencyKey: "orphan-key",
+    })
+    renderSheet()
+    const item = await screen.findByTestId("outbound-queue-row-orphan")
+    expect(item).toHaveAttribute("data-status", "stuck")
+    expect(item).toHaveTextContent("Stuck")
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }))
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        enMessages.mobile.offline.queueSheet.withdrawnUnconfirmed
+      )
+    )
+    await expect(getDb().mobileOutboundQueue.get("orphan")).resolves.toBeUndefined()
+  })
+
+  it("says so when the row left the queue before the tap landed", async () => {
+    const row = await enqueue({ command: "connector_send", payload: {}, ...scope, nowMs: 1 })
+    renderSheet()
+    await screen.findByTestId(`outbound-queue-row-${row.id}`)
+    await getDb().mobileOutboundQueue.delete(row.id)
+    // The live query may not have re-rendered yet; the tap still has an answer.
+    const button = screen.queryByRole("button", { name: "Withdraw" })
+    if (button) {
+      fireEvent.click(button)
+      await waitFor(() =>
+        expect(toastMessage).toHaveBeenCalledWith(enMessages.mobile.offline.queueSheet.alreadyGone)
+      )
+    }
+    expect(await screen.findByTestId("outbound-queue-empty")).toBeInTheDocument()
   })
 
   it("keeps a conversation send in order instead of offering to withdraw it", async () => {

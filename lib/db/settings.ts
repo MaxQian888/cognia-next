@@ -116,7 +116,10 @@ export const DEFAULTS: AppSettings = {
     maxStoredEvents: 10_000,
   },
   storageRetention: { traceRetentionDays: 30 },
-  sttLanguage: "en-US",
+  // Unset on purpose: dictation follows the app language until the user picks
+  // one (`resolveSttLanguage` in @cognia/tts/speech). A fixed "en-US" here was
+  // merged into every saved row and transcribed a zh-CN user's speech as English.
+  sttLanguage: undefined,
   selectedMicId: undefined,
   pinnedWorkflowIds: [],
   pinnedMeRowIds: [],

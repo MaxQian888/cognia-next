@@ -16,6 +16,7 @@
       "push": "推送通知",
       "toast": "应用内提示"
     },
+    "channelDenied": "Cognia 没有发送通知的权限。请在系统设置中为本应用允许通知，然后再打开此开关。",
     "channelHelp": {
       "os": "显示系统原生通知。",
       "push": "应用关闭时仍推送到本设备。",
@@ -38,8 +39,11 @@
     "minOsLevelHelp": "仅在不低于该级别时触发系统通知。",
     "minPushLevel": "推送最低级别",
     "minPushLevelHelp": "仅在不低于该级别时发送推送通知。",
+    "openSettings": "打开设置",
+    "osUnavailable": "此设备无法使用系统通知。",
     "perSourceHelp": "屏蔽来自特定子系统的通知。",
     "perSourceTitle": "按来源",
+    "pushUnavailable": "此设备无法设置推送通知，例如设备上没有 Google Play 服务。",
     "quietHoursEnabled": "勿扰时段",
     "quietHoursEnabledHelp": "在每日时段内静音非严重通知。",
     "quietHoursEnd": "结束时间",

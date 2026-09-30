@@ -12,7 +12,7 @@
   "debugMode": "Debug mode",
   "debugModeHelp": "Surface extra diagnostics in agent output.",
   "escalateGate": "Require biometric to raise autonomy",
-  "escalateGateHelp": "Re-prompt Face ID / fingerprint before raising the desktop's permission mode from this phone.",
+  "escalateGateHelp": "Re-prompt face or fingerprint unlock before raising the desktop's permission mode from this phone.",
   "escalateReason": "Confirm raising the agent's permission mode",
   "escalateTitle": "Raise permission mode",
   "permAcceptEdits": "Accept edits",

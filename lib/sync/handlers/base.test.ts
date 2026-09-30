@@ -160,6 +160,31 @@ describe("runSyncHandler", () => {
     expect(out.failure.reason).toBe("not_implemented")
   })
 
+  it.each([
+    [
+      "an unpaired companion",
+      Object.assign(new Error("companion not paired"), { code: "not_paired" }),
+    ],
+    [
+      "the plain-browser stub",
+      Object.assign(new Error("tauri-only command from web mode: sync_pull"), {
+        code: "no_host_transport",
+      }),
+    ],
+  ])("classifies a refusal from %s as no_host, not as a table failure", async (_label, error) => {
+    const fake = makeFakeTable()
+    const out = await runSyncHandler<FakeRow>(
+      { table: "characters", getTable: () => fake.table },
+      makeTransport(error),
+      { since: 0 }
+    )
+
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.failure.reason).toBe("no_host")
+    expect(fake.table.bulkPut).not.toHaveBeenCalled()
+  })
+
   it("classifies generic transport errors as transport", async () => {
     const fake = makeFakeTable()
     const transport = makeTransport(new Error("network unreachable"))

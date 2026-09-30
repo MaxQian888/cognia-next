@@ -251,8 +251,30 @@ function quotaRefusal(err: unknown): { retryAfterMs?: number } | null {
     : {}
 }
 
+/**
+ * Codes a transport raises when there is no host at all to answer:
+ * `CompanionTransport` before a pairing exists, and the plain-browser
+ * `WebStubTransport` (`lib/tauri/transport-web.ts`). Read structurally for the
+ * same import-cycle reason as {@link quotaRefusal}.
+ */
+const NO_HOST_CODES: ReadonlySet<unknown> = new Set(["not_paired", "no_host_transport"])
+
+function isNoHostRefusal(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "code" in err &&
+    NO_HOST_CODES.has((err as { code?: unknown }).code)
+  )
+}
+
 function classifyTransportError(table: SyncableTable, err: unknown): SyncFailure {
   const message = err instanceof Error ? err.message : String(err)
+  // Before every other bucket: with no host, the pull never happened, so the
+  // message is about this device, not about the table.
+  if (isNoHostRefusal(err)) {
+    return { table, reason: "no_host", message }
+  }
   if (/upgrade_required/i.test(message)) {
     return { table, reason: "upgrade_required", message }
   }

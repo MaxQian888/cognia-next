@@ -59,6 +59,21 @@ describe("apiStatusErrorParser", () => {
       kind: "category",
       category: "unauthorized",
     })
+    // Rejected-key wordings that carry no status (the phone's direct-fetch
+    // path used to hand over only this text).
+    for (const text of [
+      "API key is invalid.",
+      "Incorrect API key provided: sk-abc***",
+      "invalid x-api-key",
+      "Your api-key has been revoked",
+    ]) {
+      expect(apiStatusErrorParser.parse(text)!.nodes[0]).toMatchObject({
+        kind: "category",
+        category: "unauthorized",
+      })
+    }
+    // "key" alone is not a credential failure.
+    expect(apiStatusErrorParser.parse("duplicate key is invalid in this map")).toBeNull()
     expect(apiStatusErrorParser.parse("error: rate limit reached")!.nodes[0]).toMatchObject({
       kind: "category",
       category: "rateLimited",

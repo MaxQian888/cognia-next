@@ -34,6 +34,8 @@ import { transport } from "@/lib/tauri"
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import type { Character } from "@cognia/agent-config-types"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
+import { toHexApprox } from "@/lib/appearance/contrast"
+import { resolveModelDisplayName } from "@/lib/ai/model-options"
 
 export interface CharacterDetailSheetProps {
   open: boolean
@@ -51,13 +53,15 @@ interface FormState {
   avatarColor: string
 }
 
+const FALLBACK_AVATAR_COLOR = "#6366f1"
+
 const EMPTY: FormState = {
   name: "",
   description: "",
   systemPrompt: "",
   model: "",
   avatarEmoji: "",
-  avatarColor: "#6366f1",
+  avatarColor: FALLBACK_AVATAR_COLOR,
 }
 
 function fromCharacter(c: Character | null): FormState {
@@ -68,7 +72,7 @@ function fromCharacter(c: Character | null): FormState {
     systemPrompt: c.systemPrompt,
     model: c.model ?? "",
     avatarEmoji: c.avatarEmoji ?? "",
-    avatarColor: c.avatarColor ?? "#6366f1",
+    avatarColor: c.avatarColor ?? FALLBACK_AVATAR_COLOR,
   }
 }
 
@@ -91,6 +95,14 @@ export function CharacterDetailSheet({ open, character, onOpenChange }: Characte
 
   const isEdit = character !== null
   const valid = form.name.trim().length > 0 && form.systemPrompt.trim().length > 0
+  // The field holds the raw model id (it is free text, so any
+  // provider-supported id may be typed); the friendly name rides underneath
+  // whenever the catalog knows the id.
+  const typedModel = form.model.trim()
+  const resolvedModelName = typedModel
+    ? resolveModelDisplayName(character?.providerId, typedModel)
+    : ""
+  const modelDisplayName = resolvedModelName !== typedModel ? resolvedModelName : undefined
 
   const onSave = async () => {
     if (!valid || busy) return
@@ -190,6 +202,7 @@ export function CharacterDetailSheet({ open, character, onOpenChange }: Characte
             onChange={(v) => setForm((f) => ({ ...f, model: v }))}
             placeholder="claude-sonnet-4-6"
             testid="character-default-model"
+            hint={modelDisplayName}
           />
           <div className="grid grid-cols-2 gap-3">
             <Field
@@ -201,9 +214,13 @@ export function CharacterDetailSheet({ open, character, onOpenChange }: Characte
             />
             <Label className="flex flex-col gap-1 text-xs font-medium">
               <span>{t("avatarColorLabel")}</span>
+              {/* A native colour input speaks only `#rrggbb`; stored colours are
+                  usually `oklch()`, which the input rejects and paints black.
+                  The swatch shows the nearest hex, and the stored value is
+                  left untouched until the user actually picks a colour. */}
               <Input
                 type="color"
-                value={form.avatarColor}
+                value={toHexApprox(form.avatarColor) ?? FALLBACK_AVATAR_COLOR}
                 onChange={(e) => setForm((f) => ({ ...f, avatarColor: e.target.value }))}
                 data-testid="character-avatar-color"
               />
@@ -243,9 +260,11 @@ interface FieldProps {
   onChange: (next: string) => void
   placeholder?: string
   testid: string
+  /** Secondary line under the input (e.g. the friendly name of a typed id). */
+  hint?: string
 }
 
-function Field({ label, value, onChange, placeholder, testid }: FieldProps) {
+function Field({ label, value, onChange, placeholder, testid, hint }: FieldProps) {
   return (
     <Label className="flex flex-col gap-1 text-xs font-medium">
       <span>{label}</span>
@@ -255,6 +274,11 @@ function Field({ label, value, onChange, placeholder, testid }: FieldProps) {
         placeholder={placeholder}
         data-testid={testid}
       />
+      {hint ? (
+        <span className="font-normal text-muted-foreground" data-testid={`${testid}-hint`}>
+          {hint}
+        </span>
+      ) : null}
     </Label>
   )
 }

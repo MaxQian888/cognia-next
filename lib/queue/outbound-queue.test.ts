@@ -4,6 +4,7 @@
 import "fake-indexeddb/auto"
 
 import {
+  CLAIM_ABANDONED_AFTER_MS,
   enqueue,
   enqueueHostStateAction,
   listByStatus,
@@ -11,7 +12,14 @@ import {
 } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
 import { beginMobileStepReceipt, persistMobileStepResult } from "@/lib/db/mobile-step-receipts"
-import { createOutboundRunner, getQueueSummary, needsAttention, inFlight } from "./outbound-queue"
+import {
+  DISPATCH_DEADLINE_GRACE_MS,
+  createOutboundRunner,
+  dispatchDeadlineMs,
+  getQueueSummary,
+  needsAttention,
+  inFlight,
+} from "./outbound-queue"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -756,5 +764,238 @@ describe("createOutboundRunner", () => {
     await enqueue({ command: "connector_send", payload: { host: "a-late" } })
     await runner.kick()
     expect(call).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** Resolve after `ms` of real time; the runner's deadlines use real timers. */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Poll until `check` holds, or give up after `timeoutMs` so a bug cannot hang. */
+async function waitUntil(check: () => Promise<boolean>, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("condition not reached in time")
+    await sleep(10)
+  }
+}
+
+describe("outbound runner liveness", () => {
+  beforeEach(async () => {
+    setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
+    const all = await listAll()
+    await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
+  }, 15_000)
+
+  afterEach(() => {
+    clearActiveRuntimeTargetContext()
+  })
+
+  it("bounds a dispatch by its command's transport deadline plus grace", () => {
+    expect(dispatchDeadlineMs("workflow_trigger_manual")).toBe(30_000 + DISPATCH_DEADLINE_GRACE_MS)
+    expect(dispatchDeadlineMs("video_trim")).toBe(1_260_000 + DISPATCH_DEADLINE_GRACE_MS)
+  })
+
+  /**
+   * The restart symptom: a dispatch whose promise never settled held its row
+   * `sending` and parked the drain behind it for the life of the app.
+   */
+  it("gives up on a dispatch that never answers and schedules a retry", async () => {
+    const call = jest.fn(() => new Promise<never>(() => undefined))
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      dispatchDeadlineMs: () => 30,
+    })
+    const row = await enqueue({ command: "workflow_trigger_manual", payload: { workflowId: "w" } })
+
+    await runner.kick()
+
+    const after = await getDb().mobileOutboundQueue.get(row.id)
+    expect(after).toMatchObject({ status: "pending", attempts: 1 })
+    expect(after?.lastError).toMatch(/got no answer/)
+    expect(runner.isDraining()).toBe(false)
+    await runner.stop()
+  })
+
+  it("treats a pre-flight gate that never answers, or throws, as not now", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    const hung = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      canDispatch: () => new Promise<boolean>(() => undefined),
+      preflightDeadlineMs: 30,
+    })
+    const row = await enqueue({ command: "connector_send", payload: {} })
+    await hung.kick()
+    expect(call).not.toHaveBeenCalled()
+    expect(await getDb().mobileOutboundQueue.get(row.id)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+    })
+    await hung.stop()
+
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const throwing = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      canDispatch: () => {
+        throw new Error("gate exploded")
+      },
+    })
+    await throwing.kick()
+    expect(call).not.toHaveBeenCalled()
+    expect((await getDb().mobileOutboundQueue.get(row.id))?.status).toBe("pending")
+    warn.mockRestore()
+    await throwing.stop()
+  })
+
+  /**
+   * The gate's refusal is released back to `pending`, and that write is what
+   * the pending-jobs subscription kicks on. Without a hold, every kick
+   * re-claimed and re-released the row in a tight loop.
+   */
+  it("holds a refused row out of later drains until thawed", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    let allow = false
+    const canDispatch = jest.fn(() => allow)
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      canDispatch,
+    })
+    await enqueue({ command: "connector_send", payload: {} })
+
+    await runner.kick()
+    await runner.kick()
+    await runner.kick()
+    expect(canDispatch).toHaveBeenCalledTimes(1)
+
+    allow = true
+    await runner.kick({ thaw: true })
+    expect(canDispatch).toHaveBeenCalledTimes(2)
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(await listByStatus("sent")).toHaveLength(1)
+    await runner.stop()
+  })
+
+  it("asks about a refused row again by itself once its hold lapses", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    let allow = false
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      canDispatch: () => allow,
+      frozenRecheckMs: 40,
+    })
+    await enqueue({ command: "connector_send", payload: {} })
+    await runner.kick()
+    expect(call).not.toHaveBeenCalled()
+
+    allow = true
+    await waitUntil(async () => (await listByStatus("sent")).length === 1)
+    expect(call).toHaveBeenCalledTimes(1)
+    await runner.stop()
+  })
+
+  /**
+   * A claim left by a process killed moments before a restart is still young
+   * at the first drain. It used to be reclaimed on that first drain or never.
+   */
+  it("reclaims an abandoned claim on any drain, not only the first", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    let clock = 10_000
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      now: () => clock,
+    })
+    await runner.kick()
+    await getDb().mobileOutboundQueue.put({
+      id: "left-behind",
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+      command: "workflow_trigger_manual",
+      payload: { workflowId: "w" },
+      status: "sending",
+      attempts: 0,
+      createdAt: 9_000,
+      nextAttemptAt: 9_000,
+      claimedAt: 9_500,
+      idempotencyKey: "left-behind-key",
+    })
+
+    await runner.kick()
+    expect(call).not.toHaveBeenCalled()
+    expect((await getDb().mobileOutboundQueue.get("left-behind"))?.status).toBe("sending")
+
+    clock = 9_500 + CLAIM_ABANDONED_AFTER_MS
+    await runner.kick()
+    expect(call).toHaveBeenCalledWith(
+      "workflow_trigger_manual",
+      { workflowId: "w" },
+      expect.objectContaining({ idempotencyKey: "left-behind-key" })
+    )
+    expect((await getDb().mobileOutboundQueue.get("left-behind"))?.status).toBe("sent")
+    await runner.stop()
+  })
+
+  it("renews its claim for as long as a dispatch is running", async () => {
+    let clock = 1_000
+    let finish: ((value: unknown) => void) | null = null
+    const call = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      now: () => clock,
+      claimRenewIntervalMs: 15,
+    })
+    const row = await enqueue({ command: "connector_send", payload: {}, nowMs: 1_000 })
+    const draining = runner.kick()
+    await waitUntil(async () => finish !== null)
+    clock = 5_000
+    await waitUntil(
+      async () => (await getDb().mobileOutboundQueue.get(row.id))?.claimedAt === 5_000
+    )
+    finish!({ ok: true })
+    await draining
+    expect((await getDb().mobileOutboundQueue.get(row.id))?.status).toBe("sent")
+    await runner.stop()
+  })
+
+  it("wakes itself when a backed-off row becomes due, with no other event", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    const row = await enqueue({ command: "connector_send", payload: {} })
+    await getDb().mobileOutboundQueue.update(row.id, { nextAttemptAt: Date.now() + 60 })
+
+    await runner.kick()
+    expect(call).not.toHaveBeenCalled()
+
+    await waitUntil(async () => (await getDb().mobileOutboundQueue.get(row.id))?.status === "sent")
+    expect(call).toHaveBeenCalledTimes(1)
+    await runner.stop()
+  })
+
+  it("arms no wake-up once stopped", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    const row = await enqueue({ command: "connector_send", payload: {} })
+    await getDb().mobileOutboundQueue.update(row.id, { nextAttemptAt: Date.now() + 40 })
+    await runner.kick()
+    await runner.stop()
+    await sleep(120)
+    expect(call).not.toHaveBeenCalled()
   })
 })

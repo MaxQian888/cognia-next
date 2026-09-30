@@ -242,6 +242,9 @@ it("runs on native mobile and drains pending rows", () => {
   expect(runner.kick).toHaveBeenCalledTimes(1)
   pendingObserver?.next?.(1)
   expect(runner.kick).toHaveBeenCalledTimes(2)
+  // The runner's own release of a gate-refused row is what fires this
+  // subscription; lifting the hold here would re-arm the claim/release loop.
+  expect(runner.kick).toHaveBeenLastCalledWith(undefined)
 })
 
 it("uses the stable Host id and default Mobile account on a fresh install", () => {
@@ -445,6 +448,8 @@ describe("the interactive-approval gate", () => {
 
     expect(mockClearApproval).toHaveBeenCalled()
     expect(runner.kick.mock.calls.length).toBeGreaterThan(kicks)
+    // An approval changes the gate's answer, so the rows it held are asked again now.
+    expect(runner.kick).toHaveBeenLastCalledWith({ thaw: true })
   })
 
   it("ignores a denial, which is not something to retry into", () => {

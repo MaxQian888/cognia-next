@@ -49,6 +49,43 @@ const BENIGN_ERROR_PATTERNS = [
   /^ResizeObserver loop limit exceeded/,
 ]
 
+/**
+ * How long repeats of an opaque "Script error." are folded into one counted
+ * entry. See {@link isOpaqueScriptError}.
+ */
+export const OPAQUE_SCRIPT_ERROR_WINDOW_MS = 5 * 60_000
+
+const OPAQUE_SCRIPT_ERROR_MESSAGE = /^Script error\.?$/i
+
+/**
+ * A "muted" error: the engine withheld everything but the literal text
+ * "Script error." — no `error` object, no file, no line, no stack.
+ *
+ * Browsers do this for an exception thrown by a script whose origin the page
+ * may not read (a cross-origin `<script>` without `crossorigin`). The app's own
+ * bundles are same-origin in every shell (`https://localhost` under Capacitor,
+ * `tauri://` / the dev server elsewhere), so on the phone the usual source is
+ * code the NATIVE side evaluates into the page — Capacitor's bridge delivers
+ * plugin results by `evaluateJavascript`, which has no script origin, so an
+ * exception escaping a plugin callback surfaces here muted.
+ *
+ * Nothing in such an event can be diagnosed, and it repeats with every plugin
+ * round trip: under the ordinary 5 s dedupe it filled the whole recent-log
+ * buffer (1000 of 1000 entries on a 40-minute device session), evicting every
+ * entry that could have explained anything. So repeats are counted, not
+ * dropped — one entry per {@link OPAQUE_SCRIPT_ERROR_WINDOW_MS}, carrying how
+ * many occurrences it stands for.
+ */
+function isOpaqueScriptError(event: ErrorEvent): boolean {
+  return (
+    event.error == null &&
+    typeof event.message === "string" &&
+    OPAQUE_SCRIPT_ERROR_MESSAGE.test(event.message.trim()) &&
+    !event.filename &&
+    !event.lineno
+  )
+}
+
 const PLATFORM_DENIAL_PATTERN =
   /request is not allowed by the user agent or the platform|user denied permission/i
 const CANCELLATION_PATTERN = /^cancel(?:ed|led)$/i
@@ -144,6 +181,50 @@ export function installGlobalErrorHandlers(
   }
   installed = true
 
+  // Opaque "Script error." folding (see `isOpaqueScriptError`). The first
+  // occurrence is logged at once and opens a window; occurrences inside it are
+  // only counted, and when it closes a single entry reports the count and
+  // re-opens the window. A window that closes with nothing counted ends the
+  // cycle, so the next occurrence is logged immediately again.
+  let opaqueSuppressed = 0
+  let opaqueWindowStartedAt = 0
+  let opaqueTimer: ReturnType<typeof setTimeout> | null = null
+  const reportOpaque = (occurrences: number, windowMs: number): void => {
+    const data: Record<string, unknown> = {
+      source: "window.onerror",
+      opaque: true,
+    }
+    if (occurrences > 1) {
+      data.duplicateCount = occurrences
+      data.windowMs = windowMs
+    }
+    const summary =
+      occurrences > 1
+        ? `Uncaught error: Script error. (opaque — no message, file or stack; ${occurrences}× in ${Math.round(windowMs / 1000)}s)`
+        : "Uncaught error: Script error. (opaque — no message, file or stack)"
+    loggers.app.error(summary, undefined, data)
+  }
+  const openOpaqueWindow = (): void => {
+    opaqueWindowStartedAt = Date.now()
+    opaqueTimer = setTimeout(closeOpaqueWindow, OPAQUE_SCRIPT_ERROR_WINDOW_MS)
+  }
+  const closeOpaqueWindow = (): void => {
+    opaqueTimer = null
+    if (opaqueSuppressed === 0) return
+    const count = opaqueSuppressed
+    opaqueSuppressed = 0
+    reportOpaque(count, Date.now() - opaqueWindowStartedAt)
+    openOpaqueWindow()
+  }
+  const onOpaqueScriptError = (): void => {
+    if (opaqueTimer) {
+      opaqueSuppressed++
+      return
+    }
+    reportOpaque(1, 0)
+    openOpaqueWindow()
+  }
+
   const onError = (event: Event): void => {
     const errorEvent = event as ErrorEvent
     // Resource-load failures (img/script/link) reach `window` only in the
@@ -162,6 +243,11 @@ export function installGlobalErrorHandlers(
         (resourceTarget as { href?: string }).href ??
         ""
       emit("warn", `Resource failed to load: <${tag}> ${url}`.trim(), undefined, "window.onerror")
+      return
+    }
+
+    if (isOpaqueScriptError(errorEvent)) {
+      onOpaqueScriptError()
       return
     }
 
@@ -204,6 +290,15 @@ export function installGlobalErrorHandlers(
   return () => {
     target.removeEventListener("error", onError, true)
     target.removeEventListener("unhandledrejection", onRejection, true)
+    if (opaqueTimer) {
+      clearTimeout(opaqueTimer)
+      opaqueTimer = null
+    }
+    // Report what the open window counted rather than lose it on teardown.
+    if (opaqueSuppressed > 0) {
+      reportOpaque(opaqueSuppressed, Date.now() - opaqueWindowStartedAt)
+      opaqueSuppressed = 0
+    }
     installed = false
   }
 }

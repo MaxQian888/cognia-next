@@ -75,13 +75,17 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   // fallback toast stays out of the way here and fires on every shell that
   // does NOT mount this banner, which is all of them but the mobile ones.
   useEffect(() => registerOutboundApprovalReporter(), [])
-  const queue = useClientLiveQuery<{ inFlight: number; stuck: number }>(
+  const queue = useClientLiveQuery<{ inFlight: number; sending: number; stuck: number }>(
     async () => {
       const summary = await getQueueSummary()
-      return { inFlight: inFlight(summary), stuck: needsAttention(summary) }
+      return {
+        inFlight: inFlight(summary),
+        sending: summary.sending,
+        stuck: needsAttention(summary),
+      }
     },
     [],
-    { inFlight: 0, stuck: 0 }
+    { inFlight: 0, sending: 0, stuck: 0 }
   )
   const [reviewOpen, setReviewOpen] = useState(false)
 
@@ -93,6 +97,12 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   const offline = !status.connected || hostOffline
   const reconnecting = !offline && hostState === "connecting"
   const pendingCount = queue?.inFlight ?? 0
+  // Of those, the ones on the wire right now. The rows themselves say
+  // "Queued" and "Sending" (the workflow list, the queue sheet); a bare
+  // "2 queued" over a card reading "Sending" looked like two different
+  // accounts of the same action, so the banner names both lanes when both
+  // are occupied.
+  const sendingCount = Math.min(queue?.sending ?? 0, pendingCount)
   // Rows the Host refused, ran out of retries on, or that lost a race. Nothing
   // will move them on its own, and they used to be reported by no surface at
   // all — a refused action looked exactly like one that had gone through.
@@ -124,7 +134,9 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
                 : t("queueAwaitingApproval", { code: consentCode })
               : stuckCount > 0
                 ? t("queueNeedsAttention", { count: stuckCount })
-                : t("queuePending", { count: pendingCount })
+                : sendingCount > 0
+                  ? t("queuePendingWithSending", { count: pendingCount, sending: sendingCount })
+                  : t("queuePending", { count: pendingCount })
           }
           className={className}
         />
@@ -207,7 +219,10 @@ function BannerBody({
         <button
           type="button"
           onClick={onReview}
-          className="shrink-0 rounded-sm font-medium underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          // The hit area fills the banner's height (`-my-2` cancels the
+          // banner's own `py-2`) and extends sideways: the bare text-xs word
+          // was a ~16px target at the very top of a phone screen.
+          className="-my-2 -mr-1 shrink-0 self-stretch rounded-sm px-2 py-2 font-medium underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid="offline-banner-review"
         >
           {reviewLabel}

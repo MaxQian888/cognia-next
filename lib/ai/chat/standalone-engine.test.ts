@@ -8,7 +8,7 @@ import { MockLanguageModelV4 } from "ai/test"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 
 import { resolveStandaloneProvider } from "./resolve-standalone-provider"
-import { runStandaloneTurn } from "./standalone-engine"
+import { providerHttpMetaOf, runStandaloneTurn } from "./standalone-engine"
 
 jest.mock("./resolve-standalone-provider", () => ({ resolveStandaloneProvider: jest.fn() }))
 jest.mock("@/lib/ai/provider-consumption", () => ({
@@ -262,6 +262,41 @@ describe("runStandaloneTurn", () => {
       sessionId: "s1",
       error: expect.stringContaining("401 invalid api key"),
     })
+  })
+
+  it("threads the provider's HTTP status and Retry-After onto session_ended", async () => {
+    // The AI SDK's APICallError shape. Without the status the renderer had
+    // only "API key is invalid." to classify, and called it unexpected.
+    const rejected = Object.assign(new Error("API key is invalid."), {
+      statusCode: 401,
+      responseHeaders: { "Retry-After": "7" },
+    })
+    const { events, promise } = run({
+      streamTextImpl: fakeStream([{ type: "error", error: rejected }]),
+    })
+    await promise
+    expect(events.at(-1)).toMatchObject({
+      type: "session_ended",
+      error: "API key is invalid.",
+      httpStatus: 401,
+      retryAfterMs: 7000,
+    })
+  })
+
+  it("keeps a provider error body's message instead of [object Object]", async () => {
+    const { events, promise } = run({
+      streamTextImpl: fakeStream([
+        {
+          type: "error",
+          error: {
+            type: "error",
+            error: { type: "authentication_error", message: "invalid x-api-key" },
+          },
+        },
+      ]),
+    })
+    await promise
+    expect(events.at(-1)).toMatchObject({ type: "session_ended", error: "invalid x-api-key" })
   })
 
   it("executes the plan-selected provider and retries locally before commitment", async () => {
@@ -668,6 +703,9 @@ describe("runStandaloneTurn with the real AI SDK stream (webview runtime)", () =
       type: "session_ended",
       sessionId: "s1",
       error: "invalid api key",
+      // The real SDK's APICallError status survives to the renderer, which
+      // classifies on it before it reads the text.
+      httpStatus: 401,
     })
     consoleError.mockRestore()
   })
@@ -713,5 +751,41 @@ describe("runStandaloneTurn with the real AI SDK stream (webview runtime)", () =
     expect(abort.signal.aborted).toBe(true)
     expect(JSON.stringify(events)).toContain("partial answer")
     expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+})
+
+describe("providerHttpMetaOf", () => {
+  it("reads statusCode, then status, through RetryError.lastError and Error.cause", () => {
+    expect(providerHttpMetaOf({ statusCode: 429 })).toEqual({ httpStatus: 429 })
+    expect(providerHttpMetaOf({ status: 503 })).toEqual({ httpStatus: 503 })
+    expect(providerHttpMetaOf({ lastError: { statusCode: 401 } })).toEqual({ httpStatus: 401 })
+    expect(providerHttpMetaOf(new Error("wrapped", { cause: { statusCode: 403 } }))).toEqual({
+      httpStatus: 403,
+    })
+  })
+
+  it("parses Retry-After as seconds or an HTTP date, case-insensitively", () => {
+    const now = () => Date.parse("2026-09-30T00:00:00Z")
+    expect(
+      providerHttpMetaOf({ statusCode: 429, responseHeaders: { "retry-after": "1.5" } }, now)
+    ).toEqual({ httpStatus: 429, retryAfterMs: 1500 })
+    expect(
+      providerHttpMetaOf(
+        { statusCode: 429, responseHeaders: { "Retry-After": "Wed, 30 Sep 2026 00:00:10 GMT" } },
+        now
+      )
+    ).toEqual({ httpStatus: 429, retryAfterMs: 10_000 })
+    expect(
+      providerHttpMetaOf({ statusCode: 429, responseHeaders: { "retry-after": "soon" } }, now)
+    ).toEqual({ httpStatus: 429 })
+  })
+
+  it("returns nothing for a non-error status, a cycle, or a plain value", () => {
+    expect(providerHttpMetaOf({ statusCode: 200 })).toEqual({})
+    const cyclic: { cause?: unknown } = {}
+    cyclic.cause = cyclic
+    expect(providerHttpMetaOf(cyclic)).toEqual({})
+    expect(providerHttpMetaOf("401")).toEqual({})
+    expect(providerHttpMetaOf(undefined)).toEqual({})
   })
 })

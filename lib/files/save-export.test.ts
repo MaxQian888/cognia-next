@@ -171,11 +171,13 @@ describe("saveExport — Capacitor", () => {
     expect(capWriteFileMock.mock.calls[0][0].path).toBe("cognia/backups/b.bak")
   })
 
-  it("falls back to a web download when the plugin is unsupported", async () => {
+  it("reports an error instead of a phantom web download when the plugin is missing", async () => {
     capWriteFileMock.mockResolvedValueOnce({ kind: "unsupported" })
     const res = await saveExport({ filename: "x.md", data: "hi", mimeType: "text/markdown" })
-    expect(downloadBlobMock).toHaveBeenCalled()
-    expect(res).toMatchObject({ kind: "saved", platform: "web" })
+    // An `<a download>` is a no-op in the mobile WebView; reporting it as
+    // "saved" produced a success toast for a file that never existed.
+    expect(downloadBlobMock).not.toHaveBeenCalled()
+    expect(res).toEqual({ kind: "error", message: "native file system is unavailable" })
   })
 
   it("surfaces a plugin error", async () => {

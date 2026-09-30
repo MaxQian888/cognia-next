@@ -7,6 +7,7 @@ import {
   createConsoleTransport,
   detectConsoleEnvironment,
   resolveColorMode,
+  serializeConsoleData,
   resolveConsoleTransportOptions,
 } from "./console-transport"
 import type { ConsoleEnvironment } from "./console-transport"
@@ -218,8 +219,83 @@ describe("colour mode resolution", () => {
       tty: false,
       noColor: false,
       forceColor: false,
+      flattensObjects: false,
     })
     expect(new ConsoleTransport({ useColors: true })).toBeInstanceOf(ConsoleTransport)
+  })
+})
+
+describe("text-only console sinks (Capacitor native shells)", () => {
+  afterEach(() => {
+    delete (globalThis as { Capacitor?: unknown }).Capacitor
+  })
+
+  it("detects a Capacitor native shell as a sink that flattens objects", () => {
+    ;(globalThis as { Capacitor?: unknown }).Capacitor = { isNativePlatform: () => true }
+    expect(detectConsoleEnvironment().flattensObjects).toBe(true)
+    ;(globalThis as { Capacitor?: unknown }).Capacitor = { isNativePlatform: () => false }
+    expect(detectConsoleEnvironment().flattensObjects).toBe(false)
+    ;(globalThis as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => {
+        throw new Error("bridge not ready")
+      },
+    }
+    expect(detectConsoleEnvironment().flattensObjects).toBe(false)
+  })
+
+  it("hands the sink JSON text instead of an object Android would print as [object Object]", () => {
+    const t = new ConsoleTransport(
+      { useColors: false },
+      { browser: true, tty: false, noColor: false, forceColor: false, flattensObjects: true }
+    )
+    t.log(
+      makeEntry({
+        level: "error",
+        message: "single-export-failed",
+        data: {
+          sessionId: "s1",
+          error: {
+            name: "TransactionInactiveError",
+            message: "Failed to execute 'continue' on 'IDBCursor'",
+          },
+        },
+      })
+    )
+    const args = spies.error.mock.calls[0]
+    expect(args).toHaveLength(2)
+    expect(typeof args[1]).toBe("string")
+    expect(JSON.parse(args[1] as string)).toEqual({
+      sessionId: "s1",
+      error: {
+        name: "TransactionInactiveError",
+        message: "Failed to execute 'continue' on 'IDBCursor'",
+      },
+    })
+  })
+
+  it("keeps the object for an ordinary console, where devtools can expand it", () => {
+    const t = new ConsoleTransport({ useColors: false }, env({ browser: true }))
+    t.log(makeEntry({ data: { foo: "bar" } }))
+    expect(spies.info.mock.calls[0][1]).toEqual({ foo: "bar" })
+  })
+})
+
+describe("serializeConsoleData", () => {
+  it("keeps an Error's name, message and stack", () => {
+    const error = new Error("boom")
+    error.name = "TransactionInactiveError"
+    const parsed = JSON.parse(serializeConsoleData({ error })) as {
+      error: { name: string; message: string; stack?: string }
+    }
+    expect(parsed.error.name).toBe("TransactionInactiveError")
+    expect(parsed.error.message).toBe("boom")
+    expect(parsed.error.stack).toContain("boom")
+  })
+
+  it("survives cycles and bigints instead of throwing", () => {
+    const cyclic: Record<string, unknown> = { size: BigInt(7) }
+    cyclic.self = cyclic
+    expect(JSON.parse(serializeConsoleData(cyclic))).toEqual({ size: "7n", self: "[Circular]" })
   })
 })
 

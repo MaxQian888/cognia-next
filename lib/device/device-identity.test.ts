@@ -11,6 +11,7 @@ import {
   getDeviceMetadata,
   getDevicePlatformKind,
   getFriendlyDeviceLabel,
+  getLocalDeviceConsoleLabel,
 } from "./device-identity"
 
 jest.mock("@/lib/tauri", () => ({
@@ -100,11 +101,64 @@ describe("getFriendlyDeviceLabel", () => {
     expect(getFriendlyDeviceLabel()).toBe("Linux browser")
   })
 
+  it("names mobile browsers before the desktop OS their user agent also mentions", () => {
+    // Every Android UA contains "Linux" and every iOS UA "like Mac OS X", so
+    // an Android phone read "Linux browser".
+    setUserAgent(
+      "Mozilla/5.0 (Linux; Android 12; PLR-AL00 Build/HUAWEIPLR-AL00; wv) AppleWebKit/537.36"
+    )
+    expect(getFriendlyDeviceLabel()).toBe("Android browser")
+    setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
+    expect(getFriendlyDeviceLabel()).toBe("iOS browser")
+    setUserAgent("Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36")
+    expect(getFriendlyDeviceLabel()).toBe("ChromeOS browser")
+  })
+
+  it("tells an iPad reporting a Macintosh user agent apart by touch support", () => {
+    setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15")
+    Object.defineProperty(window.navigator, "maxTouchPoints", { value: 5, configurable: true })
+    try {
+      expect(getFriendlyDeviceLabel()).toBe("iPadOS browser")
+    } finally {
+      Object.defineProperty(window.navigator, "maxTouchPoints", { value: 0, configurable: true })
+    }
+  })
+
   it("degrades gracefully for unknown user agents", () => {
     setUserAgent("Opaque/1.0")
     expect(getFriendlyDeviceLabel()).toBe("Web browser")
     mockIsTauri.mockReturnValue(true)
     expect(getFriendlyDeviceLabel()).toBe("Desktop")
+  })
+})
+
+describe("getLocalDeviceConsoleLabel", () => {
+  const info = (value: { model?: string; manufacturer?: string }) =>
+    jest.fn(async () => ({ kind: "ok" as const, value }))
+
+  it("names the hardware on the native shell", async () => {
+    setCapacitorPlatform("android")
+    const read = info({ model: "PLR-AL00", manufacturer: "HUAWEI" })
+    await expect(getLocalDeviceConsoleLabel(read)).resolves.toBe("HUAWEI PLR-AL00")
+  })
+
+  it("does not repeat a manufacturer the model already carries", async () => {
+    setCapacitorPlatform("android")
+    const read = info({ model: "Pixel 8", manufacturer: "pixel" })
+    await expect(getLocalDeviceConsoleLabel(read)).resolves.toBe("Pixel 8")
+  })
+
+  it("falls back to the generic label without a model or off the native shell", async () => {
+    setCapacitorPlatform("ios")
+    await expect(getLocalDeviceConsoleLabel(info({ model: " " }))).resolves.toBe("iOS device")
+    const unsupported = jest.fn(async () => ({ kind: "unsupported" as const }))
+    await expect(getLocalDeviceConsoleLabel(unsupported)).resolves.toBe("iOS device")
+
+    setCapacitorPlatform(null)
+    setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) X/1.0")
+    const read = info({ model: "never read" })
+    await expect(getLocalDeviceConsoleLabel(read)).resolves.toBe("macOS browser")
+    expect(read).not.toHaveBeenCalled()
   })
 })
 

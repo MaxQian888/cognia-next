@@ -3,7 +3,7 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-import { useCoarsePointer, useHasHover } from "./use-pointer"
+import { useCoarsePointer, useHasHover, useShowKeyboardHints } from "./use-pointer"
 
 interface FakeMql {
   matches: boolean
@@ -82,6 +82,31 @@ describe("useCoarsePointer", () => {
       mql.matches = true
       mql.fire()
     })
+    expect(result.current).toBe(true)
+  })
+})
+
+describe("useShowKeyboardHints", () => {
+  it("shows hints with a hovering, fine pointer (a keyboard-and-mouse device)", () => {
+    installMatchMedia(new Set(["(hover: hover)"]))
+    const { result } = renderHook(() => useShowKeyboardHints())
+    expect(result.current).toBe(true)
+  })
+
+  it("hides hints on a touch device", () => {
+    installMatchMedia(new Set(["(pointer: coarse)"]))
+    const { result } = renderHook(() => useShowKeyboardHints())
+    expect(result.current).toBe(false)
+  })
+
+  it("hides hints when the pointer hovers but is coarse (a stylus tablet)", () => {
+    installMatchMedia(new Set(["(hover: hover)", "(pointer: coarse)"]))
+    const { result } = renderHook(() => useShowKeyboardHints())
+    expect(result.current).toBe(false)
+  })
+
+  it("renders hints without matchMedia (the SSR default)", () => {
+    const { result } = renderHook(() => useShowKeyboardHints())
     expect(result.current).toBe(true)
   })
 })

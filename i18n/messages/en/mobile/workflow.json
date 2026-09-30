@@ -100,6 +100,8 @@
   "pinned": "Pinned",
   "pinned_added": "Pinned.",
   "pinned_removed": "Unpinned.",
+  "queuedBadge": "Queued",
+  "runAlreadyQueued": "Already queued — it runs once when the desktop is online again.",
   "runButton": "Run",
   "runFailed": "Trigger failed: {message}",
   "runQueued": "Queued — fires when the desktop is online again.",
@@ -115,6 +117,7 @@
   "swipe": {
     "favorite": "Pin",
     "run": "Run",
+    "runAlreadyQueued": "{name} is already queued",
     "runQueued": "Queued {name}",
     "unfavorite": "Unpin"
   },

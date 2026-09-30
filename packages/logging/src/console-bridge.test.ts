@@ -117,6 +117,44 @@ describe("console bridge", () => {
     expect(consoleTarget.error).toBe(originalError)
   })
 
+  it("hands a text-only console (Capacitor native shell) serialized args, not [object Object]", () => {
+    const entries: StructuredLogEntry[] = []
+    addTransport({
+      name: "capture-flatten",
+      log: (entry) => {
+        entries.push(entry)
+      },
+    })
+    const originalWarn = jest.fn()
+    const originalError = jest.fn()
+    const consoleTarget = { warn: originalWarn, error: originalError }
+    const cleanup = installConsoleBridge({
+      console: consoleTarget,
+      logger: createLogger("legacy.console"),
+      flattensObjects: () => true,
+    })
+
+    const failure = new Error("Failed to execute 'continue' on 'IDBCursor'")
+    failure.name = "TransactionInactiveError"
+    consoleTarget.warn("dbDeleteSession failed", failure, 3, null)
+
+    const [message, errorText, count, nothing] = originalWarn.mock.calls[0] as unknown[]
+    expect(message).toBe("dbDeleteSession failed")
+    expect(JSON.parse(errorText as string)).toMatchObject({
+      name: "TransactionInactiveError",
+      message: "Failed to execute 'continue' on 'IDBCursor'",
+      stack: expect.any(String),
+    })
+    // Primitives are left for the console to print as it always has.
+    expect(count).toBe(3)
+    expect(nothing).toBeNull()
+    // The logger still receives the structured values, not the text.
+    expect(entries[entries.length - 1]?.data).toMatchObject({
+      arguments: [{ name: "TransactionInactiveError" }, 3, null],
+    })
+    cleanup()
+  })
+
   it("is a no-op without a browser console target", () => {
     expect(() => installConsoleBridge()()).not.toThrow()
   })

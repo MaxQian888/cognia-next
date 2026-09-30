@@ -345,7 +345,6 @@ export const ME_ENTRIES: MeEntry[] = [
     // that owns it: its roots, trust, capabilities and worktrees.
     id: "workspace",
     spotIcon: "workspace",
-    pairedOnly: true,
     icon: FolderTreeIcon,
     labelKey: "workspaceRow",
     href: "/workspace",
@@ -356,9 +355,11 @@ export const ME_ENTRIES: MeEntry[] = [
     // The tracker had no mobile entry point at all: `/issues` and `/projects`
     // are full-viewport routes with complete mobile bodies that only a deep
     // link could reach. Now that the tables sync, the rows have contents.
+    // Not `pairedOnly`: the surface contract declares `/issues`, `/projects`
+    // and `/workspace` `standalone: "full"`, and the routes carry no host
+    // gate, so "Requires desktop" here contradicted the page it opened.
     id: "issues",
     spotIcon: "issues",
-    pairedOnly: true,
     icon: CircleDotIcon,
     labelKey: "issuesRow",
     href: "/issues",
@@ -368,7 +369,6 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "issue-projects",
     spotIcon: "issue-projects",
-    pairedOnly: true,
     icon: RocketIcon,
     labelKey: "issueProjectsRow",
     href: "/projects",

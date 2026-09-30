@@ -53,4 +53,22 @@ describe("<BiometricRow />", () => {
     fireEvent.click(screen.getByTestId("biometric-export-backup"))
     expect(onChange).toHaveBeenCalledWith(true)
   })
+
+  it("holds the switch while a change is pending", () => {
+    const onChange = jest.fn()
+    render(
+      <BiometricRow
+        label="Push"
+        help="Deliver when closed"
+        checked={false}
+        onChange={onChange}
+        testid="pending-row"
+        disabled
+      />
+    )
+    const sw = screen.getByTestId("pending-row")
+    expect(sw).toBeDisabled()
+    fireEvent.click(sw)
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })

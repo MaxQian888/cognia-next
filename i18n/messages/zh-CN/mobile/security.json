@@ -3,7 +3,7 @@
     "help": "撤销某台设备的配对前先验证生物识别。",
     "label": "撤销已配对设备"
   },
-  "description": "在敏感操作前要求 Face ID 或指纹。",
+  "description": "在敏感操作前要求面部或指纹验证。",
   "exportBackup": {
     "help": "写入备份文件前先验证生物识别。",
     "label": "导出加密备份"

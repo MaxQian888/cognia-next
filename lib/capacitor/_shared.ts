@@ -101,6 +101,37 @@ export function dataUrlToBase64(dataUrl: string): string {
   return dataUrl.includes(",") ? (dataUrl.split(",")[1] ?? "") : dataUrl
 }
 
+/**
+ * View of a native plugin that is safe to hand across an `await`.
+ *
+ * `@capacitor/core`'s `registerPlugin(name)` — which `registerNativePlugins()`
+ * runs at mobile boot, and which every plugin package runs on import — returns
+ * a `Proxy` whose `get` trap answers EVERY property with a method wrapper,
+ * `then` included. Returning that proxy from an `async` function (every loader
+ * below) makes the promise machinery treat it as a thenable and call
+ * `proxy.then(resolve, reject)`; the wrapper finds no native `then` method,
+ * rejects its OWN promise ("Clipboard.then()" is not implemented on android)
+ * and never calls `resolve`. The loader's promise therefore never settles, so
+ * after boot every wrapper call on device hung forever: copy/paste, share,
+ * file writes, notification and microphone permission, the back button …
+ * all silently did nothing.
+ *
+ * The view answers `then` with `undefined` (not a thenable) and forwards every
+ * other property to the plugin, so method calls still reach the native bridge.
+ * Primitive / nullish values are returned unchanged.
+ */
+export function asNonThenable<P>(plugin: P): P {
+  if ((typeof plugin !== "object" && typeof plugin !== "function") || plugin === null) {
+    return plugin
+  }
+  return new Proxy(plugin as object, {
+    get(target, prop) {
+      if (prop === "then") return undefined
+      return Reflect.get(target, prop, target)
+    },
+  }) as P
+}
+
 export function makeDefaultLoader<P>(moduleId: string, exportName: string): () => Promise<P> {
   return async () => {
     // Capacitor injects every plugin onto window.Capacitor.Plugins at boot.
@@ -114,7 +145,7 @@ export function makeDefaultLoader<P>(moduleId: string, exportName: string): () =
       .Capacitor?.Plugins
     const fromGlobal = capPlugins?.[exportName]
     if (fromGlobal) {
-      return fromGlobal
+      return asNonThenable(fromGlobal)
     }
     // Capacitor plugins only exist on mobile. On `web` AND `tauri` the dynamic
     // import resolves to Capacitor's web-shim Proxy whose `.then` getter throws
@@ -130,6 +161,6 @@ export function makeDefaultLoader<P>(moduleId: string, exportName: string): () =
     if (!exported) {
       throw new Error(`Plugin module ${moduleId} did not export ${exportName}`)
     }
-    return exported as P
+    return asNonThenable(exported as P)
   }
 }

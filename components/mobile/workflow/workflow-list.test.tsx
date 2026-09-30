@@ -7,6 +7,9 @@ import type { WorkflowRow } from "@/types/workflow/visual"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_FILTERS, useWorkflowLibraryStore } from "@/stores/workflow"
 
+import { enqueueUnlessQueued } from "@/lib/db/mobile-outbound-queue"
+import { toast } from "sonner"
+
 import { WorkflowList } from "./workflow-list"
 
 jest.mock("next/link", () => {
@@ -51,7 +54,37 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 jest.mock("@/lib/sync/companion-sync", () => ({ runSyncDown: jest.fn(async () => {}) }))
-jest.mock("@/lib/db/mobile-outbound-queue", () => ({ enqueue: jest.fn(async () => {}) }))
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueUnlessQueued: jest.fn(async () => ({ row: {}, alreadyQueued: false })),
+}))
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), message: jest.fn(), error: jest.fn() },
+}))
+// The swipe gesture itself is SwipeRow's own business (and tested there);
+// here only what its actions do matters, so expose them as plain buttons.
+jest.mock("@/components/interactions/swipe-row", () => ({
+  SwipeRow: ({
+    children,
+    rightActions,
+  }: {
+    children: React.ReactNode
+    rightActions: Array<{ id: string; label: string; onSelect: () => void }>
+  }) => (
+    <div>
+      {children}
+      {rightActions.map((action) => (
+        <button
+          key={action.id}
+          type="button"
+          data-testid={`swipe-action-${action.id}`}
+          onClick={action.onSelect}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
+  ),
+}))
 
 // Heavy library children — stub to keep this focused on the list shell.
 jest.mock("./workflow-list-toolbar", () => ({
@@ -134,8 +167,6 @@ jest.mock("@/components/mobile/empty-state", () => ({
     </div>
   ),
 }))
-jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
-
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -228,13 +259,50 @@ describe("<WorkflowList />", () => {
     expect(screen.getByTestId("workflow-active-a")).toBeInTheDocument()
   })
 
-  it("shows the Sending badge for a workflow with a queued trigger", () => {
+  it("shows the Sending badge for a workflow whose trigger is on the wire", () => {
     pushQueries({
       workflows: [wf("a", "Alpha")],
       triggers: [{ status: "sending", payload: { workflowId: "a" } }],
     })
     render(<WorkflowList />)
-    expect(screen.getByTestId("workflow-sending-a")).toBeInTheDocument()
+    const badge = screen.getByTestId("workflow-sending-a")
+    expect(badge).toHaveAttribute("data-state", "sending")
+    expect(badge).toHaveTextContent("sending")
+  })
+
+  /**
+   * A run waiting for a desktop that is switched off is queued, not being
+   * sent — the word the banner ("1 queued") and the queue sheet use.
+   */
+  it("shows the Queued badge for a workflow whose trigger is waiting for the Host", () => {
+    pushQueries({
+      workflows: [wf("a", "Alpha")],
+      triggers: [{ status: "pending", payload: { workflowId: "a" } }],
+    })
+    render(<WorkflowList />)
+    const badge = screen.getByTestId("workflow-sending-a")
+    expect(badge).toHaveAttribute("data-state", "queued")
+    expect(badge).toHaveTextContent("queuedBadge")
+  })
+
+  it("queues a swipe Run once, labelled, and says so when it is already queued", async () => {
+    const enqueueMock = jest.mocked(enqueueUnlessQueued)
+    enqueueMock.mockClear()
+    pushQueries({ workflows: [wf("a", "Alpha")] })
+    render(<WorkflowList />)
+    fireEvent.click(screen.getByTestId("swipe-action-run"))
+    await waitFor(() =>
+      expect(enqueueMock).toHaveBeenCalledWith({
+        command: "workflow_trigger_manual",
+        payload: { workflowId: "a" },
+        label: "Alpha",
+      })
+    )
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("swipe.runQueued"))
+
+    enqueueMock.mockResolvedValueOnce({ row: {} as never, alreadyQueued: true })
+    fireEvent.click(screen.getByTestId("swipe-action-run"))
+    await waitFor(() => expect(toast.message).toHaveBeenCalledWith("swipe.runAlreadyQueued"))
   })
 
   it("prefers the Active badge over Sending when a run is already live", () => {

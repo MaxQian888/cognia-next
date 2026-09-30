@@ -196,6 +196,12 @@ export async function enqueueHostStateIntentIfAvailable(
 }
 
 export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow> {
+  const row = buildQueueRow(input)
+  await getDb().mobileOutboundQueue.put(row)
+  return row
+}
+
+function buildQueueRow(input: EnqueueInput): MobileOutboundJobRow {
   const now = input.nowMs ?? Date.now()
   const activeScope = getActiveRuntimeTargetContext()
   const localAccountId = input.accountId ?? activeScope?.accountId
@@ -203,7 +209,7 @@ export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow
   if (!localAccountId || !targetId) {
     throw new Error("Outbound queue requires an active account and runtime target.")
   }
-  const row: MobileOutboundJobRow = {
+  return {
     id: input.id ?? nanoid(),
     accountId: localAccountId,
     targetId,
@@ -223,8 +229,72 @@ export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow
     actionId: input.actionId,
     baseRevision: input.baseRevision,
   }
-  await getDb().mobileOutboundQueue.put(row)
-  return row
+}
+
+export interface EnqueueUnlessQueuedResult {
+  /** The row now standing for this action: the new one, or the one already waiting. */
+  row: MobileOutboundJobRow
+  /** True when an identical action was still on its way and nothing was added. */
+  alreadyQueued: boolean
+}
+
+/**
+ * Enqueue a standalone action unless the very same one is still on its way.
+ *
+ * For one-shot commands where a second copy is never what the user meant — a
+ * manual workflow run tapped again while the Host is away. Each tap used to add
+ * a row with a fresh idempotency key, so "Run" pressed three times offline
+ * fired the workflow three times the moment the desktop came back, and the
+ * banner counted up with nothing saying why.
+ *
+ * "The same" is: same account, same runtime target, same command, the same
+ * payload (compared key-order-insensitively), no conversation channel, and
+ * still `pending` or `sending`. Once the earlier one has been sent, refused or
+ * given up on, a new tap is a new request and is queued as one. The check and
+ * the insert share a transaction, so two quick taps cannot both miss.
+ */
+export async function enqueueUnlessQueued(input: EnqueueInput): Promise<EnqueueUnlessQueuedResult> {
+  if (input.channel) {
+    throw new Error("enqueueUnlessQueued is for standalone actions, not conversation sends.")
+  }
+  const candidate = buildQueueRow(input)
+  const fingerprint = payloadFingerprint(candidate.payload)
+  const db = getDb()
+  return db.transaction("rw", db.mobileOutboundQueue, async () => {
+    const existing = await db.mobileOutboundQueue
+      .where("status")
+      .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
+      .filter(
+        (row) =>
+          row.accountId === candidate.accountId &&
+          row.targetId === candidate.targetId &&
+          row.command === candidate.command &&
+          !row.channel &&
+          payloadFingerprint(row.payload) === fingerprint
+      )
+      .sortBy("createdAt")
+    const waiting = existing[0]
+    if (waiting) return { row: waiting, alreadyQueued: true }
+    await db.mobileOutboundQueue.put(candidate)
+    return { row: candidate, alreadyQueued: false }
+  })
+}
+
+/** A payload's identity, independent of the order its keys were written in. */
+function payloadFingerprint(value: unknown): string {
+  return JSON.stringify(canonicalize(value))
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize)
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, canonicalize((value as Record<string, unknown>)[key])])
+    )
+  }
+  return value
 }
 
 /**
@@ -518,18 +588,56 @@ export async function releaseClaim(id: string): Promise<void> {
 }
 
 /**
- * How long a `sending` claim must have sat untouched before a startup reclaim
- * treats it as abandoned.
+ * How long a `sending` claim must have gone unrenewed before it is treated as
+ * abandoned.
  *
- * Comfortably longer than any single dispatch: the point is to separate a claim
- * whose process died from one another live dispatcher is still awaiting, and
- * only the age of the claim can tell them apart.
+ * A live dispatcher renews its claim every {@link CLAIM_RENEW_INTERVAL_MS} for
+ * as long as it holds it (`renewClaim`), however long the command itself is
+ * allowed to run, so a claim this stale belongs to a process that died — or to
+ * a build that never renewed — and nothing is going to finish it. Four missed
+ * renewals, so a slow event loop on a backgrounded phone is not mistaken for a
+ * dead one.
  */
 export const CLAIM_ABANDONED_AFTER_MS = 2 * 60 * 1000
 
+/** How often a live dispatcher re-stamps `claimedAt` on the row it holds. */
+export const CLAIM_RENEW_INTERVAL_MS = 30 * 1000
+
 /**
- * Return abandoned `sending` claims to `pending`. Call once before the runner's
- * first drain.
+ * Whether a `sending` row's claim has been abandoned: no stamp at all (claimed
+ * by a build that predates it), or not renewed for {@link CLAIM_ABANDONED_AFTER_MS}.
+ * Always false for a row that is not `sending`.
+ */
+export function isAbandonedClaim(
+  row: Pick<MobileOutboundJobRow, "status" | "claimedAt">,
+  nowMs: number = Date.now(),
+  abandonedAfterMs: number = CLAIM_ABANDONED_AFTER_MS
+): boolean {
+  if (row.status !== "sending") return false
+  return row.claimedAt === undefined || nowMs - row.claimedAt >= abandonedAfterMs
+}
+
+/**
+ * Re-stamp a claim the caller is still working on, so no sweep mistakes it for
+ * an abandoned one. A no-op once the row has left `sending` (completed,
+ * withdrawn or reclaimed): renewing must never resurrect a claim.
+ */
+export async function renewClaim(id: string, nowMs: number = Date.now()): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.mobileOutboundQueue, async () => {
+    const row = await db.mobileOutboundQueue.get(id)
+    if (row?.status === "sending") {
+      await db.mobileOutboundQueue.update(id, { claimedAt: nowMs })
+    }
+  })
+}
+
+/**
+ * Return abandoned `sending` claims to `pending`. The runner calls this at the
+ * start of every drain, not only the first: a claim left by a process that was
+ * killed moments before the app restarted is still young at the first drain,
+ * and used to be left `sending` — "Sending" on screen, never retried, never
+ * withdrawable — for as long as the app stayed open.
  *
  * A row still holding `sending` at startup usually belongs to a run that was
  * killed mid-dispatch. That used to be harmless — `claimNext` looked at
@@ -561,7 +669,7 @@ export async function releaseStaleClaims(
         (row) =>
           row.accountId === scope.accountId &&
           row.targetId === scope.targetId &&
-          (row.claimedAt === undefined || nowMs - row.claimedAt >= abandonedAfterMs)
+          isAbandonedClaim(row, nowMs, abandonedAfterMs)
       )
       .toArray()
     for (const row of stale) {
@@ -569,6 +677,39 @@ export async function releaseStaleClaims(
     }
     return stale.length
   })
+}
+
+/**
+ * The earliest moment something in this scope becomes actionable without any
+ * write to announce it, or null when nothing is waiting on the clock.
+ *
+ * Two things only time can move: a `pending` row backing off until its
+ * `nextAttemptAt`, and a `sending` claim that will count as abandoned once it
+ * goes unrenewed for {@link CLAIM_ABANDONED_AFTER_MS}. Nothing woke the runner
+ * for either — it drained on writes, network changes and runtime snapshots —
+ * so a retry scheduled for later, or a claim a killed process left behind,
+ * waited for an unrelated event that might never come.
+ */
+export async function nextQueueWakeAt(
+  scope: RuntimeTargetScope,
+  nowMs: number = Date.now()
+): Promise<number | null> {
+  const rows = await getDb()
+    .mobileOutboundQueue.where("status")
+    .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
+    .filter((row) => row.accountId === scope.accountId && row.targetId === scope.targetId)
+    .toArray()
+  let earliest: number | null = null
+  for (const row of rows) {
+    const at =
+      row.status === "pending"
+        ? row.nextAttemptAt > nowMs
+          ? row.nextAttemptAt
+          : null
+        : (row.claimedAt ?? nowMs) + CLAIM_ABANDONED_AFTER_MS
+    if (at !== null && (earliest === null || at < earliest)) earliest = at
+  }
+  return earliest
 }
 
 export async function markHostStateResult(
@@ -713,24 +854,52 @@ export async function deleteRow(id: string): Promise<void> {
 }
 
 /**
- * Take back an action the user no longer wants sent. Returns whether it was.
+ * What {@link withdrawQueuedAction} did.
  *
- * Only a row that has not started is withdrawable: once `sending`, the Host
- * may already have it. The read and the delete share a transaction, so a
- * runner that claims the row in between wins and this answers `false`.
- *
- * Channel rows (a conversation's sends) are refused too. Their optimistic
- * copy is already on screen in order, so dropping one would leave a message
- * the Host never gets, sitting between ones it does. Standalone actions —
- * a workflow trigger, an approval — have no such shadow.
+ *   - `withdrawn`: removed before any attempt to send it; it will not run.
+ *   - `withdrawn-unconfirmed`: removed, but an earlier attempt may have reached
+ *     the Host before it went quiet (a retry that was backing off, or a claim
+ *     whose dispatcher died), so the Host could still run it.
+ *   - `in-flight`: a live dispatch holds it right now; the Host may already
+ *     have it, so it was left alone.
+ *   - `not-withdrawable`: a conversation send, or a row already past sending.
+ *   - `gone`: nothing by that id is queued any more.
  */
-export async function withdrawPending(id: string): Promise<boolean> {
+export type WithdrawOutcome =
+  "withdrawn" | "withdrawn-unconfirmed" | "in-flight" | "not-withdrawable" | "gone"
+
+/**
+ * Take back an action the user no longer wants sent.
+ *
+ * A `pending` row is always withdrawable. So is a `sending` row whose claim was
+ * abandoned ({@link isAbandonedClaim}): its dispatcher is gone, and refusing
+ * left the user staring at "Sending" with no way out. Only a claim a live
+ * dispatcher is still renewing is refused. The read and the delete share a
+ * transaction, so a runner that claims the row in between wins and this
+ * answers `in-flight`.
+ *
+ * Channel rows (a conversation's sends) are refused. Their optimistic copy is
+ * already on screen in order, so dropping one would leave a message the Host
+ * never gets, sitting between ones it does. Standalone actions — a workflow
+ * trigger, an approval — have no such shadow.
+ */
+export async function withdrawQueuedAction(
+  id: string,
+  nowMs: number = Date.now()
+): Promise<WithdrawOutcome> {
   const db = getDb()
-  return db.transaction("rw", db.mobileOutboundQueue, async () => {
+  return db.transaction("rw", db.mobileOutboundQueue, async (): Promise<WithdrawOutcome> => {
     const row = await db.mobileOutboundQueue.get(id)
-    if (!row || row.status !== "pending" || row.channel) return false
+    if (!row) return "gone"
+    if (row.channel) return "not-withdrawable"
+    if (row.status === "sending") {
+      if (!isAbandonedClaim(row, nowMs)) return "in-flight"
+      await db.mobileOutboundQueue.delete(id)
+      return "withdrawn-unconfirmed"
+    }
+    if (row.status !== "pending") return "not-withdrawable"
     await db.mobileOutboundQueue.delete(id)
-    return true
+    return row.attempts > 0 ? "withdrawn-unconfirmed" : "withdrawn"
   })
 }
 

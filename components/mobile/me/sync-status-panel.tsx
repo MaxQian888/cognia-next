@@ -19,13 +19,15 @@
  * panel itself triggers so feedback is immediate (not up to a tick late).
  */
 
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
   CircleDashedIcon,
   CloudOffIcon,
+  LinkIcon,
   RefreshCwIcon,
   XCircleIcon,
   type LucideIcon,
@@ -47,6 +49,8 @@ import { MeSection } from "./me-section"
 import { TransportTierIndicator } from "./transport-tier-indicator"
 import { humanizeKey } from "@/lib/plugin/convert/secrets"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
+import type { SyncOutcome } from "@/lib/sync/types"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import {
   summarizeSyncSnapshot,
   type SyncOverallStatus,
@@ -71,8 +75,34 @@ function useSyncSnapshot(intervalMs = 15_000): { snapshot: Snapshot; refresh: ()
   return { snapshot, refresh }
 }
 
+/**
+ * Emitted by `notifyCompanionConfigChanged` (lib/tauri/transport-companion) on
+ * every pair, unpair and target switch.
+ */
+const COMPANION_CONFIG_EVENT = "cognia:companion-config-changed"
+
+function subscribeCompanionConfig(onChange: () => void): () => void {
+  window.addEventListener(COMPANION_CONFIG_EVENT, onChange)
+  return () => window.removeEventListener(COMPANION_CONFIG_EVENT, onChange)
+}
+
+/**
+ * Whether this device has a host to pull from. Sync mirrors a paired host, so
+ * with none there is nothing any row could do: the panel says so and offers
+ * the pairing flow instead of 48 "never synced" rows with live retry buttons.
+ */
+function useHasSyncHost(): boolean {
+  return useSyncExternalStore(
+    subscribeCompanionConfig,
+    () => loadCompanionConfig() !== null,
+    () => false
+  )
+}
+
+type OverallKey = SyncOverallStatus | "noHost"
+
 const OVERALL_VISUAL: Record<
-  SyncOverallStatus,
+  OverallKey,
   { icon: LucideIcon; iconClass: string; tileClass: string }
 > = {
   healthy: {
@@ -100,6 +130,11 @@ const OVERALL_VISUAL: Record<
     iconClass: "text-muted-foreground",
     tileClass: "bg-muted",
   },
+  noHost: {
+    icon: CloudOffIcon,
+    iconClass: "text-muted-foreground",
+    tileClass: "bg-muted",
+  },
 }
 
 const ROW_VISUAL: Record<SyncRowStatus, { icon: LucideIcon; className: string }> = {
@@ -112,13 +147,18 @@ export interface SyncStatusPanelProps {
   /** Override the snapshot reader (tests). */
   reader?: () => Snapshot
   /** Override the sync trigger (tests). */
-  trigger?: (only?: readonly (keyof Snapshot)[]) => Promise<unknown>
+  trigger?: (only?: readonly (keyof Snapshot)[]) => Promise<readonly SyncOutcome[]>
+  /** Override whether a host is paired (tests). */
+  hasHost?: boolean
 }
 
-export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) {
+export function SyncStatusPanel({ reader, trigger, hasHost }: SyncStatusPanelProps = {}) {
   const t = useTranslations("mobile.me.sync")
+  const router = useRouter()
   const { snapshot: liveSnapshot, refresh } = useSyncSnapshot()
   const snapshot = reader ? reader() : liveSnapshot
+  const liveHasHost = useHasSyncHost()
+  const paired = hasHost ?? liveHasHost
   const [busy, setBusy] = useState<keyof Snapshot | "all" | null>(null)
 
   const onSync = useCallback(
@@ -128,11 +168,30 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
       try {
         const runner =
           trigger ?? ((scope?: readonly (keyof Snapshot)[]) => runSyncDown({ only: scope }))
-        await runner(only ? [only] : undefined)
+        const outcomes = await runner(only ? [only] : undefined)
         // Pull the freshest orchestrator state immediately rather than
         // waiting for the next slow tick.
         refresh()
-        toast.success(only ? t("toastTableSynced", { table: only }) : t("toastAllSynced"))
+        // The orchestrator never rejects for a table that failed: it resolves
+        // with one outcome per table. The toast has to read them, or a retry
+        // that failed again announces "Synced" over a row that is still red.
+        const noHost = outcomes.some((o) => !o.ok && o.failure.reason === "no_host")
+        const failures = outcomes.flatMap((o) =>
+          o.ok || o.failure.reason === "no_host" ? [] : [o.failure]
+        )
+        if (noHost) {
+          toast.error(t("toastNoHost"))
+        } else if (failures.length > 0) {
+          toast.error(
+            only
+              ? t("toastTableFailed", { table: humanizeKey(only), reason: failures[0].message })
+              : t("toastSomeFailed", { failed: failures.length, total: outcomes.length })
+          )
+        } else {
+          toast.success(
+            only ? t("toastTableSynced", { table: humanizeKey(only) }) : t("toastAllSynced")
+          )
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         toast.error(t("toastError", { reason: message }))
@@ -144,7 +203,8 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
   )
 
   const summary = summarizeSyncSnapshot(snapshot)
-  const overall = OVERALL_VISUAL[summary.overall]
+  const overallKey: OverallKey = paired ? summary.overall : "noHost"
+  const overall = OVERALL_VISUAL[overallKey]
   const OverallIcon = overall.icon
   const hintArgs = {
     synced: summary.syncedCount,
@@ -193,7 +253,7 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
               size="sm"
               variant={row.status === "error" ? "outline" : "ghost"}
               className={row.status === "error" ? "h-7 px-2 text-xs" : "size-8 p-0"}
-              disabled={busy !== null}
+              disabled={busy !== null || !paired}
               onClick={() => void onSync(table)}
               aria-label={t("syncRowAria", { table: row.table })}
               data-testid={`sync-row-retry-${row.table}`}
@@ -219,7 +279,7 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
         role="status"
         aria-live="polite"
         data-testid="sync-status-summary"
-        data-sync-overall={summary.overall}
+        data-sync-overall={overallKey}
       >
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <span
@@ -233,28 +293,41 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold leading-tight" data-testid="sync-status-headline">
-              {t(`overall.${summary.overall}`, { count: summary.failingCount })}
+              {t(`overall.${overallKey}`, { count: summary.failingCount })}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {t(`overallHint.${summary.overall}`, hintArgs)}
+              {t(`overallHint.${overallKey}`, hintArgs)}
             </p>
           </div>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={summary.overall === "healthy" ? "outline" : "default"}
-          className="w-full @xl:w-auto"
-          disabled={busy !== null || summary.total === 0}
-          onClick={() => void onSync()}
-          data-testid="sync-status-run-all"
-        >
-          <RefreshCwIcon
-            aria-hidden="true"
-            className={cn("size-3.5", busy === "all" && "animate-spin")}
-          />
-          {t("syncAll")}
-        </Button>
+        {paired ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={summary.overall === "healthy" ? "outline" : "default"}
+            className="w-full @xl:w-auto"
+            disabled={busy !== null || summary.total === 0}
+            onClick={() => void onSync()}
+            data-testid="sync-status-run-all"
+          >
+            <RefreshCwIcon
+              aria-hidden="true"
+              className={cn("size-3.5", busy === "all" && "animate-spin")}
+            />
+            {t("syncAll")}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            className="w-full @xl:w-auto"
+            onClick={() => router.push("/pair")}
+            data-testid="sync-status-pair"
+          >
+            <LinkIcon aria-hidden="true" className="size-3.5" />
+            {t("pairHost")}
+          </Button>
+        )}
       </Surface>
 
       <TransportTierIndicator />

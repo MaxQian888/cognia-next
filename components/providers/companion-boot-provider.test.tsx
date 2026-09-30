@@ -412,6 +412,45 @@ describe("<CompanionBootProvider /> — Android hardware back", () => {
       historyBack.mockRestore()
     }
   })
+
+  it("closes an open overlay before navigating or backgrounding the app", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(null)
+    getSettingsMock.mockResolvedValueOnce({ mobileRuntimeMode: "standalone" })
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() => expect(subscribeBackButtonMock).toHaveBeenCalledTimes(1))
+    const handler = subscribeBackButtonMock.mock.calls[0][0]
+
+    // Stand-in for an open Radix sheet: it answers Escape and claims the key.
+    const sheet = document.createElement("div")
+    sheet.setAttribute("role", "dialog")
+    sheet.setAttribute("data-state", "open")
+    document.body.appendChild(sheet)
+    const onEscape = jest.fn((event: KeyboardEvent) => {
+      if (event.key === "Escape") event.preventDefault()
+    })
+    document.addEventListener("keydown", onEscape, { capture: true })
+    const historyBack = jest.spyOn(window.history, "back").mockImplementation(() => {})
+    try {
+      handler({ canGoBack: false })
+      expect(onEscape).toHaveBeenCalledTimes(1)
+      expect(minimizeAppMock).not.toHaveBeenCalled()
+
+      handler({ canGoBack: true })
+      expect(onEscape).toHaveBeenCalledTimes(2)
+      expect(historyBack).not.toHaveBeenCalled()
+    } finally {
+      historyBack.mockRestore()
+      document.removeEventListener("keydown", onEscape, { capture: true })
+      sheet.remove()
+    }
+  })
 })
 
 describe("<CompanionBootProvider /> — local-notification taps", () => {
