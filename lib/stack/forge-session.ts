@@ -10,7 +10,7 @@
  *
  *   - no remote at all — the person has not pushed this repository anywhere;
  *   - a host we have no adapter for — nothing they do locally will help;
- *   - no credential — one `gh auth login` away;
+ *   - no credential — one connected account or `gh auth login` away;
  *   - ready.
  *
  * Each is a different sentence and only two of them are worth acting on, so
@@ -48,8 +48,11 @@ export type StackForge =
 
 export interface StackForgeDeps {
   remotes(repositoryRoot: string): Promise<GitRemote[]>
-  /** Null when no credential could be resolved. */
-  octokit(repository: string): Promise<OctokitLike | null>
+  /**
+   * Null when no credential could be resolved. `host` is the deployment the
+   * remote was matched to; the credential and the REST root both come from it.
+   */
+  octokit(repository: string, host: GithubHost): Promise<OctokitLike | null>
   adapter(octokit: OctokitLike): ForgeStackAdapter
   /**
    * The GitHub deployments the user has an account on (ADR-0176).
@@ -69,9 +72,9 @@ const DEFAULT_DEPS: StackForgeDeps = {
   // Imported lazily and by path, not at module scope: the credential source is
   // the application's, and a static import would drag the Agent Team graph
   // into every consumer of the stack engine — including its own tests.
-  octokit: async (repository) => {
+  octokit: async (repository, host) => {
     const { createResolveOctokit } = await import("@/lib/ai/agent/team/pr-feedback/resolvers")
-    return createResolveOctokit()(repository)
+    return createResolveOctokit()(repository, host)
   },
   adapter: (octokit) => createGithubStackAdapter({ octokit }),
   // Lazy for the same reason as `octokit`: the account registry belongs to the
@@ -115,7 +118,7 @@ export async function openStackForge(
     return { status: "unsupportedHost", host: parsed.host, remote: remote.name }
   }
 
-  const octokit = await resolved.octokit(parsed.fullName).catch(() => null)
+  const octokit = await resolved.octokit(parsed.fullName, parsed.host).catch(() => null)
   if (!octokit) {
     return { status: "noCredential", repository: parsed.fullName, remote: remote.name }
   }

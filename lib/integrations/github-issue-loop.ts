@@ -16,6 +16,7 @@ import {
   type WorkspaceHandle,
 } from "@/lib/github/workspace"
 import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
+import { GITHUB_DOT_COM, isGithubDotCom, parseGithubHost } from "@/lib/github/host"
 
 interface GithubIssue {
   title?: string
@@ -49,7 +50,7 @@ interface IssueLoopCheckpoint {
 
 export interface GithubIssueLoopDependencies {
   request: IntegrationActionHandlerContext["authenticatedRequest"]
-  resolveCredential(pluginId: string, accountId: string): Promise<string>
+  resolveCredential(pluginId: string, accountId: string, origin: string): Promise<string>
   clone(options: CloneOptions): Promise<WorkspaceHandle>
   executeAgent(prompt: string, config: Record<string, unknown>): Promise<unknown>
   commitAndPush(options: {
@@ -63,7 +64,11 @@ export interface GithubIssueLoopDependencies {
   updateJob(jobId: string, patch: Partial<IntegrationActionJob>): Promise<unknown>
 }
 
-async function resolveCredential(pluginId: string, accountId: string): Promise<string> {
+async function resolveCredential(
+  pluginId: string,
+  accountId: string,
+  origin: string
+): Promise<string> {
   const account = await getIntegrationAccount(pluginId, accountId)
   if (!account?.enabled) throw new Error(`Integration account "${accountId}" is disabled`)
   const provider = getProvider(account.providerId)
@@ -72,12 +77,7 @@ async function resolveCredential(pluginId: string, accountId: string): Promise<s
   const session = sessions.find((candidate) => candidate.id === account.authSessionId)
   if (!session) throw new Error(`Credential handle for account "${accountId}" is unavailable`)
   return provider.resolveRequestCredential
-    ? (
-        await provider.resolveRequestCredential(session.id, {
-          accountId,
-          origin: "https://github.com",
-        })
-      ).accessToken
+    ? (await provider.resolveRequestCredential(session.id, { accountId, origin })).accessToken
     : session.accessToken
 }
 
@@ -137,6 +137,11 @@ export async function runGithubIssueLoop(
   const base = text(input, "base")
   const number = issueNumber(input)
   const previous = checkpointFrom((await deps.getJob(context.jobId))?.output)
+  // ADR-0176: the account's own deployment. `apiBaseUrl` is set by the action
+  // runner from the account's credential, so a GitHub Enterprise account reads
+  // the issue, clones, pushes and opens the pull request on its own server.
+  const host = (context.apiBaseUrl && parseGithubHost(context.apiBaseUrl)) || GITHUB_DOT_COM
+  const api = host.apiBaseUrl
 
   if (previous?.checkpoint === "pull_request_created") {
     return {
@@ -156,7 +161,7 @@ export async function runGithubIssueLoop(
     let issue: GithubIssue | undefined
     if (!commitSha) {
       issue = await requireGithubResponse<GithubIssue>(
-        await deps.request(`https://api.github.com/repos/${repoFullName}/issues/${number}`, {
+        await deps.request(`${api}/repos/${repoFullName}/issues/${number}`, {
           headers: { accept: "application/vnd.github+json" },
         }),
         "issue fetch"
@@ -165,13 +170,18 @@ export async function runGithubIssueLoop(
         output: { checkpoint: "issue_fetched", branch: head, updatedAt: new Date().toISOString() },
       })
 
-      const credential = await deps.resolveCredential(context.pluginId, context.accountId)
+      const credential = await deps.resolveCredential(
+        context.pluginId,
+        context.accountId,
+        new URL(api).origin
+      )
       workspace = await deps.clone({
         repoFullName,
         branch: head,
         baseBranch: base,
         token: credential,
         backend: "local",
+        ...(isGithubDotCom(host) ? {} : { hostUrl: host.webBaseUrl }),
       })
       await deps.updateJob(context.jobId, {
         output: {
@@ -248,7 +258,7 @@ export async function runGithubIssueLoop(
     let pullRequest: GithubPullRequest
     try {
       pullRequest = await requireGithubResponse<GithubPullRequest>(
-        await deps.request(`https://api.github.com/repos/${repoFullName}/pulls`, {
+        await deps.request(`${api}/repos/${repoFullName}/pulls`, {
           method: "POST",
           headers: {
             accept: "application/vnd.github+json",

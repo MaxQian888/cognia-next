@@ -604,3 +604,85 @@ describe("fetchPrObservation", () => {
     expect(obs.review).toEqual(prev.review)
   })
 })
+
+describe("fetchPrObservation pagination", () => {
+  const next = '<https://api.github.com/x?page=2>; rel="next"'
+
+  it("reads every page of reviews, so a newer approval on page 2 wins", async () => {
+    // Reviews arrive oldest→newest. The regression: one page of 100 kept the
+    // stale CHANGES_REQUESTED and dropped the approval that superseded it.
+    const o = makeOctokit(
+      openPrRoutes({
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews": (params) =>
+          params.page === 1
+            ? {
+                headers: { etag: "rev-etag", link: next },
+                data: [{ state: "CHANGES_REQUESTED", user: { login: "reviewer" } }],
+              }
+            : { data: [{ state: "APPROVED", user: { login: "reviewer" } }] },
+      })
+    )
+    const obs = await fetchPrObservation(o, "acme/app", { number: 12 }, undefined, 1000)
+    expect(obs.review.decision).toBe("approved")
+    // A multi-page list keeps no ETag: page 1 alone would answer 304 while the
+    // last page changed.
+    expect(obs.etags?.reviews).toBeUndefined()
+  })
+
+  it("reads every page of check-runs and review comments", async () => {
+    const o = makeOctokit(
+      openPrRoutes({
+        "GET /repos/{owner}/{repo}/commits/{ref}/check-runs": (params) =>
+          params.page === 1
+            ? {
+                headers: { etag: "checks-etag", link: next },
+                data: { check_runs: [{ name: "a", status: "completed", conclusion: "success" }] },
+              }
+            : { data: { check_runs: [{ name: "b", status: "completed", conclusion: "failure" }] } },
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments": (params) =>
+          params.page === 1
+            ? {
+                headers: { link: next },
+                data: [{ id: 1, path: "x.ts", line: 1, body: "one", user: { login: "r" } }],
+              }
+            : { data: [{ id: 2, path: "y.ts", line: 2, body: "two", user: { login: "r" } }] },
+      })
+    )
+    const obs = await fetchPrObservation(o, "acme/app", { number: 12 }, undefined, 1000)
+    expect(obs.ci.summary).toBe("failing")
+    expect(obs.ci.failedChecks.map((c) => c.name)).toEqual(["b"])
+    expect(obs.review.threads).toHaveLength(2)
+    expect(obs.etags?.checks).toBeUndefined()
+  })
+
+  it("drops a stale ETag once a list grows past one page", async () => {
+    const o = makeOctokit(
+      openPrRoutes({
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews": (params) =>
+          params.page === 1
+            ? { headers: { etag: "rev-new", link: next }, data: [] }
+            : { data: [{ state: "APPROVED", user: { login: "reviewer" } }] },
+      })
+    )
+    const prev = await fetchPrObservation(
+      makeOctokit(openPrRoutes()),
+      "acme/app",
+      { number: 12 },
+      undefined,
+      1
+    )
+    expect(prev.etags?.reviews).toBe("rev-etag")
+    const obs = await fetchPrObservation(o, "acme/app", { number: 12 }, prev, 2)
+    expect(obs.etags?.reviews).toBeUndefined()
+    expect(obs.review.decision).toBe("approved")
+  })
+
+  it("stops at the page cap instead of walking forever", async () => {
+    const reviews = jest.fn(() => ({ headers: { link: next }, data: [] }))
+    const o = makeOctokit(
+      openPrRoutes({ "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews": reviews })
+    )
+    await fetchPrObservation(o, "acme/app", { number: 12 }, undefined, 1000)
+    expect(reviews).toHaveBeenCalledTimes(30)
+  })
+})

@@ -95,6 +95,44 @@ describe("integration registry", () => {
     ).toThrow('Integration "issues" action "create" has no resolved handler')
   })
 
+  it("rejects an inbox projection aliasing a projection that does not exist", () => {
+    const projection = {
+      id: "comments",
+      label: "Comments",
+      eventTypes: [],
+      threadKeyPointer: "/n",
+      titlePointer: "/t",
+      bodyPointer: "/b",
+    }
+    expect(() =>
+      registerIntegrationDefinitions({
+        pluginId: "plugin",
+        definitions: [
+          definition({
+            inboxProjections: [
+              { ...projection, threadAlias: { whenPointer: "/pr", projectionId: "missing" } },
+            ],
+          }),
+        ],
+        handlers: { "issues:create": handler },
+      })
+    ).toThrow('projection "comments" aliases unknown projection "missing"')
+    expect(() =>
+      registerIntegrationDefinitions({
+        pluginId: "plugin",
+        definitions: [
+          definition({
+            inboxProjections: [
+              { ...projection, id: "threads" },
+              { ...projection, threadAlias: { whenPointer: "/pr", projectionId: "threads" } },
+            ],
+          }),
+        ],
+        handlers: { "issues:create": handler },
+      })
+    ).not.toThrow()
+  })
+
   it("rejects unresolved ingress normalizers", () => {
     expect(() =>
       registerIntegrationDefinitions({

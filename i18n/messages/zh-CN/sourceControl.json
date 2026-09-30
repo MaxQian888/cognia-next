@@ -358,9 +358,9 @@
     "newLayerBranch": "分支名",
     "create": "创建层",
     "forge": {
-      "noCredential": "没有 {repository} 的 GitHub 凭据。先执行 `gh auth login` 再试。",
+      "noCredential": "没有 {repository} 的 GitHub 凭据。请在「设置 → 连接」中连接一个 GitHub 账号，或执行 `gh auth login`，然后再试。",
       "noRemote": "这个仓库没有能托管 Pull Request 的远程。",
-      "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台——目前只支持 github.com。"
+      "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台。GitHub Enterprise 服务器需要先在「设置 → 连接」中连接该服务器上的账号。"
     },
     "mergeBlocked": {
       "changesRequested": "有评审要求修改",

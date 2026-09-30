@@ -151,3 +151,88 @@ export async function runGithubWriteback(
   }
   return job
 }
+
+export interface CreateGithubIssueInput {
+  repoFullName: string
+  title: string
+  body?: string
+  /**
+   * Stable per (local issue, repository): a retry of the same publish is
+   * deduplicated by the action runner instead of opening a second issue.
+   */
+  idempotencyKey: string
+}
+
+export interface CreatedGithubIssue {
+  repoFullName: string
+  number: number
+  htmlUrl: string
+  /** Epoch ms of the remote's `updated_at`, when GitHub reported one. */
+  updatedAt?: number
+}
+
+/**
+ * Open a GitHub issue through the `github-delivery` `createIssue` action.
+ *
+ * Only ever called after a person confirmed the exact title and body in a
+ * dialog, so the job is approved in the same step — the same contract as
+ * `runGithubWriteback` with `approval: "user-confirmed"`. Anything short of a
+ * completed job (the plugin refused, GitHub failed) is an error, because the
+ * caller links the local issue to the result and there is no result to link.
+ */
+export async function createGithubIssue(
+  input: CreateGithubIssueInput,
+  deps: RunGithubWritebackDeps = {}
+): Promise<CreatedGithubIssue> {
+  const resolveAccount = deps.resolveAccount ?? resolveGithubWritebackAccount
+  const execute = deps.execute ?? executeIntegrationAction
+  const approve = deps.approve ?? approveIntegrationActionJob
+
+  const account = await resolveAccount()
+  if (!account) {
+    throw new GithubWritebackError(
+      "no-account",
+      "No enabled GitHub account is connected; connect one in Settings → Connections."
+    )
+  }
+
+  let job: IntegrationActionJob
+  try {
+    job = await execute(GITHUB_DELIVERY_PLUGIN_ID, {
+      integrationId: GITHUB_INTEGRATION_ID,
+      accountId: account.id,
+      actionId: "createIssue",
+      input: {
+        repoFullName: input.repoFullName,
+        title: input.title,
+        ...(input.body ? { body: input.body } : {}),
+      },
+      source: "manual",
+      idempotencyKey: input.idempotencyKey,
+    })
+  } catch (cause) {
+    throw new GithubWritebackError(
+      "plugin-unavailable",
+      cause instanceof Error ? cause.message : String(cause)
+    )
+  }
+  if (job.status === "awaiting_approval") job = await approve(job.id)
+  const output = job.output as
+    { number?: unknown; html_url?: unknown; updated_at?: unknown } | undefined
+  if (job.status !== "succeeded" || typeof output?.number !== "number") {
+    throw new GithubWritebackError(
+      "rejected",
+      job.error ?? `GitHub did not create the issue (job ${job.status})`
+    )
+  }
+  const updatedAt = typeof output.updated_at === "string" ? Date.parse(output.updated_at) : NaN
+  return {
+    repoFullName: input.repoFullName,
+    number: output.number,
+    htmlUrl:
+      typeof output.html_url === "string"
+        ? output.html_url
+        : `https://github.com/${input.repoFullName}/issues/${output.number}`,
+    ...(Number.isFinite(updatedAt) ? { updatedAt } : {}),
+  }
+}

@@ -3,6 +3,7 @@ import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import { updateIntegrationAccount } from "@/lib/db/integrations"
 import { authenticatedGithubAppRequest } from "./github-auth"
 import { syncIntegrationIngressRoutes } from "./ingress-client"
+import { isPubliclyDeliverableUrl } from "./webhook-url"
 
 export interface GithubWebhookDependencies {
   request<T>(
@@ -48,6 +49,12 @@ export async function rotateGithubWebhookSecret(
     throw new Error("Remote webhook management requires dedicated App confirmation")
   }
   if (!account.ingressEndpoint) throw new Error("GitHub webhook ingress endpoint is unavailable")
+  // The listener binds to loopback. Writing its local URL into the App's hook
+  // config would replace a working (tunnelled) URL with one GitHub refuses, so
+  // only a public https URL may be pushed.
+  if (!isPubliclyDeliverableUrl(webhookUrl)) {
+    throw new Error("GitHub can only deliver to a public https webhook URL")
+  }
   const deps = provided ?? dependencies()
   const newHandle = deps.createHandle()
   await deps.saveSecret(newHandle, newSecret)

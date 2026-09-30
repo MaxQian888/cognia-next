@@ -40,6 +40,20 @@ function dependencies(status = 200) {
 }
 
 describe("rotateGithubWebhookSecret", () => {
+  it("never writes the loopback listener URL over the App's webhook config", async () => {
+    const deps = dependencies()
+    await expect(
+      rotateGithubWebhookSecret(
+        account,
+        "http://127.0.0.1:4455/integration/route-1",
+        "new-secret",
+        deps
+      )
+    ).rejects.toThrow("public https")
+    expect(deps.request).not.toHaveBeenCalled()
+    expect(deps.saveSecret).not.toHaveBeenCalled()
+  })
+
   it("updates GitHub first, then switches keyring handles and deletes the old secret", async () => {
     const deps = dependencies()
     await rotateGithubWebhookSecret(account, "https://hooks.example/route-1", "new-secret", deps)

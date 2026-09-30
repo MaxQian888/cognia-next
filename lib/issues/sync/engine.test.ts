@@ -242,11 +242,17 @@ describe("reconcileBinding: field reconciliation", () => {
     })
     await reconcileBinding(binding(), provider, { now: () => Date.now() + 100_000 })
     expect(pushes[0].patch).toEqual({ assignee: "hubot" })
+  })
 
+  it("hands an unassignment to the provider as null", async () => {
+    const id = await importOne()
     await setIssueAssignee(id, null, HUMAN)
-    const second = fake({ pull: { items: [], notModified: true }, pushFields: ["assignee"] })
-    await reconcileBinding(binding(), second.provider, { now: () => Date.now() + 200_000 })
-    expect(second.pushes[0].patch).toEqual({ assignee: null })
+    const { provider, pushes } = fake({
+      pull: { items: [], notModified: true },
+      pushFields: ["assignee"],
+    })
+    await reconcileBinding(binding(), provider, { now: () => Date.now() + 100_000 })
+    expect(pushes[0].patch).toEqual({ assignee: null })
   })
 
   it("pushes local edits on rows an incremental pull did not mention", async () => {

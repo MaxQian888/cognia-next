@@ -8,6 +8,7 @@ import {
   registerIntegrationDefinitions,
 } from "@/lib/integrations/registry"
 import * as botBinding from "./bot-integration-binding"
+import * as actionRunner from "@/lib/integrations/action-runner"
 import { setIntegrationAuthenticatedRequestExecutorForTesting } from "@/lib/integrations/action-runner"
 import { createIntegrationsAPI } from "./integrations-api"
 
@@ -301,6 +302,40 @@ it("exposes only the bound GitHub actor identity and rejects broader identity ro
     await expect(api.authenticatedRequest(ref, url)).rejects.toThrow("scope")
   request.mockResolvedValue({ status: 403, headers: {}, data: null })
   expect((await api.authenticatedRequest(ref, "https://api.github.com/user")).data).toEqual({})
+})
+
+it("resolves an API-root-relative path against the bound account's own deployment", async () => {
+  const account = { id: "account", pluginId: "github-delivery" }
+  jest
+    .spyOn(botBinding, "resolveBotIntegrationBinding")
+    .mockResolvedValue({ account, repository: "owner/repo" } as never)
+  const request = jest.fn().mockResolvedValue({ status: 200, headers: {}, data: [] })
+  setIntegrationAuthenticatedRequestExecutorForTesting(request)
+  const api = createIntegrationsAPI("bot", () => true)
+  const ref = { runId: "run", slotId: "github" }
+
+  await api.authenticatedRequest(ref, "/repos/owner/repo/issues")
+  expect(request).toHaveBeenLastCalledWith(
+    "github-delivery",
+    "account",
+    "https://api.github.com/repos/owner/repo/issues",
+    undefined
+  )
+
+  const base = jest
+    .spyOn(actionRunner, "integrationApiBaseUrl")
+    .mockResolvedValue("https://ghe.acme.io/api/v3")
+  await api.authenticatedRequest(ref, "/repos/owner/repo/pulls/1")
+  expect(request).toHaveBeenLastCalledWith(
+    "github-delivery",
+    "account",
+    "https://ghe.acme.io/api/v3/repos/owner/repo/pulls/1",
+    undefined
+  )
+  // Relative paths get the same scope checks as absolute URLs.
+  for (const path of ["/repos/owner/other", "/user/repos", "//evil.test/repos/owner/repo"])
+    await expect(api.authenticatedRequest(ref, path)).rejects.toThrow()
+  base.mockRestore()
 })
 
 it("requires the declared permission before invoking every integration operation", async () => {

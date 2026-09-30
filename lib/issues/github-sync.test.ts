@@ -39,10 +39,19 @@ function octokit(
 function deps(
   client: OctokitLike,
   over: Partial<SyncRepoIssuesDeps> = {}
-): SyncRepoIssuesDeps & { written: GithubIssueMirrorRow[][] } {
+): SyncRepoIssuesDeps & {
+  written: GithubIssueMirrorRow[][]
+  pruned: Array<[string, number[]]>
+} {
   const written: GithubIssueMirrorRow[][] = []
+  const pruned: Array<[string, number[]]> = []
   return {
     written,
+    pruned,
+    pruneRepoMirror: async (repo, keep) => {
+      pruned.push([repo, [...keep].sort((a, b) => a - b)])
+      return 0
+    },
     resolveOctokit: async () => client,
     latestMirroredUpdate: async () => undefined,
     repoMirrorEtag: async () => undefined,
@@ -105,6 +114,35 @@ describe("syncRepoIssues", () => {
     )
     expect(calls[0]).not.toHaveProperty("since")
     expect(calls[0].headers).toEqual({})
+  })
+
+  it("prunes issues a full read no longer lists (transferred or deleted)", async () => {
+    const { client } = octokit([{ data: [rawIssue(1), rawIssue(3)] }])
+    const d = deps(client, { pruneRepoMirror: jest.fn(async () => 2) })
+    const result = await syncRepoIssues({ ...INPUT, full: true }, d)
+    expect(d.pruneRepoMirror).toHaveBeenCalledWith("o/r", new Set([1, 3]))
+    expect(result.removed).toBe(2)
+  })
+
+  it("never prunes on an incremental read — unchanged issues are simply not listed", async () => {
+    const { client } = octokit([{ data: [rawIssue(1)] }])
+    const d = deps(client)
+    expect((await syncRepoIssues(INPUT, d)).removed).toBe(0)
+    expect(d.pruned).toEqual([])
+  })
+
+  it("never prunes on a truncated full read", async () => {
+    // A cap-truncated read omits whatever did not fit; pruning then would
+    // delete live issues.
+    const pages = Array.from({ length: 40 }, () => ({
+      data: [rawIssue(1)],
+      headers: { link: '<x>; rel="next"' },
+    }))
+    const { client } = octokit(pages)
+    const d = deps(client)
+    const result = await syncRepoIssues({ ...INPUT, full: true }, d)
+    expect(result.truncated).toBe(true)
+    expect(d.pruned).toEqual([])
   })
 
   it("reports truncation rather than pretending the repo was fully read", async () => {

@@ -58,6 +58,20 @@ export function registerIntegrationDefinitions(input: RegisterIntegrationDefinit
       }
       handlers.set(action.id, handler)
     }
+    for (const projection of definition.inboxProjections ?? []) {
+      const alias = projection.threadAlias
+      // An alias names the thread identity its events join. Pointing at a
+      // projection that does not exist would file them under a thread no
+      // subscription can ever select, so refuse it at registration.
+      if (
+        alias &&
+        !definition.inboxProjections?.some((candidate) => candidate.id === alias.projectionId)
+      ) {
+        throw new Error(
+          `Integration "${definition.id}" projection "${projection.id}" aliases unknown projection "${alias.projectionId}"`
+        )
+      }
+    }
     const normalizer = definition.ingress ? input.normalizers?.[definition.id] : undefined
     if (definition.ingress && !normalizer) {
       throw new Error(`Integration "${definition.id}" has no resolved ingress normalizer`)

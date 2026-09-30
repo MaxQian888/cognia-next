@@ -201,10 +201,18 @@ export function createIntegrationsAPI(
         if (!binding.repository) {
           throw new Error("Bot binding requests require a repository-scoped installation")
         }
-        const url = new URL(input)
-        const base = new URL(
-          (await integrationApiBaseUrl(binding.account)) ?? "https://api.github.com"
-        )
+        const baseUrl = (await integrationApiBaseUrl(binding.account)) ?? "https://api.github.com"
+        // A path relative to the API root (`/repos/o/r/issues`, `/user`) is
+        // resolved against the bound account's own deployment (ADR-0176). A
+        // bot never learns which GitHub its slot points at, so this is the only
+        // way one plugin works against both github.com and GitHub Enterprise.
+        // The scope checks below apply to the resolved URL either way.
+        const target =
+          input.startsWith("/") && !input.startsWith("//")
+            ? `${baseUrl.replace(/\/$/, "")}${input}`
+            : input
+        const url = new URL(target)
+        const base = new URL(baseUrl)
         const prefix = `${base.pathname.replace(/\/$/, "")}/repos/${binding.repository}`
         const ownIdentity =
           binding.account.pluginId === "github-delivery" &&
@@ -227,7 +235,7 @@ export function createIntegrationsAPI(
         const response = await authenticatedIntegrationRequest<T>(
           binding.account.pluginId,
           binding.account.id,
-          input,
+          target,
           init
         )
         if (!ownIdentity) return response

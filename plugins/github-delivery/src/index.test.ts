@@ -481,7 +481,7 @@ describe("GitHub Delivery v3 official plugin", () => {
       kinds: ["repository"],
     })
     expect(githubIntegration.healthProvider).toEqual({ handler: "checkGithubHealth" })
-    expect(githubIntegration.actions).toHaveLength(14)
+    expect(githubIntegration.actions).toHaveLength(20)
     expect(
       githubIntegration.actions.every((action) => action.operationId === `github.${action.id}`)
     ).toBe(true)
@@ -493,7 +493,7 @@ describe("GitHub Delivery v3 official plugin", () => {
         expect.objectContaining({ id: "web", kind: "browser" }),
       ],
     })
-    expect(githubPlugin.manifest.browserSiteProviders?.[0].operations).toHaveLength(14)
+    expect(githubPlugin.manifest.browserSiteProviders?.[0].operations).toHaveLength(20)
     expect(githubPlugin.manifest.activationEvents).toBeUndefined()
     expect(githubPlugin.manifest.runtimeCompatibility).toMatchObject({
       tauri: { availability: "supported" },
@@ -960,5 +960,170 @@ describe("GitHub monitoring events and revision-bound reviews", () => {
       data: { state: "open", head: { sha: "b".repeat(40) } },
     })
     await expect(githubExports.reviewPr(input, context)).rejects.toThrow("SHA changed")
+  })
+})
+
+describe("GitHub Delivery issue reads and issue creation", () => {
+  function context(
+    responses: Array<{ status?: number; headers?: Record<string, string>; data: unknown }>
+  ) {
+    const queue = [...responses]
+    const request = jest.fn(async () => {
+      const next = queue.shift() ?? { data: [] }
+      return { status: next.status ?? 200, headers: next.headers ?? {}, data: next.data }
+    }) as jest.Mock
+    return {
+      request,
+      ctx: {
+        ...providerContext(request),
+        jobId: "job",
+        signal: new AbortController().signal,
+      },
+    }
+  }
+
+  it("declares the reads as read-risk and createIssue as a write", () => {
+    const risk = Object.fromEntries(githubIntegration.actions.map((a) => [a.id, a.risk]))
+    expect(risk).toMatchObject({
+      createIssue: "write",
+      getIssue: "read",
+      getPullRequest: "read",
+      getCommitStatus: "read",
+      listIssueComments: "read",
+      searchIssues: "read",
+    })
+  })
+
+  it("creates an issue with only the fields given", async () => {
+    const { request, ctx } = context([{ data: [] }, { status: 201, data: { number: 9 } }])
+    await expect(
+      githubExports.createIssue(
+        { repoFullName: "owner/repo", title: "Crash on save", body: "Steps", labels: ["bug"] },
+        ctx
+      )
+    ).resolves.toEqual({ number: 9 })
+    expect(request).toHaveBeenLastCalledWith("https://api.github.com/repos/owner/repo/issues", {
+      method: "POST",
+      headers: expect.any(Object),
+      body: JSON.stringify({ title: "Crash on save", body: "Steps", labels: ["bug"] }),
+    })
+  })
+
+  it("returns the issue a lost response already created instead of opening another", async () => {
+    const createdAt = new Date().toISOString()
+    const { request, ctx } = context([
+      {
+        data: [
+          {
+            number: 3,
+            title: "Crash on save",
+            body: "Steps",
+            created_at: createdAt,
+            pull_request: {},
+          },
+          { number: 4, title: "Crash on save", body: "Steps", created_at: createdAt },
+        ],
+      },
+    ])
+    await expect(
+      githubExports.createIssue(
+        { repoFullName: "owner/repo", title: "Crash on save", body: "Steps" },
+        ctx
+      )
+    ).resolves.toMatchObject({ number: 4 })
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not treat an old issue with the same title as its own earlier POST", async () => {
+    const { request, ctx } = context([
+      {
+        data: [{ number: 1, title: "Crash on save", body: "", created_at: "2020-01-01T00:00:00Z" }],
+      },
+      { status: 201, data: { number: 2 } },
+    ])
+    await expect(
+      githubExports.createIssue({ repoFullName: "owner/repo", title: "Crash on save" }, ctx)
+    ).resolves.toEqual({ number: 2 })
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it("reads an issue and a pull request", async () => {
+    const { request, ctx } = context([{ data: { number: 5 } }, { data: { number: 6 } }])
+    await githubExports.getIssue({ repoFullName: "owner/repo", issueNumber: 5 }, ctx)
+    await githubExports.getPullRequest({ repoFullName: "owner/repo", prNumber: 6 }, ctx)
+    expect(request.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.github.com/repos/owner/repo/issues/5",
+      "https://api.github.com/repos/owner/repo/pulls/6",
+    ])
+  })
+
+  it.each([
+    [{ statuses: [] }, [], "none"],
+    [
+      { statuses: [{ state: "success" }] },
+      [{ status: "completed", conclusion: "success" }],
+      "success",
+    ],
+    [{ statuses: [] }, [{ status: "in_progress", conclusion: null }], "pending"],
+    [
+      { statuses: [{ state: "pending" }] },
+      [{ status: "completed", conclusion: "success" }],
+      "pending",
+    ],
+    [{ statuses: [] }, [{ status: "completed", conclusion: "failure" }], "failure"],
+    [{ statuses: [{ state: "error" }] }, [], "failure"],
+  ])("summarises commit status %# as %s", async (combined, runs, expected) => {
+    const { ctx } = context([{ data: combined }, { data: { check_runs: runs } }])
+    await expect(
+      githubExports.getCommitStatus({ repoFullName: "owner/repo", ref: "feature/x" }, ctx)
+    ).resolves.toMatchObject({ state: expected })
+  })
+
+  it("walks every page of check runs and comments", async () => {
+    const next = '<https://api.github.com/x?page=2>; rel="next"'
+    const { request, ctx } = context([
+      { data: { statuses: [] } },
+      {
+        headers: { link: next },
+        data: { check_runs: [{ status: "completed", conclusion: "success" }] },
+      },
+      { data: { check_runs: [{ status: "completed", conclusion: "failure" }] } },
+    ])
+    await expect(
+      githubExports.getCommitStatus({ repoFullName: "owner/repo", ref: "main" }, ctx)
+    ).resolves.toMatchObject({ state: "failure", truncated: false })
+    expect(request.mock.calls[2][0]).toBe(
+      "https://api.github.com/repos/owner/repo/commits/main/check-runs?per_page=100&page=2"
+    )
+
+    const comments = context([
+      { headers: { link: next }, data: [{ id: 1 }] },
+      { data: [{ id: 2 }] },
+    ])
+    await expect(
+      githubExports.listIssueComments(
+        { repoFullName: "owner/repo", issueNumber: 7, since: "2026-09-01T00:00:00Z" },
+        comments.ctx
+      )
+    ).resolves.toEqual({ comments: [{ id: 1 }, { id: 2 }], truncated: false })
+    expect(comments.request.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/issues/7/comments?since=2026-09-01T00%3A00%3A00.000Z&per_page=100&page=1"
+    )
+  })
+
+  it("confines issue search to the action's repository", async () => {
+    const { request, ctx } = context([{ data: { total_count: 1, items: [{ number: 1 }] } }])
+    await expect(
+      githubExports.searchIssues(
+        { repoFullName: "owner/repo", query: "is:open crash", limit: 5 },
+        ctx
+      )
+    ).resolves.toEqual({ totalCount: 1, items: [{ number: 1 }] })
+    expect(request.mock.calls[0][0]).toBe(
+      `https://api.github.com/search/issues?q=${encodeURIComponent("repo:owner/repo is:open crash")}&per_page=5`
+    )
+    await expect(
+      githubExports.searchIssues({ repoFullName: "owner/repo", query: "crash repo:other/x" }, ctx)
+    ).rejects.toThrow("scoped to repoFullName")
   })
 })

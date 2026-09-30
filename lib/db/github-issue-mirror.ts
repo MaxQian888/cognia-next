@@ -117,6 +117,39 @@ export async function clearRepoMirror(repoFullName: string): Promise<void> {
   await getDb().githubIssueMirror.where("repoFullName").equals(repoFullName).delete()
 }
 
+/**
+ * Drop single issues from the cache — ones GitHub no longer lists under this
+ * repo: transferred to another repository, or deleted. Without this a
+ * transferred issue lingers on the board for good, because an incremental
+ * `since` walk never mentions an issue that left.
+ */
+export async function deleteGithubIssues(
+  repoFullName: string,
+  numbers: readonly number[]
+): Promise<number> {
+  if (numbers.length === 0) return 0
+  const ids = numbers.map((number) => githubMirrorId(repoFullName, number))
+  const table = getDb().githubIssueMirror
+  const present = (await table.bulkGet(ids)).filter(Boolean).length
+  await table.bulkDelete(ids)
+  return present
+}
+
+/**
+ * Remove every mirrored row of a repo that is not in `keepNumbers`. Only valid
+ * after a COMPLETE, untruncated read of the repository (`state: "all"`, no
+ * `since`): anything missing from that is gone from the repo, not merely
+ * unchanged.
+ */
+export async function pruneRepoMirror(
+  repoFullName: string,
+  keepNumbers: ReadonlySet<number>
+): Promise<number> {
+  const rows = await getDb().githubIssueMirror.where("repoFullName").equals(repoFullName).toArray()
+  const stale = rows.filter((row) => !keepNumbers.has(row.number)).map((row) => row.number)
+  return deleteGithubIssues(repoFullName, stale)
+}
+
 /** Most recent `updatedAt` seen for a repo, for the next `since` watermark. */
 export async function latestMirroredUpdate(repoFullName: string): Promise<number | undefined> {
   const rows = await getDb().githubIssueMirror.where("repoFullName").equals(repoFullName).toArray()

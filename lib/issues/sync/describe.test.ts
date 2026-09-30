@@ -66,7 +66,9 @@ describe("summarizeSync", () => {
         outcomes: [outcome({ created: 2, conflicts: 1 }), outcome({ pushed: 3, queued: 1 })],
         mirror: {
           repoCount: 1,
-          results: [{ repoFullName: "o/m", written: 4, notModified: false, truncated: false }],
+          results: [
+            { repoFullName: "o/m", written: 4, removed: 0, notModified: false, truncated: false },
+          ],
           failures: [],
         },
       })

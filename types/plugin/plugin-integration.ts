@@ -69,6 +69,23 @@ export interface IntegrationInboxProjectionDef {
   titlePointer: string
   bodyPointer: string
   urlPointer?: string
+  /**
+   * Pointers tried, in order, before `bodyPointer` / `urlPointer`. One thread
+   * collects several event kinds whose text lives in different places — a pull
+   * request thread carries the PR itself (`/pull_request/body`), its reviews
+   * (`/review/body`) and its line comments (`/comment/body`) — and without
+   * these every review would be projected as the PR description again.
+   */
+  bodyFallbackPointers?: string[]
+  urlFallbackPointers?: string[]
+  /**
+   * Join another projection's thread when `whenPointer` is present in the
+   * payload. GitHub delivers a comment on a pull request as `issue_comment`
+   * with `/issue/pull_request` set; keyed by `/issue/number` alone it opened a
+   * second inbox thread beside the pull request's own. With an alias it lands
+   * in the thread `projectionId` keeps for that same key.
+   */
+  threadAlias?: { whenPointer: string; projectionId: string }
 }
 
 export type IntegrationSignatureEncoding = "hex" | "base64"
@@ -291,6 +308,12 @@ export interface IntegrationIngressEndpoint {
   /** Opaque host keyring handle; never the webhook secret itself. */
   secretHandle: string
   enabled: boolean
+  /**
+   * Public https base that forwards to this device's ingress listener (a
+   * tunnel or reverse proxy). The listener binds to loopback, so without this
+   * no remote sender can reach the endpoint and nothing is pushed to one.
+   */
+  publicBaseUrl?: string
   createdAt: string
   updatedAt: string
 }
@@ -466,6 +489,13 @@ export interface PluginIntegrationsAPI {
   executeAction(input: ExecuteIntegrationActionInput): Promise<IntegrationActionJob>
   getActionJob(jobId: string): Promise<IntegrationActionJob | undefined>
   cancelAction(jobId: string): Promise<IntegrationActionJob>
+  /**
+   * `input` is an absolute URL. For a bot binding ref it may instead be a path
+   * relative to the bound account's API root (`/repos/o/r`, `/user`), which the
+   * host resolves against that account's deployment (github.com or a GitHub
+   * Enterprise server, ADR-0176). Either way the request stays scoped to the
+   * binding's repository.
+   */
   authenticatedRequest<T = unknown>(
     connectorAccountId: IntegrationAccountRef,
     input: string,

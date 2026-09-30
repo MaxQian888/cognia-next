@@ -1,9 +1,46 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { IntegrationsHub } from "./integrations-hub"
 
 let mockPlatform = "tauri"
 let mockHasEntries = true
 let mockAccounts: unknown[] = []
+let mockEntries: unknown[] | undefined
+
+const mockConfigureRepoWebhook = jest.fn()
+const mockRotateAppWebhook = jest.fn()
+const mockCreateSubscription = jest.fn()
+const mockGetAccount = jest.fn()
+const mockUpdateAccount = jest.fn()
+
+jest.mock("@/lib/integrations/ingress-client", () => ({
+  ...jest.requireActual("@/lib/integrations/ingress-client"),
+  getIntegrationIngressPublicUrl: async (routeId: string) =>
+    `http://127.0.0.1:4455/integration/${routeId}`,
+  listIntegrationIngressDeadletters: async () => [],
+  syncIntegrationIngressRoutes: async () => 0,
+}))
+jest.mock("@/lib/integrations/github-repo-webhook", () => ({
+  ...jest.requireActual("@/lib/integrations/github-repo-webhook"),
+  configureGithubRepoWebhook: (...args: unknown[]) => mockConfigureRepoWebhook(...args),
+}))
+jest.mock("@/lib/integrations/github-webhook", () => ({
+  rotateGithubWebhookSecret: (...args: unknown[]) => mockRotateAppWebhook(...args),
+}))
+jest.mock("@/lib/integrations/providers", () => ({
+  checkIntegrationAccountHealth: jest.fn(),
+  listIntegrationResources: async () => ({
+    items: [{ kind: "repository", id: "acme/app", name: "acme/app" }],
+  }),
+}))
+jest.mock("@/lib/credentials/keyring-store", () => ({
+  createKeyringStore: () => ({ save: async () => undefined }),
+}))
+jest.mock("@/lib/db/integrations", () => ({
+  ...jest.requireActual("@/lib/db/integrations"),
+  createIntegrationSubscription: (...args: unknown[]) => mockCreateSubscription(...args),
+  getIntegrationAccount: (...args: unknown[]) => mockGetAccount(...args),
+  updateIntegrationAccount: (...args: unknown[]) => mockUpdateAccount(...args),
+}))
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => [mockAccounts, [], [], []],
@@ -15,7 +52,7 @@ jest.mock("@/lib/platform/detect", () => ({
 jest.mock("@/lib/integrations/registry", () => ({
   getIntegrationRegistryRevision: () => 1,
   subscribeIntegrationRegistry: () => () => undefined,
-  listRegisteredIntegrationEntries: () => (mockHasEntries ? MOCK_ENTRIES : []),
+  listRegisteredIntegrationEntries: () => mockEntries ?? (mockHasEntries ? MOCK_ENTRIES : []),
 }))
 
 const MOCK_ENTRIES = [
@@ -67,6 +104,170 @@ beforeEach(() => {
   mockPlatform = "tauri"
   mockHasEntries = true
   mockAccounts = []
+  mockEntries = undefined
+  jest.clearAllMocks()
+})
+
+const GITHUB_ENTRY = {
+  pluginId: "github-delivery",
+  definition: {
+    id: "github",
+    label: "GitHub",
+    description: "GitHub",
+    authStrategies: [],
+    resourceKinds: ["repository"],
+    resourceProvider: { handler: "listGithubResources", kinds: ["repository"] },
+    eventTypes: [{ id: "issues.closed", label: "issues.closed" }],
+    actions: [],
+    ingress: {
+      normalizer: "normalizeGithub",
+      verification: { type: "hmac-sha256", signatureHeader: "x-hub-signature-256" },
+    },
+  },
+}
+
+function githubAccount(over: Record<string, unknown> = {}) {
+  return {
+    id: "acc-gh",
+    pluginId: "github-delivery",
+    integrationId: "github",
+    providerId: "github-pat",
+    authSessionId: "s",
+    label: "octocat",
+    enabled: true,
+    health: "healthy",
+    ingressEndpoint: {
+      id: "ep",
+      accountId: "acc-gh",
+      routeId: "route-1",
+      secretHandle: "h",
+      enabled: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+    ...over,
+  }
+}
+
+describe("IntegrationsHub webhook delivery", () => {
+  it("says the listener is local-only until a public URL is configured", async () => {
+    mockEntries = [GITHUB_ENTRY]
+    mockAccounts = [githubAccount()]
+    render(<IntegrationsHub />)
+    expect(
+      await screen.findByText("Local listener: http://127.0.0.1:4455/integration/route-1")
+    ).toBeInTheDocument()
+    expect(screen.getByText(/only accepts connections from this device/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Webhook URL:/)).not.toBeInTheDocument()
+  })
+
+  it("shows the public delivery URL once one is configured", async () => {
+    mockEntries = [GITHUB_ENTRY]
+    const account = githubAccount()
+    mockAccounts = [
+      {
+        ...account,
+        ingressEndpoint: { ...account.ingressEndpoint, publicBaseUrl: "https://hooks.example.com" },
+      },
+    ]
+    render(<IntegrationsHub />)
+    expect(
+      await screen.findByText("Webhook URL: https://hooks.example.com/integration/route-1")
+    ).toBeInTheDocument()
+  })
+
+  it("configures the repository webhook for a PAT account at the public URL", async () => {
+    mockEntries = [GITHUB_ENTRY]
+    const account = githubAccount()
+    mockAccounts = [account]
+    const withBase = {
+      ...account,
+      ingressEndpoint: { ...account.ingressEndpoint, publicBaseUrl: "https://hooks.example.com" },
+    }
+    mockGetAccount.mockResolvedValueOnce(account).mockResolvedValueOnce(withBase)
+    mockCreateSubscription.mockResolvedValue({})
+    mockConfigureRepoWebhook.mockResolvedValue({ status: "created", hookId: 1, events: [] })
+    render(<IntegrationsHub />)
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
+      target: { value: "acc-gh" },
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Discover" }))
+    await screen.findByRole("option", { name: "acme/app" })
+    fireEvent.change(screen.getByLabelText("Repository"), { target: { value: "acme/app" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Issue closed" }))
+    fireEvent.change(screen.getByLabelText("Webhook secret (required when ingress is enabled)"), {
+      target: { value: "shh" },
+    })
+    fireEvent.change(screen.getByLabelText("Public webhook URL (tunnel or reverse proxy)"), {
+      target: { value: "hooks.example.com" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add subscription" }))
+    })
+
+    await waitFor(() =>
+      expect(mockConfigureRepoWebhook).toHaveBeenCalledWith({
+        account: withBase,
+        repoFullName: "acme/app",
+        webhookUrl: "https://hooks.example.com/integration/route-1",
+        eventTypes: ["issues.closed"],
+      })
+    )
+    expect(mockUpdateAccount).toHaveBeenCalledWith(
+      "github-delivery",
+      "acc-gh",
+      expect.objectContaining({
+        ingressEndpoint: expect.objectContaining({ publicBaseUrl: "https://hooks.example.com" }),
+      })
+    )
+    expect(mockRotateAppWebhook).not.toHaveBeenCalled()
+    expect(
+      await screen.findByText(
+        "The webhook for acme/app is configured and will deliver the selected events."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("refuses a private public-URL before saving anything", async () => {
+    mockEntries = [GITHUB_ENTRY]
+    mockAccounts = [githubAccount()]
+    render(<IntegrationsHub />)
+    fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
+      target: { value: "acc-gh" },
+    })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Issue closed" }))
+    fireEvent.change(screen.getByLabelText("Public webhook URL (tunnel or reverse proxy)"), {
+      target: { value: "http://192.168.1.2:8080" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add subscription" }))
+    })
+    expect(await screen.findByText(/must be an https address on a public host/)).toBeInTheDocument()
+    expect(mockCreateSubscription).not.toHaveBeenCalled()
+  })
+
+  it("does not push anything to GitHub without a public URL", async () => {
+    mockEntries = [GITHUB_ENTRY]
+    const account = githubAccount({ providerId: "github-app", dedicatedAppConfirmed: true })
+    mockAccounts = [account]
+    mockGetAccount.mockResolvedValue(account)
+    mockCreateSubscription.mockResolvedValue({})
+    render(<IntegrationsHub />)
+    fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
+      target: { value: "acc-gh" },
+    })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Issue closed" }))
+    fireEvent.change(screen.getByLabelText("Webhook secret (required when ingress is enabled)"), {
+      target: { value: "shh" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add subscription" }))
+    })
+    expect(await screen.findByText(/GitHub was not configured/)).toBeInTheDocument()
+    expect(mockRotateAppWebhook).not.toHaveBeenCalled()
+    expect(mockConfigureRepoWebhook).not.toHaveBeenCalled()
+  })
 })
 
 describe("IntegrationsHub", () => {

@@ -644,6 +644,147 @@ export const generateChangelog: IntegrationActionHandler = async (input, context
   }
 }
 
+/** Pages a read action walks at most (100 items each). */
+const MAX_READ_PAGES = 10
+/** How far back `createIssue` looks for its own earlier POST when a retry arrives. */
+const CREATE_ISSUE_RECOVERY_MS = 15 * 60_000
+
+async function readAllPages<T>(
+  context: IntegrationActionHandlerContext,
+  path: string,
+  pick: (data: unknown) => T[] = (data) => (Array.isArray(data) ? (data as T[]) : [])
+): Promise<{ items: T[]; truncated: boolean }> {
+  const items: T[] = []
+  const separator = path.includes("?") ? "&" : "?"
+  for (let page = 1; page <= MAX_READ_PAGES; page += 1) {
+    const response = await githubRequest<unknown>(
+      context,
+      `${path}${separator}per_page=100&page=${page}`
+    )
+    items.push(...pick(response.data))
+    if (!nextCursor(response.headers.link)) return { items, truncated: false }
+  }
+  return { items, truncated: true }
+}
+
+/**
+ * Open an issue. A write, so it waits in the approval queue like every other.
+ *
+ * A retry after a lost response (a 502 from GitHub after it created the issue)
+ * must not open a second one: before POSTing, the newest issues are checked
+ * for one with exactly this title and body opened in the last few minutes, and
+ * that one is returned instead.
+ */
+export const createIssue: IntegrationActionHandler = async (input, context) => {
+  const repository = repo(input)
+  const title = requiredString(input, "title")
+  const body = typeof input.body === "string" ? input.body : ""
+  const recent = await githubRequest<
+    Array<{ title?: string; body?: string | null; created_at?: string; pull_request?: unknown }>
+  >(context, `/repos/${repository}/issues?state=all&sort=created&direction=desc&per_page=30`)
+  const cutoff = Date.now() - CREATE_ISSUE_RECOVERY_MS
+  const existing = recent.data.find(
+    (issue) =>
+      !issue.pull_request &&
+      issue.title === title &&
+      (issue.body ?? "") === body &&
+      Date.parse(issue.created_at ?? "") >= cutoff
+  )
+  if (existing) return existing
+  return actionRequest(context, input, "/issues", "POST", {
+    title,
+    ...(body ? { body } : {}),
+    ...(Array.isArray(input.labels) ? { labels: input.labels } : {}),
+    ...(Array.isArray(input.assignees) ? { assignees: input.assignees } : {}),
+    ...(typeof input.milestone === "number" ? { milestone: input.milestone } : {}),
+  })
+}
+
+/** One issue (or pull request, which GitHub also serves here) as GitHub has it now. */
+export const getIssue: IntegrationActionHandler = (input, context) =>
+  actionRequest(context, input, `/issues/${positiveInteger(input, "issueNumber")}`, "GET")
+
+/** One pull request, including `mergeable` / `mergeable_state` and its head SHA. */
+export const getPullRequest: IntegrationActionHandler = (input, context) =>
+  actionRequest(context, input, `/pulls/${positiveInteger(input, "prNumber")}`, "GET")
+
+/**
+ * CI for a commit, branch or tag: the combined legacy status and every check
+ * run, summarised as one `state` a workflow can branch on (`success`,
+ * `failure`, `pending`, or `none` when nothing reports on the ref).
+ */
+export const getCommitStatus: IntegrationActionHandler = async (input, context) => {
+  const ref = encodeURIComponent(requiredString(input, "ref"))
+  const repository = repo(input)
+  const combined = await githubRequest<{
+    state?: string
+    statuses?: Array<{ context?: string; state?: string }>
+  }>(context, `/repos/${repository}/commits/${ref}/status`)
+  const checks = await readAllPages<{ name?: string; status?: string; conclusion?: string | null }>(
+    context,
+    `/repos/${repository}/commits/${ref}/check-runs`,
+    (data) =>
+      Array.isArray((data as { check_runs?: unknown } | null)?.check_runs)
+        ? ((data as { check_runs: never[] }).check_runs as never[])
+        : []
+  )
+  const statuses = combined.data.statuses ?? []
+  const failed =
+    statuses.some((status) => status.state === "failure" || status.state === "error") ||
+    checks.items.some((check) =>
+      ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(
+        check.conclusion ?? ""
+      )
+    )
+  const pending =
+    statuses.some((status) => status.state === "pending") ||
+    checks.items.some((check) => check.status !== "completed")
+  const state =
+    statuses.length === 0 && checks.items.length === 0
+      ? "none"
+      : failed
+        ? "failure"
+        : pending
+          ? "pending"
+          : "success"
+  return { state, statuses, checkRuns: checks.items, truncated: checks.truncated }
+}
+
+/** An issue's (or pull request's) conversation comments, oldest first. */
+export const listIssueComments: IntegrationActionHandler = async (input, context) => {
+  const since =
+    typeof input.since === "string" && !Number.isNaN(Date.parse(input.since))
+      ? `?since=${encodeURIComponent(new Date(input.since).toISOString())}`
+      : ""
+  const result = await readAllPages<unknown>(
+    context,
+    `/repos/${repo(input)}/issues/${positiveInteger(input, "issueNumber")}/comments${since}`
+  )
+  return { comments: result.items, truncated: result.truncated }
+}
+
+/**
+ * GitHub issue search, confined to the action's repository: the `repo:`
+ * qualifier is always added by the host-side handler, so a query cannot reach
+ * outside the repository this action is scoped to. One page (up to 100).
+ */
+export const searchIssues: IntegrationActionHandler = async (input, context) => {
+  const repository = repo(input)
+  const query = requiredString(input, "query")
+  if (/(^|\s)(repo|org|user):/i.test(query)) {
+    throw new Error("searchIssues is scoped to repoFullName; remove repo:/org:/user: qualifiers")
+  }
+  const perPage =
+    typeof input.limit === "number" && Number.isInteger(input.limit)
+      ? Math.min(Math.max(input.limit, 1), 100)
+      : 30
+  const response = await githubRequest<{ total_count?: number; items?: unknown[] }>(
+    context,
+    `/search/issues?q=${encodeURIComponent(`repo:${repository} ${query}`)}&per_page=${perPage}`
+  )
+  return { totalCount: response.data.total_count ?? 0, items: response.data.items ?? [] }
+}
+
 /** The host replaces this export with its allowlisted first-party Issue Loop executor. */
 export const runIssueLoop: IntegrationActionHandler = async () => {
   throw new Error("GitHub Issue Loop host executor is unavailable")
@@ -781,6 +922,59 @@ const actionDefinitions = [
     },
   },
   {
+    id: "createIssue",
+    handler: "createIssue",
+    risk: "write",
+    required: ["repoFullName", "title"],
+    properties: {
+      ...repoProperty,
+      title: { type: "string", minLength: 1 },
+      body: { type: "string" },
+      labels: { type: "array", items: { type: "string" } },
+      assignees: { type: "array", items: { type: "string" } },
+      milestone: { type: "integer", minimum: 1 },
+    },
+  },
+  {
+    id: "getIssue",
+    handler: "getIssue",
+    risk: "read",
+    required: ["repoFullName", "issueNumber"],
+    properties: issueProperty,
+  },
+  {
+    id: "getPullRequest",
+    handler: "getPullRequest",
+    risk: "read",
+    required: ["repoFullName", "prNumber"],
+    properties: prProperty,
+  },
+  {
+    id: "getCommitStatus",
+    handler: "getCommitStatus",
+    risk: "read",
+    required: ["repoFullName", "ref"],
+    properties: { ...repoProperty, ref: { type: "string", minLength: 1 } },
+  },
+  {
+    id: "listIssueComments",
+    handler: "listIssueComments",
+    risk: "read",
+    required: ["repoFullName", "issueNumber"],
+    properties: { ...issueProperty, since: { type: "string" } },
+  },
+  {
+    id: "searchIssues",
+    handler: "searchIssues",
+    risk: "read",
+    required: ["repoFullName", "query"],
+    properties: {
+      ...repoProperty,
+      query: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+    },
+  },
+  {
     id: "createRelease",
     handler: "createRelease",
     risk: "destructive",
@@ -824,6 +1018,13 @@ const actionDefinitions = [
   },
 ] as const
 
+/**
+ * Every repository event the host accepts. A delivery whose `event.action` is
+ * not declared here is refused by `publishIntegrationEvent`, nacked, retried
+ * and dead-lettered — so an App subscribed to more than this list fills the
+ * dead-letter queue rather than being ignored. Events without an `action`
+ * field (`push`, `status`, `create`, `delete`) are `<event>.received`.
+ */
 const repositoryEvents = [
   "pull_request.opened",
   "pull_request.synchronize",
@@ -835,21 +1036,38 @@ const repositoryEvents = [
   "pull_request.labeled",
   "pull_request.unlabeled",
   "pull_request.review_requested",
+  "pull_request.review_request_removed",
+  "pull_request.assigned",
+  "pull_request.unassigned",
   "issues.opened",
   "issues.closed",
   "issues.reopened",
   "issues.edited",
   "issues.unlabeled",
   "issues.assigned",
+  "issues.unassigned",
   "issues.labeled",
+  "issues.milestoned",
+  "issues.demilestoned",
+  "issues.transferred",
+  "issues.deleted",
   "issue_comment.created",
+  "issue_comment.edited",
+  "issue_comment.deleted",
   "check_run.completed",
   "check_suite.completed",
+  "status.received",
   "workflow_run.completed",
   "workflow_job.completed",
   "pull_request_review.submitted",
+  "pull_request_review_comment.created",
+  "pull_request_review_comment.edited",
+  "pull_request_review_comment.deleted",
+  "release.created",
   "release.published",
   "push.received",
+  "create.received",
+  "delete.received",
 ] as const
 const lifecycleEvents = [
   "installation.created",
@@ -957,10 +1175,16 @@ export const githubIntegration: PluginIntegrationDef = {
     {
       id: "pull-request-thread",
       label: "Pull request thread",
+      // `pull_request.*`, `pull_request_review.*` and
+      // `pull_request_review_comment.*`: one conversation per pull request.
       eventTypes: repositoryEvents.filter((id) => id.startsWith("pull_request")),
       threadKeyPointer: "/pull_request/number",
       titlePointer: "/pull_request/title",
+      // A line comment's text is `/comment/body`, a review's `/review/body`;
+      // only the PR's own events fall through to its description.
+      bodyFallbackPointers: ["/comment/body", "/review/body"],
       bodyPointer: "/pull_request/body",
+      urlFallbackPointers: ["/comment/html_url", "/review/html_url"],
       urlPointer: "/pull_request/html_url",
     },
     {
@@ -980,6 +1204,10 @@ export const githubIntegration: PluginIntegrationDef = {
       titlePointer: "/issue/title",
       bodyPointer: "/comment/body",
       urlPointer: "/comment/html_url",
+      // GitHub sends a pull request's conversation comments as
+      // `issue_comment` with `/issue/pull_request` set, keyed by the same
+      // number. They belong in the pull request's thread, not a second one.
+      threadAlias: { whenPointer: "/issue/pull_request", projectionId: "pull-request-thread" },
     },
   ],
   actions: actionDefinitions.map((action) => ({

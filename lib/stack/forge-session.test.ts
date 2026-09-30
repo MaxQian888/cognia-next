@@ -104,6 +104,25 @@ describe("openStackForge", () => {
     expect(forge).toMatchObject({ status: "ready", repository: "acme/app", remote: "origin" })
   })
 
+  it("resolves the credential for the enterprise host the remote matched, not github.com", async () => {
+    // The regression: the remote was matched to the GHES host, then the
+    // octokit was minted from a bare `owner/name` — github.com's REST root and
+    // github.com's token, against a repository that does not live there.
+    const ghe = parseGithubHost("https://github.acme.com")!
+    const seen: Array<[string, GithubHost]> = []
+    await openStackForge("/repo", {
+      ...deps({
+        remotes: [remote("origin", "https://github.acme.com/acme/app.git")],
+        hosts: [GITHUB_DOT_COM, ghe],
+      }),
+      octokit: async (repository, host) => {
+        seen.push([repository, host])
+        return octokit
+      },
+    })
+    expect(seen).toEqual([["acme/app", ghe]])
+  })
+
   it("still refuses an enterprise host nobody configured", async () => {
     const forge = await openStackForge(
       "/repo",

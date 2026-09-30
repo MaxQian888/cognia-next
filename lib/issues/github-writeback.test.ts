@@ -1,4 +1,5 @@
 import {
+  createGithubIssue,
   GITHUB_DELIVERY_PLUGIN_ID,
   GITHUB_INTEGRATION_ID,
   GithubWritebackError,
@@ -196,5 +197,64 @@ describe("runGithubWriteback", () => {
     ).catch((cause) => cause)
 
     expect(error).toBeInstanceOf(GithubWritebackError)
+  })
+})
+
+describe("createGithubIssue", () => {
+  const input = {
+    repoFullName: "acme/app",
+    title: "Crash on save",
+    body: "Steps",
+    idempotencyKey: "issue-publish:i1:acme/app",
+  }
+
+  it("runs createIssue, approves it in the same step and returns the new issue", async () => {
+    const execute = jest.fn().mockResolvedValue(job({ id: "j1", status: "awaiting_approval" }))
+    const approve = jest.fn().mockResolvedValue(
+      job({
+        id: "j1",
+        status: "succeeded",
+        output: {
+          number: 42,
+          html_url: "https://github.com/acme/app/issues/42",
+          updated_at: "2026-09-01T00:00:00Z",
+        },
+      })
+    )
+    await expect(
+      createGithubIssue(input, { resolveAccount: async () => account(), execute, approve })
+    ).resolves.toEqual({
+      repoFullName: "acme/app",
+      number: 42,
+      htmlUrl: "https://github.com/acme/app/issues/42",
+      updatedAt: Date.parse("2026-09-01T00:00:00Z"),
+    })
+    expect(execute).toHaveBeenCalledWith(GITHUB_DELIVERY_PLUGIN_ID, {
+      integrationId: GITHUB_INTEGRATION_ID,
+      accountId: "acct-1",
+      actionId: "createIssue",
+      input: { repoFullName: "acme/app", title: "Crash on save", body: "Steps" },
+      source: "manual",
+      idempotencyKey: "issue-publish:i1:acme/app",
+    })
+    expect(approve).toHaveBeenCalledWith("j1")
+  })
+
+  it("refuses without an account, and when GitHub did not create anything", async () => {
+    await expect(
+      createGithubIssue(input, { resolveAccount: async () => null, execute: jest.fn() })
+    ).rejects.toMatchObject({ code: "no-account" })
+    await expect(
+      createGithubIssue(input, {
+        resolveAccount: async () => account(),
+        execute: jest.fn().mockResolvedValue(job({ status: "failed", error: "422 Validation" })),
+      })
+    ).rejects.toMatchObject({ code: "rejected", message: "422 Validation" })
+    await expect(
+      createGithubIssue(input, {
+        resolveAccount: async () => account(),
+        execute: jest.fn().mockRejectedValue(new Error("Integration is not registered")),
+      })
+    ).rejects.toMatchObject({ code: "plugin-unavailable" })
   })
 })

@@ -64,6 +64,7 @@ jest.mock("@/lib/files/workspace-fs", () => ({
 }))
 jest.mock("@/lib/integrations/action-runner", () => ({
   authenticatedIntegrationRequest: jest.fn(),
+  integrationApiBaseUrl: jest.fn(async () => undefined),
 }))
 
 const spec: BotRunWorkspaceSpec = {

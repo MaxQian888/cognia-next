@@ -75,6 +75,47 @@ describe("runGithubIssueLoop", () => {
     expect(deps.remove).toHaveBeenCalledTimes(1)
   })
 
+  it("reads, clones and opens the PR on the account's GitHub Enterprise server", async () => {
+    const deps = dependencies()
+    const ghes = { ...context, apiBaseUrl: "https://ghe.acme.io/api/v3" }
+
+    await runGithubIssueLoop(input, ghes, deps)
+
+    expect(deps.request).toHaveBeenNthCalledWith(
+      1,
+      "https://ghe.acme.io/api/v3/repos/o/r/issues/7",
+      expect.anything()
+    )
+    expect(deps.request).toHaveBeenNthCalledWith(
+      2,
+      "https://ghe.acme.io/api/v3/repos/o/r/pulls",
+      expect.objectContaining({ method: "POST" })
+    )
+    expect(deps.resolveCredential).toHaveBeenCalledWith(
+      "github-delivery",
+      "account-1",
+      "https://ghe.acme.io"
+    )
+    expect(deps.clone).toHaveBeenCalledWith(
+      expect.objectContaining({ hostUrl: "https://ghe.acme.io" })
+    )
+  })
+
+  it("targets api.github.com when the account names no deployment", async () => {
+    const deps = dependencies()
+    await runGithubIssueLoop(input, context, deps)
+    expect(deps.request).toHaveBeenNthCalledWith(
+      1,
+      "https://api.github.com/repos/o/r/issues/7",
+      expect.anything()
+    )
+    expect(deps.resolveCredential).toHaveBeenCalledWith(
+      "github-delivery",
+      "account-1",
+      "https://api.github.com"
+    )
+  })
+
   it("persists a failure checkpoint and still cleans up", async () => {
     const deps = dependencies({
       executeAgent: jest.fn(async () => Promise.reject(new Error("agent failed"))),

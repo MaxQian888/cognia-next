@@ -20,6 +20,7 @@
 import { fetchRepoIssues, type OctokitLike } from "@/lib/github/issues"
 import {
   latestMirroredUpdate,
+  pruneRepoMirror,
   repoMirrorEtag,
   upsertGithubIssues,
 } from "@/lib/db/github-issue-mirror"
@@ -29,6 +30,7 @@ export interface SyncRepoIssuesDeps {
   latestMirroredUpdate?: typeof latestMirroredUpdate
   repoMirrorEtag?: typeof repoMirrorEtag
   upsertGithubIssues?: typeof upsertGithubIssues
+  pruneRepoMirror?: typeof pruneRepoMirror
   now?: () => number
 }
 
@@ -48,6 +50,11 @@ export interface SyncRepoIssuesResult {
   repoFullName: string
   /** Rows written. Zero on a 304, and on a genuinely quiet window. */
   written: number
+  /**
+   * Rows removed because a full read no longer lists them (transferred or
+   * deleted issues). Always zero on an incremental or truncated read.
+   */
+  removed: number
   notModified: boolean
   truncated: boolean
   rateLimitRemaining?: number
@@ -70,6 +77,7 @@ export async function syncRepoIssues(
   const readWatermark = deps.latestMirroredUpdate ?? latestMirroredUpdate
   const readEtag = deps.repoMirrorEtag ?? repoMirrorEtag
   const write = deps.upsertGithubIssues ?? upsertGithubIssues
+  const prune = deps.pruneRepoMirror ?? pruneRepoMirror
   const now = deps.now ?? Date.now
 
   const [watermark, etag] = input.full
@@ -89,9 +97,18 @@ export async function syncRepoIssues(
     await write(result.rows)
   }
 
+  // A full, complete read is the only moment "not listed" means "gone": an
+  // incremental walk omits everything unchanged, and a truncated one omits
+  // whatever did not fit.
+  const removed =
+    input.full && !result.notModified && !result.truncated
+      ? await prune(input.repoFullName, new Set(result.rows.map((row) => row.number)))
+      : 0
+
   return {
     repoFullName: input.repoFullName,
     written: result.notModified ? 0 : result.rows.length,
+    removed,
     notModified: result.notModified,
     truncated: result.truncated,
     ...(result.rateLimitRemaining !== undefined

@@ -64,7 +64,7 @@ export function fixture(mode: Work["mode"] = "implement") {
     capturedAt: NOW,
   }
   const request = jest.fn(async (_binding: unknown, url: string) => {
-    const path = url.replace(`https://api.github.com/repos/${DEFAULT_REPOSITORY}`, "")
+    const path = url.replace(`/repos/${DEFAULT_REPOSITORY}`, "")
     let data: unknown
     if (path === "") data = { default_branch: "master" }
     else if (path.startsWith("/compare/"))

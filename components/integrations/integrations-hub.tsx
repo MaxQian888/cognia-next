@@ -53,6 +53,11 @@ import {
 } from "@/lib/integrations/github-auth"
 import { detectPlatform } from "@/lib/platform/detect"
 import { rotateGithubWebhookSecret } from "@/lib/integrations/github-webhook"
+import {
+  configureGithubRepoWebhook,
+  GithubRepoWebhookError,
+} from "@/lib/integrations/github-repo-webhook"
+import { normalizePublicBaseUrl, toPublicWebhookUrl } from "@/lib/integrations/webhook-url"
 import type {
   IntegrationIngressDeadLetter,
   IntegrationResourceRef,
@@ -98,6 +103,24 @@ const GITHUB_EVENT_TRANSLATIONS = {
   "installation_repositories.added": "subscriptions.eventLabels.repositoriesAdded",
   "installation_repositories.removed": "subscriptions.eventLabels.repositoriesRemoved",
   "issue_comment.created": "subscriptions.eventLabels.issueCommentCreated",
+  "issue_comment.edited": "subscriptions.eventLabels.issueCommentEdited",
+  "issue_comment.deleted": "subscriptions.eventLabels.issueCommentDeleted",
+  "issues.unassigned": "subscriptions.eventLabels.issueUnassigned",
+  "issues.milestoned": "subscriptions.eventLabels.issueMilestoned",
+  "issues.demilestoned": "subscriptions.eventLabels.issueDemilestoned",
+  "issues.transferred": "subscriptions.eventLabels.issueTransferred",
+  "issues.deleted": "subscriptions.eventLabels.issueDeleted",
+  "pull_request.assigned": "subscriptions.eventLabels.pullRequestAssigned",
+  "pull_request.unassigned": "subscriptions.eventLabels.pullRequestUnassigned",
+  "pull_request.review_request_removed":
+    "subscriptions.eventLabels.pullRequestReviewRequestRemoved",
+  "pull_request_review_comment.created": "subscriptions.eventLabels.reviewCommentCreated",
+  "pull_request_review_comment.edited": "subscriptions.eventLabels.reviewCommentEdited",
+  "pull_request_review_comment.deleted": "subscriptions.eventLabels.reviewCommentDeleted",
+  "status.received": "subscriptions.eventLabels.statusReceived",
+  "create.received": "subscriptions.eventLabels.refCreated",
+  "delete.received": "subscriptions.eventLabels.refDeleted",
+  "release.created": "subscriptions.eventLabels.releaseCreated",
   "issues.assigned": "subscriptions.eventLabels.issueAssigned",
   "issues.closed": "subscriptions.eventLabels.issueClosed",
   "issues.labeled": "subscriptions.eventLabels.issueLabeled",
@@ -110,6 +133,15 @@ const GITHUB_EVENT_TRANSLATIONS = {
   "push.received": "subscriptions.eventLabels.pushReceived",
   "release.published": "subscriptions.eventLabels.releasePublished",
 } as const
+
+const REPO_WEBHOOK_ERROR_TRANSLATIONS: Record<GithubRepoWebhookError["code"], string> = {
+  "not-pat": "subscriptions.repoWebhookErrors.failed",
+  "not-public": "subscriptions.webhookNeedsPublicUrl",
+  "no-endpoint": "subscriptions.repoWebhookErrors.failed",
+  "no-secret": "subscriptions.repoWebhookErrors.noSecret",
+  forbidden: "subscriptions.repoWebhookErrors.forbidden",
+  failed: "subscriptions.repoWebhookErrors.failed",
+}
 
 const GITHUB_PROJECTION_TRANSLATIONS = {
   "issue-comment-thread": "subscriptions.projectionLabels.issueCommentThread",
@@ -157,6 +189,8 @@ export function IntegrationsHub() {
   const [inboxEnabled, setInboxEnabled] = useState(false)
   const [projectionId, setProjectionId] = useState("")
   const [ingressSecret, setIngressSecret] = useState("")
+  const [publicBaseUrl, setPublicBaseUrl] = useState("")
+  const [notice, setNotice] = useState<string>()
   const [ingressUrls, setIngressUrls] = useState<Record<string, string>>({})
   const [deadletters, setDeadletters] = useState<IntegrationIngressDeadLetter[]>([])
   const [busy, setBusy] = useState(false)
@@ -297,8 +331,15 @@ export function IntegrationsHub() {
       setError(t("errors.projectionRequired"))
       return
     }
+    const typedBase = publicBaseUrl.trim()
+    const normalizedBase = typedBase ? normalizePublicBaseUrl(typedBase) : undefined
+    if (typedBase && !normalizedBase) {
+      setError(t("errors.publicUrlInvalid"))
+      return
+    }
     setBusy(true)
     setError(undefined)
+    setNotice(undefined)
     try {
       let ingressSecretHandle: string | undefined
       if (subscriptionEntry?.definition.ingress) {
@@ -316,21 +357,58 @@ export function IntegrationsHub() {
         ingressSecretHandle,
       })
       await syncIntegrationIngressRoutes()
-      const refreshedAccount = await getIntegrationAccount(
+      let refreshedAccount = await getIntegrationAccount(
         subscriptionAccount.pluginId,
         subscriptionAccount.id
       )
-      if (
-        refreshedAccount?.providerId === "github-app" &&
-        refreshedAccount.dedicatedAppConfirmed &&
-        refreshedAccount.ingressEndpoint &&
-        ingressSecret
-      ) {
-        const webhookUrl = await getIntegrationIngressPublicUrl(
-          refreshedAccount.ingressEndpoint.routeId
+      if (refreshedAccount?.ingressEndpoint && normalizedBase) {
+        await updateIntegrationAccount(refreshedAccount.pluginId, refreshedAccount.id, {
+          ingressEndpoint: {
+            ...refreshedAccount.ingressEndpoint,
+            publicBaseUrl: normalizedBase,
+            updatedAt: new Date().toISOString(),
+          },
+        })
+        refreshedAccount = await getIntegrationAccount(
+          refreshedAccount.pluginId,
+          refreshedAccount.id
         )
-        if (webhookUrl) {
+      }
+      const endpoint = refreshedAccount?.ingressEndpoint
+      if (refreshedAccount && endpoint && refreshedAccount.pluginId === "github-delivery") {
+        // The listener binds to loopback; GitHub needs the public URL that
+        // forwards to it. Nothing is pushed to GitHub without one.
+        const webhookUrl = toPublicWebhookUrl(
+          await getIntegrationIngressPublicUrl(endpoint.routeId),
+          endpoint.publicBaseUrl
+        )
+        if (!webhookUrl) {
+          setNotice(t("subscriptions.webhookNeedsPublicUrl"))
+        } else if (
+          refreshedAccount.providerId === "github-app" &&
+          refreshedAccount.dedicatedAppConfirmed &&
+          ingressSecret
+        ) {
           await rotateGithubWebhookSecret(refreshedAccount, webhookUrl, ingressSecret)
+        } else if (refreshedAccount.providerId === "github-pat") {
+          if (!resourceId) {
+            setNotice(t("subscriptions.patWebhookNeedsRepository", { url: webhookUrl }))
+          } else {
+            try {
+              const configured = await configureGithubRepoWebhook({
+                account: refreshedAccount,
+                repoFullName: resourceId,
+                webhookUrl,
+                eventTypes: selectedEvents,
+              })
+              if (configured.status !== "skipped") {
+                setNotice(t("subscriptions.repoWebhookConfigured", { repository: resourceId }))
+              }
+            } catch (cause) {
+              const code = cause instanceof GithubRepoWebhookError ? cause.code : "failed"
+              setError(t(REPO_WEBHOOK_ERROR_TRANSLATIONS[code], { repository: resourceId }))
+            }
+          }
         }
       }
       setResourceId("")
@@ -338,6 +416,7 @@ export function IntegrationsHub() {
       setInboxEnabled(false)
       setProjectionId("")
       setIngressSecret("")
+      setPublicBaseUrl("")
     } catch {
       setError(t("errors.subscriptionSetup"))
     } finally {
@@ -414,6 +493,11 @@ export function IntegrationsHub() {
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {notice && (
+            <Alert>
+              <AlertDescription>{notice}</AlertDescription>
             </Alert>
           )}
 
@@ -684,11 +768,30 @@ export function IntegrationsHub() {
                           </div>
                         </div>
                         <div className="grid gap-1 text-xs text-muted-foreground">
-                          {ingressUrls[account.id] && (
-                            <p>
-                              {t("accounts.webhookUrl")}: {ingressUrls[account.id]}
-                            </p>
-                          )}
+                          {ingressUrls[account.id] &&
+                            (() => {
+                              const publicUrl = toPublicWebhookUrl(
+                                ingressUrls[account.id],
+                                account.ingressEndpoint?.publicBaseUrl
+                              )
+                              return publicUrl ? (
+                                <>
+                                  <p>
+                                    {t("accounts.webhookUrl")}: {publicUrl}
+                                  </p>
+                                  <p>
+                                    {t("accounts.localListener")}: {ingressUrls[account.id]}
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p>
+                                    {t("accounts.localListener")}: {ingressUrls[account.id]}
+                                  </p>
+                                  <p>{t("accounts.webhookLocalOnly")}</p>
+                                </>
+                              )
+                            })()}
                           <p>
                             {t("accounts.webhookVerification")}:{" "}
                             {account.ingressEndpoint
@@ -855,13 +958,31 @@ export function IntegrationsHub() {
                         </>
                       )}
                       {subscriptionEntry?.definition.ingress && (
-                        <Input
-                          type="password"
-                          aria-label={t("subscriptions.ingressSecret")}
-                          placeholder={t("subscriptions.ingressSecret")}
-                          value={ingressSecret}
-                          onChange={(event) => setIngressSecret(event.target.value)}
-                        />
+                        <>
+                          <Input
+                            type="password"
+                            aria-label={t("subscriptions.ingressSecret")}
+                            placeholder={t("subscriptions.ingressSecret")}
+                            value={ingressSecret}
+                            onChange={(event) => setIngressSecret(event.target.value)}
+                          />
+                          <div className="grid gap-1">
+                            <Input
+                              aria-label={t("subscriptions.publicBaseUrl")}
+                              placeholder={
+                                subscriptionAccount?.ingressEndpoint?.publicBaseUrl ??
+                                t("subscriptions.publicBaseUrlPlaceholder")
+                              }
+                              value={publicBaseUrl}
+                              onChange={(event) => setPublicBaseUrl(event.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              {subscriptionAccount?.providerId === "github-pat"
+                                ? t("subscriptions.publicBaseUrlHintPat")
+                                : t("subscriptions.publicBaseUrlHint")}
+                            </p>
+                          </div>
+                        </>
                       )}
                       <Button
                         type="submit"

@@ -358,9 +358,9 @@
     "newLayerBranch": "Branch name",
     "create": "Create layer",
     "forge": {
-      "noCredential": "No GitHub credential for {repository}. Sign in with `gh auth login` and try again.",
+      "noCredential": "No GitHub credential for {repository}. Connect a GitHub account in Settings → Connections, or sign in with `gh auth login`, and try again.",
       "noRemote": "This repository has no remote that hosts pull requests.",
-      "unsupportedHost": "{host} is not a forge Cognia can publish to yet — only github.com."
+      "unsupportedHost": "{host} is not a forge Cognia can publish to yet. A GitHub Enterprise server needs an account on it connected in Settings → Connections first."
     },
     "mergeBlocked": {
       "changesRequested": "a reviewer requested changes",

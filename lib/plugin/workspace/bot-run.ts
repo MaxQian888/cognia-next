@@ -9,7 +9,10 @@ import { getDb } from "@/lib/db/schema"
 import { assertBotPublicationAuthority } from "@/lib/bot/policy/run-authority"
 import { gitDiffRefsFiles, gitStatus, gitReadBlobAtRef, gitLog } from "@/lib/git/commands"
 import { readWorkspaceFile, statWorkspaceFile, writeWorkspaceFile } from "@/lib/files/workspace-fs"
-import { authenticatedIntegrationRequest } from "@/lib/integrations/action-runner"
+import {
+  authenticatedIntegrationRequest,
+  integrationApiBaseUrl,
+} from "@/lib/integrations/action-runner"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { updateBotInstallation } from "@/lib/db/bot-installations"
 
@@ -297,7 +300,10 @@ export async function publishBotWorkspace(
     return previous.output as { branch: string; headSha: string }
   const current = await captureBotWorkspace(pluginId, handle)
   if (current.id !== snapshot.id) throw new Error("Workspace changed after approval")
-  const prefix = `https://api.github.com/repos/${owned.binding.repository}`
+  // ADR-0176: the bound account's own deployment, not always api.github.com.
+  const apiBaseUrl =
+    (await integrationApiBaseUrl(owned.binding.account)) ?? "https://api.github.com"
+  const prefix = `${apiBaseUrl}/repos/${owned.binding.repository}`
   const revalidate = async () => {
     const fresh = await assertOwnedBotWorkspace(pluginId, handle)
     if (

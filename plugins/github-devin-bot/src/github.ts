@@ -52,14 +52,20 @@ export class GithubRequestError extends Error {
   }
 }
 
-/** Reads only; the host owns authentication, repository scope, and HTTP origin checks. */
+/**
+ * Reads only; the host owns authentication, repository scope, and HTTP origin checks.
+ *
+ * Paths are relative to the API root: the host resolves them against the bound
+ * account's own deployment, so the same bot reads github.com and GitHub
+ * Enterprise repositories (ADR-0176).
+ */
 export function githubReader(
   ctx: PluginContext,
   runId: string,
   repository: string,
   now = Date.now
 ) {
-  const prefix = `https://api.github.com/repos/${repository}`
+  const prefix = `/repos/${repository}`
   async function read<T>(url: string, etag?: string) {
     const response = await ctx.integrations.authenticatedRequest<T>(
       { runId, slotId: "github" },
@@ -112,8 +118,7 @@ export function githubReader(
   return {
     request,
     pages,
-    viewer: async () =>
-      (await read<{ id: number; login: string }>("https://api.github.com/user")).data,
+    viewer: async () => (await read<{ id: number; login: string }>("/user")).data,
     item: async (number: number, kind: "issue" | "pr") =>
       (await request<Item>(`/${kind === "pr" ? "pulls" : "issues"}/${number}`)).data,
   }

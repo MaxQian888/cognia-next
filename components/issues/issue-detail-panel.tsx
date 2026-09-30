@@ -21,6 +21,7 @@ import {
   MessageSquareTextIcon,
   MessageSquarePlusIcon,
   PlayIcon,
+  SendIcon,
   Share2Icon,
   SquareIcon,
   TagIcon,
@@ -46,7 +47,8 @@ import { collapseActivity } from "@/lib/issues/activity-feed"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
-import { addIssueComment, setIssueAssignee } from "@/lib/db/issues"
+import { addIssueComment, getIssue, setIssueAssignee } from "@/lib/db/issues"
+import { listPublishTargets } from "@/lib/issues/publish"
 import { actorKey } from "@/lib/issues/board-model"
 import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
 import { buildIssueMenuSections, canDeleteIssue } from "@/lib/issues/menu-model"
@@ -69,6 +71,8 @@ import { IssuePropertyMenu } from "./editors/issue-property-menu"
 import { IssueTextEditor } from "./editors/issue-text-editor"
 import { GithubWritebackDialog, type GithubWritebackKind } from "./github-writeback-dialog"
 import { LinkGithubIssueDialog } from "./link-github-issue-dialog"
+import { PublishIssueDialog } from "./publish-issue-dialog"
+import { GithubCommentsSection } from "./github-comments-section"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
 import { RunIssueDialog } from "./run-issue-dialog"
 import { IssuePlanningSection } from "./planning/issue-planning-section"
@@ -138,6 +142,7 @@ export function IssueDetailPanel({
   const [writeback, setWriteback] = useState<GithubWritebackKind | null>(null)
   const [runOpen, setRunOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
+  const [publishOpen, setPublishOpen] = useState(false)
 
   // Only local rows have an activity trail in our own table.
   const parsed = parseUnifiedIssueId(item.unifiedId)
@@ -159,6 +164,13 @@ export function IssueDetailPanel({
     [] as IssueRun[]
   )
   const activeRun = (runs ?? []).find((run) => isActiveIssueRunStatus(run.status))
+  // The stored row: its external refs decide where it can still be published
+  // and which GitHub conversation belongs to it.
+  const localIssue = useClientLiveQuery(
+    () => (localId ? getIssue(localId) : Promise.resolve(undefined)),
+    [localId],
+    undefined
+  )
   const localWorkspaceId = projects.find((project) => project.id === item.issueProjectId)?.projectId
   const collabWorkspace = useClientLiveQuery(
     () => (localWorkspaceId ? getCollabWorkspace(localWorkspaceId) : Promise.resolve(undefined)),
@@ -241,6 +253,17 @@ export function IssueDetailPanel({
   // Derived, never stored: a GitHub row's mirror id IS `owner/repo#n`, so the
   // write-back target cannot drift from the row it is shown next to.
   const githubTarget = parsed?.kind === "github" ? parseGithubMirrorId(parsed.sourceId) : null
+  // A local issue linked to GitHub has the same conversation to show.
+  const commentsTarget =
+    githubTarget ??
+    (localIssue?.githubRef
+      ? { repoFullName: localIssue.githubRef.repoFullName, number: localIssue.githubRef.number }
+      : null)
+  const container = projects.find((project) => project.id === item.issueProjectId)
+  const publishTargets = useMemo(
+    () => (localIssue ? listPublishTargets(localIssue, container) : []),
+    [localIssue, container]
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="issue-detail-panel">
@@ -444,6 +467,36 @@ export function IssueDetailPanel({
           </Button>
         ) : null}
 
+        {/* Create the issue on a bound tracker (GitHub, a Lark tasklist or
+            table) and link it, for an issue that only exists here. */}
+        {localId && localIssue && publishTargets.length > 0 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 w-fit gap-1.5 text-xs"
+            onClick={() => setPublishOpen(true)}
+            data-testid="issue-detail-publish"
+          >
+            <SendIcon className="size-3.5" />
+            {t("publish.trigger")}
+          </Button>
+        ) : null}
+        {publishOpen && localIssue ? (
+          <PublishIssueDialog
+            open
+            onOpenChange={(next) => {
+              if (!next) setPublishOpen(false)
+            }}
+            issue={{
+              id: localIssue.id,
+              title: localIssue.title,
+              ...(localIssue.description ? { description: localIssue.description } : {}),
+            }}
+            targets={publishTargets}
+            onPublished={onWritebackCompleted}
+          />
+        ) : null}
+
         <OpenInProIde item={item} references={fileReferences} />
 
         {/* Filed from a chat: the conversation is the issue's provenance, so the
@@ -531,6 +584,16 @@ export function IssueDetailPanel({
                 onCompleted={onWritebackCompleted}
               />
             ) : null}
+          </>
+        ) : null}
+
+        {commentsTarget ? (
+          <>
+            <Separator />
+            <GithubCommentsSection
+              key={`${commentsTarget.repoFullName}#${commentsTarget.number}`}
+              target={commentsTarget}
+            />
           </>
         ) : null}
 

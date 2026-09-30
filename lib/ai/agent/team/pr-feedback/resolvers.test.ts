@@ -1,4 +1,7 @@
 jest.mock("@/lib/terminal/headless-exec", () => ({ runHeadlessExec: jest.fn() }))
+jest.mock("@/lib/integrations/github-read-credential", () => ({
+  resolveGithubReadToken: jest.fn(),
+}))
 
 import {
   createResolveOctokit,
@@ -6,8 +9,14 @@ import {
   createRunPrReview,
   ghCliToken,
   parseGitHubRepo,
+  resolveGithubReadTokenForRepo,
 } from "./resolvers"
 import { runHeadlessExec } from "@/lib/terminal/headless-exec"
+import { resolveGithubReadToken } from "@/lib/integrations/github-read-credential"
+import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/host"
+
+const mockAccountToken = resolveGithubReadToken as jest.Mock
+const GHES = parseGithubHost("https://ghe.acme.io") as GithubHost
 
 const mockExec = runHeadlessExec as jest.Mock
 import type { GitDefaultBranch, GitRemote } from "@/types/git"
@@ -45,6 +54,7 @@ describe("createResolveTeamRepo", () => {
     })
     expect(await resolve("/repo")).toEqual({
       fullName: "acme/app",
+      host: GITHUB_DOT_COM,
       defaultBranch: "develop",
       defaultBranchSource: "remoteHead",
       defaultBranchExists: true,
@@ -122,6 +132,37 @@ describe("createResolveTeamRepo", () => {
   })
 })
 
+describe("createResolveTeamRepo on GitHub Enterprise", () => {
+  it("resolves a remote on a configured enterprise host, with that host", async () => {
+    const resolve = createResolveTeamRepo({
+      remotes: async () => [remote({ fetchUrl: "git@ghe.acme.io:acme/app.git" })],
+      defaultBranch: async () => trunk(),
+      hosts: async () => [GITHUB_DOT_COM, GHES],
+    })
+    expect(await resolve("/repo")).toMatchObject({ fullName: "acme/app", host: GHES })
+  })
+
+  it("refuses an enterprise-looking host nobody configured", async () => {
+    const resolve = createResolveTeamRepo({
+      remotes: async () => [remote({ fetchUrl: "https://ghe.acme.io/acme/app.git" })],
+      defaultBranch: async () => trunk(),
+      hosts: async () => [GITHUB_DOT_COM],
+    })
+    expect(await resolve("/repo")).toBeNull()
+  })
+
+  it("still recognises github.com when listing hosts fails", async () => {
+    const resolve = createResolveTeamRepo({
+      remotes: async () => [remote({})],
+      defaultBranch: async () => trunk(),
+      hosts: async () => {
+        throw new Error("store locked")
+      },
+    })
+    expect(await resolve("/repo")).toMatchObject({ fullName: "acme/app", host: GITHUB_DOT_COM })
+  })
+})
+
 describe("ghCliToken", () => {
   beforeEach(() => mockExec.mockReset())
 
@@ -158,6 +199,56 @@ describe("ghCliToken", () => {
     mockExec.mockRejectedValue(new Error("no terminal"))
     expect(await ghCliToken()).toBeNull()
   })
+
+  it("asks gh for github.com with no hostname flag", async () => {
+    mockExec.mockResolvedValue({ ok: true, exitCode: 0, output: "ghp_abc" })
+    await ghCliToken()
+    expect(mockExec).toHaveBeenCalledWith(expect.objectContaining({ command: "gh auth token" }))
+  })
+
+  it("asks gh for the enterprise host's own token", async () => {
+    mockExec.mockResolvedValue({ ok: true, exitCode: 0, output: "ghp_ent" })
+    expect(await ghCliToken(GHES)).toBe("ghp_ent")
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "gh auth token --hostname ghe.acme.io" })
+    )
+  })
+
+  it("refuses a host id that is not a plain hostname", async () => {
+    const hostile = { ...GHES, id: "ghe.acme.io; rm -rf ~" }
+    expect(await ghCliToken(hostile)).toBeNull()
+    expect(mockExec).not.toHaveBeenCalled()
+  })
+})
+
+describe("resolveGithubReadTokenForRepo", () => {
+  beforeEach(() => {
+    mockExec.mockReset()
+    mockAccountToken.mockReset()
+  })
+
+  it("prefers a connected integration account over the gh CLI", async () => {
+    mockAccountToken.mockResolvedValue("ghs_installation")
+    expect(await resolveGithubReadTokenForRepo("acme/app")).toBe("ghs_installation")
+    expect(mockAccountToken).toHaveBeenCalledWith("acme/app", GITHUB_DOT_COM)
+    expect(mockExec).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the gh CLI for the same host when no account has a token", async () => {
+    mockAccountToken.mockResolvedValue(null)
+    mockExec.mockResolvedValue({ ok: true, exitCode: 0, output: "ghp_cli" })
+    expect(await resolveGithubReadTokenForRepo("acme/app", GHES)).toBe("ghp_cli")
+    expect(mockAccountToken).toHaveBeenCalledWith("acme/app", GHES)
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "gh auth token --hostname ghe.acme.io" })
+    )
+  })
+
+  it("falls back to the gh CLI when the account store throws", async () => {
+    mockAccountToken.mockRejectedValue(new Error("keyring locked"))
+    mockExec.mockResolvedValue({ ok: true, exitCode: 0, output: "ghp_cli" })
+    expect(await resolveGithubReadTokenForRepo("acme/app")).toBe("ghp_cli")
+  })
 })
 
 describe("createResolveOctokit", () => {
@@ -177,7 +268,28 @@ describe("createResolveOctokit", () => {
       repoFullName: "acme/app",
       mode: "pat",
       pat: { token: "ghp_token" },
+      host: GITHUB_DOT_COM,
     })
+  })
+
+  it("scopes both the credential and the client to an enterprise host", async () => {
+    const getToken = jest.fn(async () => "ghp_ent")
+    const build = jest.fn(async () => ({ request: jest.fn() }))
+    await createResolveOctokit({ getToken, build })("acme/app", GHES)
+    expect(getToken).toHaveBeenCalledWith("acme/app", GHES)
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ host: GHES }))
+  })
+
+  it("returns null when token resolution throws", async () => {
+    const build = jest.fn()
+    const resolve = createResolveOctokit({
+      getToken: async () => {
+        throw new Error("boom")
+      },
+      build,
+    })
+    expect(await resolve("acme/app")).toBeNull()
+    expect(build).not.toHaveBeenCalled()
   })
 
   it("returns null when the build throws", async () => {

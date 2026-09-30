@@ -420,7 +420,7 @@
     "running": "Syncing…",
     "done": "{count, plural, =0 {Already up to date} one {# issue updated} other {# issues updated}}",
     "failed": "Sync failed for {repos}",
-    "noCredential": "No GitHub credential available. Sign in with the GitHub CLI or connect an account.",
+    "noCredential": "No GitHub credential available. Connect a GitHub account in Settings → Connections, or sign in with the GitHub CLI.",
     "noRepos": "No GitHub repository is bound to a project in this workspace.",
     "upToDate": "Everything is up to date",
     "noBindings": "Nothing is bound to a project in this workspace.",
@@ -968,5 +968,32 @@
     "dropOnTimeoutHint": "If nothing it waits for happens in time, the rule just stops.",
     "expires": "expires {when}",
     "wakesOnTimeout": "wakes on timeout"
+  },
+  "publish": {
+    "trigger": "Publish to…",
+    "title": "Publish this issue",
+    "description": "Creates this issue on the tracker you choose and links the two. This writes outside Cognia and cannot be undone from here.",
+    "targetLabel": "Publish to",
+    "target": {
+      "github": "GitHub · {repository}",
+      "binding": "{provider} · {name}"
+    },
+    "preview": "Will be created as",
+    "noDescription": "No description.",
+    "submit": "Publish",
+    "success": "Published as {target}.",
+    "failed": "Couldn't publish the issue: {reason}"
+  },
+  "githubComments": {
+    "section": "GitHub conversation",
+    "load": "Load comments",
+    "refresh": "Refresh",
+    "loading": "Loading comments from GitHub…",
+    "failed": "Couldn't read the comments from GitHub. Try again.",
+    "empty": "No comments on GitHub yet.",
+    "unknownAuthor": "Unknown author",
+    "edited": "edited",
+    "open": "Open on GitHub",
+    "truncated": "Only the first 1,000 comments are shown. Open the issue on GitHub for the rest."
   }
 }

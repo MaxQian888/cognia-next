@@ -1,3 +1,4 @@
+import { parseGithubHost } from "@/lib/github/host"
 import { createGitHubPullRequestProvider } from "./github-runtime"
 
 const client = { request: jest.fn() }
@@ -16,6 +17,20 @@ it("constructs the GitHub provider from the existing local credential resolver",
     "GET /repos/{owner}/{repo}/pulls",
     expect.objectContaining({ owner: "acme", repo: "cognia" })
   )
+})
+
+it("resolves the client on the repository's own GitHub deployment", async () => {
+  const ghes = parseGithubHost("https://ghe.acme.io")!
+  const resolveClient = jest.fn(async () => client)
+  const provider = createGitHubPullRequestProvider({
+    isLocalRuntime: () => true,
+    getToken: async () => "t",
+    resolveRepository: async () => ({ fullName: "acme/cognia", defaultBranch: "main", host: ghes }),
+    resolveClient,
+  })
+  client.request.mockResolvedValueOnce({ status: 200, data: [] })
+  await provider.findForBranch("/repo", "feature")
+  expect(resolveClient).toHaveBeenCalledWith("acme/cognia", ghes)
 })
 
 it("reports web as unavailable and missing local credentials as unauthenticated", async () => {

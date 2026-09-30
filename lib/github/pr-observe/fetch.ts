@@ -35,6 +35,16 @@ import type {
 import { parseRepoFullName, unfetchedObservation } from "./types"
 import { discoverOpenPrForBranch } from "./discover"
 
+/**
+ * Page cap for the paged lists (check-runs, reviews, review comments): 30 × 100
+ * items. Reviews arrive oldest→newest, so a single page silently dropped the
+ * NEWEST reviews of a long-lived PR and the decision was derived from stale
+ * ones. Past the cap the walk stops (and keeps no ETag, so the next poll walks
+ * again); 3,000 entries on one pull request is past anything the nudge loop
+ * reasons about.
+ */
+const MAX_LIST_PAGES = 30
+
 /** Max failing-check job logs fetched per poll (bounds API spend; noted, not silent). */
 const MAX_LOG_FETCHES = 5
 /** Lines of a failed job log kept as the tail. */
@@ -70,6 +80,70 @@ async function safeRequest(
 
 function ifNoneMatch(etag?: string): Record<string, unknown> {
   return etag ? { headers: { "if-none-match": etag } } : {}
+}
+
+/**
+ * `rel="next"` in a Link header. Same test as `hasNextPage` in
+ * `lib/github/issues.ts`, kept local because that module pulls the Dexie
+ * mirror in and this fetcher must stay storage-free.
+ */
+function hasNextLink(link: string | undefined): boolean {
+  return typeof link === "string" && /<[^>]+>;\s*rel="next"/.test(link)
+}
+
+interface PagedResponse<T> {
+  status: number
+  /**
+   * The first page's headers — except `etag`, which is kept ONLY when the
+   * list fit on one page. A conditional request revalidates page 1 alone, and
+   * on an ascending list (reviews) new items land on the last page: page 1
+   * answers 304 while the list has changed. Dropping the tag forces a full walk
+   * next time instead of reusing a stale bucket.
+   */
+  headers: Record<string, string | undefined>
+  items: T[]
+  /** True when the page cap stopped the walk before GitHub ran out. */
+  truncated: boolean
+}
+
+/**
+ * Walk every page of a list endpoint. A 304/404 on page 1 is returned as-is
+ * with no items, so callers keep their existing "unchanged" / "gone" handling.
+ */
+async function requestAllPages<T>(
+  octokit: OctokitLike,
+  route: string,
+  params: Record<string, unknown>,
+  pick: (data: unknown) => T[],
+  etag?: string
+): Promise<PagedResponse<T>> {
+  const first = await safeRequest(octokit, route, {
+    ...params,
+    per_page: 100,
+    page: 1,
+    ...ifNoneMatch(etag),
+  })
+  if (first.status === 304 || first.status === 404) {
+    return { status: first.status, headers: first.headers, items: [], truncated: false }
+  }
+  const items = [...pick(first.data)]
+  let link = first.headers.link
+  let page = 1
+  while (hasNextLink(link) && page < MAX_LIST_PAGES) {
+    page += 1
+    const next = await safeRequest(octokit, route, { ...params, per_page: 100, page })
+    if (next.status !== 200) break
+    items.push(...pick(next.data))
+    link = next.headers.link
+  }
+  const truncated = hasNextLink(link)
+  const headers = { ...first.headers }
+  if (page > 1 || truncated) delete headers.etag
+  return { status: first.status, headers, items, truncated }
+}
+
+function arrayOf<T>(data: unknown): T[] {
+  return (Array.isArray(data) ? data : []) as T[]
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────────
@@ -461,35 +535,35 @@ export async function fetchPrObservation(
     }
   }
 
-  // 3. CI, reviews, comments in parallel (each ETag-guarded).
+  // 3. CI, reviews, comments in parallel (each ETag-guarded, every page).
   const [checksRes, statusRes, reviewsRes, commentsRes] = await Promise.all([
-    safeRequest(octokit, "GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
-      owner: r.owner,
-      repo: r.name,
-      ref: pr.headSha,
-      per_page: 100,
-      ...ifNoneMatch(prev?.etags?.checks),
-    }),
+    requestAllPages<CheckRunData>(
+      octokit,
+      "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+      { owner: r.owner, repo: r.name, ref: pr.headSha },
+      (data) => arrayOf<CheckRunData>((data as { check_runs?: unknown } | null)?.check_runs),
+      prev?.etags?.checks
+    ),
     safeRequest(octokit, "GET /repos/{owner}/{repo}/commits/{ref}/status", {
       owner: r.owner,
       repo: r.name,
       ref: pr.headSha,
       per_page: 100,
     }),
-    safeRequest(octokit, "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", {
-      owner: r.owner,
-      repo: r.name,
-      pull_number: prNumber,
-      per_page: 100,
-      ...ifNoneMatch(prev?.etags?.reviews),
-    }),
-    safeRequest(octokit, "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments", {
-      owner: r.owner,
-      repo: r.name,
-      pull_number: prNumber,
-      per_page: 100,
-      ...ifNoneMatch(prev?.etags?.comments),
-    }),
+    requestAllPages<ReviewData>(
+      octokit,
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+      { owner: r.owner, repo: r.name, pull_number: prNumber },
+      arrayOf<ReviewData>,
+      prev?.etags?.reviews
+    ),
+    requestAllPages<ReviewCommentData>(
+      octokit,
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments",
+      { owner: r.owner, repo: r.name, pull_number: prNumber },
+      arrayOf<ReviewCommentData>,
+      prev?.etags?.comments
+    ),
   ])
 
   // CI (with best-effort log tails on newly parsed failing checks).
@@ -497,12 +571,11 @@ export async function fetchPrObservation(
   if (checksRes.status === 304 && prev?.fetched) {
     ci = prev.ci
   } else {
-    const checkRuns = ((checksRes.data as { check_runs?: CheckRunData[] })?.check_runs ??
-      []) as CheckRunData[]
     const combined = statusRes.status === 304 ? null : (statusRes.data as CombinedStatusData | null)
-    ci = summarizeCi(pr.headSha, checkRuns, combined)
+    ci = summarizeCi(pr.headSha, checksRes.items, combined)
     await attachLogTails(octokit, r, ci)
     if (checksRes.headers.etag) etags.checks = checksRes.headers.etag
+    else delete etags.checks
   }
 
   // Reviews + comments → review bucket.
@@ -512,17 +585,23 @@ export async function fetchPrObservation(
   if (reviewsUnchanged && commentsUnchanged && prev?.fetched) {
     review = prev.review
   } else {
-    const reviews = (Array.isArray(reviewsRes.data) ? reviewsRes.data : []) as ReviewData[]
-    const comments = (
-      Array.isArray(commentsRes.data) ? commentsRes.data : []
-    ) as ReviewCommentData[]
     const decision =
-      reviewsUnchanged && prev?.fetched ? prev.review.decision : deriveReviewDecision(reviews)
+      reviewsUnchanged && prev?.fetched
+        ? prev.review.decision
+        : deriveReviewDecision(reviewsRes.items)
     const threads =
-      commentsUnchanged && prev?.fetched ? prev.review.threads : groupReviewThreads(comments)
+      commentsUnchanged && prev?.fetched
+        ? prev.review.threads
+        : groupReviewThreads(commentsRes.items)
     review = { decision, threads }
-    if (reviewsRes.headers.etag) etags.reviews = reviewsRes.headers.etag
-    if (commentsRes.headers.etag) etags.comments = commentsRes.headers.etag
+    if (!reviewsUnchanged) {
+      if (reviewsRes.headers.etag) etags.reviews = reviewsRes.headers.etag
+      else delete etags.reviews
+    }
+    if (!commentsUnchanged) {
+      if (commentsRes.headers.etag) etags.comments = commentsRes.headers.etag
+      else delete etags.comments
+    }
   }
 
   // 4. Semantic diff vs prev.

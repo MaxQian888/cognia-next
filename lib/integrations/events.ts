@@ -60,6 +60,14 @@ function pointerString(payload: unknown, pointer: string): string | undefined {
   return undefined
 }
 
+function firstPointerString(payload: unknown, pointers: readonly string[]): string | undefined {
+  for (const pointer of pointers) {
+    const value = pointerString(payload, pointer)
+    if (value) return value
+  }
+  return undefined
+}
+
 async function projectEventToInbox(
   event: IntegrationEventEnvelope,
   subscription: IntegrationSubscription,
@@ -68,16 +76,26 @@ async function projectEventToInbox(
   if (!projection.eventTypes.includes(event.eventType)) return false
   const threadKey = pointerString(event.payload, projection.threadKeyPointer)
   const title = pointerString(event.payload, projection.titlePointer)
-  const body = pointerString(event.payload, projection.bodyPointer) ?? title
+  const body =
+    firstPointerString(event.payload, [
+      ...(projection.bodyFallbackPointers ?? []),
+      projection.bodyPointer,
+    ]) ?? title
   if (!threadKey || !title || !body) return false
-  const url = projection.urlPointer
-    ? pointerString(event.payload, projection.urlPointer)
-    : undefined
+  const url = firstPointerString(event.payload, [
+    ...(projection.urlFallbackPointers ?? []),
+    ...(projection.urlPointer ? [projection.urlPointer] : []),
+  ])
+  const alias = projection.threadAlias
+  const threadProjectionId =
+    alias && readJsonPointer(event.payload, alias.whenPointer) != null
+      ? alias.projectionId
+      : projection.id
   const binding = {
     pluginId: event.pluginId,
     integrationId: event.integrationId,
     accountId: event.accountId,
-    projectionId: projection.id,
+    projectionId: threadProjectionId,
     threadKey,
     resourceKind: event.resource?.kind,
     resourceId: event.resource?.id,
@@ -175,6 +193,19 @@ export async function publishIntegrationEvent(
     botDeliveries = (await dispatchIntegrationEventToBots(event)).enqueued.length
   } catch {
     botDeliveries = 0
+  }
+
+  // The issue board is the fourth consumer, also best-effort: a GitHub issue
+  // event schedules a refresh of that repository's mirror / import bindings,
+  // so a webhook shows up on the board without waiting for the 15-minute poll.
+  try {
+    const { GithubEventIssueRefresher, getGithubEventIssueRefresher } =
+      await import("@/lib/issues/github-event-refresh")
+    if (GithubEventIssueRefresher.relevant(event)) {
+      await getGithubEventIssueRefresher().handle(event)
+    }
+  } catch {
+    // Never fail the event for workflows and the inbox over a board refresh.
   }
 
   let inboxProjections = 0

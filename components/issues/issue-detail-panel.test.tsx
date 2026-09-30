@@ -36,14 +36,36 @@ jest.mock("./github-writeback-dialog", () => ({
 let liveValue: unknown = []
 let runsValue: unknown[] = []
 let collabWorkspaceValue: { id: string; orgId: string } | undefined
+let localIssueValue: unknown
 jest.mock("@/hooks/data", () => ({
-  // Two live queries share the hook: the activity trail and the run history.
+  // Several live queries share the hook: the activity trail, the run history,
+  // the collab workspace and the stored issue row.
   useClientLiveQuery: (fn: () => unknown) =>
     fn.toString().includes("listIssueRuns")
       ? runsValue
       : fn.toString().includes("getCollabWorkspace")
         ? collabWorkspaceValue
-        : liveValue,
+        : fn.toString().includes("getIssue")
+          ? localIssueValue
+          : liveValue,
+}))
+let mockPublishTargets: unknown[] = []
+jest.mock("@/lib/issues/publish", () => ({
+  listPublishTargets: () => mockPublishTargets,
+}))
+jest.mock("./publish-issue-dialog", () => ({
+  PublishIssueDialog: (props: { targets: unknown[]; issue: { id: string } }) => (
+    <div data-testid="publish-dialog-stub">
+      {props.issue.id}:{props.targets.length}
+    </div>
+  ),
+}))
+jest.mock("./github-comments-section", () => ({
+  GithubCommentsSection: (props: { target: { repoFullName: string; number: number } }) => (
+    <div data-testid="github-comments-stub">
+      {props.target.repoFullName}#{props.target.number}
+    </div>
+  ),
 }))
 jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
 jest.mock("@/lib/db/collab-workspace-mirror", () => ({ getCollabWorkspace: jest.fn() }))
@@ -70,6 +92,7 @@ jest.mock("@/lib/codeserver/client", () => ({
 const mockSetIssueAssignee = jest.fn()
 const mockAddIssueComment = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/issues", () => ({
+  getIssue: jest.fn(),
   setIssueAssignee: (...a: unknown[]) => mockSetIssueAssignee(...a),
   addIssueComment: (...a: unknown[]) => mockAddIssueComment(...a),
 }))
@@ -773,5 +796,57 @@ describe("linking to GitHub", () => {
     render(<IssueDetailPanel item={item()} githubRepos={["acme/mercury"]} />)
     await user.click(screen.getByTestId("issue-detail-link-github"))
     expect(await screen.findByTestId("link-github-issue-dialog")).toBeInTheDocument()
+  })
+})
+
+describe("publishing and the GitHub conversation", () => {
+  afterEach(() => {
+    localIssueValue = undefined
+    mockPublishTargets = []
+  })
+
+  it("offers publishing when the stored issue has somewhere to go", async () => {
+    const user = userEvent.setup()
+    localIssueValue = { id: "i1", title: "Ship the board", externalRefs: [] }
+    mockPublishTargets = [{ kind: "github", id: "github:acme/app", repoFullName: "acme/app" }]
+    render(<IssueDetailPanel item={item()} />)
+    await user.click(screen.getByTestId("issue-detail-publish"))
+    expect(await screen.findByTestId("publish-dialog-stub")).toHaveTextContent("i1:1")
+  })
+
+  it("hides publishing with no target", () => {
+    localIssueValue = { id: "i1", title: "Ship the board", externalRefs: [] }
+    render(<IssueDetailPanel item={item()} />)
+    expect(screen.queryByTestId("issue-detail-publish")).not.toBeInTheDocument()
+  })
+
+  it("shows the GitHub conversation of a mirrored GitHub row", () => {
+    render(
+      <IssueDetailPanel
+        item={item({
+          kind: "github",
+          unifiedId: "github:acme/app#5",
+          sourceId: "acme/app#5",
+          origin: { deepLinkHref: "x", sourceLabel: "GitHub" },
+        })}
+      />
+    )
+    expect(screen.getByTestId("github-comments-stub")).toHaveTextContent("acme/app#5")
+  })
+
+  it("shows the GitHub conversation of a local issue linked to GitHub", () => {
+    localIssueValue = {
+      id: "i1",
+      title: "Ship the board",
+      githubRef: { repoFullName: "acme/app", number: 12, htmlUrl: "u" },
+    }
+    render(<IssueDetailPanel item={item()} />)
+    expect(screen.getByTestId("github-comments-stub")).toHaveTextContent("acme/app#12")
+  })
+
+  it("has no GitHub conversation for a local issue that is not on GitHub", () => {
+    localIssueValue = { id: "i1", title: "Ship the board" }
+    render(<IssueDetailPanel item={item()} />)
+    expect(screen.queryByTestId("github-comments-stub")).not.toBeInTheDocument()
   })
 })

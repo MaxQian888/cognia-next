@@ -8,11 +8,13 @@ import {
   bindRepoToIssueProject,
   clearRepoMirror,
   countMirroredIssues,
+  deleteGithubIssues,
   getGithubIssue,
   githubMirrorId,
   parseGithubMirrorId,
   latestMirroredUpdate,
   listGithubIssues,
+  pruneRepoMirror,
   repoMirrorEtag,
   upsertGithubIssues,
 } from "./github-issue-mirror"
@@ -180,5 +182,27 @@ describe("watermarks", () => {
 
   it("has no ETag before the first sync", async () => {
     expect(await repoMirrorEtag("o/never")).toBeUndefined()
+  })
+})
+
+describe("removing issues that left the repository", () => {
+  it("deletes single issues and counts only the ones that were there", async () => {
+    await upsertGithubIssues([row({ number: 1 }), row({ number: 2 }), row({ number: 3 })])
+    expect(await deleteGithubIssues("o/r", [2, 99])).toBe(1)
+    expect((await listGithubIssues({ repoFullName: "o/r" })).map((r) => r.number)).toEqual([3, 1])
+    expect(await deleteGithubIssues("o/r", [])).toBe(0)
+  })
+
+  it("prunes a repo down to the issues a full read returned, leaving other repos alone", async () => {
+    await upsertGithubIssues([
+      row({ number: 1 }),
+      row({ number: 2 }),
+      row({ number: 3 }),
+      row({ repoFullName: "o/other", number: 2 }),
+    ])
+    expect(await pruneRepoMirror("o/r", new Set([1, 3]))).toBe(1)
+    expect(await getGithubIssue("o/r", 2)).toBeUndefined()
+    expect(await getGithubIssue("o/other", 2)).toBeDefined()
+    expect(await countMirroredIssues("o/r")).toBe(2)
   })
 })

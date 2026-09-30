@@ -178,6 +178,21 @@
           "resourceKinds": ["repository"]
         },
         {
+          "id": "pull_request.review_request_removed",
+          "label": "pull_request.review_request_removed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.assigned",
+          "label": "pull_request.assigned",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.unassigned",
+          "label": "pull_request.unassigned",
+          "resourceKinds": ["repository"]
+        },
+        {
           "id": "issues.opened",
           "label": "issues.opened",
           "resourceKinds": ["repository"]
@@ -208,13 +223,48 @@
           "resourceKinds": ["repository"]
         },
         {
+          "id": "issues.unassigned",
+          "label": "issues.unassigned",
+          "resourceKinds": ["repository"]
+        },
+        {
           "id": "issues.labeled",
           "label": "issues.labeled",
           "resourceKinds": ["repository"]
         },
         {
+          "id": "issues.milestoned",
+          "label": "issues.milestoned",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.demilestoned",
+          "label": "issues.demilestoned",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.transferred",
+          "label": "issues.transferred",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.deleted",
+          "label": "issues.deleted",
+          "resourceKinds": ["repository"]
+        },
+        {
           "id": "issue_comment.created",
           "label": "issue_comment.created",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issue_comment.edited",
+          "label": "issue_comment.edited",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issue_comment.deleted",
+          "label": "issue_comment.deleted",
           "resourceKinds": ["repository"]
         },
         {
@@ -225,6 +275,11 @@
         {
           "id": "check_suite.completed",
           "label": "check_suite.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "status.received",
+          "label": "status.received",
           "resourceKinds": ["repository"]
         },
         {
@@ -243,6 +298,26 @@
           "resourceKinds": ["repository"]
         },
         {
+          "id": "pull_request_review_comment.created",
+          "label": "pull_request_review_comment.created",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request_review_comment.edited",
+          "label": "pull_request_review_comment.edited",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request_review_comment.deleted",
+          "label": "pull_request_review_comment.deleted",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "release.created",
+          "label": "release.created",
+          "resourceKinds": ["repository"]
+        },
+        {
           "id": "release.published",
           "label": "release.published",
           "resourceKinds": ["repository"]
@@ -250,6 +325,16 @@
         {
           "id": "push.received",
           "label": "push.received",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "create.received",
+          "label": "create.received",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "delete.received",
+          "label": "delete.received",
           "resourceKinds": ["repository"]
         },
         {
@@ -308,11 +393,19 @@
             "pull_request.labeled",
             "pull_request.unlabeled",
             "pull_request.review_requested",
-            "pull_request_review.submitted"
+            "pull_request.review_request_removed",
+            "pull_request.assigned",
+            "pull_request.unassigned",
+            "pull_request_review.submitted",
+            "pull_request_review_comment.created",
+            "pull_request_review_comment.edited",
+            "pull_request_review_comment.deleted"
           ],
           "threadKeyPointer": "/pull_request/number",
           "titlePointer": "/pull_request/title",
+          "bodyFallbackPointers": ["/comment/body", "/review/body"],
           "bodyPointer": "/pull_request/body",
+          "urlFallbackPointers": ["/comment/html_url", "/review/html_url"],
           "urlPointer": "/pull_request/html_url"
         },
         {
@@ -325,7 +418,12 @@
             "issues.edited",
             "issues.unlabeled",
             "issues.assigned",
-            "issues.labeled"
+            "issues.unassigned",
+            "issues.labeled",
+            "issues.milestoned",
+            "issues.demilestoned",
+            "issues.transferred",
+            "issues.deleted"
           ],
           "threadKeyPointer": "/issue/number",
           "titlePointer": "/issue/title",
@@ -339,7 +437,11 @@
           "threadKeyPointer": "/issue/number",
           "titlePointer": "/issue/title",
           "bodyPointer": "/comment/body",
-          "urlPointer": "/comment/html_url"
+          "urlPointer": "/comment/html_url",
+          "threadAlias": {
+            "whenPointer": "/issue/pull_request",
+            "projectionId": "pull-request-thread"
+          }
         }
       ],
       "actions": [
@@ -784,6 +886,213 @@
           "timeoutMs": 30000
         },
         {
+          "id": "createIssue",
+          "operationId": "github.createIssue",
+          "label": "createIssue",
+          "handler": "createIssue",
+          "risk": "write",
+          "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "title"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "body": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "milestone": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "getIssue",
+          "operationId": "github.getIssue",
+          "label": "getIssue",
+          "handler": "getIssue",
+          "risk": "read",
+          "idempotency": "supported",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "getPullRequest",
+          "operationId": "github.getPullRequest",
+          "label": "getPullRequest",
+          "handler": "getPullRequest",
+          "risk": "read",
+          "idempotency": "supported",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "getCommitStatus",
+          "operationId": "github.getCommitStatus",
+          "label": "getCommitStatus",
+          "handler": "getCommitStatus",
+          "risk": "read",
+          "idempotency": "supported",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "ref"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "listIssueComments",
+          "operationId": "github.listIssueComments",
+          "label": "listIssueComments",
+          "handler": "listIssueComments",
+          "risk": "read",
+          "idempotency": "supported",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "since": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "searchIssues",
+          "operationId": "github.searchIssues",
+          "label": "searchIssues",
+          "handler": "searchIssues",
+          "risk": "read",
+          "idempotency": "supported",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "query"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
           "id": "createRelease",
           "operationId": "github.createRelease",
           "label": "createRelease",
@@ -1025,6 +1334,42 @@
           "risk": "write"
         },
         {
+          "id": "web-createIssue",
+          "operationId": "github.createIssue",
+          "label": "createIssue",
+          "risk": "write"
+        },
+        {
+          "id": "web-getIssue",
+          "operationId": "github.getIssue",
+          "label": "getIssue",
+          "risk": "read"
+        },
+        {
+          "id": "web-getPullRequest",
+          "operationId": "github.getPullRequest",
+          "label": "getPullRequest",
+          "risk": "read"
+        },
+        {
+          "id": "web-getCommitStatus",
+          "operationId": "github.getCommitStatus",
+          "label": "getCommitStatus",
+          "risk": "read"
+        },
+        {
+          "id": "web-listIssueComments",
+          "operationId": "github.listIssueComments",
+          "label": "listIssueComments",
+          "risk": "read"
+        },
+        {
+          "id": "web-searchIssues",
+          "operationId": "github.searchIssues",
+          "label": "searchIssues",
+          "risk": "read"
+        },
+        {
           "id": "web-createRelease",
           "operationId": "github.createRelease",
           "label": "createRelease",
@@ -1087,6 +1432,12 @@
     "action.github.labelIssue": "github-delivery.action.labelIssue",
     "action.github.closeIssue": "github-delivery.action.closeIssue",
     "action.github.updateIssue": "github-delivery.action.updateIssue",
+    "action.github.createIssue": "github-delivery.action.createIssue",
+    "action.github.getIssue": "github-delivery.action.getIssue",
+    "action.github.getPullRequest": "github-delivery.action.getPullRequest",
+    "action.github.getCommitStatus": "github-delivery.action.getCommitStatus",
+    "action.github.listIssueComments": "github-delivery.action.listIssueComments",
+    "action.github.searchIssues": "github-delivery.action.searchIssues",
     "action.github.createRelease": "github-delivery.action.createRelease",
     "action.github.generateChangelog": "github-delivery.action.generateChangelog",
     "action.github.pushTag": "github-delivery.action.pushTag",

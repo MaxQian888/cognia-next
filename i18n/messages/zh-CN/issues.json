@@ -420,7 +420,7 @@
     "running": "同步中…",
     "done": "{count, plural, =0 {已是最新} other {已更新 # 条 issue}}",
     "failed": "{repos} 同步失败",
-    "noCredential": "没有可用的 GitHub 凭据。请用 GitHub CLI 登录，或连接一个账号。",
+    "noCredential": "没有可用的 GitHub 凭据。请在「设置 → 连接」中连接一个 GitHub 账号，或用 GitHub CLI 登录。",
     "noRepos": "本工作区没有任何项目绑定了 GitHub 仓库。",
     "upToDate": "已是最新",
     "noBindings": "本工作区没有绑定任何外部资源。",
@@ -968,5 +968,32 @@
     "dropOnTimeoutHint": "如果等待的事没有及时发生，规则就此停止。",
     "expires": "{when}到期",
     "wakesOnTimeout": "到期时唤醒"
+  },
+  "publish": {
+    "trigger": "发布到…",
+    "title": "发布此 Issue",
+    "description": "在所选的追踪器上创建此 Issue，并将两者关联。这会写入 Cognia 之外的系统，且无法在此撤销。",
+    "targetLabel": "发布到",
+    "target": {
+      "github": "GitHub · {repository}",
+      "binding": "{provider} · {name}"
+    },
+    "preview": "将创建为",
+    "noDescription": "无描述。",
+    "submit": "发布",
+    "success": "已发布为 {target}。",
+    "failed": "发布 Issue 失败：{reason}"
+  },
+  "githubComments": {
+    "section": "GitHub 讨论",
+    "load": "加载评论",
+    "refresh": "刷新",
+    "loading": "正在从 GitHub 加载评论…",
+    "failed": "无法从 GitHub 读取评论，请重试。",
+    "empty": "GitHub 上还没有评论。",
+    "unknownAuthor": "未知作者",
+    "edited": "已编辑",
+    "open": "在 GitHub 中打开",
+    "truncated": "仅显示前 1,000 条评论，其余请在 GitHub 上查看。"
   }
 }
