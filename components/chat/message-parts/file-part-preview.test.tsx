@@ -16,6 +16,11 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
     </pre>
   ),
 }))
+jest.mock("@/components/chat/renderers/video-block", () => ({
+  VideoBlock: ({ src, title }: { src: string; title?: string }) => (
+    <video data-testid="video-block" src={src} title={title} />
+  ),
+}))
 jest.mock("@/components/chat/markdown-renderer", () => ({
   MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: "chat" | "document" }) => (
     <article data-testid="markdown-preview" data-rhythm={rhythm}>
@@ -40,6 +45,23 @@ describe("FilePartPreview", () => {
     )
     expect(screen.getByTestId("file-download-link")).toHaveTextContent("data.bin")
     expect(screen.queryByTestId("file-preview-text")).toBeNull()
+  })
+
+  it("plays a video in the shared player without fetching it", () => {
+    render(<FilePartPreview url="blob:v" mediaType="video/mp4" filename="A paper boat.mp4" />)
+    expect(screen.getByTestId("file-preview-video")).toBeInTheDocument()
+    expect(screen.getByTestId("video-block")).toHaveAttribute("src", "blob:v")
+    expect(screen.getByTestId("video-block")).toHaveAttribute("title", "A paper boat.mp4")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("recognizes a video by its extension, and leaves unplayable containers to download", () => {
+    const { unmount } = render(<FilePartPreview url="blob:v" filename="clip.MOV" />)
+    expect(screen.getByTestId("video-block")).toBeInTheDocument()
+    unmount()
+    render(<FilePartPreview url="blob:v" mediaType="video/x-msvideo" filename="old.avi" />)
+    expect(screen.queryByTestId("video-block")).toBeNull()
+    expect(screen.getByTestId("file-download-link")).toHaveTextContent("old.avi")
   })
 
   it("embeds a PDF with a download fallback", () => {

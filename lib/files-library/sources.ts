@@ -1,11 +1,14 @@
 /**
  * Loaders feeding `aggregateFilesEntries` (ADR-0200). Artifacts and canvas
  * documents come from the artifact store (hydrated from Dexie by the root
- * bridges); images, uploads and Files metadata come straight from Dexie.
- * Only metadata and Blob handles are read — no image or upload bytes.
+ * bridges); images, uploads, generated-video jobs and Files metadata come
+ * straight from Dexie. Only metadata and Blob handles are read — no image or
+ * upload bytes.
  */
 
 import type { Artifact, CanvasDocument } from "@/types/artifact/artifact"
+import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
+import { createDexieMediaJobStore } from "@/lib/db/media-generation-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getSessionsByIds } from "@/lib/db/sessions"
 import { listLibraryItems } from "@/lib/db/files-library-items"
@@ -24,6 +27,7 @@ import {
   type FilesAggregateInput,
   type RawArtifact,
   type RawCanvas,
+  type RawGeneratedVideo,
   type RawImage,
   type RawUpload,
 } from "./aggregate"
@@ -66,6 +70,36 @@ export function rawCanvases(documents: Record<string, CanvasDocument>): RawCanva
     createdAt: toMillis(doc.createdAt) ?? 0,
     updatedAt: toMillis(doc.updatedAt) ?? 0,
   }))
+}
+
+/**
+ * Succeeded video jobs whose video is a conversation asset or a Files upload.
+ * A workflow job's file on disk is not part of Files.
+ */
+export function rawGeneratedVideos(rows: readonly MediaGenerationJobRow[]): RawGeneratedVideo[] {
+  const out: RawGeneratedVideo[] = []
+  for (const row of rows) {
+    const content = row.result?.content
+    if (row.status !== "succeeded" || !content) continue
+    const home =
+      content.kind === "session-asset"
+        ? { kind: "session-asset" as const, sessionId: content.sessionId, assetId: content.assetId }
+        : content.kind === "library"
+          ? { kind: "library" as const, assetId: content.assetId }
+          : undefined
+    if (!home) continue
+    out.push({
+      jobId: row.id,
+      prompt: row.request.prompt,
+      providerId: row.provider.providerId,
+      modelId: row.provider.modelId,
+      ...(row.result?.durationSec !== undefined ? { durationSec: row.result.durationSec } : {}),
+      ...(row.result?.width !== undefined ? { width: row.result.width } : {}),
+      ...(row.result?.height !== undefined ? { height: row.result.height } : {}),
+      home,
+    })
+  }
+  return out
 }
 
 function extractedText(asset: ListedSessionAsset): string | undefined {
@@ -157,10 +191,11 @@ export async function loadFilesSources(options: {
   canvasDocuments: Record<string, CanvasDocument>
   imageLimit?: number
 }): Promise<LoadedFilesSources> {
-  const [sessionAssets, libraryAssets, items] = await Promise.all([
+  const [sessionAssets, libraryAssets, items, succeededJobs] = await Promise.all([
     listAllSessionAssets(),
     listLibraryAssets(),
     listLibraryItems(),
+    createDexieMediaJobStore().listByStatus("succeeded"),
   ])
   const { images, truncated } = await loadImages(
     options.imageLimit ?? FILES_IMAGE_PAGE_SIZE,
@@ -198,6 +233,7 @@ export async function loadFilesSources(options: {
       images,
       sessionUploads: sessionAssets.map(rawUpload),
       libraryUploads: libraryAssets.map(rawUpload),
+      generatedVideos: rawGeneratedVideos(succeededJobs),
       items,
       sessions,
       heldOriginals,

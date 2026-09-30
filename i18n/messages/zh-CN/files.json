@@ -107,7 +107,8 @@
     "canvas": "画布文档",
     "image": "图片",
     "session-upload": "文件",
-    "upload": "文件"
+    "upload": "文件",
+    "video": "视频"
   },
   "loadMore": "显示更多",
   "loadOlderImages": "加载更早的图片",
@@ -134,8 +135,15 @@
     "conversations": "所在对话",
     "details": {
       "added": "添加时间",
+      "dimensions": "分辨率",
+      "dimensionsValue": "{width} × {height}",
+      "duration": "时长",
+      "durationValue": "{seconds} 秒",
+      "generatedWith": "生成服务",
+      "generatedWithValue": "{provider} · {model}",
       "language": "语言",
       "modified": "修改时间",
+      "prompt": "提示词",
       "size": "大小",
       "type": "类型"
     },
@@ -192,7 +200,8 @@
     "canvas": "画布文档",
     "file": "文件",
     "image": "图片",
-    "label": "类型"
+    "label": "类型",
+    "video": "视频"
   },
   "unsupported": {
     "description": "请在桌面应用或已登录此账户的浏览器中打开“文件”。",

@@ -15,7 +15,7 @@ import {
 } from "@/lib/ai/media/video-jobs/types"
 import { getDb } from "./schema"
 
-/** Settled statuses the retention sweep may prune; `succeeded` follows its session. */
+/** Settled statuses the retention sweep prunes whatever the job made. */
 const PRUNABLE_VIDEO_JOB_STATUSES: readonly VideoJobStatus[] = ["failed", "cancelled", "timed_out"]
 
 async function guarded(
@@ -75,28 +75,53 @@ export async function listSessionVideoJobs(sessionId: string): Promise<MediaGene
 
 /**
  * Retention executor: drop failed / cancelled / timed-out jobs settled before
- * `cutoff`. Succeeded jobs are kept — their video lives with the session (or
- * in Files) and is removed with it.
+ * `cutoff`, and succeeded workflow jobs, whose video is a file of their own
+ * (removed here through `removeFile`). Other succeeded jobs are kept — their
+ * video lives with the session (or in Files) and is removed with it.
  */
-export async function pruneSettledVideoJobs(cutoff: number): Promise<number> {
+export async function pruneSettledVideoJobs(
+  cutoff: number,
+  removeFile: (relativePath: string) => Promise<void>
+): Promise<number> {
   const db = getDb()
-  return db.mediaGenerationJobs
+  const rows = await db.mediaGenerationJobs
     .where("settledAt")
     .below(cutoff)
-    .filter((row) => PRUNABLE_VIDEO_JOB_STATUSES.includes(row.status))
-    .delete()
+    .filter(
+      (row) =>
+        PRUNABLE_VIDEO_JOB_STATUSES.includes(row.status) ||
+        (row.status === "succeeded" && row.result?.content.kind === "file")
+    )
+    .toArray()
+  const pruned: string[] = []
+  for (const row of rows) {
+    const content = row.result?.content
+    if (content?.kind === "file") {
+      try {
+        await removeFile(content.relativePath)
+      } catch {
+        // Keep the row, so the next sweep tries again rather than orphan the file.
+        continue
+      }
+    }
+    pruned.push(row.id)
+  }
+  await db.mediaGenerationJobs.bulkDelete(pruned)
+  return pruned.length
 }
 
 /**
  * Whether a job travels in a backup. Only settled jobs: an in-flight job
- * belongs to the device polling it. A session-bound job goes when its session
- * is exported; any other job goes with the core data.
+ * belongs to the device polling it, and so does a workflow job's video, a
+ * file on this device's disk the backup does not carry. A session-bound job
+ * goes when its session is exported; any other job goes with the core data.
  */
 export function isPortableVideoJob(
   row: MediaGenerationJobRow,
   scope: { includeCoreData: boolean; exportedSessionIds: ReadonlySet<string> }
 ): boolean {
   if (!isSettledVideoJob(row)) return false
+  if (row.result?.content.kind === "file") return false
   return row.sessionId ? scope.exportedSessionIds.has(row.sessionId) : scope.includeCoreData
 }
 

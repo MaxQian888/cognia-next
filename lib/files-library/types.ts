@@ -11,14 +11,18 @@ export type FilesTab = "recent" | "favorites" | "folders" | "images" | "all"
 
 export const FILES_TABS: readonly FilesTab[] = ["recent", "favorites", "folders", "images", "all"]
 
-/** Type filter; `file` covers both conversation and Files-owned uploads. */
-export type FilesTypeFilter = "all" | "artifact" | "canvas" | "image" | "file"
+/**
+ * Type filter. `video` and `file` split the uploads (conversation and
+ * Files-owned alike) by media type, so each upload answers exactly one.
+ */
+export type FilesTypeFilter = "all" | "artifact" | "canvas" | "image" | "video" | "file"
 
 export const FILES_TYPE_FILTERS: readonly FilesTypeFilter[] = [
   "all",
   "artifact",
   "canvas",
   "image",
+  "video",
   "file",
 ]
 
@@ -71,8 +75,38 @@ export interface FilesEntry {
   assetSessionId?: string
   /** Bounded extracted text of an upload, copied into the snapshot when kept. */
   excerpt?: string
+  /** Set when the upload is a video a generation job made (ADR-0205). */
+  generated?: FilesGeneratedVideo
   /** Lower-cased haystack for search: title, media type and a bounded body excerpt. */
   searchText: string
+}
+
+/** What a generated video's job recorded about it. */
+export interface FilesGeneratedVideo {
+  jobId: string
+  prompt: string
+  providerId: string
+  modelId: string
+  durationSec?: number
+  width?: number
+  height?: number
+}
+
+/**
+ * The `files.kinds.*` label of an entry: its kind, except that an upload which
+ * is a video reads as a video rather than a generic file.
+ */
+export function entryKindLabelKey(entry: Pick<FilesEntry, "kind" | "mediaType">): string {
+  return isVideoEntry(entry) ? "video" : entry.kind
+}
+
+/** An upload whose bytes are a video. */
+export function isVideoEntry(entry: Pick<FilesEntry, "kind" | "mediaType">): boolean {
+  return (
+    (entry.kind === "session-upload" || entry.kind === "upload") &&
+    typeof entry.mediaType === "string" &&
+    entry.mediaType.toLowerCase().startsWith("video/")
+  )
 }
 
 /** Everything a Files write needs to know about an entry. */

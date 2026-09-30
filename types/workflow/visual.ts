@@ -183,6 +183,9 @@ export type WorkflowNodeKind =
   | "action.media.frame"
   | "action.media.trim"
   | "action.media.concat"
+  // Video generation (ADR-0205): a durable provider job whose video lands as a
+  // file under AppData, so it chains into the four nodes above.
+  | "action.media.generateVideo"
   // Image editing (ADR-0168's engine). Resize, crop, rotate and flip collapse
   // into one `transform`, because the engine already takes all four in one
   // pass and four nodes would be four lossy re-encodes.
@@ -534,6 +537,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.media.frame",
   "action.media.trim",
   "action.media.concat",
+  "action.media.generateVideo",
   "action.image.info",
   "action.image.transform",
   "action.image.adjust",

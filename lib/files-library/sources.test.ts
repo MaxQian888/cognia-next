@@ -6,7 +6,14 @@ import { putLibraryAsset, putSessionAsset } from "@/lib/db/session-assets"
 import { setLibraryItemFavorite } from "@/lib/db/files-library-items"
 import { LIBRARY_REF_SESSION_ID } from "@/lib/db/message-media-refs"
 import type { MessageMediaRow } from "@/lib/db/message-media"
-import { loadFilesSources, loadImages, rawArtifacts, rawCanvases } from "./sources"
+import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
+import {
+  loadFilesSources,
+  loadImages,
+  rawArtifacts,
+  rawCanvases,
+  rawGeneratedVideos,
+} from "./sources"
 
 jest.setTimeout(30_000)
 const fixture = createDbTestFixture()
@@ -89,6 +96,73 @@ describe("loadImages", () => {
   })
 })
 
+function job(
+  id: string,
+  status: MediaGenerationJobRow["status"],
+  result?: MediaGenerationJobRow["result"]
+): MediaGenerationJobRow {
+  return {
+    id,
+    kind: "video",
+    origin: { surface: "plugin", pluginId: "p" },
+    request: { prompt: `prompt of ${id}` },
+    provider: { providerId: "google", modelId: "veo", credentialAffinity: "a" },
+    operation: {},
+    status,
+    pollCount: 0,
+    nextPollAt: 0,
+    deadlineAt: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    ...(result ? { result } : {}),
+  }
+}
+
+describe("rawGeneratedVideos", () => {
+  it("keeps succeeded jobs stored in a conversation or in Files, with their record", () => {
+    const videos = rawGeneratedVideos([
+      job("chat", "succeeded", {
+        content: { kind: "session-asset", sessionId: "s1", assetId: "video-chat" },
+        mediaType: "video/mp4",
+        byteSize: 1,
+        durationSec: 5,
+        width: 1280,
+        height: 720,
+      }),
+      job("plugin", "succeeded", {
+        content: { kind: "library", assetId: "video-plugin" },
+        mediaType: "video/mp4",
+        byteSize: 1,
+      }),
+      job("flow", "succeeded", {
+        content: { kind: "file", relativePath: "generated-videos/flow.mp4", path: "/x" },
+        mediaType: "video/mp4",
+        byteSize: 1,
+      }),
+      job("failed", "failed"),
+    ])
+    expect(videos).toEqual([
+      {
+        jobId: "chat",
+        prompt: "prompt of chat",
+        providerId: "google",
+        modelId: "veo",
+        durationSec: 5,
+        width: 1280,
+        height: 720,
+        home: { kind: "session-asset", sessionId: "s1", assetId: "video-chat" },
+      },
+      {
+        jobId: "plugin",
+        prompt: "prompt of plugin",
+        providerId: "google",
+        modelId: "veo",
+        home: { kind: "library", assetId: "video-plugin" },
+      },
+    ])
+  })
+})
+
 describe("loadFilesSources", () => {
   it("collects every source with its live sessions and held kept originals", async () => {
     const db = getDb()
@@ -107,6 +181,14 @@ describe("loadFilesSources", () => {
       filename: "mine.md",
       mediaType: "text/markdown",
     })
+    await db.mediaGenerationJobs.bulkPut([
+      job("vjob_ok", "succeeded", {
+        content: { kind: "session-asset", sessionId: "s2", assetId: "video-vjob_ok" },
+        mediaType: "video/mp4",
+        byteSize: 1,
+      }),
+      job("vjob_running", "generating"),
+    ])
     const [asset] = await db.messageMediaRefs
       .where("messageId")
       .startsWith("session-asset:")
@@ -151,6 +233,7 @@ describe("loadFilesSources", () => {
     expect(input.images.map((image) => image.hash)).toEqual(["img"])
     expect(input.sessionUploads.map((upload) => upload.assetId)).toEqual(["a1"])
     expect(input.libraryUploads.map((upload) => upload.assetId)).toEqual(["u1"])
+    expect(input.generatedVideos.map((video) => video.jobId)).toEqual(["vjob_ok"])
     expect(input.items.map((item) => item.key).sort()).toEqual(
       [`session-upload:${asset!.sessionAsset!.contentHash}`, "upload:u1"].sort()
     )

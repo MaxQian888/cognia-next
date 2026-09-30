@@ -5,7 +5,7 @@ description: "Video generation becomes a first-class feature: one engine starts 
 
 # ADR 0205 — Video generation runs as durable jobs
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-29
 **Related:** [ADR-0168](./0168-an-edit-is-a-new-version-of-the-same-message) (one media engine, plugin API delegates), [ADR-0180](./0180-a-video-reaches-the-model-as-what-it-can-read) (video input handling), [ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep) (files aggregate), [ADR-0163](./0163-provider-operation-contract) (provider-operations executor)
 
@@ -53,8 +53,9 @@ status-guarded claim makes sure only one download happens.
 
 Providers return expiring URLs, and Google's carries the API key. The engine
 downloads on the first `completed`, stores the bytes where the job was
-requested (a session asset for chat, a Files upload for plugins, a file on
-disk for workflows), and discards the URL. All traffic goes through
+requested (a session asset for chat, a Files upload for plugins, a file
+under AppData for workflows), and discards the URL. The stored file is named
+after the prompt. All traffic goes through
 `platformFetch`, which fixes the desktop CSP gap for every caller. The desktop
 bridge buffers up to 64 MiB; larger results fail early from a
 `Content-Length` check with `result_too_large`.
@@ -73,9 +74,17 @@ bridge buffers up to 64 MiB; larger results fail early from a
   device shows the card as "not stored on this device".
 - A "Media generation" settings section holds defaults; every surface can
   override them per call.
-- The Files page gains a `video` kind aggregated from succeeded jobs.
-- A workflow node `action.media.generateVideo` writes the file and outputs its
-  path.
+- On the Files page a generated video is the upload its job stored, not a
+  card of its own, so keeping, moving and deleting it work as for any upload.
+  The aggregate folds in what the job recorded (prompt, provider, model,
+  duration, size) for the preview and for search. A Video type filter covers
+  every video upload, and the preview plays it.
+- A workflow node `action.media.generateVideo` waits on its job and outputs the
+  file's path, which the other `action.media.*` nodes read. The file lives
+  under AppData, the one tree the window may write without a wider fs scope;
+  like the trim and concat outputs it is outside every workspace root. Its
+  saved defaults are the same as `/video`'s. The node does not retry, since
+  each start is a paid generation.
 - The plugin API and the executor's `videos.*` handlers call the engine.
 
 ### 5. Cancel is honest
@@ -97,7 +106,8 @@ by a test.
 2. The "Media generation" settings section, the `video_generate` /
    `video_status` agent tools, `/video` and the chat job card (including
    "check again" for a timed-out job).
-3. The Files `video` kind and the `action.media.generateVideo` workflow node.
+3. The Files Video filter, preview and job details, and the
+   `action.media.generateVideo` workflow node.
 
 Step 1 shipped with no chat origin in use; the engine, storage, backup and
 session cascade already handled one, and step 2 uses it.
@@ -108,7 +118,8 @@ session cascade already handled one, and step 2 uses it.
 - The existing plugin video API starts working on the desktop, keeps its
   signature, and leaves a Files entry behind.
 - A new Dexie table joins the backup; failed and cancelled rows are pruned
-  after 30 days, succeeded rows follow their session.
+  after 30 days, succeeded rows follow their session. A succeeded workflow
+  job's row and its file are pruned after 30 days too.
 - The provider-operations `videos.generate` for the seven media-module
   providers now answers `running` with a `vjob_…` handle instead of waiting
   for the video; `videos.get` checks the job with the provider and

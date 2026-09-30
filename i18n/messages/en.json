@@ -16004,7 +16004,8 @@
       "canvas": "Canvas document",
       "image": "Image",
       "session-upload": "File",
-      "upload": "File"
+      "upload": "File",
+      "video": "Video"
     },
     "loadMore": "Show more",
     "loadOlderImages": "Load older images",
@@ -16031,8 +16032,15 @@
       "conversations": "Conversations",
       "details": {
         "added": "Added",
+        "dimensions": "Dimensions",
+        "dimensionsValue": "{width} × {height}",
+        "duration": "Duration",
+        "durationValue": "{seconds} s",
+        "generatedWith": "Generated with",
+        "generatedWithValue": "{provider} · {model}",
         "language": "Language",
         "modified": "Modified",
+        "prompt": "Prompt",
         "size": "Size",
         "type": "Type"
       },
@@ -16089,7 +16097,8 @@
       "canvas": "Canvas documents",
       "file": "Files",
       "image": "Images",
-      "label": "Type"
+      "label": "Type",
+      "video": "Videos"
     },
     "unsupported": {
       "description": "Open Files in the desktop app or in a browser signed in to this account.",
@@ -56602,6 +56611,10 @@
           "frame": {
             "description": "Pull one frame out of a video at a timestamp and hand back a reference the image and OCR nodes can read.",
             "label": "Extract frame"
+          },
+          "generateVideo": {
+            "description": "Generate a video from a prompt, and optionally a start image, with a configured video provider. Waits for the provider (often several minutes) and outputs the file's path for the other media nodes.",
+            "label": "Generate video"
           },
           "probe": {
             "description": "Read a video's duration, dimensions, frame rate, codec and whether it has audio.",

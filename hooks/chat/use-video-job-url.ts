@@ -26,6 +26,8 @@ function keyOf(content: VideoJobContent | undefined): string | null {
       return `session:${content.sessionId}:${content.assetId}`
     case "library":
       return `library:${content.assetId}`
+    case "file":
+      return `file:${content.relativePath}`
     case "inline":
       return `inline:${content.bytes.byteLength}`
   }

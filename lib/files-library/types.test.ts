@@ -1,9 +1,17 @@
-import { entrySource, FILES_SORTS, FILES_TABS, FILES_TYPE_FILTERS, type FilesEntry } from "./types"
+import {
+  entryKindLabelKey,
+  entrySource,
+  FILES_SORTS,
+  FILES_TABS,
+  FILES_TYPE_FILTERS,
+  isVideoEntry,
+  type FilesEntry,
+} from "./types"
 
 describe("files-library types", () => {
   it("lists the tabs, type filters and sorts in display order", () => {
     expect(FILES_TABS).toEqual(["recent", "favorites", "folders", "images", "all"])
-    expect(FILES_TYPE_FILTERS).toEqual(["all", "artifact", "canvas", "image", "file"])
+    expect(FILES_TYPE_FILTERS).toEqual(["all", "artifact", "canvas", "image", "video", "file"])
     expect(FILES_SORTS).toEqual(["recent", "updated", "created", "name", "size"])
   })
 
@@ -58,5 +66,17 @@ describe("files-library types", () => {
       sourceId: "c1",
       snapshot: { title: "SPEC.md" },
     })
+  })
+
+  it("labels an uploaded video as a video, and nothing else", () => {
+    expect(isVideoEntry({ kind: "session-upload", mediaType: "video/mp4" })).toBe(true)
+    expect(isVideoEntry({ kind: "upload", mediaType: "VIDEO/WEBM" })).toBe(true)
+    expect(isVideoEntry({ kind: "upload", mediaType: "application/pdf" })).toBe(false)
+    expect(isVideoEntry({ kind: "image", mediaType: "video/mp4" })).toBe(false)
+    expect(entryKindLabelKey({ kind: "upload", mediaType: "video/mp4" })).toBe("video")
+    expect(entryKindLabelKey({ kind: "session-upload", mediaType: "text/plain" })).toBe(
+      "session-upload"
+    )
+    expect(entryKindLabelKey({ kind: "canvas" })).toBe("canvas")
   })
 })

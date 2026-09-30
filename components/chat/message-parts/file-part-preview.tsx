@@ -3,8 +3,9 @@
 // Inline preview for non-image `file` message parts. Markdown files use the
 // shared rendered/source surfaces, HTML files render live in the same
 // sanitized sandbox iframe the static artifact preview uses, other text files
-// keep the existing copyable CodeBlock, and PDFs embed via <object>. Binary
-// or unknown files and fetch failures retain the plain download fallback.
+// keep the existing copyable CodeBlock, PDFs embed via <object>, and videos
+// play in the shared VideoBlock player. Binary or unknown files and fetch
+// failures retain the plain download fallback.
 
 import { memo, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -12,6 +13,7 @@ import { Loader2Icon } from "lucide-react"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
+import { VideoBlock } from "@/components/chat/renderers/video-block"
 import { languageFromPath } from "@/components/chat/message-parts/mcp-renderers/common"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -45,6 +47,12 @@ function isTextLike(mediaType: string | undefined, filename: string | undefined)
 
 function isPdf(mediaType: string | undefined, filename: string | undefined): boolean {
   return mediaType === "application/pdf" || /\.pdf$/i.test(filename ?? "")
+}
+
+/** A container the webview's `<video>` can play. */
+function isVideo(mediaType: string | undefined, filename: string | undefined): boolean {
+  if (mediaType) return /^video\/(?:mp4|webm|ogg|quicktime)\b/i.test(mediaType)
+  return /\.(?:mp4|m4v|webm|ogv|mov)$/i.test(filename ?? "")
 }
 
 function isMarkdown(mediaType: string | undefined, filename: string | undefined): boolean {
@@ -132,7 +140,8 @@ export const FilePartPreview = memo(function FilePartPreview({
   const t = useTranslations("chat.filePreview")
   const displayName = filename ?? url
   const pdf = isPdf(mediaType, filename)
-  const textLike = !pdf && isTextLike(mediaType, filename)
+  const video = !pdf && isVideo(mediaType, filename)
+  const textLike = !pdf && !video && isTextLike(mediaType, filename)
   const markdown = textLike && isMarkdown(mediaType, filename)
   const html = textLike && isHtml(mediaType, filename)
   const text = useFileText(url, textLike)
@@ -151,6 +160,14 @@ export const FilePartPreview = memo(function FilePartPreview({
             <DownloadLink url={url} displayName={displayName} />
           </div>
         </object>
+      </div>
+    )
+  }
+
+  if (video) {
+    return (
+      <div className="my-1" data-testid="file-preview-video">
+        <VideoBlock src={url} title={displayName} />
       </div>
     )
   }

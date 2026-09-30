@@ -476,6 +476,35 @@ describe("waitForVideoJob", () => {
     expect(sleep).toHaveBeenCalled()
   })
 
+  it("keeps waiting when another window moves the job under its poll", async () => {
+    let interrupted = false
+    const t = setup({
+      materialize: jest.fn(async (row: MediaGenerationJobRow, blob: Blob) => {
+        if (!interrupted) {
+          // A new reconciler leader resets the download this window is doing.
+          interrupted = true
+          await t.store.transition(row.id, "downloading", "generating", { nextPollAt: 0 })
+        }
+        return {
+          content: { kind: "library" as const, assetId: `asset-${row.id}` },
+          mediaType: blob.type,
+          byteSize: blob.size,
+        }
+      }),
+    })
+    await started(t)
+    t.getVideoStatus.mockResolvedValue({
+      status: "completed",
+      videos: [{ type: "binary", data: new Uint8Array([7]), mediaType: "video/mp4" }],
+      warnings: [],
+      response: {},
+    })
+    const sleep = jest.fn(async (ms: number) => t.advance(ms))
+    const settled = await t.engine.wait("vjob_1", { sleep })
+    expect(settled?.status).toBe("succeeded")
+    expect(interrupted).toBe(true)
+  })
+
   it("cancels the job when the caller aborts", async () => {
     const t = setup()
     await started(t)

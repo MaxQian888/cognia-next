@@ -155,35 +155,18 @@ export function __setMediaToolDepsForTesting(factory: (() => MediaToolDeps) | nu
 /** Resolve the renderer dependencies; everything is reached lazily (see header). */
 export async function resolveMediaToolDeps(): Promise<MediaToolDeps> {
   if (testDepsFactory) return testDepsFactory()
-  const [rendererHost, host, defaults, settingsStore, providers, network, messages, sessions] =
-    await Promise.all([
-      import("@/lib/ai/media/video-jobs/renderer-host"),
-      import("@/lib/ai/media/video-jobs/host"),
-      import("@/lib/ai/media/video-jobs/defaults"),
-      import("@/stores/settings"),
-      import("@/lib/ai/provider-consumption"),
-      import("@/lib/network/platform-fetch"),
-      import("@/lib/db/messages"),
-      import("@/lib/db/sessions"),
-    ])
+  const [rendererHost, host, messages, sessions] = await Promise.all([
+    import("@/lib/ai/media/video-jobs/renderer-host"),
+    import("@/lib/ai/media/video-jobs/host"),
+    import("@/lib/db/messages"),
+    import("@/lib/db/sessions"),
+  ])
   rendererHost.ensureRendererVideoJobHost()
-  const live = () => settingsStore.useSettingsStore.getState().settings
   return {
     start: (input) => host.getVideoJobEngine().start(input),
     getJob: (jobId) => host.getVideoJobHost().store.get(jobId),
-    settings: () => live()?.videoGeneration,
-    configuredProviders: () => {
-      const settings = live()
-      const snapshot = providers.createProviderSettingsSnapshot({
-        defaultProvider: settings?.defaultProvider,
-        providerSettings: settings?.providerSettings,
-        customProviders: settings?.customProviders,
-      })
-      return defaults
-        .listConfiguredVideoProviders(snapshot, network.reachesNonCorsHosts())
-        .filter((provider) => provider.reachable)
-        .map((provider) => provider.providerId)
-    },
+    settings: rendererHost.currentVideoGenerationSettings,
+    configuredProviders: rendererHost.reachableVideoProviderIds,
     listMessages: (sessionId) => messages.listMessages(sessionId),
     projectIdOf: async (sessionId) => (await sessions.getSession(sessionId))?.projectId,
   }

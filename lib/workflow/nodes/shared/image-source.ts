@@ -36,10 +36,22 @@ function base64ToBytes(base64: string): Uint8Array {
 
 export const IMAGE_SOURCE_FIELDS = ["blobRef", "dataUrl", "imageBase64", "url"] as const
 
-export async function resolveImageSource(
+/** Whether any image source field is set (for nodes where the image is optional). */
+export function hasImageSource(params: Record<string, unknown>): boolean {
+  return IMAGE_SOURCE_FIELDS.some((field) => str(params, field) !== undefined)
+}
+
+export interface ResolvedImageBytes {
+  blob: Blob
+  /** What the bytes are, when the source said so. */
+  mediaType?: string
+}
+
+/** The image's bytes as given, without decoding them. */
+export async function resolveImageBytes(
   params: Record<string, unknown>,
   kind: string
-): Promise<ResolvedImageSource> {
+): Promise<ResolvedImageBytes> {
   const blobRef = str(params, "blobRef")
   if (blobRef) {
     if (!isWorkflowBlobRef(blobRef)) {
@@ -47,10 +59,8 @@ export async function resolveImageSource(
     }
     const blob = await openWorkflowBlob(blobRef)
     return {
-      buffer: await decodeBlobToPixelBuffer(
-        new Blob([blob.bytes as unknown as BlobPart], { type: blob.mediaType })
-      ),
-      sourceMediaType: blob.mediaType,
+      blob: new Blob([blob.bytes as unknown as BlobPart], { type: blob.mediaType }),
+      mediaType: blob.mediaType,
     }
   }
 
@@ -61,19 +71,14 @@ export async function resolveImageSource(
     }
     const response = await fetch(dataUrl)
     const blob = await response.blob()
-    return { buffer: await decodeBlobToPixelBuffer(blob), sourceMediaType: blob.type || undefined }
+    return { blob, mediaType: blob.type || undefined }
   }
 
   const imageBase64 = str(params, "imageBase64")
   if (imageBase64) {
     const mediaType = str(params, "mimeType") ?? "image/png"
     const bytes = base64ToBytes(imageBase64)
-    return {
-      buffer: await decodeBlobToPixelBuffer(
-        new Blob([bytes as unknown as BlobPart], { type: mediaType })
-      ),
-      sourceMediaType: mediaType,
-    }
+    return { blob: new Blob([bytes as unknown as BlobPart], { type: mediaType }), mediaType }
   }
 
   const url = str(params, "url")
@@ -81,8 +86,16 @@ export async function resolveImageSource(
     // `proxyFetch`, like every other workflow egress: the image lives on
     // whatever host the author pointed at, which `connect-src` does not list.
     const blob = await (await proxyFetch(url)).blob()
-    return { buffer: await decodeBlobToPixelBuffer(blob), sourceMediaType: blob.type || undefined }
+    return { blob, mediaType: blob.type || undefined }
   }
 
   throw nonRetryable(`${kind}: no image source. Set one of ${IMAGE_SOURCE_FIELDS.join(", ")}.`)
+}
+
+export async function resolveImageSource(
+  params: Record<string, unknown>,
+  kind: string
+): Promise<ResolvedImageSource> {
+  const { blob, mediaType } = await resolveImageBytes(params, kind)
+  return { buffer: await decodeBlobToPixelBuffer(blob), sourceMediaType: mediaType }
 }

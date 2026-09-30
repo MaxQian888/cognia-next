@@ -5,7 +5,7 @@ import { StarIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files-actions"
-import type { FilesEntry } from "@/lib/files-library/types"
+import { entryKindLabelKey, type FilesEntry } from "@/lib/files-library/types"
 import { formatBytes } from "@/lib/storage/usage"
 import { cn } from "@/lib/utils"
 import { FilesEntryIcon } from "./files-entry-icon"
@@ -58,7 +58,7 @@ export function FilesRow({ entry, actions, selected }: FilesRowProps) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{title}</p>
         <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-          <span>{t(`kinds.${entry.kind}`)}</span>
+          <span>{t(`kinds.${entryKindLabelKey(entry)}`)}</span>
           {entry.byteSize !== undefined ? <span>· {formatBytes(entry.byteSize)}</span> : null}
           {!entry.originAlive ? (
             <Badge variant="secondary" className="h-4 px-1 text-[10px]">

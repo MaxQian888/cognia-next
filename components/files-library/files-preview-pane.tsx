@@ -24,7 +24,8 @@ import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files
 import { getSessionsByIds } from "@/lib/db/sessions"
 import { downloadPayloadFor } from "@/lib/files-library/download"
 import { goToSession } from "@/lib/files-library/open"
-import type { FilesEntry } from "@/lib/files-library/types"
+import { getProviderDisplayName } from "@/lib/ai/icons"
+import { entryKindLabelKey, type FilesEntry } from "@/lib/files-library/types"
 import { formatBytes } from "@/lib/storage/usage"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useRouter } from "next/navigation"
@@ -58,7 +59,7 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
           <h2 className="truncate text-sm font-semibold" title={title}>
             {title}
           </h2>
-          <p className="text-xs text-muted-foreground">{t(`kinds.${entry.kind}`)}</p>
+          <p className="text-xs text-muted-foreground">{t(`kinds.${entryKindLabelKey(entry)}`)}</p>
         </div>
         <Button
           variant="ghost"
@@ -89,7 +90,7 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
         <dl className="mx-4 mb-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
           <dt className="text-muted-foreground">{t("preview.details.type")}</dt>
           <dd className="truncate">
-            {entry.mediaType ?? entry.subtype ?? t(`kinds.${entry.kind}`)}
+            {entry.mediaType ?? entry.subtype ?? t(`kinds.${entryKindLabelKey(entry)}`)}
           </dd>
           {entry.language ? (
             <>
@@ -103,6 +104,7 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
               <dd>{formatBytes(entry.byteSize)}</dd>
             </>
           ) : null}
+          {entry.generated ? <GeneratedDetails generated={entry.generated} /> : null}
           <dt className="text-muted-foreground">{t("preview.details.added")}</dt>
           <dd>{format.dateTime(entry.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd>
           <dt className="text-muted-foreground">{t("preview.details.modified")}</dt>
@@ -173,6 +175,43 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
         </Button>
       </div>
     </aside>
+  )
+}
+
+/** What the video's generation job recorded: prompt, provider and model, size. */
+function GeneratedDetails({ generated }: { generated: NonNullable<FilesEntry["generated"]> }) {
+  const t = useTranslations("files.preview.details")
+  const format = useFormatter()
+  return (
+    <>
+      <dt className="text-muted-foreground">{t("prompt")}</dt>
+      <dd className="whitespace-pre-wrap break-words" data-testid="files-preview-prompt">
+        {generated.prompt}
+      </dd>
+      <dt className="text-muted-foreground">{t("generatedWith")}</dt>
+      <dd className="truncate">
+        {t("generatedWithValue", {
+          provider: getProviderDisplayName(generated.providerId),
+          model: generated.modelId,
+        })}
+      </dd>
+      {generated.durationSec !== undefined ? (
+        <>
+          <dt className="text-muted-foreground">{t("duration")}</dt>
+          <dd>
+            {t("durationValue", {
+              seconds: format.number(Math.round(generated.durationSec * 10) / 10),
+            })}
+          </dd>
+        </>
+      ) : null}
+      {generated.width !== undefined && generated.height !== undefined ? (
+        <>
+          <dt className="text-muted-foreground">{t("dimensions")}</dt>
+          <dd>{t("dimensionsValue", { width: generated.width, height: generated.height })}</dd>
+        </>
+      ) : null}
+    </>
   )
 }
 

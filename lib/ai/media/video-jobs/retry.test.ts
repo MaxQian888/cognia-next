@@ -63,5 +63,8 @@ describe("retryInputOf", () => {
     ).toBeNull()
     expect(retryInputOf(row({ origin: { surface: "plugin", pluginId: "p" } }))).toBeNull()
     expect(retryInputOf(row({ origin: { surface: "executor" } }))).toBeNull()
+    expect(
+      retryInputOf(row({ origin: { surface: "workflow", runId: "r", stepId: "s" } }))
+    ).toBeNull()
   })
 })

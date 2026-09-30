@@ -614,7 +614,10 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
       if (!current || isSettledVideoJob(current)) return current
       if (current.status === "generating" && current.nextPollAt <= deps.now()) {
         const next = await poll(jobId, { snapshot: options.snapshot })
-        if (!next || isSettledVideoJob(next)) return next
+        // No row back means another window moved the job under this poll (it
+        // took the download, or a new reconciler leader reset it); read it
+        // again rather than report a job that is still going as missing.
+        if (next && isSettledVideoJob(next)) return next
         continue
       }
       const delay =

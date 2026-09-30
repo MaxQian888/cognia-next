@@ -200,3 +200,49 @@ it("previews a canvas document from its content", async () => {
     expect(screen.getByTestId("file-part-preview")).toHaveAttribute("data-filename", "Doc.md")
   )
 })
+
+it("labels a generated video and lists what its job recorded", async () => {
+  payload.mockResolvedValue({
+    blob: new Blob(["v"], { type: "video/mp4" }),
+    filename: "A paper boat.mp4",
+  })
+  render(
+    <FilesPreviewPane
+      entry={entry({
+        key: "session-upload:v1",
+        kind: "session-upload",
+        sourceId: "v1",
+        title: "A paper boat.mp4",
+        mediaType: "video/mp4",
+        ownedByFiles: false,
+        generated: {
+          jobId: "vjob_1",
+          prompt: "A paper boat on a rainy street",
+          providerId: "doubao",
+          modelId: "seedance-1-5-pro",
+          durationSec: 5.04,
+          width: 1280,
+          height: 720,
+        },
+      })}
+      actions={actions()}
+      onClose={jest.fn()}
+    />
+  )
+  expect(await screen.findByTestId("file-part-preview")).toBeInTheDocument()
+  expect(screen.getByText("Video")).toBeInTheDocument()
+  expect(screen.getByTestId("files-preview-prompt")).toHaveTextContent(
+    "A paper boat on a rainy street"
+  )
+  expect(screen.getByText(/· seedance-1-5-pro$/)).toBeInTheDocument()
+  expect(screen.getByText("5 s")).toBeInTheDocument()
+  expect(screen.getByText("1280 × 720")).toBeInTheDocument()
+})
+
+it("lists no generation details for an ordinary upload", async () => {
+  payload.mockResolvedValue({ blob: new Blob(["x"]), filename: "notes.md" })
+  render(<FilesPreviewPane entry={entry({})} actions={actions()} onClose={jest.fn()} />)
+  expect(await screen.findByTestId("file-part-preview")).toBeInTheDocument()
+  expect(screen.queryByTestId("files-preview-prompt")).not.toBeInTheDocument()
+  expect(screen.getByText("File")).toBeInTheDocument()
+})

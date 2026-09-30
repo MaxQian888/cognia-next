@@ -55,6 +55,16 @@ describe("filterFilesEntries", () => {
     expect(matchesType(entries[0]!, "artifact")).toBe(true)
   })
 
+  it("files an uploaded video under video, not file", () => {
+    const video = entry({ key: "v", kind: "session-upload", mediaType: "video/mp4" })
+    const owned = entry({ key: "w", kind: "upload", mediaType: "video/webm" })
+    expect(matchesType(video, "video")).toBe(true)
+    expect(matchesType(owned, "video")).toBe(true)
+    expect(matchesType(video, "file")).toBe(false)
+    expect(matchesType(entries[3]!, "video")).toBe(false)
+    expect(matchesType(entries[2]!, "video")).toBe(false)
+  })
+
   it("treats rows without a workspace as shared", () => {
     expect(matchesProject(entry({ key: "x" }), "current", "p1")).toBe(true)
     expect(matchesProject(entry({ key: "x", projectIds: ["p2"] }), "current", "p1")).toBe(false)

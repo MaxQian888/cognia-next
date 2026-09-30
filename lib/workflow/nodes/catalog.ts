@@ -15,6 +15,11 @@ import {
   type WorkflowNodeKind,
 } from "@/types/workflow/visual"
 import type { CapabilityId } from "@/lib/platform/capabilities"
+import {
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_GENERATION_PROVIDER_IDS,
+  VIDEO_RESOLUTIONS,
+} from "@/lib/ai/media/video-generation-sdk"
 import { PALETTE_SECTIONS, paletteSection, type PaletteSection } from "./palette-sections"
 
 export interface NodeCatalogEntry {
@@ -1131,6 +1136,48 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
           title: "Video file paths",
           items: { type: "string" },
         },
+      },
+    },
+  },
+  "action.media.generateVideo": {
+    label: "Generate video",
+    description:
+      "Generate a video from a prompt, and optionally a start image, with a configured video provider. Waits for the provider (often several minutes) and outputs the file's path for the other media nodes.",
+    iconName: "Clapperboard",
+    keywords: ["video", "generate", "ai", "text to video", "image to video", "veo", "seedance"],
+    // Runs the renderer's durable job host (Dexie rows, provider settings) and
+    // writes the file under AppData, which only the desktop app can; the path
+    // feeds the FFmpeg nodes, hence `media`.
+    requires: ["media", "webview"],
+    paramsSchema: {
+      type: "object",
+      required: ["prompt"],
+      properties: {
+        prompt: { type: "string", format: "expression", title: "Prompt" },
+        providerId: {
+          type: "string",
+          title: "Provider",
+          description: "Empty uses the default from Settings → Media generation.",
+          enum: VIDEO_GENERATION_PROVIDER_IDS,
+        },
+        model: {
+          type: "string",
+          title: "Model",
+          description: "Empty uses the provider's default.",
+        },
+        durationSec: { type: "integer", title: "Duration (seconds)", minimum: 1 },
+        aspectRatio: { type: "string", title: "Aspect ratio", enum: VIDEO_ASPECT_RATIOS },
+        resolution: { type: "string", title: "Resolution", enum: VIDEO_RESOLUTIONS },
+        blobRef: {
+          type: "string",
+          format: "expression",
+          title: "Start image blob reference",
+          description: "From an earlier image or frame node.",
+        },
+        dataUrl: { type: "string", format: "expression", title: "Start image data URL" },
+        imageBase64: { type: "string", format: "expression", title: "Start image base64 bytes" },
+        mimeType: { type: "string", title: "Media type for the base64 bytes" },
+        url: { type: "string", format: "expression", title: "Start image URL" },
       },
     },
   },

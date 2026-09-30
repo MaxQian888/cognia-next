@@ -5,7 +5,14 @@
 
 import { ROOT_LIBRARY_FOLDER_ID } from "@/lib/db/files-library-types"
 import { entryRecency } from "./aggregate"
-import type { FilesEntry, FilesProjectScope, FilesSort, FilesTab, FilesTypeFilter } from "./types"
+import {
+  isVideoEntry,
+  type FilesEntry,
+  type FilesProjectScope,
+  type FilesSort,
+  type FilesTab,
+  type FilesTypeFilter,
+} from "./types"
 
 export interface FilesQuery {
   tab: FilesTab
@@ -27,8 +34,10 @@ export function matchesType(entry: FilesEntry, type: FilesTypeFilter): boolean {
       return entry.kind === "canvas"
     case "image":
       return entry.kind === "image"
+    case "video":
+      return isVideoEntry(entry)
     case "file":
-      return entry.kind === "session-upload" || entry.kind === "upload"
+      return (entry.kind === "session-upload" || entry.kind === "upload") && !isVideoEntry(entry)
   }
 }
 

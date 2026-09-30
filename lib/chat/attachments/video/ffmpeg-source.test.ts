@@ -7,6 +7,8 @@ jest.mock("@tauri-apps/plugin-fs", () => ({
   mkdir: jest.fn(async () => {}),
   remove: jest.fn(async () => {}),
   writeFile: jest.fn(async () => {}),
+  rename: jest.fn(async () => {}),
+  exists: jest.fn(async () => true),
 }))
 jest.mock("@tauri-apps/api/path", () => ({
   appDataDir: jest.fn(async () => "/Users/me/Library/Application Support/cognia"),
@@ -116,8 +118,9 @@ describe("defaultFfmpegSourceDeps.stageFile", () => {
       [FFMPEG_STAGING_CHUNK_BYTES, true],
       [5, true],
     ])
-    const relative = writeFileMock.mock.calls[0][0] as string
-    expect(relative).toMatch(new RegExp(`^${FFMPEG_STAGING_DIR}/.+\\.mov$`))
+    const [, relative] = (fs.rename as jest.Mock).mock.calls[0] as [string, string]
+    expect(relative).toMatch(new RegExp(`^${FFMPEG_STAGING_DIR}/[^/]+\\.mov$`))
+    expect(writeFileMock.mock.calls[0][0]).toBe((fs.rename as jest.Mock).mock.calls[0][0])
     expect(staged.path).toBe(`/Users/me/Library/Application Support/cognia/${relative}`)
     await staged.remove()
     expect(removeMock).toHaveBeenCalledWith(relative, { baseDir: 14 })
@@ -125,7 +128,7 @@ describe("defaultFfmpegSourceDeps.stageFile", () => {
 
   it("never lets an extension escape the staging directory", async () => {
     await defaultFfmpegSourceDeps.stageFile(new Blob([new Uint8Array(1)]), "../../evil")
-    expect(writeFileMock.mock.calls[0][0]).toMatch(/\.bin$/)
+    expect((fs.rename as jest.Mock).mock.calls.at(-1)![1]).toMatch(/\.bin$/)
   })
 
   it("removes a partial copy when a write fails", async () => {

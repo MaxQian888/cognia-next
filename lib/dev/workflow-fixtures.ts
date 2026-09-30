@@ -1494,6 +1494,9 @@ const NODE_FIXTURE_PARAMS = {
   "action.media.concat": {
     sourcePaths: ["first.mp4", "second.mp4"],
   },
+  "action.media.generateVideo": {
+    prompt: "A paper boat drifting down a rainy street",
+  },
   "action.browser.open": {
     url: "https://example.com",
   },

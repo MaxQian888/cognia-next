@@ -50,6 +50,24 @@ describe("useVideoJobUrl", () => {
     expect(readRendererVideo).toHaveBeenCalledTimes(1)
   })
 
+  it("reloads when the content names another file, whatever its kind", async () => {
+    readRendererVideo.mockResolvedValue(new Blob(["v"]))
+    const file = {
+      kind: "file" as const,
+      relativePath: "generated-videos/vjob_2.mp4",
+      path: "/data/generated-videos/vjob_2.mp4",
+    }
+    const { result, rerender } = renderHook(
+      ({ c }: { c: Parameters<typeof useVideoJobUrl>[0] }) => useVideoJobUrl(c),
+      { initialProps: { c: content as Parameters<typeof useVideoJobUrl>[0] } }
+    )
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    rerender({ c: file })
+    await waitFor(() => expect(readRendererVideo).toHaveBeenCalledWith(file))
+    rerender({ c: { ...file } })
+    expect(readRendererVideo).toHaveBeenCalledTimes(2)
+  })
+
   it("reports a video that is no longer stored", async () => {
     readRendererVideo.mockRejectedValue(new Error("The video is no longer stored."))
     const { result } = renderHook(() => useVideoJobUrl(content))

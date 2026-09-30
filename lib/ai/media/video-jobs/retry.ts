@@ -13,9 +13,10 @@ function retryOrigin(origin: VideoJobOrigin): VideoJobOrigin | null {
     case "chat-tool":
     case "slash":
       return origin
-    // A plugin or executor caller is waiting on its own job id; a card has
-    // nothing to hand a repeat back to.
+    // A plugin, workflow step or executor caller is waiting on its own job
+    // id; a card has nothing to hand a repeat back to.
     case "plugin":
+    case "workflow":
     case "executor":
       return null
   }

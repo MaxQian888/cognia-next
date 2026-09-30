@@ -68,3 +68,14 @@ it("thumbnails images and flags a deleted conversation", () => {
   expect(screen.getByTestId("thumb-h")).toBeInTheDocument()
   expect(screen.getByText("Conversation deleted")).toBeInTheDocument()
 })
+
+it("labels an uploaded video as a video", () => {
+  render(
+    <FilesRow
+      entry={entry({ title: "A paper boat.mp4", mediaType: "video/mp4" })}
+      actions={actions()}
+      selected={false}
+    />
+  )
+  expect(screen.getByRole("button", { name: "Open A paper boat.mp4" })).toHaveTextContent("Video")
+})

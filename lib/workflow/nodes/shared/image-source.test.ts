@@ -24,7 +24,12 @@ jest.mock("@/lib/workflow/blobs/store", () => ({
   openWorkflowBlob: (r: string) => openWorkflowBlob(r),
 }))
 
-import { IMAGE_SOURCE_FIELDS, resolveImageSource } from "./image-source"
+import {
+  IMAGE_SOURCE_FIELDS,
+  hasImageSource,
+  resolveImageBytes,
+  resolveImageSource,
+} from "./image-source"
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -76,5 +81,20 @@ describe("resolveImageSource", () => {
     await expect(resolveImageSource({}, "action.image.info")).rejects.toThrow(
       new RegExp(IMAGE_SOURCE_FIELDS.join(", "))
     )
+  })
+})
+
+describe("resolveImageBytes", () => {
+  it("hands back the bytes and their type without decoding", async () => {
+    const result = await resolveImageBytes({ blobRef: "cognia-workflow-blob:b1" }, "k")
+    expect(result.mediaType).toBe("image/png")
+    expect(result.blob.size).toBe(2)
+    expect(decodeBlobToPixelBuffer).not.toHaveBeenCalled()
+  })
+
+  it("says whether any source is set", () => {
+    expect(hasImageSource({})).toBe(false)
+    expect(hasImageSource({ url: "  " })).toBe(false)
+    expect(hasImageSource({ dataUrl: "data:image/png;base64,AA" })).toBe(true)
   })
 })

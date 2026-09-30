@@ -16,6 +16,7 @@ function input(overrides: Partial<FilesAggregateInput> = {}): FilesAggregateInpu
     images: [],
     sessionUploads: [],
     libraryUploads: [],
+    generatedVideos: [],
     items: [],
     sessions: new Map([
       ["s1", { projectId: "p1" }],
@@ -255,6 +256,99 @@ describe("aggregateFilesEntries", () => {
       })
     )
     expect(changed[0]!.hidden).toBe(false)
+  })
+})
+
+describe("generated videos", () => {
+  const generated = {
+    jobId: "vjob_1",
+    prompt: "A paper boat on a rainy street",
+    providerId: "doubao",
+    modelId: "seedance-1",
+    durationSec: 5,
+  }
+
+  it("carries the job's record on the conversation upload it stored", () => {
+    const entries = aggregateFilesEntries(
+      input({
+        sessionUploads: [
+          upload({
+            assetId: "video-vjob_1",
+            contentHash: "v1",
+            filename: "A paper boat on a rainy street.mp4",
+            mediaType: "video/mp4",
+            extractedText: undefined,
+          }),
+          upload(),
+        ],
+        generatedVideos: [
+          {
+            ...generated,
+            home: { kind: "session-asset", sessionId: "s1", assetId: "video-vjob_1" },
+          },
+        ],
+      })
+    )
+    const video = entries.find((entry) => entry.sourceId === "v1")!
+    expect(video).toMatchObject({ kind: "session-upload", generated })
+    expect(video.generated).not.toHaveProperty("home")
+    expect(video.searchText).toContain("seedance-1")
+    expect(entries.find((entry) => entry.sourceId === "c1")!.generated).toBeUndefined()
+  })
+
+  it("keeps the record when a chat video was also saved into Files", () => {
+    const entries = aggregateFilesEntries(
+      input({
+        sessionUploads: [
+          upload({
+            assetId: "video-vjob_1",
+            contentHash: "v1",
+            filename: "boat.mp4",
+            mediaType: "video/mp4",
+            extractedText: undefined,
+          }),
+        ],
+        libraryUploads: [
+          upload({
+            assetId: "u9",
+            contentHash: "v1",
+            filename: "boat.mp4",
+            mediaType: "video/mp4",
+          }),
+        ],
+        generatedVideos: [
+          {
+            ...generated,
+            home: { kind: "session-asset", sessionId: "s1", assetId: "video-vjob_1" },
+          },
+        ],
+      })
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ kind: "upload", sessionIds: ["s1"], generated })
+    expect(entries[0]!.searchText).toContain("a paper boat on a rainy street")
+  })
+
+  it("carries it on a Files upload, and ignores a job whose upload is gone", () => {
+    const entries = aggregateFilesEntries(
+      input({
+        libraryUploads: [
+          upload({
+            assetId: "video-vjob_1",
+            contentHash: "v1",
+            filename: "boat.mp4",
+            mediaType: "video/mp4",
+          }),
+        ],
+        generatedVideos: [
+          { ...generated, home: { kind: "library", assetId: "video-vjob_1" } },
+          { ...generated, jobId: "vjob_2", home: { kind: "library", assetId: "video-vjob_2" } },
+        ],
+      })
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ kind: "upload", generated })
+    expect(entries[0]!.searchText).toContain("a paper boat on a rainy street")
   })
 })
 

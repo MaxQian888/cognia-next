@@ -7,21 +7,12 @@ import { getFileExtension } from "@/lib/canvas/utils"
 import { getManyMessageMedia } from "@/lib/db/message-media"
 import { getHeldSessionAssetSource, getLibraryAsset } from "@/lib/db/session-assets"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { safeFilename } from "./safe-filename"
 import type { FilesEntry } from "./types"
 
 export interface FilesDownloadPayload {
   blob: Blob
   filename: string
-}
-
-/** Strip only what a filesystem refuses; keep non-ASCII titles readable. */
-export function safeFilename(name: string, fallback: string): string {
-  const cleaned = name
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 180)
-  return cleaned || fallback
 }
 
 function withExtension(name: string, extension: string): string {

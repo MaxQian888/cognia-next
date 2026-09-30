@@ -1198,14 +1198,15 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
   },
   // ADR-0205: failed, cancelled and timed-out video jobs are kept 30 days so
   // "what happened to my video" stays answerable; a succeeded job follows its
-  // conversation (deleted with it) or its Files entry.
+  // conversation (deleted with it) or its Files entry, except a workflow job,
+  // whose video is a file of its own and goes with the row after 30 days.
   mediaGenerationJobs: {
     mode: "ttl",
     days: 30,
     enforcement: "central",
     executorId: "mediaGenerationJobs",
     reason:
-      "`pruneSettledVideoJobs` drops failed, cancelled and timed-out jobs 30 days after they settle; succeeded jobs are removed with their conversation.",
+      "`pruneSettledVideoJobs` drops failed, cancelled and timed-out jobs, and succeeded workflow jobs together with their video file, 30 days after they settle; other succeeded jobs are removed with their conversation.",
   },
   memoryAuditEvents: {
     mode: "ttl",

@@ -85,11 +85,15 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
   // settle. The window is the catalog's, not the user's trace slider.
   mediaGenerationJobs: {
     policy: "row-expiry",
-    prune: () =>
-      pruneSettledVideoJobs(
+    prune: async () => {
+      // A workflow job's video is a file under AppData; it goes with its row.
+      const { removeAppDataFile } = await import("@/lib/tauri/app-data-files")
+      return pruneSettledVideoJobs(
         Date.now() -
-          (policyForTable("mediaGenerationJobs")?.retentionPolicy.days ?? 30) * MS_PER_DAY
-      ),
+          (policyForTable("mediaGenerationJobs")?.retentionPolicy.days ?? 30) * MS_PER_DAY,
+        removeAppDataFile
+      )
+    },
   },
   retrievalControl: {
     policy: "row-expiry",

@@ -10,6 +10,10 @@
  *     folds into the Files-owned card.
  *   - A kept upload whose conversations are all gone is rebuilt from the
  *     snapshot on its `libraryItems` row while its bytes are still held.
+ *   - A generated video (ADR-0205) is the upload its job stored — a
+ *     conversation's asset or a Files upload — carrying what the job recorded
+ *     (prompt, provider, model), not a card of its own. It is kept, moved and
+ *     deleted as that upload.
  */
 
 import {
@@ -18,7 +22,7 @@ import {
   type LibraryItemKind,
   type LibraryItemRow,
 } from "@/lib/db/files-library-types"
-import type { FilesEntry } from "./types"
+import type { FilesEntry, FilesGeneratedVideo } from "./types"
 
 /** Characters of body text kept for search and for a kept item's snapshot. */
 export const FILES_BODY_EXCERPT_CHARS = 20_000
@@ -73,12 +77,20 @@ export interface RawUpload {
   sourceAvailable: boolean
 }
 
+/** A succeeded video generation job, keyed by where it stored the video. */
+export interface RawGeneratedVideo extends FilesGeneratedVideo {
+  home:
+    | { kind: "session-asset"; sessionId: string; assetId: string }
+    | { kind: "library"; assetId: string }
+}
+
 export interface FilesAggregateInput {
   artifacts: RawArtifact[]
   canvases: RawCanvas[]
   images: RawImage[]
   sessionUploads: RawUpload[]
   libraryUploads: RawUpload[]
+  generatedVideos: RawGeneratedVideo[]
   items: LibraryItemRow[]
   /** Live conversations referenced by any source, with their workspace. */
   sessions: ReadonlyMap<string, { projectId?: string }>
@@ -142,8 +154,26 @@ function withItem(
   }
 }
 
+function sessionAssetKey(sessionId: string, assetId: string): string {
+  return `${sessionId}\u0000${assetId}`
+}
+
+function generatedFields(video: RawGeneratedVideo | undefined): {
+  generated?: FilesGeneratedVideo
+} {
+  if (!video) return {}
+  const { home: _home, ...generated } = video
+  return { generated }
+}
+
 export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] {
   const items = new Map(input.items.map((item) => [item.key, item]))
+  const generatedInLibrary = new Map<string, RawGeneratedVideo>()
+  const generatedInSessions = new Map<string, RawGeneratedVideo>()
+  for (const video of input.generatedVideos) {
+    if (video.home.kind === "library") generatedInLibrary.set(video.home.assetId, video)
+    else generatedInSessions.set(sessionAssetKey(video.home.sessionId, video.home.assetId), video)
+  }
   const itemFor = (kind: LibraryItemKind, sourceId: string) =>
     items.get(libraryItemKey(kind, sourceId))
   const projectOf = (sessionId: string) => input.sessions.get(sessionId)?.projectId
@@ -237,6 +267,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
   const libraryByHash = new Map<string, FilesEntry>()
   for (const upload of input.libraryUploads) {
     const item = itemFor("upload", upload.assetId)
+    const generated = generatedInLibrary.get(upload.assetId)
     const entry = withItem(
       {
         key: libraryItemKey("upload", upload.assetId),
@@ -255,7 +286,14 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
         contentHash: upload.contentHash,
         assetId: upload.assetId,
         ...excerptOf(upload.extractedText),
-        searchText: haystack(upload.filename, upload.mediaType, upload.extractedText),
+        ...generatedFields(generated),
+        searchText: haystack(
+          upload.filename,
+          upload.mediaType,
+          generated?.prompt,
+          generated?.modelId,
+          upload.extractedText
+        ),
       },
       item
     )
@@ -274,9 +312,17 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
     const sessionIds = unique(uploads.map((upload) => upload.sessionId)).filter((id) =>
       input.sessions.has(id)
     )
+    const generated = uploads
+      .map((upload) => generatedInSessions.get(sessionAssetKey(upload.sessionId, upload.assetId)))
+      .find((video) => video !== undefined)
     const owned = libraryByHash.get(contentHash)
     if (owned) {
       owned.sessionIds = unique([...owned.sessionIds, ...sessionIds])
+      // A video generated in a chat and then saved into Files keeps its record.
+      if (generated && !owned.generated) {
+        Object.assign(owned, generatedFields(generated))
+        owned.searchText = haystack(owned.searchText, generated.prompt, generated.modelId)
+      }
       continue
     }
     const newest = [...uploads].sort((a, b) => b.updatedAt - a.updatedAt)[0]!
@@ -302,7 +348,14 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           assetId: newest.assetId,
           assetSessionId: newest.sessionId,
           ...excerptOf(newest.extractedText),
-          searchText: haystack(newest.filename, newest.mediaType, newest.extractedText),
+          ...generatedFields(generated),
+          searchText: haystack(
+            newest.filename,
+            newest.mediaType,
+            generated?.prompt,
+            generated?.modelId,
+            newest.extractedText
+          ),
         },
         item
       )

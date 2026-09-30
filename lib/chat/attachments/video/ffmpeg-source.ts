@@ -18,6 +18,11 @@ import { callMediaBinary } from "@/lib/media/transport"
 import { decodeNativeVideoFrame } from "@/lib/media/native-video-frame"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 import { detectHostProfile } from "@/lib/platform/capabilities"
+import {
+  APP_DATA_WRITE_CHUNK_BYTES,
+  removeAppDataFile,
+  writeBlobToAppData,
+} from "@/lib/tauri/app-data-files"
 import type { VideoRange } from "./settings"
 import { fitBuffer } from "./storyboard"
 import { NATIVE_VIDEO_MAX_BYTES } from "./delivery-gate"
@@ -32,7 +37,7 @@ import {
 /** Subdirectory of AppData the staged copies live in. */
 export const FFMPEG_STAGING_DIR = "composer-video-staging"
 /** Chunk size for the append-write copy; `write_file` is the granted fs command. */
-export const FFMPEG_STAGING_CHUNK_BYTES = 8 * 1024 * 1024
+export const FFMPEG_STAGING_CHUNK_BYTES = APP_DATA_WRITE_CHUNK_BYTES
 
 interface NativeVideoInfo {
   durationMs: number
@@ -76,28 +81,11 @@ function randomId(): string {
 }
 
 async function stageFileInAppData(blob: Blob, extension: string): Promise<StagedFile> {
-  const [{ BaseDirectory, mkdir, remove, writeFile }, { appDataDir, join }] = await Promise.all([
-    import("@tauri-apps/plugin-fs"),
-    import("@tauri-apps/api/path"),
-  ])
   const safeExtension = /^[a-z0-9]{1,8}$/i.test(extension) ? extension.toLowerCase() : "bin"
   const relative = `${FFMPEG_STAGING_DIR}/${randomId()}.${safeExtension}`
-  await mkdir(FFMPEG_STAGING_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
-  const removeStaged = () => remove(relative, { baseDir: BaseDirectory.AppData }).catch(() => {})
-  try {
-    // Chunked appends keep a 500 MB source from ever being one IPC payload.
-    for (let offset = 0; offset < blob.size || offset === 0; offset += FFMPEG_STAGING_CHUNK_BYTES) {
-      const chunk = new Uint8Array(
-        await blob.slice(offset, offset + FFMPEG_STAGING_CHUNK_BYTES).arrayBuffer()
-      )
-      await writeFile(relative, chunk, { baseDir: BaseDirectory.AppData, append: offset > 0 })
-      if (blob.size === 0) break
-    }
-  } catch (error) {
-    await removeStaged()
-    throw error
-  }
-  return { path: await join(await appDataDir(), relative), remove: removeStaged }
+  const path = await writeBlobToAppData(relative, blob)
+  // Closing a source must not throw; a stray staged copy is only disk space.
+  return { path, remove: () => removeAppDataFile(relative).catch(() => {}) }
 }
 
 export const defaultFfmpegSourceDeps: FfmpegSourceDeps = {

@@ -74,11 +74,21 @@ export interface VideoJobError {
  * that conversation. Jobs live in this device's database and are not synced:
  * a companion viewing the conversation from another device shows the card as
  * "not stored on this device" rather than a job it cannot follow.
+ *
+ * `workflow` is the `action.media.generateVideo` node; its video becomes a
+ * file on disk the next media node can read.
  */
 export type VideoJobOrigin =
   | { surface: "chat-tool"; sessionId: string }
   | { surface: "slash"; sessionId: string }
   | { surface: "plugin"; pluginId: string }
+  | {
+      surface: "workflow"
+      runId: string
+      stepId: string
+      /** The loop iteration, when the step runs inside a loop. */
+      iteration?: { loopId: string; iterationIndex: number }
+    }
   | { surface: "executor" }
 
 /** The start frame as recorded on the row — a reference, never the bytes. */
@@ -110,6 +120,11 @@ export interface VideoJobProvider {
 export type VideoJobContent =
   | { kind: "session-asset"; sessionId: string; assetId: string }
   | { kind: "library"; assetId: string }
+  /**
+   * A file under the desktop app's AppData (`relativePath`), for a workflow
+   * job; `path` is its absolute form, which is what the workflow step outputs.
+   */
+  | { kind: "file"; relativePath: string; path: string }
   /** Held in memory by the in-memory store (CLI); gone with the process. */
   | { kind: "inline"; bytes: Uint8Array }
 

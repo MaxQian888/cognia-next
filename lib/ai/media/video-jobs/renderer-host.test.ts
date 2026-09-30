@@ -7,6 +7,7 @@ import {
   getSessionAssetMetadata,
   listLibraryAssets,
 } from "@/lib/db/session-assets"
+import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
 import type { MediaGenerationJobRow } from "./types"
 
 const platformKind = jest.fn(() => "tauri")
@@ -32,15 +33,31 @@ jest.mock("@/stores/settings", () => ({
         defaultProvider: "google",
         providerSettings: { google: { enabled: true, apiKey: "g" } },
         customProviders: [],
+        videoGeneration: { agentTool: true, providerId: "google" },
       },
     }),
   },
 }))
+const appData = new Map<string, Uint8Array>()
+const writeBlobToAppData = jest.fn(async (relativePath: string, blob: Blob) => {
+  appData.set(relativePath, new Uint8Array(await readBlobAsArrayBuffer(blob)))
+  return `/data/${relativePath}`
+})
+jest.mock("@/lib/tauri/app-data-files", () => ({
+  writeBlobToAppData: (relativePath: string, blob: Blob) => writeBlobToAppData(relativePath, blob),
+  appDataFileExists: async (relativePath: string) => appData.has(relativePath),
+  appDataPath: async (relativePath: string) => `/data/${relativePath}`,
+  readAppDataFile: async (relativePath: string) => appData.get(relativePath)!,
+}))
 
 import {
   DESKTOP_BRIDGE_MAX_BYTES,
+  WORKFLOW_VIDEO_DIR,
   createRendererVideoJobHost,
+  currentVideoGenerationSettings,
+  generatedVideoFilename,
   readRendererVideo,
+  reachableVideoProviderIds,
   resolveRendererStartFrame,
   videoAssetId,
 } from "./renderer-host"
@@ -50,6 +67,7 @@ beforeAll(fixture.initialize)
 beforeEach(async () => {
   await fixture.restore()
   clearTemporarySessionAssets()
+  appData.clear()
   jest.clearAllMocks()
   await getDb().sessions.bulkPut([
     { id: "s1", title: "s1", createdAt: 1, updatedAt: 1 } as ChatSession,
@@ -91,7 +109,25 @@ describe("renderer video job host", () => {
     })
     expect(again.content).toEqual(first.content)
     const stored = await getSessionAssetMetadata("s1", "video-vjob_chat")
-    expect(stored).toMatchObject({ mediaType: "video/mp4", byteSize: 3 })
+    // Named after the prompt, so Files and downloads read as what was asked for.
+    expect(stored).toMatchObject({ mediaType: "video/mp4", byteSize: 3, filename: "a boat.mp4" })
+  })
+
+  it("writes a workflow job's video to AppData, once, and reads it back", async () => {
+    const host = createRendererVideoJobHost({ describe: async () => ({}) })
+    const row = job("vjob_flow", { surface: "workflow", runId: "r1", stepId: "s1" })
+    const first = await host.materialize(row, video())
+    const again = await host.materialize(row, video())
+    const relativePath = `${WORKFLOW_VIDEO_DIR}/vjob_flow.mp4`
+    expect(first.content).toEqual({ kind: "file", relativePath, path: `/data/${relativePath}` })
+    expect(again.content).toEqual(first.content)
+    expect(writeBlobToAppData).toHaveBeenCalledTimes(1)
+    const read = await readRendererVideo(first.content)
+    expect(Array.from(new Uint8Array(await readBlobAsArrayBuffer(read)))).toEqual([1, 2, 3])
+    expect(read.type).toBe("video/mp4")
+    await expect(
+      readRendererVideo({ kind: "file", relativePath: "gone.mp4", path: "/data/gone.mp4" })
+    ).rejects.toThrow("no longer stored")
   })
 
   it("keeps a plugin job's video in Files", async () => {
@@ -118,6 +154,32 @@ describe("renderer video job host", () => {
 
   it("reads provider settings from the settings store", () => {
     expect(createRendererVideoJobHost().getSnapshot()).toMatchObject({ defaultProvider: "google" })
+    expect(currentVideoGenerationSettings()).toEqual({ agentTool: true, providerId: "google" })
+    expect(reachableVideoProviderIds()).toEqual(["google"])
+  })
+})
+
+describe("generatedVideoFilename", () => {
+  it("names the file after the prompt's first line", () => {
+    expect(
+      generatedVideoFilename("\n A paper boat:\non a rainy street", "vjob_1", "video/mp4")
+    ).toBe("A paper boat_.mp4")
+    expect(generatedVideoFilename("纸船 在雨中", "vjob_1", "video/webm")).toBe("纸船 在雨中.webm")
+  })
+
+  it("cuts a long prompt at a word and falls back to the job id", () => {
+    const long = `${"word ".repeat(30)}end`
+    const name = generatedVideoFilename(long, "vjob_1", "video/quicktime")
+    expect(name.endsWith("word.mov")).toBe(true)
+    expect(name.length).toBeLessThanOrEqual(84)
+    expect(generatedVideoFilename("  ...  ", "vjob_1", "video/mp4")).toBe("video-vjob_1.mp4")
+    expect(generatedVideoFilename("?!*", "vjob_1", "video/mp4")).toBe("video-vjob_1.mp4")
+  })
+
+  it("never splits an emoji sequence at the cut", () => {
+    const family = "👨‍👩‍👧"
+    const name = generatedVideoFilename(`${"a".repeat(79)}${family}${family}`, "j", "video/mp4")
+    expect(name).toBe(`${"a".repeat(79)}${family}.mp4`)
   })
 })
 

@@ -22,6 +22,11 @@ import {
   type PlanEventKind,
   type PlanStatus as PlanStatusValue,
 } from "@/types/agent/plan"
+import {
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_GENERATION_PROVIDER_IDS,
+  VIDEO_RESOLUTIONS,
+} from "@/lib/ai/media/video-generation-sdk"
 import { VERIFIER_LENSES } from "@/types/agent/ultracode"
 import { ISSUE_STAGE_MAX, ISSUE_TRIAGE_STATES } from "@/types/issues"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
@@ -2293,6 +2298,19 @@ export const PARAMS_SCHEMAS = {
   }),
   "action.media.concat": z.object({
     sourcePaths: z.array(z.string().min(1)).min(2, "minItems"),
+  }),
+  // The start image is optional, so its four source fields stay optional; the
+  // provider, model and options fall back to Settings → Media generation, and
+  // the job engine refuses an option the provider does not take.
+  "action.media.generateVideo": z.object({
+    prompt: requiredString("required"),
+    ...ImageSourceParams,
+    // The inspector's "—" choice writes "", which means "use the default".
+    providerId: z.union([z.enum(VIDEO_GENERATION_PROVIDER_IDS), z.literal("")]).optional(),
+    model: optionalString,
+    durationSec: positiveInteger().optional(),
+    aspectRatio: z.union([z.enum(VIDEO_ASPECT_RATIOS), z.literal("")]).optional(),
+    resolution: z.union([z.enum(VIDEO_RESOLUTIONS), z.literal("")]).optional(),
   }),
   // Image editing. The four source fields are optional individually and one of
   // them is required in effect, which the executor reports by name rather than

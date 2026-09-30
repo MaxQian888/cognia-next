@@ -3,7 +3,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { putLibraryAsset, putSessionAsset } from "@/lib/db/session-assets"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { downloadPayloadFor, safeFilename } from "./download"
+import { downloadPayloadFor } from "./download"
 import type { FilesEntry } from "./types"
 
 jest.setTimeout(30_000)
@@ -27,13 +27,6 @@ function entry(overrides: Partial<FilesEntry> & Pick<FilesEntry, "kind" | "sourc
     ...overrides,
   }
 }
-
-describe("safeFilename", () => {
-  it("keeps non-ASCII names and strips only reserved characters", () => {
-    expect(safeFilename("设计 / 方案: v2?", "x")).toBe("设计 _ 方案_ v2_")
-    expect(safeFilename("   ", "fallback")).toBe("fallback")
-  })
-})
 
 describe("downloadPayloadFor", () => {
   it("serializes artifacts and canvas documents with a language extension", async () => {

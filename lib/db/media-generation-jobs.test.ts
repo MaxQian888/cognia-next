@@ -77,12 +77,69 @@ describe("Dexie media job store", () => {
     await store.insert(row("ok", { status: "succeeded", settledAt: 10 }))
     await store.insert(row("recent", { status: "failed", settledAt: 1000 }))
     await store.insert(row("running"))
-    await expect(pruneSettledVideoJobs(500)).resolves.toBe(3)
+    const removeFile = jest.fn(async () => undefined)
+    await expect(pruneSettledVideoJobs(500, removeFile)).resolves.toBe(3)
+    expect(removeFile).not.toHaveBeenCalled()
     expect((await getDb().mediaGenerationJobs.toCollection().primaryKeys()).sort()).toEqual([
       "ok",
       "recent",
       "running",
     ])
+  })
+
+  it("prunes an old succeeded workflow job together with its file", async () => {
+    const store = createDexieMediaJobStore()
+    const result = (relativePath: string) => ({
+      content: { kind: "file" as const, relativePath, path: `/data/${relativePath}` },
+      mediaType: "video/mp4",
+      byteSize: 1,
+    })
+    const workflow = { surface: "workflow", runId: "r", stepId: "s" } as const
+    await store.insert(
+      row("flow-old", {
+        sessionId: undefined,
+        origin: workflow,
+        status: "succeeded",
+        settledAt: 10,
+        result: result("generated-videos/flow-old.mp4"),
+      })
+    )
+    await store.insert(
+      row("flow-new", {
+        sessionId: undefined,
+        origin: workflow,
+        status: "succeeded",
+        settledAt: 1000,
+        result: result("generated-videos/flow-new.mp4"),
+      })
+    )
+    const removeFile = jest.fn(async () => undefined)
+    await expect(pruneSettledVideoJobs(500, removeFile)).resolves.toBe(1)
+    expect(removeFile).toHaveBeenCalledWith("generated-videos/flow-old.mp4")
+    expect(await getDb().mediaGenerationJobs.toCollection().primaryKeys()).toEqual(["flow-new"])
+  })
+
+  it("keeps a workflow job whose file could not be removed, for the next sweep", async () => {
+    const store = createDexieMediaJobStore()
+    await store.insert(
+      row("flow-held", {
+        sessionId: undefined,
+        origin: { surface: "workflow", runId: "r", stepId: "s" },
+        status: "succeeded",
+        settledAt: 10,
+        result: {
+          content: { kind: "file", relativePath: "generated-videos/held.mp4", path: "/x" },
+          mediaType: "video/mp4",
+          byteSize: 1,
+        },
+      })
+    )
+    await store.insert(row("failed", { status: "failed", settledAt: 10 }))
+    const removeFile = jest.fn(async () => {
+      throw new Error("file in use")
+    })
+    await expect(pruneSettledVideoJobs(500, removeFile)).resolves.toBe(1)
+    expect(await getDb().mediaGenerationJobs.toCollection().primaryKeys()).toEqual(["flow-held"])
   })
 })
 
@@ -102,6 +159,18 @@ describe("video job portability", () => {
     })
     expect(isPortableVideoJob(plugin, scope)).toBe(false)
     expect(isPortableVideoJob(plugin, { ...scope, includeCoreData: true })).toBe(true)
+    // A workflow job's video is a file on this device; the backup cannot carry it.
+    const workflow = row("e", {
+      status: "succeeded",
+      sessionId: undefined,
+      origin: { surface: "workflow", runId: "r", stepId: "s" },
+      result: {
+        content: { kind: "file", relativePath: "generated-videos/e.mp4", path: "/x" },
+        mediaType: "video/mp4",
+        byteSize: 1,
+      },
+    })
+    expect(isPortableVideoJob(workflow, { ...scope, includeCoreData: true })).toBe(false)
   })
 
   it("remaps a restored job onto its duplicated session", async () => {

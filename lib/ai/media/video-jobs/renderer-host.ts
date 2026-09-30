@@ -8,13 +8,21 @@
  * finished videos stored where they belong:
  *
  *   - a chat job (agent tool, `/video`) → a session asset of that conversation;
- *   - a plugin or provider-operations job → an upload owned by Files.
+ *   - a plugin or provider-operations job → an upload owned by Files;
+ *   - a workflow job → a file under AppData the next media node can read.
  *
- * Storing is idempotent by asset id (`video-<jobId>`), so a job interrupted
- * between storing and settling reuses the stored video on its next attempt.
+ * The stored file is named after the prompt, so Files, search and downloads
+ * show what was asked for. Storing is idempotent by asset id (`video-<jobId>`)
+ * or file path, so a job interrupted between storing and settling reuses the
+ * stored video on its next attempt.
  */
 
-import { createProviderSettingsSnapshot } from "@/lib/ai/provider-consumption"
+import type { VideoGenerationSettings } from "@cognia/agent-config-types"
+
+import {
+  createProviderSettingsSnapshot,
+  type ProviderSettingsSnapshot,
+} from "@/lib/ai/provider-consumption"
 import { openBrowserVideoSource } from "@/lib/chat/attachments/video/browser-source"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
 import { isMessageMediaReferencedBySession } from "@/lib/db/message-media-refs"
@@ -32,9 +40,18 @@ import {
   platformFetchKind,
   reachesNonCorsHosts,
 } from "@/lib/network/platform-fetch"
+import { safeFilename } from "@/lib/files-library/safe-filename"
+import {
+  appDataFileExists,
+  appDataPath,
+  readAppDataFile,
+  writeBlobToAppData,
+} from "@/lib/tauri/app-data-files"
 import { useSettingsStore } from "@/stores/settings"
 import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
 
+import type { VideoProviderId } from "../video-generation-sdk"
+import { listConfiguredVideoProviders } from "./defaults"
 import type { ResolvedStartFrame, VideoJobStartFrameInput } from "./engine"
 import { installVideoJobHost, type VideoJobHost } from "./host"
 import type {
@@ -50,14 +67,77 @@ import type {
  */
 export const DESKTOP_BRIDGE_MAX_BYTES = 64 * 1024 * 1024
 
+/** AppData subdirectory holding the videos workflow jobs produce. */
+export const WORKFLOW_VIDEO_DIR = "generated-videos"
+
+/** Characters of the prompt a stored video's name keeps. */
+const FILENAME_PROMPT_CHARS = 80
+
 export function videoAssetId(jobId: string): string {
   return `video-${jobId}`
+}
+
+/** The saved Settings → Media generation defaults, read live. */
+export function currentVideoGenerationSettings(): VideoGenerationSettings | undefined {
+  return useSettingsStore.getState().settings?.videoGeneration
+}
+
+/** Provider settings as the job engine reads them, from the live settings store. */
+function currentProviderSnapshot(): ProviderSettingsSnapshot {
+  const live = useSettingsStore.getState().settings
+  return createProviderSettingsSnapshot({
+    defaultProvider: live?.defaultProvider,
+    providerSettings: live?.providerSettings,
+    customProviders: live?.customProviders,
+  })
+}
+
+/** Configured video providers this shell can reach, in the defaults' terms. */
+export function reachableVideoProviderIds(): VideoProviderId[] {
+  return listConfiguredVideoProviders(currentProviderSnapshot(), reachesNonCorsHosts())
+    .filter((provider) => provider.reachable)
+    .map((provider) => provider.providerId)
 }
 
 function extensionOf(mediaType: string): string {
   if (mediaType === "video/webm") return "webm"
   if (mediaType === "video/quicktime") return "mov"
   return "mp4"
+}
+
+/** The media type a stored file's extension (from `extensionOf`) stands for. */
+function mediaTypeOfPath(path: string): string {
+  if (path.endsWith(".webm")) return "video/webm"
+  if (path.endsWith(".mov")) return "video/quicktime"
+  return "video/mp4"
+}
+
+/**
+ * The stored video's file name: the prompt's first line, cut at a word where
+ * one is near, with the container's extension. The prompt already passed the
+ * outbound PII gate when the job started.
+ */
+export function generatedVideoFilename(prompt: string, jobId: string, mediaType: string): string {
+  const line = (prompt.split(/\r?\n/).find((part) => part.trim()) ?? "").replace(/\s+/g, " ").trim()
+  const graphemes = graphemesOf(line)
+  let base = graphemes.slice(0, FILENAME_PROMPT_CHARS).join("")
+  if (graphemes.length > FILENAME_PROMPT_CHARS) {
+    const cut = base.lastIndexOf(" ")
+    if (cut > FILENAME_PROMPT_CHARS / 2) base = base.slice(0, cut)
+  }
+  const fallback = videoAssetId(jobId)
+  const name = safeFilename(base.replace(/[.\s]+$/, ""), fallback)
+  // A prompt of only punctuation or symbols names nothing.
+  return `${/[\p{L}\p{N}]/u.test(name) ? name : fallback}.${extensionOf(mediaType)}`
+}
+
+/** User-perceived characters, so a cut never splits an emoji or a combining mark. */
+function graphemesOf(text: string): string[] {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    return Array.from(segmenter.segment(text), (part) => part.segment)
+  }
+  return Array.from(text)
 }
 
 function sessionOf(origin: VideoJobOrigin): string | undefined {
@@ -119,7 +199,17 @@ export async function resolveRendererStartFrame(
 async function storeVideo(row: MediaGenerationJobRow, video: Blob): Promise<VideoJobContent> {
   const assetId = videoAssetId(row.id)
   const mediaType = video.type || "video/mp4"
-  const filename = `${assetId}.${extensionOf(mediaType)}`
+  if (row.origin.surface === "workflow") {
+    // Named by job id, not prompt: the path is the node's output and must
+    // stay one plain segment whatever the prompt says. The file only appears
+    // once complete (written aside, then renamed), so one that exists is whole.
+    const relativePath = `${WORKFLOW_VIDEO_DIR}/${row.id}.${extensionOf(mediaType)}`
+    const path = (await appDataFileExists(relativePath))
+      ? await appDataPath(relativePath)
+      : await writeBlobToAppData(relativePath, video)
+    return { kind: "file", relativePath, path }
+  }
+  const filename = generatedVideoFilename(row.request.prompt, row.id, mediaType)
   const sessionId = sessionOf(row.origin)
   if (sessionId) {
     if (!(await getSessionAssetMetadata(sessionId, assetId))) {
@@ -153,6 +243,15 @@ export async function readRendererVideo(content: VideoJobContent): Promise<Blob>
       if (!asset) throw new Error("The video is no longer stored.")
       return asset.blob
     }
+    case "file": {
+      if (!(await appDataFileExists(content.relativePath))) {
+        throw new Error("The video is no longer stored.")
+      }
+      const bytes = await readAppDataFile(content.relativePath)
+      return new Blob([bytes as Uint8Array<ArrayBuffer>], {
+        type: mediaTypeOfPath(content.relativePath),
+      })
+    }
   }
 }
 
@@ -161,14 +260,7 @@ export function createRendererVideoJobHost(deps: RendererVideoJobHostDeps = {}):
   return {
     store: createDexieMediaJobStore(),
     now: deps.now ?? (() => Date.now()),
-    getSnapshot: () => {
-      const live = useSettingsStore.getState().settings
-      return createProviderSettingsSnapshot({
-        defaultProvider: live?.defaultProvider,
-        providerSettings: live?.providerSettings,
-        customProviders: live?.customProviders,
-      })
-    },
+    getSnapshot: currentProviderSnapshot,
     fetch: createPlatformFetch(),
     reachesNonCorsHosts,
     resolveStartFrame: resolveRendererStartFrame,
