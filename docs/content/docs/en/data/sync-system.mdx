@@ -1,6 +1,6 @@
 ---
 title: Sync System
-description: Desktop ↔ Phone sync-down protocol — the phone is a read-only replica of the desktop Dexie, pulling deltas per table and applying them locally.
+description: Desktop ↔ Phone sync-down protocol — the Host's Dexie is the source of truth; a paired client mirrors 48 tables through staged, concurrent, cursor-persisted pulls with tombstones, and writes back through the outbound queue.
 ---
 
 # Sync System
@@ -8,222 +8,342 @@ description: Desktop ↔ Phone sync-down protocol — the phone is a read-only r
 <Status variant="beta" />
 
 <TLDR>
-  The desktop is the source of truth; the phone is a read-only cache. The phone pulls deltas via
-  `POST /api/_rpc/sync_pull`, the desktop Rust layer forwards the request to the webview, the
-  webview queries Dexie and returns a `SyncDelta`, which goes back through Rust to the phone. 9
-  mirrorable tables, each with an independent cursor, three trigger modes (manual / foreground / WS
-  event-driven). V1 has no tombstones — deletions rely on the V2 `deletedAt` index.
+  The Host (desktop or headless) is the source of truth; a paired client keeps a Dexie mirror. The
+  client pulls deltas via `POST /api/_rpc/sync_pull`, the Host's Rust layer forwards the request to
+  the webview, the webview reads Dexie and returns a `SyncDelta`. 48 tables are registered
+  (`COMPANION_SYNC_PROTOCOL_TABLE_NAMES`), pulled in three stages (`critical` → `interactive` →
+  `background`) with up to 6 concurrent pulls. Cursors persist in `hostSyncCursors`, deletions travel
+  as tombstones, and client writes go back through the outbound queue, not through sync.
 </TLDR>
 
 <StatGrid>
   <Stat
     label="Syncable Tables"
-    value="9"
-    hint="characters · skills · sessions · messages · workflows · twinProfile · plugins · adapterInstances · settings"
+    value="48"
+    hint="COMPANION_SYNC_PROTOCOL_TABLE_NAMES in lib/data-governance/table-catalog.ts"
   />
-  <Stat label="Trigger Modes" value="3" hint="manual · foreground · event-driven" />
-  <Stat label="messages limit" value="200" hint="Max 200 latest rows per pull (chronological)" />
-  <Stat label="V1 tombstone" value="No" hint="V2 adds deletedAt index" />
+  <Stat label="Pull Stages" value="3" hint="critical · interactive · background" />
+  <Stat label="Concurrent pulls" value="6" hint="SYNC_MAX_CONCURRENT_PULLS" />
+  <Stat label="Message catch-up" value="500" hint="Newest 500 on a fresh client, then paged" />
 </StatGrid>
 
 ## Applicable Scenarios
 
-| Scenario                             | Tables & Strategy                                                                                 |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| Browse historical sessions on mobile | `sessions` + `messages` (latest 200)                                                              |
-| Switch twin / character on mobile    | `characters` + `twinProfile`                                                                      |
-| View workflow definitions on mobile  | `workflows` (read-only view)                                                                      |
-| Toggle plugins on mobile             | `plugins` (read → settings outbound upload in V2)                                                 |
-| View connector policies on mobile    | `adapterInstances` (mode / quietHours read-only view)                                             |
-| Sync user preferences                | `settings` single-row `"singleton"` — full snapshot when `since === 0`, then delta by `updatedAt` |
+Every scenario reads the Host through the same `sync_pull` command; what differs is the stage a table
+is pulled in, and therefore how soon after pairing or resume the client has it.
+
+| Scenario | Tables | Stage |
+| --- | --- | --- |
+| Open the app and see the session list | `settings`, `characters`, `sessions`, `sessionState`, `sessionFolders`, `conversationOverrides` | `critical` |
+| Read a conversation and its runs | `messages` (paged), `executionRuns`, `executionRunBindings`, `workflowRuns`, `plans`, `goals`, `agentTasks`, `agentTaskAttempts`, `agentTeamBoard` | `interactive` |
+| Triage the inbox | `connectorDrafts`, `outboundQueue`, `connectorHeartbeats`, `projects`, `botInstallations`, `botEventDeliveries` | `interactive` |
+| Browse issues | `labels`, `issueProjects`, `issues`, `issueEvents`, `issueRuns`, `issueCycles` | `background` |
+| Twins, characters and templates | `twinProfile`, `twins`, `twinDrafts`, `chatTemplates`, `templateDefinitions`, `templatePackages`, `templateInstances` | `background` |
+| Capabilities and connectors | `skills`, `plugins`, `mcpServers`, `memories`, `workflows`, `adapterInstances`, `platformIdentities`, `connectorCallbackBindings`, `workflowDeployments`, `terminalHistory` | `background` |
+| Agent teams and bots | `agentTeams`, `agentTeammates`, `agentTeamTasks`, `botDefinitions` | `background` |
+| Change something from the client | none: writes go through `mobileOutboundQueue`, and the next pull brings the Host's result back | n/a |
+
+The client is a Capacitor phone, a browser paired to a Host, or a Tauri desktop routed to a remote
+Host. The Host is either the desktop app (its WebView answers) or the headless brain (its Node
+runtime answers from its own Dexie).
 
 ## Architecture Diagram
 
 ```mermaid
 flowchart TB
-  subgraph Phone["📱 Phone (Capacitor)"]
+  subgraph Client["📱 Paired client (Capacitor / browser / routed desktop)"]
     direction TB
-    PhoneUI[UI / Dexie / live query]
-    PhoneSync[lib/sync/companion-sync.ts<br/>runSyncDown]
-    Handlers[handlers/&lt;table&gt;.ts<br/>characters · skills · sessions · messages]
-    Base[handlers/base.ts<br/>runSyncHandler]
-    Transport[lib/tauri/transport-types<br/>Transport interface]
-    Cursors[In-memory cursor map<br/>Map&lt;SyncableTable, SyncState&gt;]
+    Boot[companion-boot-provider<br/>runStagedSyncDown + install*Sync]
+    Orch[lib/sync/companion-sync.ts<br/>DEFAULT_HANDLERS · runHandlerGraph<br/>≤ 6 concurrent pulls]
+    Handlers[lib/sync/handlers/*.ts<br/>48 handlers · applyRows masks]
+    Base[handlers/base.ts<br/>runSyncHandler · has_more loop]
+    CursorStore[lib/sync/cursor-store.ts<br/>hostSyncCursors]
+    Outbound[lib/db/mobile-outbound-queue.ts<br/>mobileOutboundQueue]
+    Transport[CompanionTransport<br/>HTTPS · WebRTC · relay]
+    Mirror[(Client Dexie mirror)]
   end
 
-  subgraph Desktop["💻 Desktop (Tauri)"]
+  subgraph Host["💻 Host (desktop WebView or headless brain)"]
     direction TB
-    DeskHTTP[axum POST /api/_rpc/sync_pull]
-    Bridge[cognia-companion-bus/src/sync_bridge.rs]
-    Registry[cognia-companion-bus/src/sync_registry.rs<br/>ALLOWED whitelist]
-    Source[lib/sync/desktop-sync-source.ts<br/>installDesktopSyncSource]
-    Dexie[(Desktop Dexie<br/>actual data)]
-    RespCmd[companion_sync_pull_response<br/>Tauri command]
+    RPC[companion_api/rpc/data_sync.rs<br/>sync_pull arm]
+    Registry[sync_registry.rs<br/>default_tables · 48]
+    Bridge[sync_bridge.rs<br/>SyncBridge.pull · 30 s]
+    Source[lib/sync/desktop-sync-source.ts<br/>readDexieDelta · finalizeDelta]
+    Tomb[lib/sync/tombstones.ts<br/>syncTombstones]
+    Hooks[host-table-invalidation.ts<br/>Dexie hooks]
+    Inval[host-invalidate.ts<br/>150 ms coalesce]
+    HostDexie[(Host Dexie)]
   end
 
-  PhoneUI --> PhoneSync
-  PhoneSync --> Handlers
-  Handlers --> Base
-  Base --> Transport
-  Transport -- "HTTP POST" --> DeskHTTP
-  DeskHTTP --> Bridge
-  Bridge --> Registry
-  Registry -- "validate table name" --> Bridge
-  Bridge -- "emit companion://sync-pull-request" --> Source
-  Source --> Dexie
-  Dexie --> Source
-  Source -- "invoke companion_sync_pull_response" --> RespCmd
-  RespCmd --> Bridge
-  Bridge --> DeskHTTP
-  DeskHTTP -- "SyncDelta JSON" --> Transport
-  Transport --> Base
-  Base -- "bulkPut / bulkDelete" --> PhoneUI
-  Cursors -.- PhoneSync
+  Boot --> Orch --> Handlers --> Base --> Transport
+  Orch <--> CursorStore
+  Base -- "bulkPut / bulkDelete" --> Mirror
+  Handlers -. "pending writes mask rows" .- Outbound
+  Outbound -- "commands + Idempotency-Key" --> Transport
+  Transport -- "POST /api/_rpc/sync_pull" --> RPC
+  RPC -- "contains(table)?" --> Registry
+  RPC --> Bridge
+  Bridge -- "companion://sync-pull-request" --> Source
+  Source --> HostDexie
+  Source --> Tomb
+  Source -- "companion_sync_pull_response" --> Bridge
+  HostDexie --> Hooks --> Inval
+  Inval -- "sync://invalidate" --> Transport
+  Transport -- "GET /ws/events" --> Orch
 
   classDef phone fill:#312e81,stroke:#818cf8,color:#e0e7ff
   classDef desk fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   classDef storage fill:#0f172a,stroke:#475569,color:#cbd5e1
-  class PhoneUI,PhoneSync,Handlers,Base,Transport,Cursors phone
-  class DeskHTTP,Bridge,Registry,Source,RespCmd desk
-  class Dexie storage
+  class Boot,Orch,Handlers,Base,CursorStore,Outbound,Transport phone
+  class RPC,Registry,Bridge,Source,Tomb,Hooks,Inval desk
+  class Mirror,HostDexie storage
 ```
 
 ## Key Modules & File Paths
 
-### Client (Phone)
+### Client
 
-| File                              | Purpose                                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `lib/sync/types.ts`               | `SyncableTable` / `SyncCursor` / `SyncDelta` / `SyncOutcome` / `SyncFailure`                     |
-| `lib/sync/companion-sync.ts`      | Top-level orchestration: `runSyncDown` / `installForegroundSync` / `installEventDrivenSync`      |
-| `lib/sync/handlers/base.ts`       | `runSyncHandler<TRow>` — single RPC round-trip + `bulkPut` + `bulkDelete` + error classification |
-| `lib/sync/handlers/characters.ts` | `syncCharacters` — `rowFilter: row => !row.isBuiltIn` (prevents overwriting local built-ins)     |
-| `lib/sync/handlers/skills.ts`     | `syncSkills`                                                                                     |
-| `lib/sync/handlers/sessions.ts`   | `syncSessions`                                                                                   |
-| `lib/sync/handlers/messages.ts`   | `syncMessages` — latest 200 rows only                                                            |
+| File | Purpose |
+| --- | --- |
+| `lib/sync/types.ts` | `SyncableTable` (derived from `COMPANION_SYNC_PROTOCOL_TABLE_NAMES`), `PAGED_SYNC_TABLES`, `SyncCursor`, `SyncDelta`, `SyncOutcome`, `SyncFailure`, `SyncCursorRow`, `SyncTombstoneRow` |
+| `lib/sync/companion-sync.ts` | `DEFAULT_HANDLERS` (table, stage, `after` edges), `runSyncDown`, `runStagedSyncDown`, the pull budget, cursor hydration, every `install*Sync` trigger, `COMPANION_SYNC_DOMAINS` |
+| `lib/sync/handlers/base.ts` | `runSyncHandler`: one table's pull, the `has_more` page loop, sliced `bulkPut` / `bulkDelete`, `classifyTransportError` |
+| `lib/sync/handlers/*.ts` | One handler per table (38 files, 48 syncers); per-table `rowFilter`, `applyRows` merges and pending-write masks |
+| `lib/sync/handlers/app-settings.ts` | The `settings` merge over `CROSS_PLATFORM_SETTING_KEYS` |
+| `lib/sync/cursor-store.ts` | `loadCursors` / `saveCursor` / `clearCursorsForServer` over `hostSyncCursors` |
+| `lib/sync/scheduling.ts` | `whenIdle` / `yieldToMain`, used between stages and pages |
+| `lib/db/mobile-outbound-queue.ts` | The durable write queue: enqueue, claim, retry, dead-letter |
+| `components/providers/companion-boot-provider.tsx` | Mobile wiring: critical stage first, then the triggers |
+| `components/providers/web-companion-boot-provider.tsx` | The same for a browser paired to a Host |
 
-### Desktop Responder
+### Host responder
 
-| File                                   | Purpose                                                                                                                         |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/sync/desktop-sync-source.ts`      | `installDesktopSyncSource` — listens for `companion://sync-pull-request`; queries Dexie; invokes `companion_sync_pull_response` |
-| `lib/sync/desktop-sync-source.test.ts` | Full table + boundary coverage                                                                                                  |
+| File | Purpose |
+| --- | --- |
+| `lib/sync/desktop-sync-source.ts` | `installDesktopSyncSource`: answers `companion://sync-pull-request` from Dexie; `readDexieDelta` (one branch per table), `readCursorDelta` (paged tables), `finalizeDelta` (tombstones and `next_since`) |
+| `lib/sync/tombstones.ts` | `recordTombstones`, `readTombstonesSince`, `pruneTombstones` (90-day retention) |
+| `lib/sync/host-table-invalidation.ts` | `SYNC_TABLE_SOURCES` and the Dexie hooks that announce a change to any synced table |
+| `lib/sync/host-invalidate.ts` | `publishSyncInvalidate`: per-table 150 ms coalescing of `sync://invalidate` |
+| `lib/headless/runtimes/desktop-sync-source.ts` | The headless brain's registration: the same source with the socket bridge |
+| `components/providers/desktop-sync-source-provider.tsx` | Desktop (Tauri) installation of the source and the invalidation hooks |
 
-### Rust Bridge (Companion API)
+### Rust
 
-| File                                               | Purpose                                                                               |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `crates/cognia-companion-bus/src/sync_bridge.rs`   | `_rpc/sync_pull` HTTP handler — forwards request to webview, awaits response          |
-| `crates/cognia-companion-bus/src/sync_registry.rs` | `ALLOWED` whitelist — prevents the phone from forging requests for non-allowed tables |
-| `src-tauri/src/companion_api/rpc.rs`               | RPC router — `"sync_pull"` routes to `sync_bridge`                                    |
-| `src-tauri/src/companion_api/commands.rs`          | `companion_sync_pull_response` — webview sends delta back through this command        |
+| File | Purpose |
+| --- | --- |
+| `src-tauri/src/companion_api/rpc/data_sync.rs` | The `sync_pull` and `sync_list_tables` arms: argument checks, tenant, registry, bridge selection |
+| `crates/cognia-companion-bus/src/sync_registry.rs` | `SyncTableRegistry`, `default_tables()` (48 descriptors: `name`, `description`, `has_tombstones`) |
+| `crates/cognia-companion-bus/src/sync_bridge.rs` | `SyncBridge.pull`: emits the request, awaits the response, 30 s timeout |
+| `src-tauri/src/companion_api/commands.rs` | `companion_sync_pull_response`, the WebView's reply path |
+| `crates/cognia-companion/src/ws_bridge.rs` | The brain socket: the headless Host's reply path and the `sync://invalidate` publish topic |
 
 ## Data Flow: One sync_pull
 
 ```mermaid
 sequenceDiagram
-  participant App as Phone UI
-  participant Orch as runSyncDown
+  participant O as runSyncDown
   participant H as handlers/&lt;table&gt;
-  participant B as handlers/base
-  participant T as Transport
-  participant R as Rust _rpc/sync_pull
-  participant Reg as sync_registry
-  participant Br as sync_bridge
+  participant B as runSyncHandler
+  participant T as CompanionTransport
+  participant R as data_sync.rs sync_pull
+  participant Br as SyncBridge
   participant S as desktop-sync-source
-  participant D as Desktop Dexie
+  participant D as Host Dexie
+  participant M as Client Dexie
 
-  App->>Orch: runSyncDown()
-  loop Each table (sequential)
-    Orch->>H: syncXxx(transport, { since: cursor })
-    H->>B: runSyncHandler<TRow>(opts, transport, cursor)
-    B->>T: transport.call("sync_pull", { table, since })
-    T->>R: HTTP POST /api/_rpc/sync_pull
-    R->>Reg: validateTable(table)
-    alt Table not in whitelist
-      Reg-->>T: 404 Not Implemented
+  O->>O: hydrate cursors from hostSyncCursors (once per Host)
+  O->>O: withPullBudget (≤ 6 per transport + Host)
+  O->>H: run(transport, since, cursor)
+  loop while has_more (≤ 100 pages)
+    H->>B: runSyncHandler
+    B->>T: call("sync_pull", table, since, content_protocol_version, cursor?)
+    T->>R: POST /api/_rpc/sync_pull
+    R->>R: tenant check · validate_content_protocol · registry.contains(table)
+    alt table not registered
+      R-->>T: not exposed to mobile sync
     else
-      Reg->>Br: enqueue pull
-      Br->>S: emit companion://sync-pull-request<br/>{ request_id, table, since }
-      S->>D: Read corresponding table where updatedAt > since
-      D-->>S: Row set
-      S->>S: finalizeDelta (compute next_since)
-      S->>Br: invoke companion_sync_pull_response<br/>{ requestId, delta }
-      Br-->>T: SyncDelta JSON
+      R->>Br: pull (brain socket first, else WebView)
+      Br->>S: companion://sync-pull-request
+      S->>S: account check against the unlocked account
+      S->>D: readDexieDelta / readCursorDelta
+      S->>D: readTombstonesSince(table, since)
+      S-->>Br: companion_sync_pull_response (delta)
+      Br-->>T: SyncDelta: rows, deleted_ids, next_since, next_cursor?, has_more?
     end
     T-->>B: SyncDelta
-    B->>B: rowFilter (optional)
-    B->>App: Local Dexie bulkPut(rows) + bulkDelete(deleted_ids)
-    B-->>H: SyncOutcome
-    H-->>Orch: SyncOutcome
-    Orch->>Orch: Update cursor + lastSyncAt
+    B->>B: validate delta; cursor must advance
+    B->>M: rowFilter → applyRows or bulkPut (slices of 200) → bulkDelete(deleted_ids)
   end
+  B-->>O: SyncOutcome
+  O->>O: advance cursor if nextSince did not go backwards
+  O->>M: saveCursor(serverKey, table, since, cursor, lastSyncAt, lastError)
 ```
 
-## Three Trigger Modes
+A failure after some pages carries `progress`, so the cursor still advances past the pages that
+applied. `rate_limited` failures wait (`retryAfterMs`, else 1 s, at most 30 s) and retry up to three
+times per table, resuming from that progress.
 
-| Trigger         | Implementation                                                                                                     |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Manual          | UI "Sync now" button calls `runSyncDown()`                                                                         |
-| Foreground      | `installForegroundSync` listens for `document.visibilitychange`; runs when becoming `visible`                      |
-| WS Event-driven | `installEventDrivenSync` subscribes to `transport.subscribe("sync://invalidate", ...)`; pulls when server notifies |
+## Trigger Modes
 
-`runSyncDown` is re-entrant: a second concurrent call reuses the in-flight promise instead of spawning four concurrent RPCs.
+| Trigger | Implementation |
+| --- | --- |
+| Pairing / boot | `companion-boot-provider` awaits `runStagedSyncDown(...).critical`, then installs the triggers below. `interactive` and `background` follow when the main thread is idle (`whenIdle`, 500 ms deadline) |
+| Manual | The sync status card (`components/settings/companion/sync-status-card.tsx`) runs a full pull or `only: [table]`; `use-dexie-first-query` and host orchestration also call `runSyncDown` |
+| Foreground | `installForegroundSync` on `visibilitychange`, gated by `claimForegroundSync`: the app must have been away 5 s, and runs are at least 30 s apart |
+| Resume | `installResumeSync` (native resume), same gate. Not installed on web |
+| Network | `installNetworkSync`: a full pull when connectivity comes back |
+| Push | `installEventDrivenSync` subscribes to `sync://invalidate` and pulls the named table, coalesced per table for 100 ms; a payload without a table pulls every handler table |
+| Workflow run status | `installWorkflowRunStatusSync` patches the `workflowRuns` row from `workflow://run-status`, or pulls `workflowRuns` |
+| Event gap | `remoteEventResyncCoordinator` runs `runSyncDown` when the event stream reports a gap |
+
+`runSyncDown` is re-entrant: a full run joins the in-flight promise when the Host, config generation
+and database match. Targeted runs (`only` or `stages`) bypass that, but each table keeps at most one
+active pull and one queued behind it (`scheduleTablePull`). A Host change mid-run fails the remaining
+pulls with `Sync host changed` instead of writing one Host's rows under another's cursor.
+
+### The push half
+
+On the Host, `installHostTableInvalidation` hooks `creating` / `updating` / `deleting` on the source
+table of every synced table (`SYNC_TABLE_SOURCES`, typed so a new protocol table without a source is
+a compile error). Each change calls `publishSyncInvalidate(table, conversationKey?)`, which keeps one
+150 ms timer per table and publishes `{ table }` once per window; the `conversationKey` survives only
+if every write in the window named the same one. `publishHostEvent` sends it through the headless
+bridge when one is registered, else through Tauri `emit`, and the companion server forwards it to
+clients on `GET /ws/events`. It is a no-op while this device is itself routed to a remote Host.
+Workflow run events publish directly and skip the coalescer.
 
 ## Tables & Cursor Strategy
 
-| Table              | rowFilter        | Cursor Field                                                                          | Notes                                                                                              |
-| ------------------ | ---------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `characters`       | `!row.isBuiltIn` | `updatedAt`                                                                           | Also filtered on desktop; client-side second filter for safety                                     |
-| `skills`           | —                | `updatedAt`                                                                           | —                                                                                                  |
-| `sessions`         | —                | `updatedAt`                                                                           | —                                                                                                  |
-| `messages`         | —                | `createdAt` (latest 200 only)                                                         | Table only has `[sessionId+createdAt]` index; full table scan then sort and truncate to latest 200 |
-| `workflows`        | —                | `updatedAt`                                                                           | Read-only view (phone does not write)                                                              |
-| `twinProfile`      | —                | `updatedAt` (nullable)                                                                | Old rows without `updatedAt` stabilize after one sync                                              |
-| `plugins`          | —                | `updatedAt` (nullable)                                                                | Same as above                                                                                      |
-| `adapterInstances` | —                | `updatedAt`                                                                           | mode / quietHours read-only                                                                        |
-| `settings`         | —                | `singleton` single row; full snapshot when `since===0`; otherwise `updatedAt > since` | No per-row updatedAt; cursor is document-level                                                     |
+The 48 tables are `COMPANION_SYNC_PROTOCOL_TABLE_NAMES` in `lib/data-governance/table-catalog.ts`,
+and the same set is `default_tables()` in `sync_registry.rs`. Two wire names differ from their Dexie
+table: `goals` is `chatGoals`, `plans` is `agentPlans`.
+
+### Stages and dependencies
+
+| Stage | Tables | `after` edges |
+| --- | --- | --- |
+| `critical` (6) | settings, characters, sessions, conversationOverrides, sessionState, sessionFolders | sessions → characters |
+| `interactive` (15) | messages, agentTasks, agentTaskAttempts, plans, goals, agentTeamBoard, executionRuns, workflowRuns, connectorDrafts, outboundQueue, projects, botInstallations, botEventDeliveries, executionRunBindings, connectorHeartbeats | agentTaskAttempts → agentTasks; botEventDeliveries → botInstallations; executionRunBindings → executionRuns |
+| `background` (27) | skills, workflows, twinProfile, twins, twinDrafts, labels, issueProjects, issues, issueEvents, issueRuns, issueCycles, plugins, adapterInstances, platformIdentities, connectorCallbackBindings, workflowDeployments, memories, mcpServers, terminalHistory, chatTemplates, templateDefinitions, templatePackages, templateInstances, agentTeams, agentTeammates, agentTeamTasks, botDefinitions | twins → twinProfile; twinDrafts → twins; issueProjects → labels; issues → issueProjects; issueEvents, issueRuns, issueCycles → issues; platformIdentities, connectorCallbackBindings, workflowDeployments → adapterInstances; templateInstances → templateDefinitions + templatePackages; agentTeammates, agentTeamTasks → agentTeams |
+
+`runHandlerGraph` starts a table once the tables it names in `after` have finished, with at most
+`SYNC_MAX_CONCURRENT_PULLS = 6` pulls in flight per transport and Host (`withPullBudget`). An edge
+to a table outside the current run is ignored, and a cycle is broken at the earliest-registered
+handler. Results come back in registry order.
+
+### Cursors
+
+| Kind | Tables | How it advances |
+| --- | --- | --- |
+| Watermark | 44 tables | `since` is the highest `updatedAt` (else `createdAt`) seen, or the newest tombstone's `deletedAt`, whichever is later. The Host returns rows above it |
+| Opaque, paged | `messages`, `executionRuns`, `workflowRuns`, `connectorHeartbeats` (`PAGED_SYNC_TABLES`) | The client sends `cursor` (empty string to start); the Host returns `next_cursor` and `has_more`. The cursor is JSON of version, table, position, id and tombstone watermark, capped at 4096 bytes |
+
+Paged tables, as read by `readCursorDelta`:
+
+- **`messages`**: a fresh client gets the newest `MESSAGES_PAGE_SIZE = 500` by `[createdAt+id]`,
+  pinned to the message clock's revision. After that it pages over `[syncRevision+id]` in pages of
+  500, so an edit to an old message is still delivered. A cursor from the older version is reset and
+  drained again.
+- **`executionRuns`**: pages of 200 by `updatedAt` and id.
+- **`workflowRuns`**: pages of 200 by `[syncActivityAt+id]`; the first sync looks back 30 days, and
+  rows are projected for sync.
+- **`connectorHeartbeats`**: pages of 500 by `at`; the first sync looks back one hour. The client
+  sweeps mirrored heartbeats older than 48 hours.
+
+`memories` also starts with the newest 500 on a cold client, and requires
+`content_protocol_version: 1`. The handler keeps pulling while `has_more` is set, yielding to the main
+thread between pages, up to 100 pages per run; a page whose cursor does not advance is a `schema`
+failure.
+
+### Tombstones
+
+`finalizeDelta` folds `readTombstonesSince(table, since)` into every delta as `deleted_ids`, for
+every table. A Host deletion therefore reaches the client exactly when the delete path called
+`recordTombstones` (the session cascade records sessions, messages and session state with one
+timestamp). The registry's `has_tombstones` flag does not gate this; it is metadata returned by
+`sync_list_tables`. The client applies `deleted_ids` with `bulkDelete` after the rows.
+
+### Per-table behavior
+
+| Table | Behavior |
+| --- | --- |
+| `settings` | The Host projects its singleton to the cross-platform keys (`projectMirroredSettings`). The client merges those keys onto its own singleton, keeping device-local fields, and skips any key with an `app_settings_update` still pending or sending in the outbound queue |
+| `characters`, `workflows` | `rowFilter: !row.isBuiltIn` on the client; the Host also drops built-in characters |
+| `sessions` | Merges the portable part of `executionContext` |
+| `sessionState` | Pending `session_mark_read` / `session_mark_unread` jobs override the incoming unread count |
+| `conversationOverrides`, `botInstallations` | Rows with a pending write are skipped |
+| `connectorDrafts` | A locally decided draft is not regressed to `pending` by an older Host row |
+| `outboundQueue` | The Host projects jobs (no segments, marked `syncedFromHost`); rows mirrored from another Host are excluded |
+| `plugins` | Plugin `storage` is not sent |
+| `mcpServers` | Read from `mcpServerSummaries`, never from the config that holds secrets |
+| `chatTemplates` | Calls `notifyChatTemplatesChanged` when rows applied |
 
 ## Database Tables
 
-The sync system **does not introduce new Dexie tables**:
+Sync reads the Host's existing tables and adds three of its own:
 
-- It uses the existing `updatedAt` / `createdAt` fields on the 9 desktop tables as incremental cursors.
-- The phone reuses tables with the same names, with row data in 1:1 format.
-- The cursor map is **in-memory** (V1 limitation) — cursor resets to 0 on app restart, meaning a cold start pulls a full snapshot. V2 plans to add a `_syncCursors` table for persistence.
+- `hostSyncCursors` (`&[serverKey+table]`): the client's persisted cursor per Host and table, so a
+  restart resumes where it stopped instead of pulling a full snapshot. `serverKey` namespaces the
+  cursor by account and Host, so one phone paired to several Hosts keeps them apart.
+- `syncTombstones` (`[table+id]`): the Host records one row per genuine user deletion, in the same
+  transaction as the delete (`lib/sync/tombstones.ts`), and folds them into each delta as
+  `deleted_ids`. Rows are pruned after 90 days.
+- `mobileOutboundQueue`: the client's durable write queue (see Known Limitations).
 
 ## Configuration & Extension Points
 
-### `SyncableTable` Union
+### Cursor namespace
 
-To add a new table:
+`serverKey` is `companionCursorNamespace(config)`: the URI-encoded account namespace and Host id
+(`targetId`, else `deviceId`) joined by `:`. Cursors load once per Host, database and config
+generation. If `hostSyncCursors` holds another Host's key, the client clears every mirrored table
+except `settings` before pulling, so two Hosts never share one mirror. Cursors saved under the old
+device-id key are adopted.
 
-1. Add the type literal in `lib/sync/types.ts:SyncableTable`;
-2. Add a new branch in `lib/sync/desktop-sync-source.ts:readDexieDelta`;
-3. Add `syncXxx` in `lib/sync/handlers/`;
-4. Register it in `lib/sync/companion-sync.ts:DEFAULT_HANDLERS`;
-5. Add the table name to the `ALLOWED` whitelist in Rust `cognia-companion-bus/src/sync_registry.rs`.
+### Adding a table
 
-Any missing step fails safely: missing whitelist → 404 Not Implemented → client classifies as `reason: "not_implemented"`, UI shows "not yet supported on server" instead of a red error.
+1. Add the wire name to `COMPANION_SYNC_PROTOCOL_TABLE_NAMES` in `lib/data-governance/table-catalog.ts`.
+   `SyncableTable` follows, and the typed maps below stop compiling until they have an entry.
+2. Add a descriptor to `default_tables()` in `crates/cognia-companion-bus/src/sync_registry.rs`.
+3. Add a branch to `readDexieDelta` in `lib/sync/desktop-sync-source.ts`, and a source table to
+   `SYNC_TABLE_SOURCES` in `lib/sync/host-table-invalidation.ts`.
+4. Write `lib/sync/handlers/<table>.ts` and register it in `DEFAULT_HANDLERS` with a stage and any
+   `after` edges; add its `COMPANION_SYNC_DOMAINS` entry (sensitivity, cursor kind, deletion policy).
+5. Record tombstones in the table's delete path if deletions must reach clients.
+6. Update the `sync_pull` table enum in `protocol/companion-request-schemas.json`.
 
-### Transport Abstraction
+`pnpm audit:data-governance` fails if the catalog, `DEFAULT_HANDLERS` and the Rust registry
+disagree, and `lib/data-governance/table-catalog.test.ts` pins the catalog against the protocol
+enum.
 
-Uses `lib/tauri.ts:transport`:
+### Transport
 
-- **Tauri Desktop**: no-op (same machine local Dexie, no sync needed)
-- **Capacitor (Phone)**: HTTP implementation, calls the desktop axum app
-- **Web**: no-op (no paired desktop)
+`lib/tauri/transport-instance.ts` picks the transport:
 
-The underlying interface is in `lib/tauri/transport-types.ts`.
+- **Capacitor**: `CompanionTransport`. `sync_pull` is `POST {baseUrl}/api/_rpc/sync_pull`; off the
+  LAN it can ride the WebRTC data channel or the relay, falling back to HTTPS. Events arrive on
+  `GET /ws/events`.
+- **Browser paired to a Host**: `CompanionTransport`.
+- **Tauri desktop**: `RoutingTransport` over the local transport; it syncs only when routed to a
+  remote Host.
+- **Web without a Host**: `WebStubTransport`.
+
+On the Host, `sync_pull` goes to the connected brain socket first and the desktop WebView otherwise;
+with neither it answers 503.
 
 ### Error Classification
 
-`classifyTransportError` distinguishes:
+A failed pull carries a `SyncFailure.reason`. `classifyTransportError` (`handlers/base.ts`) maps
+transport errors; `runSyncHandler` raises `schema` and `upgrade_required` itself:
 
-- `not_implemented` — 404 / "command not found" / "not implemented" → UI silent
-- `transport` — network issues → UI red
-- `schema` — Dexie `bulkPut` error → UI red + hint to upgrade
-- `unknown` — fallback
+- `no_host`: not paired, or no Host transport. No cursor or error is recorded
+- `upgrade_required`: the Host or client is too old for the other (for example a saved paged cursor
+  and a Host that does not return `next_cursor`)
+- `rate_limited`: 429, with `retryAfterMs`
+- `not_implemented`: not found, unknown command, 404
+- `schema`: a malformed delta, or a page cursor that did not advance
+- `transport`: everything else, including hitting the page cap
+- `unknown`: the fallback for errors that are not transport errors
 
 ## Related Subsystems
 
@@ -245,13 +365,27 @@ The underlying interface is in `lib/tauri/transport-types.ts`.
 - [ADR 0014 — Capacitor Mobile Shell](../adr/0014-capacitor-mobile-shell)
 - [ADR 0015 — Mobile V2 Completion](../adr/0015-mobile-v2-completion)
 - [ADR 0012 — Transport Abstraction](../adr/0012-transport-abstraction)
+- [ADR 0027 — Mobile Offline Tolerance & Server Discovery](../adr/0027-mobile-offline-and-discovery)
 
 ## Known Limitations
 
-- **V1 does not support tombstones**: deletion operations are not synced. V2 plans to add a `deletedAt` index to each table; for now, use `applyDomainImport` full replacement to handle deletions.
-- **Cursor is in-memory**: resets on app restart; cold start pulls a full snapshot. V2 will add a `_syncCursors` table for persistence.
-- **Phone is read-only only**: write operations do not go through sync; writes use the outbound queue (`mobile-outbound-queue.ts` is already schema-reserved).
-- **messages only pulls latest 200**: scrolling history to the boundary requires V2's "pull history by sessionId" extension.
-- **`settings` single-row sync semantics**: `since === 0` pulls a full snapshot; afterwards `updatedAt > since`; old settings rows lacking `updatedAt` sync once and never trigger again until the row is actually modified.
-- **Sequential pull, not concurrent**: avoids hitting the desktop with four simultaneous RPCs. Slower but safer.
-- **Built-in double filter**: both server and client filter `isBuiltIn`, preventing the phone's local built-ins from being overwritten if the desktop filter ever leaks.
+- **Tombstones are per table, and not every table records them.** A deletion reaches the client
+  only when the Host's delete path calls `recordTombstones`; sessions, messages, workflows,
+  characters, issues and most tables marked `has_tombstones: true` do. `botDefinitions` and
+  `botInstallations` are marked but their delete paths record nothing. Skills, memories, MCP servers, plugins and the template tables do not record a tombstone
+  on user delete yet, so a row deleted on the Host stays on the client. See
+  `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`, gap B2.
+- **The client writes through the outbound queue, not through sync.** Commands in
+  `MOBILE_OUTBOUND_COMMANDS` are queued durably (`pending → sending → sent | deadlettered |
+  rejected | conflicted`) and deduplicated by the Host's 24-hour idempotency ledger. Pending writes
+  mask incoming rows until they settle.
+- **The Host wins.** An incoming row overwrites the mirror (`bulkPut`); only `settings` merges an
+  allowlisted set of cross-platform keys. There is no field-level merge on this plane.
+- **Message history is paged.** A fresh client receives the newest 500 messages; older history comes
+  from transcript pagination, not from the sync pull.
+- **About 48 of the Host's tables sync.** Artifacts, canvas, knowledge bases, drafts, media and
+  provider profiles are not mirrored.
+- **No background sync on mobile.** Pulls run on foreground, resume, network change and
+  `sync://invalidate`; there is no BGTask or WorkManager job.
+- **Built-in double filter**: both server and client filter `isBuiltIn`, preventing the phone's local
+  built-ins from being overwritten if the desktop filter ever leaks.

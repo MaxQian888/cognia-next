@@ -1,6 +1,6 @@
 ---
 title: Collaboration
-description: Optional real-time multi-user co-editing — a vector-clock CRDT with a causal-delivery gate, a WebSocket provider with fixed-interval reconnect and a 30 s heartbeat, session metadata persisted to Dexie, and the /canvas/join invite flow.
+description: Optional real-time multi-user co-editing on Yjs — Monaco and CodeMirror bind to a Y.Text, the collaboration server (ADR-0149) stores opaque ordered updates and re-authorizes every frame, and comments anchor to Yjs relative positions. Off by default.
 ---
 
 # Collaboration
@@ -8,137 +8,350 @@ description: Optional real-time multi-user co-editing — a vector-clock CRDT wi
 <Status variant="experimental" />
 
 <TLDR>
-  `lib/canvas/collaboration/` adds optional real-time co-editing. `CanvasCRDTStore`
-  (`crdt-store.ts:59`) keeps each document as `content` + a `vectorClock: Map` + an append-only
-  operation log; remote ops are admitted through a causal-delivery gate (`canApplyOperation:220`) and
-  merged with element-wise clock max (`applyOperation:214`). `CanvasWebSocketProvider`
-  (`websocket-provider.ts:34`) is the transport — fixed-interval reconnect (default 1000 ms, **no
-  backoff**, capped at 5), a 30 s heartbeat, and a message queue. `useCollaborativeSession`
-  (`use-collaborative-session.ts:83`) wires store ⇄ provider ⇄ React state. It never auto-connects:
-  the WebSocket opens only when collaboration is enabled with a server URL.
+  `lib/canvas/collaboration/` adds optional real-time co-editing on **Yjs**. Each document is a
+  `Y.Doc`; Monaco and CodeMirror write into its `Y.Text` (`editor-binding.ts`), and a document-level
+  update bus sends every local change, including AI applies, model-tool writes and plugin writes. While
+  a binding is live the artifact store's `content` is a debounced projection of the `Y.Text`. The
+  transport is the collaboration server (ADR-0149, `crates/cognia-collab-server/src/canvas_api.rs`),
+  which stores opaque updates in order, deduplicates by `(document_id, operation_id)`, never decodes
+  them, and re-resolves the caller's workspace role on every inbound edit frame. Membership is the
+  workspace's ladder: viewer reads, member edits and comments, maintainer compacts and deletes. Off
+  by default behind `COLLAB_CANVAS_ENABLED` and `canvas.collaboration.enabled`.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Wire message types" value="6" hint="operation · cursor · selection · presence · sync · error" />
-  <Stat label="Reconnect" value="fixed 1000ms" hint="capped at 5 attempts — no exponential backoff" />
-  <Stat label="Heartbeat" value="30000ms" hint="presence frames; not consumed inbound" />
-  <Stat label="Conflict model" value="vector clock" hint="causal gate only — no OT/index rebasing" />
+  <Stat label="CRDT" value="Yjs" hint="Y.Doc per document; awareness for cursors and presence" />
+  <Stat label="Server" value="collab plane" hint="opaque ordered updates; yrs not linked (ADR-0158)" />
+  <Stat label="Authorization" value="per frame" hint="workspace role re-resolved on every write" />
+  <Stat label="Default" value="off" hint="COLLAB_CANVAS_ENABLED + canvas.collaboration.enabled" />
 </StatGrid>
+
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Client["Cognia client (per device)"]
+    direction TB
+    Panel["CollaborationPanel<br/>components/canvas/collaboration-panel.tsx"]
+    Session["useCollaborativeSession<br/>hooks/canvas/use-collaborative-session.ts"]
+    Store["CanvasCRDTStore (crdtStore)<br/>Y.Doc + Y.Text 'content'"]
+    EditorHook["useCanvasCollaborativeEditor<br/>hooks/canvas/use-canvas-collaborative-editor.ts"]
+    Binding["editor-binding.ts<br/>y-monaco · y-codemirror.next"]
+    Provider["CanvasWebSocketProvider<br/>websocket-provider.ts"]
+    Transport["resolveCanvasTransport<br/>canvas-transport.ts"]
+    Artifact["useArtifactStore<br/>canvasDocuments[id].content"]
+  end
+
+  subgraph Plane["cognia-collab-server (ADR-0149)"]
+    direction TB
+    Api["canvas_api.rs<br/>REST + /stream socket + hub"]
+    Caps["canvas.rs<br/>CanvasAction → workspace capability"]
+    PG[("Postgres<br/>canvas_documents · canvas_document_updates<br/>canvas_comments · canvas_versions")]
+  end
+
+  Panel --> Session
+  Session --> Store
+  Session --> Provider
+  Session --> Transport
+  EditorHook -- "subscribes to the session registry" --> Store
+  EditorHook --> Binding
+  Binding -- "writes Y.Text" --> Store
+  EditorHook -- "400 ms debounced projection" --> Artifact
+  Transport -- "CollabClient.openCanvasStream" --> Api
+  Provider <-- "JSON frames, subprotocol cognia.canvas.v1" --> Api
+  Api --> Caps
+  Api --> PG
+```
+
+The session is owned by the collaboration panel (through `useCollaborativeSession`); the editor finds
+it by subscribing to the store's registry rather than by holding it. That split is recorded in the
+2026-09-05 amendments to [ADR-0158](../../adr/0158-artifacts-and-canvas).
+
+## Modules
+
+| File | Role |
+| --- | --- |
+| `lib/canvas/collaboration/crdt-store.ts` | `CanvasCRDTStore` and the `crdtStore` singleton: one `Y.Doc` per document, the session registry, the local-update bus, remote apply, snapshots |
+| `lib/canvas/collaboration/editor-binding.ts` | `bindMonacoEditor` (y-monaco), `codeMirrorCollabExtensions` (y-codemirror.next), the awareness user, the presence stylesheet |
+| `lib/canvas/collaboration/websocket-provider.ts` | `CanvasWebSocketProvider`: the socket factory, reconnect, heartbeat, in-memory queue, frame routing |
+| `lib/canvas/collaboration/canvas-transport.ts` | `resolveCanvasTransport`, `publishCanvasDocument`, `resolveCanvasShareTarget`: binds a document to the org, workspace and plane |
+| `lib/canvas/collaboration/relative-anchor.ts` | `encodeCrdtAnchor` / `resolveCrdtAnchor`: comment anchors as Yjs relative positions |
+| `lib/canvas/collaboration/share-link.ts` | `buildCanvasSharePath` / `parseCanvasShareLink`: an ids-only join link |
+| `hooks/canvas/use-canvas-collaborative-editor.ts` | Binds the active editor to the live session and projects the `Y.Text` back to the artifact store |
+| `hooks/canvas/use-collaborative-session.ts` | Creates, connects and tears down a session for the panel |
+| `hooks/canvas/use-canvas-comment-anchors.ts` | Encodes and resolves comment anchors against the live document |
+| `lib/collab/client.ts` | `CollabClient`: the Canvas REST methods and `openCanvasStream` |
+| `crates/cognia-collab-server/src/canvas_api.rs` | Routes, stream tickets, the per-document hub, frame handling |
+| `crates/cognia-collab-server/src/canvas.rs` | `CanvasAction`, its capability mapping and audit names |
+| `crates/cognia-collab-server/src/canvas_store.rs` | `CanvasStore` trait, `InMemoryCanvasStore`, the Postgres implementation |
+| `crates/cognia-collab-server/migrations/0010_canvas.sql` | The four Canvas tables and their row-level security |
+
+Client dependencies: `yjs`, `y-monaco`, `y-codemirror.next`, `y-protocols` (awareness) and `lib0`.
+The server links no Yjs crate.
 
 ## The Edit Round-Trip
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant A as Client A editor
-  participant H as useCollaborativeSession.updateContent<br/>use-collaborative-session.ts:280
-  participant S as CanvasCRDTStore<br/>crdt-store.ts:59
-  participant WS as CanvasWebSocketProvider<br/>websocket-provider.ts:34
-  participant B as Client B
+  participant Ed as Monaco / CodeMirror (A)
+  participant YA as Y.Doc "content" (A)
+  participant PA as CanvasWebSocketProvider (A)
+  participant S as collab server /stream
+  participant DB as canvas_document_updates
+  participant PB as CanvasWebSocketProvider (B)
+  participant YB as Y.Doc (B)
+  participant AS as useArtifactStore (B)
 
-  A->>H: insert/delete at position
-  H->>S: applyLocalUpdate(ContentUpdate) (:284 → crdt-store.ts:144)
-  S->>S: createOperation — bump local clock (:182, :185)
-  S->>S: applyOperation — splice + version++ + clock max-merge (:199, :214)
-  H->>WS: broadcastOperation(operation) (:293 → websocket-provider.ts:130)
-  WS->>WS: serialize (Map→array) + send / queue (:362, :193)
-  WS->>B: WebSocketMessage { type:"operation" }
-  B->>B: onmessage → handleMessage (:98 / :210)
-  B->>B: case "operation" → handleRemoteOperation (:215 / :243)
-  B->>S: canApplyOperation gate (:220) → applyRemoteUpdate (:164)
-  B->>B: emit "content-updated" → hook pulls getDocumentContent (:249 / :192)
+  Ed->>YA: y-monaco / yCollab write into Y.Text
+  YA-->>PA: doc "update" (origin is not the remote sentinel) → onLocalUpdate → broadcastOperation
+  PA->>S: frame type "operation", data = id + base64 update
+  Note over PA: queued in memory while the socket is not connected
+  S->>S: may_edit: re-resolve the caller's workspace role
+  S->>DB: append_update (dedupe on document_id + operation_id)
+  DB-->>S: stored row with its sequence
+  S-->>PB: broadcast "operation" (the sender's own echo is skipped)
+  PB->>YB: applyRemoteUpdate → Y.applyUpdate(..., CANVAS_REMOTE_ORIGIN)
+  Note over YB: the sentinel origin keeps it off the local bus
+  YB->>AS: Y.Text observe → 400 ms debounce → updateCanvasDocument
 ```
 
-### CRDT details
+## The Document and Its Session
 
-- **Operation** (`crdt-store.ts:42`) — `{ id, type:"insert"|"delete", position, text?, length?, origin,
-  timestamp, vectorClock: Map }`. Created in `createOperation` (`:182`): clone the doc's clock,
-  increment the local participant's entry (`:185`), id = `op-${Date.now()}-${random}` (`:188`). Note a
-  `"replace"` content update collapses to `"insert"` (`:189`).
-- **Merge** — `applyOperation` (`:199`) splices `content`, increments `version`, appends to the log,
-  and merges the clock with element-wise `Math.max` (`:214-217`).
-- **Causal gate** — `canApplyOperation` (`:220`): for each clock entry (skipping the op's own origin),
-  reject if `value > localValue + 1`, i.e. an op that would skip a causally-prior update. Rejected ops
-  are **silently dropped** — there is no buffering/retry and **no operational transform**, so the gate
-  is the only conflict mechanism.
-- **Persistence side-effects** — `createSession` / `joinSession` / `leaveSession` persist session
-  metadata to Dexie (`:98`, `:115`, `:135`); `restoreRecentSessions` (`:293`) reloads metadata but
-  explicitly does **not** reopen sockets.
+`CanvasCRDTStore.ensureDocument` creates one `Y.Doc` per document id and reads its text as
+`doc.getText(CANVAS_TEXT_KEY)`, where `CANVAS_TEXT_KEY = "content"`. A non-empty starting body is
+inserted into the `Y.Text`, and one `text.observe` keeps the record's `content` and `version` in step.
 
-### WebSocket provider details
+- **Sessions.** `createSession(documentId, content)` mints `session-<timestamp>-<random>`, marks the
+  creator's permissions and persists the session's metadata to the Dexie `canvasSessions` table
+  through `lib/db/canvas-sessions.ts`. Only metadata is stored there. Yjs state is not persisted
+  locally; the plane holds it. `joinSession`, `leaveSession`, `adoptSession` and `closeSession`
+  complete the lifecycle, and `closeSession` destroys the `Y.Doc`.
+- **The registry.** `onSessionsChanged(listener)` and `sessionIdForDocument(documentId)` are what
+  the editor hook feeds to `useSyncExternalStore`. `sessionIdForDocument` returns a string on
+  purpose, because that is what a snapshot comparison can compare.
+- **The local-update bus.** The store listens to `doc.on("update")` once per document. Any
+  transaction whose origin is not `CANVAS_REMOTE_ORIGIN` (`"cognia:canvas:remote"`) is local: it is
+  wrapped as a `CRDTOperation` (`id`, base64 `update`, `origin`, `timestamp`) and handed to
+  `onLocalUpdate` subscribers. Filtering on the one remote sentinel, instead of on a list of local
+  origins, is what makes an AI apply, a model-tool write and a plugin write leave the same way as
+  typing.
+- **Remote apply.** `applyRemoteUpdate` decodes the base64 update and calls `Y.applyUpdate` under the
+  remote sentinel. A malformed update is logged (`crdt remote update rejected`) and dropped rather
+  than thrown.
+- **Snapshots.** `encodeSnapshot` returns `Y.encodeStateAsUpdate(doc)` as base64; `applySnapshot`
+  merges one under the remote sentinel. State only ever arrives as opaque bytes that merge into a
+  session the client is already in. The old `deserializeState` JSON sink is gone, and a test pins that
+  it stays gone.
 
-| Concern | Behavior | Lines |
+## Editor Binding
+
+`useCanvasCollaborativeEditor({ documentId, enabled })` is used by `components/canvas/canvas-panel.tsx`.
+It returns `active`, `bindMonaco(editor)` and `codeMirrorExtensions`.
+
+1. `useSessionId` subscribes to the registry and yields the live session for the document, only when
+   both the hook's `enabled` (the `canvas.collaboration.v1` feature flag) and
+   `CanvasSettings.collaboration.enabled` are on.
+2. For that session it creates a `y-protocols` `Awareness` over the `Y.Doc`, publishes the local
+   user as the awareness `user` field (`name`, `color`, `participantId`), applies the presence
+   timeout and builds the CodeMirror extensions.
+3. **Monaco** (desktop): `bindMonacoEditor` creates a `MonacoBinding(ytext, model, editors, awareness)`
+   inside Monaco's `onMount`; the teardown runs when the active document changes or the editor
+   unmounts.
+   **CodeMirror** (the mobile `LightCodeEditor`): `codeMirrorCollabExtensions` returns
+   `yCollab(ytext, awareness)`.
+4. **Projection.** A `text.observe` debounced by `CANVAS_PROJECTION_DEBOUNCE_MS = 400` writes the
+   text back with `updateCanvasDocument`, skipping identical content, and flushes on cleanup. While a
+   binding is live, the panel's own `handleEditorChange` commit returns early so the two writers do
+   not race. Preview, export, AI actions, the outline and version history keep reading `content`.
+
+### Presence settings
+
+| Setting | Read by | Effect |
 | --- | --- | --- |
-| Config defaults | `reconnectAttempts: 5`, `reconnectInterval: 1000`, `heartbeatInterval: 30000` | `:47-55` |
-| Connect | `onopen` → reset attempts, start heartbeat, flush queue, send `presence/join` | `:57-82` |
-| Reconnect | `handleDisconnect` — fixed `reconnectInterval` delay, **no backoff**, stops at cap | `:306-330`, `:326` |
-| Heartbeat | `setInterval(heartbeatInterval)` sends `presence/heartbeat` | `:332-344` |
-| Message queue | `send` queues when not OPEN; `flushMessageQueue` drains FIFO on open | `:193-208` |
-| Inbound routing | `handleMessage` switch → operation / cursor / selection / presence / sync / error | `:210-241` |
-| Sync | `requestSync` ⇄ `handleSync` → `crdtStore.deserializeState` | `:166`, `:298`, `crdt-store.ts:326` |
+| `enabled` | `useCanvasCollaborativeEditor` | Gates the editor binding |
+| `showCursors` | `presenceStylesheet` | Hides remote carets (`.yRemoteSelectionHead`, `.cm-ySelectionCaret`) |
+| `showSelections` | `presenceStylesheet` | Makes remote selection backgrounds transparent |
+| `cursorSmoothing` | `presenceStylesheet` | Adds a 90 ms `left` / `top` transition to remote carets |
+| `presenceTimeout` | `applyPresenceTimeout` | Sets `awareness.outdatedTimeout`, clamped to 5 s to 600 s |
+| `showAvatars` | `CollaborationPanel` | Shows avatars in the participant list |
 
-The local event bus (`on` `:178`, `emitEvent` `:353`) is distinct from the wire protocol — it fans
-`participant-joined` / `cursor-moved` / `content-updated` / `connected` etc. to the hook.
+Defaults (`types/canvas/settings.ts`): `enabled: false`, the four booleans `true`,
+`presenceTimeout: 60000`. The stylesheet is injected once as `#cognia-canvas-presence`; hiding in CSS
+rather than withholding awareness means turning a setting back on shows the peer's current position.
+`serverUrl` and `syncInterval` were removed: where the plane lives is `lib/collab/connection.ts`, and
+Yjs pushes each transaction, so there is no polling interval.
 
-## The Session Hook
+## Transport
 
-`useCollaborativeSession` (`use-collaborative-session.ts:83`) holds the singleton `crdtStore` and a
-per-session provider, and maps all eight provider events through one handler
-(`handleCollaborationEvent:123`). Lifecycle:
+### Opening the socket
 
-- `connect(documentId, content)` (`:218`) — create session, join as local participant, set local
-  participant id, construct + connect the provider.
-- `updateContent` (`:280`) / `updateCursor` (`:299`) / `updateSelection` (`:312`) — local apply +
-  broadcast.
-- `disconnect` (`:261`) — close provider, leave + close session, clear state. The unmount effect calls
-  `disconnect()` (`:431-435`).
-- `shareSession` (`:322`) returns `crdtStore.serializeState`; `importSharedSession` (`:377`) hydrates
-  from a serialized payload with no transport.
+`resolveCanvasTransport(documentId)` answers `null` unless the document belongs to a workspace
+(`getCanvasDocumentForWorkspace(...).projectId`) and a collaboration context exists
+(`resolveCurrentCollabContext`: the per-account plane address from `lib/collab/connection.ts`, the
+signed-in org and user binding, and an access token). Otherwise it returns the ids, the
+`CollabClient`, and an `openSocket` factory over `client.openCanvasStream(orgId, documentId, handlers)`.
 
-`DEFAULT_CONFIG` (`:75-81`) defaults the URL to `ws://localhost:8080/canvas` with `autoReconnect:true`
-and 5 attempts.
+`openCanvasStream` first mints a ticket (`POST .../stream-tickets`), then opens
+`wss://<plane>/v1/orgs/<org>/canvas-documents/<doc>/stream` with the subprotocols
+`["cognia.canvas.v1", ticket]`. The socket comes from `createPlatformWebSocket`, which on Tauri goes
+through the Rust proxy path and so honours the desktop proxy settings. Before connecting,
+`publishCanvasDocument` gets the document on the plane and creates it on a 404, with operation id
+`canvas-create:<documentId>`; a 403 or 404 on create means no write access.
 
-## The Invite / Join Flow
+### `CanvasWebSocketProvider`
 
-```mermaid
-flowchart LR
-  START["CollaborationPanel.handleStartSession<br/>collaboration-panel.tsx:95"]
-  CONNECT["useCollaborativeSession.connect<br/>use-collaborative-session.ts:218"]
-  CREATE["crdtStore.createSession<br/>crdt-store.ts:69"]
-  PERSIST["canvasSessionsDb.upsertSession<br/>canvas-sessions.ts:74"]
-  SHARE["handleCopyShareLink<br/>collaboration-panel.tsx:120"]
-  URL["/canvas/join?session=…&server=…"]
-  JOIN["CanvasJoinInner decode<br/>app/canvas/join/page.tsx:43"]
-  SETTINGS["updateSettings(collaboration)<br/>page.tsx:73"]
-  GUILD["setGuild canvas<br/>page.tsx:91"]
+| Concern | Behavior |
+| --- | --- |
+| Construction | Takes an `openSocket` factory, never a URL or token. Without one, `connect` throws `CanvasTransportUnavailableError` (`CANVAS_REMOTE_AUTH_REQUIRED`): the transport fails closed |
+| Connect | Calls the factory, sets `connected`, starts the heartbeat, sends `presence` `join` with the real participant, then flushes the queue |
+| Reconnect | `handleDisconnect` retries after a fixed `reconnectInterval` (1000 ms), up to `reconnectAttempts` (5), calling the factory again each time so a fresh single-use ticket is minted. It rejoins as the stored participant and calls `requestSync` afterwards. There is no exponential backoff |
+| Heartbeat | `presence` `heartbeat` every 30 000 ms while connected |
+| Queue | `dispatch` queues frames while the socket is not connected or a send fails; `flushMessageQueue` drains them in order after the join frame. The queue is in memory and does not survive a reload |
+| Errors | A socket error, a factory throw or a server `error` frame report `error`; `disconnected` is reported only for a deliberate `disconnect()` or exhausted retries |
 
-  START --> CONNECT --> CREATE --> PERSIST
-  CREATE --> SHARE --> URL --> JOIN --> SETTINGS --> GUILD
-```
+### Frames
 
-- **Create** — `connect` → `createSession` mints `session-${Date.now()}-${random}` (`crdt-store.ts:70`)
-  and persists metadata.
-- **Share** — `handleCopyShareLink` (`collaboration-panel.tsx:120`) builds
-  `${origin}/canvas/join?session=${encodeURIComponent(serializeState)}` (`:128`).
-- **Join** — `app/canvas/join/page.tsx` reads `?session` / `?server` (`:37-38`), decodes a base64url
-  payload (`:43`), writes collaboration settings if a server is present (`:73-84`), switches the shell
-  to the canvas guild (`:91`), and shows success. The page intentionally does **not** itself call
-  `joinSession` — real-time sync resumes only if collaboration is enabled in Settings.
+Every frame is JSON text of the shape `type`, `sessionId` (the document id on the server),
+`participantId`, `data`, `timestamp`.
 
-> **Implementation note (format mismatch).** The panel emits `encodeURIComponent(serializeState)` whose
-> JSON shape is `{ session, document }` (`collaboration-panel.tsx:128`), while the join page decodes a
-> base64url payload of `{ sessionId, documentId, ownerId, shareUrl, permissions }`
-> (`app/canvas/join/page.tsx:46`). The two encodings are not round-trippable in the current code — the
-> join route relies on settings + in-app `joinSession` to resume a session, not on re-hydrating the
-> shared payload.
+| `type` | Client sends | Server does |
+| --- | --- | --- |
+| `operation` | `data` is the `CRDTOperation` | Re-checks edit rights, appends, broadcasts after the write is durable |
+| `presence` | `join`, `heartbeat`, `leave` | `join` records presence with the ticket's user id and replays the roster to the joiner; `heartbeat` refreshes it; `leave` closes |
+| `sync` | `action: "request"`, `since` | Replies with the snapshot (when the caller is behind it) and each later update, one `sync` `response` frame per payload, from participant `"server"` |
+| `cursor`, `selection` | cursor / line range | Relayed to the room, not stored, no per-frame role check |
+| `error` | none | Surfaced by the provider as `error` |
+
+## The Server Side
+
+The routes are merged only when the server runs with `COLLAB_CANVAS_ENABLED` (CLI default `false`);
+`/health` then lists `canvas` among its features. `D` below is
+`/v1/orgs/{org_id}/canvas-documents/{document_id}`.
+
+| Route | Action | Notes |
+| --- | --- | --- |
+| `GET` / `POST /v1/orgs/{org_id}/workspaces/{workspace_id}/canvas-documents` | Read / Create | Create requires `id` and `operationId` |
+| `GET` / `PATCH` / `DELETE D` | Read / Rename / Delete | `PATCH` carries `baseRevision`; a stale one is 409 |
+| `GET D/updates?since=` | Read | Catch-up page: snapshot, updates, `latestSequence`, `hasMore` |
+| `POST D/updates` | Edit | The HTTP write path, deduplicated like the socket path |
+| `POST D/snapshots` | Compact | `snapshot` + `coversSequence` |
+| `GET` / `POST D/comments`, `PATCH` / `DELETE D/comments/{comment_id}` | Read / Comment | An empty anchor is 422 |
+| `GET` / `POST D/versions` | Read / Edit | Named versions |
+| `GET D/presence` | Read | The hub's in-memory roster |
+| `POST D/stream-tickets`, `GET D/stream` | Read | Ticket, then the WebSocket upgrade |
+
+### Membership and authorization
+
+There is no per-document member table. `CanvasAction` maps onto the workspace ladder in `canvas.rs`:
+`Read` needs workspace read (viewer); `Create`, `Edit`, `Comment` and `Rename` need write (member);
+`Compact` and `Delete` need manage (maintainer). An org owner or admin enters as a maintainer through
+`resolve_workspace_access`.
+
+- **404, not 403.** `document_caller` answers 404 when the document is unknown *or* the caller cannot
+  read its workspace, so an id cannot be probed. Only a reader who lacks the action's capability sees
+  403.
+- **Tickets.** A stream ticket (`ct_<uuid>`) lives 30 s in memory, is consumed on first use whether
+  or not it is still valid, and binds org, document, workspace and user. The upgrade requires the
+  `cognia.canvas.v1` subprotocol and the ticket; an expired or unknown ticket is 410.
+- **Per-frame authorization.** Every `operation` frame calls `may_edit`, which re-resolves the
+  caller's workspace role; a revoked role closes the socket at the next keystroke. Reads and presence
+  are authorized once, when the ticket is minted.
+
+### Ordering, deduplication, compaction
+
+- **Opaque, ordered updates.** `append_update` locks the document row (`FOR UPDATE`), allocates
+  `next_sequence`, and stores the payload undecoded. `UNIQUE (document_id, operation_id)` makes a
+  resend return the stored row instead of recording the edit twice, which is what makes a replayed
+  queue safe. Payloads are 1 byte to 1 MiB.
+- **Hub.** One `tokio::sync::broadcast` channel of 512 per document. The writer skips a connection's
+  own frames; a lagging receiver is closed so it reconnects and catches up.
+- **Catch-up.** `catch_up(since, 512)` raises the floor to the snapshot sequence when `since` is
+  behind it and includes the snapshot. The HTTP route reports `hasMore`.
+- **Compaction.** A maintainer's client posts `Y.encodeStateAsUpdate` with `coversSequence`. The
+  store refuses a marker that moves backwards or past `latest_sequence` (403 `snapshot does not cover
+  a stored range`), stores the snapshot, and deletes the updates it covers.
+- **Tables.** `canvas_documents` (title, language, revision, `snapshot`, `snapshot_sequence`,
+  `next_sequence`), `canvas_document_updates`, `canvas_comments` (`anchor`, `head`, `body`,
+  `resolved`) and `canvas_versions`, each with forced row-level security on `app.tenant_id`.
+
+## Comments Anchor to Characters
+
+A canvas comment on a text range stores its absolute offsets and, when a live session exists, a
+`crdt` anchor (`CanvasCrdtAnchor`: base64 `anchor` and `head`, `types/canvas/collaboration.ts`).
+
+- `encodeCrdtAnchor(text, start, end)` creates two Yjs relative positions. The start uses association
+  `0` and the end `-1`, so both ends stick outwards: text typed against either boundary lands outside
+  the comment. Out-of-range input returns `null`.
+- `resolveCrdtAnchor(doc, anchor)` returns absolute offsets, or `null` if either end no longer
+  resolves.
+- `useCanvasCommentAnchors` (in `canvas-side-panels.tsx`) encodes when a comment is created and passes
+  `resolve` to `ContextCommentsPanel` as its `resolveAnchor` prop. A range that collapses where it used
+  to cover text is read as deleted: the stored offsets are kept and the usual revision staleness
+  applies, instead of pinning the comment to wherever the collapse landed.
+- Without a live document, the stored offsets are what every device reads.
+
+Comments still live in the local `contextComments` table. The plane's comment routes exist and store
+the same `anchor` / `head` pair, but the client does not call them yet.
+
+## Share Links and the Join Page
+
+`buildCanvasSharePath` produces `/canvas/join?org=<org>&workspace=<workspace>&document=<document>`;
+the panel prefixes `window.location.origin`. `parseCanvasShareLink` requires all three ids to match
+`^[A-Za-z0-9_-]{1,128}$` and answers `missing` or `malformed` otherwise. The link carries no content,
+participants, permissions or server URL.
+
+`app/canvas/join/page.tsx` treats an old link (one carrying `session` or `server`) as `expired`. For a
+valid link it resolves the document **locally** through `getCanvasDocumentForWorkspace`; if this
+device has it, "Open Canvas" selects it and switches to the canvas view, otherwise the page reports
+`not-found`. The page does not call the plane or start a session. Its code comment saying the server
+routes "do not exist yet" predates `canvas_api.rs`.
+
+## Gates
+
+| Gate | Where | Default |
+| --- | --- | --- |
+| `COLLAB_CANVAS_ENABLED` | `cognia-collab-server` CLI / env; routes merged in `api.rs` | `false` |
+| `canvas.collaboration.v1` feature flag | `lib/canvas/feature-flags.ts`; overridable by `NEXT_PUBLIC_CANVAS_COLLABORATION_V1` and localStorage | `true` |
+| `CanvasSettings.collaboration.enabled` | Settings, Canvas; read only by `useCanvasCollaborativeEditor` | `false` |
+
+The feature flag decides whether `CollaborationHost` renders the panel and whether the editor hook is
+enabled. The setting only gates the editor binding: with it off, the panel can still start a session
+and open a socket, but the editor does not bind to it.
 
 ## Connection States
 
-The provider's `ConnectionState` (5 values: disconnected / connecting / connected / reconnecting /
-error, `websocket-provider.ts:32`) is a subset of the UI-layer `CollaborationConnectionState` (8
-values incl. `degraded-local`, `ended`, `types/canvas/collaboration.ts:117`). The recovery state
-`live` / `local-copy` / `snapshot-only` / `degraded-local` (`:126`) is derived in the hook's
-state-change effect (`use-collaborative-session.ts:409-429`).
+The provider's `ConnectionState` has five values (`disconnected`, `connecting`, `connected`,
+`reconnecting`, `error`). The UI type `CollaborationConnectionState` adds `degraded-local` and `ended`,
+and `CanvasCollaborationRecoveryState` is `live`, `local-copy`, `snapshot-only` or `degraded-local`.
+In practice the hook only reaches `connecting`, `connected`, `disconnected` and `error`; the recovery
+state is derived as `live` or `local-copy` inside an `onStateChange` callback nothing consumes, and
+`CollaborationHost` passes no `collaborationState`, so the panel's recovery badges are not reached.
+
+## Known Gaps
+
+These are read from the code, not observed in a two-machine run. The proposed 2026-09-30 amendment to
+[ADR-0158](../../adr/0158-artifacts-and-canvas) lists what has to land before the default flips.
+
+- **Remote cursors do not cross the network.** The `Awareness` is local to each client: nothing
+  encodes or applies awareness updates over the socket, so y-monaco and y-codemirror draw only local
+  state. The provider's `cursor` / `selection` frames feed `useCollaborativeSession`'s
+  `remoteCursors`, which nothing renders, and nothing calls `updateCursor` / `updateSelection`.
+- **The seed is not shared.** Each `createSession` inserts the current content into a fresh `Y.Doc`
+  before the local-update subscription exists, and nothing pushes a snapshot. Two devices that each
+  start a session on a non-empty document hold independent Yjs items; a joiner is expected to start
+  empty and apply the opener's snapshot. Edits made while the session is still connecting are not
+  sent for the same reason.
+- **Socket catch-up is one page from zero.** `requestSync` always sends `since = 0`, and the socket
+  reply is at most 512 updates with no continuation. The paged HTTP catch-up (`pullCanvasUpdates`)
+  has no caller.
+- **Most plane methods have no caller.** Of the Canvas methods on `CollabClient`, only
+  `getCanvasDocument`, `createCanvasDocument` and `openCanvasStream` are used. Snapshots (so
+  compaction), comments, versions, presence, rename, delete and the HTTP update path are unused.
+- **The replay queue is in memory**, so it covers a blip but not a reload.
+- **Joining by session id only works in the same tab.** `useCollaborativeSession.joinSession` finds
+  sessions already in this tab's store; there is no path that joins a session another device opened.
 
 ## Next
 
