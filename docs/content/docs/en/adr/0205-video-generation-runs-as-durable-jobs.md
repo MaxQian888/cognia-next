@@ -78,7 +78,10 @@ bridge buffers up to 64 MiB; larger results fail early from a
   card of its own, so keeping, moving and deleting it work as for any upload.
   The aggregate folds in what the job recorded (prompt, provider, model,
   duration, size) for the preview and for search. A Video type filter covers
-  every video upload, and the preview plays it.
+  every video upload, and the preview plays it. The job row goes with the
+  conversation that started it, so the record is also copied onto the Files
+  item that outlives it: when the video is kept, and when the conversation is
+  deleted (onto its kept upload and any Files upload of the same bytes).
 - A workflow node `action.media.generateVideo` waits on its job and outputs the
   file's path, which the other `action.media.*` nodes read. The file lives
   under AppData, the one tree the window may write without a wider fs scope;

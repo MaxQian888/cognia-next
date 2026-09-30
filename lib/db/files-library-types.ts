@@ -33,6 +33,17 @@ export const LIBRARY_ITEM_KINDS: readonly LibraryItemKind[] = [
   "upload",
 ]
 
+/** What a generated video's job recorded about it (ADR-0205). */
+export interface LibraryItemGeneratedVideo {
+  jobId: string
+  prompt: string
+  providerId: string
+  modelId: string
+  durationSec?: number
+  width?: number
+  height?: number
+}
+
 /** Display metadata copied at keep/upload time so an item outlives its source row. */
 export interface LibraryItemSnapshot {
   title: string
@@ -42,6 +53,11 @@ export interface LibraryItemSnapshot {
   contentHash?: string
   /** Extracted text of an upload, so a kept file stays searchable by body. */
   extractedText?: string
+  /**
+   * A generated video's record. Its job row goes with the conversation that
+   * started it, so the kept item carries a copy.
+   */
+  generated?: LibraryItemGeneratedVideo
 }
 
 export interface LibraryItemRow {

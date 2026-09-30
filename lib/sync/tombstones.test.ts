@@ -163,6 +163,40 @@ describe("deleted session reconciliation before tombstone expiry", () => {
     expect(await db.messageMedia.get("shared-deleted")).toBeDefined()
   })
 
+  it("leaves a generated video kept in Files with what its job recorded", async () => {
+    const db = getDb()
+    await db.messageMediaRefs.put({
+      sessionId: "gone",
+      messageId: "session-asset:gone:video-vjob_v",
+      hash: "original:sha",
+      sessionAsset: { sessionId: "gone", assetId: "video-vjob_v", contentHash: "sha" } as never,
+    })
+    await db.mediaGenerationJobs.put({
+      id: "vjob_v",
+      sessionId: "gone",
+      status: "succeeded",
+      request: { prompt: "waves" },
+      provider: { providerId: "google", modelId: "veo" },
+      result: { content: { kind: "session-asset", sessionId: "gone", assetId: "video-vjob_v" } },
+    } as never)
+    await db.libraryItems.put({
+      key: "session-upload:sha",
+      kind: "session-upload",
+      sourceId: "sha",
+      favoritedAt: 1,
+      snapshot: { title: "waves.mp4" },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await recordTombstones("sessions", ["gone"], 1)
+    await pruneTombstones(1000, 100000)
+    expect(await db.mediaGenerationJobs.get("vjob_v")).toBeUndefined()
+    expect((await db.libraryItems.get("session-upload:sha"))?.snapshot).toEqual({
+      title: "waves.mp4",
+      generated: { jobId: "vjob_v", prompt: "waves", providerId: "google", modelId: "veo" },
+    })
+  })
+
   it("keeps the deletion evidence and rows together on failure so the next sweep retries", async () => {
     const db = getDb()
     await seedChild("retry")

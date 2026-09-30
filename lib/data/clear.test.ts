@@ -107,6 +107,42 @@ describe("clearTables", () => {
     }
   })
 
+  it("leaves a generated video kept in Files with what its job recorded", async () => {
+    await seedSessions()
+    const db = getDb()
+    await db.messageMediaRefs.put({
+      sessionId: "a",
+      messageId: "session-asset:a:video-vjob_v",
+      hash: "original:sha",
+      sessionAsset: { sessionId: "a", assetId: "video-vjob_v", contentHash: "sha" } as never,
+    })
+    await db.mediaGenerationJobs.put({
+      id: "vjob_v",
+      sessionId: "a",
+      status: "succeeded",
+      request: { prompt: "waves" },
+      provider: { providerId: "google", modelId: "veo" },
+      result: { content: { kind: "session-asset", sessionId: "a", assetId: "video-vjob_v" } },
+    } as never)
+    await db.libraryItems.put({
+      key: "session-upload:sha",
+      kind: "session-upload",
+      sourceId: "sha",
+      favoritedAt: 1,
+      snapshot: { title: "waves.mp4" },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await clearTables(["sessions"])
+    expect(await db.mediaGenerationJobs.count()).toBe(0)
+    expect((await db.libraryItems.get("session-upload:sha"))?.snapshot?.generated).toEqual({
+      jobId: "vjob_v",
+      prompt: "waves",
+      providerId: "google",
+      modelId: "veo",
+    })
+  })
+
   it("clears session-owned rows and tombstones them, collecting only candidate media", async () => {
     await seedSessions()
     await clearTables(["sessions"])

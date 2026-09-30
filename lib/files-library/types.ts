@@ -4,7 +4,11 @@
  * Files-owned uploads, with the Files metadata (`libraryItems`) folded in.
  */
 
-import type { LibraryItemKind, LibraryItemRow } from "@/lib/db/files-library-types"
+import type {
+  LibraryItemGeneratedVideo,
+  LibraryItemKind,
+  LibraryItemRow,
+} from "@/lib/db/files-library-types"
 import type { LibraryItemSource } from "@/lib/db/files-library-items"
 
 export type FilesTab = "recent" | "favorites" | "folders" | "images" | "all"
@@ -82,15 +86,7 @@ export interface FilesEntry {
 }
 
 /** What a generated video's job recorded about it. */
-export interface FilesGeneratedVideo {
-  jobId: string
-  prompt: string
-  providerId: string
-  modelId: string
-  durationSec?: number
-  width?: number
-  height?: number
-}
+export type FilesGeneratedVideo = LibraryItemGeneratedVideo
 
 /**
  * The `files.kinds.*` label of an entry: its kind, except that an upload which
@@ -123,6 +119,7 @@ export function entrySource(entry: FilesEntry): LibraryItemSource {
       ...(entry.byteSize !== undefined ? { byteSize: entry.byteSize } : {}),
       ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),
       ...(entry.excerpt ? { extractedText: entry.excerpt } : {}),
+      ...(entry.generated ? { generated: entry.generated } : {}),
     },
   }
 }

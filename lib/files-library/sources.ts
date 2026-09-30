@@ -8,7 +8,7 @@
 
 import type { Artifact, CanvasDocument } from "@/types/artifact/artifact"
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
-import { createDexieMediaJobStore } from "@/lib/db/media-generation-jobs"
+import { createDexieMediaJobStore, generatedVideoRecord } from "@/lib/db/media-generation-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getSessionsByIds } from "@/lib/db/sessions"
 import { listLibraryItems } from "@/lib/db/files-library-items"
@@ -88,16 +88,7 @@ export function rawGeneratedVideos(rows: readonly MediaGenerationJobRow[]): RawG
           ? { kind: "library" as const, assetId: content.assetId }
           : undefined
     if (!home) continue
-    out.push({
-      jobId: row.id,
-      prompt: row.request.prompt,
-      providerId: row.provider.providerId,
-      modelId: row.provider.modelId,
-      ...(row.result?.durationSec !== undefined ? { durationSec: row.result.durationSec } : {}),
-      ...(row.result?.width !== undefined ? { width: row.result.width } : {}),
-      ...(row.result?.height !== undefined ? { height: row.result.height } : {}),
-      home,
-    })
+    out.push({ ...generatedVideoRecord(row), home })
   }
   return out
 }

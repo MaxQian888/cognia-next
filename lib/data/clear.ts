@@ -8,6 +8,7 @@ import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { getDb } from "@/lib/db/schema"
 import { clearTemporarySessionAssets } from "@/lib/db/session-assets"
 import { clearDraft } from "@/lib/db/chat-drafts"
+import { preserveGeneratedVideoRecords } from "@/lib/db/files-library-items"
 import {
   collectUnreferencedMessageMedia,
   isLibraryMediaRef,
@@ -47,6 +48,7 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
       db.chatTranscriptIndexState,
       db.syncTombstones,
       db.mediaGenerationJobs,
+      db.libraryItems,
       db.characters,
       db.skills,
       db.teams,
@@ -57,6 +59,12 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
     async () => {
       if (wantsSessions) {
         const sessionIds = await db.sessions.toCollection().primaryKeys()
+        // A generated video kept in Files keeps what its job recorded; read
+        // before the refs and jobs below go.
+        await preserveGeneratedVideoRecords(
+          db,
+          (await db.mediaGenerationJobs.orderBy("sessionId").uniqueKeys()) as string[]
+        )
         const messageIds = await db.messages.toCollection().primaryKeys()
         const stateIds = await db.sessionState.toCollection().primaryKeys()
         const draftIds = await db.chatDrafts.toCollection().primaryKeys()

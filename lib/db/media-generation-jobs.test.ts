@@ -7,6 +7,7 @@ import { getDb } from "./schema"
 import {
   createDexieMediaJobStore,
   existingVideoJobIds,
+  generatedVideoRecord,
   listSessionVideoJobs,
   pruneSettledVideoJobs,
 } from "./media-generation-jobs"
@@ -141,6 +142,22 @@ describe("Dexie media job store", () => {
     })
     await expect(pruneSettledVideoJobs(500, removeFile)).resolves.toBe(1)
     expect(await getDb().mediaGenerationJobs.toCollection().primaryKeys()).toEqual(["flow-held"])
+  })
+
+  it("reads a succeeded job's record, leaving out what the provider did not report", () => {
+    expect(
+      generatedVideoRecord(
+        row("v", {
+          status: "succeeded",
+          result: {
+            content: { kind: "session-asset", sessionId: "s1", assetId: "video-v" },
+            mediaType: "video/mp4",
+            byteSize: 3,
+            durationSec: 4,
+          },
+        })
+      )
+    ).toEqual({ jobId: "v", prompt: "p", providerId: "google", modelId: "veo", durationSec: 4 })
   })
 
   it("reports which ids still have a row", async () => {

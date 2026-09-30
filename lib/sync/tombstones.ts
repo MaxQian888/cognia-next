@@ -20,6 +20,7 @@
 
 import Dexie from "dexie"
 
+import { preserveGeneratedVideoRecords } from "@/lib/db/files-library-items"
 import { getDb } from "@/lib/db/schema"
 
 import type { SyncTombstoneRow, SyncableTable } from "./types"
@@ -132,6 +133,7 @@ export async function pruneTombstones(
           db.messageMediaRefs,
           db.messageMedia,
           db.mediaGenerationJobs,
+          db.libraryItems,
         ],
         async () => {
           // Re-read markers inside the write transaction; a restore or another
@@ -146,6 +148,8 @@ export async function pruneTombstones(
           let count = 0
           const pendingMediaSessions = new Set<string>()
           if (deleted.length > 0) {
+            // A generated video kept in Files keeps what its job recorded.
+            await preserveGeneratedVideoRecords(db, deleted)
             const refs = await db.messageMediaRefs.where("sessionId").anyOf(deleted).toArray()
             const hashes = [...new Set(refs.map((row) => row.hash))]
             count += await db.chatDrafts.where("sessionId").anyOf(deleted).delete()

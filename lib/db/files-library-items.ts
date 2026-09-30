@@ -20,10 +20,12 @@ import {
   isLibraryItemKept,
   libraryItemKey,
   ROOT_LIBRARY_FOLDER_ID,
+  type LibraryItemGeneratedVideo,
   type LibraryItemKind,
   type LibraryItemRow,
   type LibraryItemSnapshot,
 } from "./files-library-types"
+import { generatedVideoRecord } from "./media-generation-jobs"
 
 type Db = ReturnType<typeof getDb>
 
@@ -231,6 +233,80 @@ export async function deleteOwnedLibraryItem(key: string): Promise<void> {
     return refs.map((ref) => ref.hash)
   })
   if (released.length > 0) await collectUnreferencedMessageMedia(released, { graceMs: 0 })
+}
+
+/**
+ * Before a conversation's video jobs are deleted with it (ADR-0205), copy
+ * what each generated video's job recorded onto the Files items that outlive
+ * the conversation with the same bytes: its kept conversation upload
+ * (`session-upload:<contentHash>`) and any upload made straight into Files.
+ * Otherwise such an item loses its prompt and model the moment the job row
+ * goes. An item that already carries a copy (taken when it was kept) keeps it.
+ *
+ * Runs inside the caller's delete transaction, before the conversation's media
+ * refs and jobs are removed; the transaction must include `libraryItems`,
+ * `messageMediaRefs` and `mediaGenerationJobs`. Returns how many items gained
+ * a copy.
+ */
+export async function preserveGeneratedVideoRecords(
+  db: Db,
+  sessionIds: readonly string[]
+): Promise<number> {
+  if (sessionIds.length === 0) return 0
+  const jobs = await db.mediaGenerationJobs
+    .where("sessionId")
+    .anyOf([...sessionIds])
+    .filter((row) => row.status === "succeeded" && row.result?.content.kind === "session-asset")
+    .toArray()
+  if (jobs.length === 0) return 0
+
+  const assetKey = (sessionId: string, assetId: string) => `${sessionId}\u0000${assetId}`
+  const hashOfAsset = new Map<string, string>()
+  const refs = await db.messageMediaRefs
+    .where("sessionId")
+    .anyOf([...sessionIds])
+    .toArray()
+  for (const { sessionAsset } of refs) {
+    if (sessionAsset) {
+      hashOfAsset.set(
+        assetKey(sessionAsset.sessionId, sessionAsset.assetId),
+        sessionAsset.contentHash
+      )
+    }
+  }
+  const recordByHash = new Map<string, LibraryItemGeneratedVideo>()
+  for (const job of jobs) {
+    const content = job.result?.content
+    if (content?.kind !== "session-asset") continue
+    const hash = hashOfAsset.get(assetKey(content.sessionId, content.assetId))
+    if (hash && !recordByHash.has(hash)) recordByHash.set(hash, generatedVideoRecord(job))
+  }
+  if (recordByHash.size === 0) return 0
+
+  const hashOfItem = new Map<string, string>()
+  for (const hash of recordByHash.keys())
+    hashOfItem.set(libraryItemKey("session-upload", hash), hash)
+  // A Files upload's owner ref carries its source, content hash included.
+  const owners = await db.messageMediaRefs
+    .where("messageId")
+    .startsWith(LIBRARY_OWNER_PREFIX)
+    .filter(
+      (ref) => ref.sessionAsset !== undefined && recordByHash.has(ref.sessionAsset.contentHash)
+    )
+    .toArray()
+  for (const ref of owners) {
+    hashOfItem.set(ref.messageId.slice(LIBRARY_OWNER_PREFIX.length), ref.sessionAsset!.contentHash)
+  }
+
+  let preserved = 0
+  for (const row of await db.libraryItems.bulkGet([...hashOfItem.keys()])) {
+    if (!row?.snapshot || row.snapshot.generated) continue
+    const generated = recordByHash.get(hashOfItem.get(row.key)!)!
+    // Not a change the user made, so `updatedAt` stays.
+    await db.libraryItems.put({ ...row, snapshot: { ...row.snapshot, generated } })
+    preserved += 1
+  }
+  return preserved
 }
 
 /** Artifact / canvas ids of `sessionId` that the session purge must spare. */

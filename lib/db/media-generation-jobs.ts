@@ -13,6 +13,7 @@ import {
   type MediaGenerationJobRow,
   type VideoJobStatus,
 } from "@/lib/ai/media/video-jobs/types"
+import type { LibraryItemGeneratedVideo } from "./files-library-types"
 import { getDb } from "./schema"
 
 /** Settled statuses the retention sweep prunes whatever the job made. */
@@ -71,6 +72,19 @@ export async function listSessionVideoJobs(sessionId: string): Promise<MediaGene
     .between([sessionId, -Infinity], [sessionId, Infinity])
     .toArray()
   return rows.reverse()
+}
+
+/** What a succeeded job recorded about its video, as Files shows and keeps it. */
+export function generatedVideoRecord(row: MediaGenerationJobRow): LibraryItemGeneratedVideo {
+  return {
+    jobId: row.id,
+    prompt: row.request.prompt,
+    providerId: row.provider.providerId,
+    modelId: row.provider.modelId,
+    ...(row.result?.durationSec !== undefined ? { durationSec: row.result.durationSec } : {}),
+    ...(row.result?.width !== undefined ? { width: row.result.width } : {}),
+    ...(row.result?.height !== undefined ? { height: row.result.height } : {}),
+  }
 }
 
 /** Which of `ids` still have a job row. */

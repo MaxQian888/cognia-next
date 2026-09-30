@@ -66,6 +66,9 @@ describe("files-library types", () => {
       sourceId: "c1",
       snapshot: { title: "SPEC.md" },
     })
+    // A generated video's record goes into the snapshot, so it outlives its job row.
+    const generated = { jobId: "vjob_1", prompt: "waves", providerId: "google", modelId: "veo" }
+    expect(entrySource({ ...entry, generated }).snapshot?.generated).toEqual(generated)
   })
 
   it("labels an uploaded video as a video, and nothing else", () => {

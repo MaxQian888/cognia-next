@@ -11,6 +11,7 @@ import {
   libraryPinOwner,
   listKeptSourceIdsForSession,
   listLibraryItems,
+  preserveGeneratedVideoRecords,
   reconcileLibraryPins,
   setLibraryItemFavorite,
   setLibraryItemFolder,
@@ -19,7 +20,8 @@ import {
 import { createLibraryFolder } from "./files-library-folders"
 import { ROOT_LIBRARY_FOLDER_ID } from "./files-library-types"
 import { LIBRARY_REF_SESSION_ID } from "./message-media-refs"
-import { putLibraryAsset } from "./session-assets"
+import { putLibraryAsset, putSessionAsset } from "./session-assets"
+import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import { bulkDeleteSessions } from "./sessions"
 import type { MessageMediaRow } from "./message-media"
 
@@ -166,6 +168,127 @@ describe("session purge support", () => {
     const kept = await listKeptSourceIdsForSession("s1")
     expect([...kept.artifactIds]).toEqual(["a1"])
     expect([...kept.canvasIds]).toEqual(["c1"])
+  })
+})
+
+describe("generated video records outliving their conversation", () => {
+  const video = () => new Blob([new Uint8Array([7, 7, 7])], { type: "video/mp4" })
+
+  function succeeded(id: string, sessionId: string, assetId: string): MediaGenerationJobRow {
+    return {
+      id,
+      kind: "video",
+      sessionId,
+      origin: { surface: "chat-tool", sessionId },
+      request: { prompt: "a boat at dawn" },
+      provider: { providerId: "google", modelId: "veo-3", credentialAffinity: "keyless" },
+      operation: {},
+      status: "succeeded",
+      pollCount: 1,
+      nextPollAt: 0,
+      deadlineAt: 0,
+      createdAt: 1,
+      updatedAt: 1,
+      settledAt: 2,
+      result: {
+        content: { kind: "session-asset", sessionId, assetId },
+        mediaType: "video/mp4",
+        byteSize: 3,
+        durationSec: 8,
+        width: 1280,
+        height: 720,
+      },
+    }
+  }
+
+  const record = {
+    jobId: "vjob_1",
+    prompt: "a boat at dawn",
+    providerId: "google",
+    modelId: "veo-3",
+    durationSec: 8,
+    width: 1280,
+    height: 720,
+  }
+
+  async function generatedInChat() {
+    const asset = await putSessionAsset({
+      sessionId: "s1",
+      assetId: "video-vjob_1",
+      filename: "a boat at dawn.mp4",
+      mediaType: "video/mp4",
+      blob: video(),
+    })
+    await getDb().mediaGenerationJobs.put(succeeded("vjob_1", "s1", "video-vjob_1"))
+    return asset.contentHash
+  }
+
+  it("copies the record onto the kept upload and a Files upload of the same bytes", async () => {
+    const contentHash = await generatedInChat()
+    const kept = await setLibraryItemFavorite(
+      {
+        kind: "session-upload",
+        sourceId: contentHash,
+        originSessionId: "s1",
+        mediaHash: `original:${contentHash}`,
+        snapshot: { title: "a boat at dawn.mp4", mediaType: "video/mp4" },
+      },
+      true
+    )
+    await putLibraryAsset({
+      assetId: "own",
+      blob: video(),
+      filename: "boat.mp4",
+      mediaType: "video/mp4",
+    })
+    const ownedBefore = await getLibraryItem("upload:own")
+
+    await bulkDeleteSessions(["s1"])
+
+    const keptAfter = await getLibraryItem(kept.key)
+    expect(keptAfter?.snapshot?.generated).toEqual(record)
+    // A copy the user did not make leaves the item's own timestamps alone.
+    expect(keptAfter?.updatedAt).toBe(kept.updatedAt)
+    const ownedAfter = await getLibraryItem("upload:own")
+    expect(ownedAfter?.snapshot).toEqual({ ...ownedBefore!.snapshot, generated: record })
+    expect(await getDb().mediaGenerationJobs.count()).toBe(0)
+  })
+
+  it("keeps a copy taken when the item was kept", async () => {
+    const contentHash = await generatedInChat()
+    const earlier = { ...record, prompt: "copied at keep time" }
+    await setLibraryItemFavorite(
+      {
+        kind: "session-upload",
+        sourceId: contentHash,
+        mediaHash: `original:${contentHash}`,
+        snapshot: { title: "t", generated: earlier },
+      },
+      true
+    )
+    const db = getDb()
+    await expect(
+      db.transaction("rw", [db.libraryItems, db.messageMediaRefs, db.mediaGenerationJobs], () =>
+        preserveGeneratedVideoRecords(db, ["s1"])
+      )
+    ).resolves.toBe(0)
+    expect((await getLibraryItem(`session-upload:${contentHash}`))?.snapshot?.generated).toEqual(
+      earlier
+    )
+  })
+
+  it("does nothing for a conversation with no finished video, or an item not in Files", async () => {
+    const db = getDb()
+    const run = (ids: string[]) =>
+      db.transaction("rw", [db.libraryItems, db.messageMediaRefs, db.mediaGenerationJobs], () =>
+        preserveGeneratedVideoRecords(db, ids)
+      )
+    await expect(run([])).resolves.toBe(0)
+    await generatedInChat()
+    await expect(run(["s2"])).resolves.toBe(0)
+    await expect(run(["s1"])).resolves.toBe(0)
+    await getDb().mediaGenerationJobs.put({ ...succeeded("vjob_1", "s1", "gone"), id: "vjob_2" })
+    await expect(run(["s1"])).resolves.toBe(0)
   })
 })
 

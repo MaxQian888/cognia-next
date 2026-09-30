@@ -350,6 +350,84 @@ describe("generated videos", () => {
     expect(entries[0]).toMatchObject({ kind: "upload", generated })
     expect(entries[0]!.searchText).toContain("a paper boat on a rainy street")
   })
+
+  // The job row goes with its conversation; the item's snapshot keeps a copy.
+  describe("once the job row is gone", () => {
+    it("rebuilds a kept upload whose conversations are all gone with its record", () => {
+      const [entry] = aggregateFilesEntries(
+        input({
+          items: [
+            item({
+              key: "session-upload:v1",
+              kind: "session-upload",
+              sourceId: "v1",
+              favoritedAt: 3,
+              snapshot: { title: "boat.mp4", mediaType: "video/mp4", generated },
+            }),
+          ],
+          heldOriginals: new Set([originalMediaKey("v1")]),
+        })
+      )
+      expect(entry).toMatchObject({ kind: "session-upload", originAlive: false, generated })
+      expect(entry!.searchText).toContain("seedance-1")
+    })
+
+    it("keeps it on a Files upload and on a conversation upload still in another chat", () => {
+      const entries = aggregateFilesEntries(
+        input({
+          libraryUploads: [
+            upload({
+              assetId: "u9",
+              contentHash: "v1",
+              filename: "boat.mp4",
+              mediaType: "video/mp4",
+            }),
+          ],
+          sessionUploads: [
+            upload({ sessionId: "s2", assetId: "fwd", contentHash: "v2", mediaType: "video/mp4" }),
+          ],
+          items: [
+            item({
+              key: "upload:u9",
+              kind: "upload",
+              sourceId: "u9",
+              ownedByFiles: true,
+              snapshot: { title: "boat.mp4", generated },
+            }),
+            item({
+              key: "session-upload:v2",
+              kind: "session-upload",
+              sourceId: "v2",
+              favoritedAt: 1,
+              snapshot: { title: "fwd.mp4", generated: { ...generated, jobId: "vjob_2" } },
+            }),
+          ],
+        })
+      )
+      expect(entries.find((entry) => entry.sourceId === "u9")).toMatchObject({ generated })
+      expect(entries.find((entry) => entry.sourceId === "v2")!.generated?.jobId).toBe("vjob_2")
+    })
+
+    it("prefers the live job's record while it lasts", () => {
+      const [entry] = aggregateFilesEntries(
+        input({
+          libraryUploads: [
+            upload({ assetId: "video-vjob_1", contentHash: "v1", mediaType: "video/mp4" }),
+          ],
+          generatedVideos: [{ ...generated, home: { kind: "library", assetId: "video-vjob_1" } }],
+          items: [
+            item({
+              key: "upload:video-vjob_1",
+              kind: "upload",
+              sourceId: "video-vjob_1",
+              snapshot: { title: "t", generated: { ...generated, prompt: "stale copy" } },
+            }),
+          ],
+        })
+      )
+      expect(entry!.generated?.prompt).toBe(generated.prompt)
+    })
+  })
 })
 
 describe("helpers", () => {

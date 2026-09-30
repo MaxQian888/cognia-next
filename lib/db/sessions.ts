@@ -6,6 +6,7 @@ import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
 import { collectUnreferencedMessageMedia } from "./message-media-refs"
+import { preserveGeneratedVideoRecords } from "./files-library-items"
 import { clearTemporarySessionAssets } from "./session-assets"
 import { clearDraft } from "./chat-drafts"
 import { recordTombstones } from "@/lib/sync/tombstones"
@@ -982,6 +983,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       db.loopEvents,
       db.syncTombstones,
       db.mediaGenerationJobs,
+      db.libraryItems,
     ],
     async () => {
       const at = Date.now()
@@ -1039,6 +1041,9 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
         }
       }
 
+      // A generated video kept in Files keeps what its job recorded; read
+      // before the refs and jobs below go.
+      await preserveGeneratedVideoRecords(db, deletedIds)
       const allMessageIds: string[] = []
       const mediaRefs = await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).toArray()
       for (const ref of mediaRefs) {
