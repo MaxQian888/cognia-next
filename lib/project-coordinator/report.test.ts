@@ -1,4 +1,5 @@
 import type { ChatSession } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 import {
   MAX_TRIGGERED_REPORTS_PER_HOUR,
   REPORT_COALESCE_MS,
@@ -108,11 +109,34 @@ describe("reportThreadToCoordinator", () => {
   it("keeps going when the channel refuses the report", async () => {
     const { deps } = setup()
     ;(deps.send as jest.Mock).mockRejectedValueOnce(new Error("pii"))
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const warn = jest.spyOn(loggers.chat, "warn").mockImplementation(() => undefined)
     reportThreadToCoordinator(report("t1"), deps)
     await expect(flushThreadReports("coord")).resolves.toBeUndefined()
     expect(deps.updateSession).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith("project thread report was not delivered", {
+      coordinatorSessionId: "coord",
+      error: "Error: pii",
+    })
     warn.mockRestore()
+  })
+
+  it("sends from a thread that still exists when the first reporter was deleted", async () => {
+    const { deps, rows } = setup()
+    reportThreadToCoordinator(report("t1"), deps)
+    reportThreadToCoordinator(report("t2"), deps)
+    rows.delete("t1")
+    await flushThreadReports("coord")
+    const input = (deps.send as jest.Mock).mock.calls[0][0]
+    expect(input.senderSessionId).toBe("t2")
+    expect(input.content).toContain("Result of t1")
+  })
+
+  it("drops the batch when every reporting thread is gone", async () => {
+    const { deps, rows } = setup()
+    reportThreadToCoordinator(report("t1"), deps)
+    rows.delete("t1")
+    await flushThreadReports("coord")
+    expect(deps.send).not.toHaveBeenCalled()
   })
 })
 

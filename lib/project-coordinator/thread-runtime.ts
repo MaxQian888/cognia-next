@@ -70,8 +70,7 @@ export function defaultThreadRuntimeDeps(): ThreadRuntimeDeps {
     stopTurn: stopChatTurn,
     cancelQueued: cancelQueuedChatTurn,
     hold: (sessionId) => useChatStore.getState().holdInBackground(sessionId, THREAD_HOLDER_ID),
-    release: (sessionId) =>
-      useChatStore.getState().releaseBackgroundHold(sessionId, THREAD_HOLDER_ID),
+    release: releaseThreadHold,
     statusOf: sessionStatusOf,
     now: Date.now,
   }
@@ -213,9 +212,18 @@ export async function stopThread(
   stopping.add(threadId)
   try {
     deps.cancelQueued(threadId)
-    if (deps.statusOf(threadId) !== "idle") await deps.stopTurn(threadId)
-    await deps.interrupt(threadId, thread.projectThread.coordinatorSessionId)
-    deps.release(threadId)
+    // A failed stop still marks the thread interrupted and drops the hold:
+    // releasing the hold drops the slice, which ends the turn anyway, and a
+    // hold kept here would pin the thread in the background for good.
+    try {
+      if (deps.statusOf(threadId) !== "idle") await deps.stopTurn(threadId)
+    } finally {
+      try {
+        await deps.interrupt(threadId, thread.projectThread.coordinatorSessionId)
+      } finally {
+        deps.release(threadId)
+      }
+    }
   } finally {
     stopping.delete(threadId)
   }
@@ -254,11 +262,8 @@ export async function reopenThread(
  * A thread's turn ended: drop the hold unless the thread still needs its
  * slice (an ask waiting for a person keeps it; the store enforces that).
  */
-export function releaseThreadHold(
-  threadId: string,
-  deps: Pick<ThreadRuntimeDeps, "release"> = defaultThreadRuntimeDeps()
-): void {
-  deps.release(threadId)
+export function releaseThreadHold(threadId: string): void {
+  useChatStore.getState().releaseBackgroundHold(threadId, THREAD_HOLDER_ID)
 }
 
 /**

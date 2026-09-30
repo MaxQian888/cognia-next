@@ -1,5 +1,6 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
+import { GITHUB_DOT_COM, type GithubHost } from "@/lib/github/host"
 import { fetchPrObservation } from "@/lib/github/pr-observe/fetch"
 import { bindingRef, type PrWatchTarget } from "@/lib/ai/agent/team/pr-feedback/binding"
 import {
@@ -35,11 +36,18 @@ import { sendToThread } from "./thread-runtime"
 export interface ThreadPrBinding extends PrWatchTarget {
   sessionId: string
   projectId: string
+  /** The repository's GitHub deployment (ADR-0176); github.com when absent. */
+  host?: GithubHost
+}
+
+/** Octokits are per deployment and repository: `acme/app` may exist on both. */
+function clientKey(binding: Pick<ThreadPrBinding, "repo" | "host">): string {
+  return `${(binding.host ?? GITHUB_DOT_COM).id}:${binding.repo}`
 }
 
 export interface PrWatchDeps {
   resolveRepo: (workingDir: string) => Promise<ResolvedTeamRepo | null>
-  resolveOctokit: (repoFullName: string) => Promise<OctokitLike | null>
+  resolveOctokit: (repoFullName: string, host?: GithubHost) => Promise<OctokitLike | null>
   fetch: typeof fetchPrObservation
   persist: (record: PrObservationRecord<ThreadPrBinding>) => Promise<void>
   loadSignature: PrFeedbackDeps<ThreadPrBinding>["loadSignature"]
@@ -145,7 +153,7 @@ export class ProjectPrWatch {
       ...deps.timers,
       pollIntervalMs: deps.pollIntervalMs,
       fetch: async (binding, prev) => {
-        const octokit = this.octokits.get(binding.repo)
+        const octokit = this.octokits.get(clientKey(binding))
         if (!octokit) throw new Error(`No GitHub client for ${binding.repo}`)
         return deps.fetch(octokit, binding.repo, bindingRef(binding), prev, deps.timers.now())
       },
@@ -156,7 +164,7 @@ export class ProjectPrWatch {
     })
   }
 
-  /** The binding for a thread, when it has a branch on a github.com repository. */
+  /** The binding for a thread, when it has a branch on a configured GitHub repository. */
   async bindingFor(thread: ChatSession): Promise<ThreadPrBinding | null> {
     const context = thread.executionContext
     const branch = context?.branch
@@ -168,6 +176,7 @@ export class ProjectPrWatch {
       sessionId: thread.id,
       projectId: thread.projectId,
       repo: repo.fullName,
+      host: repo.host,
       branch,
       ...(thread.projectThread?.prRef?.number
         ? { prNumber: thread.projectThread.prRef.number }
@@ -181,10 +190,11 @@ export class ProjectPrWatch {
     if (this.bindings.has(thread.id)) return true
     const binding = await this.bindingFor(thread)
     if (!binding) return false
-    if (!this.octokits.has(binding.repo)) {
-      const octokit = await this.deps.resolveOctokit(binding.repo)
+    const key = clientKey(binding)
+    if (!this.octokits.has(key)) {
+      const octokit = await this.deps.resolveOctokit(binding.repo, binding.host)
       if (!octokit) return false
-      this.octokits.set(binding.repo, octokit)
+      this.octokits.set(key, octokit)
     }
     this.bindings.set(thread.id, binding)
     this.controller.track(binding)

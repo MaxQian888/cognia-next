@@ -1,3 +1,4 @@
+import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/host"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { PrObservation } from "@/lib/github/pr-observe/types"
 import type { TimerHandle } from "@/lib/ai/agent/team/pr-feedback/observer"
@@ -124,6 +125,26 @@ describe("ProjectPrWatch", () => {
     await expect(watch.track(trunk)).resolves.toBe(false)
     const noAuth = setup({ resolveOctokit: async () => null })
     await expect(noAuth.watch.track(thread("c"))).resolves.toBe(false)
+  })
+
+  it("resolves the client on the repository's own deployment, one per host", async () => {
+    const ghes = parseGithubHost("https://ghe.acme.io")!
+    let host: GithubHost = GITHUB_DOT_COM
+    const { deps, watch } = setup({
+      resolveRepo: jest.fn(async () => ({
+        fullName: "o/n",
+        host,
+        defaultBranch: "main",
+        defaultBranchSource: "remoteHead",
+        defaultBranchExists: true,
+      })) as unknown as PrWatchDeps["resolveRepo"],
+    })
+    await watch.track(thread("a"))
+    host = ghes
+    await watch.track(thread("b"))
+    // Same `owner/name` on two deployments is two repositories.
+    expect(deps.resolveOctokit).toHaveBeenNthCalledWith(1, "o/n", GITHUB_DOT_COM)
+    expect(deps.resolveOctokit).toHaveBeenNthCalledWith(2, "o/n", ghes)
   })
 
   it("syncs to the unresolved threads", async () => {

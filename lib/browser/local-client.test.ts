@@ -26,6 +26,7 @@ jest.mock("@/lib/tauri", () => ({
 import { transport } from "@/lib/tauri"
 import {
   LOCAL_BROWSER_EVENTS,
+  isUserChromeBrowser,
   localBrowser,
   toFrameBytes,
   type LocalBrowserEvent,
@@ -128,6 +129,15 @@ it("forwards install progress", async () => {
   await localBrowser.onInstallProgress((p) => progress.push(p))
   subscribers.get(LOCAL_BROWSER_EVENTS.install)!({ phase: "downloading", receivedBytes: 5 })
   expect(progress).toEqual([{ phase: "downloading", receivedBytes: 5 }])
+})
+
+describe("isUserChromeBrowser", () => {
+  it("accepts only the browsers the runtime can attach to", () => {
+    expect(isUserChromeBrowser("edge")).toBe(true)
+    expect(isUserChromeBrowser("chrome-canary")).toBe(true)
+    expect(isUserChromeBrowser("firefox")).toBe(false)
+    expect(isUserChromeBrowser(undefined)).toBe(false)
+  })
 })
 
 describe("toFrameBytes", () => {

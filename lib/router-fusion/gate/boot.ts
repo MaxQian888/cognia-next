@@ -12,7 +12,8 @@
  * never thrown into the boot sequence.
  *
  * Retention: a daily sweep applies the fusion database's retention
- * (`db/retention.ts`). It is maintenance, not traffic, so a failure is logged
+ * (`db/retention.ts`), after collecting the routing samples whose inputs it is
+ * about to reap (`eval/sample-collector.ts`). It is maintenance, not traffic, so a failure is logged
  * and retried on the next tick; it never feeds a surface's breaker, which
  * would take a working surface away from the user over housekeeping.
  *
@@ -86,7 +87,16 @@ export async function pruneRouterFusionData(
   try {
     const host = await loadHost()
     const store = await host.currentFusionStore()
-    return await host.pruneFusionDatabase(store.db, now())
+    const at = now()
+    // Routing samples first: they are rebuilt from run inputs this very sweep
+    // may reap, so collecting afterwards would lose them for good. A failure
+    // here costs the day's samples, never the retention sweep.
+    try {
+      await host.collectRoutingSamplesBeforeRetention(store, at, host.ARTIFACT_CONTENT_TTL_MS)
+    } catch (error) {
+      console.warn("[router-fusion] routing sample collection could not run", error)
+    }
+    return await host.pruneFusionDatabase(store.db, at)
   } catch (error) {
     console.warn("[router-fusion] retention sweep could not run", error)
     return null

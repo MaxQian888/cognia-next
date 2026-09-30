@@ -83,7 +83,19 @@ export const LOCAL_BROWSER_EVENT_TYPES: readonly LocalBrowserEventType[] = [
   "filechooser.opened",
 ]
 
-export type UserChromeBrowser = "chrome" | "chrome-beta" | "chrome-canary" | "edge" | "brave"
+export const USER_CHROME_BROWSERS = [
+  "chrome",
+  "chrome-beta",
+  "chrome-canary",
+  "edge",
+  "brave",
+] as const
+
+export type UserChromeBrowser = (typeof USER_CHROME_BROWSERS)[number]
+
+export function isUserChromeBrowser(value: unknown): value is UserChromeBrowser {
+  return (USER_CHROME_BROWSERS as readonly unknown[]).includes(value)
+}
 
 export interface UserChromeCandidate {
   browser: UserChromeBrowser | string

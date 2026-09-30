@@ -154,8 +154,9 @@ export interface FusionRunRow {
    * orchestrator passes it through, but no surface sets this field yet. The
    * review pane (WP-D5) is where it is meant to be chosen. Until then the
    * value is unreachable by design rather than by omission, and
-   * `orchestrator-host.test.ts` pins both halves: the default, and that a run
-   * carrying `workspace_updated` really reaches the approval-gated apply.
+   * `delegate-host-ports.test.ts` and `orchestrator-delegate.test.ts` pin both
+   * halves: the default, and that a run carrying `workspace_updated` really
+   * reaches the approval-gated apply and marks its patch set applied.
    */
   delegateDelivery?: "patch_only" | "workspace_updated"
   /**

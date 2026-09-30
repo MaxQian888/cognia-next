@@ -180,11 +180,15 @@ export interface RunTeamLifecycleDeps {
    * `resolvePrObserveOctokit` mints a request-ready client for that repo;
    * `runPrReview` runs the internal reviewer (dispatchStructured-backed).
    */
-  resolveTeamRepo?: (
-    workingDir: string
-  ) => Promise<{ fullName: string; defaultBranch: string } | null>
+  resolveTeamRepo?: (workingDir: string) => Promise<{
+    fullName: string
+    defaultBranch: string
+    /** The repository's GitHub deployment (ADR-0176); github.com when absent. */
+    host?: import("@/lib/github/host").GithubHost
+  } | null>
   resolvePrObserveOctokit?: (
-    repoFullName: string
+    repoFullName: string,
+    host?: import("@/lib/github/host").GithubHost
   ) => Promise<import("@/lib/github/pr-observe/types").OctokitLike | null>
   runPrReview?: import("./pr-feedback/reviewer").RunReview
   /**
@@ -301,7 +305,7 @@ export async function buildRunPrFeedback(opts: {
   try {
     const resolved = await opts.resolveTeamRepo(opts.workingDir)
     if (!resolved) return undefined
-    const octokit = await opts.resolvePrObserveOctokit(resolved.fullName)
+    const octokit = await opts.resolvePrObserveOctokit(resolved.fullName, resolved.host)
     if (!octokit) return undefined
     const [{ buildTeamPrFeedback }, { gitPush }] = await Promise.all([loadRuntime(), loadGit()])
     return buildTeamPrFeedback({

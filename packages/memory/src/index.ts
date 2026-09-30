@@ -39,8 +39,9 @@ export * from "./consolidate/consolidator"
 // Claim lifecycle: how much support a mined claim's evidence still gives it
 export * from "./lifecycle/claim-support"
 
-// Forgetting / decay
-export * from "./forget/decay"
+// Forgetting / decay (the keep-worthiness ranking stays internal to eviction)
+export { evictOverflow, expireStale } from "./forget/decay"
+export type { DecayDeps, MemoryDecayInput, MemoryDecayNamespace } from "./forget/decay"
 
 // Control plane: injection policy + contamination classification
 export * from "./control-plane/policy"

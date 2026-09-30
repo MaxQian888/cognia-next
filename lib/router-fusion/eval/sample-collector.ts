@@ -175,3 +175,38 @@ export async function collectRoutingSamples(
   const collected = await putRoutingSamples(db, rows)
   return { scanned: candidates.length, collected, skipped }
 }
+
+/** What the retention-time collection reads: the store's database and its artifact reader. */
+export interface RetentionSampleSource {
+  db: FusionDB
+  artifactStore(runId: string | null): {
+    get(artifactId: string): Promise<{ content: string } | undefined | null>
+  }
+}
+
+/**
+ * Collect every run whose input is still inside the content window, right
+ * before the daily retention sweep reaps what fell out of it.
+ *
+ * Without this the deadline above is a trap: collection only ran when someone
+ * pressed "Collect" in the experiment panel, and a week without that press
+ * lost that week of routed traffic for good. Riding the retention tick means
+ * a run is always collected while its input still exists. It costs the routed
+ * turn nothing (the sweep is the scheduled maintenance tick) and stores no
+ * text — a sample is an encoded feature vector, a cost and a verdict.
+ */
+export async function collectRoutingSamplesBeforeRetention(
+  source: RetentionSampleSource,
+  now: number,
+  contentWindowMs: number
+): Promise<CollectRoutingSamplesResult> {
+  return collectRoutingSamples(
+    source.db,
+    {
+      readArtifact: async (runId, artifactId) =>
+        (await source.artifactStore(runId).get(artifactId))?.content ?? null,
+      now: () => now,
+    },
+    { since: now - contentWindowMs }
+  )
+}

@@ -4,6 +4,7 @@ import type { ChatStatus } from "@/stores/chat/chat-store"
 import {
   checkThreadCreation,
   countActiveThreads,
+  isThreadStopping,
   reopenThread,
   resolveThread,
   resumeProjectThreads,
@@ -158,6 +159,24 @@ describe("stopThread", () => {
     expect(deps.stopTurn).toHaveBeenCalledWith("t1")
     expect(deps.interrupt).toHaveBeenCalledWith("t1", "coord")
     expect(table.get("t1")?.attachedChild?.status).toBe("interrupted")
+    expect(held.has("t1")).toBe(false)
+  })
+
+  it("still interrupts and releases the hold when stopping the turn fails", async () => {
+    const { deps, table, held } = setup([thread("t1")], { enabled: true }, { t1: "streaming" })
+    held.add("t1")
+    ;(deps.stopTurn as jest.Mock).mockRejectedValueOnce(new Error("runtime gone"))
+    await expect(stopThread("t1", deps)).rejects.toThrow("runtime gone")
+    expect(table.get("t1")?.attachedChild?.status).toBe("interrupted")
+    expect(held.has("t1")).toBe(false)
+    expect(isThreadStopping("t1")).toBe(false)
+  })
+
+  it("releases the hold even when marking the thread interrupted fails", async () => {
+    const { deps, held } = setup([thread("t1")])
+    held.add("t1")
+    ;(deps.interrupt as jest.Mock).mockRejectedValueOnce(new Error("db closed"))
+    await expect(stopThread("t1", deps)).rejects.toThrow("db closed")
     expect(held.has("t1")).toBe(false)
   })
 })

@@ -45,6 +45,7 @@ const mockLocal = {
   rpc: jest.fn(),
 }
 jest.mock("@/lib/browser/local-client", () => ({
+  isUserChromeBrowser: jest.requireActual("@/lib/browser/local-client").isUserChromeBrowser,
   localBrowser: {
     status: (...args: unknown[]) => mockLocal.status(...args),
     createSession: (...args: unknown[]) => mockLocal.createSession(...args),
@@ -197,6 +198,21 @@ describe("routeEngine", () => {
     const [a, b] = await Promise.all([ensureAgentLocalEngine(), ensureAgentLocalEngine()])
     expect(a).toBe(b)
     expect(mockLocal.createSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes a known user-chrome browser through to the runtime", async () => {
+    mockLocal.createSession.mockImplementation(async ({ id }: { id: string }) => ({ id }))
+    await ensureAgentLocalEngine("user-chrome", { browser: "edge" })
+    expect(mockLocal.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "user-chrome", browser: "edge" })
+    )
+  })
+
+  it("refuses a browser the runtime does not know instead of falling back to Chrome", async () => {
+    await expect(ensureAgentLocalEngine("user-chrome", { browser: "netscape" })).rejects.toEqual(
+      expect.objectContaining({ code: "browser_feature_unsupported" })
+    )
+    expect(mockLocal.createSession).not.toHaveBeenCalled()
   })
 
   it("primes the install snapshot from the runtime status (desktop only)", async () => {

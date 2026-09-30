@@ -50,8 +50,9 @@ function minMaxNormalize(values: number[]): number[] {
 }
 
 /**
- * Keep-worthiness of each candidate, highest first. Exported for the lifecycle
- * sweep and the console, which must agree with eviction about what is "cold".
+ * Keep-worthiness of each candidate, highest first — the order
+ * {@link evictOverflow} evicts from the bottom of. Exported for its unit tests
+ * only; the package barrel does not re-export it.
  */
 export function rankByKeepWorthiness<T extends Memory>(
   memories: readonly T[],

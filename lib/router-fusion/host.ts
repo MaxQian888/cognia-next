@@ -123,7 +123,15 @@ export {
 } from "./chat/route-chat-turn"
 export { tenantLimitFor, type TenantLimit } from "./chat/tenant-budget"
 export { currentFusionStore, drainAccountOutbox } from "./chat/store-provider"
-export { pruneFusionDatabase, type FusionRetentionReport } from "./db/retention"
+export {
+  ARTIFACT_CONTENT_TTL_MS,
+  pruneFusionDatabase,
+  type FusionRetentionReport,
+} from "./db/retention"
+export {
+  collectRoutingSamplesBeforeRetention,
+  type RetentionSampleSource,
+} from "./eval/sample-collector"
 export { chatRunDeps, windowLeaseOwner } from "./chat/chat-run-deps"
 export {
   abortRouterFusionChatTurn,

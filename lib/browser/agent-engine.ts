@@ -16,7 +16,7 @@ import {
   type EmbeddedDownloadEvent,
 } from "@/lib/browser/downloads-client"
 import type { BrowserExtension } from "@/lib/browser/extensions-client"
-import { localBrowser } from "@/lib/browser/local-client"
+import { isUserChromeBrowser, localBrowser } from "@/lib/browser/local-client"
 import { LocalChromiumEngine, type LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
 import { fillCredential, type CredentialFillReason } from "@/lib/browser/passwords"
 import { getActivePaneRect } from "@/lib/browser/pane-rect"
@@ -915,6 +915,15 @@ export async function ensureAgentLocalEngine(
   backend: LocalEngineBackend = "local-chromium",
   options: { headless?: boolean; browser?: string } = {}
 ): Promise<LocalChromiumEngine> {
+  // Plugins name the browser as a free string; refuse one Rust does not know
+  // rather than let it fall back to Chrome silently.
+  const browser = backend === "user-chrome" ? options.browser : undefined
+  if (browser !== undefined && !isUserChromeBrowser(browser)) {
+    throw new BrowserSessionError(
+      "browser_feature_unsupported",
+      `Unknown browser "${browser}" for user-chrome`
+    )
+  }
   if (paneLocalEngine && paneLocalEngine.backend === backend) return paneLocalEngine
   if (agentLocalEngine && agentLocalEngine.backend === backend) return agentLocalEngine
   if (lazyLocalPending) {
@@ -927,9 +936,7 @@ export async function ensureAgentLocalEngine(
       id: sessionId,
       kind: backend === "user-chrome" ? "user-chrome" : "local",
       headless: options.headless ?? true,
-      ...(backend === "user-chrome" && options.browser
-        ? { browser: options.browser as never }
-        : {}),
+      ...(browser ? { browser } : {}),
     })
     .then((created) => {
       const engine = new LocalChromiumEngine(created?.id ?? sessionId, backend)

@@ -347,13 +347,13 @@ async function recordDelegatePatchSet(
   now: number
 ): Promise<void> {
   try {
-    const { recordPatchSet } = await import("../db/delegate-store")
+    const { markPatchSetApplied, recordPatchSet } = await import("../db/delegate-store")
     const { PATCH_SET_TTL_MS } = await import("../db/retention")
     const { DelegatePatchSchema } = await import("@cognia/router-fusion")
     const stored = await store.artifactStore(runId).get(outcome.patchArtifactId)
     if (!stored) return
     const patch = DelegatePatchSchema.parse(JSON.parse(stored.content))
-    await recordPatchSet(store.db, {
+    const row = await recordPatchSet(store.db, {
       runId,
       baseRevision: patch.base_revision,
       resultRevision: outcome.resultRevision,
@@ -364,6 +364,16 @@ async function recordDelegatePatchSet(
       now,
       ttlMs: PATCH_SET_TTL_MS,
     })
+    // The run applied the change itself (an approved `workspace_apply`), so the
+    // row records where it landed — the review pane's "applied" line and the
+    // replay guard both read `appliedRevision`, never `delivery`.
+    if (outcome.deliveredRevision !== null) {
+      await markPatchSetApplied(store.db, {
+        patchSetId: row.patchSetId,
+        appliedRevision: outcome.deliveredRevision,
+        now,
+      })
+    }
   } catch {
     // Indexing is a convenience over durable data, never the durable data.
   }

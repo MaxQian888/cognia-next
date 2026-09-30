@@ -307,6 +307,40 @@ describe("a delegate run through the orchestrator", () => {
     expect(h.disposed()).toBe(1)
   })
 
+  it("records where an approved workspace apply landed on the run's patch set", async () => {
+    const h = harness()
+    await createRun(h, { delegateDelivery: "workspace_updated" })
+    const { deps: first } = deps(h, WORKING)
+    const parked = await executeFusionRun(first, { runId: RUN_ID })
+    expect(parked.kind).toBe("waiting")
+    const pending = await pendingApprovalOf(h.db, RUN_ID)
+    expect(pending?.kind).toBe("workspace_apply")
+    expect(
+      (
+        await decideFusionApproval(h.store, {
+          runId: RUN_ID,
+          approvalId: pending?.id,
+          decision: "approve",
+        })
+      ).ok
+    ).toBe(true)
+
+    const { deps: second } = deps(h, WORKING)
+    const outcome = await executeFusionRun(second, { runId: RUN_ID })
+    expect(outcome.kind).toBe("succeeded")
+    if (outcome.kind !== "succeeded") return
+    expect(outcome.result.delivery).toBe("workspace_updated")
+    expect(h.workspace.applied).toHaveLength(1)
+
+    const patchSets = await h.db.fusionPatchSets.where("runId").equals(RUN_ID).toArray()
+    expect(patchSets).toHaveLength(1)
+    expect(patchSets[0]).toMatchObject({
+      delivery: "workspace_updated",
+      appliedRevision: h.workspace.current,
+    })
+    expect(patchSets[0].appliedAt).toEqual(expect.any(Number))
+  })
+
   it("spends its repair and its takeover once each, then fails — no loop (DEL-06)", async () => {
     const h = harness({ acceptance: failing })
     await createRun(h)

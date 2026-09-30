@@ -1,4 +1,5 @@
 import type { ChatSession, ProjectThreadDeclaredState } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 import { getSession, updateSession } from "@/lib/db/sessions"
 import { isProjectRoleSessionPaused } from "./project-access"
 import {
@@ -110,6 +111,12 @@ export async function flushThreadReports(coordinatorSessionId: string): Promise<
   if (!batch) return
   pending.delete(coordinatorSessionId)
   const { reports, deps } = batch
+  // The batch goes out as a peer message from one of its threads. Any of them
+  // is linked to the coordinator, but one deleted inside the window is not a
+  // live sender and would drop the whole batch, so take the first that exists.
+  const threads = await Promise.all(reports.map((report) => deps.getSession(report.threadId)))
+  const sender = threads.find((thread) => thread !== undefined)
+  if (!sender) return
   const now = deps.now()
   const paused = deps.isPaused(await deps.getSession(coordinatorSessionId))
   const recent = (triggeredAt.get(coordinatorSessionId) ?? []).filter((at) => now - at < HOUR_MS)
@@ -119,7 +126,7 @@ export async function flushThreadReports(coordinatorSessionId: string): Promise<
 
   try {
     await deps.send({
-      senderSessionId: reports[0].threadId,
+      senderSessionId: sender.id,
       receiverSessionId: coordinatorSessionId,
       content: renderThreadReports(reports),
       intent: trigger ? "trigger_turn" : "note",
@@ -129,7 +136,10 @@ export async function flushThreadReports(coordinatorSessionId: string): Promise<
   } catch (error) {
     // The PII gate refused the text, or the channel failed: the result stays
     // in the thread (read_thread_report still reaches it), so log, not throw.
-    console.warn("project thread report was not delivered", error)
+    loggers.chat.warn("project thread report was not delivered", {
+      coordinatorSessionId,
+      error: String(error),
+    })
     return
   }
   await Promise.all(
