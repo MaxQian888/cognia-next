@@ -17,7 +17,16 @@ packages:
 # useFakeTimers()/useRealTimers() cycle in the same worker died with
 # "setTimeout is not defined". The patch restores whatever it captured.
 # Test-infra only — nothing ships to users, hence no changeset.
+#
+# The two Capacitor patches ship in the Android app:
+# - @capacitor/android: `public/plugins` is also the app's own `/plugins` route
+#   and plugin mirrors; upstream injected every file there as JavaScript, the
+#   bridge script failed to parse and `window.Capacitor` never existed.
+# - @capacitor/push-notifications: `register()` crashed the process on a build
+#   without google-services.json; it now rejects so JS reports "unavailable".
 patchedDependencies:
+  "@capacitor/android@8.5.2": patches/@capacitor__android@8.5.2.patch
+  "@capacitor/push-notifications@8.1.2": patches/@capacitor__push-notifications@8.1.2.patch
   "@sinonjs/fake-timers@15.4.0": patches/@sinonjs__fake-timers@15.4.0.patch
 
 # Security floors for transitive dependencies whose direct parents currently

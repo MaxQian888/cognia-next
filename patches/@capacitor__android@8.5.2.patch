@@ -1,0 +1,50 @@
+diff --git a/capacitor/src/main/java/com/getcapacitor/JSExport.java b/capacitor/src/main/java/com/getcapacitor/JSExport.java
+index 2083c2c945484dda6b7f2408d7bdfbcfe0d01294..6982795d0614b90462756a5046549182b624ae81 100644
+--- a/capacitor/src/main/java/com/getcapacitor/JSExport.java
++++ b/capacitor/src/main/java/com/getcapacitor/JSExport.java
+@@ -91,8 +91,44 @@ public class JSExport {
+         return TextUtils.join("\n", lines) + "\nwindow.Capacitor.PluginHeaders = " + pluginArray.toString() + ";";
+     }
+ 
++    /*
++     * Cognia patch: `public/plugins` is also where the web app's own `/plugins`
++     * route (Next.js segment payloads) and its built-in plugin mirrors (SVG,
++     * WebP, JSON) live. Upstream concatenates EVERY file under it into the
++     * document-start script, so that content was parsed as JavaScript, the
++     * whole injected script failed with a SyntaxError and `window.Capacitor`
++     * was never defined — the app then ran as a plain browser. Only Cordova
++     * plugin modules belong here: inject nothing when no Cordova plugin is
++     * installed (empty `cordova_plugins.js`), and only `.js` files otherwise.
++     */
+     public static String getCordovaPluginJS(Context context) {
+-        return getFilesContent(context, "public/plugins");
++        String cordovaPlugins = "";
++        try {
++            cordovaPlugins = readFileFromAssets(context.getAssets(), "public/cordova_plugins.js");
++        } catch (IOException ex) {
++            // No Cordova plugin metadata: nothing to inject.
++        }
++        if (cordovaPlugins.trim().isEmpty()) {
++            return "";
++        }
++        return getJsFilesContent(context, "public/plugins");
++    }
++
++    private static String getJsFilesContent(Context context, String path) {
++        StringBuilder builder = new StringBuilder();
++        try {
++            String[] content = context.getAssets().list(path);
++            if (content != null && content.length > 0) {
++                for (String file : content) {
++                    builder.append(getJsFilesContent(context, path + "/" + file));
++                }
++            } else if (path.endsWith(".js")) {
++                return readFileFromAssets(context.getAssets(), path);
++            }
++        } catch (IOException ex) {
++            Logger.warn("Unable to read file at path " + path);
++        }
++        return builder.toString();
+     }
+ 
+     public static String getFilesContent(Context context, String path) {
