@@ -1065,6 +1065,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaE2EOutbound
       delete window.__cogniaSeedCharacter
       delete window.__cogniaSeedConversation
+      delete window.__cogniaSeedPlan
       delete window.__cogniaSeedTeam
       delete window.__cogniaSeedSquad
       delete window.__cogniaSeedSquadRun

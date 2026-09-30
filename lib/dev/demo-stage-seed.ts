@@ -11,7 +11,9 @@
  * camera watches them land.
  *
  * Dev/E2E only — reached exclusively through `expose-test-globals.tsx`, which
- * is dead-code-eliminated unless `NEXT_PUBLIC_E2E === "1"`.
+ * installs nothing unless `NEXT_PUBLIC_E2E === "1"`. That is a runtime check:
+ * a production build still ships this module as a lazy chunk, but the gate
+ * never passes there, so the chunk is never fetched.
  *
  * Split the same way as `chat-perf-fixtures.ts`: the transcript arithmetic
  * (`applyStage`, `streamSteps`) is pure and unit-testable in jsdom, and the

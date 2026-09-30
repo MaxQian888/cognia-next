@@ -52,6 +52,19 @@ describe("locale parity beyond the type system", () => {
     expect(b.nav.sectionIndexLabel).not.toBe(a.nav.sectionIndexLabel)
     expect(b.home.finalCta.indexLabel).not.toBe(a.home.finalCta.indexLabel)
     expect(b.home.hero.ticket.label).not.toBe(a.home.hero.ticket.label)
+    for (const key of [
+      "eyebrow",
+      "title",
+      "subtitle",
+      "videoLabel",
+      "playLabel",
+      "captionsLabel",
+    ] as const) {
+      expect(b.home.film[key]).not.toBe(a.home.film[key])
+    }
+    expect(b.footage.captureNote).not.toBe(a.footage.captureNote)
+    expect(b.footage.recordingNote).not.toBe(a.footage.recordingNote)
+    expect(b.home.sectionIndex.film).not.toBe(a.home.sectionIndex.film)
   })
 
   it("gives every homepage section an eyebrow in both locales", () => {
@@ -59,6 +72,7 @@ describe("locale parity beyond the type system", () => {
       const home = copy.home
       for (const eyebrow of [
         home.hero.eyebrow,
+        home.film.eyebrow,
         home.signature.eyebrow,
         home.workbench.eyebrow,
         home.desktop.eyebrow,

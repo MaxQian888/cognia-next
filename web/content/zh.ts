@@ -309,7 +309,7 @@ export const zh: SiteCopy = {
 
   home: {
     film: {
-      eyebrow: "把任务拍下来",
+      eyebrow: "任务实录",
       title: "看一条任务从请求一路跑到审批。",
       subtitle:
         "44 秒的真实应用：读项目、复现失败的检查、给出 diff、让检查通过、写好说明——然后在推送之前停下来。",

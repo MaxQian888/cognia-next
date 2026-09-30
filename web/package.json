@@ -13,6 +13,8 @@
     "evidence": "node scripts/build-evidence.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
     "capture": "node scripts/capture-product.mjs",
+    "record": "node scripts/record-product.mjs",
+    "render": "node scripts/render-video.mjs",
     "agent-icons": "node scripts/sync-agent-icons.mjs"
   },
   "dependencies": {

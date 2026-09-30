@@ -112,8 +112,33 @@ describe("SectionHeading", () => {
   it("renders the title as a heading", () => {
     render(<SectionHeading title="One task. Every step visible." />)
     expect(
-      screen.getByRole("heading", { name: "One task. Every step visible." })
+      screen.getByRole("heading", { level: 2, name: "One task. Every step visible." })
     ).toBeInTheDocument()
+  })
+
+  it("reveals the title on scroll, word by word, through SplitReveal", () => {
+    // `view`, not `mount`: a heading already on screen at hydration is left
+    // exactly where it is, where a `mount` heading would run regardless.
+    const rect = jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 160,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: 60,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    })
+    try {
+      render(<SectionHeading title="One task. Every step visible." />)
+      const heading = screen.getByRole("heading", { level: 2 })
+      expect(heading).toHaveAttribute("data-split", "static")
+      expect(heading.querySelectorAll("[data-split-word]")).toHaveLength(5)
+      expect(heading).toHaveTextContent("One task. Every step visible.")
+    } finally {
+      rect.mockRestore()
+    }
   })
 
   it("renders the eyebrow and subtitle when supplied", () => {

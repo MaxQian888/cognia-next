@@ -127,6 +127,24 @@ const SCRIPT = {
       artifactType: "document",
     },
     {
+      kind: "stream",
+      messageId: ASSISTANT,
+      text: " Pushing waits for you.",
+      chunkSize: 8,
+      intervalMs: 5,
+    },
+    // An approval answers a tool call already in the conversation; the seam refuses one that does not.
+    {
+      kind: "addPart",
+      messageId: ASSISTANT,
+      part: {
+        type: "tool-Bash",
+        toolCallId: "spec-push",
+        state: "approval-requested",
+        input: { command: "git push origin release/1.2.0" },
+      },
+    },
+    {
       kind: "approval",
       toolCallId: "spec-push",
       toolName: "Bash",
@@ -210,7 +228,7 @@ test.describe("web — staged conversation seam", () => {
     await expect(dock).toBeVisible({ timeout: 10_000 })
     await expect(dock).toContainText("release-notes.md")
 
-    const last = await advanceTo(page, sessionId, 16)
+    const last = await advanceTo(page, sessionId, SCRIPT.stages.length - 1)
     expect(last.done).toBe(true)
     const dialog = page.getByRole("dialog").last()
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -223,10 +241,15 @@ test.describe("web — staged conversation seam", () => {
         .filter((row) => row.sessionId === id)
         .map((row) => ({ role: row.role, text: row.text }))
     }, sessionId)
-    expect(stored.map((row) => row.role)).toEqual(["user", "assistant"])
+    // Rows come back in primary-key order; conversation order is pinned by the
+    // seam's unit integration test through `listMessages`.
+    expect(stored.map((row) => row.role).sort()).toEqual(["assistant", "user"])
+    expect(stored.find((row) => row.role === "user")?.text).toBe(
+      "Fix the failing check, then draft the notes."
+    )
     // A stream stage persists its final frame: the whole narration, not a prefix.
-    expect(stored[1].text).toBe(
-      "Reproducing the failure first. Here is the plan. Applying the fix. Checking again."
+    expect(stored.find((row) => row.role === "assistant")?.text).toBe(
+      "Reproducing the failure first. Here is the plan. Applying the fix. Checking again. Pushing waits for you."
     )
   })
 

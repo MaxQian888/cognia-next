@@ -26,6 +26,7 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaEnqueueOutbound",
   "__cogniaReadMobileOutbound",
   "__cogniaSeedCharacter",
+  "__cogniaSeedPlan",
   "__cogniaSeedTeam",
   "__cogniaSeedSquad",
   "__cogniaSeedSquadRun",
@@ -524,6 +525,35 @@ describe("ExposeTestGlobals", () => {
       "No staged conversation for session missing"
     )
     useAccountStore.setState({ unlockedAccountId: null })
+  })
+
+  it("refuses to seed a staged conversation when no account unlocks within 20s", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    const { useAccountStore } = await import("@/stores/account/account-store")
+    useAccountStore.setState({ unlockedAccountId: null })
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+    jest.useFakeTimers()
+    try {
+      const seeded = window.__cogniaSeedStagedConversation!({
+        title: "Locked",
+        stages: [
+          {
+            kind: "append",
+            message: { id: "u1", role: "user", parts: [{ type: "text", text: "Hello" }] },
+          },
+        ],
+      })
+      const outcome = expect(seeded).rejects.toThrow(
+        "Staged conversation: the account did not unlock within 20s"
+      )
+      await jest.advanceTimersByTimeAsync(20_100)
+      await outcome
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("removes every global on unmount", async () => {

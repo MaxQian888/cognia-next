@@ -15,6 +15,11 @@ describe("PageHeader", () => {
     expect(screen.getByText(en.product.header.subtitle)).toBeInTheDocument()
   })
 
+  it("raises its title on first paint, since it is the first screen", () => {
+    render(<PageHeader copy={en.product.header} common={en.common} locale="en" />)
+    expect(screen.getByRole("heading", { level: 1 })).toHaveAttribute("data-split", "run")
+  })
+
   it("uses h1 exactly once, so search results land on the page's own name", () => {
     const { container } = render(
       <PageHeader copy={en.trust.header} common={en.common} locale="en" />

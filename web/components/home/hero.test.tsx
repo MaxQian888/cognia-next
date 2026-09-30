@@ -57,6 +57,8 @@ describe("Hero", () => {
     renderHero()
     expect(screen.getByText(en.home.hero.eyebrow)).toBeInTheDocument()
     expect(screen.getByRole("heading", { level: 1, name: en.home.hero.title })).toBeInTheDocument()
+    // The first screen's headline rises from CSS on first paint, never waiting on hydration.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveAttribute("data-split", "run")
   })
 
   it("carries exactly one h1", () => {

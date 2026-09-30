@@ -150,6 +150,8 @@
     "docs:start": "pnpm --filter docs run start",
     "web:build": "pnpm --filter web run build",
     "web:capture": "pnpm --filter web run capture",
+    "web:record": "pnpm --filter web run record",
+    "web:render": "pnpm --filter web run render",
     "screenshots:pwa": "node scripts/screenshots/capture-pwa-screenshots.mjs",
     "web:dev": "pnpm --filter web run dev",
     "web:evidence": "pnpm --filter web run evidence",
