@@ -8,6 +8,11 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 
 import { GlobalSearchFooter } from "./global-search-footer"
 
+let mockShowKeyboardHints = true
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useShowKeyboardHints: () => mockShowKeyboardHints,
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
@@ -39,6 +44,19 @@ describe("GlobalSearchFooter", () => {
     expect(pointerDown.defaultPrevented).toBe(true)
     expect(screen.queryByTestId("global-search-result-count")).toBeNull()
     expect(screen.queryByTestId("global-search-coverage")).toBeNull()
+  })
+
+  it("draws no key legend on a device without a keyboard, but keeps the syntax help", () => {
+    mockShowKeyboardHints = false
+    try {
+      renderFooter()
+      expect(screen.queryByTestId("global-search-key-legend")).toBeNull()
+      expect(screen.queryByText("footer.navigate")).toBeNull()
+      expect(screen.queryByText("footer.open")).toBeNull()
+      expect(screen.getByRole("button", { name: "footer.syntax" })).toBeInTheDocument()
+    } finally {
+      mockShowKeyboardHints = true
+    }
   })
 
   it("shows count, timing and coverage notes", () => {

@@ -28,7 +28,7 @@ import { memo, useEffect, useMemo, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
-import { usePlatform } from "@/hooks/use-platform"
+import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import {
   BotIcon,
   ChevronDownIcon,
@@ -523,7 +523,9 @@ function RunPanelImpl({
   const t = useTranslations("chat.runStatus")
   const tp = useTranslations("chat.runPanel")
   // Capacitor native shell has no hardware Esc; show a touch-appropriate label.
-  const isMobile = usePlatform() === "mobile"
+  // "Esc to interrupt" only where there is an Esc key. Keyed on the input
+  // hardware, not the runtime: a phone browser has no Esc either.
+  const showKeyboardHints = useShowKeyboardHints()
   const status = useSessionStatus(sessionId)
   const timing = useSessionRunTiming(sessionId)
   const steerQueue = useSessionSteerQueue(sessionId)
@@ -673,7 +675,7 @@ function RunPanelImpl({
               aria-label={tp("ariaInterrupt")}
               className="ml-auto text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             >
-              {isMobile ? t("interruptHintTouch") : t("interruptHint")}
+              {showKeyboardHints ? t("interruptHint") : t("interruptHintTouch")}
             </button>
           </div>
         ) : replay ? (

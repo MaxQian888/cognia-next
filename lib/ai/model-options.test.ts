@@ -1,4 +1,5 @@
 import {
+  compactModelLabel,
   collectModelOptions,
   catalogModelIds,
   resolveModelDisplayName,
@@ -198,6 +199,12 @@ describe("resolveModelDisplayName", () => {
     expect(resolveModelDisplayName("mystery", "gpt-4o")).toBe("GPT-4o")
     expect(resolveModelDisplayName(undefined, "totally-unknown-xyz")).toBe("totally-unknown-xyz")
   })
+
+  it("finds a built-in catalog name when no provider scopes the lookup", () => {
+    const m = PROVIDERS.anthropic.models.find((model) => model.id === "claude-haiku-4-5-20251001")!
+    expect(resolveModelDisplayName(undefined, m.id)).toBe(m.name)
+    expect(resolveModelDisplayName(undefined, m.id)).not.toBe(m.id)
+  })
 })
 
 describe("resolveModelContextLength", () => {
@@ -393,4 +400,34 @@ it("includes registered plugin models and removes stale configured models on unl
     unregisterProvider(id)
   }
   expect(collectModelOptions(settings, []).some((option) => option.providerId === id)).toBe(false)
+})
+
+describe("compactModelLabel", () => {
+  it("drops the Claude family word every Anthropic model shares", () => {
+    expect(compactModelLabel("Claude Sonnet 4.6")).toBe("Sonnet 4.6")
+    expect(compactModelLabel("Claude Haiku 4.5")).toBe("Haiku 4.5")
+    expect(compactModelLabel("claude-sonnet-4-6")).toBe("sonnet-4-6")
+  })
+
+  it("drops a `Vendor: ` prefix", () => {
+    expect(compactModelLabel("Anthropic: Claude Sonnet 4.5")).toBe("Sonnet 4.5")
+    expect(compactModelLabel("OpenAI: GPT-5")).toBe("GPT-5")
+  })
+
+  it("keeps only the last segment of a raw routed id", () => {
+    expect(compactModelLabel("anthropic/claude-opus-4")).toBe("opus-4")
+    expect(compactModelLabel("meta-llama/llama-3.3-70b")).toBe("llama-3.3-70b")
+  })
+
+  it("leaves names whose first word is the model family whole", () => {
+    expect(compactModelLabel("GPT-5")).toBe("GPT-5")
+    expect(compactModelLabel("Gemini 2.5 Pro")).toBe("Gemini 2.5 Pro")
+    expect(compactModelLabel("Auto")).toBe("Auto")
+  })
+
+  it("never empties a label", () => {
+    expect(compactModelLabel("Claude")).toBe("Claude")
+    expect(compactModelLabel("vendor/")).toBe("vendor/")
+    expect(compactModelLabel("Vendor: ")).toBe("Vendor:")
+  })
 })

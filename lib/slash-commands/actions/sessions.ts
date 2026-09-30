@@ -7,17 +7,29 @@ import type { SlashCommandResultBlock } from "../system-blocks"
 import { listSessions } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { getRuntimeTranslator, type RuntimeTranslator } from "@/lib/i18n/runtime-translator"
+
+/**
+ * Everything these commands print is read by the user, so it goes through the
+ * runtime translator in the locale the UI shows. It used to be English
+ * literals, which a zh-CN transcript printed verbatim.
+ */
+const translator = () => getRuntimeTranslator("slashCommands.sessions")
 
 /**
  * Build the inline result chip for a successful `/resume`, so the transcript
  * shows a compact "/resume <arg> — Resumed X" marker instead of a bare line.
  */
-function resumedChip(arg: string, title: string | undefined): SlashCommandResultBlock {
+function resumedChip(
+  t: RuntimeTranslator,
+  arg: string,
+  title: string | undefined
+): SlashCommandResultBlock {
   return {
     kind: "slash-result",
     commandId: "resume",
     args: arg,
-    summary: `Resumed ${title ?? "session"}`,
+    summary: t("resumed", { title: title || t("resumedFallbackTitle") }),
   }
 }
 
@@ -27,34 +39,36 @@ function resumedChip(arg: string, title: string | undefined): SlashCommandResult
  * Zustand mirror (which only carries the active session's messages).
  */
 export async function handleSessions(ctx: SlashContext): Promise<void> {
+  const t = await translator()
   let rows: Awaited<ReturnType<typeof listSessions>>
   try {
     rows = filterExposedSessions(await listSessions(), "main-list")
   } catch (err) {
     ctx.pushSystemMessage(
-      `Could not list sessions: ${err instanceof Error ? err.message : String(err)}`
+      t("listFailed", { reason: err instanceof Error ? err.message : String(err) })
     )
     return
   }
   if (rows.length === 0) {
-    ctx.pushSystemMessage("No sessions yet. Type a message to start one.")
+    ctx.pushSystemMessage(t("empty"))
     return
   }
   const lines: string[] = [
-    "**Sessions** (most recently updated first)",
+    t("heading"),
     "",
-    "| Title | Kind | Updated | ID |",
+    `| ${t("columnTitle")} | ${t("columnKind")} | ${t("columnUpdated")} | ${t("columnId")} |`,
     "| --- | --- | --- | --- |",
   ]
   const now = Date.now()
   for (const s of rows) {
-    const ago = formatRelative(now - s.updatedAt)
+    const ago = formatRelative(t, now - s.updatedAt)
+    // The kind is a protocol value (`direct`, `agent`, …), shown as-is.
     const kind = s.kind ?? "direct"
-    const title = (s.title || "(untitled)").replace(/\|/g, "\\|")
+    const title = (s.title || t("untitled")).replace(/\|/g, "\\|")
     const idShort = s.id.length > 14 ? s.id.slice(0, 14) + "…" : s.id
     lines.push(`| ${title} | ${kind} | ${ago} | \`${idShort}\` |`)
   }
-  lines.push("", "Use `/resume <title or id>` to switch.")
+  lines.push("", t("footer"))
   ctx.pushSystemMessage(lines.join("\n"))
 }
 
@@ -76,11 +90,10 @@ export async function handleReset(ctx: SlashContext): Promise<void> {
  * exactly where it left off.
  */
 export async function handleResume(ctx: SlashContext): Promise<void> {
+  const t = await translator()
   const arg = ctx.args.trim()
   if (!arg) {
-    ctx.pushSystemMessage(
-      "Usage: `/resume <id or title>` — try `/sessions` to see what's available."
-    )
+    ctx.pushSystemMessage(t("resumeUsage"))
     return
   }
   let rows: Awaited<ReturnType<typeof listSessions>>
@@ -88,19 +101,19 @@ export async function handleResume(ctx: SlashContext): Promise<void> {
     rows = filterExposedSessions(await listSessions(), "main-list")
   } catch (err) {
     ctx.pushSystemMessage(
-      `Could not list sessions: ${err instanceof Error ? err.message : String(err)}`
+      t("listFailed", { reason: err instanceof Error ? err.message : String(err) })
     )
     return
   }
   if (rows.length === 0) {
-    ctx.pushSystemMessage("No sessions yet.")
+    ctx.pushSystemMessage(t("resumeNoSessions"))
     return
   }
   // 1. exact id
   const exactId = rows.find((s) => s.id === arg)
   if (exactId) {
     useChatStore.getState().setActiveSession(exactId.id)
-    ctx.pushSystemMessage(resumedChip(arg, exactId.title))
+    ctx.pushSystemMessage(resumedChip(t, arg, exactId.title))
     return
   }
   // 2. case-insensitive exact title
@@ -108,18 +121,18 @@ export async function handleResume(ctx: SlashContext): Promise<void> {
   const exactTitle = rows.filter((s) => (s.title ?? "").toLowerCase() === needle)
   if (exactTitle.length === 1) {
     useChatStore.getState().setActiveSession(exactTitle[0].id)
-    ctx.pushSystemMessage(resumedChip(arg, exactTitle[0].title))
+    ctx.pushSystemMessage(resumedChip(t, arg, exactTitle[0].title))
     return
   }
   // 3. substring match
   const partial = rows.filter((s) => (s.title ?? "").toLowerCase().includes(needle))
   if (partial.length === 1) {
     useChatStore.getState().setActiveSession(partial[0].id)
-    ctx.pushSystemMessage(resumedChip(arg, partial[0].title))
+    ctx.pushSystemMessage(resumedChip(t, arg, partial[0].title))
     return
   }
   if (partial.length === 0 && exactTitle.length === 0) {
-    ctx.pushSystemMessage(`No session matched \`${arg}\`. Try \`/sessions\`.`)
+    ctx.pushSystemMessage(t("resumeNoMatch", { query: arg }))
     return
   }
   // Ambiguous — surface candidates.
@@ -127,12 +140,12 @@ export async function handleResume(ctx: SlashContext): Promise<void> {
     .slice(0, 8)
     .map((s) => `- \`${s.title}\` (\`${s.id}\`)`)
     .join("\n")
-  ctx.pushSystemMessage(`\`${arg}\` matches multiple sessions; resolve by id:\n${candidates}`)
+  ctx.pushSystemMessage(`${t("resumeAmbiguous", { query: arg })}\n${candidates}`)
 }
 
-function formatRelative(deltaMs: number): string {
-  if (deltaMs < 60_000) return "just now"
-  if (deltaMs < 3_600_000) return `${Math.floor(deltaMs / 60_000)}m ago`
-  if (deltaMs < 86_400_000) return `${Math.floor(deltaMs / 3_600_000)}h ago`
-  return `${Math.floor(deltaMs / 86_400_000)}d ago`
+function formatRelative(t: RuntimeTranslator, deltaMs: number): string {
+  if (deltaMs < 60_000) return t("justNow")
+  if (deltaMs < 3_600_000) return t("minutesAgo", { count: Math.floor(deltaMs / 60_000) })
+  if (deltaMs < 86_400_000) return t("hoursAgo", { count: Math.floor(deltaMs / 3_600_000) })
+  return t("daysAgo", { count: Math.floor(deltaMs / 86_400_000) })
 }

@@ -358,6 +358,35 @@ export interface ContextWorkbenchMobileDrawerProps extends Omit<
   onSnapPointChange?: (snapPoint: number | string | null) => void
 }
 
+/**
+ * Bottom padding that keeps the workbench body inside the part of the drawer a
+ * user can actually see.
+ *
+ * vaul positions a fractional snap by translating the drawer down by
+ * `(1 - snap)` of the viewport, and this drawer is a fixed 92dvh tall. So at
+ * every snap the bottom `(1 - snap) * 100dvh` of the surface is below the
+ * screen: 8dvh at the tall snap, 45dvh at the half-open one. Anything laid out
+ * against the drawer's full height lands there — a centred empty state (the
+ * artifacts list's "No artifacts") rendered as a blank strip at the half snap,
+ * and a panel's bottom row or composer was cut off even when fully open.
+ * Reserving that band as padding shrinks the body to the visible region, so
+ * centring, scrolling and bottom-pinned controls all work against what shows.
+ *
+ * The keyboard, when one overlaps, is measured from the screen's bottom edge,
+ * so it adds to the band; without one the safe-area inset does. A pixel snap
+ * (vaul also accepts `"320px"`) or no snap keeps the historical behaviour.
+ */
+export function mobileDrawerBottomReserve(
+  snap: number | string | null,
+  keyboardHeight: number
+): string | number | undefined {
+  if (typeof snap !== "number" || snap >= 1) return keyboardHeight || undefined
+  // Rounded so float noise (1 - 0.55 = 0.44999…) never reaches the style.
+  const belowFold = Math.round((1 - snap) * 10_000) / 100
+  const edge = keyboardHeight > 0 ? `${keyboardHeight}px` : "env(safe-area-inset-bottom)"
+  return `calc(${belowFold}dvh + ${edge})`
+}
+
 export function ContextWorkbenchMobileDrawer({
   open,
   onOpenChange,
@@ -385,6 +414,7 @@ export function ContextWorkbenchMobileDrawer({
   )
   const activeSnapPoint = snapPoint === undefined ? uncontrolledSnap : snapPoint
   const setActiveSnapPoint = onSnapPointChange ?? setUncontrolledSnap
+  const bottomReserve = mobileDrawerBottomReserve(activeSnapPoint, keyboardHeight)
 
   return (
     <Drawer
@@ -422,9 +452,10 @@ export function ContextWorkbenchMobileDrawer({
         className="gap-0 overflow-hidden p-0 pb-[env(safe-area-inset-bottom)] [transition-duration:calc(300ms*var(--motion-duration-scale,1))]! data-[vaul-drawer-direction=bottom]:max-h-[92dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl"
         style={{
           height: "92dvh",
-          // Overrides the safe-area class above only while a keyboard is
-          // actually overlapping; `0` falls through to the inset.
-          paddingBottom: keyboardHeight || undefined,
+          // Overrides the safe-area class above with the part of the drawer
+          // that sits below the screen at the active snap, plus the keyboard
+          // while one overlaps. See `mobileDrawerBottomReserve`.
+          paddingBottom: bottomReserve,
         }}
         data-testid="context-workbench-mobile-sheet"
       >

@@ -364,6 +364,29 @@ describe("<EmptyChatState />", () => {
     expect(screen.getByRole("button", { name: /newChat/ })).toBeInTheDocument()
   })
 
+  it("keeps the generic subtitle under the rich inline hero", () => {
+    render(<EmptyChatState {...baseProps()} variant="inline" />)
+    expect(screen.getByText("subtitle")).toBeInTheDocument()
+  })
+
+  it("drops the generic subtitle from the minimal inline hero (the phone welcome)", () => {
+    render(<EmptyChatState {...baseProps()} variant="inline" welcomeStyle="minimal" />)
+    expect(screen.getByRole("heading", { level: 2 })).toBeInTheDocument()
+    expect(screen.queryByText("subtitle")).not.toBeInTheDocument()
+  })
+
+  it("still renders an override subtitle under the minimal inline hero", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        variant="inline"
+        welcomeStyle="minimal"
+        override={{ subtitle: "Describe a flow" }}
+      />
+    )
+    expect(screen.getByText("Describe a flow")).toBeInTheDocument()
+  })
+
   it("hides the New chat button in the inline variant", () => {
     render(<EmptyChatState {...baseProps()} variant="inline" />)
     expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
@@ -443,6 +466,25 @@ describe("<EmptyChatState />", () => {
     render(<EmptyChatState {...baseProps()} hideSamples />)
     expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
     expect(screen.queryByTestId("welcome-chips")).not.toBeInTheDocument()
+  })
+
+  it("drops the starters that need a working directory when there is none", () => {
+    // A host-less phone was offered "run `git diff HEAD~3..HEAD`" and "list the
+    // files in the working directory": prompts that can only fail there.
+    render(<EmptyChatState {...baseProps()} workspaceAvailable={false} />)
+    for (const id of ["explore", "review", "draft", "tests"]) {
+      expect(
+        screen.queryByRole("button", { name: new RegExp(`samples.${id}Title`) })
+      ).not.toBeInTheDocument()
+    }
+  })
+
+  it("never filters a caller's own starters by workspace", () => {
+    const samples: StarterSample[] = [
+      { key: "build", icon: SparklesIcon, title: "Scaffold a workflow", prompt: "Build it" },
+    ]
+    render(<EmptyChatState {...baseProps()} workspaceAvailable={false} override={{ samples }} />)
+    expect(screen.getByRole("button", { name: /Scaffold a workflow/ })).toBeInTheDocument()
   })
 
   it("renders headerExtraSlot above the greeting", () => {

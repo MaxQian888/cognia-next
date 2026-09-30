@@ -7,8 +7,22 @@
 // Web Speech API path only. Browsers without Speech Recognition (Firefox,
 // Safari) get a disabled button per AI Elements default; we don't ship a
 // transcription backend in this app.
+//
+// Native mobile: the Android WebView never prompts for the microphone on the
+// Web Speech path, so the first tap asks for RECORD_AUDIO through the native
+// plugin (`ensureMicrophonePermission`) before recognition starts, a denial is
+// said out loud with a way to the app's settings, and a start that never
+// produces a "listening" state within a few seconds is reported instead of
+// leaving a mic button that silently does nothing.
 
-import { useCallback, useState, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+} from "react"
 import { useTranslations } from "next-intl"
 import { AudioLinesIcon, LanguagesIcon, Settings2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -35,12 +49,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { usePlatform } from "@/hooks/use-platform"
+import { openAppSettings } from "@/lib/capacitor/app-settings"
+import { ensureMicrophonePermission } from "@/lib/capacitor/microphone"
 import { useSettingsStore } from "@/stores/settings"
-import {
-  DEFAULT_SPEECH_LANGUAGE,
-  SPEECH_LANGUAGES,
-  type SpeechLanguageCode,
-} from "@cognia/tts/speech"
+import { SPEECH_LANGUAGES, resolveSttLanguage, type SpeechLanguageCode } from "@cognia/tts/speech"
 import { cn } from "@/lib/utils"
 import { LiveVoiceDialog } from "./live-voice-dialog"
 
@@ -57,11 +70,19 @@ const noopSubscribe = () => () => {}
 const speechUsableSnapshot = () => detectSpeechInputMode() === "speech-recognition"
 const usableOnServer = () => true
 
+/**
+ * How long a native-mobile start may take to reach the "listening" state
+ * before the tap is reported as failed. Recognition normally starts well
+ * under a second once the microphone is granted.
+ */
+export const VOICE_START_TIMEOUT_MS = 5000
+
 export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps) {
   const t = useTranslations("chat.composer.voice")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
-  const language = (settings?.sttLanguage ?? DEFAULT_SPEECH_LANGUAGE) as SpeechLanguageCode
+  // Unset follows the app language, so a zh-CN UI dictates in zh-CN.
+  const language = resolveSttLanguage(settings?.sttLanguage, settings?.language)
   const selectedMicId = settings?.selectedMicId
   // The microphone choice only reaches live voice. Dictation runs on the Web
   // Speech API, which records from the system default input and has no device
@@ -108,9 +129,71 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
   // Recording state surfaced by SpeechInput — drives the red button style,
   // the pulsing "listening" pill, and the aria labels.
   const [listening, setListening] = useState(false)
+  const nativeMobile = usePlatform() === "mobile"
+  const triggerRef = useRef<HTMLSpanElement>(null)
+  // Set once the native microphone permission is known to be granted (or the
+  // plugin is absent and the WebView owns the prompt), so later taps go
+  // straight to recognition.
+  const micReadyRef = useRef(false)
+  const startWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearStartWatchdog = useCallback(() => {
+    if (startWatchdogRef.current) clearTimeout(startWatchdogRef.current)
+    startWatchdogRef.current = null
+  }, [])
+
+  useEffect(() => clearStartWatchdog, [clearStartWatchdog])
+
+  const onListeningChange = useCallback(
+    (next: boolean) => {
+      setListening(next)
+      if (next) clearStartWatchdog()
+    },
+    [clearStartWatchdog]
+  )
+
+  const showPermissionDenied = useCallback(() => {
+    toast.error(t("errors.permissionDenied"), {
+      action: { label: t("openSettings"), onClick: () => void openAppSettings() },
+    })
+  }, [t])
+
+  // Capture-phase gate in front of SpeechInput's own click handler.
+  const onTriggerClickCapture = useCallback(
+    (event: MouseEvent<HTMLSpanElement>) => {
+      if (!nativeMobile || listening) return
+      if (micReadyRef.current) {
+        clearStartWatchdog()
+        startWatchdogRef.current = setTimeout(() => {
+          startWatchdogRef.current = null
+          toast.error(t("errors.notStarted"))
+        }, VOICE_START_TIMEOUT_MS)
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      void (async () => {
+        const permission = await ensureMicrophonePermission()
+        if (permission.kind === "ok" && permission.value === "denied") {
+          showPermissionDenied()
+          return
+        }
+        if (permission.kind === "error") {
+          toast.error(t("errors.generic"))
+          return
+        }
+        // Granted, or no native recorder plugin in this build: let the
+        // WebView's recognizer try (the watchdog still reports a dead start).
+        micReadyRef.current = true
+        triggerRef.current?.querySelector<HTMLButtonElement>("[data-voice-trigger]")?.click()
+      })()
+    },
+    [clearStartWatchdog, listening, nativeMobile, showPermissionDenied, t]
+  )
 
   const onSpeechError = useCallback(
     (error: string) => {
+      clearStartWatchdog()
       if (error === "not-allowed" || error === "service-not-allowed") {
         toast.error(t("errors.permissionDenied"))
       } else if (error === "no-speech") {
@@ -121,7 +204,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
         toast.error(t("errors.generic"))
       }
     },
-    [t]
+    [clearStartWatchdog, t]
   )
 
   // `media-recorder` mode counts as unusable here — it only records a blob for
@@ -136,26 +219,29 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
       : t("startListening")
 
   const speechInput = (
-    <SpeechInput
-      aria-label={speechLabel}
-      className={cn(
-        // `touch-hit`: the action row's icon buttons all paint at 32px and all
-        // answer a thumb at 44px — the hit slop, not a bigger box, so the mic
-        // stays the same size as the "+" and the voice settings beside it.
-        "touch-hit size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
-        listening
-          ? "bg-destructive! text-destructive-foreground! hover:bg-destructive/80! hover:text-destructive-foreground!"
-          : "bg-transparent! text-muted-foreground! hover:bg-muted/60! hover:text-foreground!"
-      )}
-      disabled={disabled}
-      lang={lang}
-      onError={onSpeechError}
-      onListeningChange={setListening}
-      onTranscriptionChange={onTranscription}
-      size="icon-sm"
-      type="button"
-      variant="ghost"
-    />
+    <span ref={triggerRef} className="inline-flex" onClickCapture={onTriggerClickCapture}>
+      <SpeechInput
+        aria-label={speechLabel}
+        data-voice-trigger=""
+        className={cn(
+          // `touch-hit`: the action row's icon buttons all paint at 32px and all
+          // answer a thumb at 44px — the hit slop, not a bigger box, so the mic
+          // stays the same size as the "+" and the voice settings beside it.
+          "touch-hit size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
+          listening
+            ? "bg-destructive! text-destructive-foreground! hover:bg-destructive/80! hover:text-destructive-foreground!"
+            : "bg-transparent! text-muted-foreground! hover:bg-muted/60! hover:text-foreground!"
+        )}
+        disabled={disabled}
+        lang={lang}
+        onError={onSpeechError}
+        onListeningChange={onListeningChange}
+        onTranscriptionChange={onTranscription}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+      />
+    </span>
   )
 
   return (

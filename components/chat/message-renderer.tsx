@@ -142,16 +142,19 @@ import {
   QuoteIcon,
   ReplyIcon,
   ListChecksIcon,
+  BookmarkIcon,
 } from "lucide-react"
 import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
+import { useEditYieldsToOtherSurfaces } from "@/hooks/chat/use-edit-yields-to-other-surfaces"
 import { CheckIcon as AnimatedCheckIcon } from "@/components/ui/check"
 import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import { toast } from "sonner"
+import { shareContent } from "@/lib/capacitor/share"
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { UsageBreakdown } from "@/components/chat/usage-breakdown"
 import type { Character } from "@cognia/agent-config-types"
-import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
+import React, { memo, useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
 import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
@@ -165,6 +168,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
 import { TodoList } from "./todo-list"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import { buildMessageShareContent, writeMessageToClipboard } from "@/lib/chat/message-share"
 import { resolveMessageActionCommands } from "@/lib/chat/message-action-commands"
 import { loggers } from "@cognia/logging"
@@ -294,6 +298,8 @@ function MessageRendererInner({
   // ...and likewise for tool-result cards.
   usePluginToolRendererRevision()
   const t = useTranslations("chat.message")
+  // "Send (⌘/Ctrl+Enter)" names keys a phone does not have.
+  const showKeyboardHints = useShowKeyboardHints()
   const router = useRouter()
   // Agent invocation-flow display mode (simplified / standard / detailed).
   const fallbackMessageDisplay = useMessageDisplay()
@@ -572,6 +578,13 @@ function MessageRendererInner({
     setDraft("")
   }
 
+  // The inline edit box is one of the conversation's text-entry surfaces. It
+  // closes as soon as the user starts on another one (the composer, its `+`
+  // menu or microphone, another message's edit) so there is never a stale
+  // edit left open beside the composer the next send actually reads.
+  const editSurfaceRef = useRef<HTMLDivElement>(null)
+  useEditYieldsToOtherSurfaces(editing, editSurfaceRef, cancelEdit)
+
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
@@ -610,37 +623,35 @@ function MessageRendererInner({
 
   const handleShare = useCallback(async () => {
     if (!messageShareContent.hasContent) return
-    try {
-      if (typeof navigator.share === "function") {
-        const files = messageShareContent.shareFiles
-        if (files.length > 0 && navigator.canShare?.({ files })) {
-          await navigator.share({
-            ...(messageShareContent.nativeShareText.trim()
-              ? { text: messageShareContent.nativeShareText }
-              : {}),
-            files,
-          })
-        } else if (files.length === 0) {
-          await navigator.share({ text: messageShareContent.plainText })
-        } else if (!(await writeMessageToClipboard(messageShareContent))) {
-          throw new Error("No compatible native share or clipboard target")
-        }
-      } else {
-        const ok = await writeMessageToClipboard(messageShareContent)
-        if (!ok) throw new Error("Clipboard unavailable")
-      }
+    // `shareContent` owns the platform split: the Capacitor WebView has no
+    // `navigator.share`, so on the phone it goes through the native share
+    // sheet (images staged as cache files) instead of silently doing nothing.
+    const files = messageShareContent.shareFiles
+    const text =
+      files.length > 0 ? messageShareContent.nativeShareText : messageShareContent.plainText
+    const out = await shareContent({ ...(text.trim() ? { text } : {}), files })
+    if (out.kind === "cancelled") return
+    if (out.kind === "shared") {
       setShared(true)
       window.setTimeout(() => setShared(false), 1500)
-    } catch (err) {
-      // Web Share API can throw on user cancel — that's not a real error.
-      const name = (err as { name?: string })?.name
-      if (name !== "AbortError") {
-        loggers.chat.warn("share failed", {
-          err: err instanceof Error ? err.message : String(err),
-        })
-      }
+      return
     }
-  }, [messageShareContent])
+    if (out.kind === "error") {
+      loggers.chat.warn("share failed", { err: out.message })
+      toast.error(t("shareFailed"))
+      return
+    }
+    // No share surface for this content here: hand it over through the
+    // clipboard, and say so, rather than flashing "Shared!" for a share that
+    // never happened.
+    if (await writeMessageToClipboard(messageShareContent)) {
+      setShared(true)
+      window.setTimeout(() => setShared(false), 1500)
+      toast.success(t("shareCopiedFallback"))
+    } else {
+      toast.error(t("shareFailed"))
+    }
+  }, [messageShareContent, t])
 
   const handleBringBack = useCallback(() => {
     if (!handBackTargetId) return
@@ -765,6 +776,9 @@ function MessageRendererInner({
 
           {editing ? (
             <div
+              ref={editSurfaceRef}
+              data-message-edit=""
+              data-testid="message-edit-surface"
               className={cn(
                 "flex w-full max-w-full flex-col gap-2",
                 message.role === "user" && "items-end"
@@ -783,7 +797,7 @@ function MessageRendererInner({
                   {t("editingCancel")}
                 </Button>
                 <Button size="sm" onClick={submitEdit}>
-                  {t("editingSubmit")}
+                  {t(showKeyboardHints ? "editingSubmit" : "editingSubmitTouch")}
                 </Button>
               </div>
             </div>
@@ -1077,6 +1091,22 @@ function MessageRendererInner({
               )}
               data-testid="message-action-line"
             >
+              {/* Always visible, like the reactions beside it. In these
+                  action modes the bookmark toggle sits in the "…" overflow or a
+                  hover-revealed bar, and on a phone in the long-press sheet, so
+                  without this a bookmarked message looked exactly like any
+                  other one. (`all` keeps the lit toggle itself on screen.) */}
+              {isBookmarked ? (
+                <span
+                  role="img"
+                  aria-label={t("bookmarkedIndicator")}
+                  title={t("bookmarkedIndicator")}
+                  data-testid="message-bookmark-indicator"
+                  className="inline-flex shrink-0 items-center text-yellow-500"
+                >
+                  <BookmarkIcon aria-hidden className="size-3.5 fill-current" />
+                </span>
+              ) : null}
               <MessageReactionPills message={message} sessionId={branchSessionId} />
               {/* Marked so selection mode can set the row's own controls aside
                   (`message-list.tsx`); the reactions beside them stay. */}

@@ -63,9 +63,11 @@ interface ModelPickerProps {
   /** Disable interaction while a turn is in flight. */
   disabled?: boolean
   className?: string
+  /** Short label, no chevron: see `ModelSelectProps.compactLabel`. */
+  compactLabel?: boolean
 }
 
-export function ModelPicker({ session, disabled, className }: ModelPickerProps) {
+export function ModelPicker({ session, disabled, className, compactLabel }: ModelPickerProps) {
   const scope = useOptionalChatScope()
   const t = useTranslations("chat.composer.modelPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -328,6 +330,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       autoEnabled={autoEnabled}
       disabled={disabled}
       className={className}
+      compactLabel={compactLabel}
     />
   )
 }

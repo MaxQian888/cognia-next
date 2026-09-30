@@ -71,7 +71,7 @@ jest.mock("@/lib/chat/search/indexer", () => ({ drainSearchIndex: jest.fn(async 
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
@@ -246,6 +246,54 @@ describe("Composer — slash popover (keyboard, end-to-end)", () => {
     await new Promise((r) => setTimeout(r, 30))
     // One Backspace removed the whole command token + its space.
     expect(ta.value).toBe("")
+  })
+
+  // Android soft keyboards send Backspace as `key: "Unidentified"`; the edit
+  // arrives as a `beforeinput` instead. The chip must still delete as one,
+  // or `/goal` becomes the plain text `/goa` and is sent as an ordinary message.
+  it("deletes a picked command as one chip from a soft keyboard's beforeinput", async () => {
+    const { ta } = renderComposer()
+    await typeValue(ta, "/cl")
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(ta.value).toMatch(/^\/\S+ $/)
+
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+    fireEvent.keyDown(ta, { key: "Unidentified", keyCode: 229 })
+    const deleteEvent = new InputEvent("beforeinput", {
+      inputType: "deleteContentBackward",
+      bubbles: true,
+      cancelable: true,
+    })
+    act(() => {
+      ta.dispatchEvent(deleteEvent)
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(deleteEvent.defaultPrevented).toBe(true)
+    expect(ta.value).toBe("")
+  })
+
+  it("leaves a composition delete to the keyboard", async () => {
+    const { ta } = renderComposer()
+    await typeValue(ta, "/cl")
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await new Promise((r) => setTimeout(r, 30))
+    const picked = ta.value
+
+    ta.setSelectionRange(picked.length, picked.length)
+    const deleteEvent = new InputEvent("beforeinput", {
+      inputType: "deleteContentBackward",
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+    })
+    act(() => {
+      ta.dispatchEvent(deleteEvent)
+    })
+    expect(deleteEvent.defaultPrevented).toBe(false)
+    expect(ta.value).toBe(picked)
   })
 
   it("does not hijack ArrowDown/Enter while an IME composition is active", async () => {

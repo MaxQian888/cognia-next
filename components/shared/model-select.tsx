@@ -47,7 +47,7 @@ import {
 
 import { subscribeSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import { useSettingsStore } from "@/stores/settings"
-import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
+import { collectModelOptions, compactModelLabel, type ModelOption } from "@/lib/ai/model-options"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import type { PopoverContent } from "@/components/ui/popover"
@@ -139,6 +139,13 @@ export interface ModelSelectProps {
   disabled?: boolean
   /** Applied to the trigger button. */
   className?: string
+  /**
+   * Label the trigger with {@link compactModelLabel} and drop the chevron, for
+   * a chip squeezed to a few characters (the composer row on a phone), where
+   * the full name ellipsized to the vendor word every model shares. The raw id
+   * stays the label's title, and the open picker lists the full names.
+   */
+  compactLabel?: boolean
   align?: React.ComponentProps<typeof PopoverContent>["align"]
   side?: React.ComponentProps<typeof PopoverContent>["side"]
 }
@@ -245,6 +252,7 @@ export function ModelSelect({
   placeholder,
   disabled,
   className,
+  compactLabel = false,
   align = "center",
   side = "top",
 }: ModelSelectProps) {
@@ -329,9 +337,13 @@ export function ModelSelect({
                 className={cn("min-w-0 truncate", !model && placeholder && "text-muted-foreground")}
                 title={model || placeholder}
               >
-                {activeModelName || placeholder}
+                {activeModelName
+                  ? compactLabel
+                    ? compactModelLabel(activeModelName)
+                    : activeModelName
+                  : placeholder}
               </span>
-              <ChevronsUpDownIcon className="size-3 opacity-50" />
+              {compactLabel ? null : <ChevronsUpDownIcon className="size-3 opacity-50" />}
             </Button>
           </TooltipTrigger>
         }

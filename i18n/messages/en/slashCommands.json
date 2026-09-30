@@ -7,5 +7,26 @@
     "run": "Run the workflow (or from a specific step). Requires approval.",
     "suggest": "Propose one next node to add (no auto-apply)",
     "validate": "Run local validation and ask the agent to fix any issues"
+  },
+  "sessions": {
+    "listFailed": "Could not list sessions: {reason}",
+    "empty": "No sessions yet. Type a message to start one.",
+    "heading": "**Sessions** (most recently updated first)",
+    "columnTitle": "Title",
+    "columnKind": "Kind",
+    "columnUpdated": "Updated",
+    "columnId": "ID",
+    "untitled": "(untitled)",
+    "footer": "Use `/resume '<'title or id>` to switch.",
+    "justNow": "just now",
+    "minutesAgo": "{count}m ago",
+    "hoursAgo": "{count}h ago",
+    "daysAgo": "{count}d ago",
+    "resumeUsage": "Usage: `/resume '<'id or title>` — try `/sessions` to see what is available.",
+    "resumeNoSessions": "No sessions yet.",
+    "resumed": "Resumed {title}",
+    "resumedFallbackTitle": "session",
+    "resumeNoMatch": "No session matched `{query}`. Try `/sessions`.",
+    "resumeAmbiguous": "`{query}` matches multiple sessions; resolve by id:"
   }
 }

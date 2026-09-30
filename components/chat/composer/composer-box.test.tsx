@@ -189,9 +189,21 @@ describe("ComposerBox — attach cluster", () => {
     expect(screen.queryByTestId("plus-menu")).not.toBeInTheDocument()
   })
 
-  it("floors the send button to the touch target in the phone layout", () => {
+  it("floors the send button's tap area without growing the circle in the phone layout", () => {
     render(<ComposerBox {...props({ isMobile: true })} />)
-    expect(screen.getByRole("button", { name: "ariaSend" }).className).toContain("touch-target")
+    const send = screen.getByRole("button", { name: "ariaSend" })
+    // Painted at 40px beside the in-box toolbar row; `touch-hit` extends the
+    // hit area to the 44px floor instead of inflating the button.
+    expect(send.className).toContain("size-10")
+    expect(send.className).toContain("touch-hit")
+    expect(send.className).not.toContain("touch-target")
+  })
+
+  it("keeps the input transparent in dark mode, so no box paints inside the box", () => {
+    render(<ComposerBox {...props({ isMobile: true })} />)
+    expect(screen.getByRole("textbox", { name: "ariaMessage" }).className).toContain(
+      "dark:bg-transparent"
+    )
   })
 
   it("shows the drop overlay only while a file drag is active", () => {

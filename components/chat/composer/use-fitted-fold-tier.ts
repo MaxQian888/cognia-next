@@ -5,6 +5,20 @@ import { useState, type RefObject } from "react"
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { resolveToolbarFoldTier, type ToolbarFoldTier } from "@/lib/chat/composer-skin"
 
+/** The last rung of the fold ladder — nothing left to fold after it. */
+const LAST_TIER: ToolbarFoldTier = 4
+
+export interface FittedToolbar {
+  tier: ToolbarFoldTier
+  /**
+   * The row is still squeezed at the last rung. Every rung has folded what it
+   * can, so the ROW has to change arrangement: an in-box row switches to the
+   * `folded` layout, whose "⋯" holds everything. Without it, a phone-width
+   * row at tier 4 crushed its glyph chips to a couple of pixels each.
+   */
+  exhausted: boolean
+}
+
 /**
  * The fold ladder's second opinion: the width thresholds propose a tier, the
  * rendered row confirms it.
@@ -30,11 +44,11 @@ import { resolveToolbarFoldTier, type ToolbarFoldTier } from "@/lib/chat/compose
  * errs towards folding, which is the invariant: a control may move into "⋯",
  * but a label is never shaved.
  */
-export function useFittedFoldTier(
+export function useFittedToolbar(
   rootRef: RefObject<HTMLElement | null>,
   width: number,
   signature: string
-): ToolbarFoldTier {
+): FittedToolbar {
   const base = resolveToolbarFoldTier(width)
   const [bump, setBump] = useState<{ width: number; signature: string; extra: number }>({
     width: 0,
@@ -42,7 +56,9 @@ export function useFittedFoldTier(
     extra: 0,
   })
   const extra = bump.width === width && bump.signature === signature ? bump.extra : 0
-  const tier = Math.min(4, base + extra) as ToolbarFoldTier
+  const steps = base + extra
+  const tier = Math.min(LAST_TIER, steps) as ToolbarFoldTier
+  const exhausted = steps > LAST_TIER
 
   // No dependency list on purpose: a label can be squeezed by any re-render
   // (a chip's value changing, a plugin slot mounting), and the check is one
@@ -50,12 +66,22 @@ export function useFittedFoldTier(
   useIsomorphicLayoutEffect(() => {
     const root = rootRef.current
     // Unmeasured (`0`) renders the widest form without judging it, like the
-    // threshold resolver; the last rung has nothing left to fold.
-    if (!root || width <= 0 || tier >= 4) return
+    // threshold resolver; once exhausted the caller has changed arrangement
+    // and there is no further rung to step to.
+    if (!root || width <= 0 || exhausted) return
     if (isToolbarSqueezed(root)) setBump({ width, signature, extra: extra + 1 })
   })
 
-  return tier
+  return { tier, exhausted }
+}
+
+/** {@link useFittedToolbar}'s rung alone, for callers with no other arrangement. */
+export function useFittedFoldTier(
+  rootRef: RefObject<HTMLElement | null>,
+  width: number,
+  signature: string
+): ToolbarFoldTier {
+  return useFittedToolbar(rootRef, width, signature).tier
 }
 
 /**
@@ -72,6 +98,13 @@ export function isToolbarSqueezed(root: HTMLElement): boolean {
   for (const label of root.querySelectorAll<HTMLElement>(".truncate")) {
     if (label.scrollWidth <= label.clientWidth + 1) continue
     if (!isCappedWithin(label, root)) return true
+  }
+  // A glyph-only chip has no `.truncate` label to clip and does not overflow
+  // the row: flex shrinks the BUTTON instead, under its own icon, until chips
+  // paint over each other. Content wider than its own control is that.
+  for (const control of root.querySelectorAll<HTMLElement>("button")) {
+    if (control.scrollWidth <= control.clientWidth + 1) continue
+    if (!isCappedWithin(control, root)) return true
   }
   return false
 }

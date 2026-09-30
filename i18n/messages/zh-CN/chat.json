@@ -62,12 +62,19 @@
     "download": "下载",
     "downloadAria": "下载 artifact",
     "downloadFailed": "无法保存该 artifact",
+    "enlarge": "放大预览",
     "expand": "展开预览",
+    "lineCount": "{count} 行",
     "openInCanvas": "在画布中打开",
     "openInCanvasAria": "在画布中打开 artifact",
     "previewAnyway": "仍然预览",
     "previewDeferred": "这个 artifact 比较大，点一下即可预览。",
-    "previewReactManual": "React artifact 需要加载运行时，按需预览。"
+    "previewReactManual": "React artifact 需要加载运行时，按需预览。",
+    "showMore": "展开更多",
+    "shrink": "缩小预览",
+    "version": "v{version}",
+    "viewPreview": "查看预览",
+    "viewSource": "查看源码"
   },
   "askUser": {
     "dismiss": "忽略",
@@ -890,7 +897,9 @@
       "breakdownUserMessages": "用户消息",
       "compactAgentOwned": "压缩由该 Agent 自行管理",
       "compactDisabled": "自动压缩已关闭",
+      "compactFailed": "无法压缩此对话：{reason}",
       "compactNow": "立即压缩",
+      "compactNothingYet": "暂无可压缩的内容。收到第一条回复后即可压缩。",
       "compactThreshold": "{pct} 时自动压缩",
       "contextTitle": "上下文窗口",
       "contextUsageAria": "上下文窗口已用 {pct}",
@@ -947,6 +956,7 @@
         "generic": "语音输入失败，请重试。",
         "noMicrophone": "没有可用的麦克风，请检查音频设备。",
         "noSpeech": "未检测到语音，请靠近麦克风再试。",
+        "notStarted": "语音输入没有启动。请确认已允许 Cognia 使用麦克风，然后重试。",
         "permissionDenied": "麦克风权限被拒绝，请为应用开启麦克风权限后重试。",
         "unsupported": "当前环境不支持语音输入。"
       },
@@ -1000,6 +1010,7 @@
       "microphoneLabel": "麦克风",
       "microphoneLiveOnly": "仅用于实时语音。语音输入使用系统默认麦克风。",
       "noMicFound": "未找到麦克风。",
+      "openSettings": "打开设置",
       "selectMicAria": "选择麦克风",
       "startListening": "开始语音输入",
       "stopListening": "停止录音",
@@ -1824,6 +1835,7 @@
     "bookmarkLabel": "切换收藏",
     "bookmarkRemoveTooltip": "取消收藏",
     "bookmarkTooltip": "收藏",
+    "bookmarkedIndicator": "已收藏",
     "branchLabel": "分支对话",
     "branchStreamingTooltip": "等这条回复结束后再分支",
     "branchTooltip": "从这里分支",
@@ -1967,7 +1979,10 @@
       "summaryNative": "以原视频发送",
       "summaryStoryboard": "{count} 帧故事板（{strategy}）",
       "video": "视频"
-    }
+    },
+    "shareCopiedFallback": "此处无法调用系统分享，已将消息复制到剪贴板。",
+    "shareFailed": "无法分享这条消息。",
+    "editingSubmitTouch": "发送"
   },
   "messageDisplay": {
     "assistant": "助手",
@@ -2052,6 +2067,7 @@
       "label": "全部放行",
       "tooltip": "所有工具自动批准。请谨慎 — Claude 可能执行任意命令。"
     },
+    "changed": "权限模式：{label}",
     "default": {
       "label": "默认",
       "tooltip": "工具按常规弹窗征求权限。"

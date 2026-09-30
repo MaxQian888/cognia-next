@@ -35,6 +35,7 @@ import {
   ContextTrigger,
 } from "@/components/ai-elements/context"
 import { ScissorsIcon } from "lucide-react"
+import { toast } from "sonner"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { compactSession } from "@/lib/claude/ipc"
@@ -299,6 +300,7 @@ export function ContextUsageIndicator({
               <CompactNowButton
                 sessionId={activeSessionId}
                 usedTokens={win.used}
+                turns={assistantTurns}
                 // The sidecar can only compact sessions it runs. An external
                 // agent owns its own history, so the control would post a
                 // frame into the void — an enabled button that does nothing.
@@ -603,36 +605,61 @@ export function ContextRing({ fraction, muted }: { fraction: number; muted?: boo
  * `lib/claude/ipc.ts:compactSession`). Disabled with no active session or an
  * empty window (nothing to compact). Exported so it is unit-testable without
  * driving the Radix hover card open in jsdom.
+ *
+ * A disabled button on its own was a silent no-op to a tap: on a translucent
+ * card its dimmed state read as enabled, and nothing said why it did nothing.
+ * When the reason is that the conversation has nothing in it yet, a line under
+ * the button says so. (An agent-owned window and an unreported occupancy are
+ * already explained in the card's header and turn summary.) A request that
+ * fails is reported rather than dropped.
  */
 export function CompactNowButton({
   sessionId,
   usedTokens,
+  turns,
   supported = true,
 }: {
   sessionId: string | null
   usedTokens: number
+  /** Completed assistant turns; `0` means there is no conversation to compact yet. */
+  turns?: number
   /** False when this session's runtime owns compaction (external agents). */
   supported?: boolean
 }) {
   const t = useTranslations("chat.composer.toolbar")
   const scope = useOptionalChatScope()
+  const nothingYet = sessionId === null || turns === 0
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="mt-1 h-7 w-full justify-start gap-1.5 text-xs"
-      disabled={!supported || !sessionId || usedTokens === 0}
-      onClick={() => {
-        if (!sessionId) return
-        if (scope?.sessionId === sessionId && scope.compact) void scope.compact()
-        else void compactSession(sessionId)
-      }}
-      data-testid="compact-now-button"
-    >
-      <ScissorsIcon className="size-3" />
-      {t("compactNow")}
-    </Button>
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="mt-1 h-7 w-full justify-start gap-1.5 text-xs"
+        disabled={!supported || !sessionId || usedTokens === 0}
+        onClick={() => {
+          if (!sessionId) return
+          const request =
+            scope?.sessionId === sessionId && scope.compact
+              ? scope.compact()
+              : compactSession(sessionId)
+          void request.catch((err: unknown) => {
+            toast.error(
+              t("compactFailed", { reason: err instanceof Error ? err.message : String(err) })
+            )
+          })
+        }}
+        data-testid="compact-now-button"
+      >
+        <ScissorsIcon className="size-3" />
+        {t("compactNow")}
+      </Button>
+      {supported && nothingYet ? (
+        <p className="px-2 text-[11px] text-muted-foreground" data-compact-now-hint="">
+          {t("compactNothingYet")}
+        </p>
+      ) : null}
+    </>
   )
 }
 

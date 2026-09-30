@@ -509,7 +509,9 @@ describe("Composer — mobile (Claude-style) layout", () => {
   // geometry), which is the meaningful structural difference between platforms.
   function pillClass(): string {
     const ta = document.querySelector("textarea")
-    const pill = ta?.closest("[class*='rounded-2xl']")
+    // By the box's own marker, not a radius class: the phone's one-surface
+    // layout draws a larger corner than the desktop pill.
+    const pill = ta?.closest("[data-composer-skin]")
     return pill?.className ?? ""
   }
 
@@ -634,9 +636,7 @@ describe("Composer — mobile (Claude-style) layout", () => {
     try {
       renderComposer()
       expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
-      expect(document.querySelector('button[aria-label="Send"]')?.className).toContain(
-        "touch-target"
-      )
+      expect(document.querySelector('button[aria-label="Send"]')?.className).toContain("touch-hit")
     } finally {
       mockUseCompactLayout.mockReturnValue(false)
     }

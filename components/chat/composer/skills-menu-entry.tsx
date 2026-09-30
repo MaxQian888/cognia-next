@@ -1,9 +1,10 @@
 "use client"
 
 // The skills entry inside the `+` menu's capability group. The row opens a
-// right-side flyout with the skill list inline rather than a modal — toggles
-// land instantly with no dialog round-trip, and the attach menu stays open
-// behind it (Radix tracks nested layers). Picks write the per-session
+// flyout (right of the row on a wide screen, stacked above it on a phone; see
+// `useFlyoutPlacement`) with the skill list inline rather than a modal —
+// toggles land instantly with no dialog round-trip, and the attach menu stays
+// open behind it (Radix tracks nested layers). Picks write the per-session
 // ephemeral-skill store and ride only the next send.
 
 import { useState } from "react"
@@ -14,6 +15,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CapabilityRow } from "@/components/chat/composer/capability-row"
 import { SkillPickerContent } from "@/components/chat/skill-picker"
 import { useChatStore, useComposerEphemeralSkillIds } from "@/stores/chat/chat-store"
+import { cn } from "@/lib/utils"
+import { useFlyoutPlacement } from "./use-flyout-placement"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 export function SkillsMenuEntry({
@@ -27,6 +30,7 @@ export function SkillsMenuEntry({
   const ids = useComposerEphemeralSkillIds(session?.id ?? null) ?? []
   const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds)
   const [flyoutOpen, setFlyoutOpen] = useState(false)
+  const { className: flyoutClassName, ...placement } = useFlyoutPlacement()
 
   return (
     <Popover open={flyoutOpen} onOpenChange={setFlyoutOpen}>
@@ -41,7 +45,11 @@ export function SkillsMenuEntry({
           data-testid="composer-skill-trigger"
         />
       </PopoverTrigger>
-      <PopoverContent align="start" side="right" sideOffset={8} className="w-72 p-0">
+      <PopoverContent
+        {...placement}
+        className={cn("w-72 p-0", flyoutClassName)}
+        data-testid="composer-skill-flyout"
+      >
         <Command>
           <SkillPickerContent
             active={flyoutOpen}

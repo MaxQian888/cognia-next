@@ -36,6 +36,7 @@ import { useTranslations } from "next-intl"
 import { CopyIcon, DownloadIcon, Maximize2Icon, XIcon } from "lucide-react"
 import { tableDataToCSV, tableDataToMarkdown, tableDataToTSV, type TableData } from "streamdown"
 import { toast } from "sonner"
+import { downloadBlob, type DownloadOutcome } from "@/lib/files/download"
 
 import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
 import { AudioBlock } from "@/components/chat/renderers/audio-block"
@@ -203,19 +204,17 @@ function serializeTable(data: TableData, format: TableCopyFormat): string {
   return tableDataToMarkdown(data)
 }
 
-function downloadTable(data: TableData, format: TableDownloadFormat): void {
+/**
+ * Download goes through the shared `downloadBlob`, which hands the file to the
+ * native share sheet inside the mobile WebView (where an `<a download>` click
+ * silently produced nothing) and clicks an anchor everywhere else.
+ */
+function downloadTable(data: TableData, format: TableDownloadFormat): Promise<DownloadOutcome> {
   const content = format === "csv" ? tableDataToCSV(data) : tableDataToMarkdown(data)
   const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "text/markdown;charset=utf-8"
   const extension = format === "csv" ? "csv" : "md"
   const prefix = format === "csv" ? "\uFEFF" : ""
-  const url = URL.createObjectURL(new Blob([prefix, content], { type: mimeType }))
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = `table.${extension}`
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
+  return downloadBlob(new Blob([prefix, content], { type: mimeType }), `table.${extension}`)
 }
 
 function MarkdownTable({
@@ -239,9 +238,10 @@ function MarkdownTable({
     }
   }
 
-  const download = (format: TableDownloadFormat) => {
+  const download = async (format: TableDownloadFormat) => {
     try {
-      downloadTable(data, format)
+      const outcome = await downloadTable(data, format)
+      if (outcome.kind === "error") toast.error(t("actionFailed"))
     } catch {
       toast.error(t("actionFailed"))
     }
@@ -287,8 +287,10 @@ function MarkdownTable({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => download("csv")}>{t("downloadCsv")}</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => download("markdown")}>
+          <DropdownMenuItem onSelect={() => void download("csv")}>
+            {t("downloadCsv")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void download("markdown")}>
             {t("downloadMarkdown")}
           </DropdownMenuItem>
         </DropdownMenuContent>

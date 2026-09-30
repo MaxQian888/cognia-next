@@ -262,4 +262,39 @@ describe("<WelcomeStats />", () => {
       )
     })
   })
+
+  describe("compact (phone welcome)", () => {
+    it("renders nothing while the default window has no usage", () => {
+      mockHook({ stats: { ...EMPTY_ACTIVITY_STATS }, daily: [], models: [] })
+      const { container } = render(<WelcomeStats compact />)
+      expect(container).toBeEmptyDOMElement()
+    })
+
+    it("keeps an empty NARROWED window up, so its range can be widened again", () => {
+      storeState.settings = { welcomeStats: { ...DEFAULT_WELCOME_STATS_PREFS, rangeDays: 7 } }
+      mockHook({ stats: { ...EMPTY_ACTIVITY_STATS }, daily: [], models: [] })
+      render(<WelcomeStats compact />)
+      expect(screen.getByTestId("welcome-stats-empty")).toBeInTheDocument()
+    })
+
+    it("keeps the loading skeleton rather than flashing away before the first snapshot", () => {
+      mockHook({ loading: true, stats: { ...EMPTY_ACTIVITY_STATS } })
+      render(<WelcomeStats compact />)
+      expect(screen.getByTestId("welcome-stats-loading")).toBeInTheDocument()
+    })
+
+    it("moves the view and range toggles into the customize popover", async () => {
+      const user = userEvent.setup()
+      render(<WelcomeStats compact />)
+      // The header holds only the ⚙ (and the ✕).
+      expect(screen.queryByTestId("welcome-stats-range")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("welcome-stats-view")).not.toBeInTheDocument()
+      await user.click(screen.getByTestId("welcome-stats-customize"))
+      expect(screen.getByTestId("welcome-stats-customize-extra")).toBeInTheDocument()
+      await user.click(screen.getByTestId("welcome-stats-range-7"))
+      expect(save).toHaveBeenCalledWith({
+        welcomeStats: { ...DEFAULT_WELCOME_STATS_PREFS, rangeDays: 7 },
+      })
+    })
+  })
 })

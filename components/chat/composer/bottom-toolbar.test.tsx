@@ -41,6 +41,20 @@ jest.mock("@/hooks/use-element-width", () => ({
   useElementWidth: () => mockToolbarWidth,
 }))
 
+// Pass-through to the real fit hook, with a switch to force the "last rung
+// still does not fit" outcome jsdom cannot measure.
+let mockForceExhausted = false
+jest.mock("./use-fitted-fold-tier", () => {
+  const actual = jest.requireActual("./use-fitted-fold-tier")
+  return {
+    ...actual,
+    useFittedToolbar: (...args: Parameters<typeof actual.useFittedToolbar>) => {
+      const fit = actual.useFittedToolbar(...args)
+      return mockForceExhausted ? { tier: 4, exhausted: true } : fit
+    },
+  }
+})
+
 // Capture router.push calls.
 const pushSpy = jest.fn()
 jest.mock("next/navigation", () => ({
@@ -623,6 +637,25 @@ describe("BottomToolbar — narrow-width More menu", () => {
     expect(screen.getByTestId("composition-chip")).toHaveAttribute("data-layout", "combined")
   })
 
+  // A folded row reads as a menu row, and on a phone that is where the thumb
+  // lands: tapping the "Sandbox" caption (not the glyph pinned to the far
+  // edge) must open the sandbox control, not do nothing.
+  it("activates a folded control from a tap on its row caption", () => {
+    mockToolbarWidth = 450
+    render(<BottomToolbar session={session} variant="embedded" />)
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    const caption = screen.getByText("moreMenu.sandbox")
+    const row = caption.closest("label")
+    expect(row).not.toBeNull()
+    expect(row).toHaveAttribute("data-testid", "composer-toolbar-menu-row")
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(caption)
+    expect(shield).toHaveAttribute("aria-expanded", "true")
+    // The agent-mode row is a label for its chip as well.
+    expect(screen.getByText("moreMenu.mode").closest("label")).not.toBeNull()
+  })
+
   // Every width shows the SAME roster — the branches differ only in how the row
   // is packed. That is what keeps each control mounted in exactly one place:
   // wide lays them out, narrower folds the tail into "⋯" in stages.
@@ -751,9 +784,21 @@ describe("BottomToolbar — the fold ladder", () => {
     expect(screen.getByTestId("effort-chip")).toHaveAttribute("data-glyph", "true")
     expect(screen.getByTestId("permission-mode-indicator")).toHaveAttribute("data-glyph", "true")
     expect(fusionChipProps.at(-1)).toMatchObject({ glyph: true })
+    // The model chip switches to its short label and drops the chevron.
+    expect(
+      screen.getByLabelText("switchModelAria").querySelector("svg.lucide-chevrons-up-down")
+    ).toBeNull()
     expect(screen.queryByTestId("composition-chip")).toBeNull()
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("composition-chip")).toHaveAttribute("data-layout", "combined")
+  })
+
+  it("keeps the model chip's full label and chevron while the row has room", () => {
+    mockToolbarWidth = 900
+    render(<BottomToolbar session={session} />)
+    expect(
+      screen.getByLabelText("switchModelAria").querySelector("svg.lucide-chevrons-up-down")
+    ).not.toBeNull()
   })
 
   it("folds fusion and the session-cost badge at tier 3, fully labelled inside", () => {
@@ -903,6 +948,45 @@ describe("BottomToolbar — every layout keeps the whole roster reachable", () =
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+  })
+
+  it("switches an in-box row that the last rung cannot fit to the folded arrangement", () => {
+    mockForceExhausted = true
+    try {
+      const view = render(<BottomToolbar session={session} variant="embedded" />)
+      expect(screen.getByTestId("composer-toolbar-embedded")).toHaveAttribute(
+        "data-toolbar-layout",
+        "folded"
+      )
+      // Everything that left the row is one tap away in "⋯".
+      fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+      expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+      view.unmount()
+
+      // The detached row under the box keeps its own packing.
+      render(<BottomToolbar session={session} variant="detached" />)
+      expect(screen.getByTestId("composer-footer")).toHaveAttribute(
+        "data-toolbar-layout",
+        "detached"
+      )
+    } finally {
+      mockForceExhausted = false
+    }
+  })
+
+  // The phone's in-box composer runs `folded`: the model is the row's only
+  // chip, so a narrow row takes the short name rather than "Claude So…".
+  it("gives the folded row's model chip its short label on a narrow row", () => {
+    mockToolbarWidth = 160
+    const narrow = render(<BottomToolbar session={session} variant="folded" />)
+    const narrowRow = screen.getByTestId("composer-toolbar-embedded")
+    expect(narrowRow.querySelector("svg.lucide-chevrons-up-down")).toBeNull()
+    narrow.unmount()
+
+    mockToolbarWidth = 900
+    render(<BottomToolbar session={session} variant="folded" />)
+    const wideRow = screen.getByTestId("composer-toolbar-embedded")
+    expect(wideRow.querySelector("svg.lucide-chevrons-up-down")).not.toBeNull()
   })
 
   it("gives the ambient rail the full-verbosity cost and credential", () => {

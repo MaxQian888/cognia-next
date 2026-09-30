@@ -115,6 +115,7 @@ import { expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useCoarsePointer } from "@/hooks/ui/use-pointer"
+import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { Button } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
@@ -2267,6 +2268,58 @@ function ComposerInner(props: InnerProps) {
     [paramTokens, textareaRef]
   )
 
+  /**
+   * Remove the whole `/command`, `@mention`, `{{parameter}}` or folded-link pill
+   * the collapsed caret is hugging, and report whether it did. Only while no
+   * completion popover is open, so mid-typing edits stay character by character.
+   */
+  const deletePillAtCaret = useCallback(
+    (ta: HTMLTextAreaElement, direction: "backward" | "forward"): boolean => {
+      if (completionTrigger || ta.selectionStart !== ta.selectionEnd) return false
+      const range = pillDeleteRange(textInput.value, ta.selectionStart, overlaySegments, direction)
+      if (!range) return false
+      const cur = textInput.value
+      textInput.setInput(cur.slice(0, range.start) + cur.slice(range.end))
+      setCaret(range.start)
+      requestAnimationFrame(() => {
+        const ta2 = textareaRef.current
+        if (ta2) {
+          ta2.setSelectionRange(range.start, range.start)
+          ta2.focus()
+        }
+      })
+      return true
+    },
+    [completionTrigger, textInput, overlaySegments]
+  )
+
+  // The same atomic delete for keyboards that never send a usable keydown.
+  // Android's soft keyboards (Gboard, the EMUI keyboard, every IME) report
+  // Backspace as `key: "Unidentified"`, so on a phone the keydown branch never
+  // fired and one Backspace turned the `/goal` pill into the plain text
+  // `/goa`, which then went out as an ordinary message. What they do send is
+  // a cancelable `beforeinput` naming the edit, so the pill is caught there.
+  // Listened for on the document because the textarea mounts and remounts
+  // with the composer's mode, and a capture listener outlives all of that.
+  // A delete that is part of an IME composition is not cancelable and is left
+  // to the keyboard.
+  const deletePillFromInputEvent = useStableCallback((event: InputEvent) => {
+    const ta = textareaRef.current
+    if (!ta || event.target !== ta || !event.cancelable || event.isComposing) return
+    const direction =
+      event.inputType === "deleteContentBackward"
+        ? "backward"
+        : event.inputType === "deleteContentForward"
+          ? "forward"
+          : null
+    if (!direction) return
+    if (deletePillAtCaret(ta, direction)) event.preventDefault()
+  })
+  useEffect(() => {
+    document.addEventListener("beforeinput", deletePillFromInputEvent, true)
+    return () => document.removeEventListener("beforeinput", deletePillFromInputEvent, true)
+  }, [deletePillFromInputEvent])
+
   // Local handles so the key handler depends on the specific props it reads,
   // not the whole `props` object (react-hooks/exhaustive-deps).
   const turnStatus = props.status
@@ -2374,42 +2427,21 @@ function ComposerInner(props: InnerProps) {
       }
       // Atomic pill delete: a Backspace/Delete next to an already-inserted
       // `/command` or `@mention` removes the WHOLE token in one keystroke, so a
-      // picked chip deletes as a unit instead of nibbling `/rese`. Only when no
-      // popover is open (mid-typing edits stay normal), not composing, plain key
-      // (let ⌥/⌘ word/line deletes through), and the selection is collapsed.
+      // picked chip deletes as a unit instead of nibbling `/rese`. Only when not
+      // composing and a plain key (let ⌥/⌘ word/line deletes through). A soft
+      // keyboard reports these keys as "Unidentified"; `beforeinput` below
+      // covers it.
       if (
-        !completionTrigger &&
         !isComposing &&
         !e.nativeEvent.isComposing &&
         (e.key === "Backspace" || e.key === "Delete") &&
         !e.metaKey &&
         !e.ctrlKey &&
-        !e.altKey
+        !e.altKey &&
+        deletePillAtCaret(e.currentTarget, e.key === "Backspace" ? "backward" : "forward")
       ) {
-        const ta = e.currentTarget
-        if (ta.selectionStart === ta.selectionEnd) {
-          const range = pillDeleteRange(
-            textInput.value,
-            ta.selectionStart,
-            overlaySegments,
-            e.key === "Backspace" ? "backward" : "forward"
-          )
-          if (range) {
-            e.preventDefault()
-            const cur = textInput.value
-            const next = cur.slice(0, range.start) + cur.slice(range.end)
-            textInput.setInput(next)
-            setCaret(range.start)
-            requestAnimationFrame(() => {
-              const ta2 = textareaRef.current
-              if (ta2) {
-                ta2.setSelectionRange(range.start, range.start)
-                ta2.focus()
-              }
-            })
-            return
-          }
-        }
+        e.preventDefault()
+        return
       }
       // Inline ghost-text acceptance (only when no `/@!#` popover is open).
       // Tab walks the `{{parameter}}` chips. Only claimed when the text
@@ -2545,9 +2577,9 @@ function ComposerInner(props: InnerProps) {
       dismissPopover,
       submit,
       isComposing,
+      deletePillAtCaret,
       history,
       textInput,
-      overlaySegments,
       paramTokens,
       stepToParam,
       activeParamId,

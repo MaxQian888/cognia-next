@@ -82,6 +82,7 @@ import { mobileTransition } from "@/lib/ui/motion"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { WorkspaceChangesCard } from "./workspace-changes-card"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
+import { useCapability } from "@/hooks/use-host-profile"
 import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
 import { acknowledgePendingChatPrompt, peekPendingChatPrompt } from "@/lib/chat/pending-prompt"
 import {
@@ -112,6 +113,9 @@ import {
  * module scope so merging the external composer ref doesn't read as mutating a
  * prop during render (React Compiler `immutability` rule).
  */
+/** Curated hero hints (`chat.empty.hints.hN`) that assume a repo to work in. */
+const WORKSPACE_HINT_NUMBERS: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6])
+
 function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
   if (typeof ref === "function") ref(node)
   else if (ref) (ref as { current: T | null }).current = node
@@ -475,6 +479,11 @@ export function ChatPane({
   // characters; returns undefined for legacy/unset ids.
   const activeCharacter = useCharacter(activeSession?.characterId)
   const projectRoot = useEffectiveCwd(activeSession)
+  // The dev-tool starters ("list the working directory", `git diff`, "run the
+  // tests") need a directory AND a shell to run in. A phone with no paired host
+  // has neither, and offering them there is offering a prompt that must fail.
+  const canRunShell = useCapability("shell")
+  const workspaceAvailable = projectRoot !== null && canRunShell
   const characterSamples = activeCharacter?.persona?.exemplarPrompts
   const aiStarters = useStarterSuggestions(activeSession, {
     name: activeCharacter?.name,
@@ -658,19 +667,27 @@ export function ChatPane({
     const custom = (customHints ?? []).map((p) => p.trim()).filter((p) => p.length > 0)
     if (custom.length > 0) return Array.from(new Set(custom)).slice(0, 10)
     const dynamic = [...(aiStarters ?? []), ...(characterSamples ?? [])]
-    const curated = Array.from({ length: 8 }, (_, i) => tEmpty(`hints.h${i + 1}`))
-    const samples = (["explore", "review", "draft", "tests"] as const).map((id) =>
-      tEmpty(`samples.${id}Prompt`)
-    )
+    // h1–h6 are about "this repo" (changes, tests, changelog, staged diff,
+    // code review, retries in the code); h7/h8 are not.
+    const curated = Array.from({ length: 8 }, (_, i) => i + 1)
+      .filter((n) => workspaceAvailable || !WORKSPACE_HINT_NUMBERS.has(n))
+      .map((n) => tEmpty(`hints.h${n}`))
+    // Every dev-tool sample drives the shell in the working directory (the
+    // same set `EmptyChatState` marks `needsWorkspace`).
+    const samples = workspaceAvailable
+      ? (["explore", "review", "draft", "tests"] as const).map((id) =>
+          tEmpty(`samples.${id}Prompt`)
+        )
+      : []
     return Array.from(
       new Set([...dynamic, ...curated, ...samples].map((p) => p.trim()).filter((p) => p.length > 0))
     ).slice(0, 10)
-  }, [aiStarters, characterSamples, customHints, tEmpty])
+  }, [aiStarters, characterSamples, customHints, tEmpty, workspaceAvailable])
 
   // Usage dashboard — only on the generic chat welcome. Surfaces that replace
   // the welcome copy entirely (the workflow-editor chat tab passes
   // `emptyState`) get their own framing and would read as off-topic with it.
-  const statsSlot = emptyState ? undefined : <WelcomeStats />
+  const statsSlot = emptyState ? undefined : <WelcomeStats compact={isMobileShell} />
 
   if (runtimeNotice && (!activeSession || !hasHistory)) {
     return (
@@ -694,6 +711,7 @@ export function ChatPane({
         onResumeSession={onResumeSession}
         override={emptyState}
         hideSamples={welcomeExtras?.hideSamples}
+        workspaceAvailable={workspaceAvailable}
         hideCreateAction={welcomeExtras?.hideNewChatAction}
         headerExtraSlot={welcomeExtras?.header}
         quickActionsSlot={welcomeExtras?.quickActions}
@@ -727,7 +745,10 @@ export function ChatPane({
               ) : null}
               <Composer
                 placement="hero"
-                defaultSkin="dense"
+                // The mono `dense` box is the desktop welcome's look. A phone
+                // keeps the one composer it uses in every conversation, so the
+                // box does not change style between the home and the chat.
+                {...(isMobileShell ? {} : { defaultSkin: "dense" as const })}
                 placeholderHints={heroHints}
                 session={null}
                 onStartNewSession={() => onCreate()}
@@ -988,9 +1009,15 @@ export function ChatPane({
                   characterSamples={characterSamples}
                   aiSamples={aiStarters}
                   override={emptyState}
+                  workspaceAvailable={workspaceAvailable}
                   statsSlot={statsSlot}
                   hiddenSections={welcomeHidden}
                   onDismissSection={handleDismissSection}
+                  // Same density and name as the no-session welcome: without
+                  // them an empty conversation on a phone fell back to the rich
+                  // desktop hero and ignored the name set in Personalization.
+                  welcomeStyle={welcomeStyle}
+                  userName={userName}
                 />
               )}
               {errorAndFooter}

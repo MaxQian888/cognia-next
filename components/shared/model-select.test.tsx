@@ -239,3 +239,44 @@ it("updates an open picker when a subscription plugin registers and unloads", as
   }
   expect(screen.queryByText("picker-model")).not.toBeInTheDocument()
 })
+
+describe("ModelSelect compact label", () => {
+  // On a phone the chip holds a few characters, and the full name ellipsized
+  // to the vendor word every Anthropic model shares ("Claude S…").
+  it("names the model by what tells it apart and drops the chevron", () => {
+    seedSettings()
+    renderSelect({
+      leadingGroups: [
+        {
+          providerId: "anthropic",
+          providerName: "Anthropic",
+          models: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }],
+        },
+      ],
+      model: "claude-sonnet-4-6",
+      compactLabel: true,
+    })
+    const trigger = screen.getByRole("button", { name: /switch model/i })
+    const label = trigger.querySelector("span[title]")
+    expect(label).toHaveTextContent(/^Sonnet 4\.6$/)
+    expect(label).toHaveAttribute("title", "claude-sonnet-4-6")
+    expect(trigger.querySelector("svg.lucide-chevrons-up-down")).toBeNull()
+  })
+
+  it("keeps the full name and chevron by default", () => {
+    seedSettings()
+    renderSelect({
+      leadingGroups: [
+        {
+          providerId: "anthropic",
+          providerName: "Anthropic",
+          models: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }],
+        },
+      ],
+      model: "claude-sonnet-4-6",
+    })
+    const trigger = screen.getByRole("button", { name: /switch model/i })
+    expect(trigger.querySelector("span[title]")).toHaveTextContent(/^Claude Sonnet 4\.6$/)
+    expect(trigger.querySelector("svg.lucide-chevrons-up-down")).not.toBeNull()
+  })
+})

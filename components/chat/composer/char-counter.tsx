@@ -9,10 +9,15 @@ import { cn } from "@/lib/utils"
 const AMBER_THRESHOLD = 8_000
 const RED_THRESHOLD = 10_000
 
-export function CharCounter() {
+/**
+ * `hideBelow`: stay hidden until the message reaches this many characters. The
+ * phone layout sets it — a running total from the first keystroke is noise in
+ * a thumb-sized field, and the count only starts to matter on long messages.
+ */
+export function CharCounter({ hideBelow = 1 }: { hideBelow?: number } = {}) {
   const controller = usePromptInputController()
   const len = controller.textInput.value.length
-  if (len === 0) return null
+  if (len === 0 || len < hideBelow) return null
   // Only announce to assistive tech once the count actually matters (nearing /
   // over the limit). A permanent `aria-live` would read the running total on
   // every single keystroke — a chatty a11y anti-pattern.

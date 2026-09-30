@@ -23,7 +23,11 @@ jest.mock("next-intl", () => ({
 jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "web"),
 }))
-import { usePlatform } from "@/hooks/use-platform"
+
+let mockShowKeyboardHints = true
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useShowKeyboardHints: () => mockShowKeyboardHints,
+}))
 
 const SID = "s1"
 
@@ -188,15 +192,15 @@ describe("RunStatusBar", () => {
     expect(onStop).toHaveBeenCalledTimes(1)
   })
 
-  it("uses touch-appropriate interrupt copy on the Capacitor native shell", () => {
-    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+  it("uses touch-appropriate interrupt copy without a hover-capable pointer", () => {
+    mockShowKeyboardHints = false
     try {
       seed({ status: "streaming" })
       render(<RunStatusBar sessionId={SID} onStop={jest.fn()} />)
       expect(screen.getByText("interruptHintTouch")).toBeInTheDocument()
       expect(screen.queryByText("interruptHint")).not.toBeInTheDocument()
     } finally {
-      ;(usePlatform as jest.Mock).mockReturnValue("web")
+      mockShowKeyboardHints = true
     }
   })
 

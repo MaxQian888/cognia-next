@@ -155,8 +155,49 @@ export function resolveModelDisplayName(
         ? openRouterCatalogEntry(modelId)?.name
         : providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)?.name
     if (discovered) return discovered
+  } else {
+    // No provider to scope by (a character or session that follows the global
+    // default): a built-in catalog id still has exactly one friendly name, and
+    // dated ids like `claude-haiku-4-5-20251001` are absent from the alias
+    // table below, so without this scan the raw id reached the UI.
+    for (const provider of Object.values(catalog)) {
+      const name = provider?.models?.find((m) => m.id === modelId)?.name
+      if (name) return name
+    }
   }
   return getModelDisplayName(modelId)
+}
+
+/**
+ * The shortest label that still names a model, for a chip with room for a
+ * handful of characters (the composer's model chip on a phone).
+ *
+ * A friendly name spends its first word on the vendor ("Claude Sonnet 4.6",
+ * OpenRouter's "Anthropic: Claude Sonnet 4.5"), so an ellipsis at ten
+ * characters kept exactly the part that does not tell two models apart:
+ * every Anthropic model read "Claude S…". This drops what is shared and keeps
+ * what differs:
+ *
+ *  - a `Vendor: ` prefix;
+ *  - the directory of a raw routed id (`anthropic/claude-sonnet-4` → its last
+ *    segment);
+ *  - the leading `Claude` family word, which every Anthropic model carries,
+ *    whose tier word ("Sonnet", "Haiku", "Opus") is the actual name.
+ *
+ * Other vendors' names are left whole: in "GPT-5" or "Gemini 2.5 Pro" the
+ * first word IS the model family, and "2.5 Pro" alone would name nothing. The
+ * full name stays the chip's title and accessible name.
+ */
+export function compactModelLabel(name: string): string {
+  let label = name.trim()
+  const vendorColon = label.indexOf(": ")
+  if (vendorColon > 0 && vendorColon < label.length - 2) label = label.slice(vendorColon + 2)
+  if (!/\s/.test(label) && label.includes("/")) {
+    const last = label.slice(label.lastIndexOf("/") + 1)
+    if (last) label = last
+  }
+  const withoutFamily = label.replace(/^claude[\s-]+/i, "")
+  return withoutFamily.length > 0 ? withoutFamily : label
 }
 
 /**

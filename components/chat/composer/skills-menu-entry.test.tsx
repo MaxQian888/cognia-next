@@ -4,6 +4,9 @@
 
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
+const mockIsMobile = { current: false }
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => mockIsMobile.current }))
+
 const mockSkillIds: { current: string[] | undefined } = { current: [] }
 const mockSetEphemeralSkillIds = jest.fn()
 
@@ -41,6 +44,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 const session = { id: "sess-1" } as ChatSession
 
 beforeEach(() => {
+  mockIsMobile.current = false
   mockSkillIds.current = []
   mockSetEphemeralSkillIds.mockClear()
 })
@@ -122,5 +126,36 @@ describe("SkillsMenuEntry", () => {
       </TooltipProvider>
     )
     expect(screen.getByTestId("composer-skill-trigger")).toBeDisabled()
+  })
+
+  // jsdom lays everything out at 0×0, so Radix may flip the side; the AXIS is
+  // what the placement decides.
+  it("flies out sideways on a wide screen", async () => {
+    const user = userEvent.setup()
+    render(
+      <TooltipProvider>
+        <SkillsMenuEntry session={session} />
+      </TooltipProvider>
+    )
+    await user.click(screen.getByTestId("composer-skill-trigger"))
+    expect(["right", "left"]).toContain(
+      screen.getByTestId("composer-skill-flyout").getAttribute("data-side")
+    )
+  })
+
+  // On a phone neither side of the `+` menu can hold the panel, and Radix only
+  // flips to the opposite side, so a right-hand flyout ran off the screen.
+  it("stacks the flyout above its row on a phone, clamped to the viewport", async () => {
+    mockIsMobile.current = true
+    const user = userEvent.setup()
+    render(
+      <TooltipProvider>
+        <SkillsMenuEntry session={session} />
+      </TooltipProvider>
+    )
+    await user.click(screen.getByTestId("composer-skill-trigger"))
+    const flyout = screen.getByTestId("composer-skill-flyout")
+    expect(["top", "bottom"]).toContain(flyout.getAttribute("data-side"))
+    expect(flyout.className).toContain("max-w-[calc(100vw-1rem)]")
   })
 })

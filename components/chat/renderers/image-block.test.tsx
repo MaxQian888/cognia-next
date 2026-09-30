@@ -107,7 +107,7 @@ function firePointer(
 describe("ImageBlock", () => {
   beforeEach(() => {
     mockDownloadFromUrl.mockClear()
-    mockDownloadFromUrl.mockResolvedValue(undefined)
+    mockDownloadFromUrl.mockResolvedValue({ kind: "downloaded" })
     mockOpenExternal.mockClear()
     mockCopy.mockClear()
     mockCopied = false

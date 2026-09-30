@@ -75,7 +75,7 @@ import {
   resolveToolbarLayout,
   type ComposerToolbarLayout,
 } from "@/lib/chat/composer-skin"
-import { useFittedFoldTier } from "./use-fitted-fold-tier"
+import { useFittedToolbar } from "./use-fitted-fold-tier"
 import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -177,13 +177,13 @@ function GenericBottomToolbar({
   // comfortable pane; a genuinely narrow one cannot hold `expanded`'s labelled
   // roster whatever the user chose.
   const proposedLayout: ComposerToolbarLayout = variant === "default" ? "detached" : variant
-  const layout = resolveToolbarLayout(proposedLayout, toolbarWidth)
+  const fittedLayout = resolveToolbarLayout(proposedLayout, toolbarWidth)
   // The fold ladder — WHICH controls the width can still hold, and in what
   // form. `resolveToolbarFoldTier`'s doc lists the rungs; these booleans are
   // only their spellings for this row. What folds always lands in the same
   // "⋯" disclosure, in its full labelled form.
   //
-  // The thresholds only PROPOSE a rung: `useFittedFoldTier` measures the row it
+  // The thresholds only PROPOSE a rung: `useFittedToolbar` measures the row it
   // produced and keeps stepping down while any label is still being shaved, so
   // a roster wider than the thresholds assumed (the web status pill, a missing
   // key, a plugin dial, a long locale) folds instead of ellipsizing. The
@@ -197,7 +197,13 @@ function GenericBottomToolbar({
     JSON.stringify(runtimeRef),
     executor.squadId ?? "",
   ].join("|")
-  const tier = useFittedFoldTier(rootRef, toolbarWidth, foldSignature)
+  const { tier, exhausted } = useFittedToolbar(rootRef, toolbarWidth, foldSignature)
+  // Past the last rung the in-box row changes arrangement instead of crushing
+  // its glyphs: `folded` keeps the model inline and hands the rest to "⋯". A
+  // phone's in-box row (~160px beside the attach cluster and send) is where
+  // this happens. The detached row keeps its own packing below the box.
+  const layout: ComposerToolbarLayout =
+    exhausted && (fittedLayout === "embedded" || fittedLayout === "rail") ? "folded" : fittedLayout
   const tierActive = !onBuiltinRuntime
 
   /** The per-turn chips run icon-only — the words cost more than they teach. */
@@ -383,10 +389,15 @@ function GenericBottomToolbar({
     </Tooltip>
   )
 
+  // Once the row runs glyph-only (tier 2+) the model chip has room for a few
+  // characters, and the full name ellipsized to "Claude S…" on every Anthropic
+  // model, so it switches to the short name ("Sonnet 4.6") and gives up its
+  // chevron. Inside "⋯" there is room for the whole name.
   const modelChip = (inMenu: boolean) => (
     <ModelPicker
       session={session}
       disabled={isStreaming}
+      compactLabel={!inMenu && glyphChips}
       className={cn(TOOLBAR_CHIP, !inMenu && tier >= 3 ? "max-w-[7rem]" : "max-w-[11rem]")}
     />
   )
@@ -468,8 +479,8 @@ function GenericBottomToolbar({
   // control renders nothing (no session, no presets, no plugin contributions)
   // collapses itself, so this list can name every possible occupant without
   // re-checking each control's own visibility rules.
-  const menuRow = (label: string, control: ReactNode) => (
-    <ToolbarMenuRow key={label} label={label}>
+  const menuRow = (label: string, control: ReactNode, activatesControl = true) => (
+    <ToolbarMenuRow key={label} label={label} activatesControl={activatesControl}>
       {control}
     </ToolbarMenuRow>
   )
@@ -489,7 +500,7 @@ function GenericBottomToolbar({
       {menuRow(t("moreMenu.preset"), presetControl)}
       {menuRow(t("moreMenu.sandbox"), sandboxIndicator)}
       {costFolded && !ambientOnRail && menuRow(t("moreMenu.cost"), costBadge(false))}
-      {menuRow(t("moreMenu.plugins"), pluginSlots)}
+      {menuRow(t("moreMenu.plugins"), pluginSlots, false)}
     </div>
   )
   const overflowMenu = (ambientOnRail: boolean) => (
@@ -522,7 +533,7 @@ function GenericBottomToolbar({
         {menuRow(t("moreMenu.cost"), costBadge(false))}
         {menuRow(t("moreMenu.credential"), credentialBadge(false))}
         {menuRow(t("moreMenu.context"), contextChip(false))}
-        {menuRow(t("moreMenu.plugins"), pluginSlots)}
+        {menuRow(t("moreMenu.plugins"), pluginSlots, false)}
       </div>
     </ToolbarMoreMenu>
   )
@@ -540,6 +551,9 @@ function GenericBottomToolbar({
         <ModelPicker
           session={session}
           disabled={isStreaming}
+          // The only chip on a narrow folded row (a phone's in-box composer):
+          // the short name ("Sonnet 5") instead of "Claude So…".
+          compactLabel={glyphChips}
           className={cn(TOOLBAR_CHIP, "max-w-[9rem]")}
         />
         <span className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
@@ -737,10 +751,38 @@ const ZONE_RULE =
  * presets, plugin slots with no contributions): the slot is then `:empty`,
  * and `has-[]:hidden` collapses the caption with it — callers never
  * duplicate each control's own visibility rules.
+ *
+ * A row that holds ONE control is a `<label>`, so a tap anywhere on it (the
+ * caption, the gap) activates that control. It reads as a menu row, and on a
+ * phone that is where a thumb lands: the control itself is a glyph or a short
+ * word pinned to the far edge, and tapping the caption of "Agent mode" or
+ * "Sandbox" used to do nothing at all. Native label activation forwards a
+ * click to the first labelable descendant and ignores a click that already
+ * landed on it, so a direct tap still opens exactly once; every control that
+ * folds here opens on click (Popover / Drawer triggers, and the dropdown
+ * trigger's click fallback). The plugin row carries several independent
+ * buttons, so it opts out rather than guessing which one a tap meant.
  */
-function ToolbarMenuRow({ label, children }: { label: string; children: ReactNode }) {
+function ToolbarMenuRow({
+  label,
+  activatesControl = true,
+  children,
+}: {
+  label: string
+  /** Whether a tap on the row's caption activates its (single) control. */
+  activatesControl?: boolean
+  children: ReactNode
+}) {
+  const Row = activatesControl ? "label" : "div"
   return (
-    <div className="flex items-center gap-2 px-1.5 py-0.5 has-[[data-toolbar-menu-slot]:empty]:hidden">
+    <Row
+      data-testid="composer-toolbar-menu-row"
+      className={cn(
+        "flex items-center gap-2 rounded-md px-1.5 py-0.5 has-[[data-toolbar-menu-slot]:empty]:hidden",
+        activatesControl &&
+          "min-h-9 cursor-pointer transition-colors hover:bg-muted/50 has-[:disabled]:cursor-default has-[:disabled]:hover:bg-transparent"
+      )}
+    >
       <span className="w-20 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
         {label}
       </span>
@@ -750,7 +792,7 @@ function ToolbarMenuRow({ label, children }: { label: string; children: ReactNod
       >
         {children}
       </div>
-    </div>
+    </Row>
   )
 }
 

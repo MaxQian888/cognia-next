@@ -5,6 +5,20 @@ import * as ReactForMocks from "react"
 
 const mockReasoningRow = jest.fn()
 
+jest.mock("sonner", () => {
+  const toast = Object.assign(jest.fn(), {
+    success: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+    warning: jest.fn(),
+    message: jest.fn(),
+    loading: jest.fn(),
+    dismiss: jest.fn(),
+    promise: jest.fn(),
+  })
+  return { ...jest.requireActual("sonner"), toast }
+})
+
 jest.mock("@/components/ai-elements/message", () => ({
   Message: ({
     children,
@@ -298,6 +312,12 @@ jest.mock("@/components/chat/checkpoint-action", () => ({
       "data-msg": props.checkpointId,
     })
   },
+}))
+
+let mockShowKeyboardHints = true
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  ...jest.requireActual("@/hooks/ui/use-pointer"),
+  useShowKeyboardHints: () => mockShowKeyboardHints,
 }))
 
 jest.mock("@/hooks/ui/use-copy", () => ({
@@ -1059,6 +1079,50 @@ describe("file parts", () => {
     })
     expect(share.mock.calls[0][0].files).toHaveLength(2)
   })
+
+  it("copies the message and says so when the platform has no share surface", async () => {
+    const { toast } = jest.requireMock("sonner") as {
+      toast: { success: jest.Mock; error: jest.Mock }
+    }
+    toast.success.mockClear()
+    Object.defineProperty(navigator, "share", { configurable: true, value: undefined })
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    Object.defineProperty(globalThis, "ClipboardItem", { configurable: true, value: undefined })
+    const msg: UIMessage = {
+      id: "share-fallback",
+      role: "user",
+      parts: [{ type: "text", text: "Plain words" }],
+    }
+
+    render(<MessageRenderer message={msg} />)
+    fireEvent.click(screen.getByLabelText("shareTooltip"))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Plain words"))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("shareCopiedFallback"))
+  })
+
+  it("reports a share that failed instead of claiming success", async () => {
+    const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+    toast.error.mockClear()
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: jest.fn().mockRejectedValue(new Error("share target crashed")),
+    })
+    const msg: UIMessage = {
+      id: "share-error",
+      role: "user",
+      parts: [{ type: "text", text: "Plain words" }],
+    }
+
+    render(<MessageRenderer message={msg} />)
+    fireEvent.click(screen.getByLabelText("shareTooltip"))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("shareFailed"))
+  })
 })
 
 // ── custom part types ─────────────────────────────────────────────────────────
@@ -1457,6 +1521,27 @@ describe("bookmark", () => {
     expect(useChatStore.getState().bookmarkedIds).not.toContain("bm2")
   })
 
+  // The bookmark action lives in the hover bar / long-press sheet, so the
+  // message itself has to say it is bookmarked.
+  // In `core` / `hover` the bookmark toggle sits in the "…" overflow or a
+  // hover-revealed bar (the phone's long-press sheet too); `all` keeps the lit
+  // toggle itself on screen, so the indicator is for the other two.
+  it("marks a bookmarked message with an always-visible indicator", () => {
+    mockActions = "core"
+    try {
+      render(<MessageRenderer message={assistantMsg("bm-ind")} isLastAssistant />)
+      expect(screen.queryByTestId("message-bookmark-indicator")).toBeNull()
+      act(() => useChatStore.getState().toggleBookmark("bm-ind"))
+      expect(screen.getByTestId("message-bookmark-indicator")).toHaveAccessibleName(
+        "bookmarkedIndicator"
+      )
+      act(() => useChatStore.getState().toggleBookmark("bm-ind"))
+      expect(screen.queryByTestId("message-bookmark-indicator")).toBeNull()
+    } finally {
+      mockActions = "all"
+    }
+  })
+
   it("bookmark selector is scoped: unrelated bookmark does not affect this message", () => {
     // Toggle a DIFFERENT message's bookmark
     useChatStore.getState().toggleBookmark("other-id")
@@ -1611,6 +1696,20 @@ describe("edit flow", () => {
     expect(onEditResend).toHaveBeenCalledWith("e1", "edited text")
   })
 
+  it("drops the keyboard shortcut from the send label on a touch device", () => {
+    mockShowKeyboardHints = false
+    try {
+      const onEditResend = jest.fn()
+      render(<MessageRenderer message={userMsg("e1t", "original")} onEditResend={onEditResend} />)
+      fireEvent.click(screen.getByLabelText("editTooltip"))
+      expect(screen.queryByText("editingSubmit")).toBeNull()
+      fireEvent.click(screen.getByText("editingSubmitTouch"))
+      expect(onEditResend).toHaveBeenCalledWith("e1t", "original")
+    } finally {
+      mockShowKeyboardHints = true
+    }
+  })
+
   it("does not bring a video's description back into the edit box", () => {
     const videoAttachment = {
       groupId: "att-1",
@@ -1646,6 +1745,28 @@ describe("edit flow", () => {
 
     fireEvent.click(screen.getByText("editingCancel"))
     expect(screen.queryByRole("textbox")).toBeNull()
+  })
+
+  // "Edit and resend" is one of two text-entry surfaces; engaging the composer
+  // (typing, the `+` menu, the microphone) must close it, not leave a stale
+  // edit box open beside the surface the next send actually reads.
+  it("closes the edit when the user starts working in the composer", () => {
+    render(
+      <>
+        <MessageRenderer message={userMsg("e-yield", "original")} onEditResend={jest.fn()} />
+        <div data-composer-skin="classic">
+          <button type="button">composer-attach</button>
+        </div>
+      </>
+    )
+    fireEvent.click(screen.getByLabelText("editTooltip"))
+    expect(screen.getByTestId("message-edit-surface")).toBeInTheDocument()
+    // Clicks inside the edit box keep it open.
+    fireEvent.pointerDown(screen.getByRole("textbox"))
+    expect(screen.getByTestId("message-edit-surface")).toBeInTheDocument()
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "composer-attach" }))
+    expect(screen.queryByTestId("message-edit-surface")).toBeNull()
   })
 
   it("submits edit with Ctrl+Enter keyboard shortcut", () => {

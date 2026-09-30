@@ -192,12 +192,18 @@ export function ImageWorkbench({
         showCloseButton={false}
       >
         <DialogHeader className="flex-row items-center gap-2 border-b border-white/10 bg-black/60 px-3 py-2 text-left">
-          <DialogTitle className="min-w-0 flex-1 truncate text-sm font-medium text-white">
+          <DialogTitle className="min-w-16 flex-1 truncate text-sm font-medium text-white">
             {title}
           </DialogTitle>
           <DialogDescription className="sr-only">{t("dialogDescription")}</DialogDescription>
 
-          <div className="flex shrink-0 items-center gap-0.5">
+          {/* The tools scroll sideways when they outgrow the bar (a phone fits
+              about half of them); the close button below sits outside this
+              strip so it can never be pushed off-screen with them. */}
+          <div
+            className="flex min-w-0 items-center gap-0.5 overflow-x-auto [&>*]:shrink-0"
+            data-testid="workbench-toolbar"
+          >
             <TooltipIconButton
               variant="ghost"
               size="icon"
@@ -300,18 +306,18 @@ export function ImageWorkbench({
             >
               {workbench.save.saving ? t("save.saving") : t("save.save")}
             </Button>
-
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className="size-8 text-white hover:bg-white/15 hover:text-white"
-              onClick={requestClose}
-              aria-label={t("close")}
-              tooltip={t("close")}
-            >
-              <XIcon className="size-4" />
-            </TooltipIconButton>
           </div>
+
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0 text-white hover:bg-white/15 hover:text-white pointer-coarse:size-11"
+            onClick={requestClose}
+            aria-label={t("close")}
+            tooltip={t("close")}
+          >
+            <XIcon className="size-4" />
+          </TooltipIconButton>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-col lg:flex-row">

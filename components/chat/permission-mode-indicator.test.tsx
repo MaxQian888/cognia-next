@@ -20,6 +20,10 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+jest.mock("sonner", () => ({ toast: jest.fn() }))
+import { toast } from "sonner"
+const toastMock = toast as unknown as jest.Mock
+
 let currentMode: PermissionMode | null = null
 jest.mock("@/stores/chat", () => ({
   useChatStore: (sel: (s: { permissionMode: PermissionMode | null }) => unknown) =>
@@ -81,5 +85,26 @@ describe("PermissionModeIndicator", () => {
     currentMode = "plan"
     renderChip(<PermissionModeIndicator onCycle={jest.fn()} disabled />)
     expect(screen.getByRole("button")).toBeDisabled()
+  })
+
+  // In glyph form a click changes how the next turn runs with no label to
+  // change and (on touch) no tooltip, so it announces the new mode.
+  it("announces the new mode in glyph form, replacing rather than stacking", async () => {
+    toastMock.mockClear()
+    currentMode = null
+    renderChip(<PermissionModeIndicator onCycle={jest.fn()} glyph />)
+    await userEvent.click(screen.getByRole("button"))
+    expect(toastMock).toHaveBeenCalledWith('changed:{"label":"acceptEdits.label"}', {
+      id: "composer-permission-mode-cycle",
+      description: "acceptEdits.tooltip",
+    })
+  })
+
+  it("does not toast when the label itself shows the change", async () => {
+    toastMock.mockClear()
+    currentMode = null
+    renderChip(<PermissionModeIndicator onCycle={jest.fn()} />)
+    await userEvent.click(screen.getByRole("button"))
+    expect(toastMock).not.toHaveBeenCalled()
   })
 })

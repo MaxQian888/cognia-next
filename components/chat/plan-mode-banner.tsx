@@ -8,6 +8,7 @@
 
 import { useTranslations } from "next-intl"
 import { NotebookPenIcon } from "lucide-react"
+import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import { useComposerPermissionMode } from "@/stores/chat"
 
 import { useComposerSessionId } from "./composer/composer-session-context"
@@ -18,6 +19,9 @@ export function PlanModeBanner() {
   // one: rendered inside an unfocused split pane it announced plan mode for the
   // pane beside it, and hid it for its own.
   const permissionMode = useComposerPermissionMode(useComposerSessionId())
+  // The chip names the Shift+Tab shortcut that leaves plan mode; without a
+  // keyboard it is a key nobody can press.
+  const showKeyboardHints = useShowKeyboardHints()
   if (permissionMode !== "plan") return null
 
   return (
@@ -27,9 +31,11 @@ export function PlanModeBanner() {
     >
       <NotebookPenIcon className="size-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{t("banner")}</span>
-      <kbd className="shrink-0 rounded border border-amber-500/40 px-1 font-mono text-[10px]">
-        {t("hint")}
-      </kbd>
+      {showKeyboardHints ? (
+        <kbd className="shrink-0 rounded border border-amber-500/40 px-1 font-mono text-[10px]">
+          {t("hint")}
+        </kbd>
+      ) : null}
     </div>
   )
 }

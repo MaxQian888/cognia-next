@@ -1,4 +1,4 @@
-import { render as rtlRender, screen, waitFor } from "@testing-library/react"
+import { act, render as rtlRender, screen, waitFor } from "@testing-library/react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ASPECT_PRESETS } from "@/lib/images"
@@ -12,6 +12,8 @@ const workbenchState: { current: WorkbenchApi } = { current: null as never }
 jest.mock("@/hooks/chat/use-image-workbench", () => ({
   useImageWorkbench: () => workbenchState.current,
 }))
+
+import { dismissTopmostOverlayOnBack } from "@/hooks/ui/use-back-dismiss"
 
 import { ImageWorkbench, type ImageWorkbenchProps } from "./image-workbench"
 
@@ -143,6 +145,34 @@ describe("ImageWorkbench", () => {
     render(<ImageWorkbench {...props({ onOpenChange })} />)
     await userEvent.click(screen.getByRole("button", { name: "Close" }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("keeps Close outside the tool strip that scrolls on a narrow screen", () => {
+    // On a phone the tools outgrow the bar; Close used to be their last item
+    // and was clipped off-screen with them, leaving the viewer no exit.
+    render(<ImageWorkbench {...props()} />)
+    const toolbar = screen.getByTestId("workbench-toolbar")
+    expect(toolbar).toHaveClass("overflow-x-auto")
+    const close = screen.getByRole("button", { name: "Close" })
+    expect(toolbar).not.toContainElement(close)
+    expect(close).toHaveClass("shrink-0")
+  })
+
+  it("closes on one Android back press, past the tooltip its first tool opens", async () => {
+    // Opening focuses the first tool, whose tooltip opens on focus and sits on
+    // top of the dialog; the press must still end with the viewer closed.
+    const onOpenChange = jest.fn()
+    render(<ImageWorkbench {...props({ onOpenChange })} />)
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="tooltip-content"]')).not.toBeNull()
+    )
+    let consumed = false
+    act(() => {
+      consumed = dismissTopmostOverlayOnBack()
+    })
+    expect(consumed).toBe(true)
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(onOpenChange).toHaveBeenCalledTimes(1)
   })
 
   it("asks before discarding unsaved edits", async () => {

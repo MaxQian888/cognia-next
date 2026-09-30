@@ -74,6 +74,9 @@ import { composerSkinVars, type ResolvedComposerSkin } from "@/lib/chat/composer
 const BOX_BASE =
   "relative flex flex-wrap items-end border shadow-(--elevation-1) transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none focus-within:border-primary/40 focus-within:shadow-(--elevation-2) focus-within:ring-2 focus-within:ring-ring/15"
 
+/** The phone layout shows the character count only from this length on. */
+const MOBILE_CHAR_COUNTER_FROM = 1_000
+
 /** Verbatim from the pre-skin composer. Pinned by the parity test. */
 const CLASSIC_BOX = "gap-2 rounded-2xl border-input/60 bg-background/70 px-2 py-2"
 
@@ -642,8 +645,11 @@ export function ComposerBox({
         <Textarea
           aria-label={t("ariaMessage")}
           className={cn(
-            "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
+            "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent dark:bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
             !isComposing && "text-transparent caret-foreground",
+            // `dark:bg-transparent` above: the shadcn Textarea's own dark
+            // `bg-input/30` otherwise survives `bg-transparent` and paints a
+            // tinted box inside the composer box.
             // Hidden, never unmounted: unmounting would drop focus, the caret,
             // the scroll position and every ref the composer holds on it.
             preview?.on && "hidden",
@@ -754,7 +760,7 @@ export function ComposerBox({
             {enhance}
           </span>
         ) : null}
-        <CharCounter />
+        <CharCounter {...(isMobile ? { hideBelow: MOBILE_CHAR_COUNTER_FROM } : {})} />
       </div>
 
       {/* `flex` so a host-pinned `toolbar` ReactNode can sit on the same line
@@ -813,10 +819,15 @@ export function ComposerBox({
                   // shapes the button from its own resolved tokens (already
                   // floored to the touch minimum on mobile by the resolver).
                   skin.isClassic
-                    ? "size-9 rounded-full"
+                    ? isMobile
+                      ? // Painted at 40px so it sits in proportion with the
+                        // toolbar row it shares on a phone; `touch-hit` keeps
+                        // the 44px tap floor without growing the circle.
+                        "size-10 rounded-full touch-hit"
+                      : "size-9 rounded-full"
                     : "size-[var(--composer-send-size)] rounded-[var(--composer-inner-radius)]",
                   // Mobile: 44px minimum tap target (primary send/stop action).
-                  isMobile && "touch-target"
+                  isMobile && !skin.isClassic && "touch-target"
                 )}
                 disabled={sendButton.disabled}
                 onClick={() => (sendButton.mode === "stop" ? void onStop() : void submit())}

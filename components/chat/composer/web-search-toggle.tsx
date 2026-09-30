@@ -25,6 +25,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useComposerSessionId } from "./composer-session-context"
 import { useComposerMenuClose } from "./composer-menu-context"
 import { CapabilityRow } from "./capability-row"
+import { useFlyoutPlacement } from "./use-flyout-placement"
+import { cn } from "@/lib/utils"
 
 interface WebSearchToggleProps {
   /** Disable the toggle externally (e.g. while a turn is streaming). */
@@ -51,6 +53,7 @@ export function WebSearchToggle({
   // The setup card's jump button goes through the host menu's close — the
   // popover/drawer stays open otherwise.
   const closeMenu = useComposerMenuClose()
+  const { className: flyoutClassName, ...placement } = useFlyoutPlacement()
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -132,7 +135,11 @@ export function WebSearchToggle({
   return (
     <Popover>
       <PopoverTrigger asChild>{row}</PopoverTrigger>
-      <PopoverContent side="right" align="start" sideOffset={8} className="w-64 p-3">
+      <PopoverContent
+        {...placement}
+        className={cn("w-64 p-3", flyoutClassName)}
+        data-testid="web-search-setup-flyout"
+      >
         <p className="text-sm text-muted-foreground">{t(setupKey)}</p>
         <Button
           type="button"

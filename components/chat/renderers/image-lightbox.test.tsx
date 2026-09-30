@@ -115,7 +115,7 @@ function FocusHarness() {
 describe("ImageLightbox", () => {
   beforeEach(() => {
     mockDownloadFromUrl.mockClear()
-    mockDownloadFromUrl.mockResolvedValue(undefined)
+    mockDownloadFromUrl.mockResolvedValue({ kind: "downloaded" })
     mockOpenExternal.mockClear()
     mockOpenExternal.mockResolvedValue(undefined)
     mockUseReducedMotion.mockReturnValue(false)

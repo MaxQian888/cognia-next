@@ -1,7 +1,27 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, within } from "@testing-library/react"
+jest.mock("sonner", () => {
+  const toast = Object.assign(jest.fn(), {
+    success: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+    warning: jest.fn(),
+    message: jest.fn(),
+  })
+  return { ...jest.requireActual("sonner"), toast }
+})
+jest.mock("@/lib/files/download", () => {
+  const actual = jest.requireActual("@/lib/files/download")
+  return {
+    ...actual,
+    downloadBlob: jest.fn((...args: Parameters<typeof actual.downloadBlob>) =>
+      actual.downloadBlob(...args)
+    ),
+  }
+})
+
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -626,6 +646,21 @@ describe("table actions", () => {
     )
     expect(downloaded.every((value) => value.includes("row 201"))).toBe(true)
     anchorClick.mockRestore()
+  })
+
+  it("reports a download the platform could not complete", async () => {
+    const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+    toast.error.mockClear()
+    const { downloadBlob } = jest.requireMock("@/lib/files/download") as {
+      downloadBlob: jest.Mock
+    }
+    downloadBlob.mockResolvedValueOnce({ kind: "error", message: "share sheet unavailable" })
+    renderTable(2)
+
+    await userEvent.click(screen.getByRole("button", { name: "Download table" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Download as CSV" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Table action failed"))
   })
 
   it("disables every table action while Markdown is streaming", () => {

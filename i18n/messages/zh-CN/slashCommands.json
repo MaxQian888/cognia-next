@@ -7,5 +7,26 @@
     "run": "运行工作流（或从指定步骤运行）。需要批准。",
     "suggest": "提议下一个节点（不会自动添加）",
     "validate": "运行本地校验并让 agent 修复"
+  },
+  "sessions": {
+    "listFailed": "无法列出会话：{reason}",
+    "empty": "还没有会话。输入一条消息即可开始。",
+    "heading": "**会话**（按最近更新排序）",
+    "columnTitle": "标题",
+    "columnKind": "类型",
+    "columnUpdated": "更新时间",
+    "columnId": "ID",
+    "untitled": "（未命名）",
+    "footer": "使用 `/resume '<'标题或 ID>` 切换。",
+    "justNow": "刚刚",
+    "minutesAgo": "{count} 分钟前",
+    "hoursAgo": "{count} 小时前",
+    "daysAgo": "{count} 天前",
+    "resumeUsage": "用法：`/resume '<'ID 或标题>` —— 可先用 `/sessions` 查看有哪些会话。",
+    "resumeNoSessions": "还没有会话。",
+    "resumed": "已恢复 {title}",
+    "resumedFallbackTitle": "会话",
+    "resumeNoMatch": "没有匹配 `{query}` 的会话。试试 `/sessions`。",
+    "resumeAmbiguous": "`{query}` 匹配到多个会话，请用 ID 指定："
   }
 }

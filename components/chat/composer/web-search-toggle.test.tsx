@@ -38,6 +38,9 @@ jest.mock("@/stores/chat", () => ({
   useComposerWebSearchOn: () => chatState.webSearchOnForNextSend,
 }))
 
+const mockIsMobile = { current: false }
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => mockIsMobile.current }))
+
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: typeof settingsState }) => T) =>
     selector({ settings: settingsState }),
@@ -70,6 +73,7 @@ async function openSetupAndJump() {
 }
 
 beforeEach(() => {
+  mockIsMobile.current = false
   setOnMock.mockReset()
   openSettingsMock.mockReset()
   closeMenuMock.mockReset()
@@ -211,5 +215,27 @@ describe("WebSearchToggle", () => {
     }
     renderToggle()
     expect(screen.getByRole("button")).not.toBeDisabled()
+  })
+
+  // The setup card is a second-level panel off a `+` menu row. On a phone it
+  // flew out to the right of a menu that already spans the screen and was
+  // entirely off-screen; it stacks above the row there instead.
+  it("places the setup card beside the row on desktop and above it on a phone", async () => {
+    settingsState = { searchEnabled: false }
+    const user = userEvent.setup()
+    const { unmount } = renderToggle()
+    await user.click(screen.getByRole("button", { name: "ariaToggleWebSearch" }))
+    // jsdom lays out at 0×0, so Radix may flip the side; the axis is the point.
+    expect(["right", "left"]).toContain(
+      screen.getByTestId("web-search-setup-flyout").getAttribute("data-side")
+    )
+    unmount()
+
+    mockIsMobile.current = true
+    renderToggle()
+    await user.click(screen.getByRole("button", { name: "ariaToggleWebSearch" }))
+    expect(["top", "bottom"]).toContain(
+      screen.getByTestId("web-search-setup-flyout").getAttribute("data-side")
+    )
   })
 })

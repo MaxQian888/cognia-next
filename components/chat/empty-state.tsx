@@ -53,13 +53,20 @@ export type WelcomeSection = "tryPrompt"
 interface SampleId {
   id: "explore" | "review" | "draft" | "tests"
   icon: LucideIcon
+  /**
+   * The prompt only makes sense against a working directory the agent can run
+   * shell commands in ("list the files in the working directory", `git diff`,
+   * "run the tests"). Offered on a device with none, it is a prompt that is
+   * guaranteed to fail.
+   */
+  needsWorkspace: boolean
 }
 
 const SAMPLE_IDS: SampleId[] = [
-  { id: "explore", icon: FolderTreeIcon },
-  { id: "review", icon: CodeIcon },
-  { id: "draft", icon: FileTextIcon },
-  { id: "tests", icon: TerminalIcon },
+  { id: "explore", icon: FolderTreeIcon, needsWorkspace: true },
+  { id: "review", icon: CodeIcon, needsWorkspace: true },
+  { id: "draft", icon: FileTextIcon, needsWorkspace: true },
+  { id: "tests", icon: TerminalIcon, needsWorkspace: true },
 ]
 
 const MAX_RECENT = 4
@@ -107,6 +114,14 @@ interface Props {
    * unset, so nothing changes there).
    */
   hideSamples?: boolean
+  /**
+   * Whether the conversation has a working directory with a shell to run in.
+   * `false` drops the built-in starters that need one (all of today's
+   * dev-tool samples), so a host-less phone is not offered `git diff`. Custom
+   * `override.samples` are the caller's own and are never filtered. Defaults
+   * to `true`.
+   */
+  workspaceAvailable?: boolean
   /**
    * Drop the demoted "New chat" button under the composer.
    *
@@ -231,6 +246,7 @@ export function EmptyChatState({
   aiSamples,
   override,
   hideSamples,
+  workspaceAvailable = true,
   hideCreateAction,
   headerExtraSlot,
   quickActionsSlot,
@@ -269,12 +285,14 @@ export function EmptyChatState({
   const samplesHeading = override?.samplesHeading ?? t("sections.tryPrompt")
   const starters: readonly StarterSample[] =
     override?.samples ??
-    SAMPLE_IDS.map(({ id, icon }) => ({
-      key: id,
-      icon,
-      title: t(`samples.${id}Title`),
-      prompt: t(`samples.${id}Prompt`),
-    }))
+    SAMPLE_IDS.filter((sample) => workspaceAvailable || !sample.needsWorkspace).map(
+      ({ id, icon }) => ({
+        key: id,
+        icon,
+        title: t(`samples.${id}Title`),
+        prompt: t(`samples.${id}Prompt`),
+      })
+    )
   const showStarters = !hideSamples && !hiddenSections?.tryPrompt && starters.length > 0
 
   // Where the "New chat" action lives. The fullscreen welcome has no session,
@@ -397,14 +415,21 @@ export function EmptyChatState({
                     {t("title")}
                   </p>
                 ) : null}
-                <p
-                  className={cn(
-                    "max-w-md text-sm leading-relaxed text-muted-foreground text-pretty",
-                    rich ? "" : "mx-auto"
-                  )}
-                >
-                  {subheading}
-                </p>
+                {/* Minimal keeps one line: the greeting. The generic subtitle
+                    only restates what the composer's rotating hints already
+                    show (the fullscreen welcome drops it for the same reason);
+                    an override subtitle is deliberate per-surface copy and
+                    still renders. */}
+                {rich || override?.subtitle ? (
+                  <p
+                    className={cn(
+                      "max-w-md text-sm leading-relaxed text-muted-foreground text-pretty",
+                      rich ? "" : "mx-auto"
+                    )}
+                  >
+                    {subheading}
+                  </p>
+                ) : null}
               </div>
             </div>
           </motion.section>

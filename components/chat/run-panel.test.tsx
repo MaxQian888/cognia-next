@@ -14,6 +14,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+let mockShowKeyboardHints = true
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useShowKeyboardHints: () => mockShowKeyboardHints,
+}))
+
 // Stub the heavy reused renderers — they have their own suites.
 jest.mock("./message-parts/tool-call-row", () => ({
   ToolCallRow: ({ part }: { part: { type: string } }) => (
@@ -226,5 +231,33 @@ describe("RunPanel — accessibility", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-expanded", "true")
+  })
+})
+
+describe("RunPanel — interrupt hint", () => {
+  const streaming = () =>
+    seed({
+      status: "streaming",
+      messages: [assistant([toolPart("t1", "Bash", "input-available")])],
+    })
+
+  it("names the Esc key where there is a keyboard", () => {
+    streaming()
+    render(<RunPanel sessionId={SID} />)
+    expect(screen.getByLabelText("ariaInterrupt")).toHaveTextContent("interruptHint")
+    expect(screen.getByLabelText("ariaInterrupt")).not.toHaveTextContent("interruptHintTouch")
+  })
+
+  it("says tap instead of Esc on a device without a keyboard, whatever the runtime", () => {
+    // A phone read "Esc to interrupt": the old gate asked whether the runtime
+    // was the Capacitor shell, not whether an Esc key exists.
+    mockShowKeyboardHints = false
+    try {
+      streaming()
+      render(<RunPanel sessionId={SID} />)
+      expect(screen.getByLabelText("ariaInterrupt")).toHaveTextContent("interruptHintTouch")
+    } finally {
+      mockShowKeyboardHints = true
+    }
   })
 })

@@ -10,6 +10,7 @@ import { CircleHelpIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
+import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { GlobalSearchCoverage } from "@/lib/global-search/types"
 import { cn } from "@/lib/utils"
@@ -42,6 +43,9 @@ export function GlobalSearchFooter({
   className,
 }: GlobalSearchFooterProps) {
   const t = useTranslations("globalSearch")
+  // Arrow keys, Enter, Tab and Esc do not exist on a phone; the legend is only
+  // drawn where a keyboard is.
+  const showKeyboardHints = useShowKeyboardHints()
   return (
     <div
       className={cn(
@@ -51,27 +55,31 @@ export function GlobalSearchFooter({
       data-testid="global-search-footer"
     >
       <div className="flex items-center gap-3">
-        <span className="flex items-center gap-1">
-          <KbdGroup>
-            <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd>
-          </KbdGroup>
-          {t("footer.navigate")}
-        </span>
-        <span className="flex items-center gap-1">
-          <Kbd>↵</Kbd>
-          {t("footer.open")}
-        </span>
-        <span className="hidden items-center gap-1 sm:flex">
-          {/* i18n-exempt: keyboard key legend */}
-          <Kbd>Tab</Kbd>
-          {t("footer.scopes")}
-        </span>
-        <span className="hidden items-center gap-1 sm:flex">
-          {/* i18n-exempt: keyboard key legend */}
-          <Kbd>Esc</Kbd>
-          {t("footer.close")}
-        </span>
+        {showKeyboardHints ? (
+          <>
+            <span className="flex items-center gap-1" data-testid="global-search-key-legend">
+              <KbdGroup>
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd>
+              </KbdGroup>
+              {t("footer.navigate")}
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>↵</Kbd>
+              {t("footer.open")}
+            </span>
+            <span className="hidden items-center gap-1 sm:flex">
+              {/* i18n-exempt: keyboard key legend */}
+              <Kbd>Tab</Kbd>
+              {t("footer.scopes")}
+            </span>
+            <span className="hidden items-center gap-1 sm:flex">
+              {/* i18n-exempt: keyboard key legend */}
+              <Kbd>Esc</Kbd>
+              {t("footer.close")}
+            </span>
+          </>
+        ) : null}
         <Tooltip>
           <TooltipTrigger asChild>
             <button

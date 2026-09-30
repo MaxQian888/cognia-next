@@ -229,15 +229,27 @@ export function resolveComposerSkin(
   const isClassic = id === "classic"
 
   if (isClassic) {
+    if (opts.isMobile) {
+      // A phone gets classic's one-surface arrangement: the input on its own
+      // full-width row, and the attach / voice cluster, the status toolbar and
+      // send sharing ONE row inside the box. The detached desktop arrangement
+      // left a 36px single-line input in a box of its own with a second, loose
+      // toolbar row under it — two surfaces competing for a narrow screen. The
+      // geometry is still classic's literals (the box's compact classes), and
+      // the legacy toggle keeps its meaning on desktop.
+      //
+      // `embedded`, and the row itself decides how much it can hold: on a
+      // phone (~160px beside the attach cluster and send) the fold ladder runs
+      // out and the row switches to the `folded` arrangement; a tablet keeps
+      // the fuller row. See `useFittedToolbar` in the composer toolbar.
+      return { ...preset, id, isClassic: true, toolbarLayout: "embedded", compactLayout: true }
+    }
     return {
       ...preset,
       id,
       isClassic: true,
-      // The legacy stacked-layout toggle keeps working exactly as it did — and
-      // it is NOT the same thing as running on a phone. Mobile stacking is
-      // driven separately by the box's `isMobile` prop (the child clusters opt
-      // out of the container-query row layout); folding the platform in here
-      // would hand a phone the desktop compact skin's geometry as well.
+      // The legacy stacked-layout toggle keeps working exactly as it did on
+      // desktop.
       compactLayout: settings?.compactLayout === true,
     }
   }

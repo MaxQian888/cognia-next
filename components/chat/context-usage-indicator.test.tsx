@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import {
   CompactNowButton,
@@ -26,6 +26,10 @@ jest.mock("next-intl", () => ({
 jest.mock("@/lib/claude/ipc", () => ({
   compactSession: jest.fn().mockResolvedValue(undefined),
 }))
+
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+import { toast } from "sonner"
+const toastErrorMock = toast.error as unknown as jest.Mock
 
 const mockedCompact = compactSession as unknown as jest.Mock
 
@@ -344,6 +348,38 @@ describe("CompactNowButton", () => {
   it("is disabled when the window is empty", () => {
     render(<CompactNowButton sessionId="s1" usedTokens={0} />)
     expect(screen.getByTestId("compact-now-button")).toBeDisabled()
+  })
+
+  // A disabled button alone was a silent no-op to a tap on a phone.
+  // An attribute, not a test id: the chrome budget counts leaf test ids as
+  // controls, and this line is prose.
+  const hint = () => document.querySelector("[data-compact-now-hint]")
+
+  it("says why when the conversation has nothing to compact yet", () => {
+    const { rerender } = render(<CompactNowButton sessionId="s1" usedTokens={0} turns={0} />)
+    expect(screen.getByTestId("compact-now-button")).toBeDisabled()
+    expect(hint()).toHaveTextContent("compactNothingYet")
+
+    rerender(<CompactNowButton sessionId={null} usedTokens={0} />)
+    expect(hint()).toBeInTheDocument()
+
+    rerender(<CompactNowButton sessionId="s1" usedTokens={5000} turns={3} />)
+    expect(hint()).toBeNull()
+  })
+
+  it("leaves the agent-owned case to the header, without the hint", () => {
+    render(<CompactNowButton sessionId={null} usedTokens={0} supported={false} />)
+    expect(hint()).toBeNull()
+  })
+
+  it("reports a compaction request that fails instead of dropping it", async () => {
+    toastErrorMock.mockClear()
+    mockedCompact.mockRejectedValueOnce(new Error("no_active_session"))
+    render(<CompactNowButton sessionId="s1" usedTokens={5000} turns={2} />)
+    fireEvent.click(screen.getByTestId("compact-now-button"))
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith('compactFailed:{"reason":"no_active_session"}')
+    )
   })
 })
 

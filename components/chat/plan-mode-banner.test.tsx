@@ -7,6 +7,11 @@ import { PlanModeBanner } from "./plan-mode-banner"
 import { ComposerSessionProvider } from "./composer/composer-session-context"
 import { useChatStore } from "@/stores/chat"
 
+let mockShowKeyboardHints = true
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useShowKeyboardHints: () => mockShowKeyboardHints,
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -36,6 +41,20 @@ describe("PlanModeBanner", () => {
     expect(banner).toHaveTextContent("banner")
     expect(banner).toHaveTextContent("hint")
     expect(banner.className).toContain("border-amber-500/40")
+  })
+
+  it("leaves out the Shift+Tab chip on a device without a keyboard", () => {
+    mockShowKeyboardHints = false
+    try {
+      setMode("plan")
+      render(<PlanModeBanner />)
+      const banner = screen.getByTestId("plan-mode-banner")
+      expect(banner).toHaveTextContent("banner")
+      expect(banner).not.toHaveTextContent("hint")
+      expect(banner.querySelector("kbd")).toBeNull()
+    } finally {
+      mockShowKeyboardHints = true
+    }
   })
 
   it("announces the mode of the pane it sits above, not the focused one", () => {

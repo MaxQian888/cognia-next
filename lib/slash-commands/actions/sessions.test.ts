@@ -1,3 +1,29 @@
+/**
+ * `next-intl` ships ESM Jest does not transform, and `getRuntimeTranslator`
+ * has its own suite. The translator is replaced by one that reads the real
+ * bundle of the locale under test, so these cases assert the keys resolve in
+ * both locales and the English copy the transcript shows.
+ */
+import en from "@/i18n/messages/en/slashCommands.json"
+import zh from "@/i18n/messages/zh-CN/slashCommands.json"
+
+let mockLocale: "en" | "zh-CN" = "en"
+jest.mock("@/lib/i18n/runtime-translator", () => ({
+  getRuntimeTranslator: async (namespace?: string) => {
+    expect(namespace).toBe("slashCommands.sessions")
+    const bundle = (mockLocale === "en" ? en : zh).sessions as Record<string, string>
+    return (key: string, values?: Record<string, unknown>) => {
+      const message = bundle[key]
+      if (typeof message !== "string") return `slashCommands.sessions.${key}`
+      // ICU quoting (`'<'`) and `{name}` arguments — the only syntax these use.
+      return Object.entries(values ?? {}).reduce(
+        (text, [name, value]) => text.replace(`{${name}}`, String(value)),
+        message.replace(/'([<{}])'/g, "$1")
+      )
+    }
+  },
+}))
+
 jest.mock("@/lib/db/sessions", () => ({
   listSessions: jest.fn(),
 }))
@@ -110,6 +136,31 @@ describe("handleSessions", () => {
     const ctx = makeCtx()
     await handleSessions(ctx)
     expect(ctx._pushed[0]).toContain("Could not list sessions: plain")
+  })
+})
+
+describe("localized output", () => {
+  afterEach(() => {
+    mockLocale = "en"
+  })
+
+  it("prints the list in the UI locale, footer included", async () => {
+    // zh-CN showed "Use /resume <title or id> to switch." verbatim.
+    mockLocale = "zh-CN"
+    mockedList.mockResolvedValue([{ id: "x", title: "", updatedAt: Date.now() - 5 * 60_000 }])
+    const ctx = makeCtx()
+    await handleSessions(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("**会话**")
+    expect(md).toContain("| 标题 | 类型 | 更新时间 | ID |")
+    expect(md).toContain("（未命名）")
+    expect(md).toContain("5 分钟前")
+    expect(md).toContain("使用 `/resume <标题或 ID>` 切换。")
+    expect(md).not.toMatch(/Use `\/resume|ago/)
+  })
+
+  it("carries every key in both locales", () => {
+    expect(Object.keys(zh.sessions).sort()).toEqual(Object.keys(en.sessions).sort())
   })
 })
 

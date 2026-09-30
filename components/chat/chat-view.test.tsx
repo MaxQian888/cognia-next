@@ -213,8 +213,14 @@ jest.mock("@/hooks/ui/use-compact-layout", () => ({
   useCompactLayout: () => isCompactLayout,
 }))
 
+let mockEffectiveCwd: string | null = "/repo"
 jest.mock("@/hooks/chat/use-effective-cwd", () => ({
-  useEffectiveCwd: () => "/repo",
+  useEffectiveCwd: () => mockEffectiveCwd,
+}))
+let mockCanRunShell = true
+jest.mock("@/hooks/use-host-profile", () => ({
+  ...jest.requireActual("@/hooks/use-host-profile"),
+  useCapability: (cap: string) => (cap === "shell" ? mockCanRunShell : false),
 }))
 
 interface PendingPromptMockRecord {
@@ -975,6 +981,26 @@ describe("ChatPane", () => {
     }
   })
 
+  it.each([
+    ["a working directory and a shell", "/repo", true, true],
+    ["no working directory", null, true, false],
+    ["no shell to run in", "/repo", false, false],
+  ] as const)("offers the workspace starters only with %s", (_label, cwd, shell, expected) => {
+    const { EmptyChatState } = jest.requireMock("./empty-state") as {
+      EmptyChatState: jest.Mock
+    }
+    EmptyChatState.mockClear()
+    mockEffectiveCwd = cwd
+    mockCanRunShell = shell
+    try {
+      render(<ChatPane {...makeProps()} activeSession={null} />)
+      expect(EmptyChatState.mock.calls[0][0].workspaceAvailable).toBe(expected)
+    } finally {
+      mockEffectiveCwd = "/repo"
+      mockCanRunShell = true
+    }
+  })
+
   it("keeps the stored style and the toggle on a wide layout", () => {
     const { EmptyChatState } = jest.requireMock("./empty-state") as { EmptyChatState: jest.Mock }
     EmptyChatState.mockClear()
@@ -1163,6 +1189,29 @@ describe("ChatPane", () => {
     const { EmptyChatState } = jest.requireMock("./empty-state") as {
       EmptyChatState: jest.Mock
     }
+
+    // An empty conversation used to get neither: on a phone it fell back to
+    // the rich desktop hero and ignored the name set in Personalization.
+    it("gives an empty conversation the same welcome density and name", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      EmptyChatState.mockClear()
+      settingsState.settings = { welcomeStyle: "rich", userName: "Max" }
+      isCompactLayout = true
+      try {
+        render(<ChatPane {...makeProps()} />)
+        const props = EmptyChatState.mock.calls.at(-1)?.[0]
+        expect(props?.variant).toBe("inline")
+        expect(props?.welcomeStyle).toBe("minimal")
+        expect(props?.userName).toBe("Max")
+        // The phone's dashboard is the compact one (hidden while empty).
+        expect(props?.statsSlot?.props?.compact).toBe(true)
+      } finally {
+        isCompactLayout = false
+        settingsState.settings = null
+        storeState.messages = saved
+      }
+    })
 
     it("docks the composer below the empty state instead of centering it inside", () => {
       const saved = storeState.messages
@@ -1469,6 +1518,24 @@ describe("ChatPane — welcome personalization reaches the welcome page", () => 
     mockComposerProps.length = 0
     render(<>{emptyStateMock.mock.calls.at(-1)?.[0].composerSlot}</>)
     expect(mockComposerProps.at(-1)).toMatchObject({ placement: "hero", routing: false })
+  })
+
+  it("gives the desktop hero the dense skin and the phone its everyday composer", () => {
+    render(<ChatPane {...makeProps()} activeSession={null} onHeroSend={jest.fn()} />)
+    mockComposerProps.length = 0
+    render(<>{emptyStateMock.mock.calls.at(-1)?.[0].composerSlot}</>)
+    expect(mockComposerProps.at(-1)?.defaultSkin).toBe("dense")
+
+    isCompactLayout = true
+    try {
+      render(<ChatPane {...makeProps()} activeSession={null} onHeroSend={jest.fn()} />)
+      mockComposerProps.length = 0
+      render(<>{emptyStateMock.mock.calls.at(-1)?.[0].composerSlot}</>)
+      // No per-surface override: the box keeps the look of every chat.
+      expect(mockComposerProps.at(-1)?.defaultSkin).toBeUndefined()
+    } finally {
+      isCompactLayout = false
+    }
   })
 
   it("omits the hero composer when the shell cannot create a session", () => {

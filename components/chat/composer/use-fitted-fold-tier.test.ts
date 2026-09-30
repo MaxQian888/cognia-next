@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { renderHook } from "@testing-library/react"
 
-import { isToolbarSqueezed, useFittedFoldTier } from "./use-fitted-fold-tier"
+import { isToolbarSqueezed, useFittedFoldTier, useFittedToolbar } from "./use-fitted-fold-tier"
 
 /** jsdom has no layout: every box is 0×0 unless a test says otherwise. */
 function box(
@@ -76,6 +76,55 @@ describe("isToolbarSqueezed", () => {
     const chip = span.parentElement as HTMLElement
     chip.style.maxWidth = "50%"
     expect(isToolbarSqueezed(root)).toBe(true)
+  })
+})
+
+describe("isToolbarSqueezed — glyph chips", () => {
+  it("is true when flex crushes a button below its own icon", () => {
+    // No `.truncate` label and no row overflow: the chip itself shrank to 2px
+    // under a 14px icon, so chips paint over each other.
+    const root = row()
+    const chip = document.createElement("button")
+    root.appendChild(chip)
+    box(chip, { scroll: 14, client: 2 })
+    expect(isToolbarSqueezed(root)).toBe(true)
+  })
+
+  it("is false when every button holds its content", () => {
+    const root = row()
+    const chip = document.createElement("button")
+    root.appendChild(chip)
+    box(chip, { scroll: 28, client: 28 })
+    expect(isToolbarSqueezed(root)).toBe(false)
+  })
+})
+
+describe("useFittedToolbar", () => {
+  it("is not exhausted while a rung still makes the row fit", () => {
+    const root = row()
+    label(root, { scroll: 40, client: 40 })
+    const { result } = renderHook(() => useFittedToolbar({ current: root }, 350, "a"))
+    expect(result.current).toEqual({ tier: 3, exhausted: false })
+  })
+
+  it("reports exhaustion when the row is still squeezed at the last rung", () => {
+    const root = row()
+    label(root, { scroll: 48, client: 11 })
+    const { result } = renderHook(() => useFittedToolbar({ current: root }, 350, "a"))
+    expect(result.current).toEqual({ tier: 4, exhausted: true })
+  })
+
+  it("starts over, un-exhausted, when the width changes", () => {
+    const root = row()
+    const span = label(root, { scroll: 48, client: 11 })
+    const { result, rerender } = renderHook(
+      ({ width }) => useFittedToolbar({ current: root }, width, "a"),
+      { initialProps: { width: 350 } }
+    )
+    expect(result.current.exhausted).toBe(true)
+    box(span, { scroll: 48, client: 48 })
+    rerender({ width: 800 })
+    expect(result.current).toEqual({ tier: 0, exhausted: false })
   })
 })
 

@@ -52,4 +52,13 @@ describe("CharCounter", () => {
     render(<CharCounter />)
     expect(screen.getByText("1").className).toContain("end-2")
   })
+
+  it("stays hidden below `hideBelow`, then shows the count", () => {
+    mockController.value = "hello"
+    const { container, rerender } = render(<CharCounter hideBelow={1_000} />)
+    expect(container.firstChild).toBeNull()
+    mockController.value = "a".repeat(1_000)
+    rerender(<CharCounter hideBelow={1_000} />)
+    expect(screen.getByText("1,000")).toBeInTheDocument()
+  })
 })

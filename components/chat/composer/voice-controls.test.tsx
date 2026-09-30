@@ -20,8 +20,14 @@ jest.mock("@/components/ai-elements/speech-input", () => ({
       <>
         <button
           data-testid="speech-input"
+          data-lang={props.lang as string | undefined}
+          data-voice-trigger={props["data-voice-trigger"] as string | undefined}
           aria-label={String(props["aria-label"] ?? "")}
-          onClick={() => onListeningChange?.(true)}
+          onClick={() => {
+            // A WebView recognizer that never fires `start` (the on-device bug).
+            if ((globalThis as Record<string, unknown>).__mockSpeechDeadStart) return
+            onListeningChange?.(true)
+          }}
         >
           mic
         </button>
@@ -89,6 +95,7 @@ jest.mock("./live-voice-dialog", () => ({
 }))
 
 jest.mock("@cognia/tts/speech", () => ({
+  resolveSttLanguage: jest.requireActual("@cognia/tts/speech").resolveSttLanguage,
   DEFAULT_SPEECH_LANGUAGE: "en-US",
   SPEECH_LANGUAGES: [
     { code: "en-US", name: "English", flag: "🇺🇸" },
@@ -96,13 +103,24 @@ jest.mock("@cognia/tts/speech", () => ({
   ],
 }))
 
+const platformRef = { current: "web" }
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platformRef.current }))
+
+jest.mock("@/lib/capacitor/microphone", () => ({ ensureMicrophonePermission: jest.fn() }))
+jest.mock("@/lib/capacitor/app-settings", () => ({ openAppSettings: jest.fn() }))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
 }))
 
+import { act } from "@testing-library/react"
 import { toast } from "sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { VoiceControls } from "./voice-controls"
+import { openAppSettings } from "@/lib/capacitor/app-settings"
+import { ensureMicrophonePermission } from "@/lib/capacitor/microphone"
+import { VOICE_START_TIMEOUT_MS, VoiceControls } from "./voice-controls"
+
+const ensureMicMock = ensureMicrophonePermission as jest.Mock
 
 const toastError = toast.error as jest.Mock
 const toastInfo = toast.info as jest.Mock
@@ -117,6 +135,86 @@ describe("VoiceControls", () => {
     micPermission.state = "prompt"
     micDevices.length = 0
     delete (globalThis as Record<string, unknown>).__mockSpeechMode
+    delete (globalThis as Record<string, unknown>).__mockSpeechDeadStart
+    platformRef.current = "web"
+  })
+
+  describe("on the native mobile shell", () => {
+    beforeEach(() => {
+      platformRef.current = "mobile"
+    })
+
+    it("asks for the microphone first, then starts dictation", async () => {
+      ensureMicMock.mockResolvedValue({ kind: "ok", value: "granted" })
+      const user = userEvent.setup()
+      renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+
+      await user.click(screen.getByTestId("speech-input"))
+
+      expect(ensureMicMock).toHaveBeenCalledTimes(1)
+      expect(await screen.findByRole("status")).toHaveTextContent("listening")
+
+      // Granted once: the next start goes straight to recognition.
+      await user.click(screen.getByTestId("speech-input"))
+      expect(ensureMicMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("says the microphone was denied and offers the app settings", async () => {
+      ensureMicMock.mockResolvedValue({ kind: "ok", value: "denied" })
+      const user = userEvent.setup()
+      renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+
+      await user.click(screen.getByTestId("speech-input"))
+
+      expect(toastError).toHaveBeenCalledWith(
+        "errors.permissionDenied",
+        expect.objectContaining({ action: expect.objectContaining({ label: "openSettings" }) })
+      )
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+      const { action } = toastError.mock.calls[0][1] as { action: { onClick: () => void } }
+      action.onClick()
+      expect(openAppSettings).toHaveBeenCalled()
+    })
+
+    it("reports a start that never reaches the listening state", async () => {
+      jest.useFakeTimers()
+      try {
+        ;(globalThis as Record<string, unknown>).__mockSpeechDeadStart = true
+        ensureMicMock.mockResolvedValue({ kind: "ok", value: "granted" })
+        const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
+        renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+
+        await user.click(screen.getByTestId("speech-input"))
+        expect(toastError).not.toHaveBeenCalled()
+        act(() => {
+          jest.advanceTimersByTime(VOICE_START_TIMEOUT_MS)
+        })
+        expect(toastError).toHaveBeenCalledWith("errors.notStarted")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("does not ask for the microphone off the native shell", async () => {
+      platformRef.current = "web"
+      const user = userEvent.setup()
+      renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+      await user.click(screen.getByTestId("speech-input"))
+      expect(ensureMicMock).not.toHaveBeenCalled()
+      expect(screen.getByRole("status")).toBeInTheDocument()
+    })
+  })
+
+  it("dictates in the app language until the user picks one", () => {
+    // A zh-CN UI listened in en-US and transcribed Chinese speech as English.
+    mockSettings = { language: "zh-CN" }
+    const { unmount } = renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+    expect(screen.getByTestId("speech-input")).toHaveAttribute("data-lang", "zh-CN")
+    unmount()
+
+    mockSettings = { language: "zh-CN", sttLanguage: "en-US" }
+    renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+    expect(screen.getByTestId("speech-input")).toHaveAttribute("data-lang", "en-US")
   })
 
   it("renders both the SpeechInput button and the settings popover trigger", () => {

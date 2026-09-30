@@ -138,10 +138,25 @@ describe("mobile floors", () => {
     expect(resolveComposerSkin({ skin: "full" }, { isMobile: true }).toolbarLayout).toBe("embedded")
   })
 
-  it("does not conflate the legacy compact flag with running on a phone", () => {
-    // Mobile stacking is the box's `isMobile` prop, not this flag. Folding the
-    // platform in here would hand a phone the desktop compact skin's geometry.
-    expect(resolveComposerSkin({ skin: "classic" }, { isMobile: true }).compactLayout).toBe(false)
+  it("gives a phone classic's one-surface layout, toolbar inside the box", () => {
+    // The detached arrangement left a single-line input in its own box with a
+    // loose toolbar row beneath it; on a phone everything shares one surface.
+    const mobile = resolveComposerSkin({ skin: "classic" }, { isMobile: true })
+    expect(mobile.isClassic).toBe(true)
+    expect(mobile.compactLayout).toBe(true)
+    // Embedded; a phone-width row folds itself further once measured.
+    expect(mobile.toolbarLayout).toBe("embedded")
+    // Even when the desktop-only legacy toggle is explicitly off.
+    expect(
+      resolveComposerSkin({ skin: "classic", compactLayout: false }, { isMobile: true })
+        .compactLayout
+    ).toBe(true)
+  })
+
+  it("keeps the legacy compact toggle in charge of classic on desktop", () => {
+    const desktop = resolveComposerSkin({ skin: "classic" }, { isMobile: false })
+    expect(desktop.compactLayout).toBe(false)
+    expect(desktop.toolbarLayout).toBe("detached")
   })
 })
 

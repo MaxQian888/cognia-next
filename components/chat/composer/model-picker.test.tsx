@@ -313,6 +313,23 @@ describe("trigger rendering (narrow-container truncation)", () => {
     expect(label.className).toContain("min-w-0")
   })
 
+  // The composer row hands this over at its glyph tiers (phone widths).
+  it("passes the compact label through: short name, no chevron", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={{}}>
+        <TooltipProvider>
+          <ModelPicker
+            session={{ ...session, model: "anthropic/claude-sonnet-4-5" }}
+            compactLabel
+          />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    const trigger = screen.getByRole("button")
+    expect(trigger.querySelector("span.truncate")).toHaveTextContent(/^sonnet-4-5$/)
+    expect(trigger.querySelector("svg.lucide-chevrons-up-down")).toBeNull()
+  })
+
   it("stays a control between sessions instead of becoming a label", () => {
     // It used to render a plain `<span>`: it named the app default, which IS
     // the model the next turn runs on, so there was a real choice on screen

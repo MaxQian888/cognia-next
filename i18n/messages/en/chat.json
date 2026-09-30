@@ -62,12 +62,19 @@
     "download": "Download",
     "downloadAria": "Download artifact",
     "downloadFailed": "Couldn't save the artifact",
+    "enlarge": "Enlarge preview",
     "expand": "Expand preview",
+    "lineCount": "{count, plural, one {# line} other {# lines}}",
     "openInCanvas": "Open in canvas",
     "openInCanvasAria": "Open artifact in canvas",
     "previewAnyway": "Preview anyway",
     "previewDeferred": "This artifact is large — previewing it is a click away.",
-    "previewReactManual": "React artifacts load a runtime, so they preview on request."
+    "previewReactManual": "React artifacts load a runtime, so they preview on request.",
+    "showMore": "Show more",
+    "shrink": "Shrink preview",
+    "version": "v{version}",
+    "viewPreview": "Show preview",
+    "viewSource": "Show source"
   },
   "askUser": {
     "dismiss": "Dismiss",
@@ -890,7 +897,9 @@
       "breakdownUserMessages": "User messages",
       "compactAgentOwned": "Compaction is managed by the agent",
       "compactDisabled": "Auto-compact is off",
+      "compactFailed": "Couldn't compact this conversation: {reason}",
       "compactNow": "Compact now",
+      "compactNothingYet": "Nothing to compact yet. Compaction becomes available after the first reply.",
       "compactThreshold": "Auto-compact at {pct}",
       "contextTitle": "Context window",
       "contextUsageAria": "Context window {pct} used",
@@ -947,6 +956,7 @@
         "generic": "Voice input failed. Please try again.",
         "noMicrophone": "No microphone available. Check your audio devices.",
         "noSpeech": "No speech detected. Try speaking closer to the microphone.",
+        "notStarted": "Voice input didn't start. Check that Cognia may use the microphone, then try again.",
         "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again.",
         "unsupported": "Voice typing isn't supported in this environment."
       },
@@ -1000,6 +1010,7 @@
       "microphoneLabel": "Microphone",
       "microphoneLiveOnly": "Used by live voice. Dictation records from the system default microphone.",
       "noMicFound": "No microphone found.",
+      "openSettings": "Open settings",
       "selectMicAria": "Select microphone",
       "startListening": "Start voice input",
       "stopListening": "Stop recording",
@@ -1824,6 +1835,7 @@
     "bookmarkLabel": "Toggle bookmark",
     "bookmarkRemoveTooltip": "Remove bookmark",
     "bookmarkTooltip": "Bookmark",
+    "bookmarkedIndicator": "Bookmarked",
     "branchLabel": "Branch conversation",
     "branchStreamingTooltip": "Wait for this reply to finish before branching",
     "branchTooltip": "Branch from here",
@@ -1967,7 +1979,10 @@
       "summaryNative": "Sent as the original video",
       "summaryStoryboard": "Storyboard of {count} frames {strategy}",
       "video": "Video"
-    }
+    },
+    "shareCopiedFallback": "Sharing isn't available here, so the message was copied to the clipboard.",
+    "shareFailed": "Couldn't share this message.",
+    "editingSubmitTouch": "Send"
   },
   "messageDisplay": {
     "assistant": "Assistant",
@@ -2052,6 +2067,7 @@
       "label": "Bypass",
       "tooltip": "All tools auto-approved. Use with care — Claude can run any command."
     },
+    "changed": "Permission mode: {label}",
     "default": {
       "label": "Default",
       "tooltip": "Tools prompt for permission as usual."

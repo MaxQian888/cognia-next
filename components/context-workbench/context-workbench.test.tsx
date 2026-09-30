@@ -17,6 +17,7 @@ import { resetPanelHistoryForTesting } from "@/hooks/context-workbench/use-panel
 import {
   ContextWorkbench,
   ContextWorkbenchMobileDrawer,
+  mobileDrawerBottomReserve,
   useContextWorkbench,
 } from "./context-workbench"
 import {
@@ -553,6 +554,49 @@ describe("ContextWorkbench", () => {
       window.dispatchEvent(new PopStateEvent("popstate"))
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  /**
+   * vaul translates a fractional snap down by `(1 - snap)` of the viewport, so
+   * that band of the 92dvh drawer is always below the screen. Laid out against
+   * the full height, the artifacts list centred its empty state inside the
+   * hidden band and the half-open drawer showed a blank strip.
+   */
+  describe("below-the-fold reserve", () => {
+    it("reserves the band the active snap pushes below the screen", () => {
+      expect(mobileDrawerBottomReserve(0.55, 0)).toBe("calc(45dvh + env(safe-area-inset-bottom))")
+      expect(mobileDrawerBottomReserve(0.92, 0)).toBe("calc(8dvh + env(safe-area-inset-bottom))")
+    })
+
+    it("stacks an overlapping keyboard on top of the band instead of the inset", () => {
+      expect(mobileDrawerBottomReserve(0.55, 300)).toBe("calc(45dvh + 300px)")
+    })
+
+    it("keeps the keyboard-only padding for pixel snaps, a full snap or no snap", () => {
+      expect(mobileDrawerBottomReserve("320px", 0)).toBeUndefined()
+      expect(mobileDrawerBottomReserve(null, 0)).toBeUndefined()
+      expect(mobileDrawerBottomReserve(1, 0)).toBeUndefined()
+      expect(mobileDrawerBottomReserve(null, 250)).toBe(250)
+    })
+
+    it("applies the reserve for the snap the drawer is resting at", () => {
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ContextWorkbenchMobileDrawer
+            open
+            onOpenChange={jest.fn()}
+            snapPoint={0.55}
+            onSnapPointChange={jest.fn()}
+            workbenchInstanceId="mobile-reserve"
+            resource={resource}
+            panels={[]}
+          />
+        </NextIntlClientProvider>
+      )
+      expect(screen.getByTestId("context-workbench-mobile-sheet").getAttribute("style")).toContain(
+        "padding-bottom: calc(45dvh + env(safe-area-inset-bottom))"
+      )
+    })
   })
 
   it("lays the mobile activity rail out horizontally and walks it with left/right", () => {

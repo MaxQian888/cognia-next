@@ -8,6 +8,7 @@
 // no-guardrail mode. Tooltip explains what each mode does.
 
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { ShieldAlertIcon, ShieldCheckIcon, ShieldIcon, type LucideIcon } from "lucide-react"
 import { useChatStore, type PermissionMode } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
@@ -31,6 +32,9 @@ const RISK_ICON: Record<PermissionModeMeta["risk"], LucideIcon> = {
   elevated: ShieldIcon,
   danger: ShieldAlertIcon,
 }
+
+/** One toast slot for the glyph chip's announcements, so a cycle replaces it. */
+const PERMISSION_CYCLE_TOAST_ID = "composer-permission-mode-cycle"
 
 /** The next mode when the chip is clicked / Shift+Tab is pressed (safe core). */
 export function nextPermissionMode(cur: PermissionMode | null): PermissionMode | null {
@@ -75,7 +79,22 @@ export function PermissionModeIndicator({
           variant="outline"
           size="sm"
           disabled={disabled}
-          onClick={() => onCycle(nextPermissionMode(mode))}
+          onClick={() => {
+            const next = nextPermissionMode(mode)
+            onCycle(next)
+            // The glyph form has no label to change, and a touch device shows
+            // no tooltip, so a tap changed how the next turn runs with nothing
+            // on screen saying so beyond a recoloured icon. Say it once. One
+            // toast id, so cycling through the modes replaces rather than
+            // stacks.
+            if (glyph) {
+              const nextMeta = permissionModeMeta(next ?? "default")
+              toast(t("changed", { label: t(`${nextMeta.i18nKey}.label`) }), {
+                id: PERMISSION_CYCLE_TOAST_ID,
+                description: t(`${nextMeta.i18nKey}.tooltip`),
+              })
+            }
+          }}
           className={cn(
             "h-auto min-w-0 shrink gap-1 px-2 py-0.5 text-[11px] font-normal transition-colors hover:bg-accent",
             className,
