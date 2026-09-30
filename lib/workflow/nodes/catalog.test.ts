@@ -81,8 +81,42 @@ describe("NODE_CATALOG", () => {
       expect(typeof entry?.description).toBe("string")
       expect((entry?.description as string)?.length ?? 0).toBeGreaterThan(0)
     })
+
+    // A node whose inspector form is drawn from its `paramsSchema` shows each
+    // field's label, hint and option labels from `fields` (see
+    // `nodeSchemaMessages`); without them the form shows the schema's English.
+    it.each(NODE_CATALOG.filter((e) => e.paramsSchema).map((e) => e.kind))(
+      "localizes every params-schema field of %s",
+      (kind) => {
+        const schema = nodeCatalogEntry(kind).paramsSchema as {
+          properties: Record<string, { description?: string; enum?: readonly unknown[] }>
+        }
+        const fields = (nodeMessage(messages, kind) as { fields?: Record<string, FieldMessages> })
+          ?.fields
+        expect(Object.keys(fields ?? {}).sort()).toEqual(Object.keys(schema.properties).sort())
+        for (const [name, property] of Object.entries(schema.properties)) {
+          const field = fields![name]!
+          expect(field.label).toEqual(expect.any(String))
+          expect(field.label.length).toBeGreaterThan(0)
+          // A hint where the schema has one, and none it would not show.
+          expect(typeof field.description).toBe(property.description ? "string" : "undefined")
+          // Option labels are optional per field, but cover every value when present.
+          if (field.options) {
+            expect(Object.keys(field.options).sort()).toEqual(
+              (property.enum ?? []).map(String).sort()
+            )
+          }
+        }
+      }
+    )
   })
 })
+
+interface FieldMessages {
+  label: string
+  description?: string
+  options?: Record<string, string>
+}
 
 describe("nodeCatalogEntry", () => {
   it("describes plan rejection as its own terminal verdict, not a cancellation", () => {

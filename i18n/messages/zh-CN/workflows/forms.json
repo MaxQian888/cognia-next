@@ -3738,5 +3738,9 @@
       "label": "冷却（毫秒）",
       "hint": "同一工作流两次触发之间的最短间隔。"
     }
+  },
+  "schemaForm": {
+    "editAsJson": "以 JSON 编辑",
+    "selectPlaceholder": "请选择"
   }
 }

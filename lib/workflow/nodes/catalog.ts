@@ -1156,6 +1156,8 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
         prompt: { type: "string", format: "expression", title: "Prompt" },
         providerId: {
           type: "string",
+          // The form lists the providers by name, not id.
+          format: "ai-provider",
           title: "Provider",
           description: "Empty uses the default from Settings → Media generation.",
           enum: VIDEO_GENERATION_PROVIDER_IDS,

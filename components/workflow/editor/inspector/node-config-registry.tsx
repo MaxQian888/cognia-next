@@ -9,9 +9,11 @@
  * component fall back to a generic JSON editor.
  */
 
-import type { ComponentType } from "react"
+import { useMemo, type ComponentType } from "react"
+import { useTranslations } from "next-intl"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { nodeSchemaMessages } from "@/lib/workflow/i18n/node-translate"
 import { SchemaForm } from "./forms/schema-form"
 import {
   GitStageConfig,
@@ -410,20 +412,31 @@ export function getNodeConfigComponent(kind: WorkflowNodeKind): NodeConfigCompon
 
 /**
  * Entry-aware variant: prefers the built-in REGISTRY hit, then a JSON Schema
- * driven `SchemaForm` (for plugin entries that ship a `paramsSchema`), then
- * the raw-JSON fallback. This is what the inspector should call once it has
- * a `NodeCatalogEntry` in hand.
+ * driven `SchemaForm` (for entries that ship a `paramsSchema`), then the
+ * raw-JSON fallback. This is what the inspector should call once it has a
+ * `NodeCatalogEntry` in hand.
+ *
+ * The schema form's field text is localized like the node's own label: a
+ * built-in node's under `workflows.nodes.<kind>.fields`, a plugin node's under
+ * its `plugin.<pluginId>.workflow.nodes.<rawKind>.fields` overlay, with the
+ * schema's text as the fallback.
  */
 export function getNodeConfigComponentForEntry(
-  entry: Pick<NodeCatalogEntry, "kind" | "paramsSchema">
+  entry: Pick<NodeCatalogEntry, "kind" | "paramsSchema" | "pluginId">
 ): NodeConfigComponent {
   const builtIn = REGISTRY[entry.kind]
   if (builtIn) return builtIn
   if (entry.paramsSchema) {
     const schema = entry.paramsSchema
-    const SchemaFormForKind: NodeConfigComponent = ({ params, onChange }) => (
-      <SchemaForm schema={schema} params={params} onChange={onChange} />
-    )
+    const { kind, pluginId } = entry
+    const SchemaFormForKind: NodeConfigComponent = ({ params, onChange }) => {
+      const tRoot = useTranslations()
+      const messages = useMemo(
+        () => nodeSchemaMessages(tRoot, { kind, ...(pluginId ? { pluginId } : {}) }),
+        [tRoot]
+      )
+      return <SchemaForm schema={schema} params={params} onChange={onChange} messages={messages} />
+    }
     SchemaFormForKind.displayName = `SchemaFormFor(${entry.kind})`
     return SchemaFormForKind
   }

@@ -21,6 +21,11 @@
  * Field metadata (`title`, `description`, `default`, `examples[0]`) maps to
  * label / hint / default value / placeholder. The schema's top-level
  * `required: string[]` drives the asterisk + `name` plumbing on `Field`.
+ *
+ * `messages` localizes that text: each field's label, hint and enum option
+ * labels resolve by the field's path from the root, falling back to the
+ * schema's own text. An enum field with `format: "ai-provider"` lists
+ * provider display names rather than ids.
  */
 
 import { useState, useEffect, useId, useMemo } from "react"
@@ -37,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { getProviderDisplayName } from "@/lib/ai/icons"
 import { Field, FieldGroup, patchParam } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 
@@ -60,6 +66,16 @@ export interface JsonSchema {
   maxLength?: number
 }
 
+/**
+ * Localized field text. Each resolver gets the field's path of property names
+ * from the form root and returns undefined to keep the schema's own text.
+ */
+export interface SchemaFormMessages {
+  label(path: readonly string[]): string | undefined
+  description(path: readonly string[]): string | undefined
+  option(path: readonly string[], value: string): string | undefined
+}
+
 export interface SchemaFormProps {
   /**
    * Top-level schema. Should be `type: "object"` with `properties`. Other
@@ -68,6 +84,14 @@ export interface SchemaFormProps {
   schema: JsonSchema
   params: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
+  messages?: SchemaFormMessages
+}
+
+/** What a field shows, resolved once by `ObjectFields`. */
+interface FieldText {
+  label: string
+  hint?: string
+  option(value: string): string
 }
 
 const NONE_SENTINEL = "__schema_form_none__"
@@ -100,41 +124,38 @@ function labelFor(name: string, schema: JsonSchema): string {
 function StringField({
   name,
   schema,
+  text,
   value,
   onChange,
   required,
 }: {
   name: string
   schema: JsonSchema
+  text: FieldText
   value: unknown
   onChange: (v: unknown) => void
   required: boolean
 }) {
   const id = useId()
+  const t = useTranslations("workflows.forms.schemaForm")
   const str = typeof value === "string" ? value : ""
   const placeholder = placeholderFor(schema)
 
   if (schema.enum && schema.enum.length > 0) {
     return (
-      <Field
-        label={labelFor(name, schema)}
-        htmlFor={id}
-        hint={schema.description}
-        name={name}
-        required={required}
-      >
+      <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
         <Select
           value={str || undefined}
           onValueChange={(v) => onChange(v === NONE_SENTINEL ? "" : v)}
         >
           <SelectTrigger id={id}>
-            <SelectValue placeholder={placeholder ?? "(select)"} />
+            <SelectValue placeholder={placeholder ?? t("selectPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {!required ? <SelectItem value={NONE_SENTINEL}>—</SelectItem> : null}
             {schema.enum.map((opt) => (
               <SelectItem key={String(opt)} value={String(opt)}>
-                {String(opt)}
+                {text.option(String(opt))}
               </SelectItem>
             ))}
           </SelectContent>
@@ -145,13 +166,7 @@ function StringField({
 
   if (schema.format === "expression") {
     return (
-      <Field
-        label={labelFor(name, schema)}
-        htmlFor={id}
-        hint={schema.description}
-        name={name}
-        required={required}
-      >
+      <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
         <ExpressionField
           id={id}
           value={str}
@@ -166,13 +181,7 @@ function StringField({
 
   if (schema.format === "textarea") {
     return (
-      <Field
-        label={labelFor(name, schema)}
-        htmlFor={id}
-        hint={schema.description}
-        name={name}
-        required={required}
-      >
+      <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
         <Textarea
           id={id}
           value={str}
@@ -195,13 +204,7 @@ function StringField({
           : "text"
 
   return (
-    <Field
-      label={labelFor(name, schema)}
-      htmlFor={id}
-      hint={schema.description}
-      name={name}
-      required={required}
-    >
+    <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
       <Input
         id={id}
         type={inputType}
@@ -218,12 +221,14 @@ function StringField({
 function NumberField({
   name,
   schema,
+  text,
   value,
   onChange,
   required,
 }: {
   name: string
   schema: JsonSchema
+  text: FieldText
   value: unknown
   onChange: (v: unknown) => void
   required: boolean
@@ -236,13 +241,7 @@ function NumberField({
         ? schema.default
         : 0
   return (
-    <Field
-      label={labelFor(name, schema)}
-      htmlFor={id}
-      hint={schema.description}
-      name={name}
-      required={required}
-    >
+    <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
       <Input
         id={id}
         type="number"
@@ -263,12 +262,14 @@ function NumberField({
 function BooleanField({
   name,
   schema,
+  text,
   value,
   onChange,
   required,
 }: {
   name: string
   schema: JsonSchema
+  text: FieldText
   value: unknown
   onChange: (v: unknown) => void
   required: boolean
@@ -276,19 +277,8 @@ function BooleanField({
   const id = useId()
   const checked = typeof value === "boolean" ? value : Boolean(schema.default)
   return (
-    <Field
-      label={labelFor(name, schema)}
-      htmlFor={id}
-      hint={schema.description}
-      name={name}
-      required={required}
-    >
-      <Switch
-        id={id}
-        checked={checked}
-        onCheckedChange={onChange}
-        aria-label={labelFor(name, schema)}
-      />
+    <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} aria-label={text.label} />
     </Field>
   )
 }
@@ -296,12 +286,14 @@ function BooleanField({
 function StringArrayField({
   name,
   schema,
+  text,
   value,
   onChange,
   required,
 }: {
   name: string
   schema: JsonSchema
+  text: FieldText
   value: unknown
   onChange: (v: unknown) => void
   required: boolean
@@ -310,13 +302,7 @@ function StringArrayField({
   const t = useTranslations("workflows.forms.arrayField")
   const arr = useMemo<string[]>(() => (Array.isArray(value) ? (value as string[]) : []), [value])
   return (
-    <Field
-      label={labelFor(name, schema)}
-      htmlFor={id}
-      hint={schema.description}
-      name={name}
-      required={required}
-    >
+    <Field label={text.label} htmlFor={id} hint={text.hint} name={name} required={required}>
       <div className="space-y-2">
         {arr.map((item, i) => (
           <div key={i} className="flex gap-2">
@@ -352,38 +338,41 @@ function StringArrayField({
 function JsonFallbackField({
   name,
   schema,
+  text,
   value,
   onChange,
   required,
 }: {
   name: string
   schema: JsonSchema
+  text: FieldText
   value: unknown
   onChange: (v: unknown) => void
   required: boolean
 }) {
   const id = useId()
-  const [text, setText] = useState(() => JSON.stringify(value ?? schema.default ?? null, null, 2))
+  const t = useTranslations("workflows.forms.schemaForm")
+  const [json, setJson] = useState(() => JSON.stringify(value ?? schema.default ?? null, null, 2))
   // Reset on external change.
   const [prev, setPrev] = useState(value)
   if (prev !== value) {
     setPrev(value)
-    setText(JSON.stringify(value ?? schema.default ?? null, null, 2))
+    setJson(JSON.stringify(value ?? schema.default ?? null, null, 2))
   }
   return (
     <Field
-      label={labelFor(name, schema)}
+      label={text.label}
       htmlFor={id}
-      hint={schema.description ?? "Edit as JSON"}
+      hint={text.hint ?? t("editAsJson")}
       name={name}
       required={required}
     >
       <Textarea
         id={id}
-        value={text}
+        value={json}
         onChange={(e) => {
           const next = e.target.value
-          setText(next)
+          setJson(next)
           try {
             onChange(JSON.parse(next))
           } catch {
@@ -399,14 +388,34 @@ function JsonFallbackField({
 
 // ── Object renderer (also the top-level entry point) ──────────────────────
 
+/** Resolve a field's label, hint and option labels: `messages` first, then the schema. */
+function fieldText(
+  path: readonly string[],
+  schema: JsonSchema,
+  messages: SchemaFormMessages | undefined
+): FieldText {
+  return {
+    label: messages?.label(path) ?? labelFor(path[path.length - 1]!, schema),
+    hint: messages?.description(path) ?? schema.description,
+    option: (value) =>
+      messages?.option(path, value) ??
+      (schema.format === "ai-provider" ? getProviderDisplayName(value) : value),
+  }
+}
+
 function ObjectFields({
   schema,
   params,
   onChange,
+  messages,
+  path = [],
 }: {
   schema: JsonSchema
   params: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
+  messages?: SchemaFormMessages
+  /** Property names from the form root to this object. */
+  path?: readonly string[]
 }) {
   // Apply defaults exactly once when a field has no value yet. Without this,
   // a plugin schema with `default: 5` would never seed `params.foo = 5`,
@@ -436,22 +445,20 @@ function ObjectFields({
         const childOnChange = (v: unknown) => onChange(patchParam(params, key, v))
         const value = params[key]
         const isReq = required.has(key)
+        const fieldPath = [...path, key]
+        const text = fieldText(fieldPath, sub, messages)
 
         if (sub.type === "object" && sub.properties) {
           return (
             <div key={key} className="space-y-2 rounded-md border p-3">
-              {sub.title ? (
-                <p className="text-xs font-semibold">{sub.title}</p>
-              ) : (
-                <p className="text-xs font-semibold">{labelFor(key, sub)}</p>
-              )}
-              {sub.description ? (
-                <p className="text-[11px] text-muted-foreground">{sub.description}</p>
-              ) : null}
+              <p className="text-xs font-semibold">{text.label}</p>
+              {text.hint ? <p className="text-[11px] text-muted-foreground">{text.hint}</p> : null}
               <ObjectFields
                 schema={sub}
                 params={(value as Record<string, unknown>) ?? {}}
                 onChange={(nested) => onChange(patchParam(params, key, nested))}
+                messages={messages}
+                path={fieldPath}
               />
             </div>
           )
@@ -463,6 +470,7 @@ function ObjectFields({
               key={key}
               name={key}
               schema={sub}
+              text={text}
               value={value}
               onChange={childOnChange}
               required={isReq}
@@ -475,6 +483,7 @@ function ObjectFields({
               key={key}
               name={key}
               schema={sub}
+              text={text}
               value={value}
               onChange={childOnChange}
               required={isReq}
@@ -487,6 +496,7 @@ function ObjectFields({
               key={key}
               name={key}
               schema={sub}
+              text={text}
               value={value}
               onChange={childOnChange}
               required={isReq}
@@ -499,6 +509,7 @@ function ObjectFields({
               key={key}
               name={key}
               schema={sub}
+              text={text}
               value={value}
               onChange={childOnChange}
               required={isReq}
@@ -510,6 +521,7 @@ function ObjectFields({
             key={key}
             name={key}
             schema={sub}
+            text={text}
             value={value}
             onChange={childOnChange}
             required={isReq}
@@ -520,7 +532,7 @@ function ObjectFields({
   )
 }
 
-export function SchemaForm({ schema, params, onChange }: SchemaFormProps) {
+export function SchemaForm({ schema, params, onChange, messages }: SchemaFormProps) {
   // Top-level shape MUST be an object schema for the form to work. Anything
   // else falls back to a single JSON textarea.
   if (schema.type !== "object" || !schema.properties) {
@@ -529,6 +541,7 @@ export function SchemaForm({ schema, params, onChange }: SchemaFormProps) {
         <JsonFallbackField
           name="_root"
           schema={schema}
+          text={fieldText(["_root"], schema, undefined)}
           value={params}
           onChange={(v) => onChange((v as Record<string, unknown> | null) ?? {})}
           required={false}
@@ -536,5 +549,5 @@ export function SchemaForm({ schema, params, onChange }: SchemaFormProps) {
       </FieldGroup>
     )
   }
-  return <ObjectFields schema={schema} params={params} onChange={onChange} />
+  return <ObjectFields schema={schema} params={params} onChange={onChange} messages={messages} />
 }

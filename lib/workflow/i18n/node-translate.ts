@@ -13,6 +13,10 @@
  * at `plugin.<pluginId>.workflow.nodes.<rawKind>.<field>`. When the plugin
  * ships no such key the author's raw `label` / `description` stays as the
  * visible fallback.
+ *
+ * A node whose inspector form is drawn from its `paramsSchema` localizes each
+ * field the same way, under `fields.<field>.label` / `.description` /
+ * `.options.<value>` beside the node's own keys (`nodeSchemaMessages`).
  */
 
 import { unprefixPluginKind } from "@/lib/plugin/bridge/kind-prefix"
@@ -64,4 +68,64 @@ export function tNodeField(
     ? pluginNodeMessageKey(pluginId, kind, field)
     : `workflows.nodes.${kind}.${field}`
   return tNode(rootT, key, fallback)
+}
+
+/** The part of a params-schema field the inspector form shows. */
+export type NodeSchemaFieldPart =
+  { part: "label" } | { part: "description" } | { part: "option"; value: string }
+
+/** A message key segment: no `.`, which next-intl reads as nesting. */
+function isKeySegment(segment: string): boolean {
+  return segment.length > 0 && !segment.includes(".")
+}
+
+/**
+ * The key a node's params-schema field text resolves at, beside the node's own
+ * `label` / `description`: `…nodes.<kind>.fields.<field>.label`, `.description`
+ * or `.options.<value>`, with a nested object's fields under its own
+ * `fields`. Undefined when a segment cannot be a key (an option value with a
+ * `.`), so the schema's own text shows.
+ */
+export function nodeSchemaFieldMessageKey(opts: {
+  kind: string
+  pluginId?: string
+  path: readonly string[]
+  field: NodeSchemaFieldPart
+}): string | undefined {
+  const { kind, pluginId, path, field } = opts
+  if (path.length === 0 || !path.every(isKeySegment)) return undefined
+  const node = pluginId
+    ? `plugin.${pluginId}.workflow.nodes.${unprefixPluginKind(pluginId, kind)}`
+    : `workflows.nodes.${kind}`
+  const base = `${node}.${path.map((segment) => `fields.${segment}`).join(".")}`
+  if (field.part !== "option") return `${base}.${field.part}`
+  return isKeySegment(field.value) ? `${base}.options.${field.value}` : undefined
+}
+
+/**
+ * Localized text for a node's params-schema form: each resolver returns the
+ * registered translation, or undefined so the form keeps the schema's text.
+ */
+export interface NodeSchemaMessages {
+  label(path: readonly string[]): string | undefined
+  description(path: readonly string[]): string | undefined
+  option(path: readonly string[], value: string): string | undefined
+}
+
+/** {@link NodeSchemaMessages} for one node kind, from a ROOT translator. */
+export function nodeSchemaMessages(
+  rootT: Translator,
+  node: { kind: string; pluginId?: string }
+): NodeSchemaMessages {
+  const resolve = (path: readonly string[], field: NodeSchemaFieldPart) => {
+    const key = nodeSchemaFieldMessageKey({ ...node, path, field })
+    if (!key) return undefined
+    const text = tNode(rootT, key, "")
+    return text === "" ? undefined : text
+  }
+  return {
+    label: (path) => resolve(path, { part: "label" }),
+    description: (path) => resolve(path, { part: "description" }),
+    option: (path, value) => resolve(path, { part: "option", value }),
+  }
 }

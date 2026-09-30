@@ -1,4 +1,10 @@
-import { pluginNodeMessageKey, tNode, tNodeField } from "./node-translate"
+import {
+  nodeSchemaFieldMessageKey,
+  nodeSchemaMessages,
+  pluginNodeMessageKey,
+  tNode,
+  tNodeField,
+} from "./node-translate"
 
 describe("tNode", () => {
   it("returns the translation when the key resolves", () => {
@@ -73,5 +79,65 @@ describe("tNodeField", () => {
         fallback: "Run git status",
       })
     ).toBe("Run git status")
+  })
+})
+
+describe("nodeSchemaFieldMessageKey", () => {
+  const kind = "action.media.generateVideo"
+
+  it("places a built-in node's field text beside its own label", () => {
+    expect(nodeSchemaFieldMessageKey({ kind, path: ["prompt"], field: { part: "label" } })).toBe(
+      "workflows.nodes.action.media.generateVideo.fields.prompt.label"
+    )
+    expect(
+      nodeSchemaFieldMessageKey({ kind, path: ["model"], field: { part: "description" } })
+    ).toBe("workflows.nodes.action.media.generateVideo.fields.model.description")
+    expect(
+      nodeSchemaFieldMessageKey({
+        kind: "action.fs.read",
+        path: ["rootMode"],
+        field: { part: "option", value: "host-default" },
+      })
+    ).toBe("workflows.nodes.action.fs.read.fields.rootMode.options.host-default")
+  })
+
+  it("nests a nested object's fields, and uses a plugin's overlay", () => {
+    expect(
+      nodeSchemaFieldMessageKey({
+        kind: "git.action.status",
+        pluginId: "git",
+        path: ["auth", "token"],
+        field: { part: "label" },
+      })
+    ).toBe("plugin.git.workflow.nodes.action.status.fields.auth.fields.token.label")
+  })
+
+  it("has no key for a segment next-intl would read as nesting", () => {
+    expect(
+      nodeSchemaFieldMessageKey({ kind, path: ["x"], field: { part: "option", value: "1.5" } })
+    ).toBeUndefined()
+    expect(
+      nodeSchemaFieldMessageKey({ kind, path: ["a.b"], field: { part: "label" } })
+    ).toBeUndefined()
+    expect(nodeSchemaFieldMessageKey({ kind, path: [], field: { part: "label" } })).toBeUndefined()
+  })
+})
+
+describe("nodeSchemaMessages", () => {
+  const known: Record<string, string> = {
+    "workflows.nodes.action.fs.read.fields.rootMode.label": "工作区根目录",
+    "workflows.nodes.action.fs.read.fields.rootMode.description": "要使用的根目录。",
+    "workflows.nodes.action.fs.read.fields.rootMode.options.project": "项目",
+  }
+  const t = Object.assign((key: string) => known[key]!, { has: (key: string) => key in known })
+
+  it("returns the registered text, and undefined so the form keeps the schema's", () => {
+    const messages = nodeSchemaMessages(t, { kind: "action.fs.read" })
+    expect(messages.label(["rootMode"])).toBe("工作区根目录")
+    expect(messages.description(["rootMode"])).toBe("要使用的根目录。")
+    expect(messages.option(["rootMode"], "project")).toBe("项目")
+    expect(messages.option(["rootMode"], "explicit")).toBeUndefined()
+    expect(messages.label(["path"])).toBeUndefined()
+    expect(messages.option(["rootMode"], "a.b")).toBeUndefined()
   })
 })

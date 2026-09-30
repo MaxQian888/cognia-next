@@ -139,7 +139,6 @@
     "lib/ai/eval/import/foreign/openai-evals.ts",
     "lib/ai/eval/import/foreign/promptfoo.ts",
     "lib/ai/eval/import/index.ts",
-    "lib/ai/icons.ts",
     "lib/ai/infrastructure/api-test.ts",
     "lib/ai/providers/openrouter-catalog-sync.ts",
     "lib/appearance/component-style-registry.ts",

@@ -3738,5 +3738,9 @@
       "label": "Cooldown (ms)",
       "hint": "Minimum time between fires for the same workflow."
     }
+  },
+  "schemaForm": {
+    "editAsJson": "Edit as JSON",
+    "selectPlaceholder": "Select…"
   }
 }

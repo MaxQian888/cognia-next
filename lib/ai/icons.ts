@@ -6,6 +6,7 @@
  */
 
 import { resolveModelsDevProviderId } from "@cognia/provider-core/providers/models-dev-id-map"
+import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
 
 // ============================================================================
 // Provider Icon Registry
@@ -217,9 +218,10 @@ export function getProviderIconInfo(providerId: string): ProviderIconInfo {
     return PROVIDER_ICON_REGISTRY[normalized]
   }
 
-  // Generate fallback for unknown providers
+  // Generate fallback for providers without an icon entry; a built-in
+  // provider still has its catalog name (the video providers, for one).
   return {
-    name: providerId,
+    name: getBuiltInProviderCatalogEntry(normalized)?.name ?? providerId,
     localIcon: `/icons/providers/${normalized}.svg`,
     brandColor: "#6b7280",
     hasLocalIcon: false,

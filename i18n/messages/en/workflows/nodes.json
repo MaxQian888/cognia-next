@@ -33,39 +33,163 @@
     "browser": {
       "act": {
         "description": "Click, type, select, hover, press a key or scroll, addressing an element by the ref a snapshot gave it.",
-        "label": "Act on element"
+        "label": "Act on element",
+        "fields": {
+          "action": {
+            "label": "Action",
+            "options": {
+              "click": "Click",
+              "double_click": "Double-click",
+              "type": "Type",
+              "fill": "Fill",
+              "select": "Select",
+              "hover": "Hover",
+              "focus": "Focus",
+              "key": "Press key",
+              "scroll": "Scroll"
+            }
+          },
+          "ref": {
+            "label": "Element ref"
+          },
+          "value": {
+            "label": "Value or key chord"
+          },
+          "direction": {
+            "label": "Scroll direction",
+            "options": {
+              "up": "Up",
+              "down": "Down",
+              "left": "Left",
+              "right": "Right",
+              "top": "To the top",
+              "bottom": "To the bottom"
+            }
+          },
+          "amount": {
+            "label": "Scroll amount"
+          }
+        }
       },
       "diagnostics": {
         "description": "Read the page's console lines and network requests. The did-the-deploy-break-it node.",
-        "label": "Read console and network"
+        "label": "Read console and network",
+        "fields": {
+          "include": {
+            "label": "Include",
+            "options": {
+              "both": "Console and network",
+              "console": "Console",
+              "network": "Network"
+            }
+          },
+          "errorsOnly": {
+            "label": "Console errors only"
+          },
+          "limit": {
+            "label": "Entry cap"
+          }
+        }
       },
       "fillForm": {
         "description": "Fill several fields in order. A field can name a credential instead of a literal, and a credential that will not resolve fails the step rather than typing an empty string into it.",
-        "label": "Fill form"
+        "label": "Fill form",
+        "fields": {
+          "fields": {
+            "label": "Fields",
+            "description": "Each entry is '{ ref, value }' or '{ ref, credentialRef }'."
+          }
+        }
       },
       "open": {
         "description": "Navigate the run's browser to a URL and wait for it to load. A public domain has to be granted for this workspace first, and a redirect off it fails the step.",
-        "label": "Open page"
+        "label": "Open page",
+        "fields": {
+          "url": {
+            "label": "URL"
+          },
+          "timeoutMs": {
+            "label": "Load timeout (ms)"
+          }
+        }
       },
       "readPage": {
         "description": "Read the page as plain text. The reading counterpart of Snapshot.",
-        "label": "Read page text"
+        "label": "Read page text",
+        "fields": {
+          "maxNodes": {
+            "label": "Node cap"
+          }
+        }
       },
       "replayFlow": {
         "description": "Replay a recorded browser flow. Desktop only: the replayer addresses elements through the embedded pane.",
-        "label": "Replay recorded flow"
+        "label": "Replay recorded flow",
+        "fields": {
+          "recordingId": {
+            "label": "Recording id"
+          }
+        }
       },
       "screenshot": {
         "description": "Capture the viewport, the full page, or one element. The bytes ride only when asked for, and the size is always reported.",
-        "label": "Screenshot page"
+        "label": "Screenshot page",
+        "fields": {
+          "scope": {
+            "label": "Scope",
+            "options": {
+              "viewport": "Visible area",
+              "fullPage": "Full page",
+              "element": "One element"
+            }
+          },
+          "ref": {
+            "label": "Element ref"
+          },
+          "includeImage": {
+            "label": "Include the image bytes"
+          }
+        }
       },
       "snapshot": {
         "description": "Capture the page's accessibility tree with a ref for every element, which is what Act and Fill form address.",
-        "label": "Snapshot page"
+        "label": "Snapshot page",
+        "fields": {
+          "includeText": {
+            "label": "Include non-interactive text"
+          },
+          "maxNodes": {
+            "label": "Node cap"
+          }
+        }
       },
       "waitFor": {
         "description": "Block until text appears, a selector matches, or the network goes idle. Exactly one of the three.",
-        "label": "Wait for page"
+        "label": "Wait for page",
+        "fields": {
+          "text": {
+            "label": "Text"
+          },
+          "selector": {
+            "label": "CSS selector"
+          },
+          "networkIdle": {
+            "label": "Network idle"
+          },
+          "mode": {
+            "label": "Mode",
+            "options": {
+              "appear": "Appears",
+              "disappear": "Disappears"
+            }
+          },
+          "timeoutMs": {
+            "label": "Timeout (ms)"
+          },
+          "failOnTimeout": {
+            "label": "Fail on timeout"
+          }
+        }
       }
     },
     "canvas": {
@@ -169,39 +293,258 @@
     "fs": {
       "copy": {
         "description": "Copy an entry within the workspace root. A directory needs the recursive flag. Refuses to clobber an existing destination.",
-        "label": "Copy path"
+        "label": "Copy path",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "fromRelPath": {
+            "label": "From"
+          },
+          "toRelPath": {
+            "label": "To"
+          },
+          "recursive": {
+            "label": "Recursive (directories)"
+          }
+        }
       },
       "delete": {
         "description": "Delete a file or directory. A non-empty directory needs the recursive flag. Needs an approval upstream on a non-interactive run.",
-        "label": "Delete path"
+        "label": "Delete path",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "relPath": {
+            "label": "Path to delete"
+          },
+          "recursive": {
+            "label": "Recursive (directories)"
+          }
+        }
       },
       "list": {
         "description": "List a directory, optionally recursively. Honours .gitignore and reports what a cap withheld rather than passing a partial tree off as complete.",
-        "label": "List directory"
+        "label": "List directory",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "relPath": {
+            "label": "Directory",
+            "description": "Leave empty for the root itself."
+          },
+          "recursive": {
+            "label": "Recursive"
+          },
+          "includeDirs": {
+            "label": "Include directories"
+          },
+          "includeIgnored": {
+            "label": "Include .gitignore'd entries"
+          },
+          "maxEntries": {
+            "label": "Entry cap"
+          },
+          "maxDepth": {
+            "label": "Depth cap"
+          }
+        }
       },
       "mkdir": {
         "description": "Create a directory and any missing parents.",
-        "label": "Create directory"
+        "label": "Create directory",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "relPath": {
+            "label": "Directory to create"
+          }
+        }
       },
       "move": {
         "description": "Move an entry within the workspace root. Refuses to clobber an existing destination. Needs an approval upstream on a non-interactive run.",
-        "label": "Move or rename"
+        "label": "Move or rename",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "fromRelPath": {
+            "label": "From"
+          },
+          "toRelPath": {
+            "label": "To"
+          }
+        }
       },
       "read": {
         "description": "Read a UTF-8 text file from the workspace. Stats first and refuses over the byte cap, so a large file never reaches the run log.",
-        "label": "Read file"
+        "label": "Read file",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "relPath": {
+            "label": "Path in the workspace"
+          },
+          "maxBytes": {
+            "label": "Byte cap"
+          }
+        }
       },
       "search": {
         "description": "Search the workspace by file content (with an optional regex) or by file name. Honours .gitignore.",
-        "label": "Search files"
+        "label": "Search files",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "query": {
+            "label": "Query"
+          },
+          "target": {
+            "label": "Search",
+            "options": {
+              "content": "File contents",
+              "name": "File names"
+            }
+          },
+          "isRegex": {
+            "label": "Treat the query as a regex"
+          },
+          "caseSensitive": {
+            "label": "Case sensitive"
+          },
+          "maxResults": {
+            "label": "Result cap"
+          }
+        }
       },
       "stat": {
         "description": "Metadata for one workspace path. Answers with exists: false rather than failing, so a flow can probe before it writes.",
-        "label": "Stat path"
+        "label": "Stat path",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "relPath": {
+            "label": "Path in the workspace"
+          }
+        }
       },
       "write": {
         "description": "Write or append a UTF-8 text file, creating parent directories. Needs an approval upstream on a non-interactive run.",
-        "label": "Write file"
+        "label": "Write file",
+        "fields": {
+          "rootMode": {
+            "label": "Workspace root",
+            "description": "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+            "options": {
+              "project": "Project",
+              "host-default": "Host default",
+              "explicit": "Explicit path"
+            }
+          },
+          "rootPath": {
+            "label": "Root path",
+            "description": "Only used when the root is 'explicit'. A path this Host will browse."
+          },
+          "relPath": {
+            "label": "Path in the workspace"
+          },
+          "content": {
+            "label": "Content"
+          },
+          "mode": {
+            "label": "Mode",
+            "options": {
+              "overwrite": "Overwrite",
+              "append": "Append"
+            }
+          }
+        }
       }
     },
     "git": {
@@ -309,19 +652,184 @@
     "image": {
       "adjust": {
         "description": "Brightness, contrast, exposure, saturation, vibrance, temperature, tint, hue, gamma, blur and sharpen.",
-        "label": "Adjust image"
+        "label": "Adjust image",
+        "fields": {
+          "blobRef": {
+            "label": "Blob reference",
+            "description": "From an earlier image or frame node."
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 bytes"
+          },
+          "mimeType": {
+            "label": "Media type for the base64 bytes"
+          },
+          "url": {
+            "label": "Image URL"
+          },
+          "brightness": {
+            "label": "Brightness"
+          },
+          "contrast": {
+            "label": "Contrast"
+          },
+          "exposure": {
+            "label": "Exposure"
+          },
+          "saturation": {
+            "label": "Saturation"
+          },
+          "vibrance": {
+            "label": "Vibrance"
+          },
+          "temperature": {
+            "label": "Temperature"
+          },
+          "tint": {
+            "label": "Tint"
+          },
+          "hue": {
+            "label": "Hue (degrees)"
+          },
+          "gamma": {
+            "label": "Gamma"
+          },
+          "blur": {
+            "label": "Blur"
+          },
+          "sharpen": {
+            "label": "Sharpen"
+          },
+          "format": {
+            "label": "Output format",
+            "description": "An image with transparency comes back as PNG regardless.",
+            "options": {
+              "png": "PNG",
+              "jpeg": "JPEG",
+              "webp": "WebP"
+            }
+          },
+          "quality": {
+            "label": "Quality (0 to 100)"
+          }
+        }
       },
       "convert": {
         "description": "Re-encode an image. The output reports the format it actually is, which is not always the one requested.",
-        "label": "Convert image"
+        "label": "Convert image",
+        "fields": {
+          "blobRef": {
+            "label": "Blob reference",
+            "description": "From an earlier image or frame node."
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 bytes"
+          },
+          "mimeType": {
+            "label": "Media type for the base64 bytes"
+          },
+          "url": {
+            "label": "Image URL"
+          },
+          "format": {
+            "label": "Output format",
+            "description": "An image with transparency comes back as PNG regardless.",
+            "options": {
+              "png": "PNG",
+              "jpeg": "JPEG",
+              "webp": "WebP"
+            }
+          },
+          "quality": {
+            "label": "Quality (0 to 100)"
+          }
+        }
       },
       "info": {
         "description": "Dimensions, aspect ratio and whether the image carries transparency.",
-        "label": "Read image info"
+        "label": "Read image info",
+        "fields": {
+          "blobRef": {
+            "label": "Blob reference",
+            "description": "From an earlier image or frame node."
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 bytes"
+          },
+          "mimeType": {
+            "label": "Media type for the base64 bytes"
+          },
+          "url": {
+            "label": "Image URL"
+          }
+        }
       },
       "transform": {
         "description": "Crop, scale, rotate and flip in one pass, so a chain of edits costs one decode and one encode rather than four.",
-        "label": "Transform image"
+        "label": "Transform image",
+        "fields": {
+          "blobRef": {
+            "label": "Blob reference",
+            "description": "From an earlier image or frame node."
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 bytes"
+          },
+          "mimeType": {
+            "label": "Media type for the base64 bytes"
+          },
+          "url": {
+            "label": "Image URL"
+          },
+          "rotate": {
+            "label": "Rotate (degrees clockwise)"
+          },
+          "scale": {
+            "label": "Scale factor"
+          },
+          "flipHorizontal": {
+            "label": "Flip horizontally"
+          },
+          "flipVertical": {
+            "label": "Flip vertically"
+          },
+          "cropX": {
+            "label": "Crop x"
+          },
+          "cropY": {
+            "label": "Crop y"
+          },
+          "cropWidth": {
+            "label": "Crop width"
+          },
+          "cropHeight": {
+            "label": "Crop height"
+          },
+          "format": {
+            "label": "Output format",
+            "description": "An image with transparency comes back as PNG regardless.",
+            "options": {
+              "png": "PNG",
+              "jpeg": "JPEG",
+              "webp": "WebP"
+            }
+          },
+          "quality": {
+            "label": "Quality (0 to 100)"
+          }
+        }
       }
     },
     "humanInput": {
@@ -333,23 +841,93 @@
     "media": {
       "concat": {
         "description": "Join two or more videos end to end. The result lands in the media temp area, the same as Trim.",
-        "label": "Join videos"
+        "label": "Join videos",
+        "fields": {
+          "sourcePaths": {
+            "label": "Video file paths"
+          }
+        }
       },
       "frame": {
         "description": "Pull one frame out of a video at a timestamp and hand back a reference the image and OCR nodes can read.",
-        "label": "Extract frame"
+        "label": "Extract frame",
+        "fields": {
+          "sourcePath": {
+            "label": "Video file path"
+          },
+          "timeSeconds": {
+            "label": "Timestamp (seconds)"
+          }
+        }
       },
       "generateVideo": {
         "description": "Generate a video from a prompt, and optionally a start image, with a configured video provider. Waits for the provider (often several minutes) and outputs the file's path for the other media nodes.",
-        "label": "Generate video"
+        "label": "Generate video",
+        "fields": {
+          "prompt": {
+            "label": "Prompt"
+          },
+          "providerId": {
+            "label": "Provider",
+            "description": "Empty uses the default from Settings → Media generation."
+          },
+          "model": {
+            "label": "Model",
+            "description": "Empty uses the provider's default."
+          },
+          "durationSec": {
+            "label": "Duration (seconds)"
+          },
+          "aspectRatio": {
+            "label": "Aspect ratio"
+          },
+          "resolution": {
+            "label": "Resolution"
+          },
+          "blobRef": {
+            "label": "Start image blob reference",
+            "description": "From an earlier image or frame node."
+          },
+          "dataUrl": {
+            "label": "Start image data URL"
+          },
+          "imageBase64": {
+            "label": "Start image base64 bytes"
+          },
+          "mimeType": {
+            "label": "Media type for the base64 bytes"
+          },
+          "url": {
+            "label": "Start image URL"
+          }
+        }
       },
       "probe": {
         "description": "Read a video's duration, dimensions, frame rate, codec and whether it has audio.",
-        "label": "Probe video"
+        "label": "Probe video",
+        "fields": {
+          "sourcePath": {
+            "label": "Video file path"
+          }
+        }
       },
       "trim": {
         "description": "Cut a video between two timestamps. The result lands in the media temp area, so it chains into another media node rather than into a file node.",
-        "label": "Trim video"
+        "label": "Trim video",
+        "fields": {
+          "sourcePath": {
+            "label": "Video file path"
+          },
+          "startSeconds": {
+            "label": "Start (seconds)"
+          },
+          "endSeconds": {
+            "label": "End (seconds)"
+          },
+          "format": {
+            "label": "Container"
+          }
+        }
       }
     },
     "mcp": {
@@ -393,15 +971,100 @@
     "notify": {
       "list": {
         "description": "Read the notification centre, newest first, with the current badge counts.",
-        "label": "List notifications"
+        "label": "List notifications",
+        "fields": {
+          "source": {
+            "label": "Only this source",
+            "options": {
+              "scheduler": "Scheduler",
+              "agent-team": "Agent team",
+              "plugin": "Plugin",
+              "connector": "Connector",
+              "session": "Conversation",
+              "workflow": "Workflow",
+              "system": "System",
+              "issue": "Issue"
+            }
+          },
+          "readStates": {
+            "label": "Read states",
+            "description": "unseen, seen, read or done. Empty means every state except done."
+          },
+          "includeDone": {
+            "label": "Include archived"
+          },
+          "hideSnoozed": {
+            "label": "Hide snoozed"
+          },
+          "limit": {
+            "label": "Limit"
+          }
+        }
       },
       "resolve": {
         "description": "Mark a notification seen, read or done, or snooze it. The lifecycle only moves forward.",
-        "label": "Resolve notification"
+        "label": "Resolve notification",
+        "fields": {
+          "notificationId": {
+            "label": "Notification id"
+          },
+          "state": {
+            "label": "Mark as",
+            "options": {
+              "seen": "Seen",
+              "read": "Read",
+              "done": "Done"
+            }
+          },
+          "snoozeMs": {
+            "label": "Snooze for (ms)",
+            "description": "When set, snoozes instead of changing the read state."
+          }
+        }
       },
       "send": {
         "description": "Raise a notification in the centre and fan it out by the user's own preferences. Nothing waits for it. Use Request approval when the flow needs an answer.",
-        "label": "Send notification"
+        "label": "Send notification",
+        "fields": {
+          "title": {
+            "label": "Title"
+          },
+          "body": {
+            "label": "Body"
+          },
+          "level": {
+            "label": "Level",
+            "options": {
+              "info": "Info",
+              "success": "Success",
+              "warning": "Warning",
+              "error": "Error",
+              "critical": "Critical"
+            }
+          },
+          "directed": {
+            "label": "Needs attention",
+            "description": "Counts toward the red badge instead of the ambient dot."
+          },
+          "href": {
+            "label": "Open on click",
+            "description": "An in-app route such as /agent-runs."
+          },
+          "icon": {
+            "label": "Lucide icon name"
+          },
+          "groupKey": {
+            "label": "Group key",
+            "description": "Defaults to this workflow, so its notifications stack together."
+          },
+          "dedupeKey": {
+            "label": "Dedupe key",
+            "description": "Defaults to this run and step, so a retry bumps rather than duplicates."
+          },
+          "ttlMs": {
+            "label": "Auto-expire after (ms)"
+          }
+        }
       }
     },
     "pet": {
@@ -565,41 +1228,192 @@
     "search": {
       "messages": {
         "description": "Search message text across conversations, with the excerpt around each hit. Says when older history was never scanned.",
-        "label": "Search chat history"
+        "label": "Search chat history",
+        "fields": {
+          "query": {
+            "label": "Query"
+          },
+          "workspaceScope": {
+            "label": "Workspace scope",
+            "options": {
+              "current": "This workspace",
+              "all": "All workspaces"
+            }
+          },
+          "projectId": {
+            "label": "Workspace id"
+          },
+          "roles": {
+            "label": "Only these roles",
+            "description": "user, assistant. Empty means any."
+          },
+          "includeArchived": {
+            "label": "Include archived"
+          },
+          "collapseBySession": {
+            "label": "One hit per conversation"
+          },
+          "limit": {
+            "label": "Limit"
+          }
+        }
       },
       "query": {
         "description": "Run the command palette's search over conversations, memories, workflows, issues, skills and the rest. Scoped to this run's workspace unless widened.",
-        "label": "Search everything"
+        "label": "Search everything",
+        "fields": {
+          "query": {
+            "label": "Query"
+          },
+          "kinds": {
+            "label": "Only these kinds",
+            "description": "Empty searches every kind a graph can act on."
+          },
+          "workspaceScope": {
+            "label": "Workspace scope",
+            "options": {
+              "current": "This workspace",
+              "all": "All workspaces"
+            }
+          },
+          "projectId": {
+            "label": "Workspace id"
+          },
+          "limit": {
+            "label": "Per-kind limit"
+          }
+        }
       }
     },
     "session": {
       "appendMessage": {
         "description": "Append one message to a conversation's transcript. A user-role message does not start a turn on its own.",
-        "label": "Append message"
+        "label": "Append message",
+        "fields": {
+          "sessionId": {
+            "label": "Conversation id"
+          },
+          "text": {
+            "label": "Text"
+          },
+          "role": {
+            "label": "Role",
+            "options": {
+              "user": "User",
+              "assistant": "Assistant"
+            }
+          }
+        }
       },
       "archive": {
         "description": "Archive or unarchive a conversation. This family has no delete: removing something a person saved is their call, not a graph's.",
-        "label": "Archive conversation"
+        "label": "Archive conversation",
+        "fields": {
+          "sessionId": {
+            "label": "Conversation id"
+          },
+          "archived": {
+            "label": "Archived"
+          }
+        }
       },
       "create": {
         "description": "Start a conversation, optionally with a first message. Does not move the user's UI, so a scheduled run does not pull them out of what they are reading.",
-        "label": "Start conversation"
+        "label": "Start conversation",
+        "fields": {
+          "title": {
+            "label": "Title"
+          },
+          "characterId": {
+            "label": "Character id"
+          },
+          "projectId": {
+            "label": "Workspace id",
+            "description": "Defaults to the workspace this run belongs to."
+          },
+          "workingDir": {
+            "label": "Working directory"
+          },
+          "seedUserMessage": {
+            "label": "First message"
+          },
+          "activate": {
+            "label": "Switch the user to it",
+            "description": "Off by default. Only meaningful when a person is at the app."
+          }
+        }
       },
       "export": {
         "description": "Render a conversation's transcript as markdown or JSON.",
-        "label": "Export conversation"
+        "label": "Export conversation",
+        "fields": {
+          "sessionId": {
+            "label": "Conversation id"
+          },
+          "format": {
+            "label": "Format",
+            "options": {
+              "markdown": "Markdown",
+              "json": "JSON"
+            }
+          }
+        }
       },
       "get": {
         "description": "Read one conversation, optionally with its most recent messages.",
-        "label": "Get conversation"
+        "label": "Get conversation",
+        "fields": {
+          "sessionId": {
+            "label": "Conversation id"
+          },
+          "messageLimit": {
+            "label": "Recent messages"
+          }
+        }
       },
       "list": {
         "description": "List conversations in a workspace. Embedded and imported inner transcripts stay out, the same as everywhere else they are enumerated.",
-        "label": "List conversations"
+        "label": "List conversations",
+        "fields": {
+          "projectId": {
+            "label": "Workspace id",
+            "description": "Defaults to the workspace this run belongs to."
+          },
+          "characterId": {
+            "label": "Only this character"
+          },
+          "folderId": {
+            "label": "Only this folder"
+          },
+          "pinnedOnly": {
+            "label": "Pinned only"
+          },
+          "includeArchived": {
+            "label": "Include archived"
+          },
+          "limit": {
+            "label": "Limit"
+          }
+        }
       },
       "update": {
         "description": "Rename, pin or file a conversation. Renaming turns auto-titling off for good.",
-        "label": "Update conversation"
+        "label": "Update conversation",
+        "fields": {
+          "sessionId": {
+            "label": "Conversation id"
+          },
+          "title": {
+            "label": "New title"
+          },
+          "pinned": {
+            "label": "Pinned"
+          },
+          "folderId": {
+            "label": "Folder id",
+            "description": "Empty moves it back to the root."
+          }
+        }
       }
     },
     "site": {
@@ -912,35 +1726,116 @@
   "knowledge": {
     "chunk": {
       "description": "Create format-aware chunks with stable position metadata.",
-      "label": "Chunk knowledge"
+      "label": "Chunk knowledge",
+      "fields": {
+        "artifactId": {
+          "label": "Transformed artifact ID"
+        }
+      }
     },
     "embed": {
       "description": "Embed chunks through Cognia's mandatory safe embedding gateway.",
-      "label": "Embed knowledge"
+      "label": "Embed knowledge",
+      "fields": {
+        "artifactId": {
+          "label": "Chunk artifact ID"
+        }
+      }
     },
     "index": {
       "description": "Validate vector counts and dimensions before publication.",
-      "label": "Validate knowledge index"
+      "label": "Validate knowledge index",
+      "fields": {
+        "artifactId": {
+          "label": "Embedded artifact ID"
+        }
+      }
     },
     "parse": {
       "description": "Parse one persisted source into a protected run-scoped artifact.",
-      "label": "Parse knowledge"
+      "label": "Parse knowledge",
+      "fields": {
+        "sourceId": {
+          "label": "Source ID"
+        }
+      }
     },
     "publish": {
       "description": "Atomically publish a validated immutable index generation.",
-      "label": "Publish knowledge revision"
+      "label": "Publish knowledge revision",
+      "fields": {
+        "artifactId": {
+          "label": "Validated index artifact ID"
+        }
+      }
     },
     "retrieve": {
       "description": "Retrieve ACL-filtered chunks from frozen Knowledge Base revisions.",
-      "label": "Retrieve knowledge"
+      "label": "Retrieve knowledge",
+      "fields": {
+        "knowledgeBaseIds": {
+          "label": "Knowledge Base IDs"
+        },
+        "query": {
+          "label": "Query"
+        },
+        "topKPerBase": {
+          "label": "Top K per Knowledge Base"
+        },
+        "scoreThreshold": {
+          "label": "Minimum score"
+        },
+        "tokenBudget": {
+          "label": "Token budget"
+        },
+        "revisionBindings": {
+          "label": "Frozen revision bindings"
+        }
+      }
     },
     "source": {
       "description": "Create or incrementally update a stable Knowledge Base source.",
-      "label": "Knowledge source"
+      "label": "Knowledge source",
+      "fields": {
+        "knowledgeBaseId": {
+          "label": "Knowledge Base ID"
+        },
+        "sourceMode": {
+          "label": "Source mode",
+          "options": {
+            "text": "Text",
+            "web": "Web page",
+            "existing": "Existing source"
+          }
+        },
+        "sourceId": {
+          "label": "Existing source ID"
+        },
+        "sourceKey": {
+          "label": "Stable source key"
+        },
+        "title": {
+          "label": "Title"
+        },
+        "format": {
+          "label": "Format"
+        },
+        "content": {
+          "label": "Content"
+        },
+        "url": {
+          "label": "Web URL"
+        }
+      }
     },
     "transform": {
       "description": "Normalize and PII-redact parsed content before chunking.",
-      "label": "Transform knowledge"
+      "label": "Transform knowledge",
+      "fields": {
+        "artifactId": {
+          "label": "Parsed artifact ID"
+        }
+      }
     }
   },
   "ocr": {
@@ -1027,31 +1922,180 @@
     "memory": {
       "written": {
         "description": "Fires when a long-term memory is created. Never carries the memory text: read it downstream with Recall memory if you need it.",
-        "label": "On memory written"
+        "label": "On memory written",
+        "fields": {
+          "types": {
+            "label": "Only these types",
+            "description": "semantic, episodic or procedural. Empty means any."
+          },
+          "scopes": {
+            "label": "Only these scopes",
+            "description": "global, workspace, character or agent."
+          },
+          "provenances": {
+            "label": "Only these provenances",
+            "description": "explicit is what the user deliberately captured. user is what the extractor mined."
+          },
+          "minImportance": {
+            "label": "Minimum importance"
+          },
+          "characterId": {
+            "label": "Only this character"
+          },
+          "projectId": {
+            "label": "Only this workspace"
+          },
+          "agentId": {
+            "label": "Only this agent"
+          },
+          "keyPrefix": {
+            "label": "Key starts with"
+          },
+          "cooldownMs": {
+            "label": "Cooldown (ms)"
+          }
+        }
       }
     },
     "capture": {
       "item": {
         "description": "Fires when content capture saves an item. Carries ids and classification; the captured text rides only when you ask for it, and always through the redaction gate.",
-        "label": "On captured item"
+        "label": "On captured item",
+        "fields": {
+          "kinds": {
+            "label": "Only these kinds",
+            "description": "text, url or image. Empty fires for every kind."
+          },
+          "sourceAppContains": {
+            "label": "Source app contains"
+          },
+          "urlHostContains": {
+            "label": "Source host contains"
+          },
+          "enrichedOnly": {
+            "label": "Only enriched captures"
+          },
+          "includeText": {
+            "label": "Include the captured text",
+            "description": "Off by default. The text is your clipboard, and it still passes the redaction gate."
+          },
+          "cooldownMs": {
+            "label": "Cooldown (ms)"
+          }
+        }
       }
     },
     "file": {
       "watch": {
         "description": "Fires when a file changes under a watched directory. Stays muted for the whole run it starts, so a workflow that writes files cannot re-trigger itself.",
-        "label": "On file changed"
+        "label": "On file changed",
+        "fields": {
+          "root": {
+            "label": "Directory to watch",
+            "description": "An absolute path. The filesystem root and your home directory are refused."
+          },
+          "globs": {
+            "label": "Only these paths",
+            "description": "Globs relative to the root, such as src/**/*.ts. Empty watches everything."
+          },
+          "ignoreGlobs": {
+            "label": "Ignore these paths"
+          },
+          "respectGitignore": {
+            "label": "Honour .gitignore"
+          },
+          "events": {
+            "label": "Only these events",
+            "description": "created, modified, removed or renamed. Empty means any."
+          },
+          "recursive": {
+            "label": "Include subdirectories"
+          },
+          "debounceMs": {
+            "label": "Debounce (ms)"
+          },
+          "settleMs": {
+            "label": "Quiet needed before re-arming (ms)"
+          },
+          "catchUpOnStart": {
+            "label": "Report changes made while the app was closed",
+            "description": "One summary event with a count, never a replay. Off by default."
+          },
+          "maxFiresPerMinute": {
+            "label": "Fires per minute"
+          }
+        }
       }
     },
     "scheduler": {
       "taskCompleted": {
         "description": "Fires when a scheduled task settles, including when it fails. Distinct from a workflow's own cron trigger: this reacts to somebody else's task.",
-        "label": "On scheduled task finished"
+        "label": "On scheduled task finished",
+        "fields": {
+          "taskId": {
+            "label": "Only this task"
+          },
+          "taskTypes": {
+            "label": "Only these task types",
+            "description": "workflow, agent, chat, plan, goal and the rest. Empty means any."
+          },
+          "status": {
+            "label": "Only this outcome",
+            "options": {
+              "completed": "Completed",
+              "failed": "Failed",
+              "cancelled": "Cancelled",
+              "skipped": "Skipped"
+            }
+          },
+          "terminalReasons": {
+            "label": "Only these terminal reasons"
+          },
+          "projectId": {
+            "label": "Only this workspace"
+          },
+          "cooldownMs": {
+            "label": "Cooldown (ms)"
+          }
+        }
       }
     },
     "plan": {
       "event": {
         "description": "Fires when a plan is approved, refined, paused, cancelled, a step starts, completes or fails, or the plan exits. Scope it with the kinds filter.",
-        "label": "On plan event"
+        "label": "On plan event",
+        "fields": {
+          "kinds": {
+            "label": "Only these events",
+            "description": "Empty fires for every plan event."
+          },
+          "planId": {
+            "label": "Only this plan"
+          },
+          "sessionId": {
+            "label": "Only this conversation"
+          },
+          "characterId": {
+            "label": "Only this character"
+          },
+          "status": {
+            "label": "Only when the plan is in this status"
+          },
+          "source": {
+            "label": "Only plans authored this way",
+            "options": {
+              "exit_plan_mode": "Plan mode",
+              "agent_tool": "Agent tool",
+              "planner_llm": "Planner model",
+              "team_projection": "Agent team",
+              "goal_projection": "Goal",
+              "manual": "Manual"
+            }
+          },
+          "cooldownMs": {
+            "label": "Cooldown (ms)"
+          }
+        }
       }
     },
     "team": {

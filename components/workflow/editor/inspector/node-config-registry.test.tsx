@@ -1,7 +1,10 @@
 /**
  * @jest-environment jsdom
  */
+import "@testing-library/jest-dom"
+import { render, screen } from "@testing-library/react"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
+import { __resetPluginI18nForTesting, registerPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import {
   getNodeConfigComponent,
@@ -144,5 +147,44 @@ describe("node-config-registry", () => {
     })
     expect(typeof builtIn).toBe("function")
     expect(builtIn.displayName).toContain("SchemaFormFor")
+  })
+
+  describe("schema form field text", () => {
+    afterEach(() => __resetPluginI18nForTesting())
+
+    it("localizes a built-in node's fields from workflows.nodes.<kind>.fields", () => {
+      const Form = getNodeConfigComponentForEntry(nodeCatalogEntry("action.fs.write"))
+      render(<Form params={{ rootMode: "host-default", mode: "append" }} onChange={() => {}} />)
+      // The option labels differ from the raw values the schema lists.
+      const selects = screen.getAllByRole("combobox")
+      expect(selects[0]).toHaveTextContent("Host default")
+      expect(screen.getByText("Workspace root")).toBeInTheDocument()
+      expect(selects.some((select) => select.textContent === "Append")).toBe(true)
+    })
+
+    it("localizes a plugin node's fields from its own overlay, else the schema's text", () => {
+      registerPluginI18n({
+        pluginId: "myplugin",
+        messages: {
+          en: {
+            "plugin.myplugin.workflow.nodes.action.fetch.fields.url.label": "Endpoint address",
+          },
+        },
+      })
+      const Form = getNodeConfigComponentForEntry({
+        kind: "myplugin.action.fetch" as WorkflowNodeKind,
+        pluginId: "myplugin",
+        paramsSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", title: "URL" },
+            method: { type: "string", title: "Method" },
+          },
+        },
+      })
+      render(<Form params={{}} onChange={() => {}} />)
+      expect(screen.getByLabelText("Endpoint address")).toBeInTheDocument()
+      expect(screen.getByLabelText("Method")).toBeInTheDocument()
+    })
   })
 })

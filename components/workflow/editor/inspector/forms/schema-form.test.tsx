@@ -4,7 +4,7 @@
 import "@testing-library/jest-dom"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { useState } from "react"
-import { SchemaForm } from "./schema-form"
+import { SchemaForm, type SchemaFormMessages } from "./schema-form"
 
 // CodeMirror's ExpressionField needs Dexie/IDB to subscribe to live runs.
 // Stub it so tests don't have to spin up fake-indexeddb.
@@ -30,11 +30,19 @@ jest.mock("./shared/expression-field", () => ({
   ),
 }))
 
-function Harness({ schema }: { schema: Parameters<typeof SchemaForm>[0]["schema"] }) {
-  const [params, setParams] = useState<Record<string, unknown>>({})
+function Harness({
+  schema,
+  messages,
+  initial = {},
+}: {
+  schema: Parameters<typeof SchemaForm>[0]["schema"]
+  messages?: SchemaFormMessages
+  initial?: Record<string, unknown>
+}) {
+  const [params, setParams] = useState<Record<string, unknown>>(initial)
   return (
     <div>
-      <SchemaForm schema={schema} params={params} onChange={setParams} />
+      <SchemaForm schema={schema} params={params} onChange={setParams} messages={messages} />
       <pre data-testid="state">{JSON.stringify(params)}</pre>
     </div>
   )
@@ -242,5 +250,83 @@ describe("SchemaForm", () => {
     )
     expect(screen.getByText("Payload")).toBeInTheDocument()
     expect(screen.getByText("Edit raw JSON")).toBeInTheDocument()
+  })
+
+  describe("localized field text", () => {
+    const schema = {
+      type: "object" as const,
+      properties: {
+        mode: {
+          type: "string" as const,
+          title: "Mode",
+          description: "How to write",
+          enum: ["overwrite", "append"],
+        },
+        auth: {
+          type: "object" as const,
+          title: "Auth",
+          properties: { token: { type: "string" as const, title: "Token" } },
+        },
+        untouched: { type: "boolean" as const, title: "Untouched", description: "Kept" },
+      },
+    }
+    const known: Record<string, string> = {
+      "mode.label": "写入方式",
+      "mode.description": "如何写入",
+      "mode.option.overwrite": "覆盖",
+      "auth.label": "认证",
+      "auth/token.label": "令牌",
+    }
+    const messages: SchemaFormMessages = {
+      label: (path) => known[`${path.join("/")}.label`],
+      description: (path) => known[`${path.join("/")}.description`],
+      option: (path, value) => known[`${path.join("/")}.option.${value}`],
+    }
+
+    it("shows the localized label, hint and option, by path, over the schema's", () => {
+      render(<Harness schema={schema} messages={messages} initial={{ mode: "overwrite" }} />)
+      expect(screen.getByText("写入方式")).toBeInTheDocument()
+      expect(screen.getByText("如何写入")).toBeInTheDocument()
+      expect(screen.getByRole("combobox")).toHaveTextContent("覆盖")
+      // A nested object's own fields resolve under its path.
+      expect(screen.getByText("认证")).toBeInTheDocument()
+      expect(screen.getByLabelText("令牌")).toBeInTheDocument()
+      // No translation: the schema's text stays.
+      expect(screen.getByText("Untouched")).toBeInTheDocument()
+      expect(screen.getByText("Kept")).toBeInTheDocument()
+    })
+
+    it("keeps an option's raw value when no label is registered", () => {
+      render(<Harness schema={schema} messages={messages} initial={{ mode: "append" }} />)
+      expect(screen.getByRole("combobox")).toHaveTextContent("append")
+    })
+
+    it("lists AI providers by name", () => {
+      render(
+        <Harness
+          schema={{
+            type: "object",
+            properties: {
+              providerId: { type: "string", format: "ai-provider", enum: ["google", "xai"] },
+            },
+          }}
+          initial={{ providerId: "google" }}
+        />
+      )
+      expect(screen.getByRole("combobox")).toHaveTextContent("Google")
+      expect(screen.getByRole("combobox")).not.toHaveTextContent("google")
+    })
+
+    it("localizes its own placeholder", () => {
+      render(
+        <Harness
+          schema={{
+            type: "object",
+            properties: { method: { type: "string", enum: ["GET", "POST"] } },
+          }}
+        />
+      )
+      expect(screen.getByRole("combobox")).toHaveTextContent("Select…")
+    })
   })
 })

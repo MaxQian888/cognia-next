@@ -33,39 +33,163 @@
     "browser": {
       "act": {
         "description": "点击、输入、选择、悬停、按键或滚动，用快照给出的 ref 定位元素。",
-        "label": "操作元素"
+        "label": "操作元素",
+        "fields": {
+          "action": {
+            "label": "操作",
+            "options": {
+              "click": "单击",
+              "double_click": "双击",
+              "type": "输入",
+              "fill": "填充",
+              "select": "选择",
+              "hover": "悬停",
+              "focus": "聚焦",
+              "key": "按键",
+              "scroll": "滚动"
+            }
+          },
+          "ref": {
+            "label": "元素引用"
+          },
+          "value": {
+            "label": "值或组合键"
+          },
+          "direction": {
+            "label": "滚动方向",
+            "options": {
+              "up": "向上",
+              "down": "向下",
+              "left": "向左",
+              "right": "向右",
+              "top": "到顶部",
+              "bottom": "到底部"
+            }
+          },
+          "amount": {
+            "label": "滚动量"
+          }
+        }
       },
       "diagnostics": {
         "description": "读取页面的控制台输出和网络请求。用来回答「这次发布是不是把控制台搞炸了」。",
-        "label": "读取控制台与网络"
+        "label": "读取控制台与网络",
+        "fields": {
+          "include": {
+            "label": "包含",
+            "options": {
+              "both": "控制台和网络",
+              "console": "控制台",
+              "network": "网络"
+            }
+          },
+          "errorsOnly": {
+            "label": "仅控制台错误"
+          },
+          "limit": {
+            "label": "条目上限"
+          }
+        }
       },
       "fillForm": {
         "description": "按顺序填写多个字段。字段可以引用凭据而不是写死的值；凭据取不到时会直接失败，而不是往密码框里填一个空字符串。",
-        "label": "填写表单"
+        "label": "填写表单",
+        "fields": {
+          "fields": {
+            "label": "字段",
+            "description": "每一项为 '{ ref, value }' 或 '{ ref, credentialRef }'。"
+          }
+        }
       },
       "open": {
         "description": "让本次运行的浏览器导航到某个 URL 并等待加载完成。公网域名需要先在本工作区授权，跳转到授权域之外会直接失败。",
-        "label": "打开页面"
+        "label": "打开页面",
+        "fields": {
+          "url": {
+            "label": "URL"
+          },
+          "timeoutMs": {
+            "label": "加载超时（毫秒）"
+          }
+        }
       },
       "readPage": {
         "description": "把页面读成纯文本。快照的阅读版对应节点。",
-        "label": "读取页面文本"
+        "label": "读取页面文本",
+        "fields": {
+          "maxNodes": {
+            "label": "节点数上限"
+          }
+        }
       },
       "replayFlow": {
         "description": "回放一段录制好的浏览器流程。仅桌面可用：回放器通过内嵌面板定位元素。",
-        "label": "回放录制流程"
+        "label": "回放录制流程",
+        "fields": {
+          "recordingId": {
+            "label": "录制 ID"
+          }
+        }
       },
       "screenshot": {
         "description": "截取视口、整页或某个元素。图像字节只在明确要求时才带上，尺寸则始终返回。",
-        "label": "页面截图"
+        "label": "页面截图",
+        "fields": {
+          "scope": {
+            "label": "范围",
+            "options": {
+              "viewport": "可见区域",
+              "fullPage": "整页",
+              "element": "单个元素"
+            }
+          },
+          "ref": {
+            "label": "元素引用"
+          },
+          "includeImage": {
+            "label": "包含图片字节"
+          }
+        }
       },
       "snapshot": {
         "description": "抓取页面的无障碍树，每个元素带一个 ref，「操作元素」和「填写表单」就用它定位。",
-        "label": "页面快照"
+        "label": "页面快照",
+        "fields": {
+          "includeText": {
+            "label": "包含非交互文本"
+          },
+          "maxNodes": {
+            "label": "节点数上限"
+          }
+        }
       },
       "waitFor": {
         "description": "阻塞直到文本出现、选择器命中，或网络空闲。三者只能选其一。",
-        "label": "等待页面"
+        "label": "等待页面",
+        "fields": {
+          "text": {
+            "label": "文本"
+          },
+          "selector": {
+            "label": "CSS 选择器"
+          },
+          "networkIdle": {
+            "label": "网络空闲"
+          },
+          "mode": {
+            "label": "模式",
+            "options": {
+              "appear": "出现",
+              "disappear": "消失"
+            }
+          },
+          "timeoutMs": {
+            "label": "超时（毫秒）"
+          },
+          "failOnTimeout": {
+            "label": "超时即失败"
+          }
+        }
       }
     },
     "canvas": {
@@ -169,39 +293,258 @@
     "fs": {
       "copy": {
         "description": "在工作区根内复制条目。复制目录需要勾选递归。目标已存在时拒绝覆盖。",
-        "label": "复制路径"
+        "label": "复制路径",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "fromRelPath": {
+            "label": "源路径"
+          },
+          "toRelPath": {
+            "label": "目标路径"
+          },
+          "recursive": {
+            "label": "递归（目录）"
+          }
+        }
       },
       "delete": {
         "description": "删除文件或目录。非空目录需要勾选递归。非交互触发的运行需要上游有审批节点。",
-        "label": "删除路径"
+        "label": "删除路径",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "relPath": {
+            "label": "要删除的路径"
+          },
+          "recursive": {
+            "label": "递归（目录）"
+          }
+        }
       },
       "list": {
         "description": "列出一个目录，可选递归。遵循 .gitignore，并会报告因上限而未列出的部分，不会把不完整的树当作完整结果。",
-        "label": "列出目录"
+        "label": "列出目录",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "relPath": {
+            "label": "目录",
+            "description": "留空表示根目录本身。"
+          },
+          "recursive": {
+            "label": "递归"
+          },
+          "includeDirs": {
+            "label": "包含目录"
+          },
+          "includeIgnored": {
+            "label": "包含被 .gitignore 忽略的条目"
+          },
+          "maxEntries": {
+            "label": "条目上限"
+          },
+          "maxDepth": {
+            "label": "深度上限"
+          }
+        }
       },
       "mkdir": {
         "description": "创建目录以及缺失的父级目录。",
-        "label": "创建目录"
+        "label": "创建目录",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "relPath": {
+            "label": "要创建的目录"
+          }
+        }
       },
       "move": {
         "description": "在工作区根内移动条目。目标已存在时拒绝覆盖。非交互触发的运行需要上游有审批节点。",
-        "label": "移动或重命名"
+        "label": "移动或重命名",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "fromRelPath": {
+            "label": "源路径"
+          },
+          "toRelPath": {
+            "label": "目标路径"
+          }
+        }
       },
       "read": {
         "description": "从工作区读取一个 UTF-8 文本文件。先取元数据，超过字节上限直接拒绝，所以大文件不会进入运行日志。",
-        "label": "读取文件"
+        "label": "读取文件",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "relPath": {
+            "label": "工作区内的路径"
+          },
+          "maxBytes": {
+            "label": "字节上限"
+          }
+        }
       },
       "search": {
         "description": "按文件内容（可用正则）或文件名搜索工作区。遵循 .gitignore。",
-        "label": "搜索文件"
+        "label": "搜索文件",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "query": {
+            "label": "查询"
+          },
+          "target": {
+            "label": "搜索",
+            "options": {
+              "content": "文件内容",
+              "name": "文件名"
+            }
+          },
+          "isRegex": {
+            "label": "将查询视为正则表达式"
+          },
+          "caseSensitive": {
+            "label": "区分大小写"
+          },
+          "maxResults": {
+            "label": "结果上限"
+          }
+        }
       },
       "stat": {
         "description": "读取工作区中某个路径的元数据。路径不存在时返回 exists: false 而不是失败，便于写入前先探测。",
-        "label": "查看路径信息"
+        "label": "查看路径信息",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "relPath": {
+            "label": "工作区内的路径"
+          }
+        }
       },
       "write": {
         "description": "写入或追加一个 UTF-8 文本文件，自动创建父目录。非交互触发的运行需要上游有审批节点。",
-        "label": "写入文件"
+        "label": "写入文件",
+        "fields": {
+          "rootMode": {
+            "label": "工作区根目录",
+            "description": "要使用的根目录。“项目”使用本次运行的工作区，“主机默认”使用主机声明的第一个根目录（可移植），“指定路径”使用你提供的路径。",
+            "options": {
+              "project": "项目",
+              "host-default": "主机默认",
+              "explicit": "指定路径"
+            }
+          },
+          "rootPath": {
+            "label": "根目录路径",
+            "description": "仅在根目录为“指定路径”时使用。须是此主机允许浏览的路径。"
+          },
+          "relPath": {
+            "label": "工作区内的路径"
+          },
+          "content": {
+            "label": "内容"
+          },
+          "mode": {
+            "label": "模式",
+            "options": {
+              "overwrite": "覆盖",
+              "append": "追加"
+            }
+          }
+        }
       }
     },
     "git": {
@@ -309,19 +652,184 @@
     "image": {
       "adjust": {
         "description": "亮度、对比度、曝光、饱和度、自然饱和度、色温、色调、色相、伽马、模糊与锐化。",
-        "label": "调整图像"
+        "label": "调整图像",
+        "fields": {
+          "blobRef": {
+            "label": "Blob 引用",
+            "description": "来自前面的图像节点或抽帧节点。"
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 字节"
+          },
+          "mimeType": {
+            "label": "Base64 字节的媒体类型"
+          },
+          "url": {
+            "label": "图片 URL"
+          },
+          "brightness": {
+            "label": "亮度"
+          },
+          "contrast": {
+            "label": "对比度"
+          },
+          "exposure": {
+            "label": "曝光"
+          },
+          "saturation": {
+            "label": "饱和度"
+          },
+          "vibrance": {
+            "label": "自然饱和度"
+          },
+          "temperature": {
+            "label": "色温"
+          },
+          "tint": {
+            "label": "色调"
+          },
+          "hue": {
+            "label": "色相（度）"
+          },
+          "gamma": {
+            "label": "伽马"
+          },
+          "blur": {
+            "label": "模糊"
+          },
+          "sharpen": {
+            "label": "锐化"
+          },
+          "format": {
+            "label": "输出格式",
+            "description": "带透明通道的图片无论如何都会输出为 PNG。",
+            "options": {
+              "png": "PNG",
+              "jpeg": "JPEG",
+              "webp": "WebP"
+            }
+          },
+          "quality": {
+            "label": "质量（0 到 100）"
+          }
+        }
       },
       "convert": {
         "description": "重新编码图像。输出报告的是实际得到的格式，未必等于请求的格式。",
-        "label": "转换图像格式"
+        "label": "转换图像格式",
+        "fields": {
+          "blobRef": {
+            "label": "Blob 引用",
+            "description": "来自前面的图像节点或抽帧节点。"
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 字节"
+          },
+          "mimeType": {
+            "label": "Base64 字节的媒体类型"
+          },
+          "url": {
+            "label": "图片 URL"
+          },
+          "format": {
+            "label": "输出格式",
+            "description": "带透明通道的图片无论如何都会输出为 PNG。",
+            "options": {
+              "png": "PNG",
+              "jpeg": "JPEG",
+              "webp": "WebP"
+            }
+          },
+          "quality": {
+            "label": "质量（0 到 100）"
+          }
+        }
       },
       "info": {
         "description": "尺寸、宽高比，以及图像是否带透明通道。",
-        "label": "读取图像信息"
+        "label": "读取图像信息",
+        "fields": {
+          "blobRef": {
+            "label": "Blob 引用",
+            "description": "来自前面的图像节点或抽帧节点。"
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 字节"
+          },
+          "mimeType": {
+            "label": "Base64 字节的媒体类型"
+          },
+          "url": {
+            "label": "图片 URL"
+          }
+        }
       },
       "transform": {
         "description": "在一次解码编码中完成裁剪、缩放、旋转和翻转，避免一串编辑变成四次有损重编码。",
-        "label": "变换图像"
+        "label": "变换图像",
+        "fields": {
+          "blobRef": {
+            "label": "Blob 引用",
+            "description": "来自前面的图像节点或抽帧节点。"
+          },
+          "dataUrl": {
+            "label": "Data URL"
+          },
+          "imageBase64": {
+            "label": "Base64 字节"
+          },
+          "mimeType": {
+            "label": "Base64 字节的媒体类型"
+          },
+          "url": {
+            "label": "图片 URL"
+          },
+          "rotate": {
+            "label": "旋转（顺时针角度）"
+          },
+          "scale": {
+            "label": "缩放倍数"
+          },
+          "flipHorizontal": {
+            "label": "水平翻转"
+          },
+          "flipVertical": {
+            "label": "垂直翻转"
+          },
+          "cropX": {
+            "label": "裁剪 X"
+          },
+          "cropY": {
+            "label": "裁剪 Y"
+          },
+          "cropWidth": {
+            "label": "裁剪宽度"
+          },
+          "cropHeight": {
+            "label": "裁剪高度"
+          },
+          "format": {
+            "label": "输出格式",
+            "description": "带透明通道的图片无论如何都会输出为 PNG。",
+            "options": {
+              "png": "PNG",
+              "jpeg": "JPEG",
+              "webp": "WebP"
+            }
+          },
+          "quality": {
+            "label": "质量（0 到 100）"
+          }
+        }
       }
     },
     "humanInput": {
@@ -333,23 +841,93 @@
     "media": {
       "concat": {
         "description": "把两个以上的视频首尾相接。产物同样落在媒体临时目录里。",
-        "label": "拼接视频"
+        "label": "拼接视频",
+        "fields": {
+          "sourcePaths": {
+            "label": "视频文件路径列表"
+          }
+        }
       },
       "frame": {
         "description": "按时间点从视频中抽出一帧，返回一个图像节点和 OCR 节点都能读取的引用。",
-        "label": "抽取帧"
+        "label": "抽取帧",
+        "fields": {
+          "sourcePath": {
+            "label": "视频文件路径"
+          },
+          "timeSeconds": {
+            "label": "时间点（秒）"
+          }
+        }
       },
       "generateVideo": {
         "description": "用已配置的视频提供商，根据提示词（可选起始图片）生成视频。会等待提供商完成（通常需要几分钟），并输出文件路径，供其他媒体节点使用。",
-        "label": "生成视频"
+        "label": "生成视频",
+        "fields": {
+          "prompt": {
+            "label": "提示词"
+          },
+          "providerId": {
+            "label": "提供商",
+            "description": "留空则使用「设置 → 媒体生成」中的默认值。"
+          },
+          "model": {
+            "label": "模型",
+            "description": "留空则使用提供商的默认值。"
+          },
+          "durationSec": {
+            "label": "时长（秒）"
+          },
+          "aspectRatio": {
+            "label": "宽高比"
+          },
+          "resolution": {
+            "label": "分辨率"
+          },
+          "blobRef": {
+            "label": "起始图片 Blob 引用",
+            "description": "来自前面的图像节点或抽帧节点。"
+          },
+          "dataUrl": {
+            "label": "起始图片 Data URL"
+          },
+          "imageBase64": {
+            "label": "起始图片 Base64 字节"
+          },
+          "mimeType": {
+            "label": "Base64 字节的媒体类型"
+          },
+          "url": {
+            "label": "起始图片 URL"
+          }
+        }
       },
       "probe": {
         "description": "读取视频的时长、分辨率、帧率、编码格式，以及是否含音轨。",
-        "label": "读取视频信息"
+        "label": "读取视频信息",
+        "fields": {
+          "sourcePath": {
+            "label": "视频文件路径"
+          }
+        }
       },
       "trim": {
         "description": "按起止时间裁剪视频。产物落在媒体临时目录里，因此只能接给另一个媒体节点，接不到文件节点。",
-        "label": "裁剪视频"
+        "label": "裁剪视频",
+        "fields": {
+          "sourcePath": {
+            "label": "视频文件路径"
+          },
+          "startSeconds": {
+            "label": "开始（秒）"
+          },
+          "endSeconds": {
+            "label": "结束（秒）"
+          },
+          "format": {
+            "label": "封装格式"
+          }
+        }
       }
     },
     "mcp": {
@@ -393,15 +971,100 @@
     "notify": {
       "list": {
         "description": "按时间倒序读取通知中心，并附带当前的角标计数。",
-        "label": "列出通知"
+        "label": "列出通知",
+        "fields": {
+          "source": {
+            "label": "仅限此来源",
+            "options": {
+              "scheduler": "定时任务",
+              "agent-team": "智能体团队",
+              "plugin": "插件",
+              "connector": "连接器",
+              "session": "会话",
+              "workflow": "工作流",
+              "system": "系统",
+              "issue": "事项"
+            }
+          },
+          "readStates": {
+            "label": "读取状态",
+            "description": "unseen、seen、read 或 done。留空表示除 done 以外的所有状态。"
+          },
+          "includeDone": {
+            "label": "包含已归档"
+          },
+          "hideSnoozed": {
+            "label": "隐藏已延后的通知"
+          },
+          "limit": {
+            "label": "数量上限"
+          }
+        }
       },
       "resolve": {
         "description": "把通知标记为已看到、已读或已归档，或者延后提醒。读取状态只会向前推进。",
-        "label": "处理通知"
+        "label": "处理通知",
+        "fields": {
+          "notificationId": {
+            "label": "通知 ID"
+          },
+          "state": {
+            "label": "标记为",
+            "options": {
+              "seen": "已看到",
+              "read": "已读",
+              "done": "已归档"
+            }
+          },
+          "snoozeMs": {
+            "label": "延后时长（毫秒）",
+            "description": "设置后改为延后提醒，而不是更改阅读状态。"
+          }
+        }
       },
       "send": {
         "description": "在通知中心写一条通知，并按用户自己的偏好分发。没有任何步骤会等待它。需要对方回答时请用「请求审批」。",
-        "label": "发送通知"
+        "label": "发送通知",
+        "fields": {
+          "title": {
+            "label": "标题"
+          },
+          "body": {
+            "label": "正文"
+          },
+          "level": {
+            "label": "级别",
+            "options": {
+              "info": "信息",
+              "success": "成功",
+              "warning": "警告",
+              "error": "错误",
+              "critical": "严重"
+            }
+          },
+          "directed": {
+            "label": "需要处理",
+            "description": "计入红色角标，而不是普通提示点。"
+          },
+          "href": {
+            "label": "点击后打开",
+            "description": "应用内路由，例如 /agent-runs。"
+          },
+          "icon": {
+            "label": "Lucide 图标名"
+          },
+          "groupKey": {
+            "label": "分组键",
+            "description": "默认为本工作流，这样它的通知会归为一组显示。"
+          },
+          "dedupeKey": {
+            "label": "去重键",
+            "description": "默认为本次运行和步骤，这样重试会更新原通知而不是重复发送。"
+          },
+          "ttlMs": {
+            "label": "自动过期时长（毫秒）"
+          }
+        }
       }
     },
     "pet": {
@@ -565,41 +1228,192 @@
     "search": {
       "messages": {
         "description": "跨会话搜索消息正文，并返回命中处的摘录。会说明是否有更早的历史尚未扫描。",
-        "label": "搜索聊天记录"
+        "label": "搜索聊天记录",
+        "fields": {
+          "query": {
+            "label": "查询"
+          },
+          "workspaceScope": {
+            "label": "工作区范围",
+            "options": {
+              "current": "当前工作区",
+              "all": "所有工作区"
+            }
+          },
+          "projectId": {
+            "label": "工作区 ID"
+          },
+          "roles": {
+            "label": "仅限这些消息角色",
+            "description": "user、assistant。留空表示任意。"
+          },
+          "includeArchived": {
+            "label": "包含已归档"
+          },
+          "collapseBySession": {
+            "label": "每个会话只取一条结果"
+          },
+          "limit": {
+            "label": "数量上限"
+          }
+        }
       },
       "query": {
         "description": "用命令面板同一套引擎搜索会话、记忆、工作流、事项、技能等。默认限定在本次运行所属的工作区。",
-        "label": "全局搜索"
+        "label": "全局搜索",
+        "fields": {
+          "query": {
+            "label": "查询"
+          },
+          "kinds": {
+            "label": "仅限这些类型",
+            "description": "留空则搜索工作流可处理的所有类型。"
+          },
+          "workspaceScope": {
+            "label": "工作区范围",
+            "options": {
+              "current": "当前工作区",
+              "all": "所有工作区"
+            }
+          },
+          "projectId": {
+            "label": "工作区 ID"
+          },
+          "limit": {
+            "label": "每种类型的数量上限"
+          }
+        }
       }
     },
     "session": {
       "appendMessage": {
         "description": "向会话记录追加一条消息。user 角色的消息本身不会启动一轮对话。",
-        "label": "追加消息"
+        "label": "追加消息",
+        "fields": {
+          "sessionId": {
+            "label": "会话 ID"
+          },
+          "text": {
+            "label": "文本"
+          },
+          "role": {
+            "label": "消息角色",
+            "options": {
+              "user": "用户",
+              "assistant": "助手"
+            }
+          }
+        }
       },
       "archive": {
         "description": "归档或取消归档一个会话。这一族没有删除节点：删掉别人存下的东西该由人来决定，不是图。",
-        "label": "归档会话"
+        "label": "归档会话",
+        "fields": {
+          "sessionId": {
+            "label": "会话 ID"
+          },
+          "archived": {
+            "label": "已归档"
+          }
+        }
       },
       "create": {
         "description": "新建一个会话，可带首条消息。不会切换用户界面，所以定时运行不会把人从正在看的内容里拽走。",
-        "label": "新建会话"
+        "label": "新建会话",
+        "fields": {
+          "title": {
+            "label": "标题"
+          },
+          "characterId": {
+            "label": "角色 ID"
+          },
+          "projectId": {
+            "label": "工作区 ID",
+            "description": "默认使用本次运行所属的工作区。"
+          },
+          "workingDir": {
+            "label": "工作目录"
+          },
+          "seedUserMessage": {
+            "label": "首条消息"
+          },
+          "activate": {
+            "label": "将用户切换到该会话",
+            "description": "默认关闭。仅在有人正在使用应用时才有意义。"
+          }
+        }
       },
       "export": {
         "description": "把会话记录渲染成 Markdown 或 JSON。",
-        "label": "导出会话"
+        "label": "导出会话",
+        "fields": {
+          "sessionId": {
+            "label": "会话 ID"
+          },
+          "format": {
+            "label": "格式",
+            "options": {
+              "markdown": "Markdown",
+              "json": "JSON"
+            }
+          }
+        }
       },
       "get": {
         "description": "读取一个会话，可选带上最近若干条消息。",
-        "label": "读取会话"
+        "label": "读取会话",
+        "fields": {
+          "sessionId": {
+            "label": "会话 ID"
+          },
+          "messageLimit": {
+            "label": "最近消息数"
+          }
+        }
       },
       "list": {
         "description": "列出某个工作区里的会话。内嵌会话与导入的子代理内部记录不在其中，与其他枚举场景一致。",
-        "label": "列出会话"
+        "label": "列出会话",
+        "fields": {
+          "projectId": {
+            "label": "工作区 ID",
+            "description": "默认使用本次运行所属的工作区。"
+          },
+          "characterId": {
+            "label": "仅限此角色"
+          },
+          "folderId": {
+            "label": "仅限此文件夹"
+          },
+          "pinnedOnly": {
+            "label": "仅置顶"
+          },
+          "includeArchived": {
+            "label": "包含已归档"
+          },
+          "limit": {
+            "label": "数量上限"
+          }
+        }
       },
       "update": {
         "description": "重命名、置顶或归档到文件夹。重命名会永久关闭自动标题。",
-        "label": "更新会话"
+        "label": "更新会话",
+        "fields": {
+          "sessionId": {
+            "label": "会话 ID"
+          },
+          "title": {
+            "label": "新标题"
+          },
+          "pinned": {
+            "label": "置顶"
+          },
+          "folderId": {
+            "label": "文件夹 ID",
+            "description": "留空则移出文件夹（回到顶层）。"
+          }
+        }
       }
     },
     "site": {
@@ -912,35 +1726,116 @@
   "knowledge": {
     "chunk": {
       "description": "创建包含稳定位置元数据的格式感知知识分块。",
-      "label": "知识分块"
+      "label": "知识分块",
+      "fields": {
+        "artifactId": {
+          "label": "转换产物 ID"
+        }
+      }
     },
     "embed": {
       "description": "通过 Cognia 强制安全嵌入网关为知识分块生成向量。",
-      "label": "知识嵌入"
+      "label": "知识嵌入",
+      "fields": {
+        "artifactId": {
+          "label": "分块产物 ID"
+        }
+      }
     },
     "index": {
       "description": "在发布前校验向量数量和维度。",
-      "label": "校验知识索引"
+      "label": "校验知识索引",
+      "fields": {
+        "artifactId": {
+          "label": "嵌入产物 ID"
+        }
+      }
     },
     "parse": {
       "description": "将一个已持久化来源解析为受保护的运行级产物。",
-      "label": "解析知识"
+      "label": "解析知识",
+      "fields": {
+        "sourceId": {
+          "label": "来源 ID"
+        }
+      }
     },
     "publish": {
       "description": "原子发布经过校验的不可变索引修订。",
-      "label": "发布知识修订"
+      "label": "发布知识修订",
+      "fields": {
+        "artifactId": {
+          "label": "已校验的索引产物 ID"
+        }
+      }
     },
     "retrieve": {
       "description": "从冻结的知识库修订中检索经过 ACL 过滤的知识分块。",
-      "label": "检索知识"
+      "label": "检索知识",
+      "fields": {
+        "knowledgeBaseIds": {
+          "label": "知识库 ID 列表"
+        },
+        "query": {
+          "label": "查询"
+        },
+        "topKPerBase": {
+          "label": "每个知识库的 Top K"
+        },
+        "scoreThreshold": {
+          "label": "最低分数"
+        },
+        "tokenBudget": {
+          "label": "Token 预算"
+        },
+        "revisionBindings": {
+          "label": "冻结的修订绑定"
+        }
+      }
     },
     "source": {
       "description": "创建或增量更新具有稳定标识的知识库来源。",
-      "label": "知识来源"
+      "label": "知识来源",
+      "fields": {
+        "knowledgeBaseId": {
+          "label": "知识库 ID"
+        },
+        "sourceMode": {
+          "label": "来源方式",
+          "options": {
+            "text": "文本",
+            "web": "网页",
+            "existing": "已有来源"
+          }
+        },
+        "sourceId": {
+          "label": "已有来源 ID"
+        },
+        "sourceKey": {
+          "label": "稳定来源键"
+        },
+        "title": {
+          "label": "标题"
+        },
+        "format": {
+          "label": "格式"
+        },
+        "content": {
+          "label": "内容"
+        },
+        "url": {
+          "label": "网页 URL"
+        }
+      }
     },
     "transform": {
       "description": "在分块前规范化解析内容并执行 PII 脱敏。",
-      "label": "转换知识"
+      "label": "转换知识",
+      "fields": {
+        "artifactId": {
+          "label": "解析产物 ID"
+        }
+      }
     }
   },
   "ocr": {
@@ -1027,31 +1922,180 @@
     "memory": {
       "written": {
         "description": "当一条长期记忆被创建时触发。载荷永远不带记忆正文：需要正文就在下游用「回忆记忆」节点读。",
-        "label": "写入长期记忆时"
+        "label": "写入长期记忆时",
+        "fields": {
+          "types": {
+            "label": "仅限这些类型",
+            "description": "semantic、episodic 或 procedural。留空表示任意。"
+          },
+          "scopes": {
+            "label": "仅限这些范围",
+            "description": "global、workspace、character 或 agent。"
+          },
+          "provenances": {
+            "label": "仅限这些出处",
+            "description": "explicit 表示用户主动记录的内容，user 表示由提取器自动提炼的内容。"
+          },
+          "minImportance": {
+            "label": "最低重要度"
+          },
+          "characterId": {
+            "label": "仅限此角色"
+          },
+          "projectId": {
+            "label": "仅限此工作区"
+          },
+          "agentId": {
+            "label": "仅限此智能体"
+          },
+          "keyPrefix": {
+            "label": "键前缀"
+          },
+          "cooldownMs": {
+            "label": "冷却时间（毫秒）"
+          }
+        }
       }
     },
     "capture": {
       "item": {
         "description": "当内容捕获保存了一条记录时触发。载荷只带 id 和分类；正文只有在你明确要求时才会带上，并且始终要过脱敏闸。",
-        "label": "捕获到内容时"
+        "label": "捕获到内容时",
+        "fields": {
+          "kinds": {
+            "label": "仅限这些类型",
+            "description": "text、url 或 image。留空则任意类型都会触发。"
+          },
+          "sourceAppContains": {
+            "label": "来源应用包含"
+          },
+          "urlHostContains": {
+            "label": "来源主机包含"
+          },
+          "enrichedOnly": {
+            "label": "仅已提取内容的捕获"
+          },
+          "includeText": {
+            "label": "包含捕获的文本",
+            "description": "默认关闭。这段文本来自你的剪贴板，仍会经过脱敏闸。"
+          },
+          "cooldownMs": {
+            "label": "冷却时间（毫秒）"
+          }
+        }
       }
     },
     "file": {
       "watch": {
         "description": "当被监听目录下的文件发生变化时触发。它在自己启动的整个运行期间保持静音，所以写文件的工作流不会把自己再次触发。",
-        "label": "文件变更时"
+        "label": "文件变更时",
+        "fields": {
+          "root": {
+            "label": "要监听的目录",
+            "description": "绝对路径。不接受文件系统根目录和你的主目录。"
+          },
+          "globs": {
+            "label": "仅限这些路径",
+            "description": "相对于根目录的 glob，例如 src/**/*.ts。留空则监听全部。"
+          },
+          "ignoreGlobs": {
+            "label": "忽略这些路径"
+          },
+          "respectGitignore": {
+            "label": "遵循 .gitignore"
+          },
+          "events": {
+            "label": "仅限这些事件",
+            "description": "created、modified、removed 或 renamed。留空表示任意。"
+          },
+          "recursive": {
+            "label": "包含子目录"
+          },
+          "debounceMs": {
+            "label": "防抖间隔（毫秒）"
+          },
+          "settleMs": {
+            "label": "重新待命前所需的静默时长（毫秒）"
+          },
+          "catchUpOnStart": {
+            "label": "报告应用关闭期间的更改",
+            "description": "只发一条带数量的汇总事件，不会逐条重放。默认关闭。"
+          },
+          "maxFiresPerMinute": {
+            "label": "每分钟触发次数上限"
+          }
+        }
       }
     },
     "scheduler": {
       "taskCompleted": {
         "description": "当一个定时任务结算时触发，包括失败的情况。这与工作流自己的 cron 触发器不同：它响应的是别人的任务。",
-        "label": "定时任务结束时"
+        "label": "定时任务结束时",
+        "fields": {
+          "taskId": {
+            "label": "仅限此任务"
+          },
+          "taskTypes": {
+            "label": "仅限这些任务类型",
+            "description": "workflow、agent、chat、plan、goal 等。留空表示任意。"
+          },
+          "status": {
+            "label": "仅限此结果",
+            "options": {
+              "completed": "已完成",
+              "failed": "失败",
+              "cancelled": "已取消",
+              "skipped": "已跳过"
+            }
+          },
+          "terminalReasons": {
+            "label": "仅限这些终止原因"
+          },
+          "projectId": {
+            "label": "仅限此工作区"
+          },
+          "cooldownMs": {
+            "label": "冷却时间（毫秒）"
+          }
+        }
       }
     },
     "plan": {
       "event": {
         "description": "当计划被批准、refined、暂停、取消，或某个步骤开始、完成、失败，或计划退出时触发。用 kinds 过滤器收窄范围。",
-        "label": "计划事件时"
+        "label": "计划事件时",
+        "fields": {
+          "kinds": {
+            "label": "仅限这些事件",
+            "description": "留空则任何计划事件都会触发。"
+          },
+          "planId": {
+            "label": "仅限此计划"
+          },
+          "sessionId": {
+            "label": "仅限此会话"
+          },
+          "characterId": {
+            "label": "仅限此角色"
+          },
+          "status": {
+            "label": "仅当计划处于此状态时"
+          },
+          "source": {
+            "label": "仅限以此方式创建的计划",
+            "options": {
+              "exit_plan_mode": "计划模式",
+              "agent_tool": "智能体工具",
+              "planner_llm": "规划模型",
+              "team_projection": "智能体团队",
+              "goal_projection": "目标",
+              "manual": "手动"
+            }
+          },
+          "cooldownMs": {
+            "label": "冷却时间（毫秒）"
+          }
+        }
       }
     },
     "team": {
