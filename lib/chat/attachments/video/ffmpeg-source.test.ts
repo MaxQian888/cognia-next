@@ -2,6 +2,14 @@ jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
 jest.mock("@/lib/media/transport", () => ({ callMediaBinary: jest.fn() }))
 jest.mock("@/lib/platform/capabilities", () => ({ detectHostProfile: jest.fn(() => "desktop") }))
 jest.mock("@/lib/tauri/transport-routing", () => ({ getActiveRemoteEndpoint: jest.fn(() => null) }))
+jest.mock("@/lib/tauri/account-app-data", () => {
+  const actual = jest.requireActual("@/lib/tauri/account-app-data")
+  return {
+    ...actual,
+    activeDatabaseAppDataDir: (dir: string) =>
+      actual.databaseAppDataDir(dir, "acct_test", "cognia-account-acct_test"),
+  }
+})
 jest.mock("@tauri-apps/plugin-fs", () => ({
   BaseDirectory: { AppData: 14 },
   mkdir: jest.fn(async () => {}),
@@ -23,7 +31,6 @@ import { detectHostProfile } from "@/lib/platform/capabilities"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 import {
   FFMPEG_STAGING_CHUNK_BYTES,
-  FFMPEG_STAGING_DIR,
   canUseLocalFfmpeg,
   defaultFfmpegSourceDeps,
   isMissingFfmpegError,
@@ -112,14 +119,15 @@ describe("defaultFfmpegSourceDeps.stageFile", () => {
   it("copies the blob into AppData in appended chunks and returns an absolute path", async () => {
     const size = FFMPEG_STAGING_CHUNK_BYTES * 2 + 5
     const staged = await defaultFfmpegSourceDeps.stageFile(new Blob([new Uint8Array(size)]), "MOV")
-    expect(fs.mkdir).toHaveBeenCalledWith(FFMPEG_STAGING_DIR, { baseDir: 14, recursive: true })
+    const stagingDir = "composer-video-staging/acct_test/cognia-account-acct_test"
+    expect(fs.mkdir).toHaveBeenCalledWith(stagingDir, { baseDir: 14, recursive: true })
     expect(writeFileMock.mock.calls.map((call) => [call[1].byteLength, call[2].append])).toEqual([
       [FFMPEG_STAGING_CHUNK_BYTES, false],
       [FFMPEG_STAGING_CHUNK_BYTES, true],
       [5, true],
     ])
     const [, relative] = (fs.rename as jest.Mock).mock.calls[0] as [string, string]
-    expect(relative).toMatch(new RegExp(`^${FFMPEG_STAGING_DIR}/[^/]+\\.mov$`))
+    expect(relative).toMatch(new RegExp(`^${stagingDir}/[^/]+\\.mov$`))
     expect(writeFileMock.mock.calls[0][0]).toBe((fs.rename as jest.Mock).mock.calls[0][0])
     expect(staged.path).toBe(`/Users/me/Library/Application Support/cognia/${relative}`)
     await staged.remove()

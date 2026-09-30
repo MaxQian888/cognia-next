@@ -18,6 +18,14 @@ jest.mock("@/lib/db/settings", () => {
   return { __esModule: true, ...actual, getSettings: jest.fn(actual.getSettings) }
 })
 
+jest.mock("@/lib/ai/media/video-jobs/app-data-sweep", () => ({
+  sweepVideoAppData: jest.fn(async () => ({
+    databaseDirectories: 0,
+    orphanVideos: 0,
+    staleStagingCopies: 0,
+  })),
+}))
+
 const MS_PER_DAY = 86_400_000
 
 const dbFixture = createDbTestFixture()
@@ -132,6 +140,23 @@ describe("pruneRetainedTables", () => {
       { id: "syncTombstones", removed: 0 },
     ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])
+  })
+
+  it("sweeps the video files no job row accounts for after pruning the rows", async () => {
+    const { sweepVideoAppData } = jest.requireMock("@/lib/ai/media/video-jobs/app-data-sweep")
+    const target = RETENTION_TARGETS.find((t) => t.id === "mediaGenerationJobs")!
+    ;(sweepVideoAppData as jest.Mock).mockClear()
+    await expect(target.prune(Date.now())).resolves.toBe(0)
+    expect(sweepVideoAppData).toHaveBeenCalledTimes(1)
+
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    ;(sweepVideoAppData as jest.Mock).mockRejectedValueOnce(new Error("fs refused"))
+    await expect(target.prune(Date.now())).resolves.toBe(0)
+    expect(warn).toHaveBeenCalledWith(
+      "storage retention: video file sweep failed",
+      expect.any(Error)
+    )
+    warn.mockRestore()
   })
 
   it("exposes agentTraces as a default target", () => {

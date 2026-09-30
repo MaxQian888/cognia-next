@@ -3,6 +3,7 @@
 
 import Dexie from "dexie"
 
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { getDb } from "@/lib/db/schema"
 import { clearTemporarySessionAssets } from "@/lib/db/session-assets"
@@ -14,6 +15,7 @@ import {
 } from "@/lib/db/message-media-refs"
 import { fusionDatabaseName } from "@/lib/router-fusion/gate/database-name"
 import { recordTombstones } from "@/lib/sync/tombstones"
+import { purgeDatabaseAppData } from "@/lib/tauri/account-app-data"
 import { loggers } from "@cognia/logging"
 
 export type ClearableTable =
@@ -141,10 +143,16 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
  * database and its ledger (account removal, runtime-target removal, the
  * refused-layout reset): a delete that silently did nothing must not be
  * reported to the user as "all data cleared".
+ *
+ * The videos this database's workflow jobs generated, and any composer
+ * staging copy, are files under AppData in the database's own directory; they
+ * go too. Also best-effort: a file held open is removed by the retention sweep
+ * once no job row accounts for it.
  */
 export async function clearAll(): Promise<void> {
   const db = getDb()
   const mainName = db.name
+  const accountId = getActiveAccountId()
   const fusionName = fusionDatabaseName(mainName)
   await db.delete()
   clearTemporarySessionAssets()
@@ -158,6 +166,13 @@ export async function clearAll(): Promise<void> {
     await clearBrowserPreviewData()
   } catch (error) {
     loggers.store.warn("clear all: browser preview data was not cleared", {
+      error: String(error),
+    })
+  }
+  try {
+    await purgeDatabaseAppData(accountId, mainName)
+  } catch (error) {
+    loggers.store.warn("clear all: generated video files were not all removed", {
       error: String(error),
     })
   }

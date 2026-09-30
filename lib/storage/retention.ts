@@ -88,11 +88,19 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
     prune: async () => {
       // A workflow job's video is a file under AppData; it goes with its row.
       const { removeAppDataFile } = await import("@/lib/tauri/app-data-files")
-      return pruneSettledVideoJobs(
+      const pruned = await pruneSettledVideoJobs(
         Date.now() -
           (policyForTable("mediaGenerationJobs")?.retentionPolicy.days ?? 30) * MS_PER_DAY,
         removeAppDataFile
       )
+      // Then the video files no row accounts for: a dropped database's, an
+      // orphan whose removal failed, a crash's staging copy. A file sweep that
+      // fails must not report the row prune as failed.
+      const { sweepVideoAppData } = await import("@/lib/ai/media/video-jobs/app-data-sweep")
+      await sweepVideoAppData().catch((err) =>
+        console.warn("storage retention: video file sweep failed", err)
+      )
+      return pruned
     },
   },
   retrievalControl: {

@@ -73,6 +73,13 @@ export async function listSessionVideoJobs(sessionId: string): Promise<MediaGene
   return rows.reverse()
 }
 
+/** Which of `ids` still have a job row. */
+export async function existingVideoJobIds(ids: readonly string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set()
+  const rows = await getDb().mediaGenerationJobs.bulkGet([...ids])
+  return new Set(rows.flatMap((row) => (row ? [row.id] : [])))
+}
+
 /**
  * Retention executor: drop failed / cancelled / timed-out jobs settled before
  * `cutoff`, and succeeded workflow jobs, whose video is a file of their own

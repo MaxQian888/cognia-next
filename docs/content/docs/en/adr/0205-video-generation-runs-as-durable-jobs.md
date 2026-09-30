@@ -84,7 +84,13 @@ bridge buffers up to 64 MiB; larger results fail early from a
   under AppData, the one tree the window may write without a wider fs scope;
   like the trim and concat outputs it is outside every workspace root. Its
   saved defaults are the same as `/video`'s. The node does not retry, since
-  each start is a paid generation.
+  each start is a paid generation. The file sits in a directory of the
+  account and database whose row points at it
+  (`generated-videos/<account>/<database>/`), as do the composer's FFmpeg
+  staging copies, so "clear all data" and account deletion remove them
+  without opening the database. The retention sweep removes what no row
+  accounts for: a dropped database's directory, a video whose job is gone,
+  a staging copy older than a day.
 - The plugin API and the executor's `videos.*` handlers call the engine.
 
 ### 5. Cancel is honest

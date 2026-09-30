@@ -5,11 +5,12 @@
  * An adapter over the video job engine, like the chat tool and `/video`: the
  * node starts a durable job (origin `workflow`), waits on its row, and the
  * renderer's job host writes the finished video under AppData
- * (`generated-videos/<jobId>.<ext>`). The output's `outputPath` is what
- * `action.media.probe`, `frame`, `trim` and `concat` read. Like their temp-root
- * outputs it is outside every workspace root, so an `action.fs.*` node cannot
- * read it. A succeeded job's file is removed with its row by the 30-day
- * retention sweep.
+ * (`generated-videos/<accountId>/<database>/<jobId>.<ext>`). The output's
+ * `outputPath` is what `action.media.probe`, `frame`, `trim` and `concat` read.
+ * Like their temp-root outputs it is outside every workspace root, so an
+ * `action.fs.*` node cannot read it. A succeeded job's file is removed with its
+ * row by the 30-day retention sweep, and with its database by "clear all data"
+ * or account deletion.
  *
  * Provider, model and options fall back to Settings → Media generation the
  * same way `/video` does (`applyVideoDefaults`). The start image is optional

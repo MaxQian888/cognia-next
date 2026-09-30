@@ -6,6 +6,7 @@ import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import { getDb } from "./schema"
 import {
   createDexieMediaJobStore,
+  existingVideoJobIds,
   listSessionVideoJobs,
   pruneSettledVideoJobs,
 } from "./media-generation-jobs"
@@ -140,6 +141,12 @@ describe("Dexie media job store", () => {
     })
     await expect(pruneSettledVideoJobs(500, removeFile)).resolves.toBe(1)
     expect(await getDb().mediaGenerationJobs.toCollection().primaryKeys()).toEqual(["flow-held"])
+  })
+
+  it("reports which ids still have a row", async () => {
+    await createDexieMediaJobStore().insert(row("kept"))
+    await expect(existingVideoJobIds(["kept", "gone"])).resolves.toEqual(new Set(["kept"]))
+    await expect(existingVideoJobIds([])).resolves.toEqual(new Set())
   })
 })
 

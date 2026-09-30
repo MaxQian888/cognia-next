@@ -6,6 +6,11 @@ jest.mock("@tauri-apps/plugin-fs", () => ({
   rename: jest.fn(async () => {}),
   exists: jest.fn(async () => true),
   readFile: jest.fn(async () => new Uint8Array([4, 2])),
+  readDir: jest.fn(async () => [
+    { name: "a.mp4", isDirectory: false, isFile: true, isSymlink: false },
+    { name: "db", isDirectory: true, isFile: false, isSymlink: false },
+  ]),
+  stat: jest.fn(async () => ({ mtime: new Date(1234) })),
 }))
 jest.mock("@tauri-apps/api/path", () => ({
   appDataDir: jest.fn(async () => "/data/cognia"),
@@ -17,8 +22,11 @@ import * as fs from "@tauri-apps/plugin-fs"
 import {
   APP_DATA_WRITE_CHUNK_BYTES,
   appDataFileExists,
+  appDataModifiedAt,
   appDataPath,
+  listAppDataDirectory,
   readAppDataFile,
+  removeAppDataDirectory,
   removeAppDataFile,
   writeBlobToAppData,
 } from "./app-data-files"
@@ -88,6 +96,32 @@ describe("the other AppData helpers", () => {
     expect(remove).not.toHaveBeenCalled()
     remove.mockRejectedValueOnce(new Error("file in use"))
     await expect(removeAppDataFile("videos/a.mp4")).rejects.toThrow("file in use")
+  })
+
+  it("removes a directory with its contents, and skips one already gone", async () => {
+    await removeAppDataDirectory("videos/acct")
+    expect(remove).toHaveBeenCalledWith("videos/acct", { baseDir: 14, recursive: true })
+    exists.mockResolvedValueOnce(false)
+    remove.mockClear()
+    await removeAppDataDirectory("videos/gone")
+    expect(remove).not.toHaveBeenCalled()
+    await expect(removeAppDataDirectory("..")).rejects.toThrow("relative AppData")
+  })
+
+  it("lists a directory, empty when it does not exist", async () => {
+    await expect(listAppDataDirectory("videos")).resolves.toEqual([
+      { name: "a.mp4", isDirectory: false, isFile: true },
+      { name: "db", isDirectory: true, isFile: false },
+    ])
+    expect(fs.readDir).toHaveBeenCalledWith("videos", { baseDir: 14 })
+    exists.mockResolvedValueOnce(false)
+    await expect(listAppDataDirectory("missing")).resolves.toEqual([])
+  })
+
+  it("reads a modification time, null when the disk has none", async () => {
+    await expect(appDataModifiedAt("videos/a.mp4")).resolves.toBe(1234)
+    ;(fs.stat as jest.Mock).mockResolvedValueOnce({ mtime: null })
+    await expect(appDataModifiedAt("videos/a.mp4")).resolves.toBeNull()
   })
 
   it("test, read and resolve under AppData", async () => {

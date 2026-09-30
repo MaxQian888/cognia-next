@@ -1206,7 +1206,7 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     enforcement: "central",
     executorId: "mediaGenerationJobs",
     reason:
-      "`pruneSettledVideoJobs` drops failed, cancelled and timed-out jobs, and succeeded workflow jobs together with their video file, 30 days after they settle; other succeeded jobs are removed with their conversation.",
+      "`pruneSettledVideoJobs` drops failed, cancelled and timed-out jobs, and succeeded workflow jobs together with their video file, 30 days after they settle; other succeeded jobs are removed with their conversation. The same sweep removes AppData video files no row accounts for (a dropped database's, an orphaned video, a day-old staging copy).",
   },
   memoryAuditEvents: {
     mode: "ttl",

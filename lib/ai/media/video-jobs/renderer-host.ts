@@ -42,6 +42,10 @@ import {
 } from "@/lib/network/platform-fetch"
 import { safeFilename } from "@/lib/files-library/safe-filename"
 import {
+  GENERATED_VIDEO_APP_DATA_DIR,
+  activeDatabaseAppDataDir,
+} from "@/lib/tauri/account-app-data"
+import {
   appDataFileExists,
   appDataPath,
   readAppDataFile,
@@ -66,9 +70,6 @@ import type {
  * over 64 MiB (`MAX_PROXY_HTTP_BODY_BYTES`, `src-tauri/src/proxy_config/commands.rs`).
  */
 export const DESKTOP_BRIDGE_MAX_BYTES = 64 * 1024 * 1024
-
-/** AppData subdirectory holding the videos workflow jobs produce. */
-export const WORKFLOW_VIDEO_DIR = "generated-videos"
 
 /** Characters of the prompt a stored video's name keeps. */
 const FILENAME_PROMPT_CHARS = 80
@@ -203,7 +204,9 @@ async function storeVideo(row: MediaGenerationJobRow, video: Blob): Promise<Vide
     // Named by job id, not prompt: the path is the node's output and must
     // stay one plain segment whatever the prompt says. The file only appears
     // once complete (written aside, then renamed), so one that exists is whole.
-    const relativePath = `${WORKFLOW_VIDEO_DIR}/${row.id}.${extensionOf(mediaType)}`
+    // It sits in the directory of the database holding the row, which clearing
+    // that database or deleting its account removes (`account-app-data`).
+    const relativePath = `${activeDatabaseAppDataDir(GENERATED_VIDEO_APP_DATA_DIR)}/${row.id}.${extensionOf(mediaType)}`
     const path = (await appDataFileExists(relativePath))
       ? await appDataPath(relativePath)
       : await writeBlobToAppData(relativePath, video)

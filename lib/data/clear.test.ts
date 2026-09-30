@@ -7,10 +7,14 @@ import { loggers } from "@cognia/logging"
 import { putSessionAsset, listSessionAssets, putLibraryAsset } from "@/lib/db/session-assets"
 import { LIBRARY_OWNER_PREFIX, LIBRARY_REF_SESSION_ID } from "@/lib/db/message-media-refs"
 import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { purgeDatabaseAppData } from "@/lib/tauri/account-app-data"
 import { clearTables, clearAll } from "./clear"
 
 jest.mock("@/lib/browser/preview-data", () => ({ clearBrowserPreviewData: jest.fn() }))
 const clearPreview = clearBrowserPreviewData as jest.Mock
+jest.mock("@/lib/tauri/account-app-data", () => ({ purgeDatabaseAppData: jest.fn() }))
+const purgeAppData = purgeDatabaseAppData as jest.Mock
 
 const fixture = createRecreatedDbTestFixture({ seeded: false })
 beforeAll(fixture.initialize)
@@ -272,6 +276,29 @@ describe("clearAll", () => {
     clearPreview.mockReset().mockResolvedValue({ cookiesRemoved: 2 })
     await clearAll()
     expect(clearPreview).toHaveBeenCalledTimes(1)
+  })
+
+  // Workflow videos and composer staging copies are files under AppData in
+  // the database's own directory; they must not outlive it.
+  it("removes the files the database kept under AppData", async () => {
+    const name = getDb().name
+    purgeAppData.mockReset().mockResolvedValue(undefined)
+    await clearAll()
+    expect(purgeAppData).toHaveBeenCalledWith(getActiveAccountId(), name)
+  })
+
+  it("still reports the data cleared when a video file is held open", async () => {
+    purgeAppData.mockReset().mockRejectedValue(new Error("file in use"))
+    const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => undefined)
+    try {
+      await expect(clearAll()).resolves.toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(
+        "clear all: generated video files were not all removed",
+        expect.anything()
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it("still clears the database when the browser's cookie store is unreachable", async () => {

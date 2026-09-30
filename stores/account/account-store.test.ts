@@ -174,6 +174,7 @@ const mockForgetCloudIdentity = jest.fn<
   [string, { hostBound: boolean }]
 >()
 const mockPurgeAccountLocalState = jest.fn<Promise<void>, [string]>()
+const mockPurgeAccountFiles = jest.fn<Promise<void>, [string]>()
 const mockActivateAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockClearAccountLocalState = jest.fn<void, []>()
 const mockPrepareRuntimeTarget = jest.fn()
@@ -233,6 +234,7 @@ function makeStore() {
   const dependencies: Partial<AccountStoreDependencies> = {
     dropAccountDatabase: mockDropAccountDatabase,
     purgeAccountLocalState: mockPurgeAccountLocalState,
+    purgeAccountFiles: mockPurgeAccountFiles,
     activateAccountLocalState: mockActivateAccountLocalState,
     clearAccountLocalState: mockClearAccountLocalState,
     prepareRuntimeTarget: mockPrepareRuntimeTarget,
@@ -320,6 +322,7 @@ beforeEach(() => {
   mockClearDeviceUnlockSecret.mockResolvedValue()
   mockDropAccountDatabase.mockResolvedValue()
   mockPurgeAccountLocalState.mockResolvedValue()
+  mockPurgeAccountFiles.mockReset().mockResolvedValue()
   mockActivateAccountLocalState.mockResolvedValue()
   mockPrepareRuntimeTarget.mockResolvedValue({
     accountId: "acct_browser",
@@ -1372,6 +1375,7 @@ describe("account store switching, locking, and lifecycle", () => {
     })
     expect(mockDropAccountDatabase).toHaveBeenCalledWith("acct_beta")
     expect(mockPurgeAccountLocalState).toHaveBeenCalledWith("acct_beta")
+    expect(mockPurgeAccountFiles).toHaveBeenCalledWith("acct_beta")
     expect(store.getState().accounts.map((item) => item.id)).toEqual(["acct_alpha"])
     expect(store.getState().unlockedAccountId).toBe("acct_alpha")
     expect(result).toMatchObject({
@@ -1380,7 +1384,27 @@ describe("account store switching, locking, and lifecycle", () => {
       registryDeleted: true,
       accountDatabaseDeleted: true,
       localStatePurged: true,
+      accountFilesPurged: true,
     })
+  })
+
+  // The database is already gone; a video held open by a player must not fail
+  // a deletion that has destroyed the data. The retention sweep retries it.
+  it("finishes the deletion when an AppData file cannot be removed yet", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    const beta = account("acct_beta", "Beta")
+    mockListAccounts.mockResolvedValue([alpha, beta])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    mockPurgeAccountFiles.mockRejectedValueOnce(new Error("file in use"))
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+
+    const result = await store.getState().deleteAccount("acct_beta")
+
+    expect(result.accountFilesPurged).toBe(false)
+    expect(store.getState().accounts.map((item) => item.id)).toEqual(["acct_alpha"])
+    expect(store.getState().error).toBeNull()
   })
 
   it("records delete failures before local cascade runs", async () => {

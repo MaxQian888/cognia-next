@@ -62,6 +62,7 @@ import {
 import { withLockoutCleared } from "@/lib/accounts/quick-unlock/types"
 import type { QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
 import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
+import { purgeAccountAppData } from "@/lib/tauri/account-app-data"
 import { AccountUnlockError, asUnlockError } from "@/lib/accounts/account-unlock-error"
 import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
@@ -268,6 +269,11 @@ export interface AccountStoreDependencies {
   registry: LocalAccountRegistry
   dropAccountDatabase: (localAccountId: string) => Promise<void>
   purgeAccountLocalState: (localAccountId: string) => Promise<void>
+  /**
+   * Remove the files the account keeps under AppData (generated videos,
+   * composer staging copies), across all its databases.
+   */
+  purgeAccountFiles: (localAccountId: string) => Promise<void>
   activateAccountLocalState: (localAccountId: string) => Promise<void>
   clearAccountLocalState: () => void
   prepareRuntimeTarget: (localAccountId: string) => Promise<RuntimeTargetRecord>
@@ -306,6 +312,11 @@ export interface LocalAccountDeletionResult {
   accountDatabaseDeleted: true
   runtimeTargetsDeleted: boolean
   localStatePurged: true
+  /**
+   * Whether the account's AppData files are gone. False when one was held
+   * open; the retention sweep removes it once its database no longer exists.
+   */
+  accountFilesPurged: boolean
   browserVaultDeleted: boolean
   /** What happened to the profile's cloud identity. Inspect `failures` and `tokensMayRemainLive`. */
   cloudIdentity: ProfileCloudIdentityCleanup
@@ -334,6 +345,7 @@ export function createAccountStore(
     registry: new LocalAccountRegistry(),
     dropAccountDatabase: dropDexieAccountDatabase,
     purgeAccountLocalState: purgeLocalStorageForAccount,
+    purgeAccountFiles: purgeAccountAppData,
     activateAccountLocalState: activateBrowserAccountLocalState,
     clearAccountLocalState: clearBrowserAccountLocalState,
     prepareRuntimeTarget: prepareAccountRuntimeTarget,
@@ -1557,6 +1569,12 @@ export function createAccountStore(
             runtimeTargetsDeleted = true
           }
           await dependencies.purgeAccountLocalState(localAccountId)
+          // The database these files belong to is gone, so a file held open
+          // must not fail the deletion; the retention sweep retries it.
+          const accountFilesPurged = await dependencies
+            .purgeAccountFiles(localAccountId)
+            .then(() => true)
+            .catch(() => false)
           await deleteBrowserVault(localAccountId)
           if (localAccountId === DESKTOP_LOCAL_ACCOUNT_ID) {
             await clearDesktopLocalAccountPassword()
@@ -1601,6 +1619,7 @@ export function createAccountStore(
             accountDatabaseDeleted: true,
             runtimeTargetsDeleted,
             localStatePurged: true,
+            accountFilesPurged,
             browserVaultDeleted,
             cloudIdentity,
           }

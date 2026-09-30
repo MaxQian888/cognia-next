@@ -79,6 +79,41 @@ export async function removeAppDataFile(relativePath: string): Promise<void> {
   await remove(relativePath, { baseDir: BaseDirectory.AppData })
 }
 
+/**
+ * Remove a directory under AppData with everything in it. A directory that is
+ * already gone is not an error; any other failure throws.
+ */
+export async function removeAppDataDirectory(relativePath: string): Promise<void> {
+  assertRelative(relativePath)
+  const { BaseDirectory, exists, remove } = await import("@tauri-apps/plugin-fs")
+  if (!(await exists(relativePath, { baseDir: BaseDirectory.AppData }))) return
+  await remove(relativePath, { baseDir: BaseDirectory.AppData, recursive: true })
+}
+
+/** One entry of an AppData directory. */
+export interface AppDataEntry {
+  name: string
+  isDirectory: boolean
+  isFile: boolean
+}
+
+/** The entries of a directory under AppData; none when it does not exist. */
+export async function listAppDataDirectory(relativePath: string): Promise<AppDataEntry[]> {
+  assertRelative(relativePath)
+  const { BaseDirectory, exists, readDir } = await import("@tauri-apps/plugin-fs")
+  if (!(await exists(relativePath, { baseDir: BaseDirectory.AppData }))) return []
+  const entries = await readDir(relativePath, { baseDir: BaseDirectory.AppData })
+  return entries.map(({ name, isDirectory, isFile }) => ({ name, isDirectory, isFile }))
+}
+
+/** When a file under AppData was last modified, or null when the disk does not say. */
+export async function appDataModifiedAt(relativePath: string): Promise<number | null> {
+  assertRelative(relativePath)
+  const { BaseDirectory, stat } = await import("@tauri-apps/plugin-fs")
+  const info = await stat(relativePath, { baseDir: BaseDirectory.AppData })
+  return info.mtime ? info.mtime.getTime() : null
+}
+
 /** Whether a file exists under AppData. */
 export async function appDataFileExists(relativePath: string): Promise<boolean> {
   assertRelative(relativePath)

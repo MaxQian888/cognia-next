@@ -19,6 +19,10 @@ import { decodeNativeVideoFrame } from "@/lib/media/native-video-frame"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 import { detectHostProfile } from "@/lib/platform/capabilities"
 import {
+  COMPOSER_VIDEO_STAGING_APP_DATA_DIR,
+  activeDatabaseAppDataDir,
+} from "@/lib/tauri/account-app-data"
+import {
   APP_DATA_WRITE_CHUNK_BYTES,
   removeAppDataFile,
   writeBlobToAppData,
@@ -34,8 +38,6 @@ import {
   type MotionFrameSource,
 } from "./frame-source"
 
-/** Subdirectory of AppData the staged copies live in. */
-export const FFMPEG_STAGING_DIR = "composer-video-staging"
 /** Chunk size for the append-write copy; `write_file` is the granted fs command. */
 export const FFMPEG_STAGING_CHUNK_BYTES = APP_DATA_WRITE_CHUNK_BYTES
 
@@ -82,7 +84,9 @@ function randomId(): string {
 
 async function stageFileInAppData(blob: Blob, extension: string): Promise<StagedFile> {
   const safeExtension = /^[a-z0-9]{1,8}$/i.test(extension) ? extension.toLowerCase() : "bin"
-  const relative = `${FFMPEG_STAGING_DIR}/${randomId()}.${safeExtension}`
+  // Per database, so clearing it or deleting its account takes stray copies too.
+  const dir = activeDatabaseAppDataDir(COMPOSER_VIDEO_STAGING_APP_DATA_DIR)
+  const relative = `${dir}/${randomId()}.${safeExtension}`
   const path = await writeBlobToAppData(relative, blob)
   // Closing a source must not throw; a stray staged copy is only disk space.
   return { path, remove: () => removeAppDataFile(relative).catch(() => {}) }

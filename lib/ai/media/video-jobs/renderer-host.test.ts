@@ -8,6 +8,10 @@ import {
   listLibraryAssets,
 } from "@/lib/db/session-assets"
 import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
+import {
+  GENERATED_VIDEO_APP_DATA_DIR,
+  activeDatabaseAppDataDir,
+} from "@/lib/tauri/account-app-data"
 import type { MediaGenerationJobRow } from "./types"
 
 const platformKind = jest.fn(() => "tauri")
@@ -52,7 +56,6 @@ jest.mock("@/lib/tauri/app-data-files", () => ({
 
 import {
   DESKTOP_BRIDGE_MAX_BYTES,
-  WORKFLOW_VIDEO_DIR,
   createRendererVideoJobHost,
   currentVideoGenerationSettings,
   generatedVideoFilename,
@@ -118,7 +121,10 @@ describe("renderer video job host", () => {
     const row = job("vjob_flow", { surface: "workflow", runId: "r1", stepId: "s1" })
     const first = await host.materialize(row, video())
     const again = await host.materialize(row, video())
-    const relativePath = `${WORKFLOW_VIDEO_DIR}/vjob_flow.mp4`
+    // In the directory of the database holding the row, which clearing it removes.
+    const dir = activeDatabaseAppDataDir(GENERATED_VIDEO_APP_DATA_DIR)
+    expect(dir).toBe(`generated-videos/${dir.split("/")[1]}/${getDb().name}`)
+    const relativePath = `${dir}/vjob_flow.mp4`
     expect(first.content).toEqual({ kind: "file", relativePath, path: `/data/${relativePath}` })
     expect(again.content).toEqual(first.content)
     expect(writeBlobToAppData).toHaveBeenCalledTimes(1)
