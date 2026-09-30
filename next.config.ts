@@ -370,6 +370,11 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_GIT_COMMIT: gitCommit,
     NEXT_PUBLIC_BUILD_TIME: buildTime,
+    // Always defined so the E2E gates (`lib/dev/expose-test-globals.tsx` and
+    // friends) compile to a constant. Next only inlines NEXT_PUBLIC_* vars that
+    // are set at build time; an unset one stays a runtime read of the empty
+    // `process.env` polyfill, and the whole test bridge ships in every build.
+    NEXT_PUBLIC_E2E: process.env.NEXT_PUBLIC_E2E ?? "",
   },
   // Note: This feature is required to use the Next.js Image component in SSG mode.
   // See https://nextjs.org/docs/messages/export-image-api for different workarounds.

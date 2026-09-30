@@ -11,9 +11,9 @@
  * camera watches them land.
  *
  * Dev/E2E only — reached exclusively through `expose-test-globals.tsx`, which
- * installs nothing unless `NEXT_PUBLIC_E2E === "1"`. That is a runtime check:
- * a production build still ships this module as a lazy chunk, but the gate
- * never passes there, so the chunk is never fetched.
+ * installs nothing unless `NEXT_PUBLIC_E2E === "1"`. The flag is inlined at
+ * build time (`next.config.ts` defines it even when unset), so a production
+ * build drops the lazy import and never emits this module as a chunk.
  *
  * Split the same way as `chat-perf-fixtures.ts`: the transcript arithmetic
  * (`applyStage`, `streamSteps`) is pure and unit-testable in jsdom, and the
