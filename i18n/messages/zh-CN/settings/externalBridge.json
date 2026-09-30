@@ -23,7 +23,8 @@
     "time": "时间",
     "title": "最近 MCP 调用",
     "toastCleared": "审计日志已清空。",
-    "tool": "工具"
+    "tool": "工具",
+    "target": "目标 · {field}"
   },
   "badgeIdle": "空闲",
   "badgeLive": "运行中",
@@ -112,6 +113,10 @@
       "wiki": {
         "description": "重建与检查计划",
         "label": "Wiki 维护"
+      },
+      "workspace": {
+        "description": "每个客户端可访问的根目录",
+        "label": "工作区访问"
       }
     },
     "mobileTrigger": "面板",
@@ -141,7 +146,11 @@
     "workflow:run": "⚠ 列出并运行当前生效的不可变工作流部署、读取持久事件并可取消运行。默认关闭。",
     "issues:read": "⚠ 允许外部代理列出并读取你的事项追踪器：当前工作区的事项、活动记录、项目与迭代。默认关闭。",
     "issues:write": "⚠ 允许外部代理创建、编辑、移动、指派和评论事项。每次写入都经过看板自己的门禁，并以外部代理身份记录在事项上。默认关闭。",
-    "browser:control": "允许外部 Agent 通过 browser_* 工具操控 Cognia 的浏览器：打开与导航页面、读取快照、点击与输入、管理标签页与下载、打印 PDF、模拟设备、查看 Cookie 元数据与网页存储，以及用已保存的密码登录。与任何角色的工具设置无关。应用内需要审批的工具（执行页面脚本、上传、下载、密码登录）每次调用仍会询问你，页面内容会被标记为不可信。默认关闭。"
+    "browser:control": "允许外部 Agent 通过 browser_* 工具操控 Cognia 的浏览器：打开与导航页面、读取快照、点击与输入、管理标签页与下载、打印 PDF、模拟设备、查看 Cookie 元数据与网页存储，以及用已保存的密码登录。与任何角色的工具设置无关。应用内需要审批的工具（执行页面脚本、上传、下载、密码登录）每次调用仍会询问你，页面内容会被标记为不可信。默认关闭。",
+    "workspace:read": "允许外部 Agent 列出、读取和搜索你在“工作区访问”中授予它的工作区根目录中的文件。凭据文件（.env、密钥、.ssh 等）和 .git 内部文件始终被拒绝，文件内容中的个人数据会被脱敏。默认关闭。",
+    "workspace:write": "允许外部 Agent 在授予它的工作区根目录中写入、编辑、移动和删除文件。凭据路径会被拒绝，每次删除都需要你在应用内确认。默认关闭。",
+    "git:read": "允许外部 Agent 读取已授权根目录的 Git 状态、差异和历史。只读：不能提交、检出或推送。凭据路径会被排除。默认关闭。",
+    "shell:run": "允许外部 Agent 在已授权根目录中以后台任务形式运行 Shell 命令，并可读取输出和停止任务。危险命令会被拒绝；有风险的命令以及涉及凭据文件的命令每次都会询问你。命令以你自己账户的权限运行，请只授予你信任的 Agent。默认关闭。"
   },
   "scopes": {
     "description": "每个范围默认关闭，需手动启用。默认安装仅开启公开代码 Wiki 相关范围。",
@@ -158,7 +167,10 @@
       "usage": "用量",
       "wiki": "Wiki",
       "workflow": "工作流",
-      "browser": "浏览器"
+      "browser": "浏览器",
+      "workspace": "工作区文件",
+      "git": "Git",
+      "shell": "Shell"
     },
     "plannedBadge": "规划中",
     "plannedReason": "已推迟到 Phase 1 之后：访问用户仓库需要逐仓库授权，该机制尚未实现。此范围保留在 API 中以便处理器继续编译，但无法被授予。",
@@ -321,5 +333,20 @@
   "browserApproval": {
     "reason": "{client} 想在 Cognia 浏览器中运行 {tool}（{detail}）。",
     "perCallReason": "{client} 想通过 {tool} 使用已保存的密码登录（{detail}）。密码由 Cognia 填入，不会交给 Agent。每次都会询问你。"
+  },
+  "workspace": {
+    "title": "工作区访问",
+    "description": "选择每个 MCP 客户端可以通过工作区、Git 和 Shell 工具访问哪些工作区根目录。没有被授予任何根目录的客户端无法访问任何内容，无论它拥有哪些权限范围。",
+    "scopesOff": "工作区、Git、Shell 权限范围均未启用，在“权限范围”中启用其中之一之前，这些授权不会生效。",
+    "noRoots": "还没有任何工作区添加了文件夹。先为工作区添加文件夹，才能在这里授权。",
+    "stdioClient": "本地 stdio 客户端",
+    "grantedCount": "{count} 个根目录",
+    "noneGranted": "无访问权限",
+    "toggleAria": "允许 {client} 访问 {root}"
+  },
+  "workspaceApproval": {
+    "deleteReason": "{client} 想要删除{kind, select, directory {文件夹} other {文件}} {path}。每次都会询问你。",
+    "commandReason": "{client} 想要在 {root} 中运行命令：{command}。Cognia 的安全检查认为它需要你确认。每次都会询问你。",
+    "commandReasonSecret": "{client} 想要在 {root} 中运行命令：{command}。该命令涉及凭据文件。每次都会询问你。"
   }
 }

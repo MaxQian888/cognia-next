@@ -56,6 +56,35 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["storybook", "--no-open"],
       "port": 6006
+    },
+    {
+      "name": "cognia-footage-e2e",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_E2E=1",
+        "NODE_OPTIONS=--max-old-space-size=12288",
+        "/Users/bytedance/Project/cognia-footage-wt/node_modules/.bin/next",
+        "dev",
+        "/Users/bytedance/Project/cognia-footage-wt",
+        "--port",
+        "3010"
+      ],
+      "port": 3010
+    },
+    {
+      "name": "hyperframes-studio",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dlx",
+        "hyperframes@0.8.93",
+        "preview",
+        "web/video",
+        "--port",
+        "3020",
+        "--foreground",
+        "--no-open"
+      ],
+      "port": 3020
     }
   ]
 }
