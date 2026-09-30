@@ -116,9 +116,15 @@ fn extract_hunks(diff: &Diff<'_>) -> Result<(String, Vec<GitHunk>, bool)> {
     Ok((header_block, hunks, is_binary))
 }
 
+/// Options for a one-path diff. The path is matched LITERALLY: libgit2 would
+/// otherwise treat it as a pathspec glob, so `*` or `.en?` would concatenate
+/// the hunks of every matching file — including credentials a caller filtered
+/// by name (ADR-0203). Every caller here means one concrete file.
 fn base_opts(path: &str) -> DiffOptions {
     let mut opts = DiffOptions::new();
-    opts.context_lines(CONTEXT_LINES).pathspec(path);
+    opts.context_lines(CONTEXT_LINES)
+        .pathspec(path)
+        .disable_pathspec_match(true);
     opts
 }
 
@@ -384,6 +390,25 @@ mod tests {
         assert!(hunk.patch.contains("+CHANGED"));
         assert!(hunk.patch.contains("-line2"));
         assert_eq!(d.new_content, "line1\nCHANGED\nline3\n");
+        let _ = tmp;
+    }
+
+    #[test]
+    fn a_glob_path_matches_literally_not_other_files() {
+        let (tmp, repo) = init_committed();
+        fs::write(tmp.path().join(".env"), "TOKEN=old\n").unwrap();
+        commit_all(&repo, "env");
+        fs::write(tmp.path().join(".env"), "TOKEN=new\n").unwrap();
+        fs::write(tmp.path().join("a.txt"), "line1\nCHANGED\nline3\n").unwrap();
+        for glob in ["*", ".en?", "[.]env"] {
+            match file_diff_for(&repo, glob, false) {
+                Ok(d) => assert!(
+                    d.hunks.iter().all(|h| !h.patch.contains("TOKEN")),
+                    "{glob} leaked another file's hunks"
+                ),
+                Err(_) => {}
+            }
+        }
         let _ = tmp;
     }
 

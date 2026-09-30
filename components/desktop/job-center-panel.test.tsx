@@ -87,6 +87,8 @@ jest.mock("sonner", () => ({
   },
 }))
 
+import { dismissTopmostOverlayOnBack } from "@/hooks/ui/use-back-dismiss"
+
 import { JobCenterPanel } from "./job-center-panel"
 
 const row = (overrides: Partial<BackgroundTaskJournalRecord>): BackgroundTaskJournalRecord => ({
@@ -174,6 +176,29 @@ it("opens from the trigger and separates active runs from history", async () => 
   expect(screen.getByText("writer")).toBeInTheDocument()
   expect(screen.getByText("Final summary text")).toBeInTheDocument()
   expect(screen.getByText("qa")).toBeInTheDocument()
+})
+
+// On a phone the panel is a side sheet in the app bar: no swipe-to-dismiss, so
+// its close button, Escape and the Android back button are the ways out.
+it("closes from its close button, from Escape and from the Android back button", async () => {
+  const user = userEvent.setup()
+  render(<JobCenterPanel compact />)
+
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByRole("button", { name: "Close" }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.keyboard("{Escape}")
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+  await user.click(screen.getByTestId("status-job-center"))
+  let consumed = false
+  act(() => {
+    consumed = dismissTopmostOverlayOnBack()
+  })
+  expect(consumed).toBe(true)
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
 })
 
 it("collects, cancels, and clears settled renderer tasks", async () => {

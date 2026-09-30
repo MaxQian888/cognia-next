@@ -23,7 +23,8 @@
     "time": "Time",
     "title": "Recent MCP calls",
     "toastCleared": "Audit log cleared.",
-    "tool": "Tool"
+    "tool": "Tool",
+    "target": "Target · {field}"
   },
   "badgeIdle": "idle",
   "badgeLive": "live",
@@ -112,6 +113,10 @@
       "wiki": {
         "description": "Rebuild and lint schedules",
         "label": "Wiki maintenance"
+      },
+      "workspace": {
+        "description": "Which roots each client may reach",
+        "label": "Workspace access"
       }
     },
     "mobileTrigger": "Panels",
@@ -141,7 +146,11 @@
     "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF.",
     "issues:read": "⚠ Lets external agents list and read your issue tracker: issues, their activity trail, projects and cycles of the active workspace. Default OFF.",
     "issues:write": "⚠ Lets external agents create, edit, move, assign and comment on issues. Every write goes through the board's own gate and is recorded on the issue with an external-agent actor. Default OFF.",
-    "browser:control": "Lets external agents drive Cognia's browser through the browser_* tools: open and navigate pages, read snapshots, click and type, manage tabs and downloads, print PDFs, emulate devices, inspect cookie metadata and storage, and sign in with a saved password. Independent of any character's tool settings. Tools that need approval in the app (running page scripts, uploads, downloads, password sign-in) still ask you on each call, and page content is fenced as untrusted. Default OFF."
+    "browser:control": "Lets external agents drive Cognia's browser through the browser_* tools: open and navigate pages, read snapshots, click and type, manage tabs and downloads, print PDFs, emulate devices, inspect cookie metadata and storage, and sign in with a saved password. Independent of any character's tool settings. Tools that need approval in the app (running page scripts, uploads, downloads, password sign-in) still ask you on each call, and page content is fenced as untrusted. Default OFF.",
+    "workspace:read": "Lets external agents list, read and search files in the workspace roots you grant them under Workspace access. Credential files (.env, keys, .ssh, …) and .git internals are always refused, and personal data in file content is redacted. Default OFF.",
+    "workspace:write": "Lets external agents write, edit, move and delete files in the workspace roots you grant them. Credential paths are refused, and you approve every delete in the app. Default OFF.",
+    "git:read": "Lets external agents read git status, diffs and history of granted roots. Read-only: no commit, checkout or push. Credential paths are left out. Default OFF.",
+    "shell:run": "Lets external agents run shell commands in granted roots as background jobs they can read and stop. Dangerous commands are refused; risky ones, and ones naming a credential file, ask you every time. Commands run with your own account's permissions, so grant this only to agents you trust. Default OFF."
   },
   "scopes": {
     "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
@@ -158,7 +167,10 @@
       "usage": "Usage",
       "wiki": "Wiki",
       "workflow": "Workflows",
-      "browser": "Browser"
+      "browser": "Browser",
+      "workspace": "Workspace files",
+      "git": "Git",
+      "shell": "Shell"
     },
     "plannedBadge": "Planned",
     "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",
@@ -321,5 +333,20 @@
   "browserApproval": {
     "reason": "{client} wants to run {tool} in Cognia's browser ({detail}).",
     "perCallReason": "{client} wants to sign in with a saved password using {tool} ({detail}). The password is filled by Cognia and never shared with the agent. You are asked every time."
+  },
+  "workspace": {
+    "title": "Workspace access",
+    "description": "Choose which workspace roots each MCP client may reach with the workspace, git and shell tools. A client with no root granted reaches nothing, whatever scopes it holds.",
+    "scopesOff": "None of the workspace, git or shell scopes is enabled, so these grants have no effect until you enable one under Permission scopes.",
+    "noRoots": "No workspace has a folder yet. Add a folder to a workspace to grant it here.",
+    "stdioClient": "Local stdio client",
+    "grantedCount": "{count, plural, one {# root} other {# roots}}",
+    "noneGranted": "No access",
+    "toggleAria": "Let {client} reach {root}"
+  },
+  "workspaceApproval": {
+    "deleteReason": "{client} wants to delete the {kind, select, directory {folder} other {file}} {path}. You are asked every time.",
+    "commandReason": "{client} wants to run a command in {root}: {command}. Cognia's safety check flagged it as needing your approval. You are asked every time.",
+    "commandReasonSecret": "{client} wants to run a command in {root}: {command}. It names a credential file. You are asked every time."
   }
 }

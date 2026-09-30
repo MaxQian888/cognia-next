@@ -78,7 +78,9 @@ function standaloneSettingsGetter(): SettingsGetter {
  */
 export async function runMcpServerStdio(): Promise<void> {
   const settingsGetter = resolveSettingsGetter()
-  const options = { settingsGetter }
+  // Only a sidecar the Rust HTTP proxy spawned sees proxy-stamped client ids.
+  const bridged = process.env.COGNIA_BRIDGED === "1" || process.env.COGNIA_BRIDGED === "true"
+  const options = { settingsGetter, trustClientMeta: bridged }
   const server = buildMcpServer(options)
   const workflowTools = await startWorkflowToolRefresh(server, options)
   const transport = createStdioTransport()

@@ -12,6 +12,8 @@ import {
   BookOpenIcon,
   BotIcon,
   BrainIcon,
+  FolderGit2Icon,
+  GitBranchIcon,
   GlobeIcon,
   GaugeIcon,
   InboxIcon,
@@ -22,6 +24,7 @@ import {
   SearchIcon,
   ServerIcon,
   ShieldIcon,
+  SquareTerminalIcon,
   TerminalIcon,
   WebhookIcon,
   WorkflowIcon,
@@ -36,7 +39,8 @@ import type {
 } from "@/components/settings/common/settings-panel-nav"
 import { ALL_BRIDGE_SCOPES, type BridgeScope } from "@/types/wiki"
 
-export type BridgePanelId = "server" | "scopes" | "wiki" | "inbound" | "setup" | "audit"
+export type BridgePanelId =
+  "server" | "scopes" | "workspace" | "wiki" | "inbound" | "setup" | "audit"
 
 export type BridgeNavGroupId = "serviceGroup" | "contentGroup" | "accessGroup"
 
@@ -50,6 +54,8 @@ export const BRIDGE_NAV_GROUPS: readonly BridgeNavGroup[] = [
     items: [
       { id: "server", icon: ServerIcon },
       { id: "scopes", icon: ShieldIcon },
+      // ADR-0203 — which workspace roots each client may address.
+      { id: "workspace", icon: FolderGit2Icon },
     ],
   },
   {
@@ -99,6 +105,10 @@ export type ScopeGroupId =
   | "usage"
   /** ADR-0201 — `browser:control`, the dedicated `browser_*` tools. */
   | "browser"
+  /** ADR-0203 — workspace files, git reads, shell jobs over granted roots. */
+  | "workspace"
+  | "git"
+  | "shell"
 
 export interface ScopeGroup {
   id: ScopeGroupId
@@ -119,6 +129,9 @@ const GROUP_ICONS: Record<ScopeGroupId, LucideIcon> = {
   workflow: WorkflowIcon,
   usage: GaugeIcon,
   browser: GlobeIcon,
+  workspace: FolderGit2Icon,
+  git: GitBranchIcon,
+  shell: SquareTerminalIcon,
 }
 
 const GROUP_ORDER: ScopeGroupId[] = [
@@ -129,6 +142,9 @@ const GROUP_ORDER: ScopeGroupId[] = [
   "agent",
   "workflow",
   "browser",
+  "workspace",
+  "git",
+  "shell",
   "inbox",
   "plugin",
   "mcp",

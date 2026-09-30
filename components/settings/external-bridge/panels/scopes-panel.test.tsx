@@ -23,7 +23,7 @@ describe("BridgeScopesPanel", () => {
   it("renders every declared scope", () => {
     setup()
 
-    expect(ALL_BRIDGE_SCOPES.length).toBe(24)
+    expect(ALL_BRIDGE_SCOPES.length).toBe(28)
     for (const scope of ALL_BRIDGE_SCOPES) {
       expect(screen.getByTestId(`bridge-scope-row-${scope}`)).toBeInTheDocument()
     }

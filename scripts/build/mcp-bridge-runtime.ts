@@ -28,6 +28,8 @@ export const cancelScheduledTask = (input: unknown) => rendererCall("cancel_sche
 export const spawnTask = (input: unknown) => rendererCall("spawn_task", input)
 // ADR-0201: browser_* MCP tools run in the renderer (plugin executors, consent, pane).
 export const browserTool = (input: unknown) => rendererCall("browser_tool", input)
+// ADR-0203: workspace / git / shell tools run in the renderer (grants, consent, host fs/git/jobs).
+export const workspaceTool = (input: unknown) => rendererCall("workspace_tool", input)
 
 export const usageQuery = (...args: unknown[]) => hostCall("usageQuery", ...args)
 export const sessionHealth = (...args: unknown[]) => hostCall("sessionHealth", ...args)

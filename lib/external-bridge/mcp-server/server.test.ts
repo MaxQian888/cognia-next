@@ -13,6 +13,19 @@ import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import type { WorkflowMcpDeploymentDescriptor, WorkflowMcpHost } from "../handlers/workflow"
 import { buildMcpServer, startWorkflowToolRefresh, __TESTING__ } from "./server"
+import { pluginToolInvoke } from "../handlers/orchestration"
+import { workspaceTool } from "../handlers/workspace"
+import { WORKSPACE_TOOL_NAMES } from "../workspace/tool-names"
+
+// Pass-through spies: let a test see what the server stamps onto the input.
+jest.mock("../handlers/workspace", () => {
+  const actual = jest.requireActual("../handlers/workspace")
+  return { ...actual, workspaceTool: jest.fn(actual.workspaceTool) }
+})
+jest.mock("../handlers/orchestration", () => {
+  const actual = jest.requireActual("../handlers/orchestration")
+  return { ...actual, pluginToolInvoke: jest.fn(actual.pluginToolInvoke) }
+})
 
 function settings(overrides: Partial<ExternalBridgeSettings> = {}): ExternalBridgeSettings {
   return {
@@ -990,5 +1003,94 @@ describe("buildMcpServer — browser tools (ADR-0201)", () => {
     })
     expect(failed.structuredContent).toEqual({ ok: false, redacted: false, code: "pii_blocked" })
     expect(failed.isError).toBe(true)
+  })
+})
+
+describe("buildMcpServer — result vocabulary and workspace tools (ADR-0203)", () => {
+  it("answers a scope denial with a decision-complete structured failure", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    const result = await client.callTool({ name: "memory_list", arguments: {} })
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toMatchObject({
+      ok: false,
+      code: "scope_denied",
+      failureStage: "authorization",
+      stateChanged: false,
+    })
+    await client.close()
+  })
+
+  it("registers every workspace tool", async () => {
+    const { client } = await makeWiredPair(settings())
+    const names = (await client.listTools()).tools.map((tool) => tool.name)
+    for (const name of WORKSPACE_TOOL_NAMES) expect(names).toContain(name)
+    await client.close()
+  })
+
+  it("denies workspace tools until their scope is on, recording the audit projection", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["workspace:read"] }))
+    const denied = await client.callTool({
+      name: "workspace_write",
+      arguments: { root: "root-a", path: "src/a.ts", content: "secret body" },
+    })
+    expect(denied.isError).toBe(true)
+    expect(denied.structuredContent).toMatchObject({ code: "scope_denied" })
+
+    // Scope on: the gate passes; outside the desktop renderer the handler
+    // answers a structured failure instead of touching the filesystem.
+    const allowed = await client.callTool({
+      name: "workspace_read",
+      arguments: { root: "root-a", path: "src/a.ts" },
+    })
+    expect(allowed.structuredContent).toMatchObject({ ok: false })
+
+    const rows = await listMcpAuditLog({ limit: 10 })
+    const write = rows.find((row) => row.tool === "workspace_write")
+    expect(write?.projection).toEqual({ root: "root-a", path: "src/a.ts" })
+    expect(JSON.stringify(write)).not.toContain("secret body")
+    await client.close()
+  })
+
+  it("stamps the caller's effective scopes onto plugin_tool_invoke", async () => {
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["plugin:tools", "workspace:read"] })
+    )
+    await client.callTool({
+      name: "plugin_tool_invoke",
+      arguments: { pluginId: "p", toolName: "t" },
+      _meta: { cogniaBridgeScopes: ["plugin:tools"] },
+    })
+    expect(jest.mocked(pluginToolInvoke)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pluginId: "p", grantedScopes: ["plugin:tools"] })
+    )
+    await client.close()
+  })
+})
+
+describe("buildMcpServer — client identity for workspace tools", () => {
+  async function callerFor(trustClientMeta: boolean | undefined) {
+    const server = buildMcpServer({
+      settingsGetter: async () => settings({ enabledScopes: ["workspace:read"] }),
+      ...(trustClientMeta === undefined ? {} : { trustClientMeta }),
+    })
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    const client = new Client({ name: "t", version: "0" })
+    await client.connect(clientTransport)
+    await client.callTool({
+      name: "workspace_roots",
+      arguments: {},
+      _meta: { cogniaBridgeClientId: "other-client" },
+    })
+    await client.close()
+    return jest.mocked(workspaceTool).mock.lastCall?.[0].clientId
+  }
+
+  it("uses the proxy-stamped client id by default", async () => {
+    expect(await callerFor(undefined)).toBe("mcp:other-client")
+  })
+
+  it("ignores a self-declared client id on a standalone stdio sidecar", async () => {
+    expect(await callerFor(false)).toBe("mcp:stdio")
   })
 })

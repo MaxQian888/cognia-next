@@ -1,5 +1,6 @@
 import { transport } from "@/lib/tauri"
 import {
+  bridgeJobOwner,
   cancelBackgroundMonitor,
   killBackgroundJob,
   listBackgroundJobs,
@@ -7,7 +8,9 @@ import {
   readBackgroundJobOutput,
   readBackgroundJobTail,
   registerScheduledBackgroundMonitor,
+  spawnBridgeBackgroundJob,
   spawnScheduledBackgroundJob,
+  waitBackgroundJobOutput,
 } from "./background-jobs"
 
 jest.mock("@/lib/tauri", () => ({
@@ -100,5 +103,49 @@ it("starts scheduler-owned jobs and monitors on the active host", async () => {
     taskId: "task-2",
     condition: { kind: "jobExit", jobId: "job-1" },
     expiresAtMs: 123,
+  })
+})
+
+describe("External Bridge jobs", () => {
+  it("lists only one owner's jobs when an owner is given", async () => {
+    invoke.mockResolvedValueOnce({ jobs: [] })
+    await listBackgroundJobs(bridgeJobOwner("mcp:client-1"))
+    expect(invoke).toHaveBeenCalledWith("background_job_list", {
+      owner: { kind: "session", sessionId: "external-bridge:jobs:mcp:client-1" },
+    })
+  })
+
+  it("spawns under the bridge command with the client id", async () => {
+    invoke.mockResolvedValueOnce({ id: "job-9" })
+    await spawnBridgeBackgroundJob({
+      clientId: "mcp:stdio",
+      command: "pnpm test",
+      cwd: "/repo",
+      label: "pnpm",
+    })
+    expect(invoke).toHaveBeenCalledWith("background_job_spawn_bridge", {
+      clientId: "mcp:stdio",
+      command: "pnpm test",
+      cwd: "/repo",
+      label: "pnpm",
+    })
+  })
+
+  it("long-polls output with a clamped offset and defaults", async () => {
+    invoke.mockResolvedValue({ data: "" })
+    await waitBackgroundJobOutput("job-1", -5)
+    expect(invoke).toHaveBeenLastCalledWith("background_job_wait", {
+      jobId: "job-1",
+      fromOffset: 0,
+      maxBytes: 8192,
+      waitMs: 0,
+    })
+    await waitBackgroundJobOutput("job-1", 12, { maxBytes: 100, waitMs: 5000 })
+    expect(invoke).toHaveBeenLastCalledWith("background_job_wait", {
+      jobId: "job-1",
+      fromOffset: 12,
+      maxBytes: 100,
+      waitMs: 5000,
+    })
   })
 })

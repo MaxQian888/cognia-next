@@ -18,6 +18,7 @@ const HOST_BRIDGED_IMPORTS = new Set([
   "../handlers/usage",
   "../handlers/issues",
   "../handlers/browser",
+  "../handlers/workspace",
 ])
 
 const FORBIDDEN_OUTPUT_INPUTS = [

@@ -57,8 +57,13 @@ export type BackgroundMonitorCondition =
     }
   | { kind: "upstream"; source: string; id: string }
 
-export async function listBackgroundJobs(): Promise<BackgroundJobRecord[]> {
-  const result = await transport.call<{ jobs: BackgroundJobRecord[] }>("background_job_list", {})
+export async function listBackgroundJobs(
+  owner?: BackgroundJobOwner
+): Promise<BackgroundJobRecord[]> {
+  const result = await transport.call<{ jobs: BackgroundJobRecord[] }>(
+    "background_job_list",
+    owner ? { owner } : {}
+  )
   return result.jobs
 }
 
@@ -101,6 +106,42 @@ export function spawnScheduledBackgroundJob(input: {
   label?: string
 }): Promise<BackgroundJobRecord> {
   return transport.call<BackgroundJobRecord>("background_job_spawn_scheduled", input)
+}
+
+/**
+ * Start a shell command for an External Bridge client. The host owns the job
+ * under the synthetic session `external-bridge:jobs:<clientId>`, so the
+ * per-session job cap and owner listing are per client.
+ */
+export function spawnBridgeBackgroundJob(input: {
+  clientId: string
+  command: string
+  cwd: string
+  label?: string
+}): Promise<BackgroundJobRecord> {
+  return transport.call<BackgroundJobRecord>("background_job_spawn_bridge", input)
+}
+
+/** The owner a bridge client's jobs are filed under (mirrors the Rust command). */
+export function bridgeJobOwner(clientId: string): BackgroundJobOwner {
+  return { kind: "session", sessionId: `external-bridge:jobs:${clientId}` }
+}
+
+/**
+ * Long-poll a job's output from `fromOffset`: resolves as soon as new bytes
+ * land or the job settles, or after `waitMs` (the host caps it at 30s).
+ */
+export function waitBackgroundJobOutput(
+  jobId: string,
+  fromOffset: number,
+  options: { maxBytes?: number; waitMs?: number } = {}
+): Promise<BackgroundJobOutput> {
+  return transport.call<BackgroundJobOutput>("background_job_wait", {
+    jobId,
+    fromOffset: Math.max(0, fromOffset),
+    maxBytes: options.maxBytes ?? 8192,
+    waitMs: options.waitMs ?? 0,
+  })
 }
 
 export async function listBackgroundMonitors(): Promise<BackgroundMonitorRecord[]> {

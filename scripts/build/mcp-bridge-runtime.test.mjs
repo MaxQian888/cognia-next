@@ -56,6 +56,7 @@ test("renderer-owned task wrappers preserve command, payload, and failure envelo
     [runtime.cancelScheduledTask, "cancel_scheduled_task", { sessionId: "s1", taskId: "t1" }],
     [runtime.spawnTask, "spawn_task", { parentSessionId: "s1", title: "Investigate" }],
     [runtime.browserTool, "browser_tool", { clientId: "c1", toolName: "browser_snapshot" }],
+    [runtime.workspaceTool, "workspace_tool", { clientId: "c1", tool: "workspace_roots", args: {} }],
   ]
 
   for (const [wrapper, command, input] of calls) {

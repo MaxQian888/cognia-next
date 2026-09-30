@@ -46,6 +46,7 @@ export async function appendMcpAuditLog(draft: McpAuditDraft): Promise<McpAuditL
     decision: draft.decision,
     durationMs: draft.durationMs,
     errorCode: draft.errorCode,
+    ...(draft.projection ? { projection: draft.projection } : {}),
   }
   await db.transaction("rw", db.mcpAuditLog, async () => {
     await db.mcpAuditLog.add(row)

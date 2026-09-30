@@ -12,6 +12,7 @@
 
 import type { BridgeScope, McpAuditLogRow } from "@/types/wiki"
 import { appendMcpAuditLog } from "@/lib/db/mcp-audit-log"
+import type { AuditProjection } from "./audit-projection"
 import type { ScopeCheckResult } from "./types"
 
 export interface RecordCallInput {
@@ -28,6 +29,11 @@ export interface RecordCallInput {
   latencyMs: number
   /** Bounded classifier set when the allowed handler failed. */
   errorCode?: string
+  /**
+   * The tool's declared audit projection, already bounded by
+   * `auditProjection` — never raw params.
+   */
+  projection?: AuditProjection
 }
 
 /**
@@ -50,6 +56,7 @@ export async function recordCall(input: RecordCallInput): Promise<McpAuditLogRow
       executionSurface: "bridge",
       decision: input.check.allowed ? "allow" : "deny",
       durationMs: input.latencyMs,
+      ...(input.projection ? { projection: input.projection } : {}),
     })
     return row
   } catch (err) {

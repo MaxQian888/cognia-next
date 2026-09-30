@@ -38,6 +38,13 @@ const KILL_ESCALATION: Duration = Duration::from_secs(3);
 
 /// Live state for a running job. Terminal jobs drop theirs and are served
 /// entirely from the store plus the on-disk log.
+///
+/// "Terminal" here means settled AND drained: the row settles as soon as the
+/// direct child exits, but a grandchild can still hold the stdout/stderr pipes
+/// open, so the entry (and its ring buffer) is only removed once both pumps
+/// have hit EOF and the log is flushed. Removing it earlier would send
+/// `read` to the on-disk log while bytes were still landing in an orphaned
+/// `JobOutput`.
 struct LiveJob {
     output: Arc<Mutex<JobOutput>>,
     /// Fires whenever output lands or the job settles — drives long-polling
@@ -56,7 +63,9 @@ pub type ExitListener = Arc<dyn Fn(JobExit) + Send + Sync>;
 pub struct JobSupervisor {
     store: Arc<JobStore>,
     log_dir: PathBuf,
-    live: Mutex<HashMap<String, Arc<LiveJob>>>,
+    /// Shared with each job's waiter task, which removes the entry once the
+    /// job is settled and its output has drained.
+    live: Arc<Mutex<HashMap<String, Arc<LiveJob>>>>,
     exit_listeners: Mutex<Vec<ExitListener>>,
 }
 
@@ -65,7 +74,7 @@ impl JobSupervisor {
         Self {
             store,
             log_dir,
-            live: Mutex::new(HashMap::new()),
+            live: Arc::new(Mutex::new(HashMap::new())),
             exit_listeners: Mutex::new(Vec::new()),
         }
     }
@@ -196,6 +205,7 @@ impl JobSupervisor {
         // Pump stdout and stderr into the same offset space. They are separate
         // pipes (unlike a PTY, which merges them) but interleave into one log
         // in arrival order, which is what a reader expects.
+        let mut pumps = Vec::with_capacity(2);
         for stream in [
             child.stdout.take().map(StreamKind::Stdout),
             child.stderr.take().map(StreamKind::Stderr),
@@ -205,7 +215,7 @@ impl JobSupervisor {
         {
             let output = Arc::clone(&output);
             let notify = Arc::clone(&notify);
-            tokio::spawn(async move {
+            pumps.push(tokio::spawn(async move {
                 let mut buf = vec![0u8; 16 * 1024];
                 match stream {
                     StreamKind::Stdout(mut s) => {
@@ -215,7 +225,7 @@ impl JobSupervisor {
                         pump(&mut s, &mut buf, &output, &notify).await;
                     }
                 }
-            });
+            }));
         }
 
         // Waiter: owns the `Child`, so kill and wait never contend on a lock.
@@ -225,6 +235,7 @@ impl JobSupervisor {
         let waiter_notify = Arc::clone(&notify);
         let waiter_owner = req.owner.clone();
         let waiter_killed = Arc::clone(&killed);
+        let waiter_live = Arc::clone(&self.live);
         let listeners = self.exit_listeners.lock().clone();
         tokio::spawn(async move {
             let status = tokio::select! {
@@ -280,6 +291,27 @@ impl JobSupervisor {
             for listener in listeners {
                 listener(exit.clone());
             }
+
+            // Drain before dropping the live state. Grandchildren that inherited
+            // the pipes keep the pumps running past the direct child's exit;
+            // until both hit EOF, late bytes only exist in this `JobOutput`.
+            for handle in pumps {
+                let _ = handle.await;
+            }
+            {
+                let mut out = waiter_output.lock();
+                out.flush();
+                let _ = store.update_output_counters(
+                    &exit.job_id,
+                    out.total_bytes(),
+                    out.dropped_bytes(),
+                );
+            }
+            // Remove BEFORE the final wake: a woken poller then either still
+            // holds a clone of the (fully flushed) output or falls through to
+            // the on-disk log, which now has every byte.
+            waiter_live.lock().remove(&exit.job_id);
+            waiter_notify.notify_waiters();
         });
 
         Ok(record)
@@ -320,6 +352,18 @@ impl JobSupervisor {
     ) -> Result<JobOutputSlice> {
         let deadline = Instant::now() + wait;
         loop {
+            // Take the notify and create the `Notified` BEFORE reading: a
+            // `notify_waiters()` that lands after this point wakes it even
+            // though it is not polled yet, and one that landed before it is
+            // already reflected in the read below. The `Notify` stays valid
+            // even if the waiter drops the live entry in between.
+            let notify = self
+                .live
+                .lock()
+                .get(job_id)
+                .map(|job| Arc::clone(&job.notify));
+            let notified = notify.as_ref().map(|n| n.notified());
+
             let slice = self.read(job_id, from_offset, max_bytes)?;
             if !slice.data.is_empty() || slice.status.is_terminal() {
                 return Ok(slice);
@@ -328,14 +372,14 @@ impl JobSupervisor {
             if remaining.is_zero() {
                 return Ok(slice);
             }
-            let notify = match self.live.lock().get(job_id) {
-                Some(job) => Arc::clone(&job.notify),
-                // Settled between the read and here — one more read decides.
-                None => continue,
-            };
-            // `notified()` is registered before the await, so a wake that lands
-            // between the read above and here is not missed.
-            let _ = tokio::time::timeout(remaining, notify.notified()).await;
+            match notified {
+                Some(notified) => {
+                    let _ = tokio::time::timeout(remaining, notified).await;
+                }
+                // No live state yet the row is not terminal — nothing will
+                // ever wake us, so answer now rather than spin.
+                None => return Ok(slice),
+            }
         }
     }
 
@@ -801,6 +845,61 @@ mod tests {
         sup.live.lock().remove(&rec.id);
         let slice = sup.read(&rec.id, 0, 4096).unwrap();
         assert!(slice.data.contains("durable-line"), "got {:?}", slice.data);
+    }
+
+    /// Poll until the waiter has drained the pumps and dropped the live entry.
+    async fn await_live_dropped(sup: &JobSupervisor, id: &str) {
+        for _ in 0..200 {
+            if !sup.live.lock().contains_key(id) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("live state for job {id} was never dropped");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn finished_jobs_release_their_live_state_without_losing_late_bytes() {
+        // Leak regression: the live map used to keep every finished job's ring
+        // buffer for the process lifetime. A backgrounded grandchild holds the
+        // pipes past the wrapper's exit and writes after the row has settled;
+        // those bytes must survive the live entry being dropped.
+        let dir = TempDir::new().unwrap();
+        let sup = supervisor(&dir);
+        let rec = sup
+            .spawn(sh(
+                "echo first; (sleep 0.3; echo grandchild-tail) & printf last-before-exit",
+                session("s1"),
+            ))
+            .await
+            .unwrap();
+
+        let settled = await_settled(&sup, &rec.id).await;
+        assert_eq!(settled.status, JobStatus::Exited);
+        // Settled but the grandchild still holds the pipes: not yet drained.
+        assert!(
+            sup.live.lock().contains_key(&rec.id),
+            "live state must outlive settle while the pumps are still open"
+        );
+
+        await_live_dropped(&sup, &rec.id).await;
+        assert!(sup.live.lock().is_empty(), "no finished job may stay live");
+
+        let slice = sup.read(&rec.id, 0, 4096).unwrap();
+        for needle in ["first", "last-before-exit", "grandchild-tail"] {
+            assert!(
+                slice.data.contains(needle),
+                "missing {needle:?} in {:?}",
+                slice.data
+            );
+        }
+        assert!(slice.status.is_terminal());
+        let after = sup.get(&rec.id).unwrap().unwrap();
+        assert_eq!(
+            after.total_output_bytes, slice.next_offset,
+            "counters are refreshed after the drain, not frozen at settle"
+        );
     }
 
     #[cfg(unix)]

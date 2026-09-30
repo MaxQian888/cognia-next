@@ -30,6 +30,27 @@ describe("recordCall", () => {
     expect(all).toHaveLength(1)
   })
 
+  it("persists a declared audit projection, and nothing when none is declared", async () => {
+    const row = await recordCall({
+      tool: "workspace_read",
+      scope: "workspace:read",
+      check: { allowed: true },
+      latencyMs: 2,
+      projection: { root: "root-a", path: "src/a.ts" },
+    })
+    expect(row?.projection).toEqual({ root: "root-a", path: "src/a.ts" })
+    const [stored] = await listMcpAuditLog({ tool: "workspace_read" })
+    expect(stored?.projection).toEqual({ root: "root-a", path: "src/a.ts" })
+
+    const bare = await recordCall({
+      tool: "wiki_search",
+      scope: "wiki:cognia",
+      check: { allowed: true },
+      latencyMs: 1,
+    })
+    expect(bare).not.toHaveProperty("projection")
+  })
+
   it("captures the deny reason when the gate refused the call", async () => {
     const row = await recordCall({
       tool: "runtime_query",

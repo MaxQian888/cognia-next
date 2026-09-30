@@ -37,6 +37,11 @@ jest.mock("@/lib/external-bridge/tauri-control", () => ({
   stopMcpServer: () => mockStop(),
 }))
 
+const mockReleaseClient = jest.fn()
+jest.mock("@/lib/external-bridge/workspace/release-client", () => ({
+  releaseBridgeClient: (...a: unknown[]) => mockReleaseClient(...a),
+}))
+
 let mockRemoteActive = false
 jest.mock("@/lib/tauri/transport-routing", () => ({
   isRemoteHostActive: () => mockRemoteActive,
@@ -339,6 +344,8 @@ describe("BridgeServerPanel", () => {
     // The already-revoked row must be skipped — revoking it again would be a
     // no-op while the live credential kept working.
     await waitFor(() => expect(mockHostClientRevoke).toHaveBeenCalledWith("client-1", "lease-1"))
+    // ADR-0203: the revoked client's jobs and root grant are released too.
+    await waitFor(() => expect(mockReleaseClient).toHaveBeenCalledWith("client-1"))
     expect(toast.success).toHaveBeenCalledWith("server.toastClientRevoked:Cognia controller")
   })
 

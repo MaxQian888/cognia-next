@@ -26,6 +26,18 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
   invokePluginTool: (...a: unknown[]) => invokePluginToolMock(...a),
 }))
 
+const getPluginMock = jest.fn<{ manifest: { permissions?: string[] } } | undefined, [string]>(
+  () => undefined
+)
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({ getPlugin: (id: string) => getPluginMock(id) }),
+}))
+
+const workspaceToolCoreMock = jest.fn()
+jest.mock("./workspace", () => ({
+  workspaceToolCore: (...a: unknown[]) => workspaceToolCoreMock(...a),
+}))
+
 const workflowListDeploymentsCoreMock = jest.fn()
 const usageHandlerMock = jest.fn()
 const issueHandlerMock = jest.fn()
@@ -700,5 +712,57 @@ describe("plan_list / plan_run", () => {
     const { planRunCore } = await import("./orchestration")
     expect((await planRunCore({ planId: "gone" })).error).toContain("not found")
     expect((await planRunCore({ planId: "" })).error).toContain("requires a planId")
+  })
+})
+
+describe("plugin_tool_invoke alignment with workspace scopes (ADR-0203)", () => {
+  beforeEach(() => {
+    isTauriMock.mockReturnValue(true)
+    invokePluginToolMock.mockReset().mockResolvedValue({ result: "done" })
+  })
+  afterEach(() => getPluginMock.mockReset().mockReturnValue(undefined))
+
+  it("refuses a filesystem/process plugin unless the matching scopes are granted", async () => {
+    getPluginMock.mockReturnValue({
+      manifest: { permissions: ["filesystem:write", "shell:execute"] },
+    })
+    const out = await pluginToolInvoke({
+      pluginId: "fs-plugin",
+      toolName: "t",
+      grantedScopes: ["plugin:tools", "workspace:write"],
+    })
+    expect(out).toMatchObject({ ok: false, code: "scope_denied" })
+    expect(out.error).toContain("`shell:run`")
+    expect(invokePluginToolMock).not.toHaveBeenCalled()
+  })
+
+  it("treats a missing grantedScopes as holding none", async () => {
+    getPluginMock.mockReturnValue({ manifest: { permissions: ["filesystem:read"] } })
+    expect(await pluginToolInvoke({ pluginId: "fs-plugin", toolName: "t" })).toMatchObject({
+      code: "scope_denied",
+    })
+  })
+
+  it("runs the tool when every mapped scope is held, or none is needed", async () => {
+    getPluginMock.mockReturnValue({
+      manifest: { permissions: ["filesystem:read", "network:fetch"] },
+    })
+    expect(
+      await pluginToolInvoke({ pluginId: "p", toolName: "t", grantedScopes: ["workspace:read"] })
+    ).toEqual({ ok: true, result: { result: "done" } })
+    getPluginMock.mockReturnValue({ manifest: { permissions: ["network:fetch"] } })
+    expect((await pluginToolInvoke({ pluginId: "p", toolName: "t" })).ok).toBe(true)
+  })
+})
+
+describe("runOrchestrationExec — workspace_tool", () => {
+  it("dispatches to the renderer workspace core", async () => {
+    workspaceToolCoreMock.mockResolvedValueOnce({ ok: true, roots: [] })
+    const input = { tool: "workspace_roots", args: {}, clientId: "mcp:c" }
+    await expect(runOrchestrationExec("workspace_tool", input)).resolves.toEqual({
+      ok: true,
+      roots: [],
+    })
+    expect(workspaceToolCoreMock).toHaveBeenCalledWith(input)
   })
 })

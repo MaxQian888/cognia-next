@@ -451,6 +451,13 @@ export interface PluginToolInvokeInput {
   args?: Record<string, unknown>
   /** Optional human-readable reason recorded with the consent prompt. */
   reason?: string
+  /**
+   * The caller's effective bridge scopes, stamped by the MCP server (never by
+   * the client). A plugin whose manifest reaches the filesystem or spawns
+   * processes also needs the matching `workspace:*` / `shell:run` scope
+   * (ADR-0203); absent is treated as holding none of them.
+   */
+  grantedScopes?: string[]
 }
 
 export interface PluginToolInvokeOutput {
@@ -486,6 +493,29 @@ export async function pluginToolInvokeCore(
         "plugin_tool_invoke does not run the browser tools. Call the dedicated browser_* tools " +
         "(browser_open, browser_navigate, browser_snapshot, …) instead; they need the " +
         "`browser:control` scope in Settings → External Bridge.",
+    }
+  }
+
+  // ADR-0203: the same power needs the same grant through either door.
+  const [{ getPluginManager }, { missingBridgeScopesForPlugin }] = await Promise.all([
+    import("@/lib/plugin/core/manager"),
+    import("../workspace/plugin-alignment"),
+  ])
+  let declared: readonly string[] = []
+  try {
+    declared = getPluginManager().getPlugin(input.pluginId)?.manifest.permissions ?? []
+  } catch {
+    // Manager not ready: `invokePluginTool` below reports that precisely.
+  }
+  const missing = missingBridgeScopesForPlugin(declared, input.grantedScopes ?? [])
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      code: "scope_denied",
+      error:
+        `plugin '${input.pluginId}' reaches the filesystem or runs processes; through the ` +
+        `bridge it also needs ${missing.map((scope) => `\`${scope}\``).join(", ")} ` +
+        "(Settings → External Bridge)",
     }
   }
 
@@ -619,6 +649,10 @@ export async function runOrchestrationExec(
       return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
     case "browser_tool":
       return browserToolCore(args as unknown as BrowserToolInput)
+    case "workspace_tool":
+      return (await import("./workspace")).workspaceToolCore(
+        args as unknown as import("./workspace").WorkspaceToolInput
+      )
     case "schedule_task":
       return (await import("./scheduling")).scheduleTaskCore(
         args as unknown as import("./scheduling").ScheduleTaskInput

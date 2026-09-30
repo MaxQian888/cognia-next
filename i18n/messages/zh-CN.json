@@ -1633,6 +1633,7 @@
       "diagnosticsCopied": "已复制",
       "displayNameLabel": "账户名称",
       "displayNamePlaceholder": "本地账户",
+      "displayNameRequired": "请输入账户名称。",
       "errorInvalidPassword": "密码不正确。",
       "errorInvalidRecoveryKey": "恢复密钥不正确。",
       "errorPasswordRequired": "请输入密码。",
@@ -1675,6 +1676,7 @@
       "revealPassword": "显示密码",
       "runtimeBadgeBrowser": "本设备的浏览器保险库",
       "runtimeBadgeDesktop": "本设备的桌面密钥链",
+      "runtimeBadgeMobile": "本设备的安全存储",
       "shareGuestAction": "不解锁，直接阅读",
       "shareGuestHint": "这是一条分享链接，持有链接的人无需账户即可阅读；解锁后可将其加入你的库。",
       "slowBody": "锁定之后重新打开账户数据库需要一点时间。数据不会丢失，解锁仍在继续。",
@@ -1787,6 +1789,7 @@
       "deleteTokensMayRemainLive": "身份提供方可能仍保留着已删除账户的会话。请到身份提供方控制台确认已退出。",
       "description": "创建、重命名和移除此设备上的本地账户。",
       "deviceProtectionHelp": "此工作空间会在本设备上自动打开。设置密码后即可启用锁屏，后续启动时需要输入密码。",
+      "displayNameRequired": "请输入账户名称。",
       "editDisplayNameLabel": "账户名称",
       "empty": "选择账户",
       "emptyList": "还没有本地账户",
@@ -6322,7 +6325,7 @@
         "manual": "手动指定",
         "redirect": "来自 CCSwitch 重定向"
       },
-      "webModeBody": "CCSwitch 互通需要读取本地 SQLite 数据库。请使用桌面模式（`pnpm tauri dev`）。",
+      "webModeBody": "CCSwitch 互通需要读取本地 SQLite 数据库，只有 Cognia 桌面应用能打开它。请在桌面应用中使用此部分。",
       "webModeTitle": "仅桌面端可用"
     },
     "prompts": {
@@ -6462,12 +6465,19 @@
       "download": "下载",
       "downloadAria": "下载 artifact",
       "downloadFailed": "无法保存该 artifact",
+      "enlarge": "放大预览",
       "expand": "展开预览",
+      "lineCount": "{count} 行",
       "openInCanvas": "在画布中打开",
       "openInCanvasAria": "在画布中打开 artifact",
       "previewAnyway": "仍然预览",
       "previewDeferred": "这个 artifact 比较大，点一下即可预览。",
-      "previewReactManual": "React artifact 需要加载运行时，按需预览。"
+      "previewReactManual": "React artifact 需要加载运行时，按需预览。",
+      "showMore": "展开更多",
+      "shrink": "缩小预览",
+      "version": "v{version}",
+      "viewPreview": "查看预览",
+      "viewSource": "查看源码"
     },
     "askUser": {
       "dismiss": "忽略",
@@ -7290,6 +7300,8 @@
         "breakdownUserMessages": "用户消息",
         "compactAgentOwned": "压缩由该 Agent 自行管理",
         "compactDisabled": "自动压缩已关闭",
+        "compactFailed": "无法压缩此对话：{reason}",
+        "compactNothingYet": "暂无可压缩的内容。收到第一条回复后即可压缩。",
         "compactNow": "立即压缩",
         "compactThreshold": "{pct} 时自动压缩",
         "contextTitle": "上下文窗口",
@@ -7347,6 +7359,7 @@
           "generic": "语音输入失败，请重试。",
           "noMicrophone": "没有可用的麦克风，请检查音频设备。",
           "noSpeech": "未检测到语音，请靠近麦克风再试。",
+          "notStarted": "语音输入没有启动。请确认已允许 Cognia 使用麦克风，然后重试。",
           "permissionDenied": "麦克风权限被拒绝，请为应用开启麦克风权限后重试。",
           "unsupported": "当前环境不支持语音输入。"
         },
@@ -7400,6 +7413,7 @@
         "microphoneLabel": "麦克风",
         "microphoneLiveOnly": "仅用于实时语音。语音输入使用系统默认麦克风。",
         "noMicFound": "未找到麦克风。",
+        "openSettings": "打开设置",
         "selectMicAria": "选择麦克风",
         "startListening": "开始语音输入",
         "stopListening": "停止录音",
@@ -8224,6 +8238,7 @@
       "bookmarkLabel": "切换收藏",
       "bookmarkRemoveTooltip": "取消收藏",
       "bookmarkTooltip": "收藏",
+      "bookmarkedIndicator": "已收藏",
       "branchLabel": "分支对话",
       "branchStreamingTooltip": "等这条回复结束后再分支",
       "branchTooltip": "从这里分支",
@@ -8241,6 +8256,7 @@
       "editTooltip": "编辑并重发",
       "editingCancel": "取消",
       "editingSubmit": "发送（⌘/Ctrl+Enter）",
+      "editingSubmitTouch": "发送",
       "errorCategory": {
         "brokenPipe": "管道中断",
         "connectionRefused": "连接被拒绝",
@@ -8334,7 +8350,9 @@
       "sendToImOpen": "在收件箱打开",
       "shareCardLabel": "分享为卡片",
       "shareCardTooltip": "分享为卡片",
+      "shareCopiedFallback": "此处无法调用系统分享，已将消息复制到剪贴板。",
       "shareDone": "已分享！",
+      "shareFailed": "无法分享这条消息。",
       "shareLabel": "分享消息",
       "shareTooltip": "分享",
       "showParsed": "查看解析",
@@ -8452,6 +8470,7 @@
         "label": "全部放行",
         "tooltip": "所有工具自动批准。请谨慎 — Claude 可能执行任意命令。"
       },
+      "changed": "权限模式：{label}",
       "default": {
         "label": "默认",
         "tooltip": "工具按常规弹窗征求权限。"
@@ -17856,6 +17875,7 @@
       "integration": "Integration",
       "label": "账号名称",
       "lastSync": "最近同步",
+      "localListener": "本地监听地址",
       "missingPermissions": "缺少权限",
       "needsIntegration": "安装集成插件后即可添加账号。",
       "notConfigured": "未配置",
@@ -17875,6 +17895,7 @@
       },
       "title": "账号",
       "validateAndAdd": "验证并添加",
+      "webhookLocalOnly": "Webhook 监听器只接受本机连接。要接收事件，请通过隧道或反向代理（例如 cloudflared）将其暴露出去，并在添加订阅时填入该公网 https 地址。",
       "webhookUrl": "Webhook 地址",
       "webhookVerification": "Webhook 验证"
     },
@@ -17898,6 +17919,7 @@
       "confirmDedicatedApp": "请确认这是专用的集成应用。",
       "installationDiscovery": "无法发现 GitHub App 安装实例。",
       "projectionRequired": "请选择收件箱投影。",
+      "publicUrlInvalid": "公网 Webhook 地址必须是公网主机上的 https 地址，不能是 localhost 或内网地址。",
       "resourceDiscovery": "无法发现资源。",
       "subscriptionSetup": "无法创建订阅。"
     },
@@ -17942,17 +17964,34 @@
         "issueAssigned": "议题已分配",
         "issueClosed": "议题已关闭",
         "issueCommentCreated": "议题评论已创建",
+        "issueCommentDeleted": "Issue 评论已删除",
+        "issueCommentEdited": "Issue 评论已编辑",
+        "issueDeleted": "Issue 已删除",
+        "issueDemilestoned": "Issue 已移出里程碑",
         "issueLabeled": "议题标签已更新",
+        "issueMilestoned": "Issue 已加入里程碑",
         "issueOpened": "议题已创建",
+        "issueTransferred": "Issue 已转移",
+        "issueUnassigned": "Issue 已取消指派",
+        "pullRequestAssigned": "Pull request 已指派",
         "pullRequestClosed": "拉取请求已关闭",
         "pullRequestOpened": "拉取请求已创建",
+        "pullRequestReviewRequestRemoved": "Pull request 评审请求已移除",
         "pullRequestReviewRequested": "已请求拉取请求审查",
         "pullRequestReviewSubmitted": "拉取请求审查已提交",
         "pullRequestSynchronized": "拉取请求已同步",
+        "pullRequestUnassigned": "Pull request 已取消指派",
         "pushReceived": "已收到推送",
+        "refCreated": "分支或标签已创建",
+        "refDeleted": "分支或标签已删除",
+        "releaseCreated": "Release 已创建",
         "releasePublished": "版本已发布",
         "repositoriesAdded": "仓库已加入安装实例",
-        "repositoriesRemoved": "仓库已从安装实例移除"
+        "repositoriesRemoved": "仓库已从安装实例移除",
+        "reviewCommentCreated": "评审评论已创建",
+        "reviewCommentDeleted": "评审评论已删除",
+        "reviewCommentEdited": "评审评论已编辑",
+        "statusReceived": "提交状态已变更"
       },
       "eventTypes": "事件类型（逗号分隔）",
       "events": "事件",
@@ -17961,11 +18000,22 @@
       "loadMore": "加载更多",
       "needsAccount": "先添加账号，再订阅它的事件。",
       "noFailedDeliveries": "没有失败投递。",
+      "patWebhookNeedsRepository": "订阅已保存。个人访问令牌没有 App Webhook，请在 GitHub 上每个仓库的设置中添加 Webhook：Payload URL 填 {url}，Content type 选 application/json，并使用同一个密钥；或者订阅单个仓库，由 Cognia 自动配置。",
       "projection": "收件箱投影",
       "projectionLabels": {
         "issueCommentThread": "议题评论线程",
         "issueThread": "议题线程",
         "pullRequestThread": "拉取请求线程"
+      },
+      "publicBaseUrl": "公网 Webhook 地址（隧道或反向代理）",
+      "publicBaseUrlHint": "转发到本机 Webhook 监听器的 https 地址。GitHub 无法直接访问监听器，只有设置了该地址才会更新 App 的 Webhook。",
+      "publicBaseUrlHintPat": "转发到本机 Webhook 监听器的 https 地址。选择了仓库时，Cognia 会自动创建或更新该仓库的 Webhook；令牌需要有管理该仓库 Webhook 的权限。",
+      "publicBaseUrlPlaceholder": "https://hooks.example.com",
+      "repoWebhookConfigured": "{repository} 的 Webhook 已配置，将推送所选事件。",
+      "repoWebhookErrors": {
+        "failed": "订阅已保存，但在 {repository} 上配置 Webhook 失败。请重试，或在仓库设置中手动添加 Webhook。",
+        "forbidden": "订阅已保存，但该令牌无权管理 {repository} 的 Webhook。请为令牌授予仓库管理（Webhook）权限，或在仓库设置中手动添加 Webhook。",
+        "noSecret": "订阅已保存，但本机钥匙串中缺少 Webhook 密钥。请移除该账号的订阅，并带上密钥重新添加。"
       },
       "repository": "仓库",
       "requeue": "重新入队",
@@ -17974,7 +18024,8 @@
       "searchResources": "搜索资源",
       "selectAccount": "选择账号",
       "selectProjection": "选择投影",
-      "title": "订阅"
+      "title": "订阅",
+      "webhookNeedsPublicUrl": "订阅已保存，但尚未配置 GitHub：需要一个转发到本机的公网 https 地址。请在订阅中填入该地址以完成设置。"
     },
     "title": "Integrations",
     "unsupportedWeb": "集成管理需要桌面应用。",
@@ -18239,6 +18290,18 @@
     },
     "freshness": {
       "stale": "共享数据已过期"
+    },
+    "githubComments": {
+      "edited": "已编辑",
+      "empty": "GitHub 上还没有评论。",
+      "failed": "无法从 GitHub 读取评论，请重试。",
+      "load": "加载评论",
+      "loading": "正在从 GitHub 加载评论…",
+      "open": "在 GitHub 中打开",
+      "refresh": "刷新",
+      "section": "GitHub 讨论",
+      "truncated": "仅显示前 1,000 条评论，其余请在 GitHub 上查看。",
+      "unknownAuthor": "未知作者"
     },
     "import": {
       "browse": "选择文件",
@@ -18507,6 +18570,21 @@
       "triageNewIssues": "新议题进入待分诊",
       "triageNewIssuesHint": "新导入的、未关闭且无人负责的议题会先进入待分诊。在有人接受之前，聊天或唤醒不会让智能体开始处理它。"
     },
+    "publish": {
+      "description": "在所选的追踪器上创建此 Issue，并将两者关联。这会写入 Cognia 之外的系统，且无法在此撤销。",
+      "failed": "发布 Issue 失败：{reason}",
+      "noDescription": "无描述。",
+      "preview": "将创建为",
+      "submit": "发布",
+      "success": "已发布为 {target}。",
+      "target": {
+        "binding": "{provider} · {name}",
+        "github": "GitHub · {repository}"
+      },
+      "targetLabel": "发布到",
+      "title": "发布此 Issue",
+      "trigger": "发布到…"
+    },
     "rail": {
       "cycles": "迭代",
       "hide": "隐藏侧栏",
@@ -18615,7 +18693,7 @@
       "failedBindings": "以下绑定同步失败：{names}",
       "joiner": "，",
       "noBindings": "本工作区没有绑定任何外部资源。",
-      "noCredential": "没有可用的 GitHub 凭据。请用 GitHub CLI 登录，或连接一个账号。",
+      "noCredential": "没有可用的 GitHub 凭据。请在「设置 → 连接」中连接一个 GitHub 账号，或用 GitHub CLI 登录。",
       "noRepos": "本工作区没有任何项目绑定了 GitHub 仓库。",
       "now": "立即同步",
       "parts": {
@@ -21125,7 +21203,7 @@
       "debugMode": "调试模式",
       "debugModeHelp": "在 agent 输出中显示额外诊断信息。",
       "escalateGate": "提升自主权时需生物识别",
-      "escalateGateHelp": "在本机提升桌面端权限模式前，重新校验 Face ID / 指纹。",
+      "escalateGateHelp": "在本机提升桌面端权限模式前，重新进行面部或指纹验证。",
       "escalateReason": "确认提升 agent 的权限模式",
       "escalateTitle": "提升权限模式",
       "permAcceptEdits": "自动接受编辑",
@@ -22126,6 +22204,7 @@
       "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
       "sections": {
         "activeRuns": "运行中",
+        "activity": "使用统计",
         "quickActions": "快捷操作",
         "recents": "最近会话"
       },
@@ -22248,8 +22327,8 @@
         "appVersion": "应用版本",
         "battery": "电量",
         "batteryCharging": "{level}% · 充电中",
-        "biometricEnrollHint": "请在系统设置中录入 Face ID / 指纹后使用。",
-        "biometricLabel": "生物识别（Face ID / 指纹）",
+        "biometricEnrollHint": "请先在系统设置中录入面部或指纹后使用。",
+        "biometricLabel": "生物识别（面部或指纹）",
         "biometricStatus": {
           "available": "就绪",
           "unavailable": "未录入",
@@ -22381,7 +22460,7 @@
       "settingsLink": "应用设置",
       "signOut": {
         "biometricDescription": "清除配对前重新验证身份。",
-        "biometricHelp": "退出本机登录前要求 Face ID / 指纹。",
+        "biometricHelp": "退出本机登录前要求面部或指纹验证。",
         "biometricLabel": "退出前要求生物识别",
         "biometricReason": "请验证以退出 cognia",
         "biometricTitle": "退出登录",
@@ -22475,6 +22554,7 @@
           "failing": "{count, plural, other {# 张表需要处理}}",
           "healthy": "全部已同步",
           "never": "尚未同步",
+          "noHost": "尚未配对宿主",
           "partial": "部分已同步"
         },
         "overallHint": {
@@ -22482,8 +22562,10 @@
           "failing": "{synced}/{total} 张表已是最新 · 请在下方重试失败的表。",
           "healthy": "{synced}/{total} 张表已是最新 · 上次同步 {time}",
           "never": "拉取一次，把桌面数据镜像到此设备。",
+          "noHost": "此设备镜像的是桌面宿主的数据。先配对一台宿主再开始同步。",
           "partial": "{synced}/{total} 张表已是最新 · 其余将在下次回到前台时拉取。"
         },
+        "pairHost": "配对宿主",
         "retry": "重试",
         "statusError": "失败",
         "statusNever": "等待首次拉取",
@@ -22493,8 +22575,11 @@
         "tablesDescription": "{synced}/{total} 已是最新",
         "tablesTitle": "同步表",
         "title": "同步状态",
-        "toastAllSynced": "已发起同步。",
+        "toastAllSynced": "全部已同步。",
         "toastError": "同步失败：{reason}",
+        "toastNoHost": "尚未配对宿主，没有可同步的来源。请先配对一台宿主。",
+        "toastSomeFailed": "{total} 张表中有 {failed} 张同步失败。",
+        "toastTableFailed": "无法同步 {table}：{reason}",
         "toastTableSynced": "已同步 {table}"
       },
       "syncRow": "同步状态",
@@ -22634,6 +22719,7 @@
           "push": "推送通知",
           "toast": "应用内提示"
         },
+        "channelDenied": "Cognia 没有发送通知的权限。请在系统设置中为本应用允许通知，然后再打开此开关。",
         "channelHelp": {
           "os": "显示系统原生通知。",
           "push": "应用关闭时仍推送到本设备。",
@@ -22656,8 +22742,11 @@
         "minOsLevelHelp": "仅在不低于该级别时触发系统通知。",
         "minPushLevel": "推送最低级别",
         "minPushLevelHelp": "仅在不低于该级别时发送推送通知。",
+        "openSettings": "打开设置",
+        "osUnavailable": "此设备无法使用系统通知。",
         "perSourceHelp": "屏蔽来自特定子系统的通知。",
         "perSourceTitle": "按来源",
+        "pushUnavailable": "此设备无法设置推送通知，例如设备上没有 Google Play 服务。",
         "quietHoursEnabled": "勿扰时段",
         "quietHoursEnabledHelp": "在每日时段内静音非严重通知。",
         "quietHoursEnd": "结束时间",
@@ -22716,26 +22805,31 @@
       "queueAwaitingApprovalNoCode": "等待主机批准。",
       "queueNeedsAttention": "{count} 条操作需要你处理",
       "queuePending": "{count} 条待发送",
+      "queuePendingWithSending": "{count} 条待发送 · {sending} 条发送中",
       "queueSheet": {
-        "description": "正在等待主机。尚未开始发送的操作可以撤回。",
+        "alreadyGone": "它已不在队列中。",
+        "description": "正在等待主机。当前没有在发送的操作都可以撤回。",
         "discard": "丢弃",
         "discarded": "已丢弃。",
         "empty": "没有待发送的操作。",
         "inOrder": "属于某个对话，会与其他消息按顺序发送。",
+        "notWithdrawable": "这项操作已无法撤回。",
         "retry": "重试",
         "retrying": "已重新排队发送。",
         "status": {
           "conflicted": "与较新的修改冲突",
           "deadlettered": "多次重试后已放弃",
-          "pending": "等待发送",
+          "pending": "待发送",
           "rejected": "被主机拒绝",
-          "sending": "正在发送…"
+          "sending": "正在发送…",
+          "stuck": "发送中断 — 未收到主机回应"
         },
         "title": "待发送的操作",
         "tooLate": "已开始发送，无法撤回。",
         "unlabeled": "待发送的操作",
         "withdraw": "撤回",
-        "withdrawn": "已撤回，不会再发送。"
+        "withdrawn": "已撤回，不会再发送。",
+        "withdrawnUnconfirmed": "已撤回。之前的发送尝试可能已送达主机，主机上仍可能执行。"
       },
       "review": "查看",
       "staleWarning": "{count} 条消息超过 30 分钟未送达。"
@@ -23011,6 +23105,7 @@
       "web": {
         "baseUrlLocked": "服务器地址由部署方预设",
         "clearPayload": "清空",
+        "clipboardEmpty": "剪贴板是空的。请先复制完整的 cgnp3 邀请，再点「粘贴」。",
         "clipboardReadFailed": "浏览器无法读取剪贴板，请手动粘贴完整配对邀请。",
         "clipboardWriteFailed": "浏览器无法复制命令，请手动选择并复制。",
         "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 伴侣 中复制。",
@@ -23173,7 +23268,7 @@
         "help": "撤销某台设备的配对前先验证生物识别。",
         "label": "撤销已配对设备"
       },
-      "description": "在敏感操作前要求 Face ID 或指纹。",
+      "description": "在敏感操作前要求面部或指纹验证。",
       "exportBackup": {
         "help": "写入备份文件前先验证生物识别。",
         "label": "导出加密备份"
@@ -23685,6 +23780,8 @@
       "pinned": "置顶",
       "pinned_added": "已置顶。",
       "pinned_removed": "已取消置顶。",
+      "queuedBadge": "待发送",
+      "runAlreadyQueued": "已在队列中 — 桌面联线后只会运行一次。",
       "runButton": "运行",
       "runFailed": "触发失败：{message}",
       "runQueued": "已加入队列，桌面联线后将触发。",
@@ -23700,6 +23797,7 @@
       "swipe": {
         "favorite": "置顶",
         "run": "运行",
+        "runAlreadyQueued": "{name} 已在队列中",
         "runQueued": "已加入队列：{name}",
         "unfavorite": "取消置顶"
       },
@@ -23717,6 +23815,7 @@
         "resume": "恢复计划",
         "resumeQueued": "正在恢复 {name} 的计划 — 已加入桌面端队列。",
         "run": "立即运行",
+        "runAlreadyQueued": "{name} 已在桌面端队列中 — 只会运行一次。",
         "runQueued": "已触发 {name} — 已加入桌面端队列。",
         "title": "工作流操作",
         "unpin": "取消置顶",
@@ -29668,9 +29767,9 @@
       "gatewayDescription": "这个提供商指向了自定义端点。只有该端点允许来自浏览器的跨域请求，流式才能生效。",
       "gatewayTitle": "自定义端点，流式未经验证",
       "supportedDescription": "回复逐字返回，直接来自提供商，中间不经过桌面端。",
-      "supportedTitle": "可以从当前浏览器直连流式",
+      "supportedTitle": "可以从本设备直连流式",
       "unsupportedDescription": "这个提供商的端点可能拒绝浏览器发起的请求。回复可能一次性返回而非逐字流式，也可能直接失败。",
-      "unsupportedTitle": "可能无法在浏览器里流式"
+      "unsupportedTitle": "在本设备上可能无法流式"
     },
     "builtin": "内置",
     "cachedInputPrice": "缓存输入单价",
@@ -29849,6 +29948,7 @@
       "connectionSuccess": "已连接",
       "credentialsDescription": "本机访问该服务商所需的信息。凭据仅保存在本机，导出诊断时绝不会带出。",
       "credentialsTitle": "凭据与端点",
+      "defaultModelCatalogPlaceholder": "服务商默认：{name}",
       "defaultModelDescription": "在该服务商下新建会话时默认选中的模型。",
       "defaultModelLabel": "默认模型",
       "defaultModelManualHint": "搜索已知模型，或输入提供商支持的模型 ID。",
@@ -30030,6 +30130,8 @@
         "description": "选择由生产配置解析的目标，并在执行前核对请求数与费用上限。",
         "embedding": "向量测速",
         "endpoint": "端点",
+        "endpointEmpty": "没有可测试的端点。该服务商未设置 Base URL，其 SDK 内置端点也不在此列出。请在“连接”页填写 Base URL 后再运行诊断。",
+        "endpointResolvedByHost": "由已配对的桌面端决定，诊断会使用桌面端当前配置的端点。",
         "mode": "采样模式",
         "model": "模型",
         "open": "配置运行",
@@ -30151,6 +30253,9 @@
       },
       "summary": {
         "auth": "身份验证",
+        "connectionTestFailed": "该服务商的“错误”状态来自上一次连接测试（测试失败）。下方卡片只反映诊断运行的结果——运行诊断可查看是哪一层失败。",
+        "connectionTestFailedWithError": "该服务商的“错误”状态来自上一次连接测试（测试失败）：{error}。下方卡片只反映诊断运行的结果——运行诊断可查看是哪一层失败。",
+        "connectionTestPassed": "上一次连接测试已通过。下方卡片只反映诊断运行的结果，在完成一次诊断前会保持“未验证”。",
         "description": "{provider} 的建议性诊断状态；不会改变路由健康。",
         "execution": "真实执行",
         "title": "提供商概览",
@@ -31030,7 +31135,7 @@
       "localLoginBodyPlan": "本机的 Claude Code CLI 已登录（{plan} 订阅）。一键即可在此复用该订阅，无需再次登录。",
       "localLoginTitle": "检测到本机 Claude Code 登录",
       "manage": "在订阅中管理",
-      "privacyBody": "密钥以明文形式保存在浏览器的 IndexedDB 中。任何能访问你用户目录磁盘的人都能读取。后续版本会迁移到系统钥匙串。",
+      "privacyBody": "密钥以明文形式保存在本设备上此应用的本地数据库（IndexedDB）中。任何能访问你用户目录磁盘的人都能读取。后续版本会迁移到系统钥匙串。",
       "privacyTitle": "隐私提示",
       "signIn": "前往登录",
       "signedInBody": "已登录:{account}。无需 API Key。",
@@ -35812,6 +35917,7 @@
           "title": "应用导入的外观？"
         },
         "export": "导出",
+        "exportFailed": "外观导出失败：{message}",
         "exportSuccess": "外观已导出。",
         "import": "导入",
         "importInvalid": "无法读取该文件：{message}",
@@ -36768,7 +36874,7 @@
         "clearOutputOnRun": "每次运行时清空输出",
         "maxExecutionTime": "最大执行时间",
         "pythonAvailable": "Python 通过本应用的受限解释器运行。",
-        "pythonRequiresDesktop": "Python 执行需要桌面端（Tauri）。运行 `pnpm tauri dev` 以启用。",
+        "pythonRequiresDesktop": "Python 执行在 Cognia 桌面应用中运行。请在桌面应用中打开此画布来运行 Python。",
         "showOutput": "显示输出面板"
       },
       "resetAll": "重置全部",
@@ -41200,6 +41306,7 @@
         "status": "状态",
         "statusDeny": "拒绝",
         "statusOk": "通过",
+        "target": "目标 · {field}",
         "time": "时间",
         "title": "最近 MCP 调用",
         "toastCleared": "审计日志已清空。",
@@ -41296,6 +41403,10 @@
           "wiki": {
             "description": "重建与检查计划",
             "label": "Wiki 维护"
+          },
+          "workspace": {
+            "description": "每个客户端可访问的根目录",
+            "label": "工作区访问"
           }
         },
         "mobileTrigger": "面板",
@@ -41305,6 +41416,7 @@
         "agent:dispatch": "⚠ 允许外部代理无界面运行你的内置/插件子代理或角色（工具循环 + 模型调用）。返回文本经 PII 脱敏。默认关闭。",
         "agent:team": "⚠ 允许外部代理无界面启动智能体团队——它们本无法触及的多智能体编排。默认关闭。",
         "browser:control": "允许外部 Agent 通过 browser_* 工具操控 Cognia 的浏览器：打开与导航页面、读取快照、点击与输入、管理标签页与下载、打印 PDF、模拟设备、查看 Cookie 元数据与网页存储，以及用已保存的密码登录。与任何角色的工具设置无关。应用内需要审批的工具（执行页面脚本、上传、下载、密码登录）每次调用仍会询问你，页面内容会被标记为不可信。默认关闭。",
+        "git:read": "允许外部 Agent 读取已授权根目录的 Git 状态、差异和历史。只读：不能提交、检出或推送。凭据路径会被排除。默认关闭。",
         "inbound:write": "⚠ 允许外部代理提交经验、技能草稿与笔记。不会自动生效 —— 提交内容作为待审、不可信草稿进入审阅队列，由你接受或丢弃。默认关闭。",
         "inbox:connectors:read": "⚠ 只读收件箱自省 — 适配器、会话、草稿、审计。元数据可能包含会话句柄与近期消息片段。默认关闭。",
         "inbox:connectors:send": "⚠ 允许外部 Agent 向你的 IM 收件箱发送 AI 回复。与应用内聊天走同一管线（PII 门控、策略评估、出站队列）。默认关闭。",
@@ -41322,10 +41434,13 @@
         "runtime:plugins": "暴露已安装插件的列表与元数据。",
         "runtime:skills": "⚠ 暴露已安装的 Skills 内容。",
         "runtime:twins": "⚠ 暴露孪生档案。已执行 PII 脱敏，但启用前请审核。",
+        "shell:run": "允许外部 Agent 在已授权根目录中以后台任务形式运行 Shell 命令，并可读取输出和停止任务。危险命令会被拒绝；有风险的命令以及涉及凭据文件的命令每次都会询问你。命令以你自己账户的权限运行，请只授予你信任的 Agent。默认关闭。",
         "usage:read": "允许外部 Agent 读取你的花费、会话效率指标与本地优化建议。只读：无法修改任何设置或应用修复，会话 ID 会做假名化处理。默认关闭。",
         "wiki:cognia": "Cognia 公开代码 Wiki — 安全可暴露。",
         "wiki:user-repo": "用户仓库 Wiki。Phase 3 — Phase 1 暂不可用。",
-        "workflow:run": "⚠ 列出并运行当前生效的不可变工作流部署、读取持久事件并可取消运行。默认关闭。"
+        "workflow:run": "⚠ 列出并运行当前生效的不可变工作流部署、读取持久事件并可取消运行。默认关闭。",
+        "workspace:read": "允许外部 Agent 列出、读取和搜索你在“工作区访问”中授予它的工作区根目录中的文件。凭据文件（.env、密钥、.ssh 等）和 .git 内部文件始终被拒绝，文件内容中的个人数据会被脱敏。默认关闭。",
+        "workspace:write": "允许外部 Agent 在授予它的工作区根目录中写入、编辑、移动和删除文件。凭据路径会被拒绝，每次删除都需要你在应用内确认。默认关闭。"
       },
       "scopes": {
         "description": "每个范围默认关闭，需手动启用。默认安装仅开启公开代码 Wiki 相关范围。",
@@ -41333,6 +41448,7 @@
         "groups": {
           "agent": "Agent",
           "browser": "浏览器",
+          "git": "Git",
           "inbound": "入站",
           "inbox": "收件箱",
           "mcp": "计算机操作",
@@ -41340,9 +41456,11 @@
           "plugin": "插件",
           "rag": "检索",
           "runtime": "运行时",
+          "shell": "Shell",
           "usage": "用量",
           "wiki": "Wiki",
-          "workflow": "工作流"
+          "workflow": "工作流",
+          "workspace": "工作区文件"
         },
         "plannedBadge": "规划中",
         "plannedReason": "已推迟到 Phase 1 之后：访问用户仓库需要逐仓库授权，该机制尚未实现。此范围保留在 API 中以便处理器继续编译，但无法被授予。",
@@ -41501,6 +41619,21 @@
         "toastClean": "Wiki 无问题 —— 共 {count} 篇文章。",
         "toastLintFailed": "检查失败：{message}",
         "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。"
+      },
+      "workspace": {
+        "description": "选择每个 MCP 客户端可以通过工作区、Git 和 Shell 工具访问哪些工作区根目录。没有被授予任何根目录的客户端无法访问任何内容，无论它拥有哪些权限范围。",
+        "grantedCount": "{count} 个根目录",
+        "noRoots": "还没有任何工作区添加了文件夹。先为工作区添加文件夹，才能在这里授权。",
+        "noneGranted": "无访问权限",
+        "scopesOff": "工作区、Git、Shell 权限范围均未启用，在“权限范围”中启用其中之一之前，这些授权不会生效。",
+        "stdioClient": "本地 stdio 客户端",
+        "title": "工作区访问",
+        "toggleAria": "允许 {client} 访问 {root}"
+      },
+      "workspaceApproval": {
+        "commandReason": "{client} 想要在 {root} 中运行命令：{command}。Cognia 的安全检查认为它需要你确认。每次都会询问你。",
+        "commandReasonSecret": "{client} 想要在 {root} 中运行命令：{command}。该命令涉及凭据文件。每次都会询问你。",
+        "deleteReason": "{client} 想要删除{kind, select, directory {文件夹} other {文件}} {path}。每次都会询问你。"
       }
     },
     "externalServices": {
@@ -45816,7 +45949,7 @@
     "createdHelp": "拥有此链接的人都能查看内容。解密密钥在链接“#”之后。",
     "createdTitle": "分享链接已就绪",
     "creating": "创建中…",
-    "dialogDescription": "创建一个公开链接。内容在你的浏览器内端到端加密——服务器只存密文。",
+    "dialogDescription": "创建一个公开链接。内容在本设备上端到端加密后才上传——服务器只存密文。",
     "dialogTitle": "生成分享链接",
     "done": "完成",
     "errorGeneric": "创建分享链接失败。",
@@ -47475,6 +47608,27 @@
     }
   },
   "slashCommands": {
+    "sessions": {
+      "columnId": "ID",
+      "columnKind": "类型",
+      "columnTitle": "标题",
+      "columnUpdated": "更新时间",
+      "daysAgo": "{count} 天前",
+      "empty": "还没有会话。输入一条消息即可开始。",
+      "footer": "使用 `/resume '<'标题或 ID>` 切换。",
+      "heading": "**会话**（按最近更新排序）",
+      "hoursAgo": "{count} 小时前",
+      "justNow": "刚刚",
+      "listFailed": "无法列出会话：{reason}",
+      "minutesAgo": "{count} 分钟前",
+      "resumeAmbiguous": "`{query}` 匹配到多个会话，请用 ID 指定：",
+      "resumeNoMatch": "没有匹配 `{query}` 的会话。试试 `/sessions`。",
+      "resumeNoSessions": "还没有会话。",
+      "resumeUsage": "用法：`/resume '<'ID 或标题>` —— 可先用 `/sessions` 查看有哪些会话。",
+      "resumed": "已恢复 {title}",
+      "resumedFallbackTitle": "会话",
+      "untitled": "（未命名）"
+    },
     "workflow": {
       "debug": "通过 workflow-debugger 子代理诊断失败的运行",
       "delegate": "显式移交给四位工作流专家之一",
@@ -47793,9 +47947,9 @@
       "emptyHint": "选一个分支，再选它所基于的分支。在你明确要求之前不会推送任何东西。",
       "error": "栈操作失败：{message}",
       "forge": {
-        "noCredential": "没有 {repository} 的 GitHub 凭据。先执行 `gh auth login` 再试。",
+        "noCredential": "没有 {repository} 的 GitHub 凭据。请在「设置 → 连接」中连接一个 GitHub 账号，或执行 `gh auth login`，然后再试。",
         "noRemote": "这个仓库没有能托管 Pull Request 的远程。",
-        "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台——目前只支持 github.com。"
+        "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台。GitHub Enterprise 服务器需要先在「设置 → 连接」中连接该服务器上的账号。"
       },
       "healthy": "每一层都正确地位于下面一层之上。",
       "land": "合入",

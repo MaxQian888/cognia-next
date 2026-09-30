@@ -58,6 +58,7 @@ import {
   updateExternalBridgeConfig,
   type McpServerStatus,
 } from "@/lib/external-bridge/tauri-control"
+import { releaseBridgeClient } from "@/lib/external-bridge/workspace/release-client"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 
@@ -266,6 +267,8 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
       if (!client) throw new Error(t("server.noActiveClientError"))
       const lease = await issueHostAdminLease(["external_bridge_client_revoke"])
       await revokeExternalBridgeClient(client.id, lease.token)
+      // ADR-0203: a revoked client's shell jobs and root grant must not outlive it.
+      await releaseBridgeClient(client.id)
       // The plaintext shown after create/rotate belongs to the grant that just
       // ended — keeping it on screen would invite pasting a dead credential.
       setOneTimeCredential(null)

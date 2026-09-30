@@ -40,6 +40,11 @@ const VALID_SCOPES: &[&str] = &[
     "workflow:run",
     // ADR-0201 — first-class browser_* MCP tools.
     "browser:control",
+    // ADR-0203 — workspace files, git reads and shell jobs over granted roots.
+    "workspace:read",
+    "workspace:write",
+    "git:read",
+    "shell:run",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,6 +496,18 @@ mod tests {
             validate_scopes(&["browser:control".to_string()]).unwrap(),
             vec!["browser:control".to_string()]
         );
+    }
+
+    #[test]
+    fn workspace_scopes_are_accepted_but_not_enabled_by_default() {
+        let scopes: Vec<String> = ["workspace:read", "workspace:write", "git:read", "shell:run"]
+            .iter()
+            .map(|scope| scope.to_string())
+            .collect();
+        for scope in &scopes {
+            assert!(!ExternalBridgeConfig::default().enabled_scopes.contains(scope));
+        }
+        assert_eq!(validate_scopes(&scopes).unwrap(), scopes);
     }
 
     #[test]

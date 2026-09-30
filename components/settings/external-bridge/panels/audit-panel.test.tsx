@@ -16,6 +16,7 @@ type Row = {
   allowed: boolean
   latencyMs: number
   reason?: string
+  projection?: Record<string, string | number | boolean>
 }
 
 let liveRows: Row[] = []
@@ -121,6 +122,17 @@ describe("BridgeAuditPanel", () => {
     expect(await screen.findByTestId("bridge-audit-detail-1")).toHaveTextContent(
       "scope rag:user-repo is not granted"
     )
+  })
+
+  it("shows what a call touched from the tool's audit projection", async () => {
+    const user = userEvent.setup()
+    liveRows = [row({ allowed: true, projection: { root: "root-a", path: "src/a.ts" } })]
+    render(<BridgeAuditPanel />)
+
+    await user.click(screen.getByRole("button", { name: "audit.detailAria:wiki_search" }))
+
+    expect(await screen.findByTestId("bridge-audit-target-path")).toHaveTextContent("src/a.ts")
+    expect(screen.getByTestId("bridge-audit-target-root")).toHaveTextContent("root-a")
   })
 
   it("omits the reason term on an allowed call", async () => {

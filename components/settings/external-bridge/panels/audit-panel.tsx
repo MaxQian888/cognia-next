@@ -14,7 +14,7 @@
  * cell. It is now an expandable detail row.
  */
 
-import { useCallback, useState } from "react"
+import { Fragment, useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronRightIcon } from "lucide-react"
@@ -255,6 +255,16 @@ function AuditRowView({
               <dd className="truncate font-mono">{row.scope}</dd>
               <dt className="text-muted-foreground">{t("audit.time")}</dt>
               <dd>{new Date(row.ts).toLocaleString()}</dd>
+              {row.projection
+                ? Object.entries(row.projection).map(([key, value]) => (
+                    <Fragment key={key}>
+                      <dt className="text-muted-foreground">{t("audit.target", { field: key })}</dt>
+                      <dd className="truncate font-mono" data-testid={`bridge-audit-target-${key}`}>
+                        {String(value)}
+                      </dd>
+                    </Fragment>
+                  ))
+                : null}
               {row.reason ? (
                 <>
                   <dt className="text-muted-foreground">{t("audit.reason")}</dt>

@@ -179,6 +179,12 @@
     "background_job_spawn_scheduled": {
       "to": "background.job.spawn_scheduled"
     },
+    "background_job_spawn_bridge": {
+      "to": "background.job.spawn_bridge"
+    },
+    "background_job_wait": {
+      "to": "background.job.wait"
+    },
     "background_monitor_cancel": {
       "to": "background.monitor.cancel"
     },

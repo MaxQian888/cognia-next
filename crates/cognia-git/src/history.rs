@@ -118,7 +118,8 @@ fn commit_touches_path(repo: &Repository, commit: &Commit<'_>, path: &str) -> Re
         Some(commit.parent(0)?.tree()?)
     };
     let mut opts = DiffOptions::new();
-    opts.pathspec(path);
+    // Literal match: a glob here would attribute other files' commits to `path`.
+    opts.pathspec(path).disable_pathspec_match(true);
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
     Ok(diff.deltas().len() > 0)
 }

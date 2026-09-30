@@ -16,6 +16,7 @@ describe("external-bridge nav-config", () => {
 
   it("resolves a known deep link and falls back otherwise", () => {
     expect(resolveBridgePanel("audit")).toBe("audit")
+    expect(resolveBridgePanel("workspace")).toBe("workspace")
     expect(resolveBridgePanel("nope")).toBe(DEFAULT_BRIDGE_PANEL)
     expect(resolveBridgePanel(null)).toBe(DEFAULT_BRIDGE_PANEL)
   })
@@ -37,6 +38,12 @@ describe("groupBridgeScopes", () => {
     expect(groups.find((g) => g.id === "workflow")?.scopes).toEqual(["workflow:run"])
     // ADR-0201: browser control is its own group, not an unrecognised extra.
     expect(groups.find((g) => g.id === "browser")?.scopes).toEqual(["browser:control"])
+    expect(groups.find((g) => g.id === "workspace")?.scopes).toEqual([
+      "workspace:read",
+      "workspace:write",
+    ])
+    expect(groups.find((g) => g.id === "git")?.scopes).toEqual(["git:read"])
+    expect(groups.find((g) => g.id === "shell")?.scopes).toEqual(["shell:run"])
   })
 
   it("renders a scope with an unrecognised prefix rather than dropping it", () => {

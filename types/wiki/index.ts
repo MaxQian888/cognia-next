@@ -148,6 +148,34 @@ export type BridgeScope =
    * `plugin_tool_invoke` refuses the browser plugin and points at these tools.
    */
   | "browser:control"
+  /**
+   * List, read and search files under the workspace roots granted to the
+   * calling client (`workspace_roots` / `workspace_list` / `workspace_read` /
+   * `workspace_search`). Default OFF. Credential files and `.git` internals are
+   * always refused; content is PII-redacted on the way out. A scope without a
+   * root grant (`workspaceGrants`) reaches nothing.
+   */
+  | "workspace:read"
+  /**
+   * Write, edit, move and delete files under granted roots (`workspace_write`
+   * / `workspace_edit` / `workspace_move` / `workspace_delete`). Default OFF.
+   * Credential paths are refused; every delete asks the user in-app.
+   */
+  | "workspace:write"
+  /**
+   * Read git state of granted roots (`git_status` / `git_diff` / `git_log` /
+   * `git_show`). Read-only and default OFF; credential paths are left out of
+   * statuses and diffs.
+   */
+  | "git:read"
+  /**
+   * Run shell commands in a granted root as supervised background jobs
+   * (`shell_run` / `job_output` / `job_list` / `job_kill`). Default OFF. The
+   * command-safety classifier refuses dangerous commands and asks the user
+   * in-app for risky ones or ones naming a credential path; a command still
+   * runs with the user's own permissions.
+   */
+  | "shell:run"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -174,6 +202,10 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "workflow:run",
   "usage:read",
   "browser:control",
+  "workspace:read",
+  "workspace:write",
+  "git:read",
+  "shell:run",
 ] as const
 
 export const WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES = [
@@ -227,6 +259,14 @@ export interface ExternalBridgeSettings {
    * deletes the `wiki-lint::singleton` scheduler row.
    */
   wikiLintSchedule?: WikiScheduleSettings
+  /**
+   * Workspace roots each bridge caller may address with the `workspace:*`,
+   * `git:read` and `shell:run` tools, keyed by caller id (`mcp:stdio`, or
+   * `mcp:<clientId>` for an HTTP client credential) and naming roots by their
+   * stable `WorkspaceRoot.id`. Absent or empty means no roots: a scope alone
+   * reaches nothing (roadmap 2026-09-29, Phase 2).
+   */
+  workspaceGrants?: Record<string, string[]>
 }
 
 export type WikiScheduleMode = "off" | "daily" | "weekly" | "custom"
@@ -562,4 +602,10 @@ export interface McpAuditLogRow {
   decision?: "allow" | "deny" | "ask"
   durationMs?: number
   errorCode?: string
+  /**
+   * What the call touched, as the tool's own audit projection declared it
+   * (e.g. `{ root, path }`) — bounded scalars only, never raw arguments.
+   * Absent for tools that declare no projection.
+   */
+  projection?: Record<string, string | number | boolean>
 }

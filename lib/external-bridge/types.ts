@@ -21,6 +21,7 @@ export {
 
 import type { BridgeScope } from "@/types/wiki"
 import { BROWSER_TOOL_NAMES } from "@cognia/plugin-sdk/api/browser"
+import { WORKSPACE_TOOL_SCOPES } from "./workspace/tool-names"
 
 /**
  * Result of a permission gate check. When `allowed === false`, `reason` is
@@ -95,6 +96,10 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   // ADR-0201 first-class browser tools — one scope for the whole surface, so
   // a grant is one decision; per-tool approval still applies per call.
   ...Object.fromEntries(BROWSER_TOOL_NAMES.map((name) => [name, "browser:control" as const])),
+  // Roadmap 2026-09-29 Phase 2 — workspace files, git reads, shell jobs.
+  // Each also needs a root grant (`workspaceGrants`); the scope alone reaches
+  // nothing.
+  ...WORKSPACE_TOOL_SCOPES,
 }
 
 /**

@@ -39,6 +39,7 @@ import {
 } from "./nav-config"
 import { BridgeServerPanel } from "./panels/server-panel"
 import { BridgeScopesPanel } from "./panels/scopes-panel"
+import { BridgeWorkspacePanel } from "./panels/workspace-panel"
 import { BridgeWikiPanel } from "./panels/wiki-panel"
 import { BridgeInboundPanel } from "./panels/inbound-panel"
 import { BridgeSetupPanel } from "./panels/setup-panel"
@@ -154,6 +155,8 @@ function renderPanel(
       return <BridgeServerPanel settings={settings} onChange={onChange} />
     case "scopes":
       return <BridgeScopesPanel settings={settings} onChange={onChange} />
+    case "workspace":
+      return <BridgeWorkspacePanel settings={settings} onChange={onChange} />
     case "wiki":
       return <BridgeWikiPanel />
     case "inbound":

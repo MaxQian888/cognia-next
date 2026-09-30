@@ -27,6 +27,10 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
+import { auditProjection } from "../audit-projection"
+import { handlerFailed, scopeDenied } from "../tool-result"
+import { bridgeCallerForClientId, STDIO_BRIDGE_CALLER } from "../bridge-caller"
+import { registerWorkspaceTools } from "./workspace-tools"
 import {
   bridgeScopeForRagScope,
   checkRagCall,
@@ -121,6 +125,13 @@ export interface BuildServerOptions {
   serverInfo?: { name: string; version: string }
   settingsGetter: SettingsGetter
   workflowHost?: WorkflowMcpHost
+  /**
+   * Whether `_meta.cogniaBridgeClientId` was stamped by the Rust HTTP proxy
+   * (which overwrites whatever the client sent). A standalone stdio sidecar
+   * passes `false`: its client could otherwise claim another client's id and,
+   * with it, that client's workspace grants and jobs (ADR-0203). Default true.
+   */
+  trustClientMeta?: boolean
 }
 
 const DEFAULT_SERVER_INFO = { name: "cognia", version: "1.0.0" }
@@ -150,6 +161,11 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerIssuesTools(server, opts.settingsGetter)
   registerUsageTools(server, opts.settingsGetter)
   registerBrowserTools(server, opts.settingsGetter)
+  registerWorkspaceTools(server, {
+    run: runWithGate,
+    settingsFor: (extra) => scopedSettings(opts.settingsGetter, extra),
+    caller: opts.trustClientMeta === false ? () => STDIO_BRIDGE_CALLER : bridgeCaller,
+  })
   registerWorkflowLifecycleTools(
     server,
     opts.settingsGetter,
@@ -166,13 +182,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function bridgeCaller(extra: BridgeRequestExtra): string {
-  const raw = extra._meta?.cogniaBridgeClientId
-  if (typeof raw !== "string" || !raw.trim()) return "mcp:stdio"
-  const normalized = raw
-    .trim()
-    .replace(/[^a-zA-Z0-9._:-]/g, "_")
-    .slice(0, 128)
-  return `mcp:${normalized || "client"}`
+  return bridgeCallerForClientId(extra._meta?.cogniaBridgeClientId)
 }
 
 function bridgeIdempotencyKey(extra: BridgeRequestExtra): string | undefined {
@@ -1082,13 +1092,21 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         reason: z.string().optional().describe("Reason shown in the consent prompt / audit."),
       },
     },
-    async (args, extra) =>
-      runWithGate({
+    async (args, extra) => {
+      const settings = await scopedSettings(settingsGetter, extra)
+      return runWithGate({
         tool: "plugin_tool_invoke",
         scope: "plugin:tools",
-        check: checkToolCall(await scopedSettings(settingsGetter, extra), "plugin_tool_invoke"),
-        body: () => pluginToolInvoke(args as Parameters<typeof pluginToolInvoke>[0]),
+        check: checkToolCall(settings, "plugin_tool_invoke"),
+        // ADR-0203: the renderer checks the plugin's manifest permissions
+        // against these, so a plugin cannot sidestep workspace:* / shell:run.
+        body: () =>
+          pluginToolInvoke({
+            ...(args as Parameters<typeof pluginToolInvoke>[0]),
+            grantedScopes: settings?.enabledScopes ?? [],
+          }),
       })
+    }
   )
 }
 
@@ -1778,7 +1796,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
     {
       title: "Search Cognia's long-term memory",
       description:
-        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Default OFF; gate via Settings → External Bridge → memory:read.",
+        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Pass asOf to search what was remembered at a past instant (earlier wordings included; lexical only). Default OFF; gate via Settings → External Bridge → memory:read.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -1800,6 +1818,12 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         agentId: z.string().optional().describe("Include this private agent layer"),
         branch: z.string().optional().describe("Exact branch context"),
         path: z.string().optional().describe("Workspace-relative path context"),
+        asOf: z
+          .union([z.number().int().positive(), z.string()])
+          .optional()
+          .describe(
+            "Search memory as it was at this instant (epoch ms or ISO 8601). Hits whose text was an earlier wording carry revisionId/validFrom/validTo."
+          ),
       },
     },
     async (args, extra) =>
@@ -1817,6 +1841,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             agentId: args.agentId,
             branch: args.branch,
             path: args.path,
+            asOf: args.asOf,
           }),
       })
   )
@@ -2491,6 +2516,13 @@ interface RunWithGateInput<T> {
    * screenshot serialised as text is a screenshot the model cannot look at.
    */
   present?: (result: T) => Pick<ToolEnvelope, "content" | "structuredContent" | "isError"> | null
+  /**
+   * The tool's own audit projection: the few argument fields worth keeping in
+   * the audit log (a root id and relative path, a command head). Owned by the
+   * tool definition, never derived from raw params; a tool that declares none
+   * records none. See `auditProjection` in `../audit-log`.
+   */
+  audit?: () => Record<string, unknown>
 }
 
 interface ToolEnvelope {
@@ -2510,15 +2542,18 @@ interface ToolEnvelope {
  */
 async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope> {
   const start = Date.now()
+  const projection = auditProjection(input.audit)
   if (!input.check.allowed) {
     await recordCall({
       tool: input.tool,
       scope: input.scope,
       check: input.check,
       latencyMs: Date.now() - start,
+      ...(projection ? { projection } : {}),
     })
     return {
       content: [{ type: "text", text: input.check.reason }],
+      structuredContent: { ...scopeDenied(input.check.reason) },
       isError: true,
     }
   }
@@ -2529,6 +2564,7 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
       scope: input.scope,
       check: { allowed: true },
       latencyMs: Date.now() - start,
+      ...(projection ? { projection } : {}),
     })
     // MCP requires `structuredContent` to be a JSON object (Record). Arrays
     // and primitives are wrapped under `{ value: ... }` so they survive
@@ -2553,9 +2589,11 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
       check: { allowed: true },
       latencyMs: Date.now() - start,
       errorCode: "handler-error",
+      ...(projection ? { projection } : {}),
     })
     return {
       content: [{ type: "text", text: message }],
+      structuredContent: { ...handlerFailed(message) },
       isError: true,
     }
   }
