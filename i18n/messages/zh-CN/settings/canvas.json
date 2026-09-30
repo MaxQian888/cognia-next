@@ -129,7 +129,7 @@
     "clearOutputOnRun": "每次运行时清空输出",
     "maxExecutionTime": "最大执行时间",
     "pythonAvailable": "Python 通过本应用的受限解释器运行。",
-    "pythonRequiresDesktop": "Python 执行需要桌面端（Tauri）。运行 `pnpm tauri dev` 以启用。",
+    "pythonRequiresDesktop": "Python 执行在 Cognia 桌面应用中运行。请在桌面应用中打开此画布来运行 Python。",
     "showOutput": "显示输出面板"
   },
   "resetAll": "重置全部",

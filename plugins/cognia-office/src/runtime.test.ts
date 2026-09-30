@@ -131,7 +131,7 @@ it("creates, inspects, atomically edits, validates, and exports a native workboo
     sheets: [{ cellCount: 1 }],
   })
 
-  const edited = runtime.applyOperations({
+  const edited = await runtime.applyOperations({
     artifactId: created.artifactId,
     expectedVersion: 1,
     operations: [
@@ -383,7 +383,7 @@ it("lists and restores workbook versions, refusing unknown snapshots", async () 
   const { ctx } = context()
   const runtime = createOfficeRuntime(ctx)
   const created = await runtime.create({ title: "History" })
-  runtime.applyOperations({
+  await runtime.applyOperations({
     artifactId: created.artifactId,
     expectedVersion: 1,
     operations: [
@@ -418,13 +418,55 @@ it("returns summaries and findings from edits instead of the workbook payload", 
   const runtime = createOfficeRuntime(ctx)
   const created = await runtime.create({ title: "Edits" })
   expect(created).toMatchObject({ version: 1, findings: [] })
-  const edited = runtime.applyOperations({
+  const edited = await runtime.applyOperations({
     artifactId: created.artifactId,
     expectedVersion: 1,
     operations: [{ op: "merge", sheet: "Sheet1", range: "A1:B1" }],
   })
   expect(edited).not.toHaveProperty("workbook")
   expect(edited.summary.sheets[0]).toMatchObject({ usedRange: "A1:B1", merges: 1 })
+})
+
+it("derives formula values on create and on every edit, reporting the recalculation", async () => {
+  const { ctx } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({
+    title: "Totals",
+    operations: [
+      {
+        op: "setRange",
+        sheet: "Sheet1",
+        range: "A1:A3",
+        values: [
+          [{ type: "number", value: 2 }],
+          [{ type: "number", value: 3 }],
+          // The asserted value is wrong; the stored one must be the computed 5.
+          [{ type: "number", formula: "=SUM(A1:A2)", value: 999 }],
+        ],
+      },
+    ],
+  })
+  expect(created.recalculation).toMatchObject({ status: "complete", evaluated: 1, errorCount: 0 })
+  expect(runtime.readRange(created.artifactId, { sheet: "Sheet1", range: "A3" })).toMatchObject({
+    sheets: [{ rows: [[5]] }],
+  })
+
+  const edited = await runtime.applyOperations({
+    artifactId: created.artifactId,
+    expectedVersion: 1,
+    operations: [
+      { op: "setCell", sheet: "Sheet1", cell: "A1", value: { type: "number", value: 10 } },
+      { op: "setCell", sheet: "Sheet1", cell: "B1", value: { type: "number", formula: "A3/0" } },
+    ],
+  })
+  expect(edited.recalculation).toMatchObject({
+    status: "complete",
+    errorCount: 1,
+    errorCells: [{ sheet: "Sheet1", cell: "B1", error: "#DIV/0!" }],
+  })
+  expect(runtime.readRange(created.artifactId, { sheet: "Sheet1", range: "A3:B3" })).toMatchObject({
+    sheets: [{ rows: [[13, null]] }],
+  })
 })
 
 it("refuses a workbook artifact that another plugin owns", async () => {

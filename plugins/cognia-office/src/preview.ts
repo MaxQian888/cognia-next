@@ -1,5 +1,6 @@
 import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import { decodeRange, encodeCell, encodeColumn } from "./a1"
+import { createCellEditor, type CellEditor } from "./cell-editor"
 import {
   createExportController,
   renderExportBar,
@@ -13,9 +14,11 @@ import {
   validateWorkbook,
   type WorkbookCell,
   type WorkbookDocument,
+  type WorkbookOperation,
   type WorkbookSheet,
   type WorkbookValidationFinding,
 } from "./model"
+import { dateToSerial } from "./serial-date"
 import { loadSheetJs } from "./xlsx"
 
 /** Resolves a plugin i18n key at render time so locale switches take effect. */
@@ -33,6 +36,16 @@ export interface WorkbookPreviewDeps {
     artifactId: string,
     allowUnsupportedFeatureLoss: boolean
   ) => Promise<ExportOutcomeLike>
+  /**
+   * Commit a human cell edit (the same versioned, recalculated path as
+   * `office_apply_operations`); rejects on a version conflict. Cells are
+   * editable only when set.
+   */
+  applyEdit?: (
+    artifactId: string,
+    expectedVersion: number,
+    operations: WorkbookOperation[]
+  ) => Promise<unknown>
 }
 
 const ROW_HEADER_WIDTH = 46
@@ -114,6 +127,13 @@ const PREVIEW_STYLES = `
 .copv-export-status { margin:0; min-width:0; font-size:12px; color:var(--muted-foreground); overflow-wrap:anywhere; }
 .copv-export-status:empty { display:none; }
 .copv-export-status[role="alert"] { color:var(--destructive); }
+.copv-table[role="grid"] { cursor:cell; outline:none; }
+.copv-table[role="grid"]:focus-visible .copv-cell--active, .copv-cell--active:focus-within { box-shadow:inset 0 0 0 2px var(--ring); }
+.copv-cell--active { box-shadow:inset 0 0 0 1px var(--ring); }
+.copv-table[aria-busy="true"] { cursor:progress; }
+.copv-cell-input { width:100%; min-width:0; margin:-3px -6px; padding:3px 6px; border:0; outline:none; background:var(--background); color:var(--foreground); font:inherit; }
+.copv-edit-status { margin:0; padding:4px 10px; border-bottom:1px solid var(--border); font-size:12px; color:var(--muted-foreground); }
+.copv-edit-status[role="alert"] { color:var(--destructive); }
 .copv-chip { padding:1px 6px; border-radius:999px; background:var(--accent); color:var(--accent-foreground); font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; }
 `
 
@@ -134,12 +154,22 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
       let activeSheet = 0
       let renderedSheet = -1
       let content = artifact.content
+      let version = artifact.version
       let loadError: string | undefined
       const exportWorkbook = deps.exportWorkbook
       const exporter: ExportController | undefined = exportWorkbook
         ? createExportController({
             run: (allowLoss) => exportWorkbook(artifact.id, allowLoss),
             onChange: () => render(),
+            isDisposed: () => disposed,
+          })
+        : undefined
+      const applyEdit = deps.applyEdit
+      const editor: CellEditor | undefined = applyEdit
+        ? createCellEditor({
+            t,
+            commit: (operations) => applyEdit(artifact.id, version, operations),
+            render: () => render(),
             isDisposed: () => disposed,
           })
         : undefined
@@ -177,11 +207,22 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
         }
         activeSheet = Math.max(0, Math.min(activeSheet, workbook.sheets.length - 1))
         renderedSheet = activeSheet
-        renderWorkbook(root, workbook, activeSheet, t, mountId, (index, focus) => {
-          activeSheet = index
-          render()
-          if (focus) focusTab(root, index)
-        })
+        renderWorkbook(
+          root,
+          workbook,
+          activeSheet,
+          t,
+          mountId,
+          (index, focus) => {
+            if (index !== activeSheet) editor?.reset()
+            activeSheet = index
+            render()
+            if (focus) focusTab(root, index)
+          },
+          editor
+        )
+        const editStatus = editor?.renderStatus()
+        if (editStatus) root.prepend(editStatus)
         if (exporter) root.prepend(renderExportBar(exporter, t, "copv"))
         const next = root.querySelector<HTMLElement>(".copv-grid")
         if (next && scroll) {
@@ -193,20 +234,24 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
 
       const disposeLocale = deps.onLocaleChange(render)
       render()
-      if (!formatNumber) {
-        preloadWorkbookPreviewEngine().then(
-          () => {
-            if (!disposed) render()
-          },
-          (error: unknown) => {
-            loadError = error instanceof Error ? error.message : String(error)
-            if (!disposed) render()
-          }
-        )
-      }
+      // Settles once the grid (or the load error) is painted — what an
+      // off-screen capture waits for instead of the loading line.
+      const painted: Promise<void> = formatNumber
+        ? Promise.resolve()
+        : preloadWorkbookPreviewEngine().then(
+            () => {
+              if (!disposed) render()
+            },
+            (error: unknown) => {
+              loadError = error instanceof Error ? error.message : String(error)
+              if (!disposed) render()
+            }
+          )
       return {
+        ready: () => painted,
         update: (updatedArtifact) => {
           content = updatedArtifact.content
+          version = updatedArtifact.version
           render()
         },
         dispose: () => {
@@ -260,7 +305,8 @@ function renderWorkbook(
   activeSheet: number,
   t: PreviewTranslator,
   mountId: number,
-  selectSheet: (index: number, moveFocus: boolean) => void
+  selectSheet: (index: number, moveFocus: boolean) => void,
+  editor?: CellEditor
 ): void {
   root.replaceChildren()
   const findings = validateWorkbook(workbook)
@@ -274,8 +320,9 @@ function renderWorkbook(
   panel.setAttribute("role", "tabpanel")
   panel.setAttribute("aria-labelledby", `copv-tab-${mountId}-${activeSheet}`)
   if (sheet) {
-    const { content, limited } = renderSheet(sheet, t)
+    const { content, limited, table, rendered } = renderSheet(sheet, t, mountId, Boolean(editor))
     panel.appendChild(content)
+    if (editor && table && rendered) editor.decorate(table, sheet, rendered)
     if (limited) {
       const notice = document.createElement("div")
       notice.className = "copv-limited"
@@ -413,13 +460,17 @@ interface SheetGeometry {
   columnLeft: (column: number) => number
 }
 
-function sheetGeometry(sheet: WorkbookSheet): SheetGeometry {
+/**
+ * `spare` extra rows and columns past the used range give an editable grid
+ * somewhere to type the next row (or the first cell of an empty sheet).
+ */
+function sheetGeometry(sheet: WorkbookSheet, spare = 0): SheetGeometry {
   // The grid always starts at A1, so only the used range's far corner matters.
   const used = usedRangeAddress(sheet)
   const totalRows = used ? used.e.r + 1 : 0
   const totalColumns = used ? used.e.c + 1 : 0
-  const rowCount = Math.min(totalRows, MAX_PREVIEW_ROWS)
-  const columnCount = Math.min(totalColumns, MAX_PREVIEW_COLUMNS)
+  const rowCount = Math.min(totalRows + spare, MAX_PREVIEW_ROWS)
+  const columnCount = Math.min(totalColumns + spare, MAX_PREVIEW_COLUMNS)
 
   const columnWidth = (column: number) => {
     const dimension = sheet.columnDimensions?.[encodeColumn(column)]
@@ -451,16 +502,26 @@ function sheetGeometry(sheet: WorkbookSheet): SheetGeometry {
 
 function renderSheet(
   sheet: WorkbookSheet,
-  t: PreviewTranslator
-): { content: HTMLElement; limited?: string } {
-  const geometry = sheetGeometry(sheet)
+  t: PreviewTranslator,
+  mountId: number,
+  editable: boolean
+): {
+  content: HTMLElement
+  limited?: string
+  table?: HTMLTableElement
+  rendered?: { rows: number; columns: number }
+} {
+  const geometry = sheetGeometry(sheet, editable ? 1 : 0)
   if (!geometry.rowCount || !geometry.columnCount) return { content: emptyState(t) }
 
   const viewport = document.createElement("div")
   viewport.className = "copv-grid"
-  // A scrollable region must be reachable from the keyboard to be scrolled.
-  viewport.tabIndex = 0
-  viewport.dataset.focusKey = "grid"
+  // A scrollable region must be reachable from the keyboard to be scrolled;
+  // an editable grid is the tab stop itself and scrolls its active cell.
+  if (!editable) {
+    viewport.tabIndex = 0
+    viewport.dataset.focusKey = "grid"
+  }
   viewport.setAttribute("role", "region")
   viewport.setAttribute("aria-label", t("preview.grid", { name: sheet.title }))
   const frozenRows = Math.min(sheet.freeze?.rows ?? 0, geometry.rowCount)
@@ -470,6 +531,7 @@ function renderSheet(
 
   const table = document.createElement("table")
   table.className = "copv-table"
+  table.id = `copv-grid-${mountId}`
   table.setAttribute("aria-label", sheet.title)
 
   const colgroup = document.createElement("colgroup")
@@ -578,7 +640,12 @@ function renderSheet(
         total: geometry.totalColumns,
       })
     )
-  return { content: viewport, limited: parts.length ? parts.join(" · ") : undefined }
+  return {
+    content: viewport,
+    limited: parts.length ? parts.join(" · ") : undefined,
+    table,
+    rendered: { rows: geometry.rowCount, columns: geometry.columnCount },
+  }
 }
 
 function renderCellContent(td: HTMLElement, cell: WorkbookCell | undefined): void {
@@ -617,19 +684,13 @@ function displayValue(cell: WorkbookCell): string {
 function formatDate(date: Date, format: string | undefined): string {
   if (format && formatNumber) {
     try {
-      return formatNumber(format, toSerial(date))
+      return formatNumber(format, dateToSerial(date))
     } catch {
       // fall through to ISO formatting
     }
   }
   const pad = (value: number) => String(value).padStart(2, "0")
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-/** Excel serial for a JS Date, matching SheetJS' default 1900 date system. */
-function toSerial(date: Date): number {
-  const epoch = Date.UTC(1899, 11, 30)
-  return (date.getTime() - epoch - date.getTimezoneOffset() * 60000) / 86400000
 }
 
 function applyCellStyle(element: HTMLElement, style: WorkbookCell["style"]): void {

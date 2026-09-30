@@ -249,12 +249,15 @@ export function createPdfRenderer(deps: PdfPreviewDeps): ArtifactRenderer {
 
       const disposeLocale = deps.onLocaleChange(updateChrome)
       updateChrome()
-      void load(artifact.content)
+      // The latest load settles once its page is painted (or its error shown):
+      // what an off-screen capture waits for.
+      let loading = load(artifact.content)
 
       return {
+        ready: () => loading,
         update: (updated) => {
           saveState = { kind: "idle" }
-          void load(updated.content)
+          loading = load(updated.content)
         },
         dispose: () => {
           disposed = true

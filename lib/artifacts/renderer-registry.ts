@@ -28,6 +28,8 @@ export interface PluginArtifactRenderer {
 export interface PluginArtifactRendererHandle {
   update?: (artifact: Artifact) => void
   dispose(): void
+  /** First complete paint; see `ArtifactRendererHandle.ready` in `types/plugin/plugin.ts`. */
+  ready?: () => Promise<void>
 }
 
 const artifactRenderers = new Map<string, PluginArtifactRenderer>()

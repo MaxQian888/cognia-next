@@ -19,8 +19,10 @@ jest.mock("@/lib/artifacts/reveal", () => ({
   revealArtifactInWorkspace: jest.fn(),
 }))
 
+const mockCapture = jest.fn()
+
 function deps(): ArtifactToolDeps {
-  return { store: useArtifactStore.getState(), activeSessionId: "s1" }
+  return { store: useArtifactStore.getState(), activeSessionId: "s1", capture: mockCapture }
 }
 
 const ctx = { sessionId: "s1", messageId: "m1" }
@@ -35,6 +37,7 @@ function setReviewBeforeApply(value: boolean) {
 }
 
 beforeEach(() => {
+  mockCapture.mockReset()
   useArtifactStore.setState({
     artifacts: {},
     artifactVersions: {},
@@ -264,6 +267,75 @@ describe("artifact_delete", () => {
       ctx
     )) as { ok: boolean; code: string }
     expect(result).toMatchObject({ ok: false, code: "not_found" })
+  })
+})
+
+describe("artifact_capture", () => {
+  async function created() {
+    return (await runArtifactBuiltinTool(
+      "artifact_create",
+      { type: "svg", title: "Logo", content: "<svg/>" },
+      deps(),
+      ctx
+    )) as { artifactId: string }
+  }
+
+  it("returns the rendered image as an MCP image block", async () => {
+    const { artifactId } = await created()
+    mockCapture.mockResolvedValueOnce({ data: "iVBORw0KGgo=", mimeType: "image/png" })
+    const result = (await runArtifactBuiltinTool(
+      "artifact_capture",
+      { artifactId, width: 900, height: 600.5 },
+      deps(),
+      ctx
+    )) as { content: Array<Record<string, unknown>> }
+    expect(mockCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ id: artifactId }),
+      // A non-integer size is dropped rather than forwarded.
+      { width: 900 }
+    )
+    expect(JSON.parse(result.content[0].text as string)).toMatchObject({
+      ok: true,
+      artifactId,
+      title: "Logo",
+      type: "svg",
+    })
+    expect(result.content[1]).toEqual({
+      type: "image",
+      data: "iVBORw0KGgo=",
+      mimeType: "image/png",
+    })
+  })
+
+  it("maps the raster module's typed failures onto codes", async () => {
+    const { artifactId } = await created()
+    for (const [name, code] of [
+      ["ArtifactPreviewNotMountedError", "not_rendered"],
+      ["ArtifactTooLargeToRasteriseError", "too_large"],
+      ["ArtifactNotRasterisableError", "not_rasterisable"],
+      ["ArtifactRenderTimeoutError", "render_timeout"],
+    ]) {
+      const error = new Error("nope")
+      error.name = name
+      mockCapture.mockRejectedValueOnce(error)
+      await expect(
+        runArtifactBuiltinTool("artifact_capture", { artifactId }, deps(), ctx)
+      ).resolves.toEqual({ ok: false, code, error: "nope" })
+    }
+    mockCapture.mockRejectedValueOnce(new Error("canvas exploded"))
+    await expect(
+      runArtifactBuiltinTool("artifact_capture", { artifactId }, deps(), ctx)
+    ).resolves.toMatchObject({ ok: false, code: "tool_failed", error: "canvas exploded" })
+  })
+
+  it("reports not_found and invalid arguments without capturing", async () => {
+    await expect(
+      runArtifactBuiltinTool("artifact_capture", { artifactId: "ghost" }, deps(), ctx)
+    ).resolves.toMatchObject({ ok: false, code: "not_found" })
+    await expect(
+      runArtifactBuiltinTool("artifact_capture", {}, deps(), ctx)
+    ).resolves.toMatchObject({ ok: false, code: "invalid_arguments" })
+    expect(mockCapture).not.toHaveBeenCalled()
   })
 })
 

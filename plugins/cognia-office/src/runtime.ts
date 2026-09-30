@@ -1,6 +1,7 @@
 import type { PluginContext } from "@cognia/plugin-sdk"
 import { decodeCell } from "./a1"
 import { normalizeExportName, summarizeSave } from "./export-file"
+import { loadFormulaFunctions, recalculateWorkbook } from "./formula-eval"
 import {
   applyWorkbookOperations,
   createWorkbook,
@@ -34,6 +35,15 @@ export function normalizeXlsxName(value: string | undefined): string {
 }
 
 export function createOfficeRuntime(ctx: OfficePluginContext) {
+  /**
+   * Derive every formula's value from its formula, in place, before a commit
+   * — the stored value is never an agent's assertion. Import skips this and
+   * keeps the source file's cached values.
+   */
+  async function recalculate(workbook: WorkbookDocument) {
+    return recalculateWorkbook(workbook, await loadFormulaFunctions())
+  }
+
   function readArtifact(artifactId: string) {
     const artifact = ctx.artifact.getArtifact(artifactId)
     if (!artifact) throw new Error(`workbook artifact not found: ${artifactId}`)
@@ -88,6 +98,7 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
           : createWorkbook(input.title, input.sheetTitle),
         input.operations ?? []
       )
+      const recalculation = await recalculate(workbook)
       const artifactId = await createArtifact(workbook, input)
       return {
         ok: true as const,
@@ -95,6 +106,7 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         version: 1,
         summary: summarizeWorkbook(workbook),
         findings: validateWorkbook(workbook),
+        recalculation,
       }
     },
 
@@ -163,7 +175,7 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
       }
     },
 
-    applyOperations: (input: {
+    applyOperations: async (input: {
       artifactId: string
       expectedVersion: number
       operations: WorkbookOperation[]
@@ -171,6 +183,9 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
     }) => {
       const { workbook } = readArtifact(input.artifactId)
       const updated = applyWorkbookOperations(workbook, input.operations)
+      const recalculation = await recalculate(updated)
+      // `expectedVersion` still guards the write: an edit that landed while the
+      // function library loaded makes this one fail instead of overwriting it.
       const artifact = ctx.artifact.updateArtifact(input.artifactId, {
         content: JSON.stringify(updated),
         title: updated.title,
@@ -184,6 +199,7 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         version: artifact.version,
         summary: summarizeWorkbook(updated),
         findings: validateWorkbook(updated),
+        recalculation,
       }
     },
 

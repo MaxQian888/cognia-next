@@ -91,7 +91,13 @@
         "card.running": "Working…",
         "card.failed": "The tool did not finish.",
         "card.cancelled": "Cancelled — nothing was saved.",
-        "card.unreadable": "This result could not be read."
+        "card.unreadable": "This result could not be read.",
+        "edit.grid": "Sheet {name}. Arrow keys select a cell, Enter edits it, Delete clears it.",
+        "edit.input": "Edit cell {cell}",
+        "edit.saving": "Saving the edit…",
+        "edit.failed": "The edit was not applied: {error}",
+        "edit.conflict": "The workbook changed while you were editing, so the edit was not applied. Edit the current version again.",
+        "edit.changeDescription": "Edited a cell in the preview"
       },
       "zh-CN": {
         "manifest.name": "Cognia 表格",
@@ -159,7 +165,13 @@
         "card.running": "正在处理…",
         "card.failed": "工具未能完成。",
         "card.cancelled": "已取消，未保存任何内容。",
-        "card.unreadable": "无法读取此结果。"
+        "card.unreadable": "无法读取此结果。",
+        "edit.grid": "工作表 {name}。方向键选择单元格，Enter 编辑，Delete 清除内容。",
+        "edit.input": "编辑单元格 {cell}",
+        "edit.saving": "正在保存编辑…",
+        "edit.failed": "编辑未生效：{error}",
+        "edit.conflict": "编辑期间工作簿已被修改，本次编辑未生效。请在当前版本上重新编辑。",
+        "edit.changeDescription": "在预览中编辑了单元格"
       }
     }
   },

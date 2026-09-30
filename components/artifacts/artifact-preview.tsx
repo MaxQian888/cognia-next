@@ -54,6 +54,7 @@ import {
   ArtifactRenderer,
   PluginArtifactRendererHost,
   resolveArtifactRenderPlan,
+  type ArtifactRenderDensity,
 } from "./artifact-renderers"
 import { JupyterRenderer } from "./jupyter-renderer"
 import { getArtifactRuntimeAdapter } from "./runtime-adapters"
@@ -76,6 +77,8 @@ interface ArtifactPreviewProps {
    * renders the toggle claims it.
    */
   pickable?: boolean
+  /** Forwarded to the built-in renderers; see `ArtifactRenderDensity`. */
+  density?: ArtifactRenderDensity
 }
 
 /**
@@ -151,19 +154,46 @@ function PreviewLoading({ message }: { message?: string }) {
   )
 }
 
+const RUNTIME_HEALTH_BADGE_TONE: Record<Exclude<ArtifactRuntimeHealth, "ready">, string> = {
+  loading: "text-muted-foreground",
+  error: "border-destructive/30 text-destructive",
+  unsupported: "border-amber-500/30 text-amber-600 dark:text-amber-400",
+}
+
+/**
+ * Only a state worth reading gets a badge. A settled `ready` preview is the
+ * normal case, and stamping it over the content read as part of the artifact
+ * (a "READY" floating beside a document's first heading).
+ */
 function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
+  const t = useTranslations("artifacts.runtimeStates")
+  if (state === "ready") return null
   return (
     <div
       data-testid="runtime-health-badge"
       data-state={state}
-      className="absolute right-2 top-2 z-20 rounded-pill bg-background/90 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground shadow-sm"
+      role="status"
+      className={cn(
+        "pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-pill border bg-background/90 px-2 py-0.5 text-[11px] font-medium shadow-xs backdrop-blur-sm",
+        RUNTIME_HEALTH_BADGE_TONE[state]
+      )}
     >
-      {state}
+      {state === "loading" ? (
+        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      ) : (
+        <AlertCircle className="size-3" aria-hidden="true" />
+      )}
+      {t(state)}
     </div>
   )
 }
 
-export function ArtifactPreview({ artifact, className, pickable }: ArtifactPreviewProps) {
+export function ArtifactPreview({
+  artifact,
+  className,
+  pickable,
+  density = "default",
+}: ArtifactPreviewProps) {
   const t = useTranslations("artifactPreview")
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Mirrors `error` for the capturer, which is a long-lived closure and would
@@ -820,6 +850,7 @@ export function ArtifactPreview({ artifact, className, pickable }: ArtifactPrevi
       artifact={undefined}
       chartType={artifact.metadata?.chartType}
       className={adapter.rendererType === "chart" ? "min-h-[300px]" : "min-h-full"}
+      density={density}
     />
   )
 
@@ -860,6 +891,7 @@ export function ArtifactPreview({ artifact, className, pickable }: ArtifactPrevi
             content={artifact.content}
             artifact={artifact}
             className="min-h-full"
+            density={density}
           />
         </div>
       </PreviewErrorBoundary>

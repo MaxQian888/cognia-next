@@ -16,7 +16,7 @@
 
 import { getArtifactRuntimeAdapter } from "@/components/artifacts/runtime-adapters"
 import { generateDocument } from "@/lib/files/document-writer"
-import { renderArtifactToPngBlob, type RasteriseOptions } from "./raster"
+import { readAsDataUrl, renderArtifactToPngBlob, type RasteriseOptions } from "./raster"
 import type { Artifact } from "@/types"
 
 /** A4 at 72dpi in points, matching `document-writer`'s jsPDF unit. */
@@ -26,15 +26,6 @@ const PAGE_MARGIN_PT = 36
 
 /** Artifact types whose PDF is laid-out text rather than a picture. */
 const TEXT_PDF_TYPES = new Set(["document", "code", "jupyter"])
-
-function readAsDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error("failed to read the rendered image"))
-    reader.readAsDataURL(blob)
-  })
-}
 
 function loadImageSize(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {

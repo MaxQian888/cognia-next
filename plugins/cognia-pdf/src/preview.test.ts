@@ -227,3 +227,26 @@ it("ignores cancelled renders and releases the pdf.js document on dispose", asyn
   expect(env.destroy).toHaveBeenCalled()
   expect(env.container).toBeEmptyDOMElement()
 })
+
+it("reports ready once the latest load has painted its page", async () => {
+  let open: (session: PdfRenderSession) => void = () => {}
+  const { session, renderPage } = fakeSession()
+  const { handle } = mount({
+    openDocument: jest.fn(
+      () =>
+        new Promise<PdfRenderSession>((resolve) => {
+          open = resolve
+        })
+    ),
+  })
+  let settled = false
+  void handle.ready?.().then(() => {
+    settled = true
+  })
+  await flush()
+  expect(settled).toBe(false)
+  open(session)
+  await handle.ready?.()
+  expect(renderPage).toHaveBeenCalledTimes(1)
+  expect(settled).toBe(true)
+})

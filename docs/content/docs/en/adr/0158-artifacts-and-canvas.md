@@ -101,6 +101,16 @@ model pays for on every turn. `artifact_render` is the dock's job. `artifact_exp
 is withheld because a model writing to the user's disk is a consent question, and
 the button is one square from the user's eye.
 
+**Amendment (2026-09-29): a ninth tool, `artifact_capture`.** It is not
+`artifact_render` back: it draws nothing for the user, it returns the drawn pixels
+to the model as an MCP image block through the same relay, so an agent can check a
+chart, page or workbook it would otherwise ship blind. Plugin renderers are mounted
+off-screen through their own `mount → ready → dispose` contract
+(`ArtifactRendererHandle.ready`, implemented by the renderers that paint
+asynchronously); live Recharts / Mermaid / React previews exist only in the dock, so
+those are revealed and captured there (`lib/artifacts/capture.ts`). Read-only, so
+`allow`.
+
 **The part is emitted from `tool_result`, never `tool_use`.** This was the root
 cause of the "content cleared" placeholder: `tool_use` arrives *before* the row
 exists, so a part built from it can only point at an id that does not resolve.

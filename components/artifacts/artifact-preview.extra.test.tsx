@@ -22,9 +22,17 @@ jest.mock("./artifact-renderers", () => {
     "@/lib/artifacts/renderer-registry"
   )
   return {
-    ArtifactRenderer: ({ type, content }: { type: string; content: string }) => {
+    ArtifactRenderer: ({
+      type,
+      content,
+      density,
+    }: {
+      type: string
+      content: string
+      density?: string
+    }) => {
       if (content === "__throw__") throw new Error("inner preview failure")
-      return <div data-testid={`artifact-renderer-${type}`} />
+      return <div data-testid={`artifact-renderer-${type}`} data-density={density} />
     },
     PluginArtifactRendererHost: ({
       renderer,
@@ -131,6 +139,22 @@ describe("ArtifactPreview — extra coverage", () => {
     expect(screen.getByTestId("artifact-renderer-document")).toBeInTheDocument()
   })
 
+  it("forwards the density to the built-in renderer", () => {
+    render(
+      <ArtifactPreview artifact={dummy({ type: "document", content: "# hi" })} density="compact" />
+    )
+    expect(screen.getByTestId("artifact-renderer-document")).toHaveAttribute(
+      "data-density",
+      "compact"
+    )
+  })
+
+  it("stamps no runtime badge over a preview that settled fine", () => {
+    // A "READY" pill over a document read as part of the document.
+    render(<ArtifactPreview artifact={dummy({ type: "document", content: "# hi" })} />)
+    expect(screen.queryByTestId("runtime-health-badge")).toBeNull()
+  })
+
   it("renders the math branch", () => {
     render(<ArtifactPreview artifact={dummy({ type: "math", content: "$$x$$" })} />)
     expect(screen.getByTestId("artifact-renderer-math")).toBeInTheDocument()
@@ -174,10 +198,11 @@ describe("ArtifactPreview — extra coverage", () => {
       />
     )
 
-    expect(await screen.findByTestId("runtime-health-badge")).toHaveAttribute(
-      "data-state",
-      "unsupported"
-    )
+    const badge = await screen.findByTestId("runtime-health-badge")
+    expect(badge).toHaveAttribute("data-state", "unsupported")
+    // Translated through `artifacts.runtimeStates`, not the raw state id.
+    expect(badge).toHaveAttribute("role", "status")
+    expect(badge).toHaveTextContent("unsupported")
   })
 
   it("renders a React-typed iframe (separate sandbox path)", () => {

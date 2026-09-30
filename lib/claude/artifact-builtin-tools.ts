@@ -37,6 +37,8 @@ import { revealCanvasDocument } from "@/lib/artifacts/reveal"
 import { buildArtifactSourceMetadata } from "@/lib/artifacts/source-metadata"
 import { CHART_TYPES } from "@/lib/artifacts/chart-contract"
 import { ARTIFACT_TYPES } from "@/lib/artifacts/constants"
+import type { ArtifactImage } from "@/lib/artifacts/capture"
+import type { CaptureOptions } from "@/lib/artifacts/export/raster"
 import type { Artifact, ArtifactLanguage, ArtifactType, CanvasDocument } from "@/types"
 
 export const ARTIFACT_BUILTIN_PLUGIN_ID = "cognia-artifact-builtin"
@@ -45,6 +47,7 @@ export const ARTIFACT_CREATE_TOOL_NAME = "artifact_create"
 export const ARTIFACT_UPDATE_TOOL_NAME = "artifact_update"
 export const ARTIFACT_READ_TOOL_NAME = "artifact_read"
 export const ARTIFACT_DELETE_TOOL_NAME = "artifact_delete"
+export const ARTIFACT_CAPTURE_TOOL_NAME = "artifact_capture"
 export const CANVAS_CREATE_TOOL_NAME = "canvas_create"
 export const CANVAS_UPDATE_TOOL_NAME = "canvas_update"
 export const CANVAS_READ_TOOL_NAME = "canvas_read"
@@ -55,6 +58,7 @@ export const ARTIFACT_TOOL_NAMES = [
   ARTIFACT_UPDATE_TOOL_NAME,
   ARTIFACT_READ_TOOL_NAME,
   ARTIFACT_DELETE_TOOL_NAME,
+  ARTIFACT_CAPTURE_TOOL_NAME,
 ] as const
 
 export const CANVAS_TOOL_NAMES = [
@@ -172,6 +176,34 @@ export function buildArtifactManifestEntries(): ArtifactManifestEntry[] {
         additionalProperties: false,
         required: ["artifactId"],
         properties: { artifactId: { type: "string", minLength: 1 } },
+      },
+    },
+    {
+      name: ARTIFACT_CAPTURE_TOOL_NAME,
+      pluginId: ARTIFACT_BUILTIN_PLUGIN_ID,
+      description:
+        "See an artifact the way the user does: renders it and returns a PNG. Call it after creating or changing a chart, page, diagram, workbook, document or deck, and fix clipped, overflowing, blank or wrong-looking output before telling the user it is done. Charts and React pages are brought on screen to be captured.",
+      jsonSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["artifactId"],
+        properties: {
+          artifactId: { type: "string", minLength: 1 },
+          width: {
+            type: "integer",
+            minimum: 320,
+            maximum: 2560,
+            description:
+              "Viewport width in CSS pixels for plugin-rendered artifacts (default 1280).",
+          },
+          height: {
+            type: "integer",
+            minimum: 200,
+            maximum: 16000,
+            description:
+              "Viewport height in CSS pixels for plugin-rendered artifacts (default 800).",
+          },
+        },
       },
     },
   ]
@@ -297,6 +329,8 @@ function canvasSummary(doc: CanvasDocument) {
 export interface ArtifactToolDeps {
   store: ReturnType<typeof useArtifactStore.getState>
   activeSessionId: string | null
+  /** Renders an artifact to an image (`lib/artifacts/capture.ts`); injected for tests. */
+  capture: (artifact: Artifact, options: CaptureOptions) => Promise<ArtifactImage>
 }
 
 /** Resolve the renderer-side singletons the runner writes through. */
@@ -304,7 +338,24 @@ export function resolveArtifactToolDeps(): ArtifactToolDeps {
   return {
     store: useArtifactStore.getState(),
     activeSessionId: useChatStore.getState().activeSessionId,
+    // Loaded on first capture: html2canvas is not free, and most turns never look.
+    capture: async (artifact, options) =>
+      (await import("@/lib/artifacts/capture")).captureArtifactImage(artifact, options),
   }
+}
+
+/** The raster module's typed failures, as codes the model can act on. */
+const CAPTURE_ERROR_CODES: Record<string, string> = {
+  ArtifactPreviewNotMountedError: "not_rendered",
+  ArtifactTooLargeToRasteriseError: "too_large",
+  ArtifactNotRasterisableError: "not_rasterisable",
+  ArtifactRenderTimeoutError: "render_timeout",
+  ArtifactFrameCaptureTimeoutError: "render_timeout",
+}
+
+function optionalInteger(args: Record<string, unknown>, key: string): number | undefined {
+  const value = args[key]
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined
 }
 
 /**
@@ -428,6 +479,33 @@ export async function runArtifactBuiltinTool(
         if (!store.getArtifact(artifactId)) return notFound("artifact", artifactId)
         store.deleteArtifact(artifactId)
         return { ok: true as const, artifactId, deleted: true as const }
+      }
+
+      case ARTIFACT_CAPTURE_TOOL_NAME: {
+        const artifactId = str(args, "artifactId")
+        if (!artifactId) return invalidArguments("artifactId is required")
+        const artifact = store.getArtifact(artifactId)
+        if (!artifact) return notFound("artifact", artifactId)
+        const width = optionalInteger(args, "width")
+        const height = optionalInteger(args, "height")
+        try {
+          const image = await deps.capture(artifact, {
+            ...(width !== undefined ? { width } : {}),
+            ...(height !== undefined ? { height } : {}),
+          })
+          // An MCP CallToolResult: the relay passes it through untouched, so the
+          // model receives an image block rather than base64 text.
+          return {
+            content: [
+              { type: "text", text: JSON.stringify({ ok: true, ...artifactSummary(artifact) }) },
+              { type: "image", data: image.data, mimeType: image.mimeType },
+            ],
+          }
+        } catch (err) {
+          const code = err instanceof Error ? CAPTURE_ERROR_CODES[err.name] : undefined
+          if (!code) throw err
+          return { ok: false as const, code, error: err instanceof Error ? err.message : "" }
+        }
       }
 
       case CANVAS_CREATE_TOOL_NAME: {

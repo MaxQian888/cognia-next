@@ -18,8 +18,16 @@ jest.mock("@/components/chat/renderers/mermaid-block", () => ({
   MermaidBlock: ({ content }: { content: string }) => <div data-testid="mermaid">{content}</div>,
 }))
 jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content, rhythm }: { content: string; rhythm?: string }) => (
-    <div data-testid="md" data-rhythm={rhythm}>
+  MarkdownRenderer: ({
+    content,
+    rhythm,
+    className,
+  }: {
+    content: string
+    rhythm?: string
+    className?: string
+  }) => (
+    <div data-testid="md" data-rhythm={rhythm} className={className}>
       {content}
     </div>
   ),
@@ -110,6 +118,19 @@ describe("ArtifactRenderer", () => {
   it("dispatches to MarkdownRenderer for documents", () => {
     render(<ArtifactRenderer type="document" content="# hi" />)
     expect(screen.getByTestId("md")).toHaveAttribute("data-rhythm", "document")
+  })
+
+  it("insets a document from the frame edge and holds it to a readable measure", () => {
+    render(<ArtifactRenderer type="document" content="# hi" className="min-h-full" />)
+    const md = screen.getByTestId("md")
+    expect(md).toHaveClass("px-6", "py-5", "max-w-3xl", "min-h-full")
+  })
+
+  it("steps a compact document down to the chat column's scale", () => {
+    render(<ArtifactRenderer type="document" content="# hi" density="compact" />)
+    const md = screen.getByTestId("md")
+    expect(md).toHaveClass("px-4", "py-3", "[--typeset-size:0.875rem]")
+    expect(md).not.toHaveClass("max-w-3xl")
   })
 
   it("dispatches to CodeBlock for code", () => {

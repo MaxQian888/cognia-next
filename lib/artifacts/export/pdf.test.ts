@@ -6,6 +6,7 @@ jest.mock("@/lib/files/document-writer", () => ({
 
 const renderPngMock = jest.fn()
 jest.mock("./raster", () => ({
+  ...jest.requireActual<typeof import("./raster")>("./raster"),
   renderArtifactToPngBlob: (...args: unknown[]) => renderPngMock(...args),
 }))
 

@@ -149,6 +149,10 @@ export type BuiltInToolName =
   | "artifact_update"
   | "artifact_read"
   | "artifact_delete"
+  //   `artifact_capture` is not `artifact_render` back: it asks for nothing
+  //   to be drawn for the user, it returns the drawn pixels to the MODEL, so
+  //   it can check the result it would otherwise ship blind.
+  | "artifact_capture"
   // Desktop pet (ADR-0058), implemented in `lib/claude/pet-builtin-tools.ts`
   // and routed host-side through `lib/claude/plugin-tool-ipc.ts`. Offered only
   // when the user turned them on in Settings, Tools, and never on the mobile

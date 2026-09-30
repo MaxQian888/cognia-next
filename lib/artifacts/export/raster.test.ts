@@ -8,10 +8,16 @@ jest.mock("html2canvas-pro", () => ({
 import {
   ArtifactNotRasterisableError,
   ArtifactPreviewNotMountedError,
+  ArtifactRenderTimeoutError,
   ArtifactTooLargeToRasteriseError,
+  DEFAULT_CAPTURE_VIEWPORT,
   MAX_PNG_HEIGHT_PX,
+  MIN_CAPTURE_WIDTH_PX,
+  captureArtifactToPngBlob,
+  readAsDataUrl,
   renderArtifactToPngBlob,
 } from "./raster"
+import { registerArtifactRenderer } from "@/lib/artifacts/renderer-registry"
 import {
   clearArtifactPreviewNodes,
   registerArtifactPreviewNode,
@@ -181,5 +187,111 @@ describe("renderArtifactToPngBlob — react", () => {
     await expect(
       renderArtifactToPngBlob({ id: "r1", type: "react", content: "x" })
     ).rejects.toBeInstanceOf(ArtifactTooLargeToRasteriseError)
+  })
+})
+
+describe("captureArtifactToPngBlob — plugin renderers", () => {
+  const artifact = {
+    id: "wb1",
+    sessionId: "s1",
+    messageId: "m1",
+    type: "code" as const,
+    title: "Workbook",
+    content: "{}",
+    language: "json" as const,
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    metadata: { plugin: { kind: "demo/sheet", schemaVersion: 1, ownerPluginId: "demo" } },
+  }
+  let dispose: () => void
+
+  afterEach(() => dispose?.())
+
+  function register(ready?: () => Promise<void>) {
+    const events: string[] = []
+    const mounted: HTMLElement[] = []
+    dispose = registerArtifactRenderer("demo/sheet", {
+      id: "demo/sheet",
+      kind: "demo/sheet",
+      mount: (_artifact, container) => {
+        events.push("mount")
+        mounted.push(container)
+        container.textContent = "grid"
+        return {
+          ...(ready ? { ready } : {}),
+          dispose: () => {
+            events.push("dispose")
+            container.replaceChildren()
+          },
+        }
+      },
+    })
+    return { events, mounted }
+  }
+
+  it("mounts off-screen at the requested viewport, waits for ready, and cleans up", async () => {
+    let finishPaint: () => void = () => {}
+    const painted = new Promise<void>((resolve) => {
+      finishPaint = resolve
+    })
+    const { events, mounted } = register(() => painted)
+    const pending = captureArtifactToPngBlob(artifact, { width: 10, height: 99_999 })
+    await Promise.resolve()
+    expect(html2canvasMock).not.toHaveBeenCalled()
+    const container = mounted[0]
+    // Clamped to the capture bounds, and out of sight but not hidden.
+    expect(container.style.width).toBe(`${MIN_CAPTURE_WIDTH_PX}px`)
+    expect(container.style.height).toBe(`${MAX_PNG_HEIGHT_PX}px`)
+    expect(container.style.left).toBe("-100000px")
+    expect(container.getAttribute("aria-hidden")).toBe("true")
+    finishPaint()
+    const blob = await pending
+    expect(blob.type).toBe("image/png")
+    const [target, options] = html2canvasMock.mock.calls[0]
+    expect(target).toBe(container)
+    expect(options).toMatchObject({ scale: 1, x: 0, y: 0, width: MIN_CAPTURE_WIDTH_PX })
+    // The clone is moved back on-screen so the crop at 0,0 contains it.
+    const cloned = document.implementation.createHTMLDocument("")
+    const clone = cloned.createElement("div")
+    clone.id = container.id
+    clone.style.left = "-100000px"
+    cloned.body.appendChild(clone)
+    options.onclone(cloned)
+    expect(clone.style.left).toBe("0px")
+    expect(events).toEqual(["mount", "dispose"])
+    expect(container.isConnected).toBe(false)
+  })
+
+  it("defaults to the standard viewport when the renderer paints synchronously", async () => {
+    register()
+    await captureArtifactToPngBlob(artifact)
+    expect(html2canvasMock.mock.calls[0][1]).toMatchObject({
+      width: DEFAULT_CAPTURE_VIEWPORT.width,
+      height: DEFAULT_CAPTURE_VIEWPORT.height,
+    })
+  })
+
+  it("times out a renderer that never paints, and still disposes it", async () => {
+    const { events } = register(() => new Promise<void>(() => {}))
+    await expect(captureArtifactToPngBlob(artifact, { readyTimeoutMs: 5 })).rejects.toBeInstanceOf(
+      ArtifactRenderTimeoutError
+    )
+    expect(events).toEqual(["mount", "dispose"])
+    expect(html2canvasMock).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the built-in transports without a plugin renderer", async () => {
+    await expect(
+      captureArtifactToPngBlob({ ...artifact, id: "c1", type: "chart", metadata: undefined })
+    ).rejects.toBeInstanceOf(ArtifactPreviewNotMountedError)
+  })
+})
+
+describe("readAsDataUrl", () => {
+  it("encodes a blob as a data URL", async () => {
+    await expect(readAsDataUrl(new Blob(["hi"], { type: "text/plain" }))).resolves.toBe(
+      "data:text/plain;base64,aGk="
+    )
   })
 })

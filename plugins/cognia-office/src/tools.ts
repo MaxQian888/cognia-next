@@ -33,8 +33,8 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
         name: OFFICE_TOOL_NAMES[0],
         description:
           "Create a native XLSX-ready workbook artifact from deterministic workbook operations. " +
-          "Returns a summary (sheets, used ranges, findings), not the cells; read them back with " +
-          "office_read_range.",
+          "Formulas are evaluated on commit (see recalculation). Returns a summary (sheets, used " +
+          "ranges, findings), not the cells; read them back with office_read_range.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -106,7 +106,10 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
           "Atomically apply deterministic workbook operations with optimistic version checking. " +
           "Structural edits (insert/delete rows or columns, rename/delete sheets) rewrite formula " +
           "references across every sheet the way Excel does; references into deleted cells " +
-          "become #REF!.",
+          "become #REF!. Every formula is then recalculated and its computed value stored. " +
+          "recalculation lists error results (errorCells) and formulas the engine could not " +
+          "evaluate (issues: circular → #REF!, unsupported or syntax → cached value kept, else " +
+          "an error); fix those before relying on the numbers.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -143,7 +146,10 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistrat
       name: OFFICE_TOOL_NAMES[5],
       definition: {
         name: OFFICE_TOOL_NAMES[5],
-        description: "Open the read-only workbook preview.",
+        description:
+          "Open the workbook preview for the user, who can also edit cells there (a human edit " +
+          "is a new version: pass the current version as expectedVersion). To see the rendered " +
+          "sheet yourself, call artifact_capture with the artifactId.",
         parametersSchema: artifactOnlySchema,
       },
       execute: async (args) => {
@@ -357,8 +363,11 @@ const cellSchema = {
   type: "object",
   properties: {
     type: { enum: ["string", "number", "boolean", "date", "blank", "error"] },
-    value: { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }] },
-    formula: { type: "string", minLength: 1 },
+    value: {
+      anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
+      description: "Omit for formula cells: the computed result replaces it.",
+    },
+    formula: { type: "string", minLength: 1, description: "Excel formula, e.g. SUM(A1:A5)." },
     style: styleSchema,
   },
   required: ["type"],

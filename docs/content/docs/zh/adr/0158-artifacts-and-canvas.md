@@ -89,6 +89,14 @@ CLI 也在复用。第二个 MCP server 只会换来第二套注册面、第二�
 是 dock 的事。`artifact_export` 被扣下：模型主动往用户磁盘写是同意面问题，而按钮
 就在用户眼前一格。
 
+**修订（2026-09-29）：第 9 个工具 `artifact_capture`。** 它不是 `artifact_render`
+的回归：它不为用户绘制任何东西，而是把已绘制的像素以 MCP image 块经同一条中继
+交还给**模型**，让 agent 能检查原本只能盲交的图表、页面或工作簿。插件渲染器通过
+自身的 `mount → ready → dispose` 契约在屏幕外挂载（`ArtifactRendererHandle.ready`，
+由异步绘制的渲染器实现）；Recharts / Mermaid / React 的实时预览只存在于 dock 中，
+因此这类工件会先被展示再在 dock 里截取（`lib/artifacts/capture.ts`）。只读，所以
+是 `allow`。
+
 **part 从 `tool_result` 发出，绝不从 `tool_use`。** 这正是「内容已清除」占位符的
 根因：`tool_use` 早于行的创建，据此构造的 part 只能指向一个解析不出来的 id。
 `lib/artifacts/tool-part.ts` 现在是两条路径共用的唯一转换器，取代了那对重复实现。

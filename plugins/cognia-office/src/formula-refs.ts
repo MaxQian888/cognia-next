@@ -49,7 +49,7 @@ export type FormulaEdit =
   | { kind: "deleteSheet"; sheet: string }
 
 /** One A1 reference, decoded. Row/column indexes are 0-based. */
-type RefBody =
+export type RefBody =
   | {
       type: "area"
       start: { c: number; r: number; absC: boolean; absR: boolean }
@@ -67,7 +67,7 @@ type RefBody =
       end: { r: number; abs: boolean }
     }
 
-interface SheetPrefix {
+export interface SheetPrefix {
   /** Sheet names, one entry (or two for a 3D span), unquoted. */
   names: string[]
   /** Text of the prefix as written, including the trailing `!`. */
@@ -108,19 +108,19 @@ export function rewriteFormula(formula: string, hostSheet: string, edit: Formula
       external = true
       continue
     }
-    if (char === "'") {
-      const prefix = readQuotedPrefix(formula, index)
-      if (prefix) {
-        const ref = readRefBody(formula, prefix.end)
-        if (ref) {
-          out += external
-            ? formula.slice(index, ref.end)
-            : rewriteRef(formula.slice(index, ref.end), prefix.prefix, ref.body, hostSheet, edit)
-          index = ref.end
-          external = false
-          continue
-        }
+    const startsWord = isWordChar(char) && !isWordChar(formula[index - 1])
+    if (char === "'" || startsWord) {
+      const ref = readReferenceAt(formula, index)
+      if (ref) {
+        out += external
+          ? formula.slice(index, ref.end)
+          : rewriteRef(formula.slice(index, ref.end), ref.prefix, ref.body, hostSheet, edit)
+        index = ref.end
+        external = false
+        continue
       }
+    }
+    if (char === "'") {
       // Not a sheet-qualified reference: copy the quoted run verbatim.
       const end = skipQuoted(formula, index)
       out += formula.slice(index, end)
@@ -128,18 +128,7 @@ export function rewriteFormula(formula: string, hostSheet: string, edit: Formula
       external = false
       continue
     }
-    if (isWordChar(char) && !isWordChar(formula[index - 1])) {
-      const prefix = readUnquotedPrefix(formula, index)
-      const bodyStart = prefix ? prefix.end : index
-      const ref = readRefBody(formula, bodyStart)
-      if (ref) {
-        out += external
-          ? formula.slice(index, ref.end)
-          : rewriteRef(formula.slice(index, ref.end), prefix?.prefix, ref.body, hostSheet, edit)
-        index = ref.end
-        external = false
-        continue
-      }
+    if (startsWord) {
       const end = skipWord(formula, index)
       out += formula.slice(index, end)
       index = end
@@ -310,6 +299,25 @@ function formatBody(body: RefBody): string {
 // ---------------------------------------------------------------------------
 // Scanning
 // ---------------------------------------------------------------------------
+
+/**
+ * A reference starting at `from` — `A1`, `$A$1:B2`, `A:C`, `2:5`, optionally
+ * behind `Sheet1!` / `'My sheet'!` / a 3D `First:Last!` prefix — or null.
+ * The one reference grammar: the rewriter above and the evaluator's tokenizer
+ * (`formula-parser.ts`) both read through it. Callers own the word-boundary
+ * check (`xA1` is not a reference), and a quoted run that is not followed by a
+ * reference body returns null.
+ */
+export function readReferenceAt(
+  formula: string,
+  from: number
+): { prefix?: SheetPrefix; body: RefBody; end: number } | null {
+  const prefix =
+    formula[from] === "'" ? readQuotedPrefix(formula, from) : readUnquotedPrefix(formula, from)
+  if (formula[from] === "'" && !prefix) return null
+  const ref = readRefBody(formula, prefix ? prefix.end : from)
+  return ref ? { ...(prefix ? { prefix: prefix.prefix } : {}), body: ref.body, end: ref.end } : null
+}
 
 function skipString(formula: string, from: number): number {
   let index = from + 1

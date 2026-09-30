@@ -31,6 +31,7 @@ const DECLARED_ARTIFACT_TOOLS = [
   "artifact_update",
   "artifact_read",
   "artifact_delete",
+  "artifact_capture",
 ] as const satisfies readonly BuiltInToolName[]
 
 describe("declared artifact/canvas tool names", () => {

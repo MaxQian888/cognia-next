@@ -27,12 +27,22 @@
  * - **renderer types** (chart / mermaid / math): captured from the mounted
  *   node via `lib/artifacts/preview-registry.ts`. Recharts and Mermaid draw
  *   live React/SVG; there is no serialisable source to re-render off-screen.
+ * - **plugin renderers** (a cognia-office workbook, a cognia-pdf page, …):
+ *   mounted off-screen through the same `mount` → `ready` → `dispose`
+ *   contract the dock uses (`components/artifacts/artifact-renderers.tsx`), so
+ *   the capture is exactly what a person would see, with no preview open.
+ *   `captureArtifactToPngBlob` routes there; this is how an agent sees what it
+ *   produced (`artifact_capture` in `lib/claude/artifact-builtin-tools.ts`).
  */
 
 import html2canvas from "html2canvas-pro"
 import { sanitizeHTML } from "@/lib/artifacts/preview-utils"
 import { getArtifactPreviewNode } from "@/lib/artifacts/preview-registry"
 import { captureArtifactFrame } from "@/lib/artifacts/frame-capture-registry"
+import {
+  resolveRegisteredArtifactRenderer,
+  type PluginArtifactRenderer,
+} from "@/lib/artifacts/renderer-registry"
 import { getArtifactRuntimeAdapter } from "@/components/artifacts/runtime-adapters"
 import type { Artifact } from "@/types"
 
@@ -68,6 +78,16 @@ export class ArtifactNotRasterisableError extends Error {
     super(`artifact type ${type} has no rendered form to rasterise`)
     this.name = "ArtifactNotRasterisableError"
   }
+}
+
+/** A rendered image as a `data:` URL (the PDF page embeds it; `artifact_capture` strips the prefix). */
+export function readAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error("failed to read the rendered image"))
+    reader.readAsDataURL(blob)
+  })
 }
 
 function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -202,4 +222,122 @@ export async function renderArtifactToPngBlob(
     return rasteriseMountedNode(node, background ?? "#ffffff")
   }
   throw new ArtifactNotRasterisableError(artifact.type)
+}
+
+/** Viewport a plugin renderer is captured at when the caller names none. */
+export const DEFAULT_CAPTURE_VIEWPORT = { width: 1280, height: 800 } as const
+/** Narrowest / widest capture viewport, so a caller cannot ask for a sliver or a mural. */
+export const MIN_CAPTURE_WIDTH_PX = 320
+export const MAX_CAPTURE_WIDTH_PX = 2560
+export const MIN_CAPTURE_HEIGHT_PX = 200
+/** How long a plugin renderer may take to finish its first paint (`handle.ready`). */
+export const RENDERER_READY_TIMEOUT_MS = 10_000
+
+/** A plugin renderer never finished its first paint. */
+export class ArtifactRenderTimeoutError extends Error {
+  constructor(artifactId: string, ms: number) {
+    super(`artifact ${artifactId} did not finish rendering within ${ms}ms`)
+    this.name = "ArtifactRenderTimeoutError"
+  }
+}
+
+export interface CaptureOptions extends RasteriseOptions {
+  /** CSS pixels. Clamped to the capture bounds above. */
+  width?: number
+  height?: number
+  /** Device pixel ratio of the image; 1 keeps an agent-bound image small. */
+  scale?: number
+  /** Test seam for the first-paint wait. */
+  readyTimeoutMs?: number
+}
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, Math.round(value)))
+
+/**
+ * Mount `renderer` into a detached-from-view container, wait for its first
+ * complete paint, rasterise, and dispose — never touching the dock.
+ *
+ * The container sits far off-screen rather than hidden: html2canvas skips
+ * `visibility:hidden` and `opacity:0` subtrees. Its clone is moved back to
+ * the origin in `onclone`, and the crop is pinned there with `x`/`y`, so the
+ * capture does not depend on how a browser lays out an element at -100000px.
+ */
+async function rasterisePluginRenderer(
+  artifact: Artifact,
+  renderer: PluginArtifactRenderer,
+  options: CaptureOptions
+): Promise<Blob> {
+  const width = clamp(
+    options.width ?? DEFAULT_CAPTURE_VIEWPORT.width,
+    MIN_CAPTURE_WIDTH_PX,
+    MAX_CAPTURE_WIDTH_PX
+  )
+  const height = clamp(
+    options.height ?? DEFAULT_CAPTURE_VIEWPORT.height,
+    MIN_CAPTURE_HEIGHT_PX,
+    MAX_PNG_HEIGHT_PX
+  )
+  const background = options.background === undefined ? "#ffffff" : options.background
+  const timeoutMs = options.readyTimeoutMs ?? RENDERER_READY_TIMEOUT_MS
+  const container = document.createElement("div")
+  const captureId = `artifact-capture-${artifact.id}-${Date.now()}`
+  container.id = captureId
+  container.setAttribute("aria-hidden", "true")
+  container.inert = true
+  container.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${height}px;overflow:hidden;pointer-events:none;contain:strict`
+  document.body.appendChild(container)
+  let handle: ReturnType<PluginArtifactRenderer["mount"]> | null = null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    handle = renderer.mount(artifact, container)
+    const ready = handle.ready?.() ?? Promise.resolve()
+    await Promise.race([
+      ready,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ArtifactRenderTimeoutError(artifact.id, timeoutMs)),
+          timeoutMs
+        )
+      }),
+    ])
+    // Yield once so work queued by the last paint settles. Not a
+    // requestAnimationFrame: a backgrounded window (the agent working while the
+    // user is elsewhere) never runs one, and html2canvas forces layout itself.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const canvas = await html2canvas(container, {
+      backgroundColor: background,
+      scale: options.scale ?? 1,
+      width,
+      height,
+      x: 0,
+      y: 0,
+      windowWidth: width,
+      windowHeight: height,
+      logging: false,
+      onclone: (clonedDocument) => {
+        const clone = clonedDocument.getElementById(captureId)
+        if (clone) clone.style.left = "0px"
+      },
+    })
+    return await canvasToPng(canvas)
+  } finally {
+    if (timer) clearTimeout(timer)
+    handle?.dispose()
+    container.remove()
+  }
+}
+
+/**
+ * What `artifact` looks like, as a PNG: a plugin renderer captured off-screen
+ * at the requested viewport, anything else through `renderArtifactToPngBlob`
+ * (with its typed "preview it first" / "too large" / "nothing to draw" errors).
+ */
+export async function captureArtifactToPngBlob(
+  artifact: Artifact,
+  options: CaptureOptions = {}
+): Promise<Blob> {
+  const renderer = resolveRegisteredArtifactRenderer(artifact)
+  if (renderer) return rasterisePluginRenderer(artifact, renderer, options)
+  return renderArtifactToPngBlob(artifact, { background: options.background })
 }

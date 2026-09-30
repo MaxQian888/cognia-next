@@ -12,8 +12,8 @@
  * - `artifact_update` / `canvas_update` — with the user's own
  *   review-before-apply setting on (the default) these stage a diff rather than
  *   overwriting, and versions are kept either way. Allowed.
- * - `artifact_read` / `canvas_read` / `canvas_open` — read or move the user's
- *   viewport. Allowed.
+ * - `artifact_read` / `artifact_capture` / `canvas_read` / `canvas_open` —
+ *   read, or move the user's viewport. Allowed.
  * - `artifact_delete` — destroys user-visible work. Asks.
  *
  * Precedence: merged as the LOWEST layer of `opts.permissionRuleset`, so an

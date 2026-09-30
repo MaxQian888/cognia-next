@@ -2492,6 +2492,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // A coordinated project's coordinator and threads (ADR-0204): gates both the
+  // project goal section below and the coordinator tool ruleset.
+  const projectRoleToolsSurfaced = projectRoleToolsApply(session, ctx.activeProject)
   const systemPrompt = [
     baseSystem,
     personaSection,
@@ -2499,10 +2502,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // The turn's own workspace (`activeProject` is `resolveSessionWorkspace`),
     // not whichever one is on screen.
     buildWorkspaceInstructionsSection(ctx.activeProject),
-    // A coordinated project's goal (ADR-0204), for its coordinator and threads.
-    projectRoleToolsApply(session, ctx.activeProject)
-      ? buildProjectGoalSection(ctx.activeProject)
-      : "",
+    projectRoleToolsSurfaced ? buildProjectGoalSection(ctx.activeProject) : "",
     memorySection,
     projectContinuitySection,
     projectKnowledgeSection,
@@ -2642,7 +2642,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.selfInvokeTools?.pet === true && (await import("@/lib/tauri")).isTauri()
   const { buildTemplateToolRuleset } = await import("@/lib/claude/permissions/template-tool-rules")
   const { buildPetToolRuleset } = await import("@/lib/claude/permissions/pet-tool-rules")
-  const projectRoleToolsSurfaced = projectRoleToolsApply(session, ctx.activeProject)
   const { buildMediaToolRuleset } = await import("@/lib/claude/permissions/media-tool-rules")
   const { buildProjectCoordinatorToolRuleset } =
     await import("@/lib/claude/permissions/project-coordinator-tool-rules")

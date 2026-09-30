@@ -39,6 +39,13 @@ export type { ChartDataPoint } from "./chart-renderer"
 
 export type ArtifactRendererOwner = "plugin" | "builtin" | "runtime" | "jupyter"
 
+/**
+ * How much room a renderer is drawn into. `"default"` is a full pane (the dock,
+ * the canvas preview, Files); `"compact"` is a card inside the message stream,
+ * where article-sized headings and pane-sized margins crowd the transcript.
+ */
+export type ArtifactRenderDensity = "default" | "compact"
+
 export interface ArtifactRenderPlan {
   owner: ArtifactRendererOwner
   pluginRenderer?: PluginArtifactRenderer
@@ -246,6 +253,7 @@ export function ArtifactRenderer({
   chartType,
   chartData,
   artifact,
+  density = "default",
 }: {
   type: string
   content: string
@@ -253,6 +261,7 @@ export function ArtifactRenderer({
   chartType?: ArtifactChartType
   chartData?: ChartDataPoint[]
   artifact?: Artifact
+  density?: ArtifactRenderDensity
 }) {
   if (artifact) {
     const plan = resolveArtifactRenderPlan(artifact)
@@ -289,7 +298,21 @@ export function ArtifactRenderer({
     case "math":
       return <MathBlock content={content} className={className} />
     case "document":
-      return <ChatMarkdownRenderer content={content} className={className} rhythm="document" />
+      // A document is prose, so it gets a page: inset from the frame edge and
+      // held to a readable measure on wide panes. The compact card steps the
+      // typeset scale down to the chat column's size instead.
+      return (
+        <ChatMarkdownRenderer
+          content={content}
+          rhythm="document"
+          className={cn(
+            density === "compact"
+              ? "px-4 py-3 [--typeset-flow:1em] [--typeset-size:0.875rem]"
+              : "mx-auto w-full max-w-3xl px-6 py-5",
+            className
+          )}
+        />
+      )
     case "code":
       return (
         <CodeBlock

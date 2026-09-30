@@ -479,3 +479,19 @@ it("localizes the overlapping-merge finding with its ranges", () => {
   const item = container.querySelector('.copv-findings li[data-severity="error"]')
   expect(item).toHaveTextContent("合并区域 A1:B2 与 B2:C3 重叠")
 })
+
+it("reports ready once the grid is painted, for off-screen capture", async () => {
+  const container = document.createElement("div")
+  const handle = createWorkbookRenderer(translator()).mount(
+    artifact(
+      JSON.stringify(
+        applyWorkbookOperations(createWorkbook("Book"), [
+          { op: "setCell", sheet: "Sheet1", cell: "A1", value: { type: "number", value: 1 } },
+        ])
+      )
+    ),
+    container
+  )
+  await expect(handle.ready?.()).resolves.toBeUndefined()
+  expect(container.querySelector("td[data-ref='A1']")?.textContent).toBe("1")
+})

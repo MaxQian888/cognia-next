@@ -129,7 +129,7 @@
     "clearOutputOnRun": "Clear output on each run",
     "maxExecutionTime": "Max execution time",
     "pythonAvailable": "Python runs through this app's confined interpreter.",
-    "pythonRequiresDesktop": "Python execution requires the desktop build (Tauri). Run `pnpm tauri dev` to enable.",
+    "pythonRequiresDesktop": "Python execution runs in the Cognia desktop app. Open this canvas there to run Python.",
     "showOutput": "Show output panel"
   },
   "resetAll": "Reset all",

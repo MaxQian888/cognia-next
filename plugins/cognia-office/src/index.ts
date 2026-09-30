@@ -64,6 +64,14 @@ export default definePlugin({
           onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler),
           exportWorkbook: (artifactId, allowUnsupportedFeatureLoss) =>
             runtime.exportXlsx(artifactId, undefined, allowUnsupportedFeatureLoss),
+          // A human cell edit commits (and recalculates) like office_apply_operations.
+          applyEdit: (artifactId, expectedVersion, operations) =>
+            runtime.applyOperations({
+              artifactId,
+              expectedVersion,
+              operations,
+              changeDescription: t("edit.changeDescription"),
+            }),
         })
       ),
       "cognia-office:renderer"

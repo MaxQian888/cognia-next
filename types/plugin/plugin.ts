@@ -5030,6 +5030,13 @@ export interface ArtifactRenderer {
 export interface ArtifactRendererHandle {
   update?: (artifact: Artifact) => void
   dispose: () => void
+  /**
+   * Resolves once the first complete paint is in the container — after any
+   * lazily loaded engine (a number formatter, pdf.js) has drawn. Off-screen
+   * capture (`artifact_capture`) waits on it; omit it when `mount` paints
+   * synchronously.
+   */
+  ready?: () => Promise<void>
 }
 
 export interface PluginFileHandle {
