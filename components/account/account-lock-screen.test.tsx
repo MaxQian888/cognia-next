@@ -15,6 +15,9 @@ jest.mock("next-intl", () => ({
   useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }))
 
+let mockPlatform = "web"
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
+
 const mockCopy = jest.fn()
 jest.mock("@/hooks/ui/use-copy", () => ({
   useCopy: () => ({ copied: false, isCopying: false, copy: mockCopy }),
@@ -79,6 +82,27 @@ describe("idle state", () => {
   it("names the desktop keychain on the desktop host", () => {
     renderScreen({ supportsRecoveryKey: false })
     expect(screen.getByText("runtimeBadgeDesktop")).toBeInTheDocument()
+  })
+
+  it("names the mobile app's secure storage, not a desktop keychain, on the phone", () => {
+    mockPlatform = "mobile"
+    try {
+      renderScreen({ supportsRecoveryKey: false })
+      expect(screen.getByText("runtimeBadgeMobile")).toBeInTheDocument()
+      expect(screen.queryByText("runtimeBadgeDesktop")).not.toBeInTheDocument()
+    } finally {
+      mockPlatform = "web"
+    }
+  })
+
+  it("keeps typed text when the password field loses focus", () => {
+    // Reported on device: the first entry vanished when the field blurred.
+    // The field is controlled and only a successful unlock clears it.
+    renderScreen()
+    const field = screen.getByLabelText("passwordLabel")
+    fireEvent.change(field, { target: { value: "abc123456" } })
+    fireEvent.blur(field)
+    expect(field).toHaveValue("abc123456")
   })
 
   it("toggles the password between masked and readable", () => {

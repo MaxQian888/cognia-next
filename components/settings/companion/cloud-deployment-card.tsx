@@ -244,7 +244,10 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
           type="button"
           size="sm"
           variant="outline"
-          disabled={checking || !url.trim()}
+          // Not disabled on an empty address: a greyed-out button gave no
+          // reason on touch, so tapping it read as "nothing happens". `check`
+          // validates and says what is missing.
+          disabled={checking}
           onClick={() => void check()}
           data-testid="cloud-deployment-check"
         >

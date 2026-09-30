@@ -74,6 +74,8 @@ import {
   type ApiFlavor,
 } from "@cognia/provider-types"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import { getAllProviders } from "@cognia/provider-types/provider"
+import { resolveModelDisplayName } from "@/lib/ai/model-options"
 import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { BedrockSettingsFields } from "./bedrock-settings-fields"
 import { BrowserStreamingNotice } from "./browser-streaming-notice"
@@ -443,6 +445,18 @@ export function ProviderConfigTab({
     identity: `${providerId}:default-model`,
     debounceMs: 300,
   })
+  // With no stored pick, chats on this provider run its catalog default — the
+  // setup checklist counts that as "default model selected". The empty field
+  // therefore names that default instead of reading "Select model", which
+  // contradicted the ticked checklist step.
+  const catalogDefaultModel = getAllProviders()[providerId]?.defaultModel?.trim() || ""
+  const modelName = (id: string) =>
+    providerModels.find((m) => m.id === id)?.name ?? resolveModelDisplayName(providerId, id)
+  const typedDefaultModel = defaultModelField.value.trim()
+  const defaultModelPlaceholder = catalogDefaultModel
+    ? t("configTab.defaultModelCatalogPlaceholder", { name: modelName(catalogDefaultModel) })
+    : t("configTab.selectModel")
+  const typedDefaultModelName = typedDefaultModel ? modelName(typedDefaultModel) : ""
   const hasRotationSupport = !!(onToggleRotation || onAddApiKey || onRemoveApiKey)
   const isBedrock = providerId === "bedrock"
 
@@ -717,7 +731,7 @@ export function ProviderConfigTab({
             onChange={(event) => defaultModelField.onChange(event.target.value)}
             onBlur={defaultModelField.onBlur}
             onKeyDown={defaultModelField.onKeyDown}
-            placeholder={t("configTab.selectModel")}
+            placeholder={defaultModelPlaceholder}
             aria-label={t("configTab.defaultModelLabel")}
             autoComplete="off"
           />
@@ -730,6 +744,11 @@ export function ProviderConfigTab({
               />
             ))}
           </datalist>
+          {typedDefaultModelName && typedDefaultModelName !== typedDefaultModel ? (
+            <p className="text-xs text-foreground" data-testid="provider-default-model-name">
+              {typedDefaultModelName}
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">{t("configTab.defaultModelManualHint")}</p>
         </SettingsBlock>
       )}

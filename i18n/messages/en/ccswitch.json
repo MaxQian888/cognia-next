@@ -76,7 +76,7 @@
       "manual": "Manual override",
       "redirect": "From CCSwitch redirect"
     },
-    "webModeBody": "CCSwitch interop reads a local SQLite database. Run Cognia in desktop mode (`pnpm tauri dev`) to use this section.",
+    "webModeBody": "CCSwitch interop reads a local SQLite database, which only the Cognia desktop app can open. Use the desktop app for this section.",
     "webModeTitle": "Desktop only"
   },
   "prompts": {

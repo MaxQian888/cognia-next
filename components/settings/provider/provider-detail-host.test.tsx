@@ -69,7 +69,16 @@ jest.mock("./provider-models-tab", () => ({
 }))
 jest.mock("./provider-cost-tab", () => ({ ProviderCostTab: () => <div data-testid="cost-tab" /> }))
 jest.mock("./provider-diagnostics-tab", () => ({
-  ProviderDiagnosticsTab: () => <div data-testid="diagnostics-tab" />,
+  ProviderDiagnosticsTab: ({
+    connectionTest,
+  }: {
+    connectionTest?: { success: boolean; error?: string } | null
+  }) => (
+    <div
+      data-testid="diagnostics-tab"
+      data-connection-test={JSON.stringify(connectionTest ?? null)}
+    />
+  ),
 }))
 jest.mock("./provider-parameters-tab", () => ({
   ProviderParametersTab: ({
@@ -406,6 +415,30 @@ describe("ProviderDetailHost", () => {
 
     renderHost({ isLocalProvider: true, selectedId: "ollama" })
     expect(screen.getByTestId("diagnostics-tab")).toBeInTheDocument()
+  })
+
+  // The row / header status reads the connection test; the diagnostics tiles
+  // do not. The tab gets the same test so it can say where "Error" came from.
+  it("hands the diagnostics tab the connection test behind the header status", () => {
+    const { unmount } = renderHost({
+      configTestResult: { success: false, error: "Failed to fetch", testedAt: 5 },
+    })
+    expect(
+      JSON.parse(screen.getByTestId("diagnostics-tab").getAttribute("data-connection-test")!)
+    ).toEqual({ success: false, error: "Failed to fetch", testedAt: 5 })
+    unmount()
+
+    // A custom provider keeps only the outcome string.
+    renderHost({
+      isCustom: true,
+      selectedId: "gw",
+      selectedBuiltIn: undefined,
+      selectedCustom: { id: "gw", customName: "GW" } as never,
+      settings: { ...settings, customTestResults: { gw: "error" } } as never,
+    })
+    expect(
+      JSON.parse(screen.getByTestId("diagnostics-tab").getAttribute("data-connection-test")!)
+    ).toEqual({ success: false })
   })
 
   // Parameters was a tab of its own holding one collapsible block. It is now

@@ -8,6 +8,7 @@ import { useTTS } from "@/hooks/media"
 import { useSettingsStore } from "@/stores/settings"
 import { loggers } from "@cognia/logging"
 import type { SpeechSettings } from "@cognia/tts/types"
+import { resolveSttLanguage } from "@cognia/tts/speech"
 
 interface TestTtsButtonProps {
   /**
@@ -28,7 +29,9 @@ interface TestTtsButtonProps {
  */
 export function TestTtsButton({ voiceOverlay, sampleText }: TestTtsButtonProps = {}) {
   const t = useTranslations("settings.speech.tts")
-  const sttLanguage = useSettingsStore((s) => s.settings?.sttLanguage ?? "en-US")
+  const sttLanguage = useSettingsStore((s) =>
+    resolveSttLanguage(s.settings?.sttLanguage, s.settings?.language)
+  )
   const { speak, stop, isPlaying, isLoading } = useTTS({
     source: "settings",
     voiceOverlay: { ...voiceOverlay, ttsFallbackEnabled: false },

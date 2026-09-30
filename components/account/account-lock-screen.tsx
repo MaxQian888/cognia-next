@@ -67,6 +67,7 @@ import { isDeviceManagedAccount } from "@/lib/accounts/desktop-local-account"
 import type { AutoUnlockFailure, UnlockAccountOptions } from "@/stores/account/account-store"
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { usePlatform } from "@/hooks/use-platform"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 import { QuickUnlockPanel } from "./quick-unlock/quick-unlock-panel"
 import { LockScreenBackdrop } from "./lock-screen-backdrop"
@@ -282,6 +283,15 @@ export function AccountLockScreen({
   )
 
   const stages = useMemo(() => unlockStagesFor(supportsRecoveryKey), [supportsRecoveryKey])
+  // Which store holds the credential, named for the shell it runs in: the
+  // Browser Vault on the web, the OS keychain on the desktop, the platform's
+  // secure storage in the mobile app (which has no desktop keychain at all).
+  const platform = usePlatform()
+  const runtimeBadgeKey = supportsRecoveryKey
+    ? "runtimeBadgeBrowser"
+    : platform === "mobile"
+      ? "runtimeBadgeMobile"
+      : "runtimeBadgeDesktop"
   const stageIndex = stage ? stages.indexOf(stage) : -1
   const slow = submitting && elapsedMs >= slowAfterMs
   const stuck = submitting && elapsedMs >= stuckAfterMs
@@ -412,9 +422,7 @@ export function AccountLockScreen({
         <h1 className="text-lg font-semibold">
           {t("unlockTitle", { name: account?.displayName ?? t("unknownAccount") })}
         </h1>
-        <p className="text-xs text-muted-foreground">
-          {t(supportsRecoveryKey ? "runtimeBadgeBrowser" : "runtimeBadgeDesktop")}
-        </p>
+        <p className="text-xs text-muted-foreground">{t(runtimeBadgeKey)}</p>
       </header>
 
       {accounts.length > 1 && (

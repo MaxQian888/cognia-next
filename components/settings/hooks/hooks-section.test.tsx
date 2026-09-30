@@ -90,6 +90,7 @@ jest.mock("next-intl", () => ({
 const replaceMock = jest.fn()
 let searchString = ""
 jest.mock("next/navigation", () => ({
+  usePathname: () => "/settings",
   useRouter: () => ({ replace: replaceMock }),
   useSearchParams: () => new URLSearchParams(searchString),
 }))

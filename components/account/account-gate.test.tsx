@@ -227,6 +227,41 @@ describe("AccountGate", () => {
     expect(screen.queryByRole("button", { name: "createAccount" })).not.toBeInTheDocument()
   })
 
+  it("shows the unlock screen on native mobile for a locked password account", () => {
+    // Created by a build whose native bridge failed and ran the browser flow:
+    // passing it through left no account unlocked and every turn failing.
+    mockIsTauri = false
+    mockIsCapacitor = true
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      locked: true,
+    })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+  })
+
+  it("passes an unlocked account through on native mobile", () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      locked: false,
+    })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    expect(screen.getByText("child")).toBeInTheDocument()
+  })
+
   it.each(["overlay", "popup"] as const)(
     "passes through to children in the %s pet window even when locked on Tauri",
     (role) => {
@@ -286,6 +321,78 @@ describe("AccountGate", () => {
       })
     )
     expect(screen.queryByText("child")).not.toBeInTheDocument()
+  })
+
+  it("submits visible autofilled values and preserves them after a failed creation", async () => {
+    mockCreateAccount.mockRejectedValueOnce(new Error("creation unavailable"))
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    const name = screen.getByRole<HTMLInputElement>("textbox", { name: "displayNameLabel" })
+    const password = screen.getByLabelText<HTMLInputElement>("passwordLabel")
+    fireEvent.change(password, { target: { value: "previous-password" } })
+    // Autofill can change the native controls without a React change event.
+    name.value = "Mobile User"
+    password.value = "synthetic-password"
+    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
+
+    expect(await screen.findByText("creation unavailable")).toBeInTheDocument()
+    expect(mockCreateAccount).toHaveBeenCalledWith({
+      displayName: "Mobile User",
+      password: "synthetic-password",
+    })
+    expect(name).toHaveValue("Mobile User")
+    expect(password).toHaveValue("synthetic-password")
+    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
+    await waitFor(() => expect(mockCreateAccount).toHaveBeenCalledTimes(2))
+    expect(mockCreateAccount).toHaveBeenLastCalledWith({
+      displayName: "Mobile User",
+      password: "synthetic-password",
+    })
+  })
+
+  it.each(["mobile123", "123456", "移动用户"])(
+    "keeps native input-event value %s when another field rerenders the form",
+    async (displayName) => {
+      render(
+        <AccountGate>
+          <div>child</div>
+        </AccountGate>
+      )
+      const name = screen.getByRole<HTMLInputElement>("textbox", { name: "displayNameLabel" })
+      name.value = displayName
+      fireEvent.input(name, { inputType: "insertCompositionText", isComposing: true })
+      fireEvent.change(screen.getByLabelText("passwordLabel"), {
+        target: { value: "synthetic-password" },
+      })
+      expect(name).toHaveValue(displayName)
+      fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
+      await waitFor(() =>
+        expect(mockCreateAccount).toHaveBeenCalledWith({
+          displayName,
+          password: "synthetic-password",
+        })
+      )
+    }
+  )
+
+  it("rejects a blank name with a translated error before creating a vault", () => {
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    fireEvent.change(screen.getByLabelText("displayNameLabel"), {
+      target: { value: "   " },
+    })
+    fireEvent.change(screen.getByLabelText("passwordLabel"), {
+      target: { value: "synthetic-password" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("displayNameRequired")
+    expect(mockCreateAccount).not.toHaveBeenCalled()
   })
 
   it("requires explicit confirmation before dismissing the one-time recovery key", () => {

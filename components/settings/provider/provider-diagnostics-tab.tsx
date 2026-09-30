@@ -67,13 +67,15 @@ import { MatrixSection } from "./diagnostics/matrix-section"
 import { ProgressSection } from "./diagnostics/progress-section"
 import { RunComposer } from "./diagnostics/run-composer"
 import { RunConfirmDialog } from "./diagnostics/run-confirm-dialog"
-import { SummarySection } from "./diagnostics/summary-section"
+import { SummarySection, type SummaryConnectionTest } from "./diagnostics/summary-section"
 
 interface ProviderDiagnosticsTabProps {
   providerId: string
   providerName: string
   modelIds: string[]
   defaultModel?: string
+  /** Last connection test — the source of the row / header Connected-or-Error status. */
+  connectionTest?: SummaryConnectionTest | null
 }
 
 /** Precise mode repeats each target four times to get a usable median. */
@@ -102,6 +104,7 @@ export function ProviderDiagnosticsTab({
   providerName,
   modelIds,
   defaultModel,
+  connectionTest,
 }: ProviderDiagnosticsTabProps) {
   const t = useTranslations("providers.diagnostics")
   const settings = useSettingsStore((state) => state.settings)
@@ -113,8 +116,10 @@ export function ProviderDiagnosticsTab({
   const providerSettings = settings?.providerSettings?.[providerId]
   const customProvider = settings?.customProviders?.find((provider) => provider.id === providerId)
   const catalog = getProviderConfig(providerId)
+  // `||`, not `??`: a cleared Base URL field is stored as "", which must fall
+  // through to the catalog endpoint rather than blank the endpoint picker.
   const baseUrl =
-    customProvider?.baseURL ?? providerSettings?.baseURL ?? catalog?.defaultBaseURL ?? ""
+    customProvider?.baseURL || providerSettings?.baseURL || catalog?.defaultBaseURL || ""
   const apiKey = customProvider?.apiKey ?? providerSettings?.apiKey
   const { data: ccswitchProviders = [] } = useCcswitchProviders(
     isTauri(),
@@ -515,7 +520,11 @@ export function ProviderDiagnosticsTab({
       )}
 
       <SettingsStack>
-        <SummarySection providerName={providerName} latestSample={latestSample} />
+        <SummarySection
+          providerName={providerName}
+          latestSample={latestSample}
+          connectionTest={connectionTest}
+        />
 
         <RunComposer
           mode={mode}
@@ -531,6 +540,7 @@ export function ProviderDiagnosticsTab({
           endpoint={selectedEndpoint || baseUrl}
           onEndpointChange={setSelectedEndpoint}
           endpointCandidates={endpointCandidates}
+          endpointResolvedByHost={pairedClient}
           concurrency={concurrency}
           onConcurrencyChange={setConcurrency}
           timeoutMs={timeoutMs}
@@ -543,7 +553,9 @@ export function ProviderDiagnosticsTab({
           }
           onReviewRun={() => void prepareRun()}
           running={jobRunning}
-          runDisabled={!baseUrl || (capability !== "probe" && !modelId)}
+          // A paired client never sends an endpoint (the desktop resolves its
+          // own), so a missing local Base URL must not block its run.
+          runDisabled={(!pairedClient && !baseUrl) || (capability !== "probe" && !modelId)}
         />
 
         {jobRunning && (

@@ -105,7 +105,14 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
   // Native mobile retains the established runtime chooser / pairing gate.
   // Ordinary browsers use the same local account gate as desktop, backed by
   // the Web Crypto PBKDF2 verifier instead of a Tauri command.
-  if (isCapacitor()) {
+  //
+  // The exception is a password-protected account that is still locked. Mobile
+  // itself never creates one, but builds whose native bridge failed to load ran
+  // as a plain browser and created one through the browser flow. Passing it
+  // through left the app open with no account unlocked, and every turn failed
+  // ("A local account must be unlocked…"), so it gets the same unlock screen
+  // as a browser instead.
+  if (isCapacitor() && !(locked && targetAccount)) {
     return <>{children}</>
   }
 
@@ -225,16 +232,27 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
   if (accounts.length === 0) {
     const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (password.length < PASSWORD_MIN_LENGTH) {
+      // Read the visible controls before a pending/error render can restore
+      // stale state after a native keyboard or autofill update.
+      const data = new FormData(event.currentTarget)
+      const submittedName = String(data.get("displayName") ?? "").trim()
+      const submittedPassword = String(data.get("password") ?? "")
+      setDisplayName(submittedName)
+      setPassword(submittedPassword)
+      if (submittedPassword.length < PASSWORD_MIN_LENGTH) {
         setActionError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
+        return
+      }
+      if (!submittedName) {
+        setActionError(t("displayNameRequired"))
         return
       }
       setSubmitting(true)
       setActionError(null)
       try {
         await createAccount({
-          displayName,
-          password,
+          displayName: submittedName,
+          password: submittedPassword,
         })
         setPassword("")
       } catch (error) {
@@ -261,9 +279,11 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
             <Label htmlFor={displayNameId}>{t("displayNameLabel")}</Label>
             <Input
               id={displayNameId}
+              name="displayName"
               value={displayName}
               placeholder={t("displayNamePlaceholder")}
               autoComplete="name"
+              onInput={(event) => setDisplayName(event.currentTarget.value)}
               onChange={(event) => setDisplayName(event.target.value)}
             />
           </FieldBlock>
@@ -271,10 +291,12 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
             <Label htmlFor={passwordId}>{t("passwordLabel")}</Label>
             <Input
               id={passwordId}
+              name="password"
               value={password}
               placeholder={t("passwordPlaceholder")}
               type="password"
               autoComplete="new-password"
+              onInput={(event) => setPassword(event.currentTarget.value)}
               onChange={(event) => setPassword(event.target.value)}
             />
             <PasswordStrengthMeter password={password} />

@@ -24,9 +24,26 @@ jest.mock("@/stores/settings", () => ({
   ),
 }))
 
+const platformRef: { current: string } = { current: "web" }
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platformRef.current }))
+
+jest.mock("@/lib/files/download", () => {
+  const actual = jest.requireActual("@/lib/files/download")
+  return {
+    ...actual,
+    downloadFile: jest.fn((...args: Parameters<typeof actual.downloadFile>) =>
+      actual.downloadFile(...args)
+    ),
+  }
+})
+
+import { downloadFile } from "@/lib/files/download"
 import { AppearanceConfigToolbar } from "./appearance-config-toolbar"
 
+const downloadFileMock = downloadFile as jest.Mock
+
 beforeEach(() => {
+  platformRef.current = "web"
   save.mockClear()
   toastSuccess.mockClear()
   toastError.mockClear()
@@ -50,11 +67,43 @@ function jsonFile(content: string): File {
 }
 
 describe("AppearanceConfigToolbar", () => {
-  it("exports the current appearance as a downloadable file", () => {
+  it("exports the current appearance as a downloadable file", async () => {
     render(<AppearanceConfigToolbar />)
     fireEvent.click(screen.getByRole("button", { name: "export" }))
     expect(URL.createObjectURL).toHaveBeenCalled()
-    expect(toastSuccess).toHaveBeenCalled()
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("exportSuccess"))
+  })
+
+  it("reports a failed export instead of claiming success", async () => {
+    downloadFileMock.mockResolvedValueOnce({ kind: "error", message: "no share sheet" })
+    render(<AppearanceConfigToolbar />)
+    fireEvent.click(screen.getByRole("button", { name: "export" }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("exportFailed"))
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet when the share sheet is dismissed", async () => {
+    downloadFileMock.mockResolvedValueOnce({ kind: "cancelled" })
+    render(<AppearanceConfigToolbar />)
+    fireEvent.click(screen.getByRole("button", { name: "export" }))
+    await waitFor(() => expect(downloadFileMock).toHaveBeenCalled())
+    await Promise.resolve()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("puts the import file input under the tap and drops the MIME filter on the phone", () => {
+    const { unmount } = render(<AppearanceConfigToolbar />)
+    const trigger = screen.getByTestId("appearance-import-trigger")
+    const input = screen.getByTestId("appearance-import-input")
+    expect(trigger.tagName).toBe("LABEL")
+    expect(trigger).toContainElement(input)
+    expect(input).toHaveAttribute("accept", "application/json,.json")
+    unmount()
+
+    platformRef.current = "mobile"
+    render(<AppearanceConfigToolbar />)
+    expect(screen.getByTestId("appearance-import-input")).not.toHaveAttribute("accept")
   })
 
   it("opens a confirm dialog for a valid import, then applies it", async () => {

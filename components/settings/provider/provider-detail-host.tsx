@@ -464,6 +464,14 @@ export function ProviderDetailHost({
               : enrichedBuiltInModels.map((model) => model.id)
           }
           defaultModel={selectedSettings?.defaultModel ?? selectedCustom?.defaultModel}
+          connectionTest={
+            isCustom
+              ? // A custom provider keeps only the outcome, no message or time.
+                s.customTestResults[selectedId] == null
+                ? null
+                : { success: s.customTestResults[selectedId] !== "error" }
+              : configTestResult
+          }
         />
       }
     />

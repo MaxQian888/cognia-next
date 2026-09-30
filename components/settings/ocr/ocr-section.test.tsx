@@ -155,6 +155,34 @@ describe("OcrSection", () => {
     expect(last.defaultLanguages).toEqual(["en", "zh"])
   })
 
+  it("adopts a persisted value the parent rewrites (e.g. an unavailable default normalized to Auto)", () => {
+    const base: UserOcrSettings = {
+      ...DEFAULT_OCR_SETTINGS,
+      ocrWizardDismissed: true,
+      defaultProviderId: "mistral-ocr",
+      defaultLanguages: ["en"],
+    }
+    const { rerender } = render(<OcrSection settings={base} onChange={jest.fn()} platform="web" />)
+    const panel = screen.getByTestId("ocr-auto-router-panel")
+    expect(within(panel).getByRole("combobox", { name: /Default provider/i })).toHaveTextContent(
+      /Mistral OCR/
+    )
+
+    rerender(
+      <OcrSection
+        settings={{ ...base, defaultProviderId: "auto", defaultLanguages: ["fr"] }}
+        onChange={jest.fn()}
+        platform="web"
+      />
+    )
+    expect(
+      within(screen.getByTestId("ocr-auto-router-panel")).getByRole("combobox", {
+        name: /Default provider/i,
+      })
+    ).not.toHaveTextContent(/Mistral OCR/)
+    expect(screen.getByLabelText(/Default languages/i)).toHaveValue("fr")
+  })
+
   it("toggles the cloud fallback switch from the Auto-Router panel", async () => {
     const user = userEvent.setup()
     const { onChange } = renderSection({ cloudFallbackEnabled: true })

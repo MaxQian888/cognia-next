@@ -218,6 +218,18 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
   const [settings, setSettings] = useState<UserOcrSettings>(
     () => props.settings ?? DEFAULT_OCR_SETTINGS
   )
+  // The local copy keeps edits instant, but the persisted value is the truth:
+  // the persisted shell rewrites it on its own (an unavailable default is
+  // normalized to Auto, a legacy key is migrated). Seeding once and never
+  // re-reading left the Default-provider select and the Auto-Router card on
+  // the old provider while the toast said it had switched. Re-adopt the prop
+  // whenever the parent hands down a new value, derived during render rather
+  // than synced in an effect.
+  const [adoptedSettings, setAdoptedSettings] = useState(props.settings)
+  if (props.settings !== undefined && props.settings !== adoptedSettings) {
+    setAdoptedSettings(props.settings)
+    setSettings(props.settings)
+  }
   const [selectedId, setSelectedId] = useState<string>(OCR_AUTO_ROUTER_ID)
   const [search, setSearch] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<OcrCategoryFilter>("all")

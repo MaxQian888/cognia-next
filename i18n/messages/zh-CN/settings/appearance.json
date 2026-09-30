@@ -419,6 +419,7 @@
       "title": "应用导入的外观？"
     },
     "export": "导出",
+    "exportFailed": "外观导出失败：{message}",
     "exportSuccess": "外观已导出。",
     "import": "导入",
     "importInvalid": "无法读取该文件：{message}",

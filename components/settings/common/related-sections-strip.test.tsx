@@ -2,9 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { RelatedSectionsStrip, CLAUDE_CODE_RELATED } from "./related-sections-strip"
 
 const replaceMock = jest.fn()
+const pushMock = jest.fn()
+let mockPathname = "/settings"
 
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: replaceMock }),
+  useRouter: () => ({ replace: replaceMock, push: pushMock }),
+  usePathname: () => mockPathname,
   useSearchParams: () => new URLSearchParams("section=agent-runtime"),
 }))
 
@@ -14,6 +17,8 @@ jest.mock("next-intl", () => ({
 
 beforeEach(() => {
   replaceMock.mockClear()
+  pushMock.mockClear()
+  mockPathname = "/settings"
 })
 
 describe("RelatedSectionsStrip", () => {
@@ -79,5 +84,30 @@ describe("RelatedSectionsStrip", () => {
     render(<RelatedSectionsStrip current="hooks" targets={[{ section: "mcp", labelKey: "mcp" }]} />)
     fireEvent.click(screen.getByTestId("related-link-mcp"))
     expect(replaceMock).toHaveBeenCalledWith("?section=mcp", { scroll: false })
+  })
+  it("opens the settings route from a standalone phone page, which reads no ?section=", () => {
+    mockPathname = "/me/subscription"
+    render(
+      <RelatedSectionsStrip
+        current="subscription"
+        targets={[
+          {
+            section: "agent-runtime",
+            tabParam: "agentRuntimeTab",
+            tab: "sessions",
+            labelKey: "sessions",
+          },
+          { section: "mcp", labelKey: "mcp" },
+        ]}
+      />
+    )
+    fireEvent.click(screen.getByTestId("related-link-agent-runtime-sessions"))
+    expect(pushMock).toHaveBeenCalledWith(
+      "/settings?section=agent-runtime&agentRuntimeTab=sessions"
+    )
+    fireEvent.click(screen.getByTestId("related-link-mcp"))
+    // Only the target's own params: the phone page's query is not carried over.
+    expect(pushMock).toHaveBeenLastCalledWith("/settings?section=mcp")
+    expect(replaceMock).not.toHaveBeenCalled()
   })
 })

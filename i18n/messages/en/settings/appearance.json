@@ -419,6 +419,7 @@
       "title": "Apply imported appearance?"
     },
     "export": "Export",
+    "exportFailed": "Couldn't export the appearance: {message}",
     "exportSuccess": "Appearance exported.",
     "import": "Import",
     "importInvalid": "Couldn't read that file: {message}",

@@ -93,6 +93,18 @@ describe("CloudDeploymentCard", () => {
     expect(d.discover).not.toHaveBeenCalled()
   })
 
+  it("says what is missing when Check is tapped with an empty address", () => {
+    const d = deps()
+    render(<CloudDeploymentCard deps={d} />)
+    const check = screen.getByTestId("cloud-deployment-check")
+    expect(check).toBeEnabled()
+    fireEvent.click(check)
+    expect(screen.getByTestId("cloud-deployment-error")).toHaveTextContent(
+      "account.cloud.deployment.error.invalid"
+    )
+    expect(d.discover).not.toHaveBeenCalled()
+  })
+
   it("checks the normalized address, shows what it offers, and only then stores it", async () => {
     const d = deps()
     sessionStorage.setItem(`${CLOUD_OFFLINE_KEY_PREFIX}.acct_a`, "1")

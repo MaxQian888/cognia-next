@@ -11,7 +11,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
@@ -30,6 +30,8 @@ export interface RelatedTarget {
   labelKey: string
 }
 
+const SETTINGS_ROUTE = "/settings"
+
 interface Props {
   /** Section id this strip is rendered inside — hidden from the list. */
   current: SettingsSectionId
@@ -40,12 +42,24 @@ interface Props {
 export function RelatedSectionsStrip({ current, targets }: Props) {
   const t = useTranslations("settings.relatedSections")
   const router = useRouter()
+  const pathname = usePathname()
   const params = useSearchParams()
 
   const visible = targets.filter((target) => target.section !== current)
   if (visible.length === 0) return null
 
   const goTo = (target: RelatedTarget) => {
+    // Inside the settings shell the section is a query param on `/settings`,
+    // so swapping it in place is enough. The same sections are also mounted
+    // as standalone phone pages (`/me/subscription`, `/me/mcp`, …) that read
+    // no `?section=`: rewriting the query there changed nothing, and every
+    // pill was a dead link on mobile. Off the shell, open the settings route.
+    if (pathname !== SETTINGS_ROUTE) {
+      const next = new URLSearchParams({ section: target.section })
+      if (target.tabParam && target.tab) next.set(target.tabParam, target.tab)
+      router.push(`${SETTINGS_ROUTE}?${next.toString()}`)
+      return
+    }
     const next = new URLSearchParams(params?.toString() ?? "")
     next.set("section", target.section)
     if (target.tabParam && target.tab) next.set(target.tabParam, target.tab)

@@ -76,7 +76,7 @@
       "manual": "手动指定",
       "redirect": "来自 CCSwitch 重定向"
     },
-    "webModeBody": "CCSwitch 互通需要读取本地 SQLite 数据库。请使用桌面模式（`pnpm tauri dev`）。",
+    "webModeBody": "CCSwitch 互通需要读取本地 SQLite 数据库，只有 Cognia 桌面应用能打开它。请在桌面应用中使用此部分。",
     "webModeTitle": "仅桌面端可用"
   },
   "prompts": {

@@ -42,14 +42,27 @@ export function AccountCreateForm({ onCreated }: AccountCreateFormProps) {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (password.length < PASSWORD_MIN_LENGTH) {
+    // Snapshot native control values before submission rerenders the form.
+    const data = new FormData(event.currentTarget)
+    const submittedName = String(data.get("displayName") ?? "").trim()
+    const submittedPassword = String(data.get("password") ?? "")
+    setDisplayName(submittedName)
+    setPassword(submittedPassword)
+    if (submittedPassword.length < PASSWORD_MIN_LENGTH) {
       setError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
+      return
+    }
+    if (!submittedName) {
+      setError(t("displayNameRequired"))
       return
     }
     setSubmitting(true)
     setError(null)
     try {
-      const account = await createAccount({ displayName, password })
+      const account = await createAccount({
+        displayName: submittedName,
+        password: submittedPassword,
+      })
       close()
       onCreated?.(account)
     } catch (err) {
@@ -85,17 +98,21 @@ export function AccountCreateForm({ onCreated }: AccountCreateFormProps) {
       <Label htmlFor="account-new-display-name">{t("newDisplayNameLabel")}</Label>
       <Input
         id="account-new-display-name"
+        name="displayName"
         value={displayName}
         placeholder={t("newDisplayNamePlaceholder")}
+        onInput={(event) => setDisplayName(event.currentTarget.value)}
         onChange={(event) => setDisplayName(event.target.value)}
       />
       <Label htmlFor="account-new-password">{t("newPasswordLabel")}</Label>
       <Input
         id="account-new-password"
+        name="password"
         type="password"
         autoComplete="new-password"
         value={password}
         placeholder={t("newPasswordPlaceholder")}
+        onInput={(event) => setPassword(event.currentTarget.value)}
         onChange={(event) => setPassword(event.target.value)}
       />
       <PasswordStrengthMeter password={password} />

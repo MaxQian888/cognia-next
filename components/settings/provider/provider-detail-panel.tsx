@@ -115,6 +115,8 @@ export function ProviderDetailPanel({
     ? requestedTab
     : DEFAULT_PROVIDER_TAB
   const modelsTabActive = activeTabValue === "models"
+  const enableBlockedHintId = React.useId()
+  const enableBlocked = !isEnabled && !canEnable && Boolean(enableBlockedReason)
 
   if (provider === null) {
     return (
@@ -256,7 +258,7 @@ export function ProviderDetailPanel({
                 {t("detailPanel.notConfigured")}
               </Badge>
             )}
-            {!isEnabled && !canEnable && enableBlockedReason ? (
+            {enableBlocked ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span tabIndex={0} className="inline-flex" data-testid="provider-enable-blocked">
@@ -265,6 +267,7 @@ export function ProviderDetailPanel({
                       disabled
                       className="pointer-events-none"
                       aria-label={t("detailPanel.enableSwitchAria")}
+                      aria-describedby={enableBlockedHintId}
                     />
                   </span>
                 </TooltipTrigger>
@@ -305,6 +308,18 @@ export function ProviderDetailPanel({
             )}
           </div>
         </TooltipProvider>
+        {/* A tooltip never opens on touch, so on a phone the disabled switch
+            read as a dead control. The reason is also written out under the
+            header, full width, where every input method can see it. */}
+        {enableBlocked && (
+          <p
+            id={enableBlockedHintId}
+            data-testid="provider-enable-blocked-hint"
+            className="basis-full text-xs text-muted-foreground"
+          >
+            {enableBlockedReason}
+          </p>
+        )}
       </div>
 
       {/* Tabs. Controlled, because the Models tab is scroll-owning: the shared

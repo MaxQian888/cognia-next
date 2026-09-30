@@ -15,11 +15,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores/settings"
-import {
-  DEFAULT_SPEECH_LANGUAGE,
-  SPEECH_LANGUAGES,
-  type SpeechLanguageCode,
-} from "@cognia/tts/speech"
+import { SPEECH_LANGUAGES, resolveSttLanguage, type SpeechLanguageCode } from "@cognia/tts/speech"
 import { loggers } from "@cognia/logging"
 
 type MicDevice = { deviceId: string; label: string }
@@ -34,8 +30,8 @@ export function SttCard() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
-  const sttLanguage =
-    (settings?.sttLanguage as SpeechLanguageCode | undefined) ?? DEFAULT_SPEECH_LANGUAGE
+  // Unset follows the app language; the picker shows what dictation will use.
+  const sttLanguage = resolveSttLanguage(settings?.sttLanguage, settings?.language)
   const selectedMicId = settings?.selectedMicId
 
   const [supported] = useState<boolean | null>(() =>

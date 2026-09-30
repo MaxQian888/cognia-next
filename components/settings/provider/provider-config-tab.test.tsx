@@ -3,6 +3,7 @@
  */
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { getAllProviders } from "@cognia/provider-types/provider"
 import { ProviderConfigTab } from "./provider-config-tab"
 import { useLiveQuery } from "dexie-react-hooks"
 import type { UserProviderSettings } from "@cognia/provider-types"
@@ -10,8 +11,9 @@ import type { UserProviderSettings } from "@cognia/provider-types"
 // ── i18n mock ────────────────────────────────────────────────────────────────
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, values?: Record<string, string>) => {
     const map: Record<string, string> = {
+      "configTab.defaultModelCatalogPlaceholder": "Provider default: {name}",
       "configTab.apiKeyLabel": "API Key",
       "configTab.apiKeyPlaceholder": "Enter your API key",
       "configTab.getApiKey": "Get API Key →",
@@ -47,7 +49,10 @@ jest.mock("next-intl", () => ({
       protocolGeminiDesc: "Google Gemini API format",
       baseURLHint: "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
     }
-    return map[key] ?? key
+    const template = map[key] ?? key
+    return values
+      ? template.replace(/\{(\w+)\}/g, (_, name: string) => values[name] ?? `{${name}}`)
+      : template
   },
 }))
 
@@ -263,6 +268,39 @@ describe("ProviderConfigTab", () => {
     fireEvent.change(picker, { target: { value: "account-only-model" } })
     fireEvent.blur(picker)
     expect(onDefaultModelChange).toHaveBeenCalledWith("account-only-model")
+  })
+
+  it("names the catalog default in an empty default-model field, matching the ticked checklist step", () => {
+    const catalogDefault = getAllProviders().openai!.defaultModel
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        settings={{ ...mockSettings, defaultModel: "" }}
+        providerModels={[{ id: catalogDefault, name: "Catalog Default Name" }, ...mockModels]}
+      />
+    )
+    const picker = screen.getByRole("combobox", { name: "Default Model" })
+    expect(picker).toHaveValue("")
+    expect(picker).toHaveAttribute("placeholder", "Provider default: Catalog Default Name")
+  })
+
+  it("falls back to the plain prompt when the provider has no catalog default", () => {
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="my-custom-provider"
+        settings={{ ...mockSettings, providerId: "my-custom-provider", defaultModel: "" }}
+      />
+    )
+    expect(screen.getByRole("combobox", { name: "Default Model" })).toHaveAttribute(
+      "placeholder",
+      "Select model"
+    )
+  })
+
+  it("shows the friendly name of a stored raw model id under the field", () => {
+    render(<ProviderConfigTab {...defaultProps} />)
+    expect(screen.getByTestId("provider-default-model-name")).toHaveTextContent("GPT-4o")
   })
 
   // 4. Shows connection success card when testResult.success is true

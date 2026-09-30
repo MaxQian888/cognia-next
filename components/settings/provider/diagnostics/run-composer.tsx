@@ -36,6 +36,11 @@ export interface RunComposerProps {
   endpoint: string
   onEndpointChange: (endpoint: string) => void
   endpointCandidates: ProviderEndpointCandidate[]
+  /**
+   * A paired client does not pick the endpoint: the desktop resolves its own.
+   * The picker is replaced by a line saying so instead of an empty dropdown.
+   */
+  endpointResolvedByHost?: boolean
   concurrency: number
   onConcurrencyChange: (concurrency: number) => void
   timeoutMs: number
@@ -73,6 +78,7 @@ export function RunComposer({
   endpoint,
   onEndpointChange,
   endpointCandidates,
+  endpointResolvedByHost = false,
   concurrency,
   onConcurrencyChange,
   timeoutMs,
@@ -165,18 +171,30 @@ export function RunComposer({
           </div>
           <div className="space-y-1.5">
             <Label>{t("composer.endpoint")}</Label>
-            <Select value={endpoint} onValueChange={onEndpointChange}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {endpointCandidates.map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.url}>
-                    {candidate.label ?? candidate.url}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* An empty Select rendered as a blank, unopenable box with no hint
+                of why. Say where the endpoint comes from instead. */}
+            {endpointResolvedByHost ? (
+              <p className="text-xs text-muted-foreground" data-testid="diagnostics-endpoint-host">
+                {t("composer.endpointResolvedByHost")}
+              </p>
+            ) : endpointCandidates.length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="diagnostics-endpoint-empty">
+                {t("composer.endpointEmpty")}
+              </p>
+            ) : (
+              <Select value={endpoint} onValueChange={onEndpointChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {endpointCandidates.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.url}>
+                      {candidate.label ?? candidate.url}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
 

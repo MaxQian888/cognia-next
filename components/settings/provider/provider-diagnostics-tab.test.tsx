@@ -103,4 +103,17 @@ describe("ProviderDiagnosticsTab", () => {
       expect.objectContaining({ providerDiagnostics: expect.any(Object) })
     )
   })
+  it("tells the summary where the row's connection status comes from", () => {
+    render(
+      <ProviderDiagnosticsTab
+        providerId="openai"
+        providerName="OpenAI"
+        modelIds={["gpt-5.4"]}
+        connectionTest={{ success: false, error: "Failed to fetch", testedAt: 1 }}
+      />
+    )
+    expect(screen.getByTestId("diagnostics-summary-connection-test")).toHaveTextContent(
+      /Failed to fetch/
+    )
+  })
 })

@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Mobile settings and providers: a provider that can't be enabled yet now says why under its switch instead of only in a tooltip, which touch screens never show. An empty Default Model field names the provider's catalog default, matching the ticked setup step. Raw model ids show their display names in the chat list and the character editor. The character editor's avatar colour swatch shows the real colour instead of black. The Diagnostics tab explains that a provider's Error status comes from its last connection test, and says why the Endpoint list is empty (or that the paired desktop picks it) instead of showing a blank dropdown. OCR settings now show Auto after an unavailable default provider is switched to Auto. Issues, Delivery projects and Workspace are no longer marked "Requires desktop", since they work without one. The Cloud deployment "Check" button explains an empty address. The "Related" links on the Subscription, MCP and other Claude Code pages now open on a phone. The bottom tab bar keeps its space reserved while the keyboard is closed.

@@ -65,6 +65,27 @@ describe("RunComposer", () => {
     expect(screen.getByText(/composer\.poolCredential.*"index":2/)).toBeInTheDocument()
   })
 
+  it("explains an empty endpoint list instead of rendering a blank picker", () => {
+    render(<RunComposer {...props} endpoint="" endpointCandidates={[]} />)
+    expect(screen.getByTestId("diagnostics-endpoint-empty")).toHaveTextContent(
+      "composer.endpointEmpty"
+    )
+  })
+
+  it("lists endpoint candidates when there are some", () => {
+    render(<RunComposer {...props} />)
+    expect(screen.getByText("https://api.openai.com/v1")).toBeInTheDocument()
+    expect(screen.queryByTestId("diagnostics-endpoint-empty")).not.toBeInTheDocument()
+  })
+
+  it("says the paired desktop picks the endpoint on a paired client", () => {
+    render(<RunComposer {...props} endpoint="" endpointCandidates={[]} endpointResolvedByHost />)
+    expect(screen.getByTestId("diagnostics-endpoint-host")).toHaveTextContent(
+      "composer.endpointResolvedByHost"
+    )
+    expect(screen.queryByTestId("diagnostics-endpoint-empty")).not.toBeInTheDocument()
+  })
+
   it("previews the request count for the selected mode", () => {
     const { rerender } = render(<RunComposer {...props} />)
     expect(screen.getByText(/composer\.preview.*"requests":1/)).toBeInTheDocument()

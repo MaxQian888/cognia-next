@@ -309,6 +309,34 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByRole("switch")).toBeDisabled()
   })
 
+  it("writes the blocked-enable reason out inline so touch users see it without hover", () => {
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        isEnabled={false}
+        canEnable={false}
+        enableBlockedReason="Add an API key first"
+        onToggleEnabled={jest.fn()}
+      />
+    )
+    const hint = screen.getByTestId("provider-enable-blocked-hint")
+    expect(hint).toHaveTextContent("Add an API key first")
+    expect(hint).toBeVisible()
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-describedby", hint.id)
+  })
+
+  it("shows no inline enable hint once the provider may be enabled", () => {
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        isEnabled={false}
+        canEnable
+        onToggleEnabled={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("provider-enable-blocked-hint")).not.toBeInTheDocument()
+  })
+
   it("keeps a disabled Set-default button visible with a reason instead of hiding it", () => {
     render(
       <ProviderDetailPanel

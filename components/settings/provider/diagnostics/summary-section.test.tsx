@@ -84,4 +84,52 @@ describe("SummarySection", () => {
     expect(container.querySelector('[data-slot="card"]')).toBeNull()
     expect(screen.getByTestId("diagnostics-summary")).toBeInTheDocument()
   })
+  describe("connection-test source note", () => {
+    it("says a failed connection test is where the Error status comes from", () => {
+      render(
+        <SummarySection
+          providerName="Anthropic"
+          connectionTest={{ success: false, error: "Failed to fetch", testedAt: 10 }}
+        />
+      )
+      const note = screen.getByTestId("diagnostics-summary-connection-test")
+      expect(note).toHaveAttribute("data-outcome", "failed")
+      expect(note).toHaveTextContent(/summary\.connectionTestFailedWithError.*Failed to fetch/)
+      // The tiles still speak only for diagnostic runs.
+      expect(screen.getAllByText("status.unverified")).toHaveLength(2)
+    })
+
+    it("uses the generic failure copy when the test carried no message", () => {
+      render(<SummarySection providerName="Anthropic" connectionTest={{ success: false }} />)
+      expect(screen.getByTestId("diagnostics-summary-connection-test")).toHaveTextContent(
+        "summary.connectionTestFailed"
+      )
+    })
+
+    it("notes a passed test so Unverified tiles do not read as a failure", () => {
+      render(
+        <SummarySection providerName="Anthropic" connectionTest={{ success: true, testedAt: 5 }} />
+      )
+      expect(screen.getByTestId("diagnostics-summary-connection-test")).toHaveAttribute(
+        "data-outcome",
+        "passed"
+      )
+    })
+
+    it("stays quiet when a diagnostic run is newer than the connection test", () => {
+      render(
+        <SummarySection
+          providerName="Anthropic"
+          latestSample={sample({ startedAt: 20, completedAt: 30 })}
+          connectionTest={{ success: false, error: "old", testedAt: 10 }}
+        />
+      )
+      expect(screen.queryByTestId("diagnostics-summary-connection-test")).not.toBeInTheDocument()
+    })
+
+    it("stays quiet with no connection test", () => {
+      render(<SummarySection providerName="Anthropic" connectionTest={null} />)
+      expect(screen.queryByTestId("diagnostics-summary-connection-test")).not.toBeInTheDocument()
+    })
+  })
 })
