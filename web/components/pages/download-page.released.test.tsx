@@ -89,7 +89,9 @@ describe("DownloadPage with a published release", () => {
 
   it("still offers the build-from-source route beside the installers", () => {
     render(<DownloadPage locale="en" />)
-    expect(screen.getByText(en.download.buildFromSource.title)).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: en.download.buildFromSource.title })
+    ).toBeInTheDocument()
   })
 
   it("localises the released surface", () => {

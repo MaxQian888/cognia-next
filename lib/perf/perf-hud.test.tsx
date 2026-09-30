@@ -135,6 +135,17 @@ describe("PerfHud helpers", () => {
       expect(isHudEnabledForRuntime()).toBe(true)
     })
 
+    it("returns false when no global process exists (production browser bundle)", () => {
+      const globalScope = globalThis as { process?: unknown }
+      const proc = globalScope.process
+      delete globalScope.process
+      try {
+        expect(isHudEnabledForRuntime()).toBe(false)
+      } finally {
+        globalScope.process = proc
+      }
+    })
+
     it("returns false in production when the flag is missing", () => {
       withNodeEnv("production", () => {
         expect(isHudEnabledForRuntime()).toBe(false)

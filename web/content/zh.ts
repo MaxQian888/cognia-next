@@ -174,6 +174,11 @@ export const zh: SiteCopy = {
     copiedCommand: "已复制",
   },
 
+  footage: {
+    captureNote: "截取自运行演示数据的 Cognia 应用。",
+    recordingNote: "录制自运行演示数据的 Cognia 应用。",
+  },
+
   reconstruction: {
     label: "界面结构重建",
     note: "由本页基于同一条演示任务重建，不是应用截图。",
@@ -303,6 +308,15 @@ export const zh: SiteCopy = {
   },
 
   home: {
+    film: {
+      eyebrow: "把任务拍下来",
+      title: "看一条任务从请求一路跑到审批。",
+      subtitle:
+        "44 秒的真实应用：读项目、复现失败的检查、给出 diff、让检查通过、写好说明——然后在推送之前停下来。",
+      videoLabel: "影片：Cognia 运行发布任务，从请求一直到推送前的审批检查点。",
+      playLabel: "播放影片",
+      captionsLabel: "中文",
+    },
     hero: {
       eyebrow: "开源 AI 工作空间",
       title: "你的开放 AI Agent 工作空间。",
@@ -864,6 +878,7 @@ export const zh: SiteCopy = {
 
     sectionIndex: {
       hero: "概览",
+      film: "影片",
       task: "一条任务",
       workbench: "工作台",
       desktop: "桌面",

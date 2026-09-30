@@ -1,0 +1,11 @@
+# Cloudflare Pages response headers (ADR-0092, product footage amendment).
+#
+# The films under /video/ are content-hashed by web/scripts/render-video.mjs —
+# a re-render publishes a new name and deletes the old one — so a browser may
+# keep any file it has for a year without asking again.
+#
+# /product/ screenshots are deliberately absent: their names are stable
+# (`hero-dark-en.png`), so an immutable header would pin a stale capture in
+# readers' caches after a re-capture. They keep the default revalidation.
+/video/*
+  Cache-Control: public, max-age=31536000, immutable

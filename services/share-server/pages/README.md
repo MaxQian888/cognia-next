@@ -44,12 +44,14 @@ Pages project on that path, so `/v1/*` hits the API and everything else
 
 ## Notes
 
-- **The whole app shell is published.** `out/` is a monolithic export, so the
-  entire static client becomes reachable at the Pages host. This is a
-  secret-free client bundle (all credentials live in the desktop keyring / local
-  Dexie, never in the export), so it is safe to expose, but be aware that paths
-  other than `/share/view` resolve to the app shell. If you want only the viewer
-  exposed, add a Pages redirect/`_redirects` rule sending non-`/share/view`
-  paths to `/share/view`.
+- **The whole app shell is published, but gated.** `out/` is a monolithic
+  export, so the entire static client is uploaded to the Pages host. The
+  bundled `public/_worker.js` Pages Function intercepts every request before
+  asset serving and redirects any path that is not `/share/view` (or a real
+  asset file) to the viewer — casual visitors never see the app shell. This is
+  a secret-free client bundle (all credentials live in the desktop keyring /
+  local Dexie, never in the export), so the gate is about surface area, not
+  secrecy. `_redirects` alone cannot do this because Pages serves existing
+  exported `.html` files before it consults redirect rules.
 - Keep the host in sync with the app's `NEXT_PUBLIC_SHARE_URL` /
   `DEFAULT_SHARE_URL` (`lib/share/config.ts`).

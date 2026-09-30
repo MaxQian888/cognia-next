@@ -8,10 +8,11 @@
  *
  * Two rules this script exists to enforce:
  *
- *  1. **Never the author's data.** It seeds a purpose-built demo workspace
- *     through the same `window.__cognia*` test seams the E2E suite uses. A
- *     screenshot of a real working session would publish repository names,
- *     conversation contents and provider configuration.
+ *  1. **Never the author's data.** It plays the signature task
+ *     (`demo-transcript.mjs`) into a fresh E2E build through the staged
+ *     conversation seam (`demo-session.mjs`), the same one the film recorder
+ *     uses. A screenshot of a real working session would publish repository
+ *     names, conversation contents and provider configuration.
  *  2. **Fail rather than produce a wrong asset.** Every section declares the
  *     selectors that must be visible before the shutter fires. If the product UI
  *     moved, the run fails with the section named — it does not quietly capture
@@ -20,8 +21,8 @@
  *     missing one.
  *
  * Prerequisites (the script checks and reports, it does not install):
- *   pnpm test:e2e:build          # NEXT_PUBLIC_E2E=1 static export into out/
- *   pnpm dlx serve out -l 4173   # or any static server for that export
+ *   pnpm test:e2e:build                                  # NEXT_PUBLIC_E2E=1 static export into out/
+ *   node scripts/e2e/serve-out.mjs --port 4173           # serves that export
  *
  * Usage:
  *   node web/scripts/capture-product.mjs --base-url http://localhost:4173
@@ -32,6 +33,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { CHAT_SURFACE_SELECTOR } from "./demo-session.mjs"
+import { DEMO } from "./demo-transcript.mjs"
+
+export { DEMO }
+
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const OUT_DIR = join(WEB_ROOT, "public", "product")
 const MANIFEST = join(WEB_ROOT, "content", "generated", "product-shots.json")
@@ -39,22 +45,12 @@ const MANIFEST = join(WEB_ROOT, "content", "generated", "product-shots.json")
 const LOCALES = ["en", "zh"]
 const THEMES = ["light", "dark"]
 
+/** The thread's own "Jump to latest" pill. */
+export const JUMP_TO_LATEST_SELECTOR = '[data-testid="conversation-jump-pill"]'
+
 /** Viewport at capture time. DPR 2 so the shot stands up on a retina display. */
 const VIEWPORT = { width: 1440, height: 900 }
 const SCALE = 2
-
-/**
- * The demo project every screenshot shows. Fictional on purpose: the signature
- * task needs a failing check and a pending release, and manufacturing those in
- * a real repository to take a photograph of them is worse than saying the
- * project is a demonstration.
- */
-export const DEMO = {
-  repository: "acme/checkout-service",
-  branch: "release/2.4.0",
-  failingCheck: "unit-tests",
-  artifact: "launch-notes.md",
-}
 
 /**
  * One entry per matrix section. `requireVisible` is the guard: the shutter does
@@ -63,20 +59,17 @@ export const DEMO = {
 export const SECTIONS = [
   {
     key: "hero",
-    route: "/",
-    requireVisible: ['[data-testid="chat-pane"]'],
+    requireVisible: [CHAT_SURFACE_SELECTOR],
     clip: null,
   },
   {
     key: "workbench",
-    route: "/",
-    requireVisible: ['[data-testid="chat-pane"]', '[data-testid="artifact-workspace-dock"]'],
+    requireVisible: [CHAT_SURFACE_SELECTOR, '[data-testid="artifact-workspace-dock"]'],
     clip: null,
   },
   {
     key: "desktop",
-    route: "/",
-    requireVisible: ['[data-testid="chat-pane"]'],
+    requireVisible: [CHAT_SURFACE_SELECTOR],
     // A macro crop of the shell rather than the whole window — the spec asks
     // for a close read of the workspace chrome, not a shrunken desktop.
     clip: { x: 0, y: 0, width: 960, height: 600 },
@@ -132,59 +125,29 @@ function readShotManifest() {
 }
 
 /**
- * The seam that seeds the signature task. It does NOT exist yet.
- *
- * `lib/dev/expose-test-globals.tsx` exposes `__cogniaSetSettings`,
- * `__cogniaResetDb`, `__cogniaSeedTeam`, `__cogniaSeedRun`,
- * `__cogniaSeedWorkflow` and friends — enough to seed a team or a run, but
- * nothing that produces a chat session carrying a plan, a diff, an approval
- * checkpoint, a test result and an artifact together. That composite is exactly
- * what the signature task's screenshots need.
- *
- * Adding it is a product-side change (dev-only, behind the same
- * `NEXT_PUBLIC_E2E` gate as every other global), not a website change, so this
- * script names the file rather than guessing at a global that is not there.
+ * Put the application into the signature task's final state — every stage
+ * played, halted on the push approval — for one locale and theme. Every
+ * section of that cell is shot from this one state, so the hero, workbench and
+ * desktop crops agree with each other and with the film.
  */
-const SEED_SEAM = "__cogniaSeedDemoWorkspace"
-
-/**
- * Put the application into a known state: demo locale, theme, and a seeded
- * workspace holding the signature task. Uses the same seams as the E2E suite,
- * so it stays correct as those evolve rather than duplicating their logic.
- */
-async function prepare(page, { locale, theme }) {
-  await page.waitForFunction(() => typeof window.__cogniaSetSettings === "function", {
-    timeout: 60_000,
-  })
-
-  const seamPresent = await page.evaluate(
-    (seam) => typeof (/** @type {any} */ (window)[seam]) === "function",
-    SEED_SEAM
-  )
-  if (!seamPresent) {
-    throw new Error(
-      `window.${SEED_SEAM} is not exposed. Add it to lib/dev/expose-test-globals.tsx ` +
-        "(dev-only, behind the existing NEXT_PUBLIC_E2E gate) so a capture run can seed the " +
-        "signature task — repository context, plan, failing check, diff, approval checkpoint, " +
-        "test output and the launch-notes artifact — without touching real data."
-    )
-  }
-
-  await page.evaluate(
-    async ({ locale: lang, theme: mode, demo, seam }) => {
-      const w = /** @type {any} */ (window)
-      await w.__cogniaSetSettings({
-        locale: lang === "zh" ? "zh-CN" : "en",
-        theme: mode,
-      })
-      await w[seam](demo)
-    },
-    { locale, theme, demo: DEMO, seam: SEED_SEAM }
-  )
-
+async function prepare(page, { baseUrl, locale, theme }) {
+  const { openDemoSession } = await import("./demo-session.mjs")
+  const session = await openDemoSession(page, { baseUrl, locale, theme })
+  let result = { done: false }
+  while (!result.done) result = await session.advance()
   // Motion has to be off, or two runs of the same cell differ.
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme })
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(600)
+  // Stages played back to back outrun the thread's follow-scroll, which then
+  // offers "Jump to latest". Take it so the still shows the end of the task
+  // rather than its middle. Through the element's own click handler, not a
+  // pointer click: the approval dialog's overlay sits above the thread and
+  // would swallow the pointer.
+  const jump = page.locator(JUMP_TO_LATEST_SELECTOR).first()
+  if (await jump.isVisible().catch(() => false)) {
+    await jump.evaluate((el) => /** @type {HTMLElement} */ (el).click())
+    await page.waitForTimeout(800)
+  }
 }
 
 async function main() {
@@ -234,12 +197,14 @@ async function main() {
           reducedMotion: "reduce",
         })
         const page = await context.newPage()
+        let prepared = null
 
         for (const section of sections) {
           const label = `${section.key}-${theme}-${locale}`
           try {
-            await page.goto(`${args.baseUrl}${section.route}`, { waitUntil: "domcontentloaded" })
-            await prepare(page, { locale, theme })
+            // Once per cell; a failure is recorded against every section in it.
+            prepared ??= prepare(page, { baseUrl: args.baseUrl, locale, theme })
+            await prepared
 
             for (const selector of section.requireVisible) {
               await page.locator(selector).first().waitFor({ state: "visible", timeout: 30_000 })

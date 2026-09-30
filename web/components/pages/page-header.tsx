@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { Hairline } from "@web/components/hairline"
 import { Reveal } from "@web/components/reveal"
 import { SiteLink } from "@web/components/site-link"
+import { SplitReveal } from "@web/components/split-reveal"
 import type {
   CapabilitySection,
   CommonCopy,
@@ -61,9 +62,12 @@ export function PageHeader({ copy, common, locale, sections, meta, docsOrigin }:
               <span className="text-ink">{copy.eyebrow}</span>
             </p>
 
-            <h1 className="mt-6 max-w-3xl text-balance text-4xl font-medium leading-[1.1] tracking-tight text-ink md:text-5xl lg:text-6xl">
-              {copy.title}
-            </h1>
+            <SplitReveal
+              as="h1"
+              trigger="mount"
+              text={copy.title}
+              className="mt-6 max-w-3xl text-balance text-4xl font-medium leading-[1.1] tracking-tight text-ink md:text-5xl lg:text-6xl"
+            />
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted">{copy.subtitle}</p>
           </Reveal>
 

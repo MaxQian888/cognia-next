@@ -175,6 +175,11 @@ export const en: SiteCopy = {
     copiedCommand: "Copied",
   },
 
+  footage: {
+    captureNote: "Captured from the Cognia app running demo data.",
+    recordingNote: "Recorded from the Cognia app running demo data.",
+  },
+
   reconstruction: {
     label: "Interface reconstruction",
     note: "Rebuilt in this page from the same demo task, not a screenshot of the application.",
@@ -307,6 +312,16 @@ export const en: SiteCopy = {
   },
 
   home: {
+    film: {
+      eyebrow: "The task, filmed",
+      title: "Watch one task run from request to approval.",
+      subtitle:
+        "Forty-four seconds of the real app: it reads the project, reproduces the failing check, shows the diff, passes the check, writes the notes — and stops before the push.",
+      videoLabel:
+        "Film: Cognia running the release task, from the request to the approval checkpoint on the push.",
+      playLabel: "Play the film",
+      captionsLabel: "English",
+    },
     hero: {
       eyebrow: "Open-source AI workspace",
       title: "Your open workspace for AI agents.",
@@ -903,6 +918,7 @@ export const en: SiteCopy = {
 
     sectionIndex: {
       hero: "Overview",
+      film: "Film",
       task: "One task",
       workbench: "Workbench",
       desktop: "Desktop",

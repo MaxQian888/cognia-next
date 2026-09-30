@@ -33,6 +33,17 @@ junit.xml
 /out/
 /web/.next/
 /web/out/
+# Product footage (ADR-0092, product footage amendment). The recordings and raw
+# renders are re-derivable intermediates, tens of megabytes each run:
+# `web/scripts/record-product.mjs` and `render-video.mjs` regenerate them, and
+# only the published cut under `web/public/video/` is committed. The rest is
+# HyperFrames tool state (preview cache, thumbnails, review sheets).
+/web/video/recordings/
+/web/video/renders/
+/web/video/snapshots/
+/web/video/.review/
+/web/video/.thumbnails/
+/web/video/.hyperframes/
 
 # Live2D Cubism Core — proprietary, fetched at build time by
 # scripts/download-cubism-core.mjs (predev/prebuild). Never committed.

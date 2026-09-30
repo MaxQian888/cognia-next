@@ -3,11 +3,14 @@ import { Icon, type IconName } from "@web/components/icon"
 import { Reveal } from "@web/components/reveal"
 import { formatIndex } from "@web/components/section"
 import { RevealGroup, RevealItem } from "@web/components/reveal-group"
+import { SplitReveal } from "@web/components/split-reveal"
 import { HeroTaskTicket } from "@web/components/home/hero-task-ticket"
 import { HeroWorkbench } from "@web/components/home/hero-workbench"
+import { ProductVideo } from "@web/components/product-video"
 import type { SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
+import { findVideo } from "@web/lib/product-videos"
 
 interface HeroProps {
   locale: Locale
@@ -38,12 +41,22 @@ const TRUST_RAIL_ICONS: IconName[] = ["source", "model", "approval", "system"]
  * the hairlines onto their stage counterparts, so the button, the rail and the
  * reconstruction all render correctly here without a second variant of each.
  *
+ * The workbench is the recorded hero loop when it has been rendered
+ * (`findVideo("hero-loop")`): the real application running the task, halting
+ * on approval, looping on that halt. Until then it is the DOM reconstruction
+ * running the same task, labelled as one.
+ *
  * Under the two-line rule (spec 3.2) the display size steps with the column:
  * six of twelve tracks from `lg`, five from `xl`, and the type follows so the
- * headline holds two lines at every width from 1024 up.
+ * headline holds two lines at every width from 1024 up. The shell stops
+ * growing at 1480px, so from `2xl` the column is a fixed ~567px: measured in
+ * both locales, 3.625rem is the last size that holds two lines there, and the
+ * step is set one notch inside it (3.5rem) so a platform's font rendering
+ * cannot push the English title onto a third.
  */
 export function Hero({ locale, copy, releaseState, docsOrigin, index }: HeroProps) {
   const { hero } = copy.home
+  const loop = findVideo("hero-loop", locale)
 
   return (
     <section
@@ -72,9 +85,14 @@ export function Hero({ locale, copy, releaseState, docsOrigin, index }: HeroProp
               <span>{hero.eyebrow}</span>
             </p>
 
-            <h1 className="mt-7 text-balance text-4xl font-medium leading-[1.06] tracking-tight text-ink md:text-5xl lg:text-[2.75rem] xl:text-[3.25rem] 2xl:text-6xl">
-              {hero.title}
-            </h1>
+            {/* `mount`: the first screen's headline rises on first paint, from CSS
+             * alone, so it never waits on hydration. */}
+            <SplitReveal
+              as="h1"
+              trigger="mount"
+              text={hero.title}
+              className="mt-7 text-balance text-4xl font-medium leading-[1.06] tracking-tight text-ink md:text-5xl lg:text-[2.75rem] xl:text-[3.25rem] 2xl:text-[3.5rem]"
+            />
 
             <p className="mt-7 max-w-xl text-lg leading-relaxed text-muted md:text-xl">
               {hero.subtitle}
@@ -94,11 +112,21 @@ export function Hero({ locale, copy, releaseState, docsOrigin, index }: HeroProp
            * trigger would hold the page's largest visual at opacity 0 for a
            * reader who never scrolls. */}
           <Reveal variant="scale" trigger="mount" className="min-w-0 lg:col-span-6 xl:col-span-7">
-            <HeroWorkbench
-              copy={copy.reconstruction}
-              alt={hero.stageAlt}
-              caption={hero.stageCaption}
-            />
+            {loop ? (
+              <ProductVideo
+                mode="ambient"
+                video={loop}
+                label={hero.stageAlt}
+                caption={hero.stageCaption}
+                note={copy.footage.recordingNote}
+              />
+            ) : (
+              <HeroWorkbench
+                copy={copy.reconstruction}
+                alt={hero.stageAlt}
+                caption={hero.stageCaption}
+              />
+            )}
           </Reveal>
         </div>
 

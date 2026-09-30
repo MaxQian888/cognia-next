@@ -5,16 +5,35 @@ import { en } from "./en"
 import { zh } from "./zh"
 
 describe("DEMO_TASK", () => {
-  it("stays the same project the capture script seeds", () => {
-    // Read as text rather than imported: the capture script is an `.mjs` node
-    // script outside the Jest module graph. What matters is that a reconstruction
-    // and a future screenshot of the same section describe one task, so the two
+  it("stays the same project the capture and recording scripts seed", () => {
+    // Read as text rather than imported: the transcript is an `.mjs` node
+    // script outside the Jest module graph. What matters is that a
+    // reconstruction, a screenshot and a film frame describe one task, so the
     // identities must not drift apart silently.
-    const script = readFileSync(join(__dirname, "..", "scripts", "capture-product.mjs"), "utf8")
+    const script = readFileSync(join(__dirname, "..", "scripts", "demo-transcript.mjs"), "utf8")
     expect(script).toContain(`repository: "${DEMO_TASK.repository}"`)
     expect(script).toContain(`branch: "${DEMO_TASK.branch}"`)
     expect(script).toContain(`failingCheck: "${DEMO_TASK.check}"`)
     expect(script).toContain(`artifact: "${DEMO_TASK.artifact.file}"`)
+    expect(script).toContain(`version: "${DEMO_TASK.artifact.version}"`)
+    expect(script).toContain(`testCommand: "${DEMO_TASK.test.command}"`)
+    expect(script).toContain(`sourcePath: "${DEMO_TASK.diff.path}"`)
+    expect(script).toContain(
+      `pushCommand: "${DEMO_TASK.approval.command} ${DEMO_TASK.approval.target}"`
+    )
+    // The capture script takes its identity from the transcript, not a copy.
+    const capture = readFileSync(join(__dirname, "..", "scripts", "capture-product.mjs"), "utf8")
+    expect(capture).toContain('import { DEMO } from "./demo-transcript.mjs"')
+  })
+
+  it("films the same test names and the same change the reconstructions show", () => {
+    const script = readFileSync(join(__dirname, "..", "scripts", "demo-transcript.mjs"), "utf8")
+    for (const line of DEMO_TASK.test.lines.filter((l) => l.state !== "queued")) {
+      expect(script).toContain(line.name)
+    }
+    for (const line of DEMO_TASK.diff.lines.filter((l) => l.kind !== "context")) {
+      expect(script).toContain(line.text.trim())
+    }
   })
 
   it("names the project as a demonstration, not as a real customer", () => {

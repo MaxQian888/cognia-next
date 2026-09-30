@@ -111,7 +111,11 @@ function isHudEnabledForRuntime(): boolean {
   // when `window` is undefined (SSR), so this is safe to call unconditionally.
   if (detectNativePlatform() === "mobile") return false
   if (dismissed) return false
-  if (getNodeEnv() !== "production") return true
+  // A shipped browser bundle has no global `process`, so NODE_ENV reads "" —
+  // that is a production static export, not dev. Only an explicitly
+  // non-production env (dev server, jest) earns the auto-mount.
+  const nodeEnv = getNodeEnv()
+  if (nodeEnv !== "" && nodeEnv !== "production") return true
   if (typeof window === "undefined") return false
   try {
     return window.localStorage.getItem(HUD_LOCALSTORAGE_KEY) === "1"

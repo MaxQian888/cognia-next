@@ -1,0 +1,400 @@
+<!doctype html>
+<html
+  lang="en"
+  data-composition-variables='[
+    {"id":"locale","type":"enum","label":"Locale","default":"en","options":[{"value":"en","label":"English"},{"value":"zh","label":"中文"}]},
+    {"id":"recording","type":"string","label":"Recording","default":"recordings/en.mp4"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <!-- Per-locale beat times and focus rectangles, written by web/scripts/record-product.mjs. -->
+    <script src="recordings/timing.js"></script>
+    <!-- The film's words, shared with the caption tracks the render script writes. -->
+    <script src="film-copy.js"></script>
+    <style>
+      @font-face {
+        font-family: Geist;
+        src: url(assets/fonts/Geist-Regular.woff2) format("woff2");
+        font-weight: 400;
+      }
+      @font-face {
+        font-family: Geist;
+        src: url(assets/fonts/Geist-Medium.woff2) format("woff2");
+        font-weight: 500;
+      }
+      @font-face {
+        font-family: "Geist Mono";
+        src: url(assets/fonts/GeistMono-Regular.woff2) format("woff2");
+        font-weight: 400;
+      }
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC");
+        font-weight: 400;
+      }
+      @font-face {
+        font-family: "PingFang SC";
+        src: local("PingFang SC Medium"), local("PingFang SC");
+        font-weight: 500;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #0c1115;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        font-family: Geist, "PingFang SC", sans-serif;
+        color: #f3f1ec;
+      }
+      /* Stage ground and its dot lattice. A full-bleed child, never the root's own fill. */
+      #ground {
+        position: absolute;
+        inset: 0;
+        background: #0c1115;
+      }
+      #lattice {
+        position: absolute;
+        inset: -24px;
+        background-image: radial-gradient(circle, #2a333a 1.6px, transparent 1.9px);
+        background-size: 24px 24px;
+        opacity: 0.55;
+      }
+      .mono {
+        font-family: "Geist Mono", "PingFang SC", monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #8e959b;
+      }
+
+      /* Title cards (open and sign-off). */
+      .card {
+        position: absolute;
+        left: 192px;
+        right: 192px;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .lock {
+        display: flex;
+        align-items: center;
+        gap: 40px;
+      }
+      .icon {
+        display: block;
+        width: 132px;
+        height: 132px;
+        flex: none;
+        border-radius: 28px;
+        border: 2px solid #2a333a;
+        background: url(assets/brand/cognia-icon-512.png) center / cover no-repeat;
+      }
+      .title {
+        font-size: 104px;
+        font-weight: 500;
+        letter-spacing: -0.025em;
+        line-height: 1.08;
+        white-space: nowrap;
+      }
+      #close-title {
+        font-size: 80px;
+      }
+      .rule {
+        display: block;
+        margin-top: 48px;
+        width: 360px;
+        height: 3px;
+        background: #35cedd;
+        transform-origin: 0 50%;
+      }
+      .meta {
+        margin-top: 30px;
+        font-size: 24px;
+      }
+      .meta.strong {
+        margin-top: 14px;
+        color: #f3f1ec;
+      }
+
+      /* The footage window: the recording is a bounded work surface on the stage. */
+      #rec {
+        position: absolute;
+        left: 192px;
+        top: 60px;
+        width: 1536px;
+        height: 960px;
+        object-fit: cover;
+        background: #0c1115;
+      }
+      #mat {
+        position: absolute;
+        left: 192px;
+        top: 60px;
+        width: 1536px;
+        height: 960px;
+        border-radius: 14px;
+        /* Paints the stage everywhere outside the rounded window, so the camera's
+           push never shows the recording past the frame. */
+        box-shadow: 0 0 0 2400px #0c1115;
+      }
+      #frame {
+        position: absolute;
+        left: 190px;
+        top: 58px;
+        width: 1540px;
+        height: 964px;
+        border-radius: 16px;
+        border: 2px solid #2a333a;
+      }
+      #cover {
+        position: absolute;
+        left: 192px;
+        top: 60px;
+        width: 1536px;
+        height: 960px;
+        border-radius: 14px;
+        background: #0c1115;
+      }
+      .top {
+        position: absolute;
+        top: 20px;
+        font-size: 20px;
+      }
+      #task-id {
+        left: 192px;
+      }
+      #provenance {
+        right: 192px;
+      }
+
+      /* Beat callouts: a graphite plate over the window's lower-left corner. */
+      .plate {
+        position: absolute;
+        left: 96px;
+        bottom: 72px;
+        width: 780px;
+        padding: 28px 34px 30px;
+        background: #151b20;
+        border: 2px solid #2a333a;
+        border-radius: 12px;
+        opacity: 0;
+      }
+      .plate.amber {
+        border-color: #d99a3d;
+      }
+      .tag {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 22px;
+      }
+      .tick {
+        display: block;
+        width: 28px;
+        height: 3px;
+        background: #35cedd;
+        transform-origin: 0 50%;
+      }
+      .amber .tick {
+        background: #d99a3d;
+      }
+      .amber .tag {
+        color: #d99a3d;
+      }
+      .line {
+        margin-top: 14px;
+        font-size: 38px;
+        line-height: 1.3;
+        color: #f3f1ec;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="product-film"
+      data-start="0"
+      data-duration="44"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="ground"><div id="lattice"></div></div>
+
+      <!-- 01 · Open -->
+      <div id="open" class="clip" data-start="0" data-duration="4.2" data-track-index="1">
+        <div class="card">
+          <div class="lock">
+            <div id="open-icon" class="icon"></div>
+            <div id="open-title" class="title">One task, end to end.</div>
+          </div>
+          <span id="open-rule" class="rule"></span>
+          <div id="open-meta" class="meta mono">acme/checkout-service · release/2.4.0</div>
+        </div>
+      </div>
+
+      <!-- 02–09 · The recording. A direct root child: the framework owns its playback. -->
+      <video
+        id="rec"
+        class="clip"
+        src="recordings/en.mp4"
+        data-var-src="recording"
+        data-start="4"
+        data-duration="34"
+        data-media-start="0"
+        data-track-index="2"
+        muted
+        playsinline
+      ></video>
+
+      <div id="chrome" class="clip" data-start="3.8" data-duration="34.6" data-track-index="3">
+        <div id="mat"></div>
+        <div id="frame"></div>
+        <div id="cover"></div>
+        <div id="task-id" class="top mono">acme/checkout-service · release/2.4.0</div>
+        <div id="provenance" class="top mono">Recorded in Cognia · demo data</div>
+        <div class="plate" data-beat="request"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate" data-beat="context"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate" data-beat="reproduce"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate" data-beat="plan"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate" data-beat="fix"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate" data-beat="verify"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate" data-beat="notes"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+        <div class="plate amber" data-beat="approval"><div class="tag mono"><span class="tick"></span><span class="tag-text"></span></div><div class="line"></div></div>
+      </div>
+
+      <!-- 10 · Sign-off -->
+      <div id="close" class="clip" data-start="37.8" data-duration="6.2" data-track-index="1">
+        <div class="card">
+          <div class="lock">
+            <div id="close-icon" class="icon"></div>
+            <div id="close-title" class="title">Your open workspace for AI agents.</div>
+          </div>
+          <span id="close-rule" class="rule"></span>
+          <div id="close-meta" class="meta mono">Open source · Build from source</div>
+          <div id="close-url" class="meta mono strong">github.com/MaxQian888/cognia-next</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---- Copy, per locale (film-copy.js): the same text the caption tracks carry.
+      const COPY = window.__cogniaFilmCopy
+
+      const BEATS = ["request", "context", "reproduce", "plan", "fix", "verify", "notes", "approval"]
+      // How close the camera may get on each beat (the storyboard's per-frame zoom).
+      const MAX_SCALE = {
+        request: 1.3,
+        context: 1.3,
+        reproduce: 1.45,
+        plan: 1.4,
+        fix: 1.6,
+        verify: 1.4,
+        notes: 1.0,
+        approval: 1.25,
+      }
+
+      const vars = window.__hyperframes ? window.__hyperframes.getVariables() : {}
+      const locale = vars.locale === "zh" ? "zh" : "en"
+      const copy = COPY[locale]
+      const timing = window.__cogniaFootageTiming && window.__cogniaFootageTiming[locale]
+      if (!timing) throw new Error(`recordings/timing.js has no timing for ${locale}; run record-product.mjs`)
+      document.documentElement.lang = locale === "zh" ? "zh-CN" : "en"
+
+      document.getElementById("open-title").textContent = copy.openTitle
+      document.getElementById("open-meta").textContent = copy.openMeta
+      document.getElementById("provenance").textContent = copy.provenance
+      document.getElementById("close-title").textContent = copy.closeTitle
+      document.getElementById("close-meta").textContent = copy.closeMeta
+      for (const plate of document.querySelectorAll(".plate")) {
+        const [tag, line] = copy.beats[plate.dataset.beat]
+        plate.querySelector(".tag-text").textContent = tag
+        plate.querySelector(".line").textContent = line
+      }
+
+      // ---- Camera math. The recording fills the 1536×960 window; focus rectangles arrive in
+      // the recorded viewport's CSS pixels.
+      const WIN = { w: 1536, h: 960 }
+      const FOOTAGE_AT = 4
+      const k = WIN.w / timing.viewport.width
+
+      function camera(beat) {
+        const f = timing.beats[beat].focus
+        const cx = (f.x + f.w / 2) * k
+        const cy = (f.y + f.h / 2) * k
+        const fit = Math.min(WIN.w / (f.w * k * 1.2), WIN.h / (f.h * k * 1.3))
+        const s = Math.max(1, Math.min(MAX_SCALE[beat], fit))
+        const clamp = (v, lim) => Math.max(-lim, Math.min(lim, v))
+        return {
+          scale: s,
+          x: clamp(-s * (cx - WIN.w / 2), (s - 1) * (WIN.w / 2)),
+          y: clamp(-s * (cy - WIN.h / 2), (s - 1) * (WIN.h / 2)),
+        }
+      }
+      const at = (beat) => FOOTAGE_AT + timing.beats[beat].startS
+
+      const tl = gsap.timeline({ paused: true })
+
+      // Ambient: one slow breath on the lattice for the whole film (finite repeats).
+      tl.to("#lattice", { opacity: 0.35, duration: 5.5, ease: "sine.inOut", yoyo: true, repeat: 7 }, 0)
+
+      // ---- 01 · Open: titlecard-reveal, with the index rule drawing under the title.
+      tl.fromTo("#open-icon", { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, 0.15)
+      tl.fromTo("#open-title", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: 0.8, ease: "power3.out" }, 0.3)
+      tl.fromTo("#open-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "power2.inOut" }, 0.9)
+      tl.fromTo("#open-meta", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 1.25)
+      tl.to("#open .card", { opacity: 0, y: -16, duration: 0.5, ease: "power2.in" }, 3.55)
+
+      // ---- The window arrives: the cover lifts off the first frame while the camera settles.
+      tl.fromTo("#frame", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.out" }, 3.8)
+      tl.fromTo([".top"], { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power2.out" }, 4.1)
+      tl.fromTo("#cover", { opacity: 1 }, { opacity: 0, duration: 0.7, ease: "power2.out" }, 4.0)
+      tl.fromTo("#rec", { scale: 1.04, x: 0, y: 0, transformOrigin: "50% 50%" }, { scale: 1, duration: 1.2, ease: "power3.out" }, 4.0)
+
+      // ---- 02–09 · One camera move and one callout per beat, on the recorded beat times.
+      BEATS.forEach((beat, i) => {
+        const start = at(beat)
+        const end = i + 1 < BEATS.length ? at(BEATS[i + 1]) : 37.6
+        const cam = camera(beat)
+        const move = beat === "approval" ? 1.5 : beat === "notes" ? 1.3 : 1.1
+        tl.to("#rec", { ...cam, duration: move, ease: "power3.inOut" }, start + (beat === "approval" ? 0.4 : 0.1))
+
+        const plate = `.plate[data-beat="${beat}"]`
+        tl.fromTo(plate, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, start + 0.2)
+        tl.fromTo(`${plate} .tick`, { scaleX: 0 }, { scaleX: 1, duration: 0.4, ease: "power2.out" }, start + 0.35)
+        tl.fromTo(`${plate} .line`, { opacity: 0, x: -10 }, { opacity: 1, x: 0, duration: 0.45, ease: "power2.out" }, start + 0.45)
+        tl.to(plate, { opacity: 0, y: -8, duration: 0.3, ease: "power2.in" }, end - 0.35)
+      })
+
+      // ---- The window leaves on the held halt; the camera eases back as it closes.
+      tl.to("#rec", { scale: 1, x: 0, y: 0, duration: 1.2, ease: "power2.inOut" }, 36.6)
+      tl.to("#cover", { opacity: 1, duration: 0.6, ease: "power2.in" }, 37.4)
+      tl.to(["#frame", ".top"], { opacity: 0, duration: 0.5, ease: "power2.in" }, 37.6)
+
+      // ---- 10 · Sign-off: logo-assemble-lockup, restrained — the rule draws first, the mark
+      // and the line build out from it, the source route follows.
+      tl.fromTo("#close-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "power2.inOut" }, 38.2)
+      tl.fromTo("#close-icon", { opacity: 0, scale: 0.86 }, { opacity: 1, scale: 1, duration: 0.7, ease: "back.out(1.4)" }, 38.45)
+      tl.fromTo("#close-title", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.8, ease: "power3.out" }, 38.6)
+      tl.fromTo("#close-meta", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 39.2)
+      tl.fromTo("#close-url", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 39.45)
+
+      window.__timelines["product-film"] = tl
+    </script>
+  </body>
+</html>

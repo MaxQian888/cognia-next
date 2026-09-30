@@ -227,6 +227,15 @@ The recurring silhouette is a bounded work surface: rectangular, cropped, and di
 - Reconstructions expose one accurate alt description, not a tree of fake controls.
 - Scale/fade motion may support entry, but the content must remain complete under reduced motion.
 
+**The Product Footage Rule.** A film of the product is the real application, recorded, never an animated mock-up.
+
+- Footage is recorded from the app running scripted demo data (`web/scripts/record-product.mjs`) and edited offline in HyperFrames (`web/video/`); the site ships only the rendered files and a player, no animation runtime.
+- Every film says what it is: the provenance line ("Recorded from the Cognia app running demo data.") sits under the frame, and the footage carries "Recorded in Cognia · demo data" on screen.
+- The hero loop is ambient: muted, no controls, and it plays only while hydrated, visible and in view. Its poster is the loop's resting frame, the task halted on approval, and under reduced motion the poster is the whole picture.
+- A film with a story never autoplays. It starts on the reader's click, hands over to native controls, and carries a caption track in the page's language.
+- Films are silent. The callouts and captions carry every beat; sound is not a channel the page relies on.
+- Each render has a size budget (hero loop 2.5 MB, film 9 MB), a content-hashed name, and immutable caching; a render over budget fails rather than ships.
+
 ### Marks
 
 - Lucide icons (`Icon`) name controls and states. Bespoke marks (`Glyph`) name the product's subsystems, one each, on a 24 unit grid with a 1 unit stroke and no fill.
@@ -246,6 +255,8 @@ The recurring silhouette is a bounded work surface: rectangular, cropped, and di
 - Keep one pinned narrative section and one canvas provenance surface as the site-wide budget established by ADR-0092.
 - A surface that builds itself up in phases runs through `useScene`: it starts when it reaches the viewport, runs once, and ends on its static picture. Off screen it holds its opening state, never a finished picture that would flash to empty. Under reduced motion it renders the finished picture at once.
 - Respect `prefers-reduced-motion` in JavaScript as well as CSS. Reduced motion renders a complete static state, not an empty start frame.
+- Headlines rise into place word by word behind a mask (`SplitReveal`; CJK per character, punctuation kept with its neighbour). The first screen's headline runs from CSS on first paint; a section heading arms only if it is still off screen after hydration. A heading is never hidden in the server markup, and its text appears exactly once.
+- A route change fades the page body through to the next page (`PageTransition`, React's `ViewTransition`); navigation and footer do not move. Browsers without the View Transitions API, and reduced motion, swap instantly.
 
 ## Do's and Don'ts
 

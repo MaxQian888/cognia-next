@@ -132,7 +132,7 @@ describe("CapabilityPanorama", () => {
 
   it("renders the Chinese copy with the same lanes", () => {
     const { container } = renderPanorama("zh")
-    expect(screen.getByText(zh.home.panorama.title)).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: zh.home.panorama.title })).toBeInTheDocument()
     expect(container.querySelectorAll("[data-lane]")).toHaveLength(4)
     expect(zh.home.panorama.lanes.map((lane) => lane.items.length)).toEqual(
       en.home.panorama.lanes.map((lane) => lane.items.length)

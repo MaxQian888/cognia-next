@@ -6,6 +6,12 @@ jest.mock("next-themes", () => ({
   useTheme: () => ({ theme: "system", setTheme: jest.fn() }),
 }))
 
+jest.mock("./page-transition", () => ({
+  PageTransition: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="page-transition">{children}</div>
+  ),
+}))
+
 describe("SiteShell", () => {
   it("wraps the page in navigation, a main landmark and a footer", () => {
     render(
@@ -17,6 +23,19 @@ describe("SiteShell", () => {
     expect(screen.getByRole("main")).toBeInTheDocument()
     expect(screen.getByRole("contentinfo")).toBeInTheDocument()
     expect(screen.getByText("page body")).toBeInTheDocument()
+  })
+
+  it("puts the route-change boundary around main, where a remounted page can animate", () => {
+    render(
+      <SiteShell locale="en" route="/">
+        <p>body</p>
+      </SiteShell>
+    )
+    const boundary = screen.getByTestId("page-transition")
+    expect(boundary.children).toHaveLength(1)
+    expect(boundary.firstElementChild).toBe(screen.getByRole("main"))
+    expect(boundary).not.toContainElement(screen.getByRole("navigation"))
+    expect(boundary).not.toContainElement(screen.getByRole("contentinfo"))
   })
 
   it("gives main the id the skip link targets", () => {

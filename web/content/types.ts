@@ -355,9 +355,14 @@ export interface FinalCtaCopy {
   changesSuffix: string
 }
 
-/** The ten homepage section ids, in document order. */
+/**
+ * The homepage section ids, in document order. `film` renders only when its
+ * render exists (`findVideo`); the page drops it from the rail and the
+ * numbering otherwise, so no anchor points at a section that is not there.
+ */
 export const HOME_SECTIONS = [
   "hero",
+  "film",
   "task",
   "workbench",
   "desktop",
@@ -485,8 +490,30 @@ export interface ConnectionFlowCopy {
   centerNode: string
 }
 
+/** The product film section (ADR-0092, product footage amendment). */
+export interface FilmCopy {
+  eyebrow: string
+  title: string
+  subtitle: string
+  /** Accessible name of the player: what the film shows, as alt text would. */
+  videoLabel: string
+  /** The play affordance over the poster before the first play. */
+  playLabel: string
+  /** Label of the caption track in the player's captions menu. */
+  captionsLabel: string
+}
+
+/** Provenance lines for real product imagery (DESIGN.md, Product Footage Rule). */
+export interface FootageCopy {
+  /** Under a screenshot captured from the application. */
+  captureNote: string
+  /** Under a film recorded from the application. */
+  recordingNote: string
+}
+
 export interface HomeCopy {
   hero: HeroCopy
+  film: FilmCopy
   signature: SignatureCopy
   workbench: WorkbenchCopy
   desktop: DesktopCopy
@@ -862,6 +889,7 @@ export interface SiteCopy {
   footer: FooterCopy
   common: CommonCopy
   reconstruction: ReconstructionCopy
+  footage: FootageCopy
   home: HomeCopy
   product: ProductPageCopy
   workflows: WorkflowsPageCopy

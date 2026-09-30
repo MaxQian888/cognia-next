@@ -1,0 +1,10 @@
+{
+  "name": "cognia-product-footage",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.8.93 preview",
+    "check": "npx --yes hyperframes@0.8.93 check",
+    "render": "npx --yes hyperframes@0.8.93 render"
+  }
+}

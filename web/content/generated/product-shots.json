@@ -1,4 +1,65 @@
 {
-  "capturedAt": null,
-  "shots": {}
+  "capturedAt": "2026-09-30T02:30:48.895Z",
+  "shots": {
+    "hero-light-en": {
+      "src": "/product/hero-light-en.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "workbench-light-en": {
+      "src": "/product/workbench-light-en.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "desktop-light-en": {
+      "src": "/product/desktop-light-en.png",
+      "width": 1920,
+      "height": 1200
+    },
+    "hero-dark-en": {
+      "src": "/product/hero-dark-en.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "workbench-dark-en": {
+      "src": "/product/workbench-dark-en.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "desktop-dark-en": {
+      "src": "/product/desktop-dark-en.png",
+      "width": 1920,
+      "height": 1200
+    },
+    "hero-light-zh": {
+      "src": "/product/hero-light-zh.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "workbench-light-zh": {
+      "src": "/product/workbench-light-zh.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "desktop-light-zh": {
+      "src": "/product/desktop-light-zh.png",
+      "width": 1920,
+      "height": 1200
+    },
+    "hero-dark-zh": {
+      "src": "/product/hero-dark-zh.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "workbench-dark-zh": {
+      "src": "/product/workbench-dark-zh.png",
+      "width": 2880,
+      "height": 1800
+    },
+    "desktop-dark-zh": {
+      "src": "/product/desktop-dark-zh.png",
+      "width": 1920,
+      "height": 1200
+    }
+  }
 }

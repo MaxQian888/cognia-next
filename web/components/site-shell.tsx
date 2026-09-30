@@ -4,6 +4,7 @@ import { getCopy } from "@web/content"
 import { type Evidence, releaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 import { RELEASES_URL, docsUrl } from "@web/lib/site"
+import { PageTransition } from "./page-transition"
 import { SiteFooter } from "./site-footer"
 import { SiteNav } from "./site-nav"
 
@@ -38,9 +39,14 @@ export function SiteShell({ locale, route, children }: SiteShellProps) {
         releaseState={state}
         docsOrigin={docsOrigin}
       />
-      <main id="main" className="w-full max-w-full overflow-x-clip">
-        {children}
-      </main>
+      {/* Around `<main>`, not inside it: a route change remounts the whole page,
+       * `<main>` included, and React only animates a boundary that is itself
+       * the outermost thing entering or leaving. */}
+      <PageTransition>
+        <main id="main" className="w-full max-w-full overflow-x-clip">
+          {children}
+        </main>
+      </PageTransition>
       <SiteFooter locale={locale} copy={copy} docsOrigin={docsOrigin} />
     </>
   )

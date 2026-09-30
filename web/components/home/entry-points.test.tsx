@@ -140,7 +140,7 @@ describe("EntryPoints", () => {
 
   it("renders the Chinese copy", () => {
     renderEntries("zh")
-    expect(screen.getByText(zh.home.entryPoints.title)).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: zh.home.entryPoints.title })).toBeInTheDocument()
     for (const channel of zh.home.entryPoints.channels) {
       expect(screen.getByText(channel)).toBeInTheDocument()
     }

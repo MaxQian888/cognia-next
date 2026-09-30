@@ -388,6 +388,109 @@ cycle, a nesting counter stopping at `MAX_SUBWORKFLOW_DEPTH` (pinned by test to
 demonstration ends on its static picture, which is also what reduced motion renders, and every
 picture is hidden from assistive technology behind the sentence it illustrates.
 
+## Amendment, 2026-09-30 — product footage films
+
+The site's product visuals were all DOM reconstructions: §8's capture matrix had never run,
+because the seed seam it waited on did not exist. This amendment builds that seam and puts the
+real application on the page twice more, as film. It supersedes §8's 2026-07-26 note that the
+matrix is empty.
+
+### A. One pipeline from a scripted demo to the page
+
+Five layers, each re-runnable on its own:
+
+1. **A staged-conversation seam in the product** (`lib/dev/demo-stage-seed.ts`, exposed as
+   `__cogniaSeedStagedConversation` / `__cogniaAdvanceStage` only when `NEXT_PUBLIC_E2E=1`). It
+   plays a scripted conversation into the real renderers one stage at a time — messages streamed,
+   tool calls moved from running to done, an awaiting-approval plan, an artifact, a permission
+   request — writing Dexie and the live store the way a real turn does. It is generic; the site's
+   script is data it is handed. A live model is not an option here: the browser build's mock model
+   has no tool-use turn, and permission prompts come only from the sidecar.
+2. **The site's one task as that script** (`web/scripts/demo-transcript.mjs`, English and
+   Chinese), pinned to `web/content/demo-task.ts` by test, so the reconstructions, the screenshots
+   and the films describe the same release.
+3. **A recorder** (`web/scripts/record-product.mjs`) that drives the static E2E build through the
+   script, records it with the Chrome DevTools screencast at 2× (Playwright's own recorder is too
+   soft for close-ups), holds each beat to a fixed total so both locales cut to one timeline, and
+   measures each beat's focus rectangle from the real DOM for the camera. The same run feeds
+   `capture-product.mjs`, which now fills the screenshot matrix (12 cells).
+4. **A HyperFrames project** (`web/video/`) that edits the recordings: a 44-second film with
+   title cards, per-beat camera moves and callouts, and a 10-second hero loop cut from four shots.
+5. **A render script** (`web/scripts/render-video.mjs`) that renders each film per locale,
+   re-encodes to H.264 with `+faststart`, extracts the poster, writes WebVTT captions from the
+   same beat copy, publishes content-hashed files to `web/public/video/`, and records them in
+   `web/content/generated/product-videos.json`. `findVideo()` answers null for a film that has
+   not been rendered, and the page keeps its previous visual.
+
+HyperFrames (Apache-2.0) is an **offline toolchain**, pinned (`hyperframes@0.8.93`) and run with
+`pnpm dlx`; the site gains no animation runtime, only MP4 files and a small player
+(`ProductVideo`). Remotion was the first candidate and was rejected on licence: its terms require
+a paid company licence above three employees, which an open-source project's contributors should
+not have to check before re-rendering a film. Intermediates (recordings, raw renders) are
+git-ignored; the published cut is committed, like the screenshots.
+
+### B. Provenance is always on the page
+
+§8 forbids a mock-up passed off as a photograph; a film inherits the rule. Every frame of product
+UI in the films is the real application, and each says so twice: the footage carries "Recorded
+in Cognia · demo data", and the figure caption under every player carries the provenance line.
+Captured screenshots gained the equivalent line. The demo data is the only thing scripted.
+
+### C. Two films, two contracts
+
+- **The hero loop is ambient.** Muted, looping, no controls; it plays only when hydrated, in view,
+  in a visible tab, and with motion allowed. Reduced motion never starts it: the stylesheet belt
+  cannot stop a `<video>`, so the component decides in script.
+- **The film never autoplays.** It is a new homepage section right after the hero; nothing loads
+  until the reader presses play, then native controls take over with a caption track in the
+  page's language. The section exists only when its render does, and the section index numbers
+  follow, so a missing render never leaves a gap in the sequence.
+
+Both films are silent. A music bed was planned for the film and dropped with its source library;
+the callouts and captions carry every beat, so nothing is lost to a reader with sound off, which
+is how most will watch.
+
+### D. The loop is an exception to "the halt is the argument", and it keeps the halt
+
+The 2026-09-05 amendment (§A) runs the hero once because a loop would undo the approval halt
+every few seconds. The recorded loop is built so that it does not: its first and last frames are
+the same held approval dialog at the same framing, so the seam is invisible and the picture the
+loop keeps returning to is the checkpoint. Its poster, which is also the whole of the reduced-motion
+picture, is that frame.
+
+### E. Budgets and caching
+
+Each render has a budget, hero loop 2.5 MB and film 9 MB against Cloudflare Pages' 25 MiB file
+cap; the encoder steps down a CRF ladder until the file fits and fails if none does. As first
+published: hero loops 1.34 / 1.23 MB, films 3.50 / 3.20 MB (en / zh). Hashed names let
+`web/public/_headers` serve `/video/*` as immutable. The screenshots keep stable names, so they
+are deliberately left on revalidation.
+
+### F. Motion on the headlines and between pages
+
+Two additions to §6's motion vocabulary, both honouring reduced motion and neither hiding content
+before hydration:
+
+- **Headline reveal** (`SplitReveal`): words, or CJK characters, rise into place behind a mask.
+  The first screen's headline runs from CSS on first paint, so it never waits on JavaScript; a
+  section heading renders in place on the server and arms only if it is still off screen after
+  hydration. The split is deterministic rather than `Intl.Segmenter`, whose dictionaries differ
+  between the server's ICU and the browser's. The heading's text appears once, for snippets and
+  copy-paste.
+- **Route change** (`PageTransition`): React's `<ViewTransition>` around `<main>` fades the page
+  body through to the next page on internal navigation; navigation and footer stay put. It wraps
+  `<main>` rather than sitting inside it because a route change remounts the page, and React
+  only animates a boundary that is itself the outermost thing entering or leaving.
+
+The hero headline's widest step also came down from 3.75rem to 3.5rem: from 1536px the shell's
+column is a fixed 567px, and at 3.75rem the English title broke the two-line rule there.
+
+### G. Cost
+
+A product UI change that alters what the films show means re-recording and re-rendering, as it
+already meant re-capturing for the screenshots. The staged seam is the mitigation: it plays the
+current renderers, so a re-record picks the change up without editing the script.
+
 ## Consequences
 
 **Positive.** The website can iterate without rebuilding MDX collections or touching documented

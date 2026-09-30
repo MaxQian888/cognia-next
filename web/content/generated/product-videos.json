@@ -1,0 +1,43 @@
+{
+  "renderedAt": "2026-09-30T04:01:11.753Z",
+  "videos": {
+    "hero-loop-en": {
+      "src": "/video/hero-loop-en.c1a9af0f47.mp4",
+      "poster": "/video/hero-loop-en.c1a9af0f47.jpg",
+      "width": 1600,
+      "height": 1000,
+      "bytes": 1335467,
+      "durationS": 10,
+      "hasAudio": false
+    },
+    "hero-loop-zh": {
+      "src": "/video/hero-loop-zh.77615a7874.mp4",
+      "poster": "/video/hero-loop-zh.77615a7874.jpg",
+      "width": 1600,
+      "height": 1000,
+      "bytes": 1234744,
+      "durationS": 10,
+      "hasAudio": false
+    },
+    "product-film-en": {
+      "src": "/video/product-film-en.be7540dc4e.mp4",
+      "poster": "/video/product-film-en.be7540dc4e.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 3502984,
+      "durationS": 44,
+      "captions": "/video/product-film-en.be7540dc4e.vtt",
+      "hasAudio": false
+    },
+    "product-film-zh": {
+      "src": "/video/product-film-zh.f3a7be833d.mp4",
+      "poster": "/video/product-film-zh.f3a7be833d.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 3202390,
+      "durationS": 44,
+      "captions": "/video/product-film-zh.f3a7be833d.vtt",
+      "hasAudio": false
+    }
+  }
+}

@@ -5,7 +5,7 @@ import { zh } from "@web/content/zh"
 import { SignatureDemo } from "./signature-demo"
 
 let reduced = false
-jest.mock("motion/react", () => ({ useReducedMotion: () => reduced }))
+jest.mock("motion/react", () => ({ useReducedMotion: () => reduced, useInView: () => true }))
 
 describe("SignatureDemo", () => {
   beforeEach(() => {

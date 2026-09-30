@@ -1,3 +1,18 @@
+const FILM = {
+  src: "/video/product-film-en.abc.mp4",
+  poster: "/video/product-film-en.abc.jpg",
+  width: 1920,
+  height: 1080,
+  bytes: 6_000_000,
+  durationS: 44,
+  captions: "/video/product-film-en.abc.vtt",
+  hasAudio: true,
+}
+// Created inside the factory (a factory runs before module-level consts exist)
+// and reached through the mocked module, whose `videos` each test replaces.
+jest.mock("@web/content/generated/product-videos.json", () => ({ renderedAt: null, videos: {} }))
+
+import videoManifest from "@web/content/generated/product-videos.json"
 import { render, screen, within } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
@@ -16,8 +31,16 @@ jest.mock("motion/react", () => ({
   motion: { div: ({ children }: { children: React.ReactNode }) => <div>{children}</div> },
 }))
 
+function mockVideos(): { videos: Record<string, unknown> } {
+  return videoManifest as unknown as { videos: Record<string, unknown> }
+}
+
+beforeEach(() => {
+  mockVideos().videos = { "product-film-en": FILM }
+})
+
 describe("HomePage", () => {
-  it("renders all ten sections in the order the spec fixes", () => {
+  it("renders all eleven sections in the order the spec fixes", () => {
     render(<HomePage locale="en" />)
     const headings = screen
       .getAllByRole("heading", { level: 1 })
@@ -26,6 +49,7 @@ describe("HomePage", () => {
 
     const expected = [
       en.home.hero.title,
+      en.home.film.title,
       en.home.signature.title,
       en.home.workbench.title,
       en.home.desktop.title,
@@ -44,12 +68,31 @@ describe("HomePage", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
   })
 
-  it("numbers every section from 01 to 10 in document order", () => {
+  it("numbers every section from 01 to 11 in document order", () => {
     const { container } = render(<HomePage locale="en" />)
     const tags = [...container.querySelectorAll('[data-slot="section-index"]')].map(
       (tag) => tag.textContent
     )
+    expect(tags).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"])
+  })
+
+  it("closes the numbering and the rail over the film when it has not been rendered", () => {
+    mockVideos().videos = {}
+    const { container } = render(<HomePage locale="en" />)
+    expect(container.querySelector("#film")).toBeNull()
+    const tags = [...container.querySelectorAll('[data-slot="section-index"]')].map(
+      (tag) => tag.textContent
+    )
     expect(tags).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"])
+    const rail = screen.getByRole("navigation", { name: en.nav.sectionIndexLabel })
+    expect(within(rail).queryByRole("link", { name: en.home.sectionIndex.film })).toBeNull()
+  })
+
+  it("plays the film right after the hero, never autoplaying", () => {
+    const { container } = render(<HomePage locale="en" />)
+    const film = container.querySelector("section#film")
+    expect(film?.previousElementSibling).toHaveAttribute("id", "hero")
+    expect(film?.querySelector("video")).toHaveAttribute("preload", "none")
   })
 
   it("advances one signature task, never a second scenario", () => {

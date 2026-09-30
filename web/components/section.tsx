@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { SplitReveal } from "./split-reveal"
 
 export type SectionTone = "paper" | "surface" | "stage"
 
@@ -156,13 +157,13 @@ export function SectionHeading({
           <span>{eyebrow}</span>
         </p>
       ) : null}
-      <h2
+      <SplitReveal
+        as="h2"
+        text={title}
         className={`text-balance text-3xl font-medium leading-tight tracking-tight md:text-4xl lg:text-5xl ${
           onStage ? "text-on-stage" : "text-ink"
         }`}
-      >
-        {title}
-      </h2>
+      />
       {subtitle ? (
         <p
           className={`mt-6 max-w-2xl text-lg leading-relaxed ${

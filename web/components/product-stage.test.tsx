@@ -36,6 +36,12 @@ describe("ProductStage with a captured pair", () => {
     }
   })
 
+  it("says the capture is the real app running demo data", () => {
+    render(<ProductStage section="hero" locale="en" alt="The workspace" />)
+    expect(screen.getByText(en.footage.captureNote)).toBeInTheDocument()
+    expect(screen.queryByText(en.reconstruction.note)).not.toBeInTheDocument()
+  })
+
   it("renders the caption when given", () => {
     render(
       <ProductStage section="hero" locale="en" alt="The workspace" caption="Running the task" />

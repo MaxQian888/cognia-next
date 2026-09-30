@@ -33,7 +33,7 @@ bucket_name = "cognia-shares"
 
 [[kv_namespaces]]
 binding = "SHARE_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "d7440c19873d48a29cab0c306cba4fe6"
 
 [vars]
 MAX_BODY_BYTES = "10485760"

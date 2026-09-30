@@ -1,0 +1,41 @@
+WEBVTT
+
+1
+00:00:00.400 --> 00:00:03.500
+One task, end to end.
+
+2
+00:00:05.392 --> 00:00:07.020
+01 · Request — One sentence starts the task.
+
+3
+00:00:07.220 --> 00:00:10.562
+02 · Context — It reads the project before it proposes anything.
+
+4
+00:00:10.762 --> 00:00:15.867
+03 · Reproduce — The failing check, reproduced first.
+
+5
+00:00:16.067 --> 00:00:19.117
+04 · Plan — A plan you can read before a file changes.
+
+6
+00:00:19.317 --> 00:00:23.467
+05 · Fix — The change arrives as a diff, not a claim.
+
+7
+00:00:23.667 --> 00:00:27.664
+06 · Verify — The check that failed now passes.
+
+8
+00:00:27.864 --> 00:00:31.454
+07 · Notes — The result is a file you keep.
+
+9
+00:00:31.654 --> 00:00:37.600
+08 · Approval — Anything that leaves the machine waits for you.
+
+10
+00:00:38.600 --> 00:00:44.000
+Your open workspace for AI agents.

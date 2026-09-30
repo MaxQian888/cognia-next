@@ -1,3 +1,8 @@
+// Created inside the factory (a factory runs before module-level consts exist)
+// and reached through the mocked module, whose `videos` each test replaces.
+jest.mock("@web/content/generated/product-videos.json", () => ({ renderedAt: null, videos: {} }))
+
+import videoManifest from "@web/content/generated/product-videos.json"
 import { render, screen } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
@@ -31,6 +36,21 @@ function renderHero(locale: "en" | "zh" = "en") {
     />
   )
 }
+
+function mockVideos(): { videos: Record<string, unknown> } {
+  return videoManifest as unknown as { videos: Record<string, unknown> }
+}
+
+beforeEach(() => {
+  mockVideos().videos = {}
+  // jsdom has no media playback; the player's play/pause calls are not under test here.
+  jest.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+  jest.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined)
+})
+
+afterEach(() => {
+  jest.restoreAllMocks()
+})
 
 describe("Hero", () => {
   it("states the product category and the claim", () => {
@@ -68,6 +88,45 @@ describe("Hero", () => {
     expect(screen.getByRole("img", { name: en.home.hero.stageAlt })).toBeInTheDocument()
     expect(screen.getByText(en.home.hero.stageCaption)).toBeInTheDocument()
     expect(container.querySelector(".stage-grid")).toHaveAttribute("aria-hidden")
+  })
+
+  it("keeps the labelled reconstruction until the hero loop has been rendered", () => {
+    const { container } = renderHero()
+    expect(container.querySelector('[data-placeholder="product-stage"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-video="ambient"]')).toBeNull()
+  })
+
+  it("plays the recorded hero loop once it is rendered, saying it is a recording", () => {
+    mockVideos().videos["hero-loop-en"] = {
+      src: "/video/hero-loop-en.abc.mp4",
+      poster: "/video/hero-loop-en.abc.jpg",
+      width: 1600,
+      height: 1000,
+      bytes: 1_000_000,
+      durationS: 10,
+      hasAudio: false,
+    }
+    const { container } = renderHero()
+    const video = container.querySelector('[data-video="ambient"] video')
+    expect(video).toHaveAttribute("src", "/video/hero-loop-en.abc.mp4")
+    expect(video).toHaveAttribute("aria-label", en.home.hero.stageAlt)
+    expect(container.querySelector('[data-placeholder="product-stage"]')).toBeNull()
+    expect(screen.getByText(en.footage.recordingNote)).toBeInTheDocument()
+    expect(screen.getByText(en.home.hero.stageCaption)).toBeInTheDocument()
+  })
+
+  it("does not borrow the other locale's recording", () => {
+    mockVideos().videos["hero-loop-en"] = {
+      src: "/video/hero-loop-en.abc.mp4",
+      poster: "/video/hero-loop-en.abc.jpg",
+      width: 1600,
+      height: 1000,
+      bytes: 1,
+      durationS: 10,
+      hasAudio: false,
+    }
+    const { container } = renderHero("zh")
+    expect(container.querySelector('[data-video="ambient"]')).toBeNull()
   })
 
   it("sits on the execution stage and remaps the reading tokens onto it", () => {

@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <!-- Sketch pass (review-loop §2): wireframe with the real words, no motion. -->
+    <template>
+      <style>
+@font-face{font-family:'PingFang SC';src:local('PingFang SC');font-weight:400}
+@font-face{font-family:'PingFang SC';src:local('PingFang SC Medium'),local('PingFang SC');font-weight:500}
+@font-face{font-family:Geist;src:url(assets/fonts/Geist-Regular.woff2) format('woff2');font-weight:400}
+@font-face{font-family:Geist;src:url(assets/fonts/Geist-Medium.woff2) format('woff2');font-weight:500}
+@font-face{font-family:'Geist Mono';src:url(assets/fonts/GeistMono-Regular.woff2) format('woff2');font-weight:400}
+#root{position:absolute;inset:0;overflow:hidden;font-family:Geist,'PingFang SC',sans-serif;color:#F3F1EC}
+#frame-01-open-bg{position:absolute;inset:0;background:#0C1115}
+.mono{font-family:'Geist Mono','PingFang SC',monospace;text-transform:uppercase;letter-spacing:.1em;color:#8E959B}
+.blk{position:absolute;border:2px solid #2A333A;border-radius:14px;background:#151B20;display:flex;align-items:center;justify-content:center}
+.blk span{font-family:'Geist Mono',monospace;font-size:20px;letter-spacing:.1em;color:#8E959B;text-transform:uppercase}
+.focus{position:absolute;border:2px dashed #35CEDD;border-radius:8px}
+.focus i{position:absolute;left:0;top:-34px;font-style:normal;font-family:'Geist Mono',monospace;font-size:18px;letter-spacing:.1em;color:#35CEDD;text-transform:uppercase}
+.plate{position:absolute;left:96px;bottom:72px;width:760px;padding:28px 32px;background:#151B20;border:2px solid #2A333A;border-radius:12px}
+.plate .tag{display:flex;gap:14px;align-items:center;font-size:22px}
+.plate .tick{width:28px;height:2px;background:#35CEDD}
+.plate .line{margin-top:14px;font-size:38px;line-height:1.25;font-weight:400;color:#F3F1EC}
+.top{position:absolute;top:22px;font-size:20px}
+
+.card{position:absolute;left:192px;top:360px;right:192px}
+.lock{display:flex;align-items:center;gap:40px}
+.icon{width:132px;height:132px;border-radius:28px;border:2px solid #2A333A;background:#151B20;display:flex;align-items:center;justify-content:center}
+.icon span{font-family:'Geist Mono',monospace;font-size:16px;color:#8E959B;text-align:center}
+.title{font-size:104px;font-weight:500;letter-spacing:-.025em;line-height:1.08}
+.rule{margin-top:44px;width:360px;height:2px;background:#35CEDD}
+.meta{margin-top:28px;font-size:24px}
+.meta2{margin-top:14px;font-size:24px;color:#F3F1EC}
+
+      </style>
+      <div id="root" data-composition-id="frame-01-open" data-width="1920" data-height="1080">
+        <div id="frame-01-open-bg"></div>
+        <div class="card">
+          <div class="lock">
+            <div class="icon"><span>app icon</span></div>
+            <div class="title">One task, end to end.</div>
+          </div>
+          <div class="rule"></div>
+          <div class="meta mono">acme/checkout-service · release/2.4.0 · unit-tests failing</div>
+        </div>
+      </div>
+      <script>
+        window.__timelines = window.__timelines || {};
+        window.__timelines["frame-01-open"] = gsap.timeline({ paused: true });
+      </script>
+    </template>
+  </body>
+</html>

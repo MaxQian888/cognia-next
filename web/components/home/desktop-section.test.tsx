@@ -26,7 +26,11 @@ describe("DesktopSection", () => {
 
   it("shows a described crop of the real shell", () => {
     render(<DesktopSection copy={en.home.desktop} locale="en" />)
-    expect(screen.getByRole("img", { name: en.home.desktop.stageAlt })).toBeInTheDocument()
+    // A captured shell renders a light and a dark screenshot under one description;
+    // without a capture the reconstruction carries it once. Either way it is described.
+    const images = screen.getAllByRole("img", { name: en.home.desktop.stageAlt })
+    expect(images.length).toBeGreaterThanOrEqual(1)
+    expect(images.length).toBeLessThanOrEqual(2)
   })
 
   it("adds the controllable terminal as a flat desktop band", () => {

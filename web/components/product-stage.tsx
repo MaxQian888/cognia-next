@@ -29,13 +29,15 @@ interface ProductStageProps {
  *     section, the screenshots win — nothing represents the product as well as
  *     the product. Both are emitted and toggled by the `dark` class rather than
  *     `prefers-color-scheme`, because the theme control can override the system
- *     preference and a media query would ignore that choice.
- *  2. **A DOM reconstruction**, labelled as one. The capture matrix needs a
- *     product-side seed seam that does not exist yet, and an empty frame carrying
- *     a sentence of alt text was the largest visual on the page. A reconstruction
- *     that says it is a reconstruction is honest; the thing ADR-0092 §8 forbids
- *     is an unlabelled mock-up passed off as a photograph of the application,
- *     which the frame's permanent marker prevents.
+ *     preference and a media query would ignore that choice. The capture plays
+ *     the signature task into an E2E build (`web/scripts/capture-product.mjs`,
+ *     `lib/dev/demo-stage-seed.ts`), so it always carries the provenance line:
+ *     the application is real, the data is the demo task.
+ *  2. **A DOM reconstruction**, labelled as one, for a section the matrix has
+ *     not captured. A reconstruction that says it is a reconstruction is
+ *     honest; the thing ADR-0092 §8 forbids is an unlabelled mock-up passed off
+ *     as a photograph of the application, which the frame's permanent marker
+ *     prevents.
  *
  * A half-captured pair is refused rather than shown: a reader who saw the light
  * capture in dark mode would conclude the product looks like that.
@@ -50,6 +52,7 @@ export function ProductStage({
   signalBorder = false,
 }: ProductStageProps) {
   const pair = findShotPair(section, locale)
+  const copy = getCopy(locale)
 
   if (pair) {
     const frame =
@@ -92,14 +95,15 @@ export function ProductStage({
             />
           ) : null}
         </div>
-        {caption ? (
-          <figcaption className="mt-3 font-mono text-xs text-muted">{caption}</figcaption>
-        ) : null}
+        <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">
+          {caption ? <span>{caption}</span> : null}
+          <span>{copy.footage.captureNote}</span>
+        </figcaption>
       </figure>
     )
   }
 
-  const copy = getCopy(locale).reconstruction
+  const reconstruction = copy.reconstruction
 
   return (
     <figure className={className} data-placeholder="product-stage">
@@ -122,9 +126,9 @@ export function ProductStage({
         <div role="img" aria-label={alt}>
           <div aria-hidden>
             {section === "desktop" ? (
-              <DesktopReconstruction copy={copy} />
+              <DesktopReconstruction copy={reconstruction} />
             ) : (
-              <WorkbenchReconstruction copy={copy} />
+              <WorkbenchReconstruction copy={reconstruction} />
             )}
           </div>
         </div>
@@ -142,7 +146,7 @@ export function ProductStage({
 
       <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">
         {caption ? <span>{caption}</span> : null}
-        <span>{copy.note}</span>
+        <span>{reconstruction.note}</span>
       </figcaption>
     </figure>
   )

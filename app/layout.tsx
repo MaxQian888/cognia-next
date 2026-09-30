@@ -109,7 +109,7 @@ import { ClaudeChatRuntimeProvider } from "@/hooks/chat/use-claude-chat"
 import { ProjectCoordinatorHost } from "@/components/project-coordinator/project-coordinator-host"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
-import { PerfHud } from "@/lib/perf"
+import { PerfHudMount } from "@/components/providers/initializers/perf-hud-mount"
 import { PetMount } from "@/components/pet/pet-mount"
 import { CaptureMount } from "@/components/capture/capture-mount"
 import { LightweightRouteShell } from "@/components/runtime/lightweight-route-shell"
@@ -488,8 +488,10 @@ export default async function RootLayout({
                               <OrchestrationDispatchProvider />
                               <RendererPerfInitializer />
                               {/* Dev-only perf HUD. In production it returns null
-                               * unless `localStorage.cogniaPerfHud === "1"`. */}
-                              <PerfHud />
+                               * unless `localStorage.cogniaPerfHud === "1"`, and it
+                               * never mounts on a touch-only device, where its
+                               * bottom-right box would cover the tab bar. */}
+                              <PerfHudMount />
                               {/* Floating virtual-pet widget — gates itself on the pet
                                * setting and degrades on mobile / reduced motion. */}
                               <PetMount />

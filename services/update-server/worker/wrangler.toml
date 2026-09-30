@@ -20,12 +20,12 @@ compatibility_flags = ["nodejs_compat"]
 
 # Must match the app's `DEFAULT_CATALOG_URL` (lib/updates/catalog-client.ts)
 # and the Tauri updater endpoint in src-tauri/tauri.conf.json.
-routes = [{ pattern = "update.cognia.cn/v1/*", zone_name = "cognia.cn" }]
+routes = [{ pattern = "update.cognia.cn", custom_domain = true }]
 
 [[d1_databases]]
 binding = "UPDATE_DB"
 database_name = "cognia-updates"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "a46eb433-b87b-432a-a036-bb31a1b1e6b2"
 migrations_dir = "migrations"
 
 [vars]

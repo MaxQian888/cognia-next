@@ -199,6 +199,20 @@
       opacity: 1 !important;
       transform: none !important;
     }
+
+    /* A split headline is its finished line, and a route change is a swap:
+     * pseudo-elements are outside the `*` rule above, so they are named. */
+    [data-split] [data-split-word] {
+      opacity: 1 !important;
+      transform: none !important;
+      animation: none !important;
+    }
+
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation: none !important;
+    }
   }
 
   ::selection {
@@ -224,6 +238,59 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* Headline reveal (`SplitReveal`): each word or CJK character rises into place
+ * behind its own mask. The mask is a clip path rather than `overflow: hidden`,
+ * because an overflow-clipped inline-block moves its baseline to its bottom
+ * edge and would lift every word off the line. The insets leave room above for
+ * accents and below for descenders once the word is home. */
+.split-mask {
+  display: inline-block;
+  clip-path: inset(-0.35em -0.25em -0.18em -0.25em);
+}
+
+.split-mask > [data-split-word] {
+  display: inline-block;
+}
+
+/* Armed: off screen and waiting. Never the server state — see SplitReveal. */
+[data-split="armed"] [data-split-word] {
+  opacity: 0;
+  transform: translateY(115%);
+}
+
+[data-split="run"] [data-split-word] {
+  animation: split-rise 760ms var(--ease-entrance) var(--split-delay, 0ms) both;
+}
+
+@keyframes split-rise {
+  from {
+    opacity: 0;
+    transform: translateY(115%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Route change (`PageTransition`): the page body leaves quickly and the next
+ * one arrives on the fade-through curve once it has gone, so the two never
+ * compete. Navigation and footer are identical on both sides and swap without
+ * animation, with the root rule below. */
+::view-transition-old(.page-fade) {
+  animation: 150ms ease-out both page-leave;
+}
+
+::view-transition-new(.page-fade) {
+  animation: 320ms var(--ease-entrance) 150ms both fade-through;
+}
+
+@keyframes page-leave {
+  to {
+    opacity: 0;
   }
 }
 
