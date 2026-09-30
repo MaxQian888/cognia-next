@@ -1633,6 +1633,7 @@
       "diagnosticsCopied": "Copied",
       "displayNameLabel": "Account name",
       "displayNamePlaceholder": "Local account",
+      "displayNameRequired": "Enter an account name.",
       "errorInvalidPassword": "That password is not correct.",
       "errorInvalidRecoveryKey": "That recovery key is not correct.",
       "errorPasswordRequired": "Enter your password.",
@@ -1675,6 +1676,7 @@
       "revealPassword": "Show password",
       "runtimeBadgeBrowser": "Browser Vault on this device",
       "runtimeBadgeDesktop": "Desktop keychain on this device",
+      "runtimeBadgeMobile": "Secure storage on this device",
       "shareGuestAction": "Read without unlocking",
       "shareGuestHint": "This is a shared link. Anyone who has it can read it without an account; unlock to add it to your library.",
       "slowBody": "Reopening your account database after a lock takes a moment. Nothing is lost — this keeps going.",
@@ -1787,6 +1789,7 @@
       "deleteTokensMayRemainLive": "The identity provider may still hold a session for the deleted account. Sign out from the provider's own console to be sure.",
       "description": "Create, rename, and remove local accounts on this device.",
       "deviceProtectionHelp": "This workspace opens automatically on this device. Set a password to enable locking and require it on future launches.",
+      "displayNameRequired": "Enter an account name.",
       "editDisplayNameLabel": "Account name",
       "empty": "Select an account",
       "emptyList": "No local accounts yet",
@@ -6322,7 +6325,7 @@
         "manual": "Manual override",
         "redirect": "From CCSwitch redirect"
       },
-      "webModeBody": "CCSwitch interop reads a local SQLite database. Run Cognia in desktop mode (`pnpm tauri dev`) to use this section.",
+      "webModeBody": "CCSwitch interop reads a local SQLite database, which only the Cognia desktop app can open. Use the desktop app for this section.",
       "webModeTitle": "Desktop only"
     },
     "prompts": {
@@ -6462,12 +6465,19 @@
       "download": "Download",
       "downloadAria": "Download artifact",
       "downloadFailed": "Couldn't save the artifact",
+      "enlarge": "Enlarge preview",
       "expand": "Expand preview",
+      "lineCount": "{count, plural, one {# line} other {# lines}}",
       "openInCanvas": "Open in canvas",
       "openInCanvasAria": "Open artifact in canvas",
       "previewAnyway": "Preview anyway",
       "previewDeferred": "This artifact is large — previewing it is a click away.",
-      "previewReactManual": "React artifacts load a runtime, so they preview on request."
+      "previewReactManual": "React artifacts load a runtime, so they preview on request.",
+      "showMore": "Show more",
+      "shrink": "Shrink preview",
+      "version": "v{version}",
+      "viewPreview": "Show preview",
+      "viewSource": "Show source"
     },
     "askUser": {
       "dismiss": "Dismiss",
@@ -7290,6 +7300,8 @@
         "breakdownUserMessages": "User messages",
         "compactAgentOwned": "Compaction is managed by the agent",
         "compactDisabled": "Auto-compact is off",
+        "compactFailed": "Couldn't compact this conversation: {reason}",
+        "compactNothingYet": "Nothing to compact yet. Compaction becomes available after the first reply.",
         "compactNow": "Compact now",
         "compactThreshold": "Auto-compact at {pct}",
         "contextTitle": "Context window",
@@ -7347,6 +7359,7 @@
           "generic": "Voice input failed. Please try again.",
           "noMicrophone": "No microphone available. Check your audio devices.",
           "noSpeech": "No speech detected. Try speaking closer to the microphone.",
+          "notStarted": "Voice input didn't start. Check that Cognia may use the microphone, then try again.",
           "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again.",
           "unsupported": "Voice typing isn't supported in this environment."
         },
@@ -7400,6 +7413,7 @@
         "microphoneLabel": "Microphone",
         "microphoneLiveOnly": "Used by live voice. Dictation records from the system default microphone.",
         "noMicFound": "No microphone found.",
+        "openSettings": "Open settings",
         "selectMicAria": "Select microphone",
         "startListening": "Start voice input",
         "stopListening": "Stop recording",
@@ -8224,6 +8238,7 @@
       "bookmarkLabel": "Toggle bookmark",
       "bookmarkRemoveTooltip": "Remove bookmark",
       "bookmarkTooltip": "Bookmark",
+      "bookmarkedIndicator": "Bookmarked",
       "branchLabel": "Branch conversation",
       "branchStreamingTooltip": "Wait for this reply to finish before branching",
       "branchTooltip": "Branch from here",
@@ -8241,6 +8256,7 @@
       "editTooltip": "Edit & resend",
       "editingCancel": "Cancel",
       "editingSubmit": "Send (⌘/Ctrl+Enter)",
+      "editingSubmitTouch": "Send",
       "errorCategory": {
         "brokenPipe": "Broken pipe",
         "connectionRefused": "Connection refused",
@@ -8334,7 +8350,9 @@
       "sendToImOpen": "Open in Inbox",
       "shareCardLabel": "Share as card",
       "shareCardTooltip": "Share as card",
+      "shareCopiedFallback": "Sharing isn't available here, so the message was copied to the clipboard.",
       "shareDone": "Shared!",
+      "shareFailed": "Couldn't share this message.",
       "shareLabel": "Share message",
       "shareTooltip": "Share",
       "showParsed": "Show parsed",
@@ -8452,6 +8470,7 @@
         "label": "Bypass",
         "tooltip": "All tools auto-approved. Use with care — Claude can run any command."
       },
+      "changed": "Permission mode: {label}",
       "default": {
         "label": "Default",
         "tooltip": "Tools prompt for permission as usual."
@@ -17856,6 +17875,7 @@
       "integration": "Integration",
       "label": "Account label",
       "lastSync": "Last sync",
+      "localListener": "Local listener",
       "missingPermissions": "Missing permissions",
       "needsIntegration": "Install an integration plugin to add an account.",
       "notConfigured": "Not configured",
@@ -17875,6 +17895,7 @@
       },
       "title": "Accounts",
       "validateAndAdd": "Validate and add",
+      "webhookLocalOnly": "The webhook listener only accepts connections from this device. To receive events, expose it through a tunnel or reverse proxy (for example cloudflared) and enter that public https URL when you add a subscription.",
       "webhookUrl": "Webhook URL",
       "webhookVerification": "Webhook verification"
     },
@@ -17898,6 +17919,7 @@
       "confirmDedicatedApp": "Confirm that this is a dedicated integration app.",
       "installationDiscovery": "Couldn't discover GitHub App installations.",
       "projectionRequired": "Select an inbox projection.",
+      "publicUrlInvalid": "The public webhook URL must be an https address on a public host, not localhost or a private network.",
       "resourceDiscovery": "Couldn't discover resources.",
       "subscriptionSetup": "Couldn't create the subscription."
     },
@@ -17942,17 +17964,34 @@
         "issueAssigned": "Issue assigned",
         "issueClosed": "Issue closed",
         "issueCommentCreated": "Issue comment created",
+        "issueCommentDeleted": "Issue comment deleted",
+        "issueCommentEdited": "Issue comment edited",
+        "issueDeleted": "Issue deleted",
+        "issueDemilestoned": "Issue removed from a milestone",
         "issueLabeled": "Issue labeled",
+        "issueMilestoned": "Issue added to a milestone",
         "issueOpened": "Issue opened",
+        "issueTransferred": "Issue transferred",
+        "issueUnassigned": "Issue unassigned",
+        "pullRequestAssigned": "Pull request assigned",
         "pullRequestClosed": "Pull request closed",
         "pullRequestOpened": "Pull request opened",
+        "pullRequestReviewRequestRemoved": "Pull request review request removed",
         "pullRequestReviewRequested": "Pull request review requested",
         "pullRequestReviewSubmitted": "Pull request review submitted",
         "pullRequestSynchronized": "Pull request synchronized",
+        "pullRequestUnassigned": "Pull request unassigned",
         "pushReceived": "Push received",
+        "refCreated": "Branch or tag created",
+        "refDeleted": "Branch or tag deleted",
+        "releaseCreated": "Release created",
         "releasePublished": "Release published",
         "repositoriesAdded": "Repositories added to installation",
-        "repositoriesRemoved": "Repositories removed from installation"
+        "repositoriesRemoved": "Repositories removed from installation",
+        "reviewCommentCreated": "Review comment created",
+        "reviewCommentDeleted": "Review comment deleted",
+        "reviewCommentEdited": "Review comment edited",
+        "statusReceived": "Commit status changed"
       },
       "eventTypes": "Event types, comma-separated",
       "events": "Events",
@@ -17961,11 +18000,22 @@
       "loadMore": "Load more",
       "needsAccount": "Add an account first, then subscribe to its events.",
       "noFailedDeliveries": "No failed deliveries.",
+      "patWebhookNeedsRepository": "The subscription was saved. A personal access token has no App webhook, so add a webhook in each repository's settings on GitHub with the payload URL {url}, content type application/json, and the same secret — or subscribe to one repository and Cognia will configure it.",
       "projection": "Inbox projection",
       "projectionLabels": {
         "issueCommentThread": "Issue comment thread",
         "issueThread": "Issue thread",
         "pullRequestThread": "Pull request thread"
+      },
+      "publicBaseUrl": "Public webhook URL (tunnel or reverse proxy)",
+      "publicBaseUrlHint": "The https address that forwards to this device's webhook listener. GitHub cannot reach the listener directly, and the App webhook is only updated when this is set.",
+      "publicBaseUrlHintPat": "The https address that forwards to this device's webhook listener. With a repository selected, Cognia creates or updates that repository's webhook for you; the token needs permission to manage its webhooks.",
+      "publicBaseUrlPlaceholder": "https://hooks.example.com",
+      "repoWebhookConfigured": "The webhook for {repository} is configured and will deliver the selected events.",
+      "repoWebhookErrors": {
+        "failed": "The subscription was saved, but configuring the webhook on {repository} failed. Try again, or add the webhook in the repository settings.",
+        "forbidden": "The subscription was saved, but the token cannot manage webhooks on {repository}. Grant it repository administration (webhooks) access, or add the webhook in the repository settings.",
+        "noSecret": "The subscription was saved, but the webhook secret is missing from this device's keyring. Remove the account's subscriptions and add them again with a secret."
       },
       "repository": "Repository",
       "requeue": "Requeue",
@@ -17974,7 +18024,8 @@
       "searchResources": "Search resources",
       "selectAccount": "Select an account",
       "selectProjection": "Select a projection",
-      "title": "Subscriptions"
+      "title": "Subscriptions",
+      "webhookNeedsPublicUrl": "The subscription was saved, but GitHub was not configured: it needs a public https URL that forwards to this device. Add one to the subscription to finish the setup."
     },
     "title": "Integrations",
     "unsupportedWeb": "Integration management requires the desktop app.",
@@ -18239,6 +18290,18 @@
     },
     "freshness": {
       "stale": "Shared data is stale"
+    },
+    "githubComments": {
+      "edited": "edited",
+      "empty": "No comments on GitHub yet.",
+      "failed": "Couldn't read the comments from GitHub. Try again.",
+      "load": "Load comments",
+      "loading": "Loading comments from GitHub…",
+      "open": "Open on GitHub",
+      "refresh": "Refresh",
+      "section": "GitHub conversation",
+      "truncated": "Only the first 1,000 comments are shown. Open the issue on GitHub for the rest.",
+      "unknownAuthor": "Unknown author"
     },
     "import": {
       "browse": "Choose file",
@@ -18507,6 +18570,21 @@
       "triageNewIssues": "File new open issues into triage",
       "triageNewIssuesHint": "A newly imported issue that is open and unassigned waits in triage. Agents do not start on it from a chat or a wakeup until someone accepts it."
     },
+    "publish": {
+      "description": "Creates this issue on the tracker you choose and links the two. This writes outside Cognia and cannot be undone from here.",
+      "failed": "Couldn't publish the issue: {reason}",
+      "noDescription": "No description.",
+      "preview": "Will be created as",
+      "submit": "Publish",
+      "success": "Published as {target}.",
+      "target": {
+        "binding": "{provider} · {name}",
+        "github": "GitHub · {repository}"
+      },
+      "targetLabel": "Publish to",
+      "title": "Publish this issue",
+      "trigger": "Publish to…"
+    },
     "rail": {
       "cycles": "Cycles",
       "hide": "Hide the sidebar",
@@ -18615,7 +18693,7 @@
       "failedBindings": "Sync failed for {names}",
       "joiner": ", ",
       "noBindings": "Nothing is bound to a project in this workspace.",
-      "noCredential": "No GitHub credential available. Sign in with the GitHub CLI or connect an account.",
+      "noCredential": "No GitHub credential available. Connect a GitHub account in Settings → Connections, or sign in with the GitHub CLI.",
       "noRepos": "No GitHub repository is bound to a project in this workspace.",
       "now": "Sync now",
       "parts": {
@@ -21125,7 +21203,7 @@
       "debugMode": "Debug mode",
       "debugModeHelp": "Surface extra diagnostics in agent output.",
       "escalateGate": "Require biometric to raise autonomy",
-      "escalateGateHelp": "Re-prompt Face ID / fingerprint before raising the desktop's permission mode from this phone.",
+      "escalateGateHelp": "Re-prompt face or fingerprint unlock before raising the desktop's permission mode from this phone.",
       "escalateReason": "Confirm raising the agent's permission mode",
       "escalateTitle": "Raise permission mode",
       "permAcceptEdits": "Accept edits",
@@ -22126,6 +22204,7 @@
       "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",
       "sections": {
         "activeRuns": "Active runs",
+        "activity": "Activity",
         "quickActions": "Quick actions",
         "recents": "Recent chats"
       },
@@ -22248,8 +22327,8 @@
         "appVersion": "App version",
         "battery": "Battery",
         "batteryCharging": "{level}% · charging",
-        "biometricEnrollHint": "Enroll Face ID / fingerprint in system settings to use it.",
-        "biometricLabel": "Biometric (Face ID / fingerprint)",
+        "biometricEnrollHint": "Enroll a face or fingerprint in system settings to use it.",
+        "biometricLabel": "Biometric (face or fingerprint)",
         "biometricStatus": {
           "available": "Ready",
           "unavailable": "Not enrolled",
@@ -22381,7 +22460,7 @@
       "settingsLink": "App settings",
       "signOut": {
         "biometricDescription": "Re-prompts before clearing the pairing JWT.",
-        "biometricHelp": "Require Face ID / fingerprint before signing this phone out.",
+        "biometricHelp": "Require face or fingerprint unlock before signing this phone out.",
         "biometricLabel": "Confirm before sign-out",
         "biometricReason": "Confirm to sign out of cognia",
         "biometricTitle": "Sign out",
@@ -22475,6 +22554,7 @@
           "failing": "{count, plural, =1 {1 table needs attention} other {# tables need attention}}",
           "healthy": "Everything is in sync",
           "never": "Not synced yet",
+          "noHost": "No host paired",
           "partial": "Partially synced"
         },
         "overallHint": {
@@ -22482,8 +22562,10 @@
           "failing": "{synced} of {total} tables up to date · retry the failed ones below.",
           "healthy": "{synced} of {total} tables up to date · last synced {time}",
           "never": "Pull once to mirror the desktop onto this device.",
+          "noHost": "This device mirrors a desktop host's data. Pair one to start syncing.",
           "partial": "{synced} of {total} tables up to date · the rest pull on the next foreground."
         },
+        "pairHost": "Pair a host",
         "retry": "Retry",
         "statusError": "Failed",
         "statusNever": "Waiting for first pull",
@@ -22493,8 +22575,11 @@
         "tablesDescription": "{synced} of {total} up to date",
         "tablesTitle": "Tables",
         "title": "Companion sync",
-        "toastAllSynced": "Sync requested.",
+        "toastAllSynced": "Everything is in sync.",
         "toastError": "Sync failed: {reason}",
+        "toastNoHost": "No host is paired, so there is nothing to sync from. Pair a host first.",
+        "toastSomeFailed": "{failed, plural, =1 {1 table} other {# tables}} of {total} failed to sync.",
+        "toastTableFailed": "Could not sync {table}: {reason}",
         "toastTableSynced": "Synced {table}."
       },
       "syncRow": "Sync status",
@@ -22634,6 +22719,7 @@
           "push": "Push notifications",
           "toast": "In-app toasts"
         },
+        "channelDenied": "Cognia isn't allowed to post notifications. Allow them in the app's system settings, then turn this on again.",
         "channelHelp": {
           "os": "Show native OS notifications.",
           "push": "Deliver to this device when the app is closed.",
@@ -22656,8 +22742,11 @@
         "minOsLevelHelp": "Only fire system notifications at or above this severity.",
         "minPushLevel": "Minimum push level",
         "minPushLevelHelp": "Only send push notifications at or above this severity.",
+        "openSettings": "Open settings",
+        "osUnavailable": "System notifications aren't available on this device.",
         "perSourceHelp": "Mute notifications from a specific subsystem.",
         "perSourceTitle": "By source",
+        "pushUnavailable": "Push notifications can't be set up on this device, for example because it has no Google Play services.",
         "quietHoursEnabled": "Quiet hours",
         "quietHoursEnabledHelp": "Silence non-critical notifications during a daily window.",
         "quietHoursEnd": "End time",
@@ -22716,26 +22805,31 @@
       "queueAwaitingApprovalNoCode": "Waiting for approval on the host.",
       "queueNeedsAttention": "{count, plural, one {# action needs your attention} other {# actions need your attention}}",
       "queuePending": "{count} queued",
+      "queuePendingWithSending": "{count} queued · {sending} sending",
       "queueSheet": {
-        "description": "Waiting for your host. Anything that has not started sending can be withdrawn.",
+        "alreadyGone": "It is no longer in the queue.",
+        "description": "Waiting for your host. Anything not being sent right now can be withdrawn.",
         "discard": "Discard",
         "discarded": "Discarded.",
         "empty": "Nothing is queued.",
         "inOrder": "Part of a conversation, so it sends in order with the rest.",
+        "notWithdrawable": "This one can no longer be withdrawn.",
         "retry": "Retry",
         "retrying": "Queued to try again.",
         "status": {
           "conflicted": "Conflicts with a newer change",
           "deadlettered": "Gave up after retries",
-          "pending": "Waiting to send",
+          "pending": "Queued",
           "rejected": "Refused by the host",
-          "sending": "Sending…"
+          "sending": "Sending…",
+          "stuck": "Stuck — the send stopped without an answer"
         },
         "title": "Queued actions",
         "tooLate": "Already sending, so it can no longer be withdrawn.",
         "unlabeled": "Queued action",
         "withdraw": "Withdraw",
-        "withdrawn": "Withdrawn — it will not be sent."
+        "withdrawn": "Withdrawn — it will not be sent.",
+        "withdrawnUnconfirmed": "Withdrawn. An earlier attempt may already have reached the host, so it could still run there."
       },
       "review": "Review",
       "staleWarning": "{count} messages waiting > 30 min."
@@ -23011,6 +23105,7 @@
       "web": {
         "baseUrlLocked": "Server URL is set by this deployment",
         "clearPayload": "Clear",
+        "clipboardEmpty": "The clipboard is empty. Copy the full cgnp3 invitation first, then tap Paste again.",
         "clipboardReadFailed": "The browser could not read the clipboard. Paste the full invitation manually.",
         "clipboardWriteFailed": "The browser could not copy the command. Select it and copy it manually.",
         "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
@@ -23173,7 +23268,7 @@
         "help": "Ask for biometric before revoking a device's pairing.",
         "label": "Revoke a paired device"
       },
-      "description": "Require Face ID / fingerprint before sensitive actions.",
+      "description": "Require face or fingerprint unlock before sensitive actions.",
       "exportBackup": {
         "help": "Ask for biometric before writing a backup file.",
         "label": "Export encrypted backup"
@@ -23685,6 +23780,8 @@
       "pinned": "Pinned",
       "pinned_added": "Pinned.",
       "pinned_removed": "Unpinned.",
+      "queuedBadge": "Queued",
+      "runAlreadyQueued": "Already queued — it runs once when the desktop is online again.",
       "runButton": "Run",
       "runFailed": "Trigger failed: {message}",
       "runQueued": "Queued — fires when the desktop is online again.",
@@ -23700,6 +23797,7 @@
       "swipe": {
         "favorite": "Pin",
         "run": "Run",
+        "runAlreadyQueued": "{name} is already queued",
         "runQueued": "Queued {name}",
         "unfavorite": "Unpin"
       },
@@ -23717,6 +23815,7 @@
         "resume": "Resume schedule",
         "resumeQueued": "Resuming schedule of {name} — queued for desktop.",
         "run": "Run now",
+        "runAlreadyQueued": "{name} is already queued for the desktop — it runs once.",
         "runQueued": "Triggered {name} — queued for desktop.",
         "title": "Workflow actions",
         "unpin": "Unpin",
@@ -29668,9 +29767,9 @@
       "gatewayDescription": "This provider points at a custom endpoint. Streaming works only if that endpoint allows requests from a browser origin.",
       "gatewayTitle": "Custom endpoint, streaming unverified",
       "supportedDescription": "Responses arrive token by token, straight from the provider, with no desktop app in between.",
-      "supportedTitle": "Streams directly from this browser",
+      "supportedTitle": "Streams directly from this device",
       "unsupportedDescription": "This provider's endpoint may refuse browser requests. Replies can arrive all at once instead of streaming, or fail outright.",
-      "unsupportedTitle": "May not stream from a browser"
+      "unsupportedTitle": "May not stream on this device"
     },
     "builtin": "Built-in",
     "cachedInputPrice": "Cached input price",
@@ -29849,6 +29948,7 @@
       "connectionSuccess": "Connected",
       "credentialsDescription": "What this device needs to reach the provider. Credentials stay local and are never included in diagnostics.",
       "credentialsTitle": "Credentials & endpoint",
+      "defaultModelCatalogPlaceholder": "Provider default: {name}",
       "defaultModelDescription": "Preselected whenever a new chat runs on this provider.",
       "defaultModelLabel": "Default Model",
       "defaultModelManualHint": "Search the known models or type a provider-supported model ID.",
@@ -30030,6 +30130,8 @@
         "description": "Choose a production-resolved target and review its request and cost limits before execution.",
         "embedding": "Embedding benchmark",
         "endpoint": "Endpoint",
+        "endpointEmpty": "No endpoint to test. This provider has no Base URL set, and its SDK's built-in endpoint is not listed here. Enter a Base URL on the Connect tab to run diagnostics.",
+        "endpointResolvedByHost": "Chosen by the paired desktop, which runs diagnostics against the endpoint it is configured with.",
         "mode": "Sampling mode",
         "model": "Model",
         "open": "Configure run",
@@ -30151,6 +30253,9 @@
       },
       "summary": {
         "auth": "Authentication",
+        "connectionTestFailed": "The Error status on this provider comes from its last connection test, which failed. The tiles below only reflect diagnostic runs — run diagnostics to see which layer fails.",
+        "connectionTestFailedWithError": "The Error status on this provider comes from its last connection test, which failed: {error}. The tiles below only reflect diagnostic runs — run diagnostics to see which layer fails.",
+        "connectionTestPassed": "The last connection test passed. The tiles below only reflect diagnostic runs, so they stay Unverified until one completes.",
         "description": "Advisory state for {provider}; routing health is unchanged.",
         "execution": "Real execution",
         "title": "Provider summary",
@@ -31030,7 +31135,7 @@
       "localLoginBodyPlan": "This machine's Claude Code CLI is already signed in ({plan} plan). Reuse that subscription here with one click — no need to sign in again.",
       "localLoginTitle": "Local Claude Code login detected",
       "manage": "Manage in Subscription",
-      "privacyBody": "The key is stored as plaintext in your browser's IndexedDB. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring.",
+      "privacyBody": "The key is stored as plaintext in this app's local database (IndexedDB) on this device. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring.",
       "privacyTitle": "Privacy note",
       "signIn": "Go to sign in",
       "signedInBody": "Signed in as {account}. No API key needed.",
@@ -35812,6 +35917,7 @@
           "title": "Apply imported appearance?"
         },
         "export": "Export",
+        "exportFailed": "Couldn't export the appearance: {message}",
         "exportSuccess": "Appearance exported.",
         "import": "Import",
         "importInvalid": "Couldn't read that file: {message}",
@@ -36768,7 +36874,7 @@
         "clearOutputOnRun": "Clear output on each run",
         "maxExecutionTime": "Max execution time",
         "pythonAvailable": "Python runs through this app's confined interpreter.",
-        "pythonRequiresDesktop": "Python execution requires the desktop build (Tauri). Run `pnpm tauri dev` to enable.",
+        "pythonRequiresDesktop": "Python execution runs in the Cognia desktop app. Open this canvas there to run Python.",
         "showOutput": "Show output panel"
       },
       "resetAll": "Reset all",
@@ -41200,6 +41306,7 @@
         "status": "Status",
         "statusDeny": "DENY",
         "statusOk": "OK",
+        "target": "Target · {field}",
         "time": "Time",
         "title": "Recent MCP calls",
         "toastCleared": "Audit log cleared.",
@@ -41296,6 +41403,10 @@
           "wiki": {
             "description": "Rebuild and lint schedules",
             "label": "Wiki maintenance"
+          },
+          "workspace": {
+            "description": "Which roots each client may reach",
+            "label": "Workspace access"
           }
         },
         "mobileTrigger": "Panels",
@@ -41305,6 +41416,7 @@
         "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
         "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
         "browser:control": "Lets external agents drive Cognia's browser through the browser_* tools: open and navigate pages, read snapshots, click and type, manage tabs and downloads, print PDFs, emulate devices, inspect cookie metadata and storage, and sign in with a saved password. Independent of any character's tool settings. Tools that need approval in the app (running page scripts, uploads, downloads, password sign-in) still ask you on each call, and page content is fenced as untrusted. Default OFF.",
+        "git:read": "Lets external agents read git status, diffs and history of granted roots. Read-only: no commit, checkout or push. Credential paths are left out. Default OFF.",
         "inbound:write": "⚠ Lets external agents contribute lessons, skill drafts, and notes. Nothing is applied automatically — submissions land in a review queue as pending, untrusted drafts for you to accept or discard. Default OFF.",
         "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
         "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF.",
@@ -41322,10 +41434,13 @@
         "runtime:plugins": "Exposes the list and metadata of installed plugins.",
         "runtime:skills": "⚠ Exposes your installed skills' content.",
         "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
+        "shell:run": "Lets external agents run shell commands in granted roots as background jobs they can read and stop. Dangerous commands are refused; risky ones, and ones naming a credential file, ask you every time. Commands run with your own account's permissions, so grant this only to agents you trust. Default OFF.",
         "usage:read": "Lets external agents read your own spend, session efficiency metrics, and the local optimizer's findings. Read-only: it cannot change a setting or apply a fix, and session ids are pseudonymized. Default OFF.",
         "wiki:cognia": "Public Cognia code wiki — safe to expose.",
         "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
-        "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF."
+        "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF.",
+        "workspace:read": "Lets external agents list, read and search files in the workspace roots you grant them under Workspace access. Credential files (.env, keys, .ssh, …) and .git internals are always refused, and personal data in file content is redacted. Default OFF.",
+        "workspace:write": "Lets external agents write, edit, move and delete files in the workspace roots you grant them. Credential paths are refused, and you approve every delete in the app. Default OFF."
       },
       "scopes": {
         "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
@@ -41333,6 +41448,7 @@
         "groups": {
           "agent": "Agents",
           "browser": "Browser",
+          "git": "Git",
           "inbound": "Inbound",
           "inbox": "Inbox",
           "mcp": "Computer use",
@@ -41340,9 +41456,11 @@
           "plugin": "Plugins",
           "rag": "Retrieval",
           "runtime": "Runtime",
+          "shell": "Shell",
           "usage": "Usage",
           "wiki": "Wiki",
-          "workflow": "Workflows"
+          "workflow": "Workflows",
+          "workspace": "Workspace files"
         },
         "plannedBadge": "Planned",
         "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",
@@ -41501,6 +41619,21 @@
         "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
         "toastLintFailed": "Lint failed: {message}",
         "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
+      },
+      "workspace": {
+        "description": "Choose which workspace roots each MCP client may reach with the workspace, git and shell tools. A client with no root granted reaches nothing, whatever scopes it holds.",
+        "grantedCount": "{count, plural, one {# root} other {# roots}}",
+        "noRoots": "No workspace has a folder yet. Add a folder to a workspace to grant it here.",
+        "noneGranted": "No access",
+        "scopesOff": "None of the workspace, git or shell scopes is enabled, so these grants have no effect until you enable one under Permission scopes.",
+        "stdioClient": "Local stdio client",
+        "title": "Workspace access",
+        "toggleAria": "Let {client} reach {root}"
+      },
+      "workspaceApproval": {
+        "commandReason": "{client} wants to run a command in {root}: {command}. Cognia's safety check flagged it as needing your approval. You are asked every time.",
+        "commandReasonSecret": "{client} wants to run a command in {root}: {command}. It names a credential file. You are asked every time.",
+        "deleteReason": "{client} wants to delete the {kind, select, directory {folder} other {file}} {path}. You are asked every time."
       }
     },
     "externalServices": {
@@ -45816,7 +45949,7 @@
     "createdHelp": "Anyone with this link can view the content. The decryption key is in the link after “#”.",
     "createdTitle": "Your share link is ready",
     "creating": "Creating…",
-    "dialogDescription": "Create a public link. The contents are end-to-end encrypted in your browser — the server only ever stores ciphertext.",
+    "dialogDescription": "Create a public link. The contents are end-to-end encrypted on this device before upload — the server only ever stores ciphertext.",
     "dialogTitle": "Share via link",
     "done": "Done",
     "errorGeneric": "Could not create the share link.",
@@ -47475,6 +47608,27 @@
     }
   },
   "slashCommands": {
+    "sessions": {
+      "columnId": "ID",
+      "columnKind": "Kind",
+      "columnTitle": "Title",
+      "columnUpdated": "Updated",
+      "daysAgo": "{count}d ago",
+      "empty": "No sessions yet. Type a message to start one.",
+      "footer": "Use `/resume '<'title or id>` to switch.",
+      "heading": "**Sessions** (most recently updated first)",
+      "hoursAgo": "{count}h ago",
+      "justNow": "just now",
+      "listFailed": "Could not list sessions: {reason}",
+      "minutesAgo": "{count}m ago",
+      "resumeAmbiguous": "`{query}` matches multiple sessions; resolve by id:",
+      "resumeNoMatch": "No session matched `{query}`. Try `/sessions`.",
+      "resumeNoSessions": "No sessions yet.",
+      "resumeUsage": "Usage: `/resume '<'id or title>` — try `/sessions` to see what is available.",
+      "resumed": "Resumed {title}",
+      "resumedFallbackTitle": "session",
+      "untitled": "(untitled)"
+    },
     "workflow": {
       "debug": "Diagnose a failing run via the workflow-debugger subagent",
       "delegate": "Hand off explicitly to one of the four workflow specialists",
@@ -47793,9 +47947,9 @@
       "emptyHint": "Pick a branch and the branch it sits on. Nothing is pushed until you say so.",
       "error": "Stack operation failed: {message}",
       "forge": {
-        "noCredential": "No GitHub credential for {repository}. Sign in with `gh auth login` and try again.",
+        "noCredential": "No GitHub credential for {repository}. Connect a GitHub account in Settings → Connections, or sign in with `gh auth login`, and try again.",
         "noRemote": "This repository has no remote that hosts pull requests.",
-        "unsupportedHost": "{host} is not a forge Cognia can publish to yet — only github.com."
+        "unsupportedHost": "{host} is not a forge Cognia can publish to yet. A GitHub Enterprise server needs an account on it connected in Settings → Connections first."
       },
       "healthy": "Every layer sits on the one below it.",
       "land": "Land",
