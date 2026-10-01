@@ -1,102 +1,66 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 
-// Records the zone each render hands the provider.
-const mockProviderZones: (string | undefined)[] = []
+let mockLocale = "en"
+const mockProviders: Array<{
+  locale: string
+  messages: Record<string, unknown>
+  timeZone: string
+}> = []
 jest.mock("next-intl", () => ({
-  NextIntlClientProvider: ({
-    children,
-    timeZone,
-  }: {
+  NextIntlClientProvider: (props: {
+    locale: string
+    messages: Record<string, unknown>
+    timeZone: string
     children: React.ReactNode
-    timeZone?: string
   }) => {
-    mockProviderZones.push(timeZone)
-    return children
+    mockProviders.push(props)
+    return props.children
   },
 }))
-
-jest.mock("@/i18n/messages", () => ({
-  defaultMessages: { common: { ready: "Ready" } },
-  loadMessages: jest.fn(),
+jest.mock("@/hooks/ui/use-app-locale", () => ({
+  useAppLocaleState: () => ({ locale: mockLocale, ready: true }),
 }))
-
-jest.mock("@/i18n/config", () => ({ defaultLocale: "en", locales: ["en", "zh-CN"] }))
-jest.mock("@/lib/tauri/store", () => ({ getPref: jest.fn() }))
-
-// The overlay reads the same settings slice the full LocaleGate does, so the
-// browser and Capacitor shells (where `getPref` is always null) still honour
-// the chosen language.
-const settingsState: {
-  settings: { language?: string; profile?: { timezone?: string } } | null
-  loaded: boolean
-} = {
+const settingsState: { settings: { profile?: { timezone?: string } } | null; loaded: boolean } = {
   settings: null,
   loaded: false,
 }
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: typeof settingsState) => unknown) => selector(settingsState),
 }))
-
-import { getPref } from "@/lib/tauri/store"
-import { loadMessages } from "@/i18n/messages"
+import { startupMessages } from "@/i18n/messages"
 import { LightweightLocaleGate } from "./lightweight-locale-gate"
 
-const getPrefMock = getPref as jest.Mock
-const loadMessagesMock = loadMessages as jest.Mock
-
 beforeEach(() => {
-  mockProviderZones.length = 0
-  getPrefMock.mockReset().mockResolvedValue(null)
-  loadMessagesMock.mockReset()
+  mockLocale = "en"
+  mockProviders.length = 0
   settingsState.settings = null
   settingsState.loaded = false
 })
 
-it("renders the eager locale without loading account or plugin stores", async () => {
-  render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
-  expect(screen.getByText("overlay")).toBeInTheDocument()
-  await waitFor(() => expect(getPrefMock).toHaveBeenCalledWith("appearance.locale"))
-  expect(loadMessagesMock).not.toHaveBeenCalled()
+it("leaves settings hydration reachable before a full language pack is requested", () => {
+  render(<LightweightLocaleGate>hydrator</LightweightLocaleGate>)
+  expect(screen.getByText("hydrator")).toBeInTheDocument()
+  expect(mockProviders.at(-1)?.messages).toBe(startupMessages.en)
 })
 
-it("loads a mirrored non-default locale and ignores malformed values", async () => {
-  getPrefMock.mockResolvedValueOnce("zh-CN")
-  loadMessagesMock.mockResolvedValueOnce({ common: { ready: "就绪" } })
-  render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
-  await waitFor(() => expect(loadMessagesMock).toHaveBeenCalledWith("zh-CN"))
-
-  getPrefMock.mockResolvedValueOnce("fr")
-  await act(async () => {
-    render(<LightweightLocaleGate>fallback</LightweightLocaleGate>)
-  })
-  expect(loadMessagesMock).toHaveBeenCalledTimes(1)
-})
-
-it("uses the hydrated settings language where the Tauri pref is unreachable", async () => {
-  // `getPref` returns null in any browser, which is exactly the /status case.
-  getPrefMock.mockResolvedValue(null)
-  settingsState.settings = { language: "zh-CN" }
-  settingsState.loaded = true
-  loadMessagesMock.mockResolvedValueOnce({ common: { ready: "就绪" } })
-
-  await act(async () => {
-    render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
-  })
-  await waitFor(() => expect(loadMessagesMock).toHaveBeenCalledWith("zh-CN"))
-})
-
-// The overlays print times too; UTC put the tray panel hours away from the
-// same timestamp in the main window.
-it("formats in UTC until settings load, then in the user's zone", () => {
+it("switches both locale and startup copy from Chinese back to English", () => {
+  mockLocale = "zh-CN"
   const { rerender } = render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
-  expect(mockProviderZones.at(-1)).toBe("UTC")
+  expect(mockProviders.at(-1)?.messages).toBe(startupMessages["zh-CN"])
+  mockLocale = "en"
+  rerender(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
+  expect(mockProviders.at(-1)?.locale).toBe("en")
+  expect(mockProviders.at(-1)?.messages).toBe(startupMessages.en)
+})
 
+it("formats in UTC until settings load, then follows the profile zone", () => {
+  const { rerender } = render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
+  expect(mockProviders.at(-1)?.timeZone).toBe("UTC")
   settingsState.loaded = true
   settingsState.settings = { profile: { timezone: "Asia/Tokyo" } }
   rerender(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
-  expect(mockProviderZones.at(-1)).toBe("Asia/Tokyo")
-
+  expect(mockProviders.at(-1)?.timeZone).toBe("Asia/Tokyo")
   settingsState.settings = { profile: { timezone: "Not/AZone" } }
   rerender(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
-  expect(mockProviderZones.at(-1)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  expect(mockProviders.at(-1)?.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
 })

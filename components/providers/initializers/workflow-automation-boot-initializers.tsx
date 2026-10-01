@@ -6,7 +6,6 @@ import { SchedulerInitializer } from "@/components/scheduler/scheduler-initializ
 import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
 import { A2UISurfacePersistenceInitializer } from "./a2ui-surface-persistence-initializer"
-import { AutoModeInitializer } from "./auto-mode-initializer"
 import { AutomationAuditMirrorInitializer } from "./automation-audit-mirror-initializer"
 import { AutomationPolicyInitializer } from "./automation-policy-initializer"
 import { BackgroundTaskInitializer } from "./background-task-initializer"
@@ -23,7 +22,6 @@ export function WorkflowAutomationBootInitializers() {
       <GoalVerificationInitializer />
       <AutomationPolicyInitializer />
       <AutomationAuditMirrorInitializer />
-      <AutoModeInitializer />
       <CodeAdoptionTrackerInitializer />
       <A2UISurfacePersistenceInitializer />
       <SchedulerInitializer />

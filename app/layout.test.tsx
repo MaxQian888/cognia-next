@@ -1,3 +1,8 @@
+// Catalog loading has its own integration tests; layout tests inspect placement.
+jest.mock("@/components/providers/full-messages-gate", () => ({
+  LocaleReadyContext: jest.requireActual("react").createContext(true),
+  FullMessagesGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
 // Geist ships as a self-hosted local font package; its font/* entrypoints call
 // next/font/local, which only works under the Next.js compiler. Stub them so the
 // layout renders under Jest with the same CSS variables production emits.
@@ -30,6 +35,11 @@ jest.mock("@/components/providers/onboarding-gate", () => ({
 // Records the `guestView` the layout hands the gate, so the share viewer's
 // no-account branch can be asserted without booting the account store.
 let mockAccountGateGuestView: React.ReactNode = undefined
+let mockAccountGateClosed = false
+jest.mock("@/components/providers/initializers/mobile-only-initializers", () => ({
+  MobileNativeSplashInitializer: () => <span data-testid="native-splash-handoff" />,
+  MobileOnlyInitializers: () => <span data-testid="mobile-splash-overlay" />,
+}))
 jest.mock("@/components/account/account-gate", () => ({
   AccountGate: ({
     children,
@@ -39,6 +49,7 @@ jest.mock("@/components/account/account-gate", () => ({
     guestView?: React.ReactNode
   }) => {
     mockAccountGateGuestView = guestView
+    if (mockAccountGateClosed) return <div data-testid="account-loading" />
     return <>{children}</>
   },
 }))
@@ -64,6 +75,20 @@ import { renderToStaticMarkup } from "react-dom/server"
 import RootLayout, { metadata } from "./layout"
 
 describe("RootLayout", () => {
+  afterEach(() => {
+    mockAccountGateClosed = false
+  })
+
+  it("mounts the native handoff even while the account gate holds the app closed", async () => {
+    mockAccountGateClosed = true
+    const tree = await RootLayout({ children: <main>content</main> })
+    const markup = renderToStaticMarkup(tree)
+    expect(markup).toContain('data-testid="native-splash-handoff"')
+    expect(markup).toContain('data-testid="account-loading"')
+    expect(markup).not.toContain('data-testid="mobile-splash-overlay"')
+    expect(markup).not.toContain("<main>content</main>")
+  })
+
   it("exports metadata used by Next.js", () => {
     expect(metadata).toMatchObject({
       title: "Cognia",

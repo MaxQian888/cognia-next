@@ -12,9 +12,6 @@ jest.mock("./goal-verification-initializer", () => ({
 jest.mock("./automation-policy-initializer", () => ({
   AutomationPolicyInitializer: () => <span data-boot="automation-policy" />,
 }))
-jest.mock("./auto-mode-initializer", () => ({
-  AutoModeInitializer: () => <span data-boot="auto-mode" />,
-}))
 jest.mock("./a2ui-surface-persistence-initializer", () => ({
   A2UISurfacePersistenceInitializer: () => <span data-boot="a2ui" />,
 }))
@@ -41,7 +38,6 @@ it("mounts workflow automation in deterministic order and reports readiness", ()
     "background",
     "goal-verification",
     "automation-policy",
-    "auto-mode",
     "code-adoption",
     "a2ui",
     "scheduler",

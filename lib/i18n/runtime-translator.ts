@@ -9,7 +9,7 @@
  * notification centre for a Chinese user.
  *
  * This is the missing half. It resolves the same locale the UI is showing (the
- * persisted setting, not the OS), loads the same message bundle the
+ * manual preference or system-following setting), loads the same message bundle the
  * `NextIntlClientProvider` uses, and returns a `next-intl` translator over it.
  *
  * Two deliberate properties:
@@ -29,35 +29,37 @@
 
 import { createTranslator } from "next-intl"
 
-import { defaultLocale, locales, type Locale } from "@/i18n/config"
-import { defaultMessages, loadMessages, type Messages } from "@/i18n/messages"
+import { defaultLocale, type Locale } from "@/i18n/config"
+import { defaultMessages, loadMessages } from "@/i18n/messages"
+import { readBootLocalePreference, resolveLocalePreference } from "./locale-preference"
 
 export type RuntimeTranslator = (key: string, values?: Record<string, unknown>) => string
 
-const bundles = new Map<Locale, Promise<Messages>>()
-
-function isLocale(value: unknown): value is Locale {
-  return typeof value === "string" && (locales as readonly string[]).includes(value)
-}
+const bundles = new Map<Locale, Promise<Record<string, unknown>>>()
 
 /** The locale the UI is currently showing, or the default when unreadable. */
 export async function currentLocale(): Promise<Locale> {
   try {
     const { useSettingsStore } = await import("@/stores/settings")
-    const language = useSettingsStore.getState().settings?.language
-    return isLocale(language) ? language : defaultLocale
+    const settings = useSettingsStore.getState().settings
+    return settings
+      ? resolveLocalePreference(settings).language
+      : readBootLocalePreference().language
   } catch {
-    return defaultLocale
+    return readBootLocalePreference().language
   }
 }
 
-function bundleFor(locale: Locale): Promise<Messages> {
+function bundleFor(locale: Locale): Promise<Record<string, unknown>> {
   const cached = bundles.get(locale)
   if (cached) return cached
-  // The default bundle is already in the main chunk, so its failure path is
-  // unreachable; a code-split locale can fail to load offline, and falling back
-  // to the eager bundle is what the UI itself does.
-  const loading = loadMessages(locale).catch(() => defaultMessages)
+  // Both full catalogs are lazy. Failed requests must remain retryable; only
+  // background translations use English as a fallback, also loaded on demand.
+  const loading = loadMessages(locale).catch(async () => {
+    bundles.delete(locale)
+    if (locale === defaultLocale) return defaultMessages
+    return loadMessages(defaultLocale).catch(() => defaultMessages)
+  })
   bundles.set(locale, loading)
   return loading
 }

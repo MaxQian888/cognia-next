@@ -54,7 +54,13 @@ export interface RecoveryProbeDeps {
   /** Opens the Dexie database and returns a row count from a core table. */
   countPluginRows: () => Promise<number>
   /** Installed plugin rows, for manifest validation. */
-  listPluginManifests: () => Promise<{ id: string; manifest: unknown }[]>
+  listPluginManifests: () => Promise<{ id: string; manifest: unknown; path?: string }[]>
+  /**
+   * The manifests this build ships for its `builtin://` plugins, keyed by
+   * plugin id. A built-in's stored row is a cache of this manifest that
+   * discovery rewrites on every launch, so it is what discovery will load.
+   */
+  loadShippedBuiltinManifests: () => Promise<ReadonlyMap<string, unknown>>
   validateManifest: (manifest: unknown) => { valid: boolean }
   /** Sidecar readiness query — a status read, never a spawn. */
   getSidecarStatus: () => Promise<{ ready: boolean }>
@@ -86,7 +92,20 @@ export function createRecoveryProbes(deps: RecoveryProbeDeps): RecoveryProbeSet 
 
     plugins: async () => {
       const rows = await deps.listPluginManifests()
-      const broken = rows.find((row) => !deps.validateManifest(row.manifest).valid)
+      const shipped = rows.some(isBuiltinRow) ? await deps.loadShippedBuiltinManifests() : null
+      const broken = rows.find((row) => {
+        if (!isBuiltinRow(row)) return !deps.validateManifest(row.manifest).valid
+        // Judge a built-in by the manifest this build ships, never by its
+        // stored copy: that copy was written by an older build and is only
+        // refreshed by discovery, which runs after this gate. Validating it
+        // against a newer validator condemned plugins that were already
+        // fixed, and kept the app in safe mode where discovery never runs.
+        const manifest = shipped?.get(row.id)
+        // A retired built-in is never loaded again (the manager's
+        // `isRetiredBuiltin`), so its stale row cannot break a boot.
+        if (manifest === undefined) return false
+        return !deps.validateManifest(manifest).valid
+      })
       return broken ? failed("plugins.manifest_invalid") : OK
     },
 
@@ -116,6 +135,10 @@ export function createRecoveryProbes(deps: RecoveryProbeDeps): RecoveryProbeSet 
       return broken ? failed("external_agent.registry_unreadable") : OK
     },
   }
+}
+
+function isBuiltinRow(row: { path?: string }): boolean {
+  return row.path?.startsWith("builtin://") === true
 }
 
 /** Fallback reason code used when a probe throws. */

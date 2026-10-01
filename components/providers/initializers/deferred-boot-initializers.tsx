@@ -1,5 +1,6 @@
 "use client"
 
+import { AutoModeInitializer } from "./auto-mode-initializer"
 import { SharedChatLifecycleInitializer } from "./shared-chat-lifecycle-initializer"
 
 import dynamic from "next/dynamic"
@@ -109,6 +110,10 @@ export function DeferredBootInitializers() {
   return (
     <>
       <SharedChatLifecycleInitializer />
+      {/* Automatic light/dark is appearance, not workflow automation: it must
+          run on every route, not only once a workflow capability is requested
+          (the development `main` profile defers that group indefinitely). */}
+      <AutoModeInitializer />
       {core ? <DeferredBootInitializersImpl /> : null}
       {workflow ? <WorkflowAutomationBootInitializers /> : null}
       {integrations ? <IntegrationBootInitializers /> : null}

@@ -13,6 +13,7 @@ function healthyDeps(overrides: Partial<RecoveryProbeDeps> = {}): RecoveryProbeD
   return {
     countPluginRows: async () => 3,
     listPluginManifests: async () => [{ id: "web-tools", manifest: { id: "web-tools" } }],
+    loadShippedBuiltinManifests: async () => new Map(),
     validateManifest: () => ({ valid: true }),
     getSidecarStatus: async () => ({ ready: true }),
     listConnectorAdapterIds: () => ["lark", "slack"],
@@ -75,6 +76,74 @@ describe("recovery probes", () => {
     it("passes when no plugins are installed", async () => {
       const probes = createRecoveryProbes(healthyDeps({ listPluginManifests: async () => [] }))
       await expect(probes.plugins()).resolves.toEqual({ ok: true })
+    })
+
+    describe("built-in rows", () => {
+      const staleRow = {
+        id: "cognia-arknights-theme",
+        manifest: { id: "cognia-arknights-theme", stale: true },
+        path: "builtin://cognia-arknights-theme",
+      }
+      const validUnlessStale = (manifest: unknown) => ({
+        valid: !(manifest as { stale?: boolean }).stale,
+      })
+
+      it("judges a built-in by the manifest this build ships, not its stale stored copy", async () => {
+        const probes = createRecoveryProbes(
+          healthyDeps({
+            listPluginManifests: async () => [staleRow],
+            loadShippedBuiltinManifests: async () =>
+              new Map([["cognia-arknights-theme", { id: "cognia-arknights-theme" }]]),
+            validateManifest: validUnlessStale,
+          })
+        )
+        await expect(probes.plugins()).resolves.toEqual({ ok: true })
+      })
+
+      it("still fails when the shipped built-in manifest is itself invalid", async () => {
+        const probes = createRecoveryProbes(
+          healthyDeps({
+            listPluginManifests: async () => [{ ...staleRow, manifest: { id: staleRow.id } }],
+            loadShippedBuiltinManifests: async () =>
+              new Map([["cognia-arknights-theme", { id: staleRow.id, stale: true }]]),
+            validateManifest: validUnlessStale,
+          })
+        )
+        await expect(probes.plugins()).resolves.toEqual({
+          ok: false,
+          reasonCode: "plugins.manifest_invalid",
+        })
+      })
+
+      it("ignores a retired built-in this build no longer ships", async () => {
+        const probes = createRecoveryProbes(
+          healthyDeps({
+            listPluginManifests: async () => [staleRow],
+            loadShippedBuiltinManifests: async () => new Map(),
+            validateManifest: validUnlessStale,
+          })
+        )
+        await expect(probes.plugins()).resolves.toEqual({ ok: true })
+      })
+
+      it("keeps judging an installed plugin by its stored manifest", async () => {
+        const loadShippedBuiltinManifests = jest.fn(async () => new Map<string, unknown>())
+        const probes = createRecoveryProbes(
+          healthyDeps({
+            listPluginManifests: async () => [
+              { id: "third-party", manifest: { stale: true }, path: "/plugins/third-party" },
+            ],
+            loadShippedBuiltinManifests,
+            validateManifest: validUnlessStale,
+          })
+        )
+        await expect(probes.plugins()).resolves.toEqual({
+          ok: false,
+          reasonCode: "plugins.manifest_invalid",
+        })
+        // The built-in registry is only loaded when a built-in row needs it.
+        expect(loadShippedBuiltinManifests).not.toHaveBeenCalled()
+      })
     })
   })
 

@@ -23,6 +23,9 @@ import { loggers } from "@cognia/logging"
 import { installIssueNotificationCommands, type IssueNotifyTranslate } from "@/lib/issues/notify"
 import { useAccountStore } from "@/stores/account/account-store"
 import { installCollabRefreshScheduler } from "@/lib/collab/refresh-scheduler"
+import { installCollabFeed } from "@/lib/collab/feed"
+import { installCollabNotificationsSync } from "@/lib/collab/notifications-sync"
+import { subscribeCollabConnection } from "@/lib/collab/connection"
 
 // The boot body lives in `lib/issues/boot.ts` so the headless brain can run the
 // same code without pulling React and `next/*` into its bundle
@@ -63,6 +66,34 @@ export function IssueTrackerInitializer() {
   useEffect(() => {
     if (!unlockedAccountId) return
     return installCollabRefreshScheduler(unlockedAccountId)
+  }, [unlockedAccountId])
+
+  // The change feed (ADR-0206) makes the plane live; the scheduler above stays
+  // installed as the fallback whenever the feed is down or unsupported. The
+  // notification sync (ADR-0207) rides the feed's `notification` frames and
+  // also pulls on boot, focus and coming online, so it works without the feed.
+  useEffect(() => {
+    if (!unlockedAccountId) return
+    const install = () => {
+      const detachFeed = installCollabFeed(unlockedAccountId)
+      const detachNotifications = installCollabNotificationsSync(unlockedAccountId)
+      return () => {
+        detachNotifications()
+        detachFeed()
+      }
+    }
+    let detach = install()
+    // A server configured, changed or forgotten after boot rebinds both, and
+    // the notification sync's first pull against a new server is a quiet one;
+    // the poll needs no rebind because it resolves the connection every tick.
+    const unsubscribe = subscribeCollabConnection(() => {
+      detach()
+      detach = install()
+    })
+    return () => {
+      unsubscribe()
+      detach()
+    }
   }, [unlockedAccountId])
 
   // The `issue.open` notification action needs the App Router, which only

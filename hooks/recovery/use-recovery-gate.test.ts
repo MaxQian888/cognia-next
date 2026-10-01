@@ -73,6 +73,15 @@ function failingProbes(at: (typeof RECOVERY_ORDER)[number], reasonCode: string):
   ) as RecoveryProbeSet
 }
 
+/** Checkpoints as this process leaves them after `at` failed its probe. */
+function failedAt(at: (typeof RECOVERY_ORDER)[number]): RecoveryStateV1["checkpoints"] {
+  const failedOrder = RECOVERY_ORDER.indexOf(at)
+  return RECOVERY_ORDER.map((subsystem, order) => ({
+    subsystem,
+    status: order < failedOrder ? "passed" : order === failedOrder ? "failed" : "skipped",
+  }))
+}
+
 describe("useRecoveryGate", () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -555,7 +564,7 @@ describe("useRecoveryGate", () => {
   it("starts a cold sidecar after retrying an upstream failure", async () => {
     recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
     recovery.getRecoveryState.mockResolvedValue(
-      state({ mode: "safe", suspectSubsystem: "plugins" })
+      state({ mode: "safe", suspectSubsystem: "plugins", checkpoints: failedAt("plugins") })
     )
     const { result } = renderHook(() =>
       useRecoveryGate({ createProbes: async () => healthyProbes() })
@@ -567,6 +576,71 @@ describe("useRecoveryGate", () => {
     })
     expect(ensureSidecarReady).toHaveBeenCalledTimes(1)
     expect(result.current.status).toBe("normal")
+  })
+
+  it("re-probes a read-only suspect left by an earlier process and leaves safe mode once it passes", async () => {
+    // A cold start resets every checkpoint to pending but keeps the persisted
+    // suspect. Holding it here made one failed check permanent: the stale data
+    // it judged is only refreshed by initializers that safe mode holds back.
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "plugins" })
+    )
+    recovery.recordRecoveryCheckpoint.mockResolvedValue(state({ mode: "recovering" }))
+    const probes = healthyProbes()
+    const pluginsProbe = jest.fn(async () => ({ ok: true }))
+    probes.plugins = pluginsProbe
+
+    const { result } = renderHook(() => useRecoveryGate({ createProbes: async () => probes }))
+
+    await waitFor(() => expect(result.current.status).toBe("normal"))
+    expect(pluginsProbe).toHaveBeenCalledTimes(1)
+    expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith("plugins", true, undefined)
+    expect(recovery.retryRecoverySubsystem).not.toHaveBeenCalled()
+  })
+
+  it("stays in safe mode when a re-probed read-only suspect still fails", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "plugins" })
+    )
+    recovery.recordRecoveryCheckpoint.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "plugins", checkpoints: failedAt("plugins") })
+    )
+
+    const { result } = renderHook(() =>
+      useRecoveryGate({
+        createProbes: async () => failingProbes("plugins", "plugins.manifest_invalid"),
+      })
+    )
+
+    await waitFor(() =>
+      expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith(
+        "plugins",
+        false,
+        "plugins.manifest_invalid"
+      )
+    )
+    await waitFor(() => expect(result.current.probing).toBe(false))
+    expect(result.current.status).toBe("safe")
+    expect(ensureSidecarReady).not.toHaveBeenCalled()
+  })
+
+  it("does not re-probe a failure this process already recorded when the webview reloads", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "plugins", checkpoints: failedAt("plugins") })
+    )
+    const probes = healthyProbes()
+    const pluginsProbe = jest.fn(async () => ({ ok: true }))
+    probes.plugins = pluginsProbe
+
+    const { result } = renderHook(() => useRecoveryGate({ createProbes: async () => probes }))
+
+    await waitFor(() => expect(result.current.state?.suspectSubsystem).toBe("plugins"))
+    expect(result.current.status).toBe("safe")
+    expect(pluginsProbe).not.toHaveBeenCalled()
+    expect(recovery.recordRecoveryCheckpoint).not.toHaveBeenCalled()
   })
 
   it("keeps the safe shell until downstream checks finish even when the controller is recovering", async () => {

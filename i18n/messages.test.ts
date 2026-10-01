@@ -1,13 +1,14 @@
-import { defaultMessages, loadMessages } from "./messages"
+import { defaultMessages, startupMessages, loadMessages } from "./messages"
 import enMessages from "./messages/en.json"
 import { defaultLocale } from "./config"
 
 describe("i18n message loaders", () => {
-  it("exposes the eager default-locale bundle as defaultMessages", () => {
-    expect(defaultMessages).toBe(enMessages)
+  it("exposes only the startup subset as defaultMessages", () => {
+    expect(defaultMessages).toBe(startupMessages.en)
+    expect(defaultMessages).not.toBe(enMessages)
   })
 
-  it("loadMessages resolves the default locale to the already-bundled object", async () => {
+  it("loadMessages resolves the lazy default catalog", async () => {
     await expect(loadMessages(defaultLocale)).resolves.toBe(enMessages)
     await expect(loadMessages("en")).resolves.toBe(enMessages)
   })
@@ -49,3 +50,26 @@ describe("i18n message loaders", () => {
     )
   })
 })
+
+it.each(["en", "zh-CN"] as const)(
+  "keeps the %s startup catalog small and consistent with full translations",
+  async (locale) => {
+    const full = await loadMessages(locale)
+    const startup = startupMessages[locale]
+    expect(full).toMatchObject(startup)
+    for (const namespace of [
+      "account",
+      "common",
+      "loading",
+      "diagnostics",
+      "exitDialog",
+      "whiteScreenRecovery",
+      "mobile",
+    ]) {
+      expect(startup).toHaveProperty(namespace)
+    }
+    expect(startup).not.toHaveProperty("settings")
+    expect(startup).not.toHaveProperty("chat")
+    expect(JSON.stringify(startup).length).toBeLessThan(JSON.stringify(full).length / 10)
+  }
+)

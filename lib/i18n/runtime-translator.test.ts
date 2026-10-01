@@ -21,6 +21,12 @@ const createTranslator = jest.fn(
 
 jest.mock("@/stores/settings", () => ({ useSettingsStore: { getState: () => getState() } }))
 jest.mock("next-intl", () => ({ createTranslator: (o: never) => createTranslator(o) }))
+jest.mock("@/i18n/messages", () => {
+  const actual = jest.requireActual("@/i18n/messages")
+  return { ...actual, loadMessages: jest.fn(actual.loadMessages) }
+})
+
+import { loadMessages } from "@/i18n/messages"
 
 import {
   __resetRuntimeTranslatorCache,
@@ -29,6 +35,9 @@ import {
 } from "./runtime-translator"
 
 beforeEach(() => {
+  ;(loadMessages as jest.Mock)
+    .mockReset()
+    .mockImplementation(jest.requireActual("@/i18n/messages").loadMessages)
   __resetRuntimeTranslatorCache()
   createTranslator.mockClear()
   getState.mockReset().mockReturnValue({ settings: { language: "zh-CN" } })
@@ -108,4 +117,31 @@ describe("getRuntimeTranslator", () => {
     const [first, second] = createTranslator.mock.calls.map((c) => c[0].messages)
     expect(first).toBe(second)
   })
+})
+
+it("retries a failed catalog on the next request rather than caching the fallback", async () => {
+  const spy = (loadMessages as jest.Mock).mockRejectedValueOnce(
+    new Error("temporary chunk failure")
+  )
+  try {
+    await getRuntimeTranslator("ns")
+    await getRuntimeTranslator("ns")
+    expect(spy.mock.calls.map(([locale]) => locale)).toEqual(["zh-CN", "en", "zh-CN"])
+  } finally {
+    spy.mockClear()
+  }
+})
+
+it("uses the system locale for background translations in system mode", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "languages")
+  Object.defineProperty(navigator, "languages", { configurable: true, value: ["zh-Hans-CN", "en"] })
+  try {
+    getState.mockReturnValue({ settings: { language: "en", languageMode: "system" } })
+    expect(await currentLocale()).toBe("zh-CN")
+    getState.mockReturnValue({ settings: { language: "en", languageMode: "manual" } })
+    expect(await currentLocale()).toBe("en")
+  } finally {
+    if (previous) Object.defineProperty(navigator, "languages", previous)
+    else Reflect.deleteProperty(navigator, "languages")
+  }
 })

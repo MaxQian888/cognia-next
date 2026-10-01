@@ -24,7 +24,17 @@ export function createDefaultRecoveryProbeDeps(): RecoveryProbeDeps {
     listPluginManifests: async () => {
       const { getDb } = await import("@/lib/db/schema")
       const rows = await getDb().plugins.toArray()
-      return rows.map((row) => ({ id: row.id, manifest: row.manifest }))
+      return rows.map((row) => ({ id: row.id, manifest: row.manifest, path: row.path }))
+    },
+
+    loadShippedBuiltinManifests: async () => {
+      // Loaded only when a built-in row exists. A registry that throws on
+      // import is a real plugins failure: discovery would throw on it too.
+      const { getBrowserBuiltinRegistry } =
+        await import("@/lib/plugin/core/browser-builtin-registry")
+      return new Map(
+        getBrowserBuiltinRegistry().map((entry) => [entry.manifest.id, entry.manifest])
+      )
     },
 
     validateManifest: (manifest) => {

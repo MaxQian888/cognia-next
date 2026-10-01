@@ -1,9 +1,9 @@
 "use client"
 
 import { useEffect } from "react"
-import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
+import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
 import { attachInstallListeners } from "@/lib/pwa/install-state"
 import { detectPlatform } from "@/lib/platform/detect"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
@@ -20,11 +20,11 @@ import { trackEvent } from "@/lib/telemetry/events/track-event"
  * - toasts when a NEW service worker takes over an already-controlled page
  *   (`skipWaiting` swap = a shipped update), so the silent version change is
  *   at least legible. The first activation (no previous controller) is not
- *   an update and does not toast.
+ *   an update and does not toast. The toast is translated from the full
+ *   catalog on demand: above `AccountGate` only the startup messages are
+ *   loaded, and they carry no `settings` namespace.
  */
 export function PwaLifecycleInitializer() {
-  const t = useTranslations("settings.about.install")
-
   useEffect(() => {
     if (detectPlatform() !== "web") return
     const detach = attachInstallListeners()
@@ -35,7 +35,11 @@ export function PwaLifecycleInitializer() {
     const container = "serviceWorker" in navigator ? navigator.serviceWorker : null
     let hadController = container?.controller != null
     const onControllerChange = () => {
-      if (hadController) toast.info(t("updateReady"))
+      if (hadController) {
+        void getRuntimeTranslator("settings.about.install").then((t) =>
+          toast.info(t("updateReady"))
+        )
+      }
       hadController = true
     }
     container?.addEventListener("controllerchange", onControllerChange)
@@ -45,7 +49,7 @@ export function PwaLifecycleInitializer() {
       window.removeEventListener("appinstalled", onInstalled)
       container?.removeEventListener("controllerchange", onControllerChange)
     }
-  }, [t])
+  }, [])
 
   return null
 }

@@ -133,6 +133,32 @@ async function reloadSpeechKeysAfterUnlock(): Promise<void> {
 }
 
 /**
+ * Whether a persisted suspect must wait for the operator's explicit retry
+ * instead of being re-probed on this boot.
+ *
+ * - A failure recorded in **this** process (its checkpoint still reads
+ *   `failed`; a cold start resets every checkpoint to `pending`) is shown as
+ *   is. A webview reload re-running the probes would replace the original
+ *   cause with whatever a half-torn-down host reports now.
+ * - A **sidecar** suspect is held across restarts too: its check is the one
+ *   that starts a process, and that start is what may have taken the previous
+ *   session down.
+ *
+ * Every other suspect came from a read-only probe in an earlier process.
+ * Re-running it is harmless, and it is the only way a fix — a new build, or a
+ * stored row discovery has since refreshed — can ever be noticed. Holding it
+ * instead made a single failed check a safe mode no restart could leave.
+ */
+function holdsSuspectForOperator(state: RecoveryStateV1): boolean {
+  const suspect = state.suspectSubsystem
+  if (!suspect || state.disabledSubsystems.includes(suspect)) return false
+  if (suspect === "sidecar") return true
+  return state.checkpoints.some(
+    (checkpoint) => checkpoint.subsystem === suspect && checkpoint.status === "failed"
+  )
+}
+
+/**
  * Owns the renderer's half of diagnostics-first safe mode (ADR-0102 §4).
  *
  * The renderer decides nothing here. It reads the native controller's boot
@@ -261,15 +287,7 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
       const current = await getRecoveryState()
       if (cancelled) return
       if (current) setState(current)
-      // Preserve a known failure until the operator retries it. Re-running
-      // read-only probes against a deliberately stopped sidecar would replace
-      // the original cause with a misleading not-ready failure.
-      if (
-        decision.requiresSafeShell &&
-        current?.suspectSubsystem &&
-        !current.disabledSubsystems.includes(current.suspectSubsystem)
-      )
-        return
+      if (decision.requiresSafeShell && current && holdsSuspectForOperator(current)) return
       if (cancelled) return
       void runSequence(current)
     })()

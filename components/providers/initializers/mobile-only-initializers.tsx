@@ -1,9 +1,31 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useSyncExternalStore } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 
 import { isMobile } from "@/lib/capacitor/_shared"
+import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
+import { hide } from "@/lib/capacitor/splash-screen"
+
+/**
+ * Mounted above AccountGate: a loading, locked, recovery or onboarding screen
+ * is already content the native launch screen can hand over to. Registration
+ * is idempotent; CompanionBootProvider retains its own registration and hide
+ * as a fallback if this early attempt cannot reach the native bridge.
+ */
+export function MobileNativeSplashInitializer() {
+  useEffect(() => {
+    if (!isMobile()) return
+    let cancelled = false
+    void registerNativePlugins().then((result) => {
+      if (!cancelled && result.kind === "registered") void hide(180)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return null
+}
 
 /**
  * Client-mount probe via `useSyncExternalStore` (not `useState` + effect, which

@@ -57,6 +57,25 @@ jest.mock("@/lib/issues/github-sync-schedule", () => ({
 }))
 
 const mockWarn = jest.fn()
+const mockDetachFeed = jest.fn()
+const mockInstallCollabFeed = jest.fn((_account: string) => mockDetachFeed)
+jest.mock("@/lib/collab/feed", () => ({
+  installCollabFeed: (account: string) => mockInstallCollabFeed(account),
+}))
+const mockDetachNotifications = jest.fn()
+const mockInstallNotificationsSync = jest.fn((_account: string) => mockDetachNotifications)
+jest.mock("@/lib/collab/notifications-sync", () => ({
+  installCollabNotificationsSync: (account: string) => mockInstallNotificationsSync(account),
+}))
+let mockConnectionListener: (() => void) | null = null
+jest.mock("@/lib/collab/connection", () => ({
+  subscribeCollabConnection: (listener: () => void) => {
+    mockConnectionListener = listener
+    return () => {
+      mockConnectionListener = null
+    }
+  },
+}))
 jest.mock("@cognia/logging", () => ({
   loggers: { shell: { warn: (...a: unknown[]) => mockWarn(...a) } },
 }))
@@ -174,5 +193,38 @@ describe("IssueTrackerInitializer", () => {
     mockSeedBuiltinIssueLabels.mockRejectedValueOnce(new Error("boom"))
     render(<IssueTrackerInitializer />)
     await waitFor(() => expect(mockWarn).toHaveBeenCalled())
+  })
+})
+
+describe("IssueTrackerInitializer — the change feed (ADR-0206)", () => {
+  it("installs the feed for the unlocked account and rebinds it when the server changes", async () => {
+    unlockedAccountId = "acct-feed"
+    const { unmount } = render(<IssueTrackerInitializer />)
+    await waitFor(() => expect(mockInstallCollabFeed).toHaveBeenCalledWith("acct-feed"))
+    mockConnectionListener?.()
+    expect(mockDetachFeed).toHaveBeenCalledTimes(1)
+    expect(mockInstallCollabFeed).toHaveBeenCalledTimes(2)
+    unmount()
+    expect(mockDetachFeed).toHaveBeenCalledTimes(2)
+    expect(mockConnectionListener).toBeNull()
+  })
+
+  it("installs no feed before an account is unlocked", () => {
+    render(<IssueTrackerInitializer />)
+    expect(mockInstallCollabFeed).not.toHaveBeenCalled()
+    expect(mockInstallNotificationsSync).not.toHaveBeenCalled()
+  })
+})
+
+describe("IssueTrackerInitializer — collaboration notifications (ADR-0207)", () => {
+  it("installs the notification sync beside the feed and rebinds both with the server", async () => {
+    unlockedAccountId = "acct-ntf"
+    const { unmount } = render(<IssueTrackerInitializer />)
+    await waitFor(() => expect(mockInstallNotificationsSync).toHaveBeenCalledWith("acct-ntf"))
+    mockConnectionListener?.()
+    expect(mockDetachNotifications).toHaveBeenCalledTimes(1)
+    expect(mockInstallNotificationsSync).toHaveBeenCalledTimes(2)
+    unmount()
+    expect(mockDetachNotifications).toHaveBeenCalledTimes(2)
   })
 })

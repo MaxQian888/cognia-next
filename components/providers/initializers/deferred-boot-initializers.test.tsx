@@ -5,6 +5,9 @@ import { DeferredBootInitializers } from "./deferred-boot-initializers"
 jest.mock("./shared-chat-lifecycle-initializer", () => ({
   SharedChatLifecycleInitializer: () => <span data-shared-chat-lifecycle />,
 }))
+jest.mock("./auto-mode-initializer", () => ({
+  AutoModeInitializer: () => <span data-auto-mode />,
+}))
 
 // Replace the `next/dynamic(...)` boundary with a lightweight stub so we can
 // assert the gating without pulling the impl chunk's subsystem graphs into
@@ -59,6 +62,14 @@ describe("DeferredBootInitializers", () => {
     const { container } = render(<DeferredBootInitializers />)
     expect(container.querySelector("[data-shared-chat-lifecycle]")).toBeInTheDocument()
     expect(container.querySelectorAll("[data-boot-bundle]")).toHaveLength(0)
+  })
+
+  it("runs automatic light/dark without waiting for the workflow capability", () => {
+    // Auto light/dark used to ride the workflow-automation bundle, so the
+    // development `main` profile never switched the theme on `/` or `/settings`.
+    mockRequested = new Set()
+    const { container } = render(<DeferredBootInitializers />)
+    expect(container.querySelector("[data-auto-mode]")).toBeInTheDocument()
   })
 
   it("mounts every requested capability bundle in eager mode", async () => {

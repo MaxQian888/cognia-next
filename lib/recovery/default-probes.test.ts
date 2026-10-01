@@ -17,6 +17,9 @@ jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn() }))
 jest.mock("@/lib/native/external-agent", () => ({ listExternalAgents: jest.fn() }))
 jest.mock("@/lib/plugin/core/validation", () => ({ validatePluginManifest: jest.fn() }))
 jest.mock("@/lib/connectors/adapter-metadata", () => ({ listConnectorMetadata: jest.fn() }))
+jest.mock("@/lib/plugin/core/browser-builtin-registry", () => ({
+  getBrowserBuiltinRegistry: jest.fn(),
+}))
 
 const { getSidecarStatus } = jest.requireMock("@/lib/claude/ipc")
 const { listAdapterInstances } = jest.requireMock("@/lib/db/adapter-instances")
@@ -24,13 +27,19 @@ const { listWorkflows } = jest.requireMock("@/lib/db/workflows")
 const { listExternalAgents } = jest.requireMock("@/lib/native/external-agent")
 const { validatePluginManifest } = jest.requireMock("@/lib/plugin/core/validation")
 const { listConnectorMetadata } = jest.requireMock("@/lib/connectors/adapter-metadata")
+const { getBrowserBuiltinRegistry } = jest.requireMock("@/lib/plugin/core/browser-builtin-registry")
 
 describe("default recovery probe wiring", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetRecoveryProbeRegistries()
     pluginsTable.count.mockResolvedValue(2)
-    pluginsTable.toArray.mockResolvedValue([{ id: "web-tools", manifest: { id: "web-tools" } }])
+    pluginsTable.toArray.mockResolvedValue([
+      { id: "web-tools", manifest: { id: "web-tools" }, path: "/plugins/web-tools" },
+    ])
+    getBrowserBuiltinRegistry.mockReturnValue([
+      { manifest: { id: "cognia-web-tools", shipped: true }, path: "builtin://cognia-web-tools" },
+    ])
     getSidecarStatus.mockResolvedValue({ ready: true })
     listAdapterInstances.mockResolvedValue([{ type: "lark" }, { type: "lark" }])
     listWorkflows.mockResolvedValue([{ id: "workflow-1" }])
@@ -48,8 +57,32 @@ describe("default recovery probe wiring", () => {
   it("reads plugin manifests without activating any plugin", async () => {
     const deps = createDefaultRecoveryProbeDeps()
     await expect(deps.listPluginManifests()).resolves.toEqual([
-      { id: "web-tools", manifest: { id: "web-tools" } },
+      { id: "web-tools", manifest: { id: "web-tools" }, path: "/plugins/web-tools" },
     ])
+  })
+
+  it("keys the manifests this build ships for its built-ins by plugin id", async () => {
+    const deps = createDefaultRecoveryProbeDeps()
+    const shipped = await deps.loadShippedBuiltinManifests()
+    expect([...shipped.entries()]).toEqual([
+      ["cognia-web-tools", { id: "cognia-web-tools", shipped: true }],
+    ])
+  })
+
+  it("validates a built-in's shipped manifest instead of its stale stored row", async () => {
+    pluginsTable.toArray.mockResolvedValue([
+      {
+        id: "cognia-web-tools",
+        manifest: { id: "cognia-web-tools", stale: true },
+        path: "builtin://cognia-web-tools",
+      },
+    ])
+    validatePluginManifest.mockImplementation((manifest: { stale?: boolean }) => ({
+      valid: !manifest.stale,
+    }))
+    const probes = await createDefaultRecoveryProbes()
+    await expect(probes.plugins()).resolves.toEqual({ ok: true })
+    expect(validatePluginManifest).toHaveBeenCalledWith({ id: "cognia-web-tools", shipped: true })
   })
 
   it("queries sidecar status rather than starting it", async () => {

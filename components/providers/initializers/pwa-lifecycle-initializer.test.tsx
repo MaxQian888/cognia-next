@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 
 const attachMock = jest.fn(() => jest.fn())
 jest.mock("@/lib/pwa/install-state", () => ({
@@ -18,6 +18,14 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
 const toastInfo = jest.fn()
 jest.mock("sonner", () => ({
   toast: { info: (...a: unknown[]) => toastInfo(...a) },
+}))
+
+const runtimeNamespace = jest.fn()
+jest.mock("@/lib/i18n/runtime-translator", () => ({
+  getRuntimeTranslator: async (namespace: string) => {
+    runtimeNamespace(namespace)
+    return (key: string) => `${namespace}.${key}`
+  },
 }))
 
 import { PwaLifecycleInitializer } from "./pwa-lifecycle-initializer"
@@ -60,6 +68,7 @@ beforeEach(() => {
   detectPlatformMock.mockReturnValue("web")
   trackEventMock.mockClear()
   toastInfo.mockClear()
+  runtimeNamespace.mockClear()
 })
 
 describe("<PwaLifecycleInitializer />", () => {
@@ -90,19 +99,23 @@ describe("<PwaLifecycleInitializer />", () => {
     expect(toastInfo).not.toHaveBeenCalled()
   })
 
-  it("toasts when a new worker takes over an already-controlled page", () => {
+  it("toasts from the full catalog when a new worker takes over an already-controlled page", async () => {
     const sw = stubServiceWorker({ old: true })
     render(<PwaLifecycleInitializer />)
     sw.fire("controllerchange")
-    expect(toastInfo).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(toastInfo).toHaveBeenCalledTimes(1))
+    // Above AccountGate the provider holds only startup messages, so the toast
+    // must not depend on a `settings` namespace from the React provider.
+    expect(runtimeNamespace).toHaveBeenCalledWith("settings.about.install")
+    expect(toastInfo).toHaveBeenCalledWith("settings.about.install.updateReady")
   })
 
-  it("toasts on every later change once the page has a controller", () => {
+  it("toasts on every later change once the page has a controller", async () => {
     const sw = stubServiceWorker(null)
     render(<PwaLifecycleInitializer />)
     sw.fire("controllerchange") // first activation — silent
     sw.fire("controllerchange") // a real update
-    expect(toastInfo).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(toastInfo).toHaveBeenCalledTimes(1))
   })
 
   it("detaches listeners on unmount", () => {

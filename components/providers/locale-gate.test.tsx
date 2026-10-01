@@ -1,4 +1,4 @@
-import { render, act, waitFor } from "@testing-library/react"
+import { render } from "@testing-library/react"
 
 // Capture what messages/locale the gate feeds NextIntlClientProvider. The
 // array name is `mock`-prefixed so babel-plugin-jest-hoist allows the factory
@@ -24,14 +24,10 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-jest.mock("@/i18n/messages", () => ({
-  // Inlined (not a closed-over const): the factory reads this at invocation
-  // time, which runs before top-level const initializers due to import hoisting.
-  defaultMessages: { common: { hi: "Hi" } },
-  loadMessages: jest.fn(),
+let mockLocale = "en"
+jest.mock("@/hooks/ui/use-app-locale", () => ({
+  useAppLocaleState: () => ({ locale: mockLocale, ready: true }),
 }))
-
-jest.mock("@/i18n/config", () => ({ defaultLocale: "en" }))
 
 let mockSettingsState: {
   settings?: { language?: string; profile?: { timezone?: string } }
@@ -61,10 +57,9 @@ jest.mock("@/lib/i18n/plugin-i18n-registry", () => ({
 }))
 
 import { LocaleGate } from "./locale-gate"
-import { defaultMessages, loadMessages } from "@/i18n/messages"
+import { defaultMessages, startupMessages } from "@/i18n/messages"
 import { getMergedPluginMessages } from "@/lib/i18n/plugin-i18n-registry"
 
-const loadMessagesMock = loadMessages as jest.Mock
 const getMergedMock = getMergedPluginMessages as jest.Mock
 
 function latest() {
@@ -76,7 +71,7 @@ function latest() {
 beforeEach(() => {
   mockProviderCalls.length = 0
   mockSettingsState = { settings: { language: "en" }, loaded: true }
-  loadMessagesMock.mockReset()
+  mockLocale = "en"
   getMergedMock.mockReset().mockReturnValue({})
 })
 
@@ -85,56 +80,22 @@ describe("LocaleGate", () => {
     mockSettingsState = { settings: { language: "en" }, loaded: true }
     render(<LocaleGate>child</LocaleGate>)
     expect(latest().locale).toBe("en")
-    expect(latest().messages).toBe(defaultMessages)
-    expect(loadMessagesMock).not.toHaveBeenCalled()
+    expect(latest().messages).toEqual(defaultMessages)
   })
 
   it("pins to the default locale until settings hydrate", () => {
     mockSettingsState = { settings: undefined, loaded: false }
     render(<LocaleGate>child</LocaleGate>)
     expect(latest().locale).toBe("en")
-    expect(latest().messages).toBe(defaultMessages)
-    expect(loadMessagesMock).not.toHaveBeenCalled()
+    expect(latest().messages).toEqual(defaultMessages)
   })
 
-  it("renders the default bundle as fallback, then swaps to the non-default chunk", async () => {
-    mockSettingsState = { settings: { language: "zh-CN" }, loaded: true }
-    const zh = { common: { hi: "你好" } }
-    let resolveLoad: (value: unknown) => void = () => {}
-    loadMessagesMock.mockReturnValue(
-      new Promise((resolve) => {
-        resolveLoad = resolve
-      })
-    )
-
+  it("renders Chinese startup messages immediately without loading a full catalog", () => {
+    mockLocale = "zh-CN"
     render(<LocaleGate>child</LocaleGate>)
-
-    // Before the chunk resolves: locale is already zh-CN but messages fall back.
     expect(latest().locale).toBe("zh-CN")
-    expect(latest().messages).toBe(defaultMessages)
-    expect(loadMessagesMock).toHaveBeenCalledWith("zh-CN")
-
-    await act(async () => {
-      resolveLoad(zh)
-    })
-
-    await waitFor(() => expect(latest().messages).toBe(zh))
-    expect(latest().locale).toBe("zh-CN")
-  })
-
-  it("stays on the default bundle when the non-default chunk fails to load", async () => {
-    mockSettingsState = { settings: { language: "zh-CN" }, loaded: true }
-    loadMessagesMock.mockRejectedValue(new Error("chunk load failed"))
-
-    render(<LocaleGate>child</LocaleGate>)
-    expect(latest().messages).toBe(defaultMessages)
-
-    // Flush the rejection microtask — the gate's .catch keeps the fallback.
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(latest().messages).toBe(defaultMessages)
-    expect(latest().locale).toBe("zh-CN")
+    expect(latest().messages).toEqual(startupMessages["zh-CN"])
+    expect(latest().messages).not.toHaveProperty("projectEnvironment")
   })
 
   it("merges enabled plugins' messages onto the host bundle", () => {
