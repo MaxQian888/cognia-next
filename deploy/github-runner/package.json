@@ -1,0 +1,9 @@
+{
+  "name": "cognia-github-runner-bootstrap",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@actions/artifact": "2.3.2"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "task": "Prepare the workspace for the application. Inspect errors, repair missing dependencies, and verify readiness.",
+  "model": {
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "your-model-id",
+    "apiKeyEnv": "COGNIA_BOOTSTRAP_API_KEY",
+    "requestTimeoutSecs": 60
+  },
+  "setupCommand": "pnpm install --frozen-lockfile",
+  "checks": [
+    { "name": "dependencies", "command": "test -d node_modules && pnpm exec tsc --version" }
+  ],
+  "reuse": { "inputs": ["package.json", "pnpm-lock.yaml"], "outputs": ["node_modules"] },
+  "limits": {
+    "maxSteps": 32,
+    "totalTimeoutSecs": 600,
+    "commandTimeoutSecs": 60,
+    "maxOutputBytes": 16000,
+    "maxContextBytes": 128000,
+    "maxResponseBytes": 1048576
+  }
+}

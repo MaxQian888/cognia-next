@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { CheckIcon, PencilIcon, PlugIcon, Trash2Icon } from "lucide-react"
 
 import { AddHostForm } from "@/components/connectivity/pair/add-host-form"
+import { GitHubRunnerPanel } from "@/components/settings/connectivity/github-runner-panel"
 import { DeviceConsoleLink } from "@/components/devices/device-console-link"
 import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Badge } from "@/components/ui/badge"
@@ -65,6 +66,8 @@ export function RemoteHostsPanel() {
       >
         <AddHostForm />
       </SettingsBlock>
+
+      <GitHubRunnerPanel />
 
       <DeviceConsoleLink
         surface="hosts"

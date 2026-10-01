@@ -1,0 +1,48 @@
+name: Standalone bootstrap scripts
+
+on:
+  pull_request:
+    paths:
+      - scripts/bootstrap/**
+      - .github/workflows/bootstrap-scripts.yml
+  push:
+    branches: [master, dev]
+    paths:
+      - scripts/bootstrap/**
+      - .github/workflows/bootstrap-scripts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  standalone:
+    name: ${{ matrix.runtime }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            runtime: bash
+          - os: ubuntu-latest
+            runtime: powershell
+          - os: windows-latest
+            runtime: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Exercise standalone runtime against local model server
+        run: python scripts/bootstrap/standalone.test.py --runtime ${{ matrix.runtime }}
+      - name: Check Bash syntax and focused runtime contracts
+        if: matrix.runtime == 'bash'
+        run: |
+          bash -n scripts/bootstrap/cognia-bootstrap.sh
+          shellcheck scripts/bootstrap/cognia-bootstrap.sh
+          python scripts/bootstrap/bash-runtime.test.py
+      - name: Check PowerShell-specific runtime contracts
+        if: matrix.runtime == 'powershell'
+        run: python scripts/bootstrap/powershell-runtime.test.py

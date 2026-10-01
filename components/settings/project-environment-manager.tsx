@@ -24,6 +24,11 @@ import {
   putProjectEnvironment,
 } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
+import {
+  assertBootstrapEnvironment,
+  BootstrapAgentValidationError,
+} from "@/lib/project-environment/bootstrap-agent"
+import { ProjectEnvironmentBootstrap } from "./project-environment-bootstrap"
 import { ProjectEnvironmentProvisioning } from "./project-environment-provisioning"
 import { ProjectEnvironmentRepoConfig } from "./project-environment-repo-config"
 import { ProjectEnvironmentRuntime } from "./project-environment-runtime"
@@ -175,11 +180,12 @@ export function ProjectEnvironmentManager({
     setMessage(null)
     try {
       const now = Date.now()
-      const { setupReuse: _draftReuse, ...rest } = draft
+      const { setupReuse: _draftReuse, bootstrapAgent: _draftBootstrap, ...rest } = draft
       const setupReuse = finalizeSetupReuse(draft.setupReuse)
       const next: ProjectEnvironment = {
         ...rest,
         ...(setupReuse ? { setupReuse } : {}),
+        ...(draft.bootstrapAgent ? { bootstrapAgent: draft.bootstrapAgent } : {}),
         name: draft.name.trim(),
         variables: Object.fromEntries(
           variables.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value])
@@ -189,6 +195,7 @@ export function ProjectEnvironmentManager({
           .map((row) => ({ variable: row.variable.trim(), keyringRef: row.keyringRef.trim() })),
         updatedAt: now,
       }
+      assertBootstrapEnvironment(next)
       await putProjectEnvironment(next)
       useProjectStore.getState().updateProject(projectId, {
         defaultEnvironmentId: isDefault
@@ -203,7 +210,14 @@ export function ProjectEnvironmentManager({
     } catch (cause) {
       setMessage({
         kind: "error",
-        text: t("failure", { message: cause instanceof Error ? cause.message : String(cause) }),
+        text: t("failure", {
+          message:
+            cause instanceof BootstrapAgentValidationError
+              ? t(`bootstrap.validation.${cause.code}`)
+              : cause instanceof Error
+                ? cause.message
+                : String(cause),
+        }),
       })
     } finally {
       setBusy(false)
@@ -231,7 +245,15 @@ export function ProjectEnvironmentManager({
     setBusy(true)
     setMessage(null)
     const result = await executeProjectEnvironment({
-      environment: draft,
+      environment: {
+        ...draft,
+        variables: Object.fromEntries(
+          variables.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value])
+        ),
+        keyringReferences: secrets
+          .filter((row) => row.variable.trim() && row.keyringRef.trim())
+          .map((row) => ({ variable: row.variable.trim(), keyringRef: row.keyringRef.trim() })),
+      },
       executionRoot,
       scope,
       surface: "interactive",
@@ -244,10 +266,17 @@ export function ProjectEnvironmentManager({
     setMessage(
       result.success
         ? { kind: "success", text: t("success") }
-        : { kind: "error", text: t("failure", { message: result.error ?? "unknown" }) }
+        : {
+            kind: "error",
+            text: t("failure", {
+              message: result.bootstrapValidationCode
+                ? t(`bootstrap.validation.${result.bootstrapValidationCode}`)
+                : (result.error ?? "unknown"),
+            }),
+          }
     )
     setBusy(false)
-    await load(draft.id)
+    if (!result.bootstrapValidationCode) await load(draft.id)
   }
 
   const updateAction = (index: number, action: ProjectEnvironmentAction) =>
@@ -338,6 +367,15 @@ export function ProjectEnvironmentManager({
               ids={`${draft.id}-setup`}
             />
           </div>
+
+          <ProjectEnvironmentBootstrap
+            value={draft.bootstrapAgent}
+            onChange={(bootstrapAgent) => setDraft({ ...draft, bootstrapAgent })}
+            onApplyRecipe={({ bootstrapAgent, setupScript }) =>
+              setDraft({ ...draft, bootstrapAgent, setupScript })
+            }
+            ids={`${draft.id}-bootstrap`}
+          />
 
           <ProjectEnvironmentSetupReuseFields
             value={draft.setupReuse}

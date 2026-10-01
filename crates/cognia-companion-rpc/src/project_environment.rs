@@ -1,11 +1,12 @@
-use crate::shell::{shell_exec_with_env, ShellResult};
+use crate::shell::{shell_exec_with_env_timeout_cap, ShellResult};
 use cognia_exec_sandbox::types::{NetworkPolicy, SandboxCommand, SandboxPolicy};
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 const DEFAULT_KEYRING_NAMESPACE: &str = "project-environment";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const MAX_TIMEOUT_SECS: u64 = 5 * 60;
+// Bootstrap may use up to one hour plus five seconds for cleanup.
+const MAX_TIMEOUT_SECS: u64 = 60 * 60 + 5;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +158,52 @@ fn sandbox_network(policy: EnvironmentNetworkPolicy) -> NetworkPolicy {
     }
 }
 
+/// Packaged sidecars are beside the host executable; development helpers
+/// live in the same workspace target tree. Existing caller PATH comes last.
+fn bootstrap_search_path(inherited: Option<std::ffi::OsString>) -> std::ffi::OsString {
+    let mut paths = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            paths.push(parent.to_path_buf());
+        }
+    }
+    if cfg!(debug_assertions) {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        paths.push(root.join("target/debug"));
+        paths.push(root.join("target/release"));
+    }
+    if let Some(inherited) = inherited {
+        paths.extend(std::env::split_paths(&inherited));
+    }
+    std::env::join_paths(paths).unwrap_or_default()
+}
+
+fn bootstrap_executable(
+    cwd: &std::path::Path,
+    variables: &BTreeMap<String, String>,
+) -> Option<PathBuf> {
+    if !variables.contains_key("COGNIA_BOOTSTRAP_CONFIG") {
+        return None;
+    }
+    let binary = variables
+        .get("COGNIA_BOOTSTRAP_BINARY")
+        .map(String::as_str)
+        .unwrap_or("cognia-bootstrap");
+    let name = std::path::Path::new(binary);
+    let candidates = if name.is_absolute() {
+        vec![name.to_path_buf()]
+    } else if name.components().count() > 1 {
+        vec![cwd.join(name)]
+    } else {
+        std::env::split_paths(variables.get("PATH").map(String::as_str).unwrap_or(""))
+            .map(|root| root.join(name))
+            .collect()
+    };
+    candidates
+        .into_iter()
+        .find_map(|candidate| candidate.canonicalize().ok().filter(|path| path.is_file()))
+}
+
 async fn execute_on_host(
     script: EnvironmentScript,
     cwd: String,
@@ -202,15 +249,35 @@ async fn execute_on_host(
         secrets.push(secret);
     }
 
+    if environment.contains_key("COGNIA_BOOTSTRAP_CONFIG") {
+        let inherited = environment
+            .remove("PATH")
+            .map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("PATH"));
+        environment.insert(
+            "PATH".into(),
+            bootstrap_search_path(inherited).to_string_lossy().into(),
+        );
+    }
     let effective = effective_policy(policy, host);
     let mut result = if !effective.require_sandbox {
         tokio::task::spawn_blocking(move || {
-            shell_exec_with_env(script, cwd, timeout_secs, environment)
+            shell_exec_with_env_timeout_cap(
+                script,
+                cwd,
+                timeout_secs,
+                environment,
+                MAX_TIMEOUT_SECS,
+            )
         })
         .await
         .map_err(|error| format!("project environment worker failed: {error}"))??
     } else {
         let cwd = PathBuf::from(cwd);
+        let mut readable = vec![cwd.clone()];
+        if let Some(binary) = bootstrap_executable(&cwd, &environment) {
+            readable.push(binary);
+        }
         let timeout = timeout_secs
             .unwrap_or(DEFAULT_TIMEOUT_SECS)
             .clamp(1, MAX_TIMEOUT_SECS);
@@ -223,7 +290,7 @@ async fn execute_on_host(
         };
         let sandbox_policy = SandboxPolicy::Bash {
             writable: vec![cwd.clone()],
-            readable: vec![cwd],
+            readable,
             network: sandbox_network(effective.network),
             max_cpu_seconds: timeout.min(u32::MAX as u64) as u32,
             max_memory_mb: 2048,
@@ -301,6 +368,36 @@ pub async fn project_environment_execute_cloud(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_sandbox_resolves_only_the_selected_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("bootstrap with spaces");
+        std::fs::write(&binary, "binary").unwrap();
+        let mut variables = BTreeMap::from([
+            ("COGNIA_BOOTSTRAP_CONFIG".into(), "{}".into()),
+            (
+                "COGNIA_BOOTSTRAP_BINARY".into(),
+                "bootstrap with spaces".into(),
+            ),
+            ("PATH".into(), dir.path().to_string_lossy().into()),
+        ]);
+        assert_eq!(
+            bootstrap_executable(dir.path(), &variables),
+            Some(binary.canonicalize().unwrap())
+        );
+        variables.remove("COGNIA_BOOTSTRAP_CONFIG");
+        assert!(bootstrap_executable(dir.path(), &variables).is_none());
+    }
+
+    #[test]
+    fn bootstrap_path_preserves_caller_search_path() {
+        let inherited = PathBuf::from("/custom/bin");
+        let path = bootstrap_search_path(Some(inherited.clone().into_os_string()));
+        let parts: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(parts.last(), Some(&inherited));
+        assert!(MAX_TIMEOUT_SECS >= 600 + 5);
+    }
 
     #[test]
     fn selects_script_for_the_execution_host() {

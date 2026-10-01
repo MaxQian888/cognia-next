@@ -12,6 +12,7 @@ import type {
   ProjectEnvironmentInitialization,
   ProjectEnvironmentSetupReuse,
 } from "@/types/project-environment"
+import { BootstrapAgentValidationError } from "./bootstrap-agent"
 
 /** Bumped when the fingerprint's input shape changes, so old records stop matching. */
 const FINGERPRINT_VERSION = 1
@@ -65,14 +66,15 @@ export function assertSetupReuse(reuse: ProjectEnvironmentSetupReuse): void {
 
 /**
  * The declaration the executor acts on, or `null` when reuse is off. Invalid
- * or duplicate paths are dropped here too, so a row saved before validation
- * existed cannot make the executor read outside the root.
+ * Legacy setup reuse paths are sanitized; bootstrap declarations are validated
+ * and unioned without truncation so every declared input affects the fingerprint.
  */
 export function effectiveSetupReuse(
-  environment: Pick<ProjectEnvironment, "setupReuse">
+  environment: Pick<ProjectEnvironment, "setupReuse" | "bootstrapAgent">
 ): ProjectEnvironmentSetupReuse | null {
   const reuse = environment.setupReuse
-  if (!reuse?.enabled) return null
+  const bootstrap = environment.bootstrapAgent?.enabled ? environment.bootstrapAgent : undefined
+  if (!reuse?.enabled && !bootstrap) return null
   const clean = (list: unknown): string[] => {
     if (!Array.isArray(list)) return []
     const seen = new Set<string>()
@@ -83,7 +85,24 @@ export function effectiveSetupReuse(
     }
     return [...seen].sort().slice(0, MAX_SETUP_REUSE_PATHS)
   }
-  return { enabled: true, inputs: clean(reuse.inputs), outputs: clean(reuse.outputs) }
+  const bootstrapPaths = (list: unknown): string[] => {
+    if (list === undefined) return []
+    if (!Array.isArray(list) || list.length > 128) throw new BootstrapAgentValidationError("reuse")
+    return list.map((entry: unknown) => {
+      const verdict =
+        typeof entry === "string" ? validateSetupReusePath(entry) : { ok: false as const }
+      if (!verdict.ok) throw new BootstrapAgentValidationError("reuse")
+      return verdict.path
+    })
+  }
+  const union = (field: "inputs" | "outputs") =>
+    [
+      ...new Set([
+        ...(reuse?.enabled ? clean(reuse[field]) : []),
+        ...bootstrapPaths(bootstrap?.reuse?.[field]),
+      ]),
+    ].sort()
+  return { enabled: true, inputs: union("inputs"), outputs: union("outputs") }
 }
 
 /** JSON with object keys sorted at every depth, so equal values hash equally. */
@@ -113,7 +132,7 @@ function sortKeys(value: unknown): unknown {
 export function setupSignature(
   environment: Pick<
     ProjectEnvironment,
-    "setupScript" | "variables" | "keyringReferences" | "policy"
+    "setupScript" | "variables" | "keyringReferences" | "policy" | "bootstrapAgent"
   >
 ): string {
   return canonicalJson({
@@ -124,6 +143,7 @@ export function setupSignature(
       .map(({ variable, keyringRef }) => ({ variable, keyringRef }))
       .sort((a, b) => a.variable.localeCompare(b.variable)),
     policy: environment.policy ?? null,
+    ...(environment.bootstrapAgent?.enabled ? { bootstrapAgent: environment.bootstrapAgent } : {}),
   })
 }
 

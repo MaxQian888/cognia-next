@@ -250,6 +250,22 @@ describe("setup reuse", () => {
     expect(putMock.mock.calls[0][0]).not.toHaveProperty("setupReuse")
   })
 
+  it("translates bootstrap validation from a manual initialization result", async () => {
+    executeMock.mockResolvedValueOnce({
+      success: false,
+      bypassed: false,
+      error: "Invalid bootstrap Agent configuration: checks",
+      bootstrapValidationCode: "checks",
+    })
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByDisplayValue("Node")
+    fireEvent.click(screen.getByRole("button", { name: "Run setup" }))
+    await waitFor(() => expect(executeMock).toHaveBeenCalled())
+    expect(screen.queryByText(/Invalid bootstrap Agent configuration/)).not.toBeInTheDocument()
+    expect(screen.getByText(/readiness check/i)).toBeInTheDocument()
+  })
+
   it("forces a manual setup run but not an action", async () => {
     listMock.mockResolvedValue([
       { ...stored, actions: [{ id: "test", name: "Test", script: { default: "pnpm test" } }] },
@@ -267,4 +283,240 @@ describe("setup reuse", () => {
       expect.objectContaining({ actionId: "test", force: false })
     )
   })
+})
+
+describe("bootstrap Agent settings", () => {
+  const agent = {
+    enabled: true,
+    task: "Prepare environment",
+    baseUrl: "https://api.example.com/v1",
+    model: "bootstrap-model",
+    checks: [{ name: "ready", command: "true" }],
+  }
+  const stored = {
+    id: "env-bootstrap",
+    projectId: "project-1",
+    name: "Bootstrap",
+    isEnabled: true,
+    setupScript: { default: "" },
+    actions: [],
+    variables: {},
+    keyringReferences: [{ variable: "COGNIA_BOOTSTRAP_API_KEY", keyringRef: "provider:key" }],
+    bootstrapAgent: agent,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  it("mounts the bootstrap section and saves edits with keyring references", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    expect(await screen.findByLabelText("Initialization task")).toHaveValue("Prepare environment")
+    fireEvent.change(screen.getByLabelText("Bootstrap model"), {
+      target: { value: "updated-model" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls.at(-1)[0]).toMatchObject({
+      bootstrapAgent: { ...agent, model: "updated-model" },
+      keyringReferences: stored.keyringReferences,
+    })
+  })
+
+  it("preserves optional configuration when disabled and saved", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization task")
+    fireEvent.click(
+      screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls.at(-1)[0]).toMatchObject({
+      bootstrapAgent: { ...agent, enabled: false },
+    })
+  })
+
+  it("saves recipe setup and readiness settings together without executing them", async () => {
+    listMock.mockResolvedValue([
+      { ...stored, setupScript: { default: "old setup", byOs: { windows: "old override" } } },
+    ])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization recipe")
+    fireEvent.change(screen.getByLabelText("Initialization recipe"), {
+      target: { value: "node-pnpm" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Apply recipe" }))
+    expect(executeMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls.at(-1)[0].setupScript).toEqual({
+      default: "pnpm install --frozen-lockfile",
+      byOs: {},
+    })
+    expect(putMock.mock.calls.at(-1)[0]).toMatchObject({
+      setupScript: { default: "pnpm install --frozen-lockfile", byOs: {} },
+      bootstrapAgent: {
+        checks: [{ name: "dependencies", command: "test -d node_modules" }],
+        reuse: { inputs: ["package.json", "pnpm-lock.yaml"], outputs: ["node_modules"] },
+        commandTimeoutSecs: 300,
+        totalTimeoutSecs: 900,
+      },
+    })
+  })
+
+  it("persists provider changes without retaining earlier authentication headers", async () => {
+    listMock.mockResolvedValue([
+      {
+        ...stored,
+        bootstrapAgent: {
+          ...agent,
+          runtime: "bash",
+          binary: "/custom/bootstrap.sh",
+          modelOptions: {
+            auth: "header",
+            apiKeyHeader: "X-Old-Key",
+            headersEnv: { "X-Old-Token": "OLD_TOKEN" },
+            extraBody: { oldProvider: true },
+          },
+        },
+      },
+    ])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Provider preset")
+    fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "ollama" } })
+    fireEvent.click(screen.getByRole("button", { name: "Apply provider" }))
+    fireEvent.change(screen.getByLabelText("Bootstrap model"), {
+      target: { value: "installed-model" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls.at(-1)[0].bootstrapAgent).toMatchObject({
+      runtime: "bash",
+      binary: "/custom/bootstrap.sh",
+      baseUrl: "http://localhost:11434/v1",
+      model: "installed-model",
+    })
+    expect(putMock.mock.calls.at(-1)[0].bootstrapAgent.modelOptions).toEqual({ auth: "none" })
+    expect(executeMock).not.toHaveBeenCalled()
+  })
+
+  it("shows translated validation and refuses saving an empty readiness check", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization task")
+    fireEvent.change(screen.getByLabelText("Readiness check command"), { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    expect(await screen.findByText(/Add 1–32 checks with unique names/)).toBeInTheDocument()
+    expect(putMock).not.toHaveBeenCalled()
+  })
+
+  it("blocks saving an invalid advanced draft instead of publishing stale options", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization task")
+    fireEvent.change(screen.getByLabelText("Advanced configuration JSON"), {
+      target: { value: '{"tools":' },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Correct the advanced JSON and model options/).length
+      ).toBeGreaterThan(0)
+    )
+    expect(putMock).not.toHaveBeenCalled()
+  })
+
+  it("retains invalid JSON after manual initialization validation and preserves it when disabled", async () => {
+    listMock.mockResolvedValue([stored])
+    executeMock.mockResolvedValue({
+      success: false,
+      bypassed: false,
+      bootstrapValidationCode: "options",
+    })
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization task")
+    const editor = screen.getByLabelText("Advanced configuration JSON")
+    fireEvent.change(editor, { target: { value: '{"tools":' } })
+    fireEvent.click(screen.getByRole("button", { name: "Run setup" }))
+    await waitFor(() => expect(executeMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run setup" })).toBeEnabled())
+    expect(editor).toHaveValue('{"tools":')
+    expect(listMock).toHaveBeenCalledTimes(1)
+    fireEvent.click(
+      screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls.at(-1)[0]).toMatchObject({
+      bootstrapAgent: { enabled: false, advancedOptionsDraft: '{"tools":' },
+    })
+  })
+
+  it("uses current credential references and plain variables for a manual initialization", async () => {
+    listMock.mockResolvedValue([stored])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization task")
+    fireEvent.change(screen.getByLabelText("namespace:credential reference"), {
+      target: { value: "provider:updated" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }))
+    fireEvent.change(screen.getAllByLabelText("Variable name")[0], { target: { value: "LANG" } })
+    fireEvent.change(screen.getByLabelText("Plain value"), { target: { value: "C" } })
+    fireEvent.click(screen.getByRole("button", { name: "Run setup" }))
+    await waitFor(() => expect(executeMock).toHaveBeenCalled())
+    expect(executeMock.mock.calls.at(-1)[0].environment).toMatchObject({
+      variables: { LANG: "C" },
+      keyringReferences: [{ variable: "COGNIA_BOOTSTRAP_API_KEY", keyringRef: "provider:updated" }],
+    })
+    expect(putMock).not.toHaveBeenCalled()
+  })
+
+  it("saves a customized local provider without requiring an API key", async () => {
+    listMock.mockResolvedValue([{ ...stored, keyringReferences: [] }])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByLabelText("Initialization task")
+    fireEvent.change(screen.getByLabelText("Model API endpoint"), {
+      target: { value: "http://localhost:11434/v1" },
+    })
+    fireEvent.change(screen.getByLabelText("Authentication"), { target: { value: "none" } })
+    fireEvent.change(screen.getByLabelText("Maximum response tokens"), {
+      target: { value: "2048" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+    await waitFor(() => expect(putMock).toHaveBeenCalled())
+    expect(putMock.mock.calls.at(-1)[0]).toMatchObject({
+      keyringReferences: [],
+      bootstrapAgent: { modelOptions: { auth: "none", maxTokens: 2048 } },
+    })
+  })
+})
+
+it("shows translated bootstrap budget validation before saving", async () => {
+  listMock.mockResolvedValue([
+    {
+      id: "env-bootstrap",
+      projectId: "project-1",
+      name: "Bootstrap",
+      isEnabled: true,
+      setupScript: { default: "" },
+      actions: [],
+      variables: {},
+      keyringReferences: [{ variable: "COGNIA_BOOTSTRAP_API_KEY", keyringRef: "provider:key" }],
+      bootstrapAgent: {
+        enabled: true,
+        task: "Prepare",
+        baseUrl: "https://api.example.com/v1",
+        model: "model",
+        checks: [{ name: "ready", command: "true" }],
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ])
+  render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+  await screen.findByLabelText("Initialization task")
+  fireEvent.change(screen.getByLabelText("Maximum steps"), { target: { value: "0" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
+  expect(await screen.findByText(/Use whole numbers: 1–256 steps/)).toBeInTheDocument()
+  expect(putMock).not.toHaveBeenCalled()
 })

@@ -1,0 +1,65 @@
+name: Cognia temporary Host
+run-name: cognia-runner-${{ inputs.lease_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      lease_id:
+        required: true
+        type: string
+      recipient_public_key:
+        required: true
+        type: string
+      host_image:
+        required: true
+        type: string
+      agent_bundle_image:
+        required: true
+        type: string
+      development_image:
+        required: true
+        type: string
+      signaling_url:
+        required: true
+        type: string
+      lifetime_minutes:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cognia-runner-${{ inputs.lease_id }}
+  cancel-in-progress: false
+
+jobs:
+  host:
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON(vars.COGNIA_RUNNER_ACTORS || '[]'), github.actor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/cognia-runner
+      - name: Install pinned artifact client
+        working-directory: .github/cognia-runner
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Start temporary Cognia Host
+        uses: ./.github/cognia-runner
+        env:
+          COGNIA_RUNNER_LEASE_ID: ${{ inputs.lease_id }}
+          COGNIA_RUNNER_RECIPIENT_PUBLIC_KEY: ${{ inputs.recipient_public_key }}
+          COGNIA_RUNNER_HOST_IMAGE: ${{ inputs.host_image }}
+          COGNIA_RUNNER_AGENT_BUNDLE_IMAGE: ${{ inputs.agent_bundle_image }}
+          COGNIA_RUNNER_DEVELOPMENT_IMAGE: ${{ inputs.development_image }}
+          COGNIA_RUNNER_SIGNALING_URL: ${{ inputs.signaling_url }}
+          COGNIA_RUNNER_LIFETIME_MINUTES: ${{ inputs.lifetime_minutes }}
+          COGNIA_RUNNER_REGISTRY_AUTH: ${{ secrets.COGNIA_RUNNER_REGISTRY_AUTH }}
+      - name: Release lease containers and volumes
+        if: always()
+        working-directory: .github/cognia-runner
+        env:
+          COGNIA_RUNNER_LEASE_ID: ${{ inputs.lease_id }}
+        run: node bootstrap.mjs --cleanup

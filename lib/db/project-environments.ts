@@ -1,3 +1,4 @@
+import { assertBootstrapEnvironment } from "@/lib/project-environment/bootstrap-agent"
 import { assertRuntimeSelection } from "@/lib/project-environment/runtime-selection"
 import { assertSetupReuse, canonicalJson } from "@/lib/project-environment/setup-reuse"
 import type {
@@ -52,6 +53,7 @@ function assertEnvironmentBoundary(environment: ProjectEnvironment): void {
     keyringVariables.add(reference.variable)
   }
 
+  assertBootstrapEnvironment(environment)
   if (environment.runtime !== undefined) assertRuntimeSelection(environment.runtime)
   if (environment.setupReuse !== undefined) assertSetupReuse(environment.setupReuse)
 }
@@ -136,6 +138,9 @@ export async function createProjectEnvironmentVersion(
       // Spread only when set: a project that never opted in snapshots exactly as before.
       ...(environment.runtime ? { runtime: structuredClone(environment.runtime) } : {}),
       ...(environment.setupReuse ? { setupReuse: structuredClone(environment.setupReuse) } : {}),
+      ...(environment.bootstrapAgent
+        ? { bootstrapAgent: structuredClone(environment.bootstrapAgent) }
+        : {}),
       createdAt,
     }
     await db.projectEnvironmentVersions.add(row)
@@ -175,6 +180,7 @@ export function compareProjectEnvironmentVersions(
     "policy",
     "runtime",
     "setupReuse",
+    "bootstrapAgent",
   ] as const
   return fields.flatMap((field) =>
     JSON.stringify(left[field]) === JSON.stringify(right[field])
@@ -192,6 +198,7 @@ const VERSIONED_ENVIRONMENT_FIELDS = [
   "keyringReferences",
   "runtime",
   "setupReuse",
+  "bootstrapAgent",
 ] as const
 
 /**
@@ -233,6 +240,7 @@ export async function rollbackProjectEnvironmentVersion(
       keyringReferences: structuredClone(target.keyringReferences),
       ...(target.runtime ? { runtime: structuredClone(target.runtime) } : {}),
       ...(target.setupReuse ? { setupReuse: structuredClone(target.setupReuse) } : {}),
+      ...(target.bootstrapAgent ? { bootstrapAgent: structuredClone(target.bootstrapAgent) } : {}),
       createdAt: target.createdAt,
       updatedAt: createdAt,
     },

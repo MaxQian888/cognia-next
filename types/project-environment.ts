@@ -75,6 +75,77 @@ export interface ProjectEnvironmentSetupReuse {
   outputs: string[]
 }
 
+/** A bounded standalone Agent that repairs setup before readiness checks pass. */
+export interface ProjectEnvironmentBootstrapAgent {
+  enabled: boolean
+  /** Independent implementation installed on the execution host. */
+  runtime?: "native" | "bash" | "powershell"
+  /** Executable or standalone script on the execution host. */
+  binary?: string
+  task: string
+  baseUrl: string
+  model: string
+  /** Variable name only. The host obtains its value from a keyring reference. */
+  apiKeyEnv?: string
+  checks: Array<{ name: string; command: string }>
+  maxSteps?: number
+  totalTimeoutSecs?: number
+  commandTimeoutSecs?: number
+  maxOutputBytes?: number
+  maxContextBytes?: number
+  maxResponseBytes?: number
+  systemPrompt?: string
+  modelOptions?: ProjectEnvironmentBootstrapModelOptions
+  context?: ProjectEnvironmentBootstrapContext
+  tools?: ProjectEnvironmentBootstrapTools
+  reuse?: { inputs?: string[]; outputs?: string[] }
+  /** Invalid advanced editor input is retained so save/run cannot silently ignore it. */
+  advancedOptionsDraft?: string
+}
+
+export interface ProjectEnvironmentBootstrapModelOptions {
+  auth?: "bearer" | "header" | "none"
+  apiKeyHeader?: string
+  endpointPath?: string
+  requestTimeoutSecs?: number
+  maxTokens?: number
+  temperature?: number
+  topP?: number
+  seed?: number
+  reasoningEffort?: string
+  thinking?: Record<string, unknown>
+  extraBody?: Record<string, unknown>
+  headers?: Record<string, string>
+  headersEnv?: Record<string, string>
+  stream?: boolean
+  showThinking?: boolean
+}
+
+export interface ProjectEnvironmentBootstrapContext {
+  contextWindowTokens?: number
+  autoCompact?: boolean
+  compactThresholdTokens?: number
+  compactRetainTokens?: number
+  compactMaxTokens?: number
+  compactRetries?: number
+  maxOverflowRetries?: number
+  pruneToolResults?: boolean
+  pruneThresholdBytes?: number
+  pruneHeadBytes?: number
+  pruneTailBytes?: number
+}
+
+export interface ProjectEnvironmentBootstrapTools {
+  shell?: boolean
+  editor?: boolean
+  profile?: "native" | "dsh"
+  shellExecutable?: string
+  shellArgs?: string[]
+  /** Non-sensitive values only; provider/header credential variables are forbidden. */
+  environment?: Record<string, string>
+  maxFileBytes?: number
+}
+
 /**
  * A project-scoped local execution definition. Definitions are device-local;
  * secret values remain exclusively in the OS keyring and are referenced by id.
@@ -99,6 +170,8 @@ export interface ProjectEnvironment {
   runtime?: ProjectRuntimeSelection
   /** Absent or disabled: setup runs on every turn, as it always has. */
   setupReuse?: ProjectEnvironmentSetupReuse
+  /** Optional adaptive initialization, executed before the full Agent runtime. */
+  bootstrapAgent?: ProjectEnvironmentBootstrapAgent
   lastInitialization?: ProjectEnvironmentInitialization
   initializationHistory?: ProjectEnvironmentInitialization[]
   createdAt: number
@@ -167,5 +240,7 @@ export interface ProjectEnvironmentVersion {
   runtime?: ProjectRuntimeSelection
   /** Setup reuse at snapshot time; absent when the environment never opted in. */
   setupReuse?: ProjectEnvironmentSetupReuse
+  /** Optional adaptive initialization, executed before the full Agent runtime. */
+  bootstrapAgent?: ProjectEnvironmentBootstrapAgent
   createdAt: number
 }

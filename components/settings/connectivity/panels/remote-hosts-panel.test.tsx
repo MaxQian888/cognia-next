@@ -17,6 +17,9 @@ jest.mock("next-intl", () => ({
 jest.mock("@/components/connectivity/pair/add-host-form", () => ({
   AddHostForm: () => <div data-testid="add-host-form" />,
 }))
+jest.mock("@/components/settings/connectivity/github-runner-panel", () => ({
+  GitHubRunnerPanel: () => <div data-testid="github-runner-panel" />,
+}))
 jest.mock("@/components/devices/device-console-link", () => ({
   DeviceConsoleLink: ({ deviceRef }: { deviceRef?: string }) => (
     <div data-testid="device-console-link-hosts" data-ref={deviceRef ?? ""} />
@@ -45,6 +48,7 @@ describe("RemoteHostsPanel", () => {
     render(<RemoteHostsPanel />)
     expect(screen.getByTestId("remote-hosts-empty")).toBeInTheDocument()
     expect(screen.getByTestId("add-host-form")).toBeInTheDocument()
+    expect(screen.getByTestId("github-runner-panel")).toBeInTheDocument()
   })
 
   it("drives, renames and removes a row and points the console at the active host", () => {

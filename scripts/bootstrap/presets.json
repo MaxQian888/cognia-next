@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "config": {
+        "model": {
+          "baseUrl": "https://api.deepseek.com",
+          "model": "deepseek-flash",
+          "apiKeyEnv": "DEEPSEEK_API_KEY",
+          "auth": "bearer"
+        }
+      }
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "config": {
+        "model": {
+          "baseUrl": "https://api.openai.com/v1",
+          "model": "gpt-4.1-mini",
+          "apiKeyEnv": "OPENAI_API_KEY",
+          "auth": "bearer"
+        }
+      }
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "config": {
+        "model": {
+          "baseUrl": "https://openrouter.ai/api/v1",
+          "model": "openrouter/auto",
+          "apiKeyEnv": "OPENROUTER_API_KEY",
+          "auth": "bearer"
+        }
+      }
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "config": {
+        "model": {
+          "baseUrl": "http://localhost:11434/v1",
+          "model": "local-model",
+          "apiKeyEnv": "COGNIA_BOOTSTRAP_API_KEY",
+          "auth": "none"
+        }
+      }
+    },
+    {
+      "id": "lmstudio",
+      "label": "LM Studio",
+      "config": {
+        "model": {
+          "baseUrl": "http://localhost:1234/v1",
+          "model": "local-model",
+          "apiKeyEnv": "COGNIA_BOOTSTRAP_API_KEY",
+          "auth": "none"
+        }
+      }
+    }
+  ],
+  "presets": [
+    {
+      "id": "coding",
+      "config": {
+        "task": "Inspect the workspace, implement the requested change, and run focused verification.",
+        "tools": { "shell": true, "editor": true },
+        "limits": { "maxSteps": 48 },
+        "model": { "maxTokens": 8192 }
+      }
+    },
+    {
+      "id": "debug",
+      "config": {
+        "task": "Reproduce the reported issue, investigate one hypothesis at a time, fix the root cause, and verify the behavior.",
+        "tools": { "shell": true, "editor": true },
+        "limits": { "maxSteps": 64 },
+        "model": { "maxTokens": 8192 }
+      }
+    },
+    {
+      "id": "chat",
+      "config": {
+        "task": "Answer the user's question clearly and accurately. Ask for missing context when necessary.",
+        "tools": { "shell": false, "editor": false },
+        "limits": { "maxSteps": 8 },
+        "model": { "maxTokens": 4096 }
+      }
+    },
+    {
+      "id": "quick",
+      "config": {
+        "task": "Complete the requested small task with minimal changes and focused verification.",
+        "tools": { "shell": true, "editor": true },
+        "limits": { "maxSteps": 12, "totalTimeoutSecs": 180 },
+        "model": { "maxTokens": 2048 }
+      }
+    },
+    {
+      "id": "explain",
+      "config": {
+        "task": "Explain the supplied material with concrete examples and clearly state assumptions. Workspace tools are disabled; ask the user to supply any missing material.",
+        "tools": { "shell": false, "editor": false },
+        "limits": { "maxSteps": 8 },
+        "model": { "maxTokens": 8192 }
+      }
+    }
+  ],
+  "recipes": [
+    {
+      "id": "node-pnpm",
+      "config": {
+        "task": "Initialize the pnpm workspace and resolve failures until the readiness checks pass.",
+        "setupCommand": "pnpm install --frozen-lockfile",
+        "checks": [{ "name": "dependencies", "command": "test -d node_modules" }],
+        "reuse": { "inputs": ["package.json", "pnpm-lock.yaml"], "outputs": ["node_modules"] },
+        "limits": { "commandTimeoutSecs": 300, "totalTimeoutSecs": 900 }
+      },
+      "powershell": {
+        "checks": [
+          {
+            "name": "dependencies",
+            "command": "if (-not (Test-Path -LiteralPath 'node_modules' -PathType Container)) { throw 'Dependencies are missing' }"
+          }
+        ]
+      }
+    },
+    {
+      "id": "python-uv",
+      "config": {
+        "task": "Initialize the uv project and resolve failures until the readiness checks pass.",
+        "setupCommand": "uv sync --frozen",
+        "checks": [
+          {
+            "name": "virtualenv",
+            "command": "test -x .venv/bin/python && .venv/bin/python --version"
+          }
+        ],
+        "reuse": { "inputs": ["pyproject.toml", "uv.lock"], "outputs": [".venv"] },
+        "limits": { "commandTimeoutSecs": 300, "totalTimeoutSecs": 900 }
+      },
+      "powershell": {
+        "checks": [
+          {
+            "name": "virtualenv",
+            "command": "$python = if ($IsWindows) { '.venv/Scripts/python.exe' } else { '.venv/bin/python' }; if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Virtual environment is missing' }; & $python --version"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rust",
+      "config": {
+        "task": "Fetch locked Rust dependencies and resolve failures until the readiness checks pass.",
+        "setupCommand": "cargo fetch --locked",
+        "checks": [{ "name": "compile", "command": "cargo check --locked --offline" }],
+        "reuse": { "inputs": ["Cargo.toml", "Cargo.lock"], "outputs": ["target"] },
+        "limits": { "commandTimeoutSecs": 300, "totalTimeoutSecs": 900 }
+      }
+    },
+    {
+      "id": "go",
+      "config": {
+        "task": "Download Go module dependencies and resolve failures until the readiness checks pass.",
+        "setupCommand": "go mod download",
+        "checks": [{ "name": "modules", "command": "go mod verify" }],
+        "reuse": { "inputs": ["go.mod", "go.sum"], "outputs": [] },
+        "limits": { "commandTimeoutSecs": 300, "totalTimeoutSecs": 900 }
+      }
+    }
+  ]
+}

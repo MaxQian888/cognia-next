@@ -259,6 +259,98 @@ describe("project environments persistence", () => {
     expect((await getProjectEnvironment("env-1"))?.runtime?.lifecycle).toBe("ephemeral")
   })
 
+  it("persists and snapshots optional bootstrap configuration with rollback and comparison", async () => {
+    const bootstrapAgent = {
+      enabled: true,
+      runtime: "bash" as const,
+      binary: "/tools/cognia-bootstrap.sh",
+      task: "Initialize",
+      baseUrl: "https://api.example.com/v1",
+      model: "model",
+      apiKeyEnv: "API_TOKEN",
+      checks: [{ name: "ready", command: "true" }],
+      systemPrompt: "Repair this workspace only.",
+      modelOptions: {
+        auth: "header" as const,
+        apiKeyHeader: "X-API-Key",
+        headersEnv: { "X-Tenant": "API_TOKEN" },
+        extraBody: { response_format: { type: "text" } },
+        maxTokens: 2048,
+      },
+      context: { contextWindowTokens: 32000, compactRetries: 2 },
+      tools: { profile: "dsh" as const, shellArgs: ["--norc"], environment: { LANG: "C" } },
+      reuse: { inputs: ["pnpm-lock.yaml"], outputs: ["node_modules"] },
+      maxResponseBytes: 2097152,
+    }
+    const snapshot = structuredClone(bootstrapAgent)
+    const configured = environment({ bootstrapAgent })
+    await putProjectEnvironment(configured)
+    expect((await getProjectEnvironment(configured.id))?.bootstrapAgent).toEqual(bootstrapAgent)
+    const plain = await createProjectEnvironmentVersion(
+      environment(),
+      { requiredRuntimeCapabilities: [] },
+      10
+    )
+    const version = await createProjectEnvironmentVersion(
+      configured,
+      { requiredRuntimeCapabilities: [] },
+      20
+    )
+    expect(version.bootstrapAgent).toEqual(bootstrapAgent)
+    expect(
+      versionMatchesEnvironment(version, configured, { requiredRuntimeCapabilities: [] })
+    ).toBe(true)
+    expect(
+      versionMatchesEnvironment(version, environment(), { requiredRuntimeCapabilities: [] })
+    ).toBe(false)
+    expect(compareProjectEnvironmentVersions(plain, version)).toEqual([
+      { field: "bootstrapAgent", before: undefined, after: bootstrapAgent },
+    ])
+    bootstrapAgent.modelOptions.extraBody.response_format.type = "changed"
+    bootstrapAgent.tools.shellArgs.push("--noprofile")
+    bootstrapAgent.reuse.inputs.push("package.json")
+    expect(version.bootstrapAgent).toEqual(snapshot)
+    expect((await getProjectEnvironmentVersion(version.id))?.bootstrapAgent).toEqual(snapshot)
+    expect(
+      versionMatchesEnvironment(version, configured, { requiredRuntimeCapabilities: [] })
+    ).toBe(false)
+    expect((await rollbackProjectEnvironmentVersion(version.id, 30)).bootstrapAgent).toEqual(
+      snapshot
+    )
+    expect(await rollbackProjectEnvironmentVersion(plain.id, 40)).not.toHaveProperty(
+      "bootstrapAgent"
+    )
+  })
+
+  it("preserves disabled bootstrap drafts but rejects invalid enabled config and plain secrets", async () => {
+    const disabled = {
+      enabled: false,
+      task: "",
+      baseUrl: "",
+      model: "",
+      checks: [],
+      advancedOptionsDraft: '{"tools":',
+    }
+    await putProjectEnvironment(environment({ bootstrapAgent: disabled }))
+    expect((await getProjectEnvironment("env-1"))?.bootstrapAgent).toEqual(disabled)
+    await expect(
+      putProjectEnvironment(environment({ bootstrapAgent: { ...disabled, enabled: true } }))
+    ).rejects.toThrow(/bootstrap Agent/)
+    const valid = {
+      enabled: true,
+      task: "Initialize",
+      baseUrl: "https://api.example.com/v1",
+      model: "model",
+      apiKeyEnv: "PLAIN_KEY",
+      checks: [{ name: "ready", command: "true" }],
+    }
+    await expect(
+      putProjectEnvironment(
+        environment({ bootstrapAgent: valid, variables: { PLAIN_KEY: "secret" } })
+      )
+    ).rejects.toThrow(/keyring/)
+  })
+
   it("hydrates them on read so a reader cannot throw on an absent array", async () => {
     // The type itself notes that legacy desktop definitions omit fields, and
     // rows come back from Dexie unvalidated. `Object.keys(undefined)` and

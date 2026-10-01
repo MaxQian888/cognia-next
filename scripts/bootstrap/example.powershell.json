@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "task": "Prepare this workspace and ensure the readiness checks pass. Use PowerShell syntax.",
+  "model": {
+    "baseUrl": "https://your-compatible-provider.example/v1",
+    "model": "your-model-id",
+    "apiKeyEnv": "COGNIA_BOOTSTRAP_API_KEY",
+    "stream": true
+  },
+  "tools": { "profile": "native" },
+  "setupCommand": "New-Item -ItemType Directory -Force .bootstrap | Out-Null; Set-Content -LiteralPath .bootstrap/ready -Value ready",
+  "checks": [
+    {
+      "name": "ready",
+      "command": "if (Test-Path -LiteralPath .bootstrap/ready -PathType Leaf) { exit 0 } else { exit 1 }"
+    }
+  ],
+  "reuse": { "inputs": [], "outputs": [".bootstrap/ready"] },
+  "limits": { "maxSteps": 32, "totalTimeoutSecs": 600, "commandTimeoutSecs": 60 }
+}

@@ -1,0 +1,5 @@
+name: Cognia temporary Host
+description: Run a lease-scoped Cognia Host and publish recipient-encrypted pairing artifacts.
+runs:
+  using: node24
+  main: bootstrap.mjs

@@ -241,6 +241,8 @@ export const SANDBOX_PLACEMENT_CHANNEL = "external-agent://placement"
  */
 export interface SandboxPlacement {
   kind: "container"
+  /** Transient Host-issued plugin leases; validated against the spawning device. */
+  hostedToolHostLeaseIds?: string[]
   /** The sealed spec. The Host re-admits it; nothing in it is trusted. */
   spec: EnvironmentSpec
   /**

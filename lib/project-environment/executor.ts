@@ -1,3 +1,9 @@
+import {
+  assertBootstrapEnvironment,
+  prepareBootstrapExecution,
+  BootstrapAgentValidationError,
+  type BootstrapValidationCode,
+} from "./bootstrap-agent"
 import { isTauri, transport } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/data/crypto"
 import { readWorkspaceFile, statWorkspaceFile } from "@/lib/files/workspace-fs"
@@ -29,6 +35,7 @@ export interface ProjectEnvironmentExecutionResult {
   stdout?: string
   stderr?: string
   error?: string
+  bootstrapValidationCode?: BootstrapValidationCode
   /** Setup was skipped: the last setup in this root succeeded with the same fingerprint. */
   reused?: boolean
   /** Setup was satisfied by an identical one already running in this root. */
@@ -88,7 +95,11 @@ export async function executeProjectEnvironment(
 
   const action = selectAction(input.environment, input.actionId)
   const script = action?.script ?? input.environment.setupScript
-  if (!script.default.trim() && !Object.values(script.byOs ?? {}).some((value) => value?.trim())) {
+  if (
+    !(input.environment.bootstrapAgent?.enabled && !action) &&
+    !script.default.trim() &&
+    !Object.values(script.byOs ?? {}).some((value) => value?.trim())
+  ) {
     return { success: true, bypassed: false }
   }
   const policy =
@@ -139,7 +150,13 @@ async function runSetupCoalesced(
     // Joined only when the finished setup did what this request would have
     // done and it worked. A failure is not shared: this request makes its own
     // attempt, under its own surface's bypass rules. A forced run never joins.
-    if (!input.force && inFlight.signature === signature && outcome?.success && !outcome.bypassed) {
+    if (
+      !input.force &&
+      !input.environment.bootstrapAgent?.enabled &&
+      inFlight.signature === signature &&
+      outcome?.success &&
+      !outcome.bypassed
+    ) {
       return { success: true, bypassed: false, exitCode: outcome.exitCode, joined: true }
     }
   }
@@ -159,7 +176,20 @@ async function runSetupOnce(
   policy: HostExecutionPolicy,
   signature: string
 ): Promise<ProjectEnvironmentExecutionResult> {
-  const reuse = effectiveSetupReuse(input.environment)
+  let reuse: ReturnType<typeof effectiveSetupReuse>
+  try {
+    assertBootstrapEnvironment(input.environment)
+    reuse = effectiveSetupReuse(input.environment)
+  } catch (validationError) {
+    // Invalid imported config must reach the normal recorded failure path,
+    // even if it carries a matching historic fingerprint.
+    return runScript(input, input.environment.setupScript, policy, {
+      recordInitialization: true,
+      validationError,
+    })
+  }
+  const bootstrap = input.environment.bootstrapAgent?.enabled === true
+  let bootstrapInvalidated = false
   let fingerprint: string | undefined
   if (reuse) {
     fingerprint = await computeSetupFingerprint(
@@ -168,7 +198,7 @@ async function runSetupOnce(
       reuse,
       setupReuseIo
     ).catch(() => undefined)
-    if (fingerprint && !input.force) {
+    if ((fingerprint || bootstrap) && !input.force) {
       // The caller's copy of the environment may predate the last setup (a
       // settings draft, a row read before a concurrent run finished), so the
       // decision reads the stored history.
@@ -176,20 +206,33 @@ async function runSetupOnce(
         (await getProjectEnvironment(input.environment.id).catch(() => undefined)) ??
         input.environment
       const record = latestSetupRecord(stored, input.executionRoot, input.scope)
-      if (
-        recordAllowsReuse(record, fingerprint) &&
-        (await setupOutputsPresent(input.executionRoot, reuse, setupReuseIo).catch(() => false))
-      ) {
+      const outputsPresent = await setupOutputsPresent(
+        input.executionRoot,
+        reuse,
+        setupReuseIo
+      ).catch(() => false)
+      if (bootstrap) {
+        bootstrapInvalidated =
+          !fingerprint ||
+          !outputsPresent ||
+          (record?.status === "succeeded" && record.fingerprint !== fingerprint)
+      }
+      if (!bootstrap && fingerprint && recordAllowsReuse(record, fingerprint) && outputsPresent) {
         // Not written to the history: the history records setups that ran, and
         // a reuse on every turn would push those out of its 100-entry window.
         return { success: true, bypassed: false, exitCode: record?.exitCode, reused: true }
       }
     }
   }
-  return runScript(input, input.environment.setupScript, policy, {
-    recordInitialization: true,
-    ...(fingerprint ? { fingerprint } : {}),
-  })
+  return runScript(
+    bootstrapInvalidated ? { ...input, force: true } : input,
+    input.environment.setupScript,
+    policy,
+    {
+      recordInitialization: true,
+      ...(fingerprint ? { fingerprint } : {}),
+    }
+  )
 }
 
 const setupReuseIo: SetupReuseIo = {
@@ -209,7 +252,7 @@ async function runScript(
   input: ExecuteProjectEnvironmentInput,
   script: ProjectEnvironmentScript,
   policy: HostExecutionPolicy,
-  options: { recordInitialization: boolean; fingerprint?: string }
+  options: { recordInitialization: boolean; fingerprint?: string; validationError?: unknown }
 ): Promise<ProjectEnvironmentExecutionResult> {
   const startedAt = Date.now()
   if (options.recordInitialization) {
@@ -226,13 +269,21 @@ async function runScript(
   }
 
   try {
+    if (options.validationError !== undefined) throw options.validationError
+    const bootstrap =
+      options.recordInitialization && input.environment.bootstrapAgent?.enabled
+        ? prepareBootstrapExecution(input.environment, input.force === true)
+        : undefined
     const result = await transport.call<NativeEnvironmentResult>("project_environment_execute", {
-      script,
+      script: bootstrap?.script ?? script,
       cwd: input.executionRoot,
-      variables: input.environment.variables,
+      variables: bootstrap?.variables ?? input.environment.variables,
       keyringReferences: input.environment.keyringReferences,
       policy,
-      timeoutSecs: input.timeoutSecs,
+      // The CLI must retain its configured budget plus time to reap tool groups.
+      timeoutSecs: bootstrap
+        ? Math.max(input.timeoutSecs ?? 0, bootstrap.timeoutSecs)
+        : input.timeoutSecs,
     })
     const success = !result.timed_out && result.exit_code === 0
     const error = result.timed_out
@@ -285,6 +336,13 @@ async function runScript(
         completedAt
       )
     }
-    return { success: bypassed, bypassed, error }
+    return {
+      success: bypassed,
+      bypassed,
+      error,
+      ...(cause instanceof BootstrapAgentValidationError
+        ? { bootstrapValidationCode: cause.code }
+        : {}),
+    }
   }
 }

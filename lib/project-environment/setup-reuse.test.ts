@@ -81,6 +81,13 @@ describe("assertSetupReuse", () => {
 })
 
 describe("effectiveSetupReuse", () => {
+  const bootstrapAgent = {
+    enabled: true,
+    task: "Initialize",
+    baseUrl: "https://api.example.com/v1",
+    model: "model",
+    checks: [{ name: "ready", command: "true" }],
+  }
   it("is null when reuse is absent or disabled", () => {
     expect(effectiveSetupReuse({})).toBeNull()
     expect(
@@ -98,6 +105,45 @@ describe("effectiveSetupReuse", () => {
         },
       })
     ).toEqual({ enabled: true, inputs: ["a.lock", "b.lock"], outputs: ["node_modules"] })
+  })
+
+  it("unions bootstrap declarations with existing reuse without truncating 128 valid inputs", () => {
+    const inputs = Array.from({ length: 128 }, (_, index) => `bootstrap-${index}.lock`)
+    const effective = effectiveSetupReuse({
+      setupReuse: { enabled: true, inputs: ["other.lock", inputs[0]], outputs: ["node_modules"] },
+      bootstrapAgent: { ...bootstrapAgent, reuse: { inputs, outputs: ["node_modules", ".venv"] } },
+    })!
+    expect(effective.inputs).toEqual([...inputs, "other.lock"].sort())
+    expect(effective.outputs).toEqual([".venv", "node_modules"])
+  })
+
+  it("tracks enabled bootstrap definitions while ignoring disabled bootstrap declarations", () => {
+    expect(effectiveSetupReuse({ bootstrapAgent })).toEqual({
+      enabled: true,
+      inputs: [],
+      outputs: [],
+    })
+    expect(
+      effectiveSetupReuse({
+        bootstrapAgent: { ...bootstrapAgent, enabled: false, reuse: { inputs: ["package.json"] } },
+      })
+    ).toBeNull()
+    expect(
+      effectiveSetupReuse({
+        setupReuse: { enabled: false, inputs: ["ignored"], outputs: [] },
+        bootstrapAgent: { ...bootstrapAgent, reuse: { inputs: ["package.json"] } },
+      })?.inputs
+    ).toEqual(["package.json"])
+  })
+
+  it.each([
+    { inputs: ["../outside"] },
+    { inputs: ["C:\\outside"] },
+    { inputs: Array.from({ length: 129 }, (_, index) => `${index}.lock`) },
+  ])("refuses unsafe or over-limit bootstrap lists %p", ({ inputs }) => {
+    expect(() =>
+      effectiveSetupReuse({ bootstrapAgent: { ...bootstrapAgent, reuse: { inputs } } })
+    ).toThrow()
   })
 })
 
@@ -277,4 +323,37 @@ describe("latestSetupRecord / recordAllowsReuse", () => {
       latestSetupRecord({ lastInitialization: record({}) }, "/root", "managedWorktree")?.status
     ).toBe("succeeded")
   })
+})
+
+it("fingerprints enabled bootstrap checks, model and budgets, while disabled settings have no effect", () => {
+  const agent = {
+    enabled: true,
+    task: "Initialize",
+    baseUrl: "https://api.example.com/v1",
+    model: "model",
+    checks: [{ name: "ready", command: "true" }],
+  }
+  const base = setupSignature(baseEnvironment)
+  const enabled = setupSignature({ ...baseEnvironment, bootstrapAgent: agent })
+  expect(enabled).not.toBe(base)
+  expect(setupSignature({ ...baseEnvironment, bootstrapAgent: { ...agent, enabled: false } })).toBe(
+    base
+  )
+  for (const patch of [
+    { runtime: "bash" as const, binary: "/tools/cognia-bootstrap.sh" },
+    { runtime: "powershell" as const },
+    { model: "other" },
+    { maxSteps: 3 },
+    { checks: [{ name: "ready", command: "false" }] },
+    { systemPrompt: "Only repair dependencies." },
+    { modelOptions: { extraBody: { response_format: { type: "json_object" } } } },
+    { context: { compactRetries: 2 } },
+    { tools: { profile: "dsh" as const, environment: { LANG: "C" } } },
+    { reuse: { inputs: ["package.json"], outputs: ["node_modules"] } },
+    { maxOutputBytes: 32768, maxContextBytes: 1048576, maxResponseBytes: 2097152 },
+  ]) {
+    expect(setupSignature({ ...baseEnvironment, bootstrapAgent: { ...agent, ...patch } })).not.toBe(
+      enabled
+    )
+  }
 })
