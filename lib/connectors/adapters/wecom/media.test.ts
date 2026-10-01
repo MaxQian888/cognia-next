@@ -3,6 +3,7 @@ import {
   bytesToBase64,
   decryptWeComMedia,
   fetchAndDecryptMedia,
+  WECOM_INBOUND_MEDIA_MAX_BYTES,
   uploadWeComMedia,
   type WeComRequestFn,
 } from "./media"
@@ -59,6 +60,66 @@ describe("fetchAndDecryptMedia", () => {
     global.fetch = jest.fn(async () => ({ ok: false, status: 403 })) as unknown as typeof fetch
     await expect(fetchAndDecryptMedia("https://cdn/x")).rejects.toThrow(/403/)
   })
+
+  it("rejects oversized Content-Length before reading the body", async () => {
+    const arrayBuffer = jest.fn()
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      headers: new Headers({ "Content-Length": String(WECOM_INBOUND_MEDIA_MAX_BYTES + 17) }),
+      arrayBuffer,
+    })) as unknown as typeof fetch
+    await expect(fetchAndDecryptMedia("https://cdn/huge", "key")).rejects.toThrow(/limit/)
+    expect(arrayBuffer).not.toHaveBeenCalled()
+  })
+
+  it("cancels a chunked response as soon as its bytes exceed the limit", async () => {
+    const cancel = jest.fn()
+    let reads = 0
+    const read = jest.fn(async () => ({
+      done: false,
+      value: new Uint8Array(++reads === 1 ? WECOM_INBOUND_MEDIA_MAX_BYTES : 1),
+    }))
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      headers: new Headers(),
+      body: { getReader: () => ({ read, cancel, releaseLock: jest.fn() }) },
+    })) as unknown as typeof fetch
+    await expect(fetchAndDecryptMedia("https://cdn/chunks")).rejects.toThrow(/limit/)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects oversized non-streamed bodies and empty payloads", async () => {
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(WECOM_INBOUND_MEDIA_MAX_BYTES + 1),
+    })) as unknown as typeof fetch
+    await expect(fetchAndDecryptMedia("https://cdn/huge")).rejects.toThrow(/limit/)
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    })) as unknown as typeof fetch
+    await expect(fetchAndDecryptMedia("https://cdn/empty")).rejects.toThrow(/empty/)
+  })
+
+  it.each([0, 1])(
+    "allows AES padding but enforces the decrypted limit (extra bytes: %s)",
+    async (extra) => {
+      const key = new Uint8Array(32).fill(7)
+      const cryptoKey = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, [
+        "encrypt",
+      ])
+      const encrypted = await crypto.subtle.encrypt(
+        { name: "AES-CBC", iv: key.slice(0, 16) },
+        cryptoKey,
+        new Uint8Array(WECOM_INBOUND_MEDIA_MAX_BYTES + extra)
+      )
+      global.fetch = jest.fn(async () => new Response(encrypted)) as unknown as typeof fetch
+      const result = fetchAndDecryptMedia("https://cdn/encrypted", bytesToBase64(key))
+      if (extra) await expect(result).rejects.toThrow(/limit/)
+      else expect((await result).byteLength).toBe(WECOM_INBOUND_MEDIA_MAX_BYTES)
+    }
+  )
 })
 
 describe("uploadWeComMedia", () => {

@@ -128,6 +128,50 @@ describe("createDingTalkAdapter — meta + capability", () => {
 })
 
 describe("send routing", () => {
+  it.each([
+    ["invalidStaffIdList", "platform_4xx", false],
+    ["flowControlledStaffIdList", "rate_limited", true],
+  ])("does not mark a recipient in %s as delivered on HTTP 200", async (field, code, retryable) => {
+    mockHttp.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ processQueryKey: "accepted-batch", [field]: ["staff_1"] }),
+    })
+    const result = await makeAdapter().send(req(ref({ conversationType: "1", userId: "staff_1" })))
+    expect(result).toMatchObject({ ok: false, error: { code, retryable } })
+    expect(result.platformMessageId).toBeUndefined()
+    expect(mockHttp).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a delivered recipient because another recipient was rejected", async () => {
+    mockHttp.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        processQueryKey: "accepted-batch",
+        invalidStaffIdList: ["other"],
+        flowControlledStaffIdList: ["another"],
+      }),
+    })
+    const result = await makeAdapter().send(req(ref({ conversationType: "1", userId: "staff_1" })))
+    expect(result).toMatchObject({ ok: true, platformMessageId: "dt:oto:robot_1:-:accepted-batch" })
+    expect(JSON.parse(mockHttp.mock.calls[0][0].body).userIds).toEqual(["staff_1"])
+    expect(mockHttp).toHaveBeenCalledTimes(1)
+  })
+
+  it("prioritizes a permanent recipient rejection over flow control", async () => {
+    mockHttp.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        invalidStaffIdList: ["staff_1"],
+        flowControlledStaffIdList: ["staff_1"],
+      }),
+    })
+    const result = await makeAdapter().send(req(ref({ conversationType: "1", userId: "staff_1" })))
+    expect(result).toMatchObject({ ok: false, error: { code: "platform_4xx", retryable: false } })
+  })
+
   it("1:1 send posts to oToMessages/batchSend with the userId", async () => {
     mockHttp.mockResolvedValue(okResp())
     const a = makeAdapter()

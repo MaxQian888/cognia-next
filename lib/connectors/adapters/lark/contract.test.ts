@@ -108,7 +108,7 @@ describe("Lark adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("send.markdown capability", () => {
-    it("markdown segment produces msg_type=interactive with lark_md", async () => {
+    it("markdown segment produces msg_type=interactive with Card 2.0 markdown", async () => {
       mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
 
       const adapter = makeAdapter()
@@ -126,10 +126,12 @@ describe("Lark adapter contract suite", () => {
       const call = lastSendCall()
       expect(call.body["msg_type"]).toBe("interactive")
       const content = JSON.parse(call.body["content"] as string) as {
-        elements: Array<{ text: { tag: string; content: string } }>
+        schema: string
+        body: { elements: Array<{ tag: string; content: string }> }
       }
-      expect(content.elements[0].text.tag).toBe("lark_md")
-      expect(content.elements[0].text.content).toContain("**bold**")
+      expect(content.schema).toBe("2.0")
+      expect(content.body.elements[0].tag).toBe("markdown")
+      expect(content.body.elements[0].content).toContain("**bold**")
     })
   })
 

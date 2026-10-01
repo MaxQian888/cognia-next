@@ -329,6 +329,33 @@ describe("botEventDeliveries", () => {
     expect(await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)).toBe(1)
     expect((await getDb().botEventDeliveries.toArray()).map((r) => r.id)).toEqual(["del_2"])
   })
+
+  it("tombstones the pruned deliveries for paired clients and none of the retained ones", async () => {
+    await getDb().syncTombstones.clear()
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "evt_2", deliveryId: "del_2" }),
+      now: NOW,
+    })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "evt_3", deliveryId: "del_3" }),
+      now: NOW,
+    })
+    await completeBotDelivery("del_1", NOW)
+    await dismissBotDelivery("del_3", "not needed", NOW)
+
+    // Nothing is past the window yet, so nothing is tombstoned.
+    expect(await pruneSettledBotDeliveries(NOW + 1)).toBe(0)
+    expect(await getDb().syncTombstones.where("table").equals("botEventDeliveries").count()).toBe(0)
+
+    const pruneAt = NOW + BOT_DELIVERY_RETENTION_MS + 1
+    expect(await pruneSettledBotDeliveries(pruneAt)).toBe(2)
+
+    const tombs = await getDb().syncTombstones.where("table").equals("botEventDeliveries").toArray()
+    expect(tombs.map((t) => t.id).sort()).toEqual(["del_1", "del_3"])
+    // The prune's clock stamps the tombstones.
+    expect(tombs.every((t) => t.deletedAt === pruneAt)).toBe(true)
+  })
 })
 
 /**

@@ -40,6 +40,9 @@ import {
   type WechatPersonalConversationRef,
 } from "./parse"
 import { getBus } from "@/lib/connectors/bus"
+import { isRecordedInbound, recordAndCheckInbound } from "@/lib/connectors/dedup"
+import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
+import { consumeNumericAction } from "./numeric-action-registry"
 import { reconnectBackoffMs } from "@/lib/connectors/adapters/_shared/reconnect-backoff"
 import { serializeIlinkSegments } from "./serialize"
 import { WECHAT_PERSONAL_CAPS, WECHAT_PERSONAL_A2UI_CAPABILITY } from "./capability"
@@ -84,6 +87,9 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
   let attempts = 0
   /** Latest context_token per conversation (reply anchor; reply-only channel). */
   const contextTokens = new Map<string, string>()
+  // Pin unresolved callbacks while the current poll batch is retried. A new
+  // menu must not redirect an older message to a different action.
+  const pendingCallbacks = new Map<string, ConnectorCallbackEvent>()
 
   const backoffBaseMs = opts._backoffBaseMs ?? 2000
 
@@ -196,14 +202,24 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
   }
 
   async function handleMessage(msg: IlinkMessage): Promise<void> {
+    const event = parseIlinkMessage(opts.id, msg)
+    if (!event) return
+    const receiptId = `ilink-numeric:${event.messageId}`
+    const pendingKey = JSON.stringify([event.conversationKey, event.messageId])
+    if (
+      /^[1-9]$/.test(event.plainText.trim()) &&
+      (await isRecordedInbound(opts.id, receiptId, "callback", event.conversationKey))
+    )
+      return
     // Numeric reply → A2UI callback short-circuit. When the registry has
     // a live binding for this conversation + digit we route to
     // dispatchConnectorCallback (which the bus then routes to the
     // wf_approve / generic callback handler depending on binding kind)
     // and DO NOT also emit a regular message — the user's "1" was a tap,
     // not a chat message.
-    const callback = tryParseNumericCallback(opts.id, msg)
+    const callback = pendingCallbacks.get(pendingKey) ?? tryParseNumericCallback(opts.id, msg)
     if (callback) {
+      pendingCallbacks.set(pendingKey, callback)
       // Stash the context_token so the eventual outbound reply
       // (workflow approval confirmation, assistant turn, etc.) has a
       // live reply anchor. `tryParseNumericCallback` always populates
@@ -212,11 +228,18 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
         contextTokens.set(callback.conversationKey, msg.context_token ?? "")
       }
       lastActivityAt = Date.now()
-      await getBus().dispatchConnectorCallback(callback)
+      const outcome = await getBus().dispatchConnectorCallback(callback)
+      if (outcome !== "terminal") throw new Error("Numeric callback requires redelivery")
+      await recordAndCheckInbound(opts.id, receiptId, "callback", event.conversationKey)
+      consumeNumericAction(
+        event.conversationKey,
+        Number(callback.value),
+        Date.now(),
+        callback.triggerId
+      )
+      pendingCallbacks.delete(pendingKey)
       return
     }
-    const event = parseIlinkMessage(opts.id, msg)
-    if (!event) return
     contextTokens.set(
       event.conversationKey,
       (event.conversationRef as WechatPersonalConversationRef).contextToken
@@ -283,6 +306,7 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       return "error"
     }
     if (typeof parsed.get_updates_buf === "string") cursor = parsed.get_updates_buf
+    pendingCallbacks.clear()
     return "ok"
   }
 

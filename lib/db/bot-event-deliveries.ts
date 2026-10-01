@@ -14,6 +14,7 @@
 import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import type { BotDeliveryStatus, BotEventDeliveryRow } from "@/lib/db/bot-types"
 import type { PluginBotRetryPolicy } from "@/types/plugin/plugin-bot"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
@@ -583,6 +584,11 @@ export async function pruneSettledBotDeliveries(now = Date.now()): Promise<numbe
     .filter((row) => row.settledAt !== undefined && row.settledAt <= cutoff)
     .map((row) => row.id)
   if (ids.length === 0) return 0
-  await db.botEventDeliveries.bulkDelete(ids)
+  await db.transaction("rw", db.botEventDeliveries, db.syncTombstones, async () => {
+    await db.botEventDeliveries.bulkDelete(ids)
+    // Paired clients mirror the delivery-status projection and hear about a
+    // pruned row only through this tombstone.
+    await recordTombstones("botEventDeliveries", ids, now)
+  })
   return ids.length
 }

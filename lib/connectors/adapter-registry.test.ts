@@ -639,6 +639,26 @@ describe("buildSlackAdapter", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildLarkAdapter", () => {
+  it("passes normalized persisted appearance into the running adapter", async () => {
+    await buildLarkAdapter(
+      makeRow({
+        type: "lark",
+        settings: {
+          selfBotOpenId: "ou_cached",
+          cardPresentation: { theme: "purple", showElapsed: false, width: "invalid" },
+        },
+      })
+    )
+    expect(mockCreateLarkAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cardPresentation: expect.objectContaining({
+          theme: "purple",
+          showElapsed: false,
+          width: "default",
+        }),
+      })
+    )
+  })
   it("passes selfBotOpenId resolved from bot/v3/info into createLarkAdapter", async () => {
     mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
       if (cmd === "connectors_keyring_get") return "lark-cred-value"

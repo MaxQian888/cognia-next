@@ -17,8 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useConversationOverrides } from "@/hooks/connectors/use-conversation-overrides"
 import { ConversationOverrideDialog } from "@/components/inbox/overrides/conversation-override-dialog"
-import { setArchived, setPinned } from "@/lib/db/conversation-overrides"
-import { getDb } from "@/lib/db/schema"
+import { deleteByConversationKey, setArchived, setPinned } from "@/lib/db/conversation-overrides"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 
 export interface ConversationsDetailProps {
@@ -144,7 +143,7 @@ export function ConversationsDetail({ adapterId }: ConversationsDetailProps) {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => void getDb().conversationOverrides.delete(row.id)}
+                    onClick={() => void deleteByConversationKey(row.conversationKey)}
                     aria-label={t("deleteOverride")}
                   >
                     <Trash2Icon className="h-3.5 w-3.5" />

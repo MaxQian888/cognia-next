@@ -18,6 +18,10 @@ export interface OutboundRequest {
    */
   editTargetMessageId?: string
   metadata: {
+    /** Opt-in Lark bot card visible only to this recipient in an ordinary group.
+     * The ephemeral endpoint has no remote idempotency: ambiguous sends require reconciliation.
+     */
+    larkEphemeral?: { recipientOpenId: string }
     /** Stable across retries; required. */
     idempotencyKey: string
     /** When this is a reply, the inbound StoredMessage.id that triggered it. */

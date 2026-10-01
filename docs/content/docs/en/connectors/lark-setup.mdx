@@ -74,13 +74,17 @@ Still on the **Event subscriptions** page:
 
 Your app needs the following permissions. Go to **Permission management** and add:
 
-| Scope                    | Purpose                                |
-| ------------------------ | -------------------------------------- |
-| `im:message`             | Read messages sent to the bot          |
-| `im:message.group_msg`   | Receive group messages that do not @ the bot (required for topic activation) |
-| `im:message:send_as_bot` | Send messages as the bot               |
-| `im:chat`                | Access chat information                |
-| `im:resource`            | Access media resources (images, files) |
+| Scope                              | Purpose                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| `im:message.p2p_msg:readonly`      | Receive user private messages                                                              |
+| `im:message.group_at_msg:readonly` | Receive user group @mentions                                                               |
+| `im:message.group_msg`             | Receive unmentioned user group messages; required alongside history read for group history |
+| `im:message.history:readonly`      | Read history (alternatively `im:message:readonly` or `im:message`)                         |
+| `im:message:send_as_bot`           | Send as the bot                                                                            |
+| `im:chat`                          | Access chat information                                                                    |
+| `im:resource`                      | Access images/files                                                                        |
+
+For bot-driven tests, add `im:message.group_at_msg.include_bot:readonly` for @mentions and `im:message.group_msg.include_bot:read` for the unmentioned second reply. These scopes are optional for initial human-only testing. Subscribe to `card.action.trigger` for interactive card callbacks, and publish changes to permissions, events and callbacks. Credential/history probes do not verify target subscriptions or real card clicks. See [local live testing](./local-live-testing) for separate App ID/Open ID configuration and the acceptance table.
 
 Click **Apply permissions** and wait for approval (self-service for custom apps in the same org).
 
@@ -109,8 +113,16 @@ Click **Apply permissions** and wait for approval (self-service for custom apps 
 | **Encrypt Key**        | (Optional) Encrypt Key from Event subscriptions |
 | **Transport**          | "Long connection" (recommended) or "Webhook"    |
 
-3. Click **Test** to verify App ID + App Secret.
-4. Click **Create** to save. The adapter will start automatically.
+3. Use the **Setup guide** in the dialog to review app creation, feature-specific permissions,
+   event and card callback subscriptions, publishing, and first-message checks. Copy the scope
+   list for the features you plan to use; optional scopes are not enabled automatically.
+4. Click **Validate** to verify App ID + App Secret. This checks credentials only, not event
+   delivery, granted permissions, or card callbacks. Editing either credential clears the result.
+5. Click **Create** to save. The adapter will start automatically. If the developer console
+   requires a live long connection before saving subscriptions, return to it after this step.
+6. For an existing connection, **Configuration and setup guide** reopens the same guide.
+   Confirm bot identity and connection health, configure the Agent and reply/admission policy,
+   then verify a private message, a group @mention, and a real card click in Feishu.
 
 ---
 
@@ -165,6 +177,82 @@ sender. The feature requires Feishu 7.20+ and a latest bot message no older than
 buttons remain the topic control surface. Expired, superseded, or ambiguous
 bubble delivery degrades only this temporary enhancement, never the progress
 card or final reply.
+
+### Run progress cards
+
+Open the Feishu connection editor and expand **Card appearance** to configure
+header colors, spacing, width, process display, history expansion, a custom title,
+and the visibility of elapsed time, progress, artifacts, final-reply quotes and
+footers. **Reset card appearance** restores the defaults in the form; save to
+apply them. Saving preserves settings from other panels and restarts the connection.
+
+Appearance applies to native and fallback progress cards and final replies.
+Warning and error headers retain their status colors. Custom titles are limited
+to 60 characters and sanitized before delivery. Process display changes apply to
+new runs; an existing native timeline finishes in its original mode. Final-reply
+quote visibility controls the card's quote, independently of native reply quoting.
+
+Advanced appearance includes desktop/mobile text sizes, a subtitle, an uploaded
+header image key, up to three comma-separated tags, and a pair of light/dark
+process-panel colors. Invalid image keys, color pairs or template settings block
+saving and show an explanation. Panel colors apply to the in-card process panel;
+Feishu's native process timeline controls its own appearance.
+
+**Use a card template for successful replies** accepts a published template ID and
+a fixed version. Define the template variables `answer`, `status`, `title`,
+`quote`, `elapsed_ms`, and `details_url` in the Feishu card builder. Error and
+interrupted replies keep the built-in status card. Replies that combine a result
+with other segments use the built-in card to preserve the surrounding content.
+An explicit template rejection falls back to that card using the same message
+UUID; network, permission and rate-limit errors retain normal delivery handling.
+
+When native process events are available, execution details appear in Feishu's
+process timeline. Otherwise, the same Card 2.0 message shows an expandable process
+panel. Status, elapsed time, artifacts, and approval guidance stay outside that
+panel; completed or cancelled history starts collapsed and remains readable.
+
+Heartbeats update changed status only, without rewriting unchanged history or
+buttons. Approval, pause, recovery, and completion bypass the normal progress
+refresh delay. Restart recovery reuses the acknowledged card state and reconciles
+uncertain writes before applying new content. Streaming timeout (`200850`) or
+closed-stream (`300309`) errors repair the existing Card 2.0 entity.
+
+Changed non-streaming components can share one CardKit batch update. Streaming
+text keeps its dedicated endpoint. Batch retries and restart recovery retain the
+original sequence and UUID before applying newer state.
+
+### Interactive cards
+
+Generated interactive replies use Card 2.0 (Feishu client 7.20+). They support
+native checkboxes, multiline inputs, dates/times, multi-selects, form submit/reset
+and required fields, columns and collapsible panels. Form values are delivered
+together as one callback to the Agent. This does not imply local A2UI data-model
+writeback. Tables and charts render natively where Feishu permits their placement;
+unsupported row/chart interactions remain informational. Native person pickers
+can be supplied in platform card JSON; the generic A2UI schema has no person-picker
+component. Unsupported/oversized layouts retain readable content as a fallback.
+Incoming Card 2.0 bodies and nested containers are preserved in Inbox; unsupported
+components remain inspectable in the raw view.
+
+### Recipient-only group cards (plugin API)
+
+Plugins with `connectors:send` can opt a queued card into private delivery by
+setting `request.metadata.larkEphemeral = { recipientOpenId: "ou_..." }` before
+calling `ctx.connectors.enqueueSend(adapterId, conversationKey, request)`.
+Use exactly one card or A2UI segment, the original bot identity, and an ordinary
+group destination. Grant a chat-read scope (`im:chat:read`, `im:chat:readonly`, or
+`im:chat`) as well as the bot message scope so group mode can be verified.
+
+Feishu only shows these temporary cards to online recipients, without a message
+notification; they must not be the only approval notification. Topic groups,
+thread replies, send-as-user, normal edits, and sibling-adapter rerouting are
+rejected. They never fall back to public messages. A lost POST response is marked
+`delivery_unknown` instead of being resent automatically. After use, call
+`ctx.connectors.deleteEphemeralCard(adapterId, platformMessageId)` to remove it.
+
+Official contracts: [Card 2.0 components](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-json-v2-components/component-json-v2-overview),
+[batch updates](https://open.feishu.cn/document/cardkit-v1/card/batch_update), and
+[recipient-only cards](https://open.feishu.cn/document/server-docs/im-v1/message-card/send-message-cards-that-are-only-visible-to-certain-people).
 
 ### Verify topic no-@ delivery
 
@@ -239,9 +327,10 @@ into the desktop app.
 2. **Grant user scopes.** In the Lark console → **Permission management**, enable and get approval
    for:
    - `offline_access` — **required**; Feishu only issues a refresh token when this is granted.
-   - `im:message` — send messages as the user.
+   - `im:message` and `im:message.send_as_user` — both are required to send as the user. See the [official send-message contract](https://open.feishu.cn/document/server-docs/im-v1/message/create). Reauthorize existing accounts after publishing the added scope.
 
    Re-release the app version after changing scopes.
+
 3. **Register the redirect URL.** In the Lark console → **Security Settings → Redirect URL**, add
    the exact URL shown in cognia-next under **Settings → Connections → Lark → Send as me** (the
    "OAuth redirect URL" field, e.g. `https://<tunnel>/oauth/lark/callback`). Leave the field blank
@@ -258,15 +347,17 @@ automatically, falling back to the bot identity if a refresh fails.
 
 ## Troubleshooting
 
-| Symptom                               | Likely cause                                                                 |
-| ------------------------------------- | ---------------------------------------------------------------------------- |
-| "Connection failed" on Test           | Incorrect App ID or App Secret                                               |
-| Events not received (long connection) | Check that `im.message.receive_v1` is subscribed                             |
-| Events not received (webhook)         | Verify the webhook URL is reachable and returns 200                          |
-| Decrypt error                         | Encrypt Key mismatch — ensure the key matches the one in Event subscriptions |
-| Bot not responding in groups          | Ensure the bot is installed to the group and has `im:message` scope          |
-| Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |
-| No welcome card on join               | Subscribe `im.chat.member.bot.added_v1`; ensure Welcome card is enabled under Help & Welcome |
-| Interactive cards render as plain text | Grant the `cardkit:card:write` scope and re-release the app version            |
+| Symptom                                          | Likely cause                                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| "Connection failed" on Test                      | Incorrect App ID or App Secret                                                                                                     |
+| Events not received (long connection)            | Check that `im.message.receive_v1` is subscribed                                                                                   |
+| Events not received (webhook)                    | Verify the webhook URL is reachable and returns 200                                                                                |
+| Decrypt error                                    | Encrypt Key mismatch — ensure the key matches the one in Event subscriptions                                                       |
+| Bot not responding in groups                     | Ensure the bot is installed to the group and has `im:message` scope                                                                |
+| Bot menu click does nothing                      | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands                                                   |
+| No welcome card on join                          | Subscribe `im.chat.member.bot.added_v1`; ensure Welcome card is enabled under Help & Welcome                                       |
+| Interactive cards render as plain text           | Grant the `cardkit:card:write` scope and re-release the app version                                                                |
 | "Connect account" fails / `redirect_uri unmatch` | The redirect URL isn't registered in Security Settings, or the tunnel host changed — use a named tunnel and register the exact URL |
-| "Send as me" still sends as the bot   | `offline_access` + `im:message` not granted/approved, or the authorization expired — reconnect the account |
+| "Send as me" still sends as the bot              | `offline_access` + `im:message` + `im:message.send_as_user` not granted/approved, or the authorization expired — reconnect the account                         |
+
+Sources verified 2026-10-01: [message receive](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive), [history](https://open.feishu.cn/document/server-docs/im-v1/message/list), [card callbacks](https://open.feishu.cn/document/feishu-cards/card-callback-communication).

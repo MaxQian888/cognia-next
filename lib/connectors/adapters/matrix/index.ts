@@ -661,7 +661,9 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       }
       return {
         ok: true,
-        ...(eventId ? { platformMessageId: buildMatrixMessageId(roomId, eventId) } : {}),
+        // Future edits and recalls must keep addressing the original event;
+        // Matrix ignores an m.replace whose target is itself a replacement.
+        platformMessageId: buildMatrixMessageId(roomId, targetEventId),
         ...(downgrades?.length ? { downgrades } : {}),
       }
     } catch (err) {

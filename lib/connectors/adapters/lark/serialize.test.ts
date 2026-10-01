@@ -363,9 +363,11 @@ describe("serializeEditAsync", () => {
     expect(call.method).toBe("PATCH")
     expect(call.payload["msg_type"]).toBeUndefined()
     const content = JSON.parse(call.payload["content"] as string) as {
-      elements: Array<{ tag: string }>
+      schema: string
+      body: { elements: Array<{ tag: string }> }
     }
-    expect(content.elements[0]?.tag).toBe("div")
+    expect(content.schema).toBe("2.0")
+    expect(content.body.elements[0]?.tag).toBe("markdown")
   })
 })
 

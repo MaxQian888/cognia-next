@@ -148,12 +148,18 @@ export async function enrichOneBotInboundMedia(
         try {
           let result = await deps.transport.send({
             action: "get_file",
+            ...(event.conversationRef.self
+              ? { self: event.conversationRef.self as { platform: string; user_id: string } }
+              : {}),
             params: { file_id: fileId, type: "data" },
             echo: `file:${crypto.randomUUID()}`,
           })
           if (result.retcode === 10004)
             result = await deps.transport.send({
               action: "get_file",
+              ...(event.conversationRef.self
+                ? { self: event.conversationRef.self as { platform: string; user_id: string } }
+                : {}),
               params: { file_id: fileId, type: "url" },
               echo: `file:${crypto.randomUUID()}`,
             })

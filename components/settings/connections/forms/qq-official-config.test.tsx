@@ -85,6 +85,7 @@ describe("QQOfficialConfigDialog", () => {
   it("renders the create title and credential inputs", () => {
     render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
     expect(screen.getByText(/add qq official bot/i)).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /https webhook/i })).toBeChecked()
     expect(screen.getByLabelText(/app id/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/client secret/i)).toBeInTheDocument()
   })
@@ -102,6 +103,7 @@ describe("QQOfficialConfigDialog", () => {
     render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
     fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "102000" } })
     fireEvent.change(screen.getByLabelText(/client secret/i), { target: { value: "secret" } })
+    fireEvent.click(screen.getByRole("radio", { name: /gateway/i }))
     fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
 
     await waitFor(() => {
@@ -111,6 +113,21 @@ describe("QQOfficialConfigDialog", () => {
       )
     })
     expect(screen.getByRole("status")).toHaveTextContent("wss://api.sgroup.qq.com/websocket")
+  })
+
+  it("tests webhook credentials without requiring the gateway endpoint", async () => {
+    mockConnectorsHttpRequest.mockResolvedValueOnce(
+      httpResp(200, { access_token: "qq-token", expires_in: 7200 })
+    )
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "102000" } })
+    fireEvent.change(screen.getByLabelText(/client secret/i), { target: { value: "secret" } })
+    fireEvent.click(screen.getByLabelText(/https webhook/i))
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(/webhook delivery still needs/i)
+    )
+    expect(mockConnectorsHttpRequest).toHaveBeenCalledTimes(1)
   })
 
   it("shows an error status when QQ rejects the credentials", async () => {
@@ -136,6 +153,7 @@ describe("QQOfficialConfigDialog", () => {
 
   it("creates a gateway adapter and stores both credentials", async () => {
     render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.click(screen.getByRole("radio", { name: /gateway/i }))
     fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "102000" } })
     fireEvent.change(screen.getByLabelText(/client secret/i), { target: { value: "secret" } })
     fireEvent.click(screen.getByRole("button", { name: /add connector/i }))

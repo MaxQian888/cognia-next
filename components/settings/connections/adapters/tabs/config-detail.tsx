@@ -56,6 +56,7 @@ export interface ConfigDetailProps {
 export function ConfigDetail({ row }: ConfigDetailProps) {
   const t = useTranslations("settings.connections.adapters.detail")
   const tAdapters = useTranslations("settings.connections.adapters")
+  const tLark = useTranslations("settings.connections.lark")
   const [editing, setEditing] = useState(false)
   const transportLabelKey = getAdapterTransportLabelKey(row.type, row.transportMode)
   const transportLabel = transportLabelKey ? tAdapters(transportLabelKey) : row.transportMode
@@ -75,7 +76,7 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
               data-testid="config-detail-edit"
             >
               <Settings2Icon className="mr-1.5 h-3.5 w-3.5" />
-              {t("editCredentials")}
+              {row.type === "lark" ? tLark("setupGuide.openConfiguration") : t("editCredentials")}
             </Button>
           </CardTitle>
         </CardHeader>

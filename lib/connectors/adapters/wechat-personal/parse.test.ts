@@ -189,7 +189,7 @@ describe("tryParseNumericCallback", () => {
     ).toBeNull()
   })
 
-  it("emits a ConnectorCallbackEvent and consumes the registry on a digit hit", () => {
+  it("resolves a numeric callback without consuming it before dispatch succeeds", () => {
     setNumericAction(CONV, 1, "a2ui:sfc1:yes:confirm")
     const ev = tryParseNumericCallback(
       ADP,
@@ -201,14 +201,14 @@ describe("tryParseNumericCallback", () => {
     expect(ev!.actionType).toBe("button")
     expect(ev!.value).toBe("1")
     expect(ev!.conversationKey).toBe(CONV)
-    // Second tap on the same digit no longer fires.
+    // A transient dispatch failure must be able to resolve the same action.
     expect(
       tryParseNumericCallback(
         ADP,
         msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "1" } }] }),
         9999
       )
-    ).toBeNull()
+    ).toMatchObject({ triggerId: "a2ui:sfc1:yes:confirm" })
   })
 
   it("routes a wfapp:* registered binding through the same path", () => {

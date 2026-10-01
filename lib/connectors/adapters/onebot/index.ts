@@ -55,7 +55,12 @@ import { resolveForwardContent } from "./inbound-forward"
 import { resolveReplySnippet } from "./inbound-reply"
 import { createReverseWsTransport } from "./transport-reverse-ws"
 import { createForwardWsTransport } from "./transport-forward-ws"
-import type { OneBotTransport } from "./transport"
+import {
+  assertOneBotSuccess,
+  oneBotMessageId,
+  OneBotRpcError,
+  type OneBotTransport,
+} from "./transport"
 import { enrichOneBotInboundMedia } from "./inbound-media"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
@@ -111,6 +116,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
   let stopCalled = false
   let currentVariant: "v11" | "v12" | null = null
   let supportedActions: Promise<Set<string>> | undefined
+  let currentSelf: SerializedOneBotCall["self"]
+  let lifecycle = 0
 
   async function getSupportedV12Actions(): Promise<Set<string>> {
     if (!supportedActions) {
@@ -170,14 +177,14 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
    * standard action, so the outcome doubles as the variant hint for
    * `probeIdentity` when no inbound event has revealed the variant yet.
    */
-  async function probeUpstreamImpl(): Promise<boolean> {
+  async function probeUpstreamImpl(active: () => boolean): Promise<boolean> {
     try {
       const resp = await transport.send({
         action: "get_version_info",
         params: {},
         echo: `${opts.id}:probe:${Date.now()}`,
       })
-      if (resp.status !== "ok") return false
+      if (!active() || resp.status !== "ok" || resp.retcode !== 0) return false
       if (!resp.data || typeof resp.data !== "object") return true
       const data = resp.data as Record<string, unknown>
       const rawImpl = typeof data["app_name"] === "string" ? (data["app_name"] as string) : ""
@@ -213,6 +220,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
       try {
         const { updateAdapterInstance } = await import("@/lib/db/adapter-instances")
+        if (!active()) return false
         await updateAdapterInstance(opts.id, {
           implMetadata: { impl, version, features },
         })
@@ -248,9 +256,11 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     variant: "v11" | "v12"
   ): Promise<Record<string, unknown> | null> {
     try {
-      const call = variant === "v12" ? serializeGetLoginInfoV12() : serializeGetLoginInfoV11()
+      const call =
+        variant === "v12" ? serializeGetLoginInfoV12(currentSelf) : serializeGetLoginInfoV11()
       const resp = await transport.send(call)
-      if (resp.status !== "ok" || !resp.data || typeof resp.data !== "object") return null
+      if (resp.status !== "ok" || resp.retcode !== 0 || !resp.data || typeof resp.data !== "object")
+        return null
       const data = resp.data as Record<string, unknown>
       const userId = data["user_id"]
       if (userId === undefined || userId === null || userId === "") return null
@@ -260,7 +270,11 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     }
   }
 
-  async function probeIdentity(ctx: AdapterContext, versionInfoOk: boolean): Promise<void> {
+  async function probeIdentity(
+    ctx: AdapterContext,
+    versionInfoOk: boolean,
+    active: () => boolean
+  ): Promise<void> {
     // Variant choice: on a fresh connect no inbound event has revealed the
     // variant yet, and blindly defaulting to v11 sends `get_login_info` to a
     // v12 upstream (invalid action → whoami stays empty forever). Instead we
@@ -272,11 +286,11 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     const first: "v11" | "v12" = known ?? (versionInfoOk ? "v11" : "v12")
     let detected = first
     let data = await fetchIdentityData(detected)
-    if (data === null && known === null) {
+    if (active() && data === null && known === null) {
       detected = first === "v11" ? "v12" : "v11"
       data = await fetchIdentityData(detected)
     }
-    if (data === null) return // best-effort: leave lastWhoamiResult untouched
+    if (!active() || data === null) return // best-effort: leave lastWhoamiResult untouched
     currentVariant = detected
     if (detected === "v12") {
       try {
@@ -284,6 +298,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
         const { getAdapterInstance, updateAdapterInstance } =
           await import("@/lib/db/adapter-instances")
         const row = await getAdapterInstance(opts.id)
+        if (!active()) return
         await updateAdapterInstance(opts.id, {
           implMetadata: {
             impl: row?.implMetadata?.impl ?? "unknown",
@@ -296,6 +311,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
       }
     }
 
+    if (!active()) return
     const uin = String(data["user_id"])
     // v11 → `nickname`; v12 → `user_displayname` / `user_name`.
     const nickname =
@@ -312,6 +328,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
     try {
       const { updateAdapterInstance } = await import("@/lib/db/adapter-instances")
+      if (!active()) return
       await updateAdapterInstance(opts.id, {
         lastWhoamiResult: { botName: nickname, appId: uin, openId: uin },
         lastWhoamiAt: Date.now(),
@@ -324,6 +341,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
   async function start(ctx: AdapterContext): Promise<void> {
     stopCalled = false
+    const epoch = ++lifecycle
+    const active = () => !stopCalled && epoch === lifecycle
     // "starting" until the transport's onOpen confirms a live upstream.
     // Previously this set "running" unconditionally, so a forward-WS that
     // never managed to connect reported "running" forever (dial failures are
@@ -338,6 +357,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     // version bump, …).
     await transport.start({
       onOpen: () => {
+        if (!active()) return
         supportedActions = undefined
         healthState = "running"
         healthReason = undefined
@@ -349,8 +369,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
         // `probeIdentity`, which records the bot's own UIN + nickname into the
         // whoami snapshot — hence the sequential chain.
         void (async () => {
-          const versionInfoOk = await probeUpstreamImpl()
-          await probeIdentity(ctx, versionInfoOk)
+          const versionInfoOk = await probeUpstreamImpl(active)
+          if (active()) await probeIdentity(ctx, versionInfoOk, active)
         })()
       },
       onClose: () => {
@@ -361,12 +381,23 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
       onConnectFailed: (consecutiveFailures) => {
         // Forward-WS only: N dials in a row failed without ever opening —
         // stop pretending and surface a diagnosable health state.
-        if (consecutiveFailures >= 3) {
+        if (active() && consecutiveFailures >= 3) {
           healthState = "degraded"
           healthReason = "connect_failed"
         }
       },
       onEvent: async (rawEvent) => {
+        if (!active()) return
+        if (rawEvent && typeof rawEvent === "object" && "self" in rawEvent) {
+          const self = (rawEvent as { self?: SerializedOneBotCall["self"] }).self
+          if (
+            self &&
+            typeof self.platform === "string" &&
+            self.platform &&
+            self.user_id === opts.selfBotUin
+          )
+            currentSelf = { ...self }
+        }
         // Heartbeat / lifecycle meta events never produce a parsed event but
         // are proof of a live upstream — they count as inbound activity per
         // the health contract ("last successful inbound or outbound").
@@ -385,7 +416,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           transport
         )
         const result = parseOneBotEvent(opts.id, enriched)
-        if (result === null) return
+        if (!active() || result === null) return
 
         // Cache the detected variant
         currentVariant = result.variant
@@ -410,7 +441,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
               : {}),
             ...(useForwardWs ? { forwardWsUrl: opts.forwardWsUrl } : {}),
           })
-          await ctx.emit(result.parsed)
+          if (active()) await ctx.emit(result.parsed)
         }
       },
     })
@@ -418,9 +449,11 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
   async function stop(): Promise<void> {
     stopCalled = true
+    lifecycle += 1
     await transport.stop()
     clearVariantCache(opts.id)
     currentVariant = null
+    currentSelf = undefined
     supportedActions = undefined
     healthState = "down"
     healthReason = undefined
@@ -432,6 +465,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     const variant = getVariant()
+    if (variant === "v12" && !req.conversationRef.self && currentSelf)
+      req = { ...req, conversationRef: { ...req.conversationRef, self: currentSelf } }
     let calls: SerializedOneBotCall[]
     try {
       const media = req.segments.filter(
@@ -488,25 +523,31 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     try {
       for (const call of calls) {
         const resp = await transport.send(call)
-        if (resp.status === "ok" && resp.data && typeof resp.data === "object") {
-          const data = resp.data as Record<string, unknown>
-          if (data.message_id !== undefined) {
-            platformMessageId = String(data.message_id)
-          }
-        }
+        platformMessageId = oneBotMessageId(resp, call.action)
       }
       // Health contract: lastActivityAt = last successful inbound OR outbound.
       lastActivityAt = Date.now()
       return { ok: true, platformMessageId }
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
-      }
+      return failedSend(err, platformMessageId)
+    }
+  }
+
+  function failedSend(err: unknown, platformMessageId?: string): OutboundResult {
+    // Retrying a partially delivered request would duplicate earlier messages.
+    const uncertain = platformMessageId !== undefined
+    return {
+      ok: false,
+      ...(platformMessageId ? { platformMessageId } : {}),
+      error: {
+        code: uncertain
+          ? "delivery_unknown"
+          : err instanceof OneBotRpcError
+            ? err.code
+            : "platform_5xx",
+        message: err instanceof Error ? err.message : String(err),
+        retryable: !uncertain && !(err instanceof OneBotRpcError),
+      },
     }
   }
 
@@ -515,9 +556,9 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     const call =
       variant === "v11"
         ? serializeDeleteV11(messageId, opts.selfBotUin)
-        : serializeDeleteV12(messageId, opts.selfBotUin)
+        : serializeDeleteV12(messageId, opts.selfBotUin, currentSelf)
 
-    await transport.send(call)
+    assertOneBotSuccess(await transport.send(call), call.action)
   }
 
   async function refreshCredentials(): Promise<void> {
@@ -561,23 +602,12 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     }
     try {
       const resp = await transport.send(call)
-      let platformMessageId: string | undefined
-      if (resp.status === "ok" && resp.data && typeof resp.data === "object") {
-        const data = resp.data as Record<string, unknown>
-        if (data.message_id !== undefined) platformMessageId = String(data.message_id)
-      }
+      const platformMessageId = oneBotMessageId(resp, call.action)
       // Health contract: lastActivityAt = last successful inbound OR outbound.
       lastActivityAt = Date.now()
       return { ok: true, platformMessageId }
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
-      }
+      return failedSend(err)
     }
   }
 
@@ -605,7 +635,10 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
    */
   async function addReaction(messageId: string, emojiId: string): Promise<ReactionRef> {
     await assertReactionSupported()
-    await transport.send(serializeSetMsgEmojiLike(messageId, emojiId, true))
+    assertOneBotSuccess(
+      await transport.send(serializeSetMsgEmojiLike(messageId, emojiId, true)),
+      "set_msg_emoji_like"
+    )
     return { reactionId: emojiId }
   }
 
@@ -616,7 +649,10 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
    */
   async function removeReaction(messageId: string, reactionId: string): Promise<void> {
     await assertReactionSupported()
-    await transport.send(serializeSetMsgEmojiLike(messageId, reactionId, false))
+    assertOneBotSuccess(
+      await transport.send(serializeSetMsgEmojiLike(messageId, reactionId, false)),
+      "set_msg_emoji_like"
+    )
   }
 
   /**

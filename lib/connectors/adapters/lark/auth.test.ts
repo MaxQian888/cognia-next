@@ -4,6 +4,7 @@ import {
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
 import {
+  LARK_SENDAS_SCOPES,
   mergeLarkScopes,
   getTenantAccessToken,
   clearTokenCache,
@@ -115,6 +116,23 @@ describe("mergeLarkScopes", () => {
 })
 
 describe("buildLarkOAuthUrl", () => {
+  it("requests both mandatory user-send permissions and refresh access for send-as-user", () => {
+    const url = new URL(
+      buildLarkOAuthUrl({
+        appId: "cli_send_as_user",
+        redirectUri: "https://relay.example/oauth/lark/callback",
+        state: "send-as-state",
+        scope: LARK_SENDAS_SCOPES,
+      })
+    )
+
+    expect(url.searchParams.get("scope")?.split(" ")).toEqual([
+      "offline_access",
+      "im:message",
+      "im:message.send_as_user",
+    ])
+  })
+
   it("builds an OAuth 2.0 authorize URL with client_id + response_type", () => {
     const url = buildLarkOAuthUrl({
       appId: "cli_my_app",

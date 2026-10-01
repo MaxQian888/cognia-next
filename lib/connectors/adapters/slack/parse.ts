@@ -446,11 +446,17 @@ export interface SlackInteractiveActionElement {
   action_id?: string
   block_id?: string
   type?: string
-  value?: string
-  selected_option?: { value?: string; text?: { text?: string } }
-  selected_options?: Array<{ value?: string }>
-  selected_date?: string
-  selected_time?: string
+  value?: string | null
+  selected_option?: { value?: string; text?: { text?: string } } | null
+  selected_options?: Array<{ value?: string }> | null
+  selected_user?: string | null
+  selected_channel?: string | null
+  selected_conversation?: string | null
+  selected_users?: string[] | null
+  selected_channels?: string[] | null
+  selected_conversations?: string[] | null
+  selected_date?: string | null
+  selected_time?: string | null
   text?: { text?: string }
 }
 
@@ -472,21 +478,36 @@ export interface SlackInteractivePayload {
     type: string
     callback_id?: string
     state?: {
-      values?: Record<
-        string,
-        Record<
-          string,
-          {
-            type?: string
-            value?: string
-            selected_option?: { value?: string }
-            selected_date?: string
-            selected_time?: string
-          }
-        >
-      >
+      values?: Record<string, Record<string, SlackInteractiveActionElement>>
     }
   }
+}
+
+/** Actions and view state use the same selector fields, including empty arrays. */
+function interactiveValue(action: SlackInteractiveActionElement): string | string[] {
+  if (action.selected_options !== undefined) {
+    return (action.selected_options ?? [])
+      .map((option) => option.value)
+      .filter((value): value is string => typeof value === "string")
+  }
+  for (const selected of [
+    action.selected_users,
+    action.selected_channels,
+    action.selected_conversations,
+  ]) {
+    if (selected !== undefined) return selected ?? []
+  }
+  if (action.type?.startsWith("multi_") || action.type === "checkboxes") return []
+  return (
+    action.value ??
+    action.selected_option?.value ??
+    action.selected_user ??
+    action.selected_channel ??
+    action.selected_conversation ??
+    action.selected_date ??
+    action.selected_time ??
+    ""
+  )
 }
 
 /**
@@ -527,44 +548,18 @@ export function parseSlackInteractivePayload(
   if (payload.type === "block_actions") {
     const action = payload.actions?.[0]
     if (!action || !action.action_id) return null
-    const actionType: ConnectorCallbackActionType =
-      action.type === "static_select" ||
-      action.type === "multi_static_select" ||
-      action.type === "external_select" ||
-      action.type === "users_select" ||
-      action.type === "channels_select"
-        ? "select"
-        : action.type === "datepicker" ||
-            action.type === "timepicker" ||
-            action.type === "plain_text_input"
-          ? "input"
-          : action.type === "checkboxes" || action.type === "radio_buttons"
-            ? "checkbox"
-            : "button"
-    let value = ""
-    let payloadFields: Record<string, unknown> | undefined
-    if (action.type?.endsWith("select")) {
-      value = action.selected_option?.value ?? ""
-      if (action.selected_options && action.selected_options.length > 1) {
-        payloadFields = {
-          values: action.selected_options.map((o) => o.value).filter(Boolean),
-        }
-      }
-    } else if (action.type === "datepicker") {
-      value = action.selected_date ?? ""
-    } else if (action.type === "timepicker") {
-      value = action.selected_time ?? ""
-    } else if (action.type === "checkboxes") {
-      const values = (action.selected_options ?? [])
-        .map((option) => option.value)
-        .filter((value): value is string => typeof value === "string")
-      value = values[0] ?? ""
-      payloadFields = { values }
-    } else if (action.type === "radio_buttons") {
-      value = action.selected_option?.value ?? ""
-    } else {
-      value = action.value ?? ""
-    }
+    const actionType: ConnectorCallbackActionType = action.type?.endsWith("_select")
+      ? "select"
+      : action.type === "datepicker" ||
+          action.type === "timepicker" ||
+          action.type === "plain_text_input"
+        ? "input"
+        : action.type === "checkboxes" || action.type === "radio_buttons"
+          ? "checkbox"
+          : "button"
+    const selected = interactiveValue(action)
+    const value = Array.isArray(selected) ? (selected[0] ?? "") : selected
+    const payloadFields = Array.isArray(selected) ? { values: selected } : undefined
     return {
       platform: "slack",
       adapterId,
@@ -589,8 +584,7 @@ export function parseSlackInteractivePayload(
     for (const blockId of Object.keys(values)) {
       for (const actionId of Object.keys(values[blockId])) {
         const v = values[blockId][actionId]
-        flat[actionId] =
-          v.value ?? v.selected_option?.value ?? v.selected_date ?? v.selected_time ?? ""
+        flat[actionId] = interactiveValue(v)
       }
     }
     return {

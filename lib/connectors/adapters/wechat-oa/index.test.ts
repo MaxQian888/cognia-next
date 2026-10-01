@@ -185,17 +185,21 @@ describe("createWechatOaAdapter", () => {
     expect(res.error?.message).toContain("HTTP 500")
   })
 
-  it("send() never reports success on an unparseable 200 body", async () => {
+  it("send() requires reconciliation on an unparseable 200 body", async () => {
     mockInvoke.mockResolvedValue(httpResp(200, "not json"))
     const res = await adapter().send(sendReq())
     expect(res.ok).toBe(false)
-    expect(res.error?.retryable).toBe(true)
+    expect(res.error?.retryable).toBe(false)
+    expect(res.error?.code).toBe("delivery_unknown")
     expect(res.error?.message).toContain("non-JSON")
   })
 
   it.each([{}, null, []])("send() rejects success bodies without errcode zero", async (body) => {
     mockInvoke.mockResolvedValue(httpResp(200, body))
-    expect((await adapter().send(sendReq())).ok).toBe(false)
+    expect(await adapter().send(sendReq())).toMatchObject({
+      ok: false,
+      error: { code: "delivery_unknown", retryable: false },
+    })
   })
 
   it("send() rejects a request without an openId", async () => {

@@ -6,9 +6,9 @@
  *   - long-connection (default): uses /im/v1/wsServer + WSS
  *   - webhook: subscribes to Tauri event channel from Rust HTTP proxy
  *
- * GAP: webhook `url_verification` challenge echo is answered by the Rust
- * webhook receiver (not TS-side). Card 2.0 migration and E2EE-style
- * advanced messaging features are out of scope for this adapter revision.
+ * Webhook `url_verification` challenge echo is answered by the Rust
+ * webhook receiver. Generated cards use Card 2.0; CardKit updates and
+ * recipient-only group cards retain their dedicated delivery lifecycles.
  */
 
 import type {
@@ -63,6 +63,8 @@ import { fetchLarkUserInfo, getTenantAccessToken, getUserAccessToken } from "./a
 import { LarkApiError, withTatRefresh, withUserTokenRefresh } from "./auth-retry"
 import { createLarkChatManagement } from "./chat-management"
 import { resolveLarkMediaKeys } from "./upload"
+import { isLarkResultTemplatePayload } from "./result-card"
+import { createLarkEphemeral } from "./ephemeral"
 import { enrichLarkInboundMedia } from "./inbound-media"
 import { createLarkPresence } from "./presence"
 import { startLarkLongConn } from "./transport-long-conn"
@@ -104,6 +106,7 @@ export interface LarkAdapterOptions {
   replyInThread?: boolean
   /** Reachable web client connected to this host; used by run details buttons. */
   webEntryBaseUrl?: string | null
+  cardPresentation?: import("./card-presentation").LarkCardPresentation
   transport: "webhook" | "long-connection"
   /**
    * Cap on `/im/v1/messages` pages walked per `fetchHistory` call. Each
@@ -665,30 +668,103 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     return { state: healthState, reason: healthReason, lastActivityAt }
   }
 
-  async function send(req: OutboundRequest): Promise<OutboundResult> {
-    try {
-      // Identity is a precondition for the whole outbound transaction. Check
-      // before media upload so an expired user binding cannot upload bytes
-      // under the bot and only then fail the user-authored message send.
-      const creds = await resolveCredentials()
-      await requireUserSendIdentity(creds)
+  const ephemeral = createLarkEphemeral({
+    request: doRequest,
+    classifyError: larkOutboundError,
+    sendAsUser: opts.sendAsUser,
+  })
+
+  async function deliverCardRequest(req: OutboundRequest, editMessageId?: string) {
+    // Identity is a precondition for the whole outbound transaction. Check
+    // before media upload so an expired user binding cannot upload bytes
+    // under the bot and only then fail the user-authored message send.
+    const creds = await resolveCredentials()
+    if (!editMessageId) await requireUserSendIdentity(creds)
+    const hasTemplate = req.segments.some(
+      (segment) => segment.type === "card" && isLarkResultTemplatePayload(segment.card.payload)
+    )
+    const attempt = async (useFallback: boolean) => {
+      const segments = req.segments.map((segment) => {
+        if (segment.type !== "card" || !isLarkResultTemplatePayload(segment.card.payload))
+          return segment
+        const template = segment.card.payload
+        return {
+          ...segment,
+          card: {
+            ...segment.card,
+            payload: useFallback ? template.fallback : { type: template.type, data: template.data },
+          },
+        }
+      })
       // Upload pre-pass — Rust `connectors_lark_upload_*` commands surface
       // TAT invalidation as Error.message text; `withTatRefresh` detects
       // those by substring and retries with a fresh token.
       const resolvedSegments = await withTatRefresh(creds, () =>
-        resolveLarkMediaKeys(req.segments, {
+        resolveLarkMediaKeys(segments, {
           getAccessToken: getTat,
           uploadCache,
         })
       )
-      const call = await serializeOutboundAsync({ ...req, segments: resolvedSegments }, opts.id)
+      const prepared = { ...req, segments: resolvedSegments }
+      const call = editMessageId
+        ? await serializeEditAsync(editMessageId, prepared, opts.id)
+        : await serializeOutboundAsync(prepared, opts.id)
       const urlPath = call.url.replace(LARK_API_BASE, "")
       // Replies are the identity-bearing path — send as the connected user when
       // opted in. Edits / deletes / reactions stay on the bot identity (they act
       // on bot-owned messages such as live-activity / progress cards).
-      const resp = (await doRequest(call.method, urlPath, call.payload, {
-        asUser: opts.sendAsUser === true,
+      return (await doRequest(call.method, urlPath, call.payload, {
+        asUser: !editMessageId && opts.sendAsUser === true,
       })) as { data?: { message_id?: string } } | null
+    }
+    // Templates render one whole card; mixed A2UI/media replies must keep
+    // their surrounding content using the built-in, composable result card.
+    if (hasTemplate && req.segments.length > 1) {
+      return { response: await attempt(true), fallbackReason: "lark_result_template_mixed_content" }
+    }
+    try {
+      return { response: await attempt(false), fallbackReason: undefined }
+    } catch (err) {
+      // 230099 confirms card creation was rejected. Never change content
+      // after an ambiguous network/5xx result or an auth/rate-limit failure.
+      if (
+        !hasTemplate ||
+        !(err instanceof LarkApiError) ||
+        err.code !== 230099 ||
+        err.status >= 500 ||
+        err.status === 429
+      )
+        throw err
+      return { response: await attempt(true), fallbackReason: "lark_result_template_rejected" }
+    }
+  }
+
+  async function send(req: OutboundRequest): Promise<OutboundResult> {
+    try {
+      if (req.metadata.larkEphemeral) {
+        return await ephemeral.send(req, async () => {
+          const creds = await resolveCredentials()
+          const segments = req.segments.map((segment) => {
+            if (segment.type !== "card" || !isLarkResultTemplatePayload(segment.card.payload))
+              return segment
+            return {
+              ...segment,
+              card: {
+                ...segment.card,
+                payload: { type: "template", data: segment.card.payload.data },
+              },
+            }
+          })
+          const resolvedSegments = await withTatRefresh(creds, () =>
+            resolveLarkMediaKeys(segments, { getAccessToken: getTat, uploadCache })
+          )
+          const call = await serializeOutboundAsync({ ...req, segments: resolvedSegments }, opts.id)
+          return call.payload.msg_type === "interactive" && typeof call.payload.content === "string"
+            ? JSON.parse(call.payload.content)
+            : null
+        })
+      }
+      const { response: resp, fallbackReason } = await deliverCardRequest(req)
       // Surface the real platform message id so the outbound runner persists
       // it on the job row — downstream consumers (workflow send node output,
       // edit/reaction chains, delivery audit) need the `om_…` id, not the
@@ -703,7 +779,21 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         healthState = "running"
         healthReason = undefined
       }
-      return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
+      return {
+        ok: true,
+        ...(messageId ? { platformMessageId: messageId } : {}),
+        ...(fallbackReason
+          ? {
+              downgrades: [
+                {
+                  from: "card" as const,
+                  to: "card" as const,
+                  reason: fallbackReason,
+                },
+              ],
+            }
+          : {}),
+      }
     } catch (err) {
       return { ok: false, error: larkOutboundError(err) }
     }
@@ -711,24 +801,34 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
     try {
-      const creds = await resolveCredentials()
-      const resolvedSegments = await withTatRefresh(creds, () =>
-        resolveLarkMediaKeys(patch.segments, {
-          getAccessToken: getTat,
-          uploadCache,
-        })
-      )
-      const call = await serializeEditAsync(
-        messageId,
-        { ...patch, segments: resolvedSegments },
-        opts.id
-      )
-      const urlPath = call.url.replace(LARK_API_BASE, "")
-      await doRequest(call.method, urlPath, call.payload)
+      if (patch.metadata.larkEphemeral)
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "Private Lark cards cannot use normal message editing",
+            retryable: false,
+          },
+        }
+      const { fallbackReason } = await deliverCardRequest(patch, messageId)
       // An edit keeps the platform message id — echo it back so callers
       // (workflow send node with editTargetMessageId, runner audit) get the
       // same feedback shape as a fresh send.
-      return { ok: true, platformMessageId: messageId }
+      return {
+        ok: true,
+        platformMessageId: messageId,
+        ...(fallbackReason
+          ? {
+              downgrades: [
+                {
+                  from: "card" as const,
+                  to: "card" as const,
+                  reason: fallbackReason,
+                },
+              ],
+            }
+          : {}),
+      }
     } catch (err) {
       return { ok: false, error: larkOutboundError(err) }
     }
@@ -1105,6 +1205,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       statusReactions: true,
       webEntryBaseUrl: opts.webEntryBaseUrl,
       cot: true,
+      presentation: opts.cardPresentation,
     }),
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("lark"),
     historyCursorKind: "timestamp",
@@ -1142,6 +1243,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     removeReaction,
     forwardMessage,
     sendUrgent,
+    deleteEphemeralCard: ephemeral.delete,
     getReadReceipt,
   }
 

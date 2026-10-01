@@ -141,6 +141,68 @@ export interface TelegramDice {
   value: number
 }
 
+/** Bot API rich text is recursive; strings are plain text, not entity objects. */
+export type TelegramRichText =
+  | string
+  | TelegramRichText[]
+  | {
+      type: string
+      text?: TelegramRichText
+      user?: TelegramUser
+      username?: string
+      url?: string
+      alternative_text?: string
+      expression?: string
+      email_address?: string
+      phone_number?: string
+      bank_card_number?: string
+      hashtag?: string
+      cashtag?: string
+      bot_command?: string
+      name?: string
+      anchor_name?: string
+      reference_name?: string
+      button?: TelegramRichButton
+    }
+
+export interface TelegramRichButton {
+  text: TelegramRichText
+  url?: string
+  web_app?: { url: string }
+  login_url?: { url: string }
+  copy_text?: { text: string }
+  callback_data?: string
+  disabled?: unknown
+}
+
+/** Consumed fields from the RichBlock union; unknown tags retain a readable fallback. */
+export interface TelegramRichBlock {
+  type: string
+  text?: TelegramRichText
+  summary?: TelegramRichText
+  credit?: TelegramRichText
+  caption?: TelegramRichText | { text: TelegramRichText; credit?: TelegramRichText }
+  language?: string
+  name?: string
+  expression?: string
+  blocks?: TelegramRichBlock[]
+  items?: Array<{
+    label: string
+    blocks: TelegramRichBlock[]
+    has_checkbox?: boolean
+    is_checked?: boolean
+  }>
+  cells?: Array<Array<{ text?: TelegramRichText }>>
+  buttons?: TelegramRichButton[]
+  photo?: TelegramPhotoSize[]
+  animation?: TelegramAnimation
+  audio?: TelegramAudio
+  document?: TelegramDocument
+  video?: TelegramVideo
+  voice_note?: TelegramVoice
+  location?: TelegramLocation
+}
+
 export interface TelegramMessage {
   message_id: number
   from?: TelegramUser
@@ -151,6 +213,7 @@ export interface TelegramMessage {
   caption?: string
   entities?: TelegramMessageEntity[]
   caption_entities?: TelegramMessageEntity[]
+  rich_message?: { blocks: TelegramRichBlock[]; is_rtl?: boolean }
   photo?: TelegramPhotoSize[]
   voice?: TelegramVoice
   audio?: TelegramAudio
@@ -262,7 +325,8 @@ function buildPlatformIdentity(
  */
 function detectMentions(
   selfId: string,
-  msg: TelegramMessage
+  msg: TelegramMessage,
+  richMentions: string[] = []
 ): { selfMentioned: boolean; users: string[] } {
   const acc = new MentionAccumulator(selfId)
 
@@ -284,11 +348,210 @@ function detectMentions(
       acc.add(String(entity.user.id))
     }
   }
+  for (const user of richMentions) acc.add(user)
 
   return acc.finalize()
 }
 
-function buildSegments(msg: TelegramMessage): MessageSegment[] {
+function richLink(
+  label: string,
+  target: string | undefined,
+  mentions?: MentionAccumulator
+): string {
+  const userId = target?.match(/^tg:\/\/user\?id=(\d+)(?:&|$)/)?.[1]
+  if (userId) mentions?.add(userId)
+  return target && target !== label ? `${label ? `${label} ` : ""}(${target})` : label
+}
+
+function richButton(button: TelegramRichButton, mentions?: MentionAccumulator): string {
+  const label = richText(button.text, mentions)
+  const rendered = richLink(
+    label,
+    button.url ?? button.web_app?.url ?? button.login_url?.url ?? button.copy_text?.text,
+    mentions
+  )
+  return button.disabled ? `${rendered} [disabled]` : rendered
+}
+
+function richText(value: TelegramRichText | undefined, mentions?: MentionAccumulator): string {
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) return value.map((part) => richText(part, mentions)).join("")
+  if (!value) return ""
+  const content = richText(value.text, mentions)
+  switch (value.type) {
+    case "text_mention":
+      if (value.user) mentions?.add(String(value.user.id))
+      return (
+        content || value.user?.first_name || value.user?.username || String(value.user?.id ?? "")
+      )
+    case "mention": {
+      const username = value.username ? `@${value.username.replace(/^@/, "")}` : content
+      mentions?.add(username)
+      return content || username
+    }
+    case "custom_emoji":
+      return value.alternative_text ?? "[custom emoji]"
+    case "mathematical_expression":
+      return value.expression ?? content
+    case "url":
+      return richLink(content, value.url, mentions)
+    case "email_address":
+      return richLink(content, value.email_address)
+    case "phone_number":
+      return richLink(content, value.phone_number)
+    case "bank_card_number":
+      return richLink(content, value.bank_card_number)
+    case "hashtag":
+      return content || value.hashtag || ""
+    case "cashtag":
+      return content || value.cashtag || ""
+    case "bot_command":
+      return content || value.bot_command || ""
+    case "anchor":
+      return `[anchor: ${value.name ?? ""}]`
+    case "anchor_link":
+      return richLink(content, `#${value.anchor_name ?? ""}`)
+    case "reference":
+      return `[${value.name ?? "reference"}: ${content}]`
+    case "reference_link":
+      return `${content} [reference: ${value.reference_name ?? ""}]`
+    case "button":
+      return value.button ? richButton(value.button, mentions) : content
+    case "bold":
+    case "italic":
+    case "underline":
+    case "strikethrough":
+    case "spoiler":
+    case "date_time":
+    case "subscript":
+    case "superscript":
+    case "marked":
+    case "code":
+      return content
+    default:
+      return `[unsupported rich text: ${value.type}]${content ? ` ${content}` : ""}`
+  }
+}
+
+function richSegments(
+  blocks: TelegramRichBlock[],
+  mentions?: MentionAccumulator
+): MessageSegment[] {
+  const segments: MessageSegment[] = []
+  const text = (value: TelegramRichText | undefined): void => {
+    const rendered = richText(value, mentions)
+    if (rendered) segments.push({ type: "text", text: rendered })
+  }
+  for (const block of blocks) {
+    switch (block.type) {
+      case "paragraph":
+      case "heading":
+      case "footer":
+      case "thinking":
+      case "expandable_blockquote":
+      case "pullquote":
+        text(block.text)
+        break
+      case "pre":
+        segments.push({
+          type: "code",
+          language: block.language,
+          code: richText(block.text, mentions),
+        })
+        break
+      case "photo":
+      case "animation":
+      case "audio":
+      case "document":
+      case "video":
+      case "voice_note":
+      case "map": {
+        // Reuse legacy media conversion so rich files go through the same
+        // tg://file enrichment/OCR path and retain ordering with their captions.
+        const media = buildSegments({
+          photo: block.photo,
+          animation: block.animation,
+          audio: block.audio,
+          document: block.document,
+          video: block.video,
+          voice: block.voice_note,
+          location: block.location,
+        })
+        segments.push(
+          ...(media.length
+            ? media
+            : [{ type: "text" as const, text: `[unavailable rich media: ${block.type}]` }])
+        )
+        break
+      }
+      case "details":
+        text(block.summary)
+        if (block.blocks) segments.push(...richSegments(block.blocks, mentions))
+        break
+      case "blockquote":
+      case "collage":
+      case "slideshow":
+        if (block.blocks) segments.push(...richSegments(block.blocks, mentions))
+        break
+      case "list":
+        for (const item of block.items ?? []) {
+          text(`${item.has_checkbox ? (item.is_checked ? "[x] " : "[ ] ") : ""}${item.label}`)
+          segments.push(...richSegments(item.blocks, mentions))
+        }
+        break
+      case "table":
+        text(
+          (block.cells ?? [])
+            .map((row) => row.map((cell) => richText(cell.text, mentions)).join(" | "))
+            .join("\n")
+        )
+        break
+      case "buttons":
+        for (const button of block.buttons ?? []) text(richButton(button, mentions))
+        break
+      case "mathematical_expression":
+        text(block.expression)
+        break
+      case "anchor":
+        text(`[anchor: ${block.name ?? ""}]`)
+        break
+      case "divider":
+        text("———")
+        break
+      default:
+        text(`[unsupported rich block: ${block.type}]`)
+        text(block.summary)
+        text(block.text)
+        if (block.blocks) segments.push(...richSegments(block.blocks, mentions))
+        break
+    }
+    if (
+      block.caption &&
+      typeof block.caption === "object" &&
+      !Array.isArray(block.caption) &&
+      !("type" in block.caption)
+    ) {
+      text(block.caption.text)
+      text(block.caption.credit)
+    } else {
+      text(block.caption as TelegramRichText | undefined)
+    }
+    text(block.credit)
+  }
+  return segments
+}
+
+function buildSegments(
+  msg: Partial<TelegramMessage>,
+  mentions?: MentionAccumulator
+): MessageSegment[] {
+  if (msg.rich_message) {
+    // Keep block boundaries in the segments themselves: media enrichment
+    // recomputes plainText later using the shared segment flattener.
+    return richSegments(msg.rich_message.blocks, mentions).flatMap((segment, index) =>
+      index === 0 ? [segment] : [{ type: "text", text: "\n" }, segment]
+    )
+  }
   const segments: MessageSegment[] = []
   const captionAfter = (): void => {
     if (msg.caption) segments.push({ type: "text", text: msg.caption })
@@ -445,16 +708,22 @@ function messageToEvent(
     username: from?.username ?? chat.username,
   })
 
-  const { selfMentioned, users } = detectMentions(selfId, msg)
-
-  const segments = buildSegments(msg)
+  const richMentions = new MentionAccumulator(selfId)
+  const segments = buildSegments(msg, richMentions)
+  const { selfMentioned, users } = detectMentions(selfId, msg, richMentions.finalize().users)
   const plainText = segmentsToPlainText(segments)
 
   const replyTo =
     msg.reply_to_message !== undefined
       ? {
           messageId: String(msg.reply_to_message.message_id),
-          snippet: (msg.reply_to_message.text ?? msg.reply_to_message.caption ?? "").slice(0, 100),
+          snippet: (
+            msg.reply_to_message.text ??
+            msg.reply_to_message.caption ??
+            (msg.reply_to_message.rich_message
+              ? segmentsToPlainText(buildSegments(msg.reply_to_message))
+              : "")
+          ).slice(0, 100),
           // Telegram carries the parent author inline — lets the exact
           // `reply-to-bot` rule match without a ledger lookup.
           ...(msg.reply_to_message.from?.id !== undefined

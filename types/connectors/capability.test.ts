@@ -87,3 +87,13 @@ describe("A2UICapabilityMatrix", () => {
     expect(componentKindsByLevel(matrix, "fallback")).toContain("Image")
   })
 })
+
+it("includes FormGroup in the shared connector component vocabulary", () => {
+  expect(A2UI_COMPONENT_KINDS).toContain("FormGroup")
+})
+
+it("recognizes recipient-only delivery as an explicit capability", () => {
+  expect(ALL_CAPABILITIES).toContain("send.ephemeral")
+  expect(hasCapability(["send.card"], "send.ephemeral")).toBe(false)
+  expect(hasCapability(["send.ephemeral"], "send.ephemeral")).toBe(true)
+})

@@ -1,6 +1,6 @@
 ---
 title: "Local Live Testing"
-description: "Drive a real Telegram, Slack, Discord, Lark or Matrix conversation against your configured Cognia bot, with the model swapped for a deterministic fixture."
+description: "Drive a real Telegram, Slack, Discord, Lark, Matrix or OneBot conversation against your configured Cognia bot, with the model swapped for a deterministic fixture."
 ---
 
 # Local Live Testing
@@ -28,7 +28,7 @@ test identity → real IM platform → your configured Cognia bot → connector 
 Two identities per platform — a **driver** that posts, and the **target** bot
 you already run in Cognia — plus a dedicated conversation only these two are in.
 The driver never reuses Cognia's own adapter code; it talks to the platform's
-API directly, so one bug cannot cancel itself out on both sides.
+API directly, so one bug cannot cancel itself out on both sides. For OneBot, the driver identity is a human using QQ; the harness only observes NapCat history.
 
 The target bot must already be configured, enabled, and set to auto-reply in
 that conversation. This harness **never writes** your database, keyring, or
@@ -58,7 +58,7 @@ pnpm im:test:live -- --platform telegram
 ```
 
 The P0 scenario. Use `--platform all` for every platform (it refuses to start
-unless all five are configured; add `--allow-unconfigured` to run what you have
+unless all six are configured; add `--allow-unconfigured` to run what you have
 and report the rest as `NOT_CONFIGURED`).
 
 Two more commands need no credentials and no running app:
@@ -95,7 +95,7 @@ verification and webhook replay protection under
    paths.
 7. Keeps watching for a further 10 seconds. A second answer to the same turn is
    a duplicate-consumption failure.
-8. Deletes the test messages (set `IM_LIVE_KEEP=1` to keep them).
+8. Deletes test messages where supported (set `IM_LIVE_KEEP=1` to keep them). OneBot retains messages for manual cleanup.
 9. Writes redacted evidence to `test-results/im-live/<runId>/<platform>.json` —
    ids, timings, marker facts, and the fixture hit. Never message text.
 
@@ -127,6 +127,14 @@ IM_LIVE_LARK_DRIVER_APP_ID=
 IM_LIVE_LARK_DRIVER_APP_SECRET=
 IM_LIVE_LARK_TARGET_CHAT_ID=
 IM_LIVE_LARK_TARGET_BOT_OPEN_ID=
+IM_LIVE_LARK_TARGET_APP_ID=
+
+# OneBot / NapCat (human-triggered, read-only HTTP observer)
+IM_LIVE_ONEBOT_API_BASE=http://127.0.0.1:3000
+IM_LIVE_ONEBOT_BEARER_TOKEN=
+IM_LIVE_ONEBOT_TARGET_GROUP_ID=
+IM_LIVE_ONEBOT_TARGET_BOT_UIN=
+IM_LIVE_ONEBOT_DRIVER_USER_UIN=
 
 # Matrix
 IM_LIVE_MATRIX_HOMESERVER=
@@ -171,7 +179,7 @@ read your app's configuration from another process.
 - Enable **Bot-to-Bot** for the driver.
 - **Turn privacy mode off** for the driver bot (@BotFather → `/setprivacy` →
   Disable, then remove and re-add it to the group). With privacy mode on the
-  driver can post but never *see* the target's reply. `doctor` checks this.
+  driver can post but never _see_ the target's reply. `doctor` checks this.
 - The driver's token must not be consumed by anything else — `getUpdates` and a
   registered webhook are mutually exclusive, and a second poller steals updates.
   `doctor` checks for a registered webhook.
@@ -212,13 +220,13 @@ The runner can see exactly two things — whether the prompt reached the fixture
 and what the bot posted. It cannot read your app's audit rows. So instead of
 guessing one cause it maps the two observations to a verdict and a shortlist:
 
-| Fixture hit | Bot replied | Verdict | What it means |
-| --- | --- | --- | --- |
-| no | no | `TIMEOUT` | The message was dropped before the AI turn. Candidates: transport not connected; the sibling-bot gate failing closed; no @-mention; chat allow/block list; quiet hours; the PII gate (`reason: "pii_blocked"`). |
-| **no** | **yes** | **`MODEL_NOT_INTERCEPTED`** | The loop works, but a **real model** answered and was billed. The vault's provider overrode the base URL, the turn carried a frozen execution spec (`sidecar/dispatch/subprocess-env.mjs` rebuilds the subprocess environment from an allowlist), or the app was started with plain `pnpm tauri dev`. |
-| yes | no | `FAIL` | The model ran; outbound failed. Check the outbound queue for dead letters, the bot's permission to post, and the circuit breaker. |
-| yes | wrong marker | `FAIL` | The reply belongs to another turn — usually a second runner or a human in the same conversation. |
-| yes | two marked replies | `FAIL` | The inbound event was consumed twice, or two bots are answering each other. |
+| Fixture hit | Bot replied        | Verdict                     | What it means                                                                                                                                                                                                                                                                                         |
+| ----------- | ------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no          | no                 | `TIMEOUT`                   | The message was dropped before the AI turn. Candidates: transport not connected; the sibling-bot gate failing closed; no @-mention; chat allow/block list; quiet hours; the PII gate (`reason: "pii_blocked"`).                                                                                       |
+| **no**      | **yes**            | **`MODEL_NOT_INTERCEPTED`** | The loop works, but a **real model** answered and was billed. The vault's provider overrode the base URL, the turn carried a frozen execution spec (`sidecar/dispatch/subprocess-env.mjs` rebuilds the subprocess environment from an allowlist), or the app was started with plain `pnpm tauri dev`. |
+| yes         | no                 | `FAIL`                      | The model ran; outbound failed. Check the outbound queue for dead letters, the bot's permission to post, and the circuit breaker.                                                                                                                                                                     |
+| yes         | wrong marker       | `FAIL`                      | The reply belongs to another turn — usually a second runner or a human in the same conversation.                                                                                                                                                                                                      |
+| yes         | two marked replies | `FAIL`                      | The inbound event was consumed twice, or two bots are answering each other.                                                                                                                                                                                                                           |
 
 Every candidate is printed with the file that implements the rule, so you can
 read the actual gate instead of trusting the list. The evidence file keeps the
@@ -236,3 +244,32 @@ modals, install/OAuth flows, Matrix E2EE, real-model answer quality, and public
 webhook tunnels. Event replay, disconnects and resume cannot be provoked on
 demand from a platform, so they stay in `pnpm im:test:contract` rather than being
 faked here.
+
+## OneBot / NapCat live lane
+
+Configure Cognia’s forward or reverse WS connection first. Add a separate **HTTP server** in NapCat WebUI for the observer: bind `127.0.0.1`, choose an unused port (the example `3000` may already be used by Next.js), set `messagePostFormat=array`, enable a `token`, and save as enabled. `IM_LIVE_ONEBOT_API_BASE` points to this HTTP port, not the WebUI or WebSocket port. The bearer token is that HTTP entry’s token. Both accounts must belong to the target group; post an initial test message so history exists.
+
+Run `pnpm im:test:doctor -- --platform onebot`, then `pnpm im:test:live -- --platform onebot` with the fixture target running. Doctor reads `get_login_info` and NapCat’s `get_group_msg_history` extension; failure of either is not a passed live test. The runner prints a marker for a **different human QQ account** to send using QQ’s actual @ picker. It then asks that user to quote the first bot reply with the second marker. Each human step has `IM_LIVE_TURN_TIMEOUT_MS` to complete. The observer verifies the configured sender and real `at`/`reply` segments, polls paginated history, deduplicates by message ID, and feeds the existing fixture/duplicate-window/report checks. It does not call send/delete APIs; messages remain for manual inspection and cleanup. Run in a quiet, dedicated group.
+
+### Feishu identities, scopes and doctor limits
+
+`IM_LIVE_LARK_TARGET_BOT_OPEN_ID` (`ou_…`) is used for mentions; `IM_LIVE_LARK_TARGET_APP_ID` (`cli_…`) identifies the app sender in history. They are not interchangeable. Bot info has a top-level `bot` object. Chat history is paginated, and topic replies are fetched using `container_id_type=thread` without time parameters.
+
+For human input the target needs `im.message.receive_v1`, private-message read and group-mention read scopes. For another bot’s @ event use `im:message.group_at_msg.include_bot:readonly`; **the full two-turn bot-driver test also sends an unmentioned reply**, so enable `im:message.group_msg.include_bot:read`. Publish scope/subscription changes. The observer app needs history read (`im:message.history:readonly`, `im:message:readonly` or `im:message`) plus `im:message.group_msg` for group history, bot send permission, and access to the test chat. Doctor verifies its token, identity, chat and history; target permissions, availability, message subscription, card callbacks (`card.action.trigger`) and actual delivery still require console/client checks.
+
+## Functional acceptance beyond the two text turns
+
+The automated PASS covers mention, quote, fixture interception and duplicate replies only. Record each case below separately as PASS / FAIL / NOT_RUN with message IDs, run/job IDs, timestamps and visible result; avoid secrets and unrelated message bodies.
+
+| Case          | Action                                                                             | Required evidence                                                                |
+| ------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Media         | Send image, file, voice and video separately; download returned attachments        | Actual readable bytes or explicit fallback, correct sender and conversation      |
+| Draft editing | Set draft mode, send probe, edit generated text in Inbox, approve once then retry  | Platform receives edited content once; reject sends nothing                      |
+| Permissions   | Use allowed and disallowed users; retry and expire an approval                     | Denied/expired/reused actions have no side effect; accepted action has a receipt |
+| Workflow      | Select a workflow, trigger, approve/cancel using its supported control surface     | Correct run, state transitions, terminal result and no cross-conversation action |
+| Recovery      | Disconnect/reconnect NapCat or Feishu transport; restart Cognia with a pending job | Ownership resumes, job remains inspectable, no duplicate model turn/send         |
+| Isolation     | Two users in two groups, with and without @                                        | Trigger policy and context boundaries hold                                       |
+
+OneBot card text is read-only; a numeric reply is not a native card click. Use Cognia’s linked conversation/run controls for supported approvals. Feishu card acceptance requires an actual authorized client click, including rejection and repeated-click checks.
+
+Sources checked 2026-10-01: [Feishu history](https://open.feishu.cn/document/server-docs/im-v1/message/list), [receive scopes](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive), [NapCat configuration](https://doc.napneko.icu/config/basic), [NapCat history implementation](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/go-cqhttp/GetGroupMsgHistory.ts).

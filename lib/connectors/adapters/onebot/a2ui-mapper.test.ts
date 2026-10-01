@@ -34,7 +34,7 @@ describe("buildOneBotA2UISegments", () => {
     expect(segments[1]).toMatchObject({ type: "image", url: "https://x/y.png", alt: "Chart" })
   })
 
-  it("appends an Available actions tail when surface contains interactive components", () => {
+  it("labels controls as read-only when surface contains interactive components", () => {
     const surface: A2UISegmentContent = {
       components: {
         root: { id: "root", component: "Column", children: ["t1", "b1", "b2"] },
@@ -49,7 +49,10 @@ describe("buildOneBotA2UISegments", () => {
     const segments = buildOneBotA2UISegments(surface, mirror)
     expect(segments).toEqual([
       { type: "text", text: "Choose:" },
-      { type: "text", text: `\n— Available actions —\n${mirror}` },
+      {
+        type: "text",
+        text: `${mirror}\n\nQQ 中仅展示预览，按钮和数字回复不可用。请在 Cognia 的关联会话或运行中处理。 / Read-only preview in QQ; buttons and numeric replies are unavailable. Use the linked conversation or run in Cognia.`,
+      },
     ])
   })
 
@@ -153,4 +156,21 @@ it("uses a visible fallback for an unsupported surface with no mirror", () => {
       ""
     )
   ).toEqual([{ type: "text", text: "[empty]" }])
+})
+
+it("explains unsupported controls even when no text mirror was supplied", () => {
+  const segments = buildOneBotA2UISegments(
+    {
+      rootId: "b",
+      dataModel: {},
+      components: { b: { component: "Button", text: "Allow", action: "approve" } },
+    },
+    ""
+  )
+  expect(segments).toEqual([
+    expect.objectContaining({
+      type: "text",
+      text: expect.stringContaining("Read-only preview in QQ"),
+    }),
+  ])
 })

@@ -43,3 +43,37 @@ export interface OneBotTransport {
   /** Tear down listeners and (for forward-ws) close the socket. */
   stop(): Promise<void>
 }
+
+/** A received rejection is final; an incomplete acknowledgement must not be replayed. */
+export class OneBotRpcError extends Error {
+  readonly retryable = false
+  constructor(
+    message: string,
+    readonly code: "platform_4xx" | "delivery_unknown" = "delivery_unknown"
+  ) {
+    super(message)
+    this.name = "OneBotRpcError"
+  }
+}
+
+export function assertOneBotSuccess(response: OneBotRpcResponse, action: string): void {
+  if (response?.status === "ok" && response.retcode === 0) return
+  const rejected =
+    response?.status === "failed" &&
+    Number.isInteger(response.retcode) &&
+    response.retcode !== 0 &&
+    response.retcode !== 1
+  const detail = response?.message || response?.wording
+  throw new OneBotRpcError(
+    `OneBot ${action}: status=${response?.status} retcode=${response?.retcode}${detail ? ` (${detail})` : ""}`,
+    rejected ? "platform_4xx" : "delivery_unknown"
+  )
+}
+
+export function oneBotMessageId(response: OneBotRpcResponse, action: string): string {
+  assertOneBotSuccess(response, action)
+  const id = (response.data as { message_id?: unknown } | null)?.message_id
+  if ((typeof id === "string" && id.length > 0) || (typeof id === "number" && Number.isFinite(id)))
+    return String(id)
+  throw new OneBotRpcError(`OneBot ${action}: successful acknowledgement missing message_id`)
+}

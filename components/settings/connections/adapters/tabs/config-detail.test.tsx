@@ -246,6 +246,9 @@ import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 const messages = {
   settings: {
     connections: {
+      lark: {
+        setupGuide: { openConfiguration: "Configuration and setup guide" },
+      },
       adapters: {
         transportLabels: {
           dingtalkStream: "Stream Mode WSS",
@@ -495,7 +498,7 @@ describe("ConfigDetail — Slack dialog", () => {
 describe("ConfigDetail — Lark dialog", () => {
   it("opens LarkConfigDialog for a lark row", async () => {
     render(withIntl(<ConfigDetail row={makeRow("lark")} />))
-    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    fireEvent.click(screen.getByRole("button", { name: "Configuration and setup guide" }))
     await waitFor(() => {
       expect(screen.getByTestId("lark-config-dialog")).toBeInTheDocument()
     })

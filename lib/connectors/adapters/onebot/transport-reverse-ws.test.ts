@@ -281,3 +281,44 @@ describe("createReverseWsTransport", () => {
     await transport.stop()
   })
 })
+
+it("removes a reverse listener registered after stop and ignores stale opens", async () => {
+  mockListen.mockReset()
+  let finish!: (fn: () => void) => void
+  mockListen.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const transport = createReverseWsTransport("late-reverse")
+  const h = { onOpen: jest.fn(), onClose: jest.fn(), onEvent: jest.fn() }
+  const starting = transport.start(h)
+  await transport.stop()
+  const unlisten = jest.fn()
+  finish(unlisten)
+  await starting
+  expect(unlisten).toHaveBeenCalledTimes(1)
+  expect(mockListen).toHaveBeenCalledTimes(1)
+})
+
+it("rejects pending reverse RPCs on stop without reviving from stale events", async () => {
+  mockListen.mockReset()
+  mockInvoke.mockReset().mockResolvedValue(undefined)
+  const bus = createEventBus()
+  mockListen.mockImplementation(bus.listenImpl)
+  const transport = createReverseWsTransport("stop-reverse")
+  const h = { onOpen: jest.fn(), onClose: jest.fn(), onEvent: jest.fn() }
+  await transport.start(h)
+  bus.trigger("connectors://onebot/stop-reverse/open", "")
+  const pending = expect(
+    transport.send({ action: "send_msg", echo: "stop-rpc", params: {} })
+  ).rejects.toThrow(/stopped/)
+  await transport.stop()
+  await pending
+  bus.trigger("connectors://onebot/stop-reverse/open", "")
+  expect(h.onOpen).toHaveBeenCalledTimes(1)
+  await expect(
+    transport.send({ action: "send_msg", echo: "after-stop", params: {} })
+  ).rejects.toThrow(/no connected client/)
+})

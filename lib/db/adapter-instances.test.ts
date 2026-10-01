@@ -135,6 +135,26 @@ describe("adapter-instances", () => {
     expect(await getAdapterInstance(row.id)).toBeUndefined()
   })
 
+  it("deleteAdapterInstance tombstones the adapter id for paired clients", async () => {
+    const row = await createAdapterInstance(baseInput())
+    const other = await createAdapterInstance(baseInput())
+
+    await deleteAdapterInstance(row.id)
+
+    const tombstones = await getDb()
+      .syncTombstones.where("table")
+      .equals("adapterInstances")
+      .toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        table: "adapterInstances",
+        id: row.id,
+        deletedAt: expect.any(Number),
+      }),
+    ])
+    expect(tombstones.map((t) => t.id)).not.toContain(other.id)
+  })
+
   it("deleteAdapterInstance reaps the adapter's connectorHeartbeats but leaves other adapters' rows", async () => {
     const row = await createAdapterInstance(baseInput())
     const other = await createAdapterInstance(baseInput())

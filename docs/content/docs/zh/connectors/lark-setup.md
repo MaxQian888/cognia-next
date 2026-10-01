@@ -74,13 +74,17 @@ description: "创建飞书（Lark）机器人应用，并通过连接器适配�
 
 你的应用需要以下权限。进入 **权限管理** 并添加：
 
-| 权限                     | 用途                                           |
-| ------------------------ | ---------------------------------------------- |
-| `im:message`             | 读取发送给机器人的消息                         |
-| `im:message.group_msg`   | 接收未 @ 机器人的群消息（话题激活功能必需）    |
-| `im:message:send_as_bot` | 以机器人身份发送消息                           |
-| `im:chat`                | 访问群聊信息                                   |
-| `im:resource`            | 访问媒体资源（图片、文件）                     |
+| 权限                               | 用途                                                     |
+| ---------------------------------- | -------------------------------------------------------- |
+| `im:message.p2p_msg:readonly`      | 接收用户私聊消息                                         |
+| `im:message.group_at_msg:readonly` | 接收用户群 @ 消息                                        |
+| `im:message.group_msg`             | 接收未 @ 的用户群消息；群历史需同时具备历史读取权限      |
+| `im:message.history:readonly`      | 读取历史，也可使用 `im:message:readonly` 或 `im:message` |
+| `im:message:send_as_bot`           | 以机器人身份发送                                         |
+| `im:chat`                          | 访问群信息                                               |
+| `im:resource`                      | 访问图片/文件资源                                        |
+
+机器人驱动测试另需 `im:message.group_at_msg.include_bot:readonly` 接收 @ 事件，第二轮无 @ 回复需 `im:message.group_msg.include_bot:read`。最初只测真人消息时可不启用 include_bot 权限。交互卡片需订阅 `card.action.trigger`，权限、事件及回调变更后发布版本。凭据/历史探测不能证明目标订阅或真实卡片点击成功。App ID/Open ID 的区分和逐项验收见[本地真实测试](./local-live-testing)。
 
 点击 **申请权限** 并等待审批（同组织内的自建应用可自助开通）。
 
@@ -100,16 +104,22 @@ description: "创建飞书（Lark）机器人应用，并通过连接器适配�
 1. 打开 **平台连接 → 适配器 → 添加连接器 → 飞书**。
 2. 填写各字段：
 
-| 字段                   | 取值                                       |
-| ---------------------- | ------------------------------------------ |
-| **App ID**             | 来自凭证与基础信息的 `cli_...`             |
-| **App Secret**         | 来自凭证与基础信息的 App Secret            |
-| **Verification Token** | 来自事件订阅的令牌                         |
-| **Encrypt Key**        | （可选）来自事件订阅的 Encrypt Key         |
-| **传输方式**           | "长连接"（推荐）或 "Webhook"               |
+| 字段                   | 取值                               |
+| ---------------------- | ---------------------------------- |
+| **App ID**             | 来自凭证与基础信息的 `cli_...`     |
+| **App Secret**         | 来自凭证与基础信息的 App Secret    |
+| **Verification Token** | 来自事件订阅的令牌                 |
+| **Encrypt Key**        | （可选）来自事件订阅的 Encrypt Key |
+| **传输方式**           | "长连接"（推荐）或 "Webhook"       |
 
-3. 点击 **测试** 以校验 App ID + App Secret。
-4. 点击 **创建** 保存。适配器将自动启动。
+3. 使用弹窗中的 **接入引导**，依次检查应用创建、按功能所需权限、消息事件与卡片回调、
+   发布和首条消息验收。可复制所选功能的权限列表；勾选功能不会自动开通后台权限。
+4. 点击 **验证凭据** 以校验 App ID + App Secret。此操作不验证事件投递、已授予权限或卡片回调；
+   修改任一凭据后，旧验证结果自动失效。
+5. 点击 **创建** 保存。适配器将自动启动。如果飞书后台要求先建立长连接才能保存订阅，
+   完成此步后返回后台保存。
+6. 已有连接可通过 **配置与接入引导** 重新打开同一引导。确认机器人身份与连接健康状态，
+   配置 Agent 和回复/准入策略，再从飞书发送私聊、群 @ 消息并实际点击卡片验收。
 
 ---
 
@@ -156,6 +166,63 @@ cognia-next 把每个菜单项的 `event_key` 映射到你指定的动作，点�
 在最近 600 秒内发送的会话最新消息。群聊和话题不受该 API 支持（平台返回 `230003`），因此
 话题中的持久控制继续由 CardKit 按钮承载；气泡发送遇到过期、非最新消息或不明确投递时也
 只降级该临时增强，不影响进度卡与最终回复。
+
+### 运行过程卡片
+
+在飞书连接编辑弹窗中展开 **卡片外观**，可设置标题配色、内容间距、卡片宽度、过程显示方式、
+历史展开方式、自定义标题，以及耗时、进度、产物、最终回复引用和页脚的显示开关。
+**恢复默认卡片外观** 会重置表单中的选项，保存后生效。保存会保留其他面板的设置，并重启连接。
+
+外观同时应用于原生进度卡、降级进度卡和最终回复。警告和错误标题保留状态配色。
+自定义标题最多 60 个字符，发送前会进行脱敏。过程显示方式对新运行生效，已有原生时间线
+按原方式结束。最终回复引用开关只控制卡片内的引用，与平台原生回复引用独立。
+
+高级外观支持桌面/移动端字号、副标题、已上传的标题图片 Key、最多三个逗号分隔标签，
+以及成对配置的浅色/深色过程面板颜色。无效图片 Key、颜色或模板配置会阻止保存并显示原因。
+面板颜色用于卡片内的过程面板，飞书原生时间线使用客户端自身样式。
+
+开启 **成功回复使用卡片模板** 后，填写已发布的模板 ID 和固定版本。在飞书卡片搭建工具中
+定义 `answer`、`status`、`title`、`quote`、`elapsed_ms`、`details_url` 变量。
+错误和中断回复保留内置状态卡片；与其他消息片段组合的结果使用内置卡片，保留周围内容。
+飞书明确拒绝模板时，使用相同消息 UUID 回退到内置卡片；网络、权限和限流错误仍按原投递策略处理。
+
+支持原生过程事件时，执行详情显示在飞书的过程时间线中；不支持时，同一张 Card 2.0
+消息使用可展开的过程面板。运行状态、耗时、产物和审批提示显示在面板外，完成或取消后的
+历史过程默认折叠，仍可展开查看。
+
+心跳只更新发生变化的状态，不重复改写未变化的历史和按钮。审批、暂停、恢复提醒和完成
+状态会越过普通进度刷新等待。重启后复用已确认的卡片状态，先核对投递结果不明确的更新，
+再应用最新内容。流式超时（`200850`）或关闭（`300309`）时在原 Card 2.0 实体上修复。
+
+多个变化的非流式组件可合并为一次 CardKit 局部更新，流式文本继续使用专用接口。
+批量更新的重试和重启恢复复用原序号及 UUID，确认后再应用更新的状态。
+
+### 交互卡片
+
+生成的交互回复使用 Card 2.0（飞书客户端 7.20+），支持原生勾选器、多行输入、日期/时间、
+多选、表单提交/重置及必填项、分栏和折叠面板。表单字段作为一次回调交给 Agent，
+不代表同步写回本机 A2UI 数据模型。表格和图表在飞书允许的位置原生展示，尚不支持的行/图表
+点击交互保持只读。人员选择器可通过平台原生卡片 JSON 使用，通用 A2UI 模型尚无对应组件。
+不支持或过大的布局保留为可读内容。收件箱保留 Card 2.0 正文和嵌套容器，无法映射的组件
+仍可在原始数据视图检查。
+
+### 群内仅本人可见卡片（插件 API）
+
+拥有 `connectors:send` 权限的插件可以设置
+`request.metadata.larkEphemeral = { recipientOpenId: "ou_..." }`，再通过
+`ctx.connectors.enqueueSend(adapterId, conversationKey, request)` 入队。
+请求必须只包含一个卡片或 A2UI 片段，使用原机器人身份，目标为普通群。
+除机器人发消息权限外，还需授予群信息读取权限（`im:chat:read`、`im:chat:readonly` 或
+`im:chat`），用于核验群模式。
+
+飞书仅向在线接收者展示此类临时卡片，不产生消息通知，因此不可将它作为唯一审批通知。
+话题群、话题回复、用户身份发送、普通消息编辑和跨机器人重路由均被拒绝；不会回退为公开消息。
+POST 结果不明确时标记为 `delivery_unknown`，不自动重发。操作完成后可调用
+`ctx.connectors.deleteEphemeralCard(adapterId, platformMessageId)` 删除。
+
+官方契约：[Card 2.0 组件](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-json-v2-components/component-json-v2-overview)、
+[批量局部更新](https://open.feishu.cn/document/cardkit-v1/card/batch_update)、
+[仅特定人可见卡片](https://open.feishu.cn/document/server-docs/im-v1/message-card/send-message-cards-that-are-only-visible-to-certain-people)。
 
 ### 验证话题免 @ 投递
 
@@ -218,9 +285,10 @@ cognia-next 通过与 webhook 相同的 Cloudflared 隧道中转回调：
    **命名隧道**，让域名在重启后保持稳定——飞书每次授权都要求与登记的地址完全一致。
 2. **授予用户权限。** 在飞书后台 → **权限管理** 中启用并通过审批：
    - `offline_access` —— **必需**；只有授予该权限，飞书才会下发刷新令牌。
-   - `im:message` —— 以用户身份发送消息。
+   - `im:message` 与 `im:message.send_as_user` —— 以用户身份发送消息需同时具备两项权限，见[官方发送消息契约](https://open.feishu.cn/document/server-docs/im-v1/message/create)。发布新增权限后，已有账号需重新授权。
 
    修改权限后需重新发布应用版本。
+
 3. **登记重定向地址。** 在飞书后台 → **安全设置 → 重定向 URL** 中，添加 cognia-next 里
    **设置 → 连接 → 飞书 → 以我的身份发送** 显示的完整地址（"OAuth 回调地址" 字段，例如
    `https://<隧道>/oauth/lark/callback`）。该字段留空则使用隧道自动生成的地址，也可填入你自建
@@ -236,15 +304,17 @@ cognia-next 通过与 webhook 相同的 Cloudflared 隧道中转回调：
 
 ## 故障排查
 
-| 现象                            | 可能原因                                                            |
-| ------------------------------- | ------------------------------------------------------------------- |
-| 测试时提示 "Connection failed"  | App ID 或 App Secret 不正确                                         |
-| 收不到事件（长连接）            | 检查是否已订阅 `im.message.receive_v1`                              |
-| 收不到事件（webhook）           | 确认 webhook URL 可达且返回 200                                     |
-| 解密错误                        | Encrypt Key 不匹配——确保密钥与事件订阅中的一致                     |
-| 机器人在群里不响应              | 确保机器人已安装到群组并拥有 `im:message` 权限                      |
-| 点击机器人菜单无反应            | 订阅 `application.bot.menu_v6` 并在快捷指令下映射对应的 `event_key` |
-| 入群后没有欢迎卡片              | 订阅 `im.chat.member.bot.added_v1`；并在"帮助与欢迎"中确认已开启欢迎卡片 |
-| 交互卡片显示为纯文本            | 授予 `cardkit:card:write` 权限并重新发布应用版本                    |
+| 现象                                     | 可能原因                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| 测试时提示 "Connection failed"           | App ID 或 App Secret 不正确                                                  |
+| 收不到事件（长连接）                     | 检查是否已订阅 `im.message.receive_v1`                                       |
+| 收不到事件（webhook）                    | 确认 webhook URL 可达且返回 200                                              |
+| 解密错误                                 | Encrypt Key 不匹配——确保密钥与事件订阅中的一致                               |
+| 机器人在群里不响应                       | 确保机器人已安装到群组并拥有 `im:message` 权限                               |
+| 点击机器人菜单无反应                     | 订阅 `application.bot.menu_v6` 并在快捷指令下映射对应的 `event_key`          |
+| 入群后没有欢迎卡片                       | 订阅 `im.chat.member.bot.added_v1`；并在"帮助与欢迎"中确认已开启欢迎卡片     |
+| 交互卡片显示为纯文本                     | 授予 `cardkit:card:write` 权限并重新发布应用版本                             |
 | "连接账号" 失败 / `redirect_uri unmatch` | 重定向地址未登记到安全设置，或隧道域名已变——请用命名隧道并登记完全一致的地址 |
-| "以我的身份发送" 仍以机器人身份发出 | 未授予/审批 `offline_access` + `im:message`，或授权已过期——请重新连接账号 |
+| "以我的身份发送" 仍以机器人身份发出      | 未授予/审批 `offline_access` + `im:message` + `im:message.send_as_user`，或授权已过期——请重新连接账号    |
+
+来源（核对日期 2026-10-01）：[message receive](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive), [history](https://open.feishu.cn/document/server-docs/im-v1/message/list), [card callbacks](https://open.feishu.cn/document/feishu-cards/card-callback-communication).

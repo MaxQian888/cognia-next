@@ -35,7 +35,7 @@ import type {
   OutboundJobRow,
   OutboundJobStatus,
 } from "@/lib/db/connector-types"
-import { replayDeadlettered } from "@/lib/db/outbound-jobs"
+import { deleteOutboundJob, replayDeadlettered } from "@/lib/db/outbound-jobs"
 import { appendAudit } from "@/lib/connectors/audit"
 import { cn } from "@/lib/utils"
 import {
@@ -120,7 +120,7 @@ async function retryJob(id: string) {
 }
 
 async function cancelJob(id: string) {
-  await getDb().outboundQueue.delete(id)
+  await deleteOutboundJob(id)
 }
 
 /**

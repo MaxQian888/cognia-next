@@ -1,4 +1,9 @@
-import { parseLarkEventEnvelope, parseLarkBotMenuEvent, extractTenantKey } from "./parse"
+import {
+  parseLarkEventEnvelope,
+  parseLarkBotMenuEvent,
+  extractTenantKey,
+  parseLarkInteractiveCallback,
+} from "./parse"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
 
@@ -921,4 +926,31 @@ describe("default reply threads", () => {
       })!.channel.kind
     ).toBe("private")
   })
+})
+
+it.each(["picker_date", "picker_time", "picker_datetime"])(
+  "parses modern %s option while preserving timezone",
+  (tag) => {
+    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", {
+      schema: "2.0",
+      header: { event_id: "picker", event_type: "card.action.trigger" },
+      event: {
+        operator: { open_id: "ou_user" },
+        action: { tag, option: "2026-10-01 12:30 +0800", value: { actionId: "a2ui:s:d:choose" } },
+      },
+    } as LarkEventEnvelope)
+    expect(cb).toMatchObject({ actionType: "input", value: "2026-10-01 12:30 +0800" })
+  }
+)
+
+it("supports native person selectors from authored Card 2.0 payloads", () => {
+  const cb = parseLarkInteractiveCallback("adp_lk", "BOT", {
+    schema: "2.0",
+    header: { event_id: "person", event_type: "card.action.trigger" },
+    event: {
+      operator: { open_id: "ou_user" },
+      action: { tag: "select_person", option: "ou_owner", value: { actionId: "a2ui:s:d:choose" } },
+    },
+  } as LarkEventEnvelope)
+  expect(cb).toMatchObject({ actionType: "select", value: "ou_owner" })
 })

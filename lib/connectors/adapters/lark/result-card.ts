@@ -9,7 +9,7 @@
  * aiden-bot lark-daemon converged on:
  *
  *   {schema:"2.0", config:{update_multi, summary, width_mode?}, header?,
- *    body:{elements:[ quote?, interrupted?, answer…, img…, hr+note? ]}}
+ *    body:{elements:[ quote?, interrupted?, answer…, img…, hr+footer? ]}}
  *
  * Design notes:
  *   - The answer is model-authored markdown rendered VERBATIM (Lark card
@@ -33,6 +33,14 @@
  */
 
 import type { MessageSegment } from "@/types/connectors/segment"
+import {
+  normalizeLarkCardPresentation,
+  larkCardBodyStyle,
+  larkCardHeaderTheme,
+  larkCardConfigStyle,
+  larkCardMarkdownStyle,
+  larkCardHeaderExtras,
+} from "./card-presentation"
 
 export type LarkResultCardStatus = "done" | "error" | "interrupted"
 
@@ -48,6 +56,7 @@ export interface LarkResultCardInput {
   initiatorOpenId?: string
   /** Absolute web URL to the run detail page. */
   detailsUrl?: string
+  presentation?: unknown
 }
 
 /** Lark markdown elements silently truncate oversized content; stay well under. */
@@ -215,9 +224,10 @@ function footerElements(input: LarkResultCardInput): Record<string, unknown>[] {
   return [
     { tag: "hr" },
     {
-      tag: "note",
+      tag: "markdown",
       element_id: "footer",
-      elements: [{ tag: "lark_md", content: parts.join(" · ") }],
+      content: parts.join(" · "),
+      text_size: "notation",
     },
   ]
 }
@@ -231,9 +241,10 @@ function footerElements(input: LarkResultCardInput): Record<string, unknown>[] {
  * card width.
  */
 export function buildLarkResultCard(input: LarkResultCardInput): Record<string, unknown> {
+  const presentation = normalizeLarkCardPresentation(input.presentation)
   const elements: Record<string, unknown>[] = []
 
-  if (input.quote?.trim()) {
+  if (presentation.showQuote && input.quote?.trim()) {
     elements.push({
       tag: "markdown",
       element_id: "quote",
@@ -272,6 +283,7 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
         tag: "markdown",
         element_id: mdCount === 0 ? "answer" : `answer_${mdCount}`,
         content: chunk,
+        ...larkCardMarkdownStyle(presentation),
       })
       mdCount += 1
     }
@@ -280,22 +292,44 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
     elements.push({ tag: "markdown", element_id: "answer", content: "—" })
   }
 
-  elements.push(...footerElements(input))
+  if (presentation.showFooter)
+    elements.push(
+      ...footerElements({
+        ...input,
+        elapsedMs: presentation.showElapsed ? input.elapsedMs : undefined,
+      })
+    )
 
   const card: Record<string, unknown> = {
     schema: "2.0",
     config: {
       update_multi: true,
+      ...larkCardConfigStyle(presentation),
+      ...(presentation.width !== "default" ? { width_mode: presentation.width } : {}),
       summary: { content: summaryContent(input.answer, input.status) },
-      ...(input.status === "interrupted" ? { width_mode: "compact" } : {}),
+      ...(input.status === "interrupted" && presentation.width === "default"
+        ? { width_mode: "compact" }
+        : {}),
     },
-    body: { elements },
+    body: { ...larkCardBodyStyle(presentation), elements },
   }
   if (input.status !== "done") {
     const header = HEADER_BY_STATUS[input.status]
     card["header"] = {
       title: { tag: "plain_text", content: header.title },
-      template: header.template,
+      template: larkCardHeaderTheme(presentation, header.template),
+      ...larkCardHeaderExtras(presentation),
+    }
+  } else if (
+    presentation.title ||
+    presentation.subtitle ||
+    presentation.headerIconKey ||
+    presentation.headerTags
+  ) {
+    card.header = {
+      title: { tag: "plain_text", content: presentation.title || SUMMARY_FALLBACK.done },
+      template: larkCardHeaderTheme(presentation, "green"),
+      ...larkCardHeaderExtras(presentation),
     }
   }
   return card
@@ -303,7 +337,64 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
 
 /** Wrap the payload as a standalone card segment (verbatim passthrough). */
 export function buildLarkResultCardSegment(input: LarkResultCardInput): MessageSegment {
-  return { type: "card", card: { kind: "lark", payload: buildLarkResultCard(input) } }
+  const fallback = buildLarkResultCard(input)
+  const presentation = normalizeLarkCardPresentation(input.presentation)
+  if (input.status === "done" && presentation.resultTemplateEnabled) {
+    const payload: LarkResultTemplatePayload = {
+      type: "template",
+      data: {
+        template_id: presentation.resultTemplateId,
+        template_version_name: presentation.resultTemplateVersion,
+        template_variable: {
+          answer: neutralizeMentions(input.answer),
+          status: input.status,
+          title: presentation.title || SUMMARY_FALLBACK.done,
+          quote: presentation.showQuote ? sanitizeQuote(input.quote ?? "") : "",
+          elapsed_ms:
+            presentation.showElapsed && Number.isFinite(input.elapsedMs)
+              ? Math.max(0, input.elapsedMs!)
+              : 0,
+          details_url:
+            input.detailsUrl && WEB_URL_PATTERN.test(input.detailsUrl) ? input.detailsUrl : "",
+        },
+      },
+      fallback,
+    }
+    return { type: "card", card: { kind: "lark", payload } }
+  }
+  return { type: "card", card: { kind: "lark", payload: fallback } }
+}
+
+/** Internal delivery envelope: the adapter consumes fallback before any network request. */
+export interface LarkResultTemplatePayload {
+  type: "template"
+  data: {
+    template_id: string
+    template_version_name: string
+    template_variable: Record<string, string | number>
+  }
+  fallback: Record<string, unknown>
+}
+
+export function isLarkResultTemplatePayload(value: unknown): value is LarkResultTemplatePayload {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Partial<LarkResultTemplatePayload>
+  return (
+    candidate.type === "template" &&
+    typeof candidate.data?.template_id === "string" &&
+    /^[A-Za-z0-9_.-]{1,100}$/.test(candidate.data.template_id) &&
+    typeof candidate.data?.template_version_name === "string" &&
+    /^[A-Za-z0-9_.-]{1,100}$/.test(candidate.data.template_version_name) &&
+    Boolean(
+      candidate.data.template_variable &&
+      typeof candidate.data.template_variable === "object" &&
+      !Array.isArray(candidate.data.template_variable)
+    ) &&
+    Object.values(candidate.data.template_variable).every(
+      (item) => typeof item === "string" || (typeof item === "number" && Number.isFinite(item))
+    ) &&
+    candidate.fallback?.schema === "2.0"
+  )
 }
 
 export interface WithLarkResultCardInput extends Omit<LarkResultCardInput, "answer"> {

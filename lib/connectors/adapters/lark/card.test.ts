@@ -45,19 +45,14 @@ describe("segmentToLarkBody", () => {
     const body = segmentToLarkBody({ type: "markdown", md: "**bold** text" })
     expect(body).not.toBeNull()
     expect(body!.msg_type).toBe("interactive")
-    const content = JSON.parse(body!.content) as {
-      elements: Array<{ text: { content: string; tag: string } }>
-    }
-    expect(content.elements[0].text.tag).toBe("lark_md")
-    expect(content.elements[0].text.content).toContain("**bold**")
+    const content = JSON.parse(body!.content)
+    expect(content.schema).toBe("2.0")
+    expect(content.body.elements[0]).toMatchObject({ tag: "markdown", content: "**bold** text" })
   })
 
   it("markdown segment escapes @ in content", () => {
     const body = segmentToLarkBody({ type: "markdown", md: "hey @user" })
-    const content = JSON.parse(body!.content) as {
-      elements: Array<{ text: { content: string } }>
-    }
-    expect(content.elements[0].text.content).toContain("\\@user")
+    expect(JSON.parse(body!.content).body.elements[0].content).toContain("\\@user")
   })
 
   it("image segment with image_key → msg_type image", () => {
@@ -262,4 +257,18 @@ describe("command Card 2.0 presentation", () => {
     expect(card.body.elements[0].content).not.toContain("<at")
     expect(card.body.elements[0].content.split("line")).toHaveLength(221)
   })
+})
+
+it("passes official template card payloads through without treating them as foreign cards", () => {
+  const payload = {
+    type: "template",
+    data: {
+      template_id: "AAqkKc",
+      template_version_name: "1.0.0",
+      template_variable: { answer: "Ready" },
+    },
+  }
+  const body = segmentToLarkBody({ type: "card", card: { kind: "lark", payload } })
+  expect(body?.msg_type).toBe("interactive")
+  expect(JSON.parse(body!.content)).toEqual(payload)
 })

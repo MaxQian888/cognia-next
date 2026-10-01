@@ -24,7 +24,7 @@ import {
 } from "@/lib/connectors/tauri/commands"
 import type { SerializedOneBotCall } from "./serialize"
 import type { UnlistenFn, OneBotRpcResponse } from "./transport-reverse-ws"
-import type { OneBotTransport, OneBotTransportHandlers } from "./transport"
+import { OneBotRpcError, type OneBotTransport, type OneBotTransportHandlers } from "./transport"
 
 export interface ForwardWsOptions {
   adapterId: string
@@ -42,54 +42,45 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
       reject(new DOMException("Aborted", "AbortError"))
       return
     }
-    const tid = setTimeout(resolve, ms)
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(tid)
-        reject(new DOMException("Aborted", "AbortError"))
-      },
-      { once: true }
-    )
+    const onAbort = () => {
+      clearTimeout(tid)
+      reject(new DOMException("Aborted", "AbortError"))
+    }
+    const tid = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
   })
 }
 
 export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTransport {
-  /** echo → resolver for in-flight RPCs. */
-  const pending = new Map<string, (resp: OneBotRpcResponse) => void>()
-  const abort = new AbortController()
+  const pending = new Map<
+    string,
+    { resolve: (resp: OneBotRpcResponse) => void; reject: (error: Error) => void }
+  >()
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
-
+  let abort = new AbortController()
+  let generation = 0
   let handlers: OneBotTransportHandlers | null = null
   let handleId: string | null = null
-  let unlistenMessage: UnlistenFn | null = null
-  let unlistenClose: UnlistenFn | null = null
+  const unlisteners: UnlistenFn[] = []
   let attempts = 0
-  /** Dial failures since the last successful open (drives onConnectFailed). */
   let failedConnects = 0
 
-  function noteConnectFailure(): void {
-    failedConnects += 1
-    handlers?.onConnectFailed?.(failedConnects)
+  function cleanupListeners(): void {
+    for (const unlisten of unlisteners.splice(0)) {
+      try {
+        unlisten()
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
   }
 
-  function cleanupListeners(): void {
-    if (unlistenMessage) {
-      try {
-        unlistenMessage()
-      } catch {
-        /* ignore */
-      }
-      unlistenMessage = null
-    }
-    if (unlistenClose) {
-      try {
-        unlistenClose()
-      } catch {
-        /* ignore */
-      }
-      unlistenClose = null
-    }
+  function rejectPending(message: string): void {
+    for (const rpc of pending.values()) rpc.reject(new OneBotRpcError(message))
+    pending.clear()
   }
 
   function routeFrame(payload: string): void {
@@ -97,106 +88,169 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
     try {
       parsed = JSON.parse(payload)
     } catch {
-      return // ignore non-JSON frames
+      return
     }
     if (parsed && typeof parsed === "object") {
       const obj = parsed as Record<string, unknown>
-      const echo = obj.echo
-      if (typeof echo === "string" && pending.has(echo) && ("retcode" in obj || "status" in obj)) {
-        const resolve = pending.get(echo)!
-        pending.delete(echo)
-        resolve(obj as unknown as OneBotRpcResponse)
+      // Only an action response settles a call; an event that happens to carry
+      // a matching `echo` must not swallow the real response.
+      if (
+        typeof obj.echo === "string" &&
+        pending.has(obj.echo) &&
+        ("retcode" in obj || "status" in obj)
+      ) {
+        const rpc = pending.get(obj.echo)!
+        pending.delete(obj.echo)
+        rpc.resolve(obj as unknown as OneBotRpcResponse)
         return
       }
     }
     void handlers?.onEvent(parsed)
   }
 
-  async function connectOnce(): Promise<void> {
-    const token = opts.token ? await opts.token() : ""
-    const headers = token ? { Authorization: `Bearer ${token}` } : undefined
-    const id = await connectorsWsOpen(opts.url, headers)
-    handleId = id
-    attempts = 0
-    failedConnects = 0
-    unlistenMessage = await connectorListen<string>(`connectors://ws/${id}/message`, (e) =>
-      routeFrame(e.payload)
-    )
-    unlistenClose = await connectorListen<void>(`connectors://ws/${id}/close`, () => {
-      handleId = null
-      handlers?.onClose()
-      void scheduleReconnect()
-    })
-    handlers?.onOpen()
+  const isActive = (epoch: number) =>
+    epoch === generation && !abort.signal.aborted && handlers !== null
+
+  async function closeSocket(id: string): Promise<void> {
+    try {
+      await connectorsWsClose(id)
+    } catch {
+      /* already closed */
+    }
   }
 
-  async function scheduleReconnect(): Promise<void> {
+  async function connectOnce(epoch: number): Promise<void> {
+    const token = opts.token ? await opts.token() : ""
+    if (!isActive(epoch)) return
+    const id = await connectorsWsOpen(
+      opts.url,
+      token ? { Authorization: `Bearer ${token}` } : undefined
+    )
+    if (!isActive(epoch)) {
+      await closeSocket(id)
+      return
+    }
+    handleId = id
+    let closed = false
+    const live = () => isActive(epoch) && !closed && handleId === id
+    const register = async (listener: Promise<UnlistenFn>): Promise<boolean> => {
+      const unlisten = await listener
+      if (!live()) {
+        unlisten()
+        return false
+      }
+      unlisteners.push(unlisten)
+      return true
+    }
+    try {
+      if (
+        !(await register(
+          connectorListen<string>(`connectors://ws/${id}/message`, (e) => {
+            if (live()) routeFrame(e.payload)
+          })
+        ))
+      )
+        return
+      if (
+        !(await register(
+          connectorListen<void>(`connectors://ws/${id}/close`, () => {
+            if (!live()) return
+            closed = true
+            handleId = null
+            rejectPending("OneBot connection closed before acknowledgement")
+            handlers?.onClose()
+            void scheduleReconnect(epoch)
+          })
+        ))
+      )
+        return
+      attempts = 0
+      failedConnects = 0
+      handlers?.onOpen()
+    } catch (error) {
+      closed = true
+      if (isActive(epoch)) {
+        handleId = null
+        cleanupListeners()
+      }
+      await closeSocket(id)
+      throw error
+    }
+  }
+
+  async function scheduleReconnect(epoch: number): Promise<void> {
+    if (!isActive(epoch)) return
     cleanupListeners()
-    if (abort.signal.aborted) return
     attempts += 1
-    const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
     try {
-      await delay(backoff, abort.signal)
+      await delay(reconnectBackoffMs(backoffBaseMs, attempts), abort.signal)
     } catch {
-      return // aborted while waiting
+      return
     }
-    if (abort.signal.aborted) return
+    if (!isActive(epoch)) return
     try {
-      await connectOnce()
+      await connectOnce(epoch)
     } catch {
-      noteConnectFailure()
-      void scheduleReconnect()
+      if (!isActive(epoch)) return
+      handlers?.onConnectFailed?.(++failedConnects)
+      void scheduleReconnect(epoch)
     }
+  }
+
+  async function stop(): Promise<void> {
+    generation += 1
+    abort.abort()
+    handlers = null
+    cleanupListeners()
+    const id = handleId
+    handleId = null
+    rejectPending("OneBot transport stopped before acknowledgement")
+    if (id) await closeSocket(id)
   }
 
   return {
-    async start(h: OneBotTransportHandlers): Promise<void> {
+    async start(h): Promise<void> {
+      if (handlers) await stop()
+      abort = new AbortController()
+      const epoch = ++generation
       handlers = h
+      attempts = 0
+      failedConnects = 0
       try {
-        await connectOnce()
+        await connectOnce(epoch)
       } catch {
-        noteConnectFailure()
-        void scheduleReconnect()
+        if (!isActive(epoch)) return
+        handlers?.onConnectFailed?.(++failedConnects)
+        void scheduleReconnect(epoch)
       }
     },
-
     send(call: SerializedOneBotCall, timeoutMs = 10_000): Promise<OneBotRpcResponse> {
       const id = handleId
-      if (!id) {
+      if (!id)
         return Promise.reject(new Error(`OneBot forward-WS not connected: action=${call.action}`))
-      }
-      return new Promise<OneBotRpcResponse>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending.delete(call.echo)
-          reject(new Error(`OneBot RPC timeout: echo=${call.echo} action=${call.action}`))
-        }, timeoutMs)
-
-        pending.set(call.echo, (resp) => {
+      return new Promise((resolve, reject) => {
+        const fail = (error: Error) => {
           clearTimeout(timer)
-          resolve(resp)
+          pending.delete(call.echo)
+          reject(error)
+        }
+        const timer = setTimeout(
+          () =>
+            fail(new OneBotRpcError(`OneBot RPC timeout: echo=${call.echo} action=${call.action}`)),
+          timeoutMs
+        )
+        pending.set(call.echo, {
+          resolve: (response) => {
+            clearTimeout(timer)
+            resolve(response)
+          },
+          reject: fail,
         })
-
-        connectorsWsSend(id, JSON.stringify(call)).catch((err) => {
-          clearTimeout(timer)
-          pending.delete(call.echo)
-          reject(err instanceof Error ? err : new Error(String(err)))
+        connectorsWsSend(id, JSON.stringify(call)).catch((error) => {
+          fail(new OneBotRpcError(error instanceof Error ? error.message : String(error)))
         })
       })
     },
-
-    async stop(): Promise<void> {
-      abort.abort()
-      cleanupListeners()
-      const id = handleId
-      handleId = null
-      if (id) {
-        try {
-          await connectorsWsClose(id)
-        } catch {
-          /* ignore */
-        }
-      }
-      pending.clear()
-    },
+    stop,
   }
 }

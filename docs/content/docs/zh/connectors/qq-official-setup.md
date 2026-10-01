@@ -1,11 +1,11 @@
 ---
 title: "QQ 官方机器人配置"
-description: "在 QQ 开放平台创建机器人，获取 App ID 与 Client Secret，通过 WebSocket 网关接入。"
+description: "在 QQ 开放平台创建机器人，获取 App ID 与 Client Secret，通过 HTTPS Webhook 接入。"
 ---
 
 # QQ 官方机器人配置指南
 
-本指南将引导你在 **QQ 开放平台** 创建一个官方授权的机器人、获取所需的 **App ID** 与 **Client Secret**，并配置 cognia-next 通过 WebSocket 网关接入。这是 QQ 官方认可的机器人通道，区别于非官方的 OneBot / NapCat 接入方式。
+本指南将引导你在 **QQ 开放平台** 创建一个官方授权的机器人、获取所需的 **App ID** 与 **Client Secret**，并配置 cognia-next 通过 HTTPS Webhook 接入。这是 QQ 官方认可的机器人通道，区别于非官方的 OneBot / NapCat 接入方式。
 
 ---
 
@@ -33,7 +33,9 @@ description: "在 QQ 开放平台创建机器人，获取 App ID 与 Client Secr
    - **Client Secret** —— 即开放平台的 **AppSecret**，cognia 用它换取访问令牌。
 4. 点击 **创建**。
 
-**App ID** 与 **Client Secret** 会加密存放在系统钥匙串中。适配器按需用它们向 `https://bots.qq.com/app/getAppAccessToken` 换取并缓存访问令牌，然后通过 `GET /gateway` 解析出 WebSocket 网关地址并建立长连接。与 Discord 类似，整个过程基于持久的 WebSocket 连接，**无需公网地址**。
+新配置默认选择 **HTTPS Webhook**。先保存适配器，再打开并复制回调 URL 到 QQ 开放平台。桌面端需要表单中显示的可访问 HTTPS 入口，本机回环地址不能直接作为公网回调。完成平台的回调验证和事件订阅。
+
+凭据加密存放在系统钥匙串，通过 `https://bots.qq.com/app/getAppAccessToken` 换取令牌。Webhook 模式的“测试凭据”只验证令牌获取，事件投递必须另行测试。可选网关兼容模式还会解析 `GET /gateway`；获取网关地址不代表已建立 WebSocket 会话。已有网关连接保留原模式。腾讯 [BotGo 指引](https://github.com/tencent-connect/botgo) 推荐 Webhook，仅在应用仍有网关权限时选择兼容模式。
 
 ---
 
@@ -56,5 +58,5 @@ description: "在 QQ 开放平台创建机器人，获取 App ID 与 Client Secr
 - **官方授权通道**：这是 QQ 官方认可的机器人接入方式，区别于非官方的 OneBot / NapCat 路径。如果你只是想以个人身份接入自己的 QQ，请参阅 [通过 OneBot 接入 QQ —— 常见问题](./qq-via-onebot-faq)。
 - **访问令牌自动刷新**：QQ 开放平台使用的是有时效的应用级访问令牌（约 2 小时过期），而非静态机器人令牌。适配器会按 (App ID, Client Secret) 缓存令牌，并在过期前约一分钟自动重新换取；网关 IDENTIFY 与每一次 REST 调用都共享该令牌（`Authorization: QQBot <access_token>`）。无需手动维护或轮换令牌。
 - **会话类型取决于开放平台开通的能力**：机器人能收发的会话类型（**频道** / **群** / **C2C**）取决于 QQ 开放平台为你的机器人开通的能力范围。cognia 默认订阅频道公开消息、群 / C2C 事件与私信事件，但只有平台已授予对应能力时，相关会话才会真正生效。
-- **网关连接与重连**：cognia 通过 WebSocket 网关接入，采用与 Discord 一致的连接协议（HELLO / IDENTIFY / 心跳 / RESUME）。连接中断时会自动以指数退避重连，并在可能时恢复会话（resume），无需人工干预。
+- **仅网关兼容模式：连接与重连**：cognia 通过 HTTPS Webhook 接入，采用与 Discord 一致的连接协议（HELLO / IDENTIFY / 心跳 / RESUME）。连接中断时会自动以指数退避重连，并在可能时恢复会话（resume），无需人工干预。
 - **消息能力范围**：当前适配器支持纯文本消息的接收与被动回复。QQ 的 Markdown 与互动按钮需在开放平台逐模板报备审核，因此暂不支持；助手发出的富文本 / 互动内容会自动降级为纯文本镜像后送出。

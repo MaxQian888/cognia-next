@@ -128,6 +128,7 @@ test("registerConfigSecrets hands every secret to the redactor", () => {
   assert.ok(redactor.labels.includes("discord.driverBotToken"))
   assert.ok(redactor.labels.includes("lark.driverAppSecret"))
   assert.ok(redactor.labels.includes("matrix.driverAccessToken"))
+  assert.ok(redactor.labels.includes("onebot.bearerToken"))
   assert.ok(redactor.labels.includes("fixtureToken"))
   assert.equal(
     redactor.redactString("boom: value-for-IM_LIVE_MATRIX_DRIVER_ACCESS_TOKEN"),
@@ -140,7 +141,7 @@ test("selectPlatforms refuses a partial `all` run unless it is opted into", () =
   assert.throws(() => selectPlatforms(config, { platform: "all" }), /not configured/)
   const relaxed = selectPlatforms(config, { platform: "all", allowUnconfigured: true })
   assert.deepEqual(relaxed.requested, PLATFORMS)
-  assert.deepEqual(relaxed.unconfigured, ["slack", "discord", "lark", "matrix"])
+  assert.deepEqual(relaxed.unconfigured, ["slack", "discord", "lark", "matrix", "onebot"])
 })
 
 test("selectPlatforms names the missing variables in its error", () => {
@@ -180,4 +181,10 @@ test("loadImLiveEnv treats an absent file as fine and a broken one as fatal", ()
       }),
     /failed to read bad\.env/
   )
+})
+
+test("Feishu requires separate target App ID and mention Open ID", () => {
+  const env = envFor("lark")
+  delete env.IM_LIVE_LARK_TARGET_APP_ID
+  assert.deepEqual(readConfig(env).platforms.lark.missing, ["IM_LIVE_LARK_TARGET_APP_ID"])
 })

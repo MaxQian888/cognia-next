@@ -21,6 +21,22 @@ jest.mock("@/lib/connectors/at-gate", () => ({
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
+const mockNumericReceipts = new Set<string>()
+jest.mock("@/lib/connectors/dedup", () => ({
+  isRecordedInbound: jest.fn(
+    async (adapter: string, id: string, namespace: string, scope: string) =>
+      mockNumericReceipts.has(JSON.stringify([adapter, id, namespace, scope]))
+  ),
+  recordAndCheckInbound: jest.fn(
+    async (adapter: string, id: string, namespace: string, scope: string) => {
+      const key = JSON.stringify([adapter, id, namespace, scope])
+      const fresh = !mockNumericReceipts.has(key)
+      mockNumericReceipts.add(key)
+      return fresh
+    }
+  ),
+}))
+
 type HttpResp = { status: number; headers: Record<string, string>; body: string }
 
 /** Build a ctx whose httpRequest routes by URL (getupdates vs sendmessage). */
@@ -83,6 +99,7 @@ const userMsg = (text: string, ctxToken = "ctx-1") => ({
 })
 
 beforeEach(() => {
+  mockNumericReceipts.clear()
   mockAttachmentRead.mockReset()
   mockAttachmentRead.mockResolvedValue(null)
   mockGate.mockClear()
@@ -570,6 +587,74 @@ describe("createWechatPersonalAdapter — numeric reply → callback short-circu
     jest.resetModules()
   })
 
+  it("retries the original callback before advancing the cursor and deduplicates its replay after restart", async () => {
+    const {
+      setNumericAction,
+      __resetNumericActionRegistryForTesting,
+      __peekNumericActionForTesting,
+    } = await import("./numeric-action-registry")
+    __resetNumericActionRegistryForTesting()
+    const conv = "wechat-personal:wx1:alice@im.wechat"
+    setNumericAction(conv, 1, "old-action")
+    const dispatch = jest.fn<Promise<"retry" | "terminal">, [{ triggerId: string }]>(
+      async (_event) => {
+        if (dispatch.mock.calls.length === 1) {
+          setNumericAction(conv, 1, "new-action")
+          return "retry"
+        }
+        return "terminal"
+      }
+    )
+    jest.doMock("@/lib/connectors/bus", () => ({
+      getBus: () => ({ dispatchConnectorCallback: dispatch }),
+    }))
+    const { createWechatPersonalAdapter: factory } = await import("./index")
+    const message = { ...userMsg("1"), message_id: "numeric-message" }
+    const emit = jest.fn()
+    let polls = 0
+    const { ctx, http } = makeCtx({
+      emit,
+      getUpdates: () =>
+        ++polls <= 3 ? { ret: 0, msgs: [message], get_updates_buf: "next-cursor" } : { ret: -14 },
+    })
+    const options = {
+      id: "wx1",
+      displayName: "Test",
+      token: async () => "synthetic",
+      _backoffBaseMs: 1,
+    }
+    const adapter = factory(options)
+    await adapter.start(ctx)
+    for (let i = 0; i < 40 && polls < 4; i++) await tick()
+    await adapter.stop()
+    expect(dispatch.mock.calls.map(([event]) => event.triggerId)).toEqual([
+      "old-action",
+      "old-action",
+    ])
+    const requests = http.mock.calls.map(([request]) =>
+      JSON.parse((request as unknown as { body: string }).body)
+    )
+    expect(requests[1].get_updates_buf).toBe("")
+    expect(requests[2].get_updates_buf).toBe("next-cursor")
+    expect(__peekNumericActionForTesting(conv, 1)).toBe("new-action")
+    expect(emit).not.toHaveBeenCalled()
+
+    // A fresh adapter still recognizes the durable message receipt, even
+    // when the same digit now names a different menu action.
+    let replays = 0
+    const restartedContext = makeCtx({
+      emit,
+      getUpdates: () => (++replays === 1 ? { ret: 0, msgs: [message] } : { ret: -14 }),
+    })
+    const restarted = factory(options)
+    await restarted.start(restartedContext.ctx)
+    for (let i = 0; i < 20 && replays < 2; i++) await tick()
+    await restarted.stop()
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(emit).not.toHaveBeenCalled()
+    jest.dontMock("@/lib/connectors/bus")
+  })
+
   it("dispatches a numeric reply through dispatchConnectorCallback when a binding is live", async () => {
     const { __resetNumericActionRegistryForTesting, setNumericAction } =
       await import("./numeric-action-registry")
@@ -577,7 +662,7 @@ describe("createWechatPersonalAdapter — numeric reply → callback short-circu
     const conv = "wechat-personal:wx1:alice@im.wechat"
     setNumericAction(conv, 1, "a2ui:s1:y:confirm")
 
-    const dispatchSpy = jest.fn(async (_e: unknown) => undefined)
+    const dispatchSpy = jest.fn(async (_e: unknown) => "terminal")
     jest.doMock("@/lib/connectors/bus", () => ({
       getBus: () => ({ dispatchConnectorCallback: dispatchSpy }),
     }))
@@ -617,7 +702,7 @@ describe("createWechatPersonalAdapter — numeric reply → callback short-circu
     const { __resetNumericActionRegistryForTesting } = await import("./numeric-action-registry")
     __resetNumericActionRegistryForTesting()
 
-    const dispatchSpy = jest.fn(async (_e: unknown) => undefined)
+    const dispatchSpy = jest.fn(async (_e: unknown) => "terminal")
     jest.doMock("@/lib/connectors/bus", () => ({
       getBus: () => ({ dispatchConnectorCallback: dispatchSpy }),
     }))

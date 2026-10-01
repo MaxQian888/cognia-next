@@ -44,7 +44,8 @@ export function extractLarkText(content) {
 }
 
 export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = Date.now }) {
-  const { driverAppId, driverAppSecret, targetChatId, targetBotOpenId, apiBase } = values
+  const { driverAppId, driverAppSecret, targetChatId, targetBotOpenId, targetAppId, apiBase } =
+    values
   const root = apiBase.replace(/\/+$/, "")
   let token = null
 
@@ -64,7 +65,10 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
     return token
   }
 
-  async function call(pathname, { method = "GET", body, expectJson = true } = {}) {
+  async function call(
+    pathname,
+    { method = "GET", body, expectJson = true, envelope = false } = {}
+  ) {
     const bearer = await tenantToken()
     const payload = await requestJson({
       url: `${root}${pathname}`,
@@ -82,7 +86,7 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
         `lark ${method} ${pathname} failed: ${payload.msg ?? "unknown"} (${payload.code})`
       )
     }
-    return payload?.data
+    return envelope ? payload : payload?.data
   }
 
   const textContent = (text) => JSON.stringify({ text })
@@ -102,24 +106,27 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
         return checks
       }
 
-      const info = await call("/bot/v3/info")
-      const openId = info?.bot?.open_id ?? ""
-      checks.push({
-        name: "driver identity",
-        ok: Boolean(openId),
-        detail: openId
-          ? `${info.bot.app_name ?? driverAppId} (${openId})`
-          : "the bot info call returned no open_id",
-      })
-
-      const distinct = openId !== String(targetBotOpenId)
-      checks.push({
-        name: "driver differs from target",
-        ok: distinct,
-        detail: distinct
-          ? `driver ${openId} ≠ target ${targetBotOpenId}`
-          : "driver and target are the same app — a Lark bot's own messages never come back as events",
-      })
+      try {
+        // Unlike IM APIs, bot info places `bot` at the envelope root.
+        const info = await call("/bot/v3/info", { envelope: true })
+        const openId = info?.bot?.open_id ?? ""
+        checks.push({
+          name: "driver identity",
+          ok: Boolean(openId),
+          detail: openId || "the bot info call returned no open_id",
+        })
+        const distinct =
+          Boolean(openId) && openId !== String(targetBotOpenId) && driverAppId !== targetAppId
+        checks.push({
+          name: "driver differs from target",
+          ok: distinct,
+          detail: distinct
+            ? `driver ${openId} ≠ target ${targetBotOpenId}`
+            : "driver and target are the same app or identity is unavailable — a Lark bot's own messages never come back as events",
+        })
+      } catch (error) {
+        checks.push({ name: "driver identity", ok: false, detail: error.message })
+      }
 
       try {
         const chat = await call(`/im/v1/chats/${encodeURIComponent(targetChatId)}`)
@@ -135,6 +142,23 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
           detail: `${error.message} — is the driver app a member of chat ${targetChatId}?`,
         })
       }
+      try {
+        await call(
+          `/im/v1/messages?${new URLSearchParams({ container_id_type: "chat", container_id: String(targetChatId), page_size: "1" })}`
+        )
+        checks.push({
+          name: "target history readable",
+          ok: true,
+          detail:
+            "Driver history access verified; target event subscriptions and include_bot scopes still require console verification.",
+        })
+      } catch (error) {
+        checks.push({
+          name: "target history readable",
+          ok: false,
+          detail: `${error.message} — check driver history permissions and im:message.group_msg.`,
+        })
+      }
       return checks
     },
 
@@ -143,7 +167,7 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
         platform: "lark",
         conversationId: String(targetChatId),
         // History is queried by a second-resolution time range.
-        extra: { startTimeSec: Math.floor(now() / 1000), seen: new Set() },
+        extra: { startTimeSec: Math.floor(now() / 1000), seen: new Set(), threadIds: new Set() },
       })
     },
 
@@ -157,6 +181,7 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
           uuid: idempotencyKey(marker),
         },
       })
+      if (sent.thread_id) lease.threadIds.add(sent.thread_id)
       lease.sentMessageIds.push(sent.message_id)
       return { messageId: sent.message_id, sentAt: Number(sent.create_time) || now() }
     },
@@ -169,30 +194,57 @@ export function createLarkDriver({ values, fetchImpl = fetch, timeoutMs, now = D
           body: { msg_type: "text", content: textContent(marker), uuid: idempotencyKey(marker) },
         }
       )
+      if (sent.thread_id) lease.threadIds.add(sent.thread_id)
       lease.sentMessageIds.push(sent.message_id)
       return { messageId: sent.message_id, sentAt: Number(sent.create_time) || now() }
     },
 
     async pollTargetMessages(lease) {
-      const query = new URLSearchParams({
-        container_id_type: "chat",
-        container_id: String(targetChatId),
-        start_time: String(lease.startTimeSec),
-        page_size: "50",
-        sort_type: "ByCreateTimeAsc",
-      })
-      const data = await call(`/im/v1/messages?${query}`)
+      const items = []
+      const readContainer = async (type, id) => {
+        const query = new URLSearchParams({
+          container_id_type: type,
+          container_id: id,
+          page_size: "50",
+          sort_type: "ByCreateTimeAsc",
+        })
+        if (type === "chat") query.set("start_time", String(lease.startTimeSec))
+        const tokens = new Set()
+        for (;;) {
+          const data = await call(`/im/v1/messages?${query}`)
+          items.push(...(data?.items ?? []))
+          for (const item of data?.items ?? []) {
+            if (item.thread_id) lease.threadIds.add(item.thread_id)
+          }
+          if (!data?.has_more) break
+          if (!data.page_token || tokens.has(data.page_token)) {
+            throw new Error("lark history pagination returned a missing or repeated page_token")
+          }
+          tokens.add(data.page_token)
+          query.set("page_token", data.page_token)
+        }
+      }
+      await readContainer("chat", String(targetChatId))
+      for (const threadId of lease.threadIds) await readContainer("thread", threadId)
+      // Commit dedup only after every page succeeds, so retrying a failed
+      // page cannot silently lose replies fetched before the failure.
       const fresh = []
-      for (const item of data?.items ?? []) {
-        if (lease.seen.has(item.message_id)) continue
+      for (const item of items) {
+        if (!item.message_id || lease.seen.has(item.message_id)) continue
         lease.seen.add(item.message_id)
-        if (String(item.sender?.id ?? "") !== String(targetBotOpenId)) continue
+        if (
+          item.sender?.sender_type !== "app" ||
+          item.sender?.id_type !== "app_id" ||
+          item.sender.id !== targetAppId
+        )
+          continue
+        if (Number(item.create_time) < lease.startTimeSec * 1000) continue
         fresh.push(
           observedReply({
             messageId: item.message_id,
             text: extractLarkText(item.body?.content),
             at: Number(item.create_time) || null,
-            threadId: item.parent_id ?? item.root_id ?? null,
+            threadId: item.thread_id ?? item.parent_id ?? item.root_id ?? null,
           })
         )
       }

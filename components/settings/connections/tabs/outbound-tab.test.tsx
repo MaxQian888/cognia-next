@@ -18,6 +18,7 @@ const mockDbDelete = jest.fn().mockResolvedValue(undefined)
 const mockBulkModify = jest.fn().mockResolvedValue(undefined)
 const mockDbGet = jest.fn().mockResolvedValue(undefined)
 const mockReplayDeadlettered = jest.fn().mockResolvedValue(undefined)
+const mockDeleteOutboundJob = jest.fn().mockResolvedValue(undefined)
 const mockAppendAudit = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/db/schema", () => ({
@@ -49,6 +50,7 @@ jest.mock("@/lib/db/schema", () => ({
 jest.mock("@/lib/db/outbound-jobs", () => ({
   __esModule: true,
   replayDeadlettered: (...a: unknown[]) => mockReplayDeadlettered(...(a as [string])),
+  deleteOutboundJob: (...a: unknown[]) => mockDeleteOutboundJob(...a),
 }))
 
 jest.mock("@/lib/connectors/audit", () => ({
@@ -307,8 +309,10 @@ describe("OutboundTab", () => {
     render(<OutboundTab />)
     fireEvent.click(screen.getByRole("button", { name: /cancel job-pending/i }))
     await waitFor(() => {
-      expect(mockDbDelete).toHaveBeenCalledWith("job-pending")
+      expect(mockDeleteOutboundJob).toHaveBeenCalledWith("job-pending")
     })
+    // The helper records the sync tombstone; a raw delete would not.
+    expect(mockDbDelete).not.toHaveBeenCalled()
   })
 
   it("filters to only pending jobs when 'pending' filter is pressed", async () => {

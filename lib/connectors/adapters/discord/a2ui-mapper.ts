@@ -15,13 +15,14 @@
  * Discord limits:
  *   - Each message: max 10 embeds, max 5 ActionRows
  *   - Each ActionRow: max 5 Buttons OR 1 SelectMenu
- *   - Button.custom_id: max 100 chars (no truncation needed in practice)
+ *   - Button.custom_id: max 100 chars (long identities use a stable digest)
  */
 
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import {
   buildActionId,
   recordCallbackBinding,
+  truncateActionId,
   walkA2UISurface,
   type A2UIWalkNode,
   bindingHintFields,
@@ -193,11 +194,10 @@ export async function buildDiscordA2UIPayload(
         const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
         const action = stringValue(node.raw.action) || node.id
         const fullId = buildActionId(input.surfaceId, node.id, action)
-        // The binding key MUST be the wire custom_id: the interaction echoes
-        // the (possibly truncated) wire id back and `resolveCallbackBinding`
-        // does an exact match — recording the untruncated fullId would break
-        // every >100-char binding (mirrors the modal path below).
-        const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
+        // Hash the entire identity when it exceeds Discord's limit; slicing
+        // the suffix discards the surface and can overwrite another binding.
+        // Persist the wire ID because interactions echo it verbatim.
+        const { wireId } = await truncateActionId(fullId, CUSTOM_ID_MAX)
         await recordCallbackBinding({
           adapterId: input.adapterId,
           actionId: wireId,
@@ -230,7 +230,7 @@ export async function buildDiscordA2UIPayload(
         const action = stringValue(node.raw.action) || node.id
         const fullId = buildActionId(input.surfaceId, node.id, action)
         // Same rule as Button: bind by the wire custom_id (exact-match lookup).
-        const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
+        const { wireId } = await truncateActionId(fullId, CUSTOM_ID_MAX)
         await recordCallbackBinding({
           adapterId: input.adapterId,
           actionId: wireId,
@@ -310,7 +310,7 @@ export async function buildDiscordA2UIPayload(
       modalInputs[0].label ||
       "Form"
     const fullId = buildActionId(input.surfaceId, modalComponentId, "submit")
-    const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
+    const { wireId } = await truncateActionId(fullId, CUSTOM_ID_MAX)
     buildDiscordModalData(wireId, { title, inputs: modalInputs })
     // One binding serves both hops: the trigger click (kind → modal_open) and
     // the modal submit (same custom_id echoed back on MODAL_SUBMIT).

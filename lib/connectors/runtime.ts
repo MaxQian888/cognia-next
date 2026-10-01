@@ -2166,7 +2166,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // goes out as its own interactive message.
         let larkGroups: MessageSegment[][] | undefined
         if (outboundTarget.deliveryTarget.address.platform === "lark") {
+          const presentationRow =
+            outboundTarget.adapterId === adapterRow.id
+              ? adapterRow
+              : await getAdapterInstance(outboundTarget.adapterId)
           const carded = withLarkResultCard(outboundSegments, {
+            presentation: presentationRow?.settings?.cardPresentation,
             status: "done",
             // The card's blockquote stands in for the platform reply-quote
             // only when quoting is off; a private chat never needs it.

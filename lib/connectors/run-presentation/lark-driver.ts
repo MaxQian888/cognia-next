@@ -1,3 +1,14 @@
+import {
+  DEFAULT_LARK_CARD_PRESENTATION,
+  normalizeLarkCardPresentation,
+  larkCardBodyStyle,
+  larkCardHeaderTheme,
+  larkCardConfigStyle,
+  larkCardHeaderExtras,
+  larkCardMarkdownStyle,
+  larkCardPanelStyle,
+  type LarkCardPresentation,
+} from "@/lib/connectors/adapters/lark/card-presentation"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { buildRunDetailsUrl } from "@/lib/connectors/entry/deep-links"
 import type {
@@ -38,7 +49,9 @@ export type LarkRunRequest = (method: LarkMethod, path: string, body: unknown) =
 const CARD_LIMIT_BYTES = 30_000
 const CARD_CREATED_AT_KEY = "cardCreatedAt"
 const SUMMARY_ELEMENT_ID = "run_summary"
+const STATUS_ELEMENT_ID = "run_status"
 const ACTIONS_ELEMENT_ID = "run_actions"
+const CARD_LAYOUT_VERSION = 2
 const MAX_MUTATION_ATTEMPTS = 3
 const MUTATION_SAFETY_VERSION = 1
 
@@ -46,8 +59,14 @@ interface PendingCardMutation {
   safetyVersion: typeof MUTATION_SAFETY_VERSION
   sequence: number
   uuid: string
-  operation: "stream_summary" | "update_actions" | "replace_card"
-  method: "PUT"
+  operation:
+    | "stream_summary"
+    | "update_summary"
+    | "update_status"
+    | "update_actions"
+    | "replace_card"
+    | "batch_update"
+  method: "PUT" | "POST"
   path: string
   body: Record<string, unknown>
 }
@@ -76,19 +95,25 @@ function isSafePendingMutation(
   if (!value || typeof value !== "object") return false
   const mutation = value as Partial<PendingCardMutation>
   const expectedPath =
-    mutation.operation === "stream_summary"
-      ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.summary}/content`
-      : mutation.operation === "update_actions"
-        ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.actions}`
-        : mutation.operation === "replace_card"
-          ? `/cardkit/v1/cards/${cardId}`
-          : undefined
+    mutation.operation === "batch_update"
+      ? `/cardkit/v1/cards/${cardId}/batch_update`
+      : mutation.operation === "stream_summary"
+        ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.summary}/content`
+        : mutation.operation === "update_summary"
+          ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.summary}`
+          : mutation.operation === "update_actions"
+            ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.actions}`
+            : mutation.operation === "update_status"
+              ? `/cardkit/v1/cards/${cardId}/elements/${STATUS_ELEMENT_ID}`
+              : mutation.operation === "replace_card"
+                ? `/cardkit/v1/cards/${cardId}`
+                : undefined
   return (
     mutation.safetyVersion === MUTATION_SAFETY_VERSION &&
     Number.isSafeInteger(mutation.sequence) &&
     typeof mutation.uuid === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/i.test(mutation.uuid) &&
-    mutation.method === "PUT" &&
+    mutation.method === (mutation.operation === "batch_update" ? "POST" : "PUT") &&
     mutation.path === expectedPath &&
     !!mutation.body &&
     typeof mutation.body === "object" &&
@@ -162,6 +187,7 @@ export interface LarkRunPresentationDriverOptions {
    * run. Pass `false` to disable the feature entirely.
    */
   cot?: boolean
+  presentation?: Partial<LarkCardPresentation>
 }
 
 // Shared with the generic fallback path, which registers the same verbs so
@@ -264,15 +290,16 @@ function cardJson(
   snapshot: RunProjectionSnapshot,
   streaming: boolean,
   webBase?: string | null,
-  cotActive = false
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
 ): Record<string, unknown> {
   const safeRunId = safeStableActivityId(snapshot.runId)
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
   const statusLabel = i18n.runStatus(snapshot.status)
-  const title = runTitleForPresentation(snapshot, i18n)
+  const title = presentation.title || runTitleForPresentation(snapshot, i18n)
   const actionLabel = zh ? ACTION_LABEL_ZH : ACTION_LABEL_EN
-  const details = summaryContent(snapshot, cotActive)
+  const details = summaryContent(snapshot, cotActive, presentation)
   const runUrl = buildRunDetailsUrl(safeRunId, webBase)
   const detailsUrl =
     runUrl && snapshot.workflowGraph
@@ -334,6 +361,8 @@ function cardJson(
     schema: "2.0",
     config: {
       update_multi: true,
+      ...larkCardConfigStyle(presentation),
+      width_mode: presentation.width,
       streaming_mode: streaming,
       summary: { content: `${title}: ${statusLabel}` },
       streaming_config: {
@@ -343,34 +372,46 @@ function cardJson(
       },
     },
     header: {
+      ...larkCardHeaderExtras(presentation),
       title: { tag: "plain_text", content: `${clamp(title, 180)} · ${statusLabel}` },
-      template:
+      template: larkCardHeaderTheme(
+        presentation,
         snapshot.status === "completed"
           ? "green"
           : snapshot.status === "failed"
             ? "red"
             : ["waiting", "paused", "recovery_required"].includes(snapshot.status)
               ? "orange"
-              : "blue",
+              : "blue"
+      ),
       padding: "12px 16px 12px 16px",
     },
     body: {
-      padding: "16px",
-      vertical_spacing: "12px",
+      ...larkCardBodyStyle(presentation),
       elements: [
+        ...(!cotActive ? [statusElement(snapshot, presentation)] : []),
         ...workflowElements(snapshot),
         // With a live COT message the process timeline renders there; the
         // panel collapses to a single summary element (same element_id, so
         // stream_summary mutations keep working). Without COT the collapsible
         // panel carries the full in-card timeline as before.
         cotActive
-          ? { tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID }
+          ? {
+              tag: "markdown",
+              ...larkCardMarkdownStyle(presentation),
+              content: details,
+              element_id: SUMMARY_ELEMENT_ID,
+            }
           : {
               tag: "collapsible_panel",
               element_id: "run_progress",
-              expanded: !snapshot.workflowGraph,
-              padding: "12px",
-              vertical_spacing: "12px",
+              expanded:
+                presentation.history === "expanded" ||
+                (presentation.history === "auto" &&
+                  !snapshot.workflowGraph &&
+                  !["completed", "cancelled"].includes(snapshot.status)),
+              ...larkCardBodyStyle(presentation),
+              ...larkCardPanelStyle(presentation),
               header: {
                 title: {
                   tag: "plain_text",
@@ -393,7 +434,14 @@ function cardJson(
                 icon_position: "right",
               },
               border: { color: "grey-200", corner_radius: "8px" },
-              elements: [{ tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID }],
+              elements: [
+                {
+                  tag: "markdown",
+                  ...larkCardMarkdownStyle(presentation),
+                  content: details,
+                  element_id: SUMMARY_ELEMENT_ID,
+                },
+              ],
             },
         ...(actions.length > 0
           ? [
@@ -417,18 +465,32 @@ function cardJson(
 /** Keep fallback edits on the same Card 2.0 schema as native messages. */
 export function buildLarkRunFallbackSegment(
   snapshot: RunProjectionSnapshot,
-  webBase?: string | null
+  webBase?: string | null,
+  preferences?: unknown
 ): MessageSegment {
-  return { type: "card", card: { kind: "lark", payload: cardJson(snapshot, false, webBase) } }
+  return {
+    type: "card",
+    card: {
+      kind: "lark",
+      payload: cardJson(
+        snapshot,
+        false,
+        webBase,
+        false,
+        normalizeLarkCardPresentation(preferences)
+      ),
+    },
+  }
 }
 
 function serializeCard(
   snapshot: RunProjectionSnapshot,
   streaming: boolean,
   webBase?: string | null,
-  cotActive = false
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
 ): string {
-  let json = JSON.stringify(cardJson(snapshot, streaming, webBase, cotActive))
+  let json = JSON.stringify(cardJson(snapshot, streaming, webBase, cotActive, presentation))
   if (new TextEncoder().encode(json).byteLength <= CARD_LIMIT_BYTES) return json
   json = JSON.stringify(
     cardJson(
@@ -441,7 +503,8 @@ function serializeCard(
       },
       streaming,
       webBase,
-      cotActive
+      cotActive,
+      presentation
     )
   )
   if (new TextEncoder().encode(json).byteLength > CARD_LIMIT_BYTES) {
@@ -450,7 +513,38 @@ function serializeCard(
   return json
 }
 
-function summaryContent(snapshot: RunProjectionSnapshot, cotActive = false): string {
+function summaryContent(
+  snapshot: RunProjectionSnapshot,
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
+): string {
+  if (cotActive) return statusContent(snapshot, true, presentation)
+  // Keep elapsed time outside this element: heartbeats must not rewrite the
+  // process history or disrupt the reader's position in the expanded panel.
+  return formatRunActivityTimeline(snapshot, resolveActivityI18n(snapshot.locale))
+    .split("\n")
+    .slice(presentation.showProgress ? 1 : 2)
+    .filter((line) => line !== "│")
+    .join("\n\n")
+}
+
+function statusElement(
+  snapshot: RunProjectionSnapshot,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
+): Record<string, unknown> {
+  return {
+    tag: "markdown",
+    element_id: STATUS_ELEMENT_ID,
+    ...larkCardMarkdownStyle(presentation),
+    content: statusContent(snapshot, false, presentation),
+  }
+}
+
+function statusContent(
+  snapshot: RunProjectionSnapshot,
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
+): string {
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
   const escape = (value: string) =>
@@ -466,34 +560,22 @@ function summaryContent(snapshot: RunProjectionSnapshot, cotActive = false): str
       ? "■".repeat(Math.round(Math.max(0, Math.min(1, ratio)) * 10)) +
         "□".repeat(10 - Math.round(Math.max(0, Math.min(1, ratio)) * 10))
       : undefined
-  const overview = `**${i18n.runStatus(snapshot.status)}** · ${zh ? "用时" : "Elapsed"} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}`
+  const overview = `**${i18n.runStatus(snapshot.status)}**${presentation.showElapsed ? ` · ${zh ? "用时" : "Elapsed"} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}` : ""}`
   const waiting = snapshot.pendingInterrupt
     ? `**${zh ? "需要你的操作" : "Your action is needed"}**\n${zh ? "请使用下方按钮批准或拒绝，再继续执行。" : "Use the controls below to approve or deny before execution continues."}`
     : undefined
   const artifacts =
-    snapshot.artifacts.length > 0
+    presentation.showArtifacts && snapshot.artifacts.length > 0
       ? `**${zh ? "产物" : "Artifacts"} · ${snapshot.artifacts.length}**\n` +
         snapshot.artifacts
           .slice(0, 5)
           .map((artifact) => `▣ ${safeLabel(artifact.title, "Artifact")}`)
           .join("\n")
       : undefined
-  // Reuse the sanitized public timeline; raw tool payloads and errors are not
-  // presentation data. The same element updates in place on every revision.
-  // With a live COT the timeline lives in that message — the summary keeps a
-  // pointer line instead of duplicating the process inside the card.
-  const timeline = cotActive
-    ? undefined
-    : formatRunActivityTimeline(snapshot, i18n)
-        .split("\n")
-        .slice(1)
-        .filter((line) => line !== "│")
-        .join("\n\n")
   return [
     overview,
-    bar,
+    presentation.showProgress ? bar : undefined,
     waiting,
-    timeline,
     artifacts,
     followUpHintLine(buildFollowUpItems(snapshot), zh),
     cotActive ? i18n.cotProcessInline : undefined,
@@ -505,9 +587,10 @@ function summaryContent(snapshot: RunProjectionSnapshot, cotActive = false): str
 function actionsElement(
   snapshot: RunProjectionSnapshot,
   webBase?: string | null,
-  cotActive = false
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
 ): Record<string, unknown> {
-  const card = cardJson(snapshot, true, webBase, cotActive) as {
+  const card = cardJson(snapshot, true, webBase, cotActive, presentation) as {
     body: { elements: Array<Record<string, unknown> & { element_id?: string }> }
   }
   return (
@@ -517,6 +600,39 @@ function actionsElement(
       element_id: ACTIONS_ELEMENT_ID,
     }
   )
+}
+
+/** Only acknowledged, rendered content participates in no-op detection. */
+function renderedContent(
+  snapshot: RunProjectionSnapshot,
+  webBase?: string | null,
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
+): Record<Exclude<PendingCardMutation["operation"], "batch_update">, string> {
+  return {
+    stream_summary: deterministicUuid(summaryContent(snapshot, cotActive, presentation)),
+    update_summary: deterministicUuid(
+      JSON.stringify({
+        tag: "markdown",
+        element_id: SUMMARY_ELEMENT_ID,
+        ...larkCardMarkdownStyle(presentation),
+        content: summaryContent(snapshot, cotActive, presentation),
+      })
+    ),
+    update_status: deterministicUuid(JSON.stringify(statusElement(snapshot, presentation))),
+    update_actions: deterministicUuid(
+      JSON.stringify(actionsElement(snapshot, webBase, cotActive, presentation))
+    ),
+    replace_card: deterministicUuid(
+      serializeCard(
+        snapshot,
+        ["running", "queued"].includes(snapshot.status),
+        webBase,
+        cotActive,
+        presentation
+      )
+    ),
+  }
 }
 
 const followUpItems = buildFollowUpItems
@@ -575,6 +691,7 @@ export function createLarkRunPresentationDriver(
 ): RunPresentationDriver {
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   const now = options.now ?? Date.now
+  const presentation = normalizeLarkCardPresentation(options.presentation)
   const cot = options.cot === false ? undefined : createLarkCotClient(request, { sleep, now })
 
   async function react(
@@ -768,7 +885,7 @@ export function createLarkRunPresentationDriver(
     snapshot: RunProjectionSnapshot,
     checkpoint?: (ref: RunPresentationRef) => Promise<void>
   ): Promise<RunPresentationRef> {
-    if (!cot) return ref
+    if (!cot || presentation.processMode === "card") return ref
     const existing = cotOpaqueState(ref)
     if (existing?.status === "disabled") return ref
     if (existing?.status === "active") {
@@ -939,7 +1056,13 @@ export function createLarkRunPresentationDriver(
     const cotActive = cotOpaqueState(previousRef)?.status === "active"
     const created = (await request("POST", "/cardkit/v1/cards", {
       type: "card_json",
-      data: serializeCard(snapshot, true, options.webEntryBaseUrl, cotActive),
+      data: serializeCard(
+        snapshot,
+        ["running", "queued"].includes(snapshot.status),
+        options.webEntryBaseUrl,
+        cotActive,
+        presentation
+      ),
       uuid: pendingCreate.uuid,
     })) as { data?: { card_id?: string } }
     const cardId = created.data?.card_id
@@ -956,6 +1079,14 @@ export function createLarkRunPresentationDriver(
         presentedStatus: snapshot.status,
         presentedGraph: graphSignature(snapshot),
         presentedCot: cotActive,
+        presentedLayout: CARD_LAYOUT_VERSION,
+        presentedPreferences: JSON.stringify(presentation),
+        presentedContent: renderedContent(
+          snapshot,
+          options.webEntryBaseUrl,
+          cotActive,
+          presentation
+        ),
         pendingCreate: undefined,
       },
     }
@@ -987,61 +1118,142 @@ export function createLarkRunPresentationDriver(
     if (now() - current.cardCreatedAt >= 14 * 24 * 60 * 60 * 1_000) {
       return openCard(current.target, snapshot, checkpoint, carryCot)
     }
+    const previousContent = ref.opaqueState?.presentedContent as Record<string, string> | undefined
+    const rendered: Record<string, string> = {}
+    let batchElements: Array<{
+      operation: "update_status" | "update_summary" | "update_actions"
+      element: Record<string, unknown>
+    }> = []
+    if (operation === "batch_update") {
+      if (!cotActive) {
+        batchElements.push({
+          operation: "update_status",
+          element: statusElement(snapshot, presentation),
+        })
+      }
+      if (!["running", "queued"].includes(snapshot.status)) {
+        batchElements.push({
+          operation: "update_summary",
+          element: {
+            tag: "markdown",
+            element_id: current.elementIds.summary,
+            ...larkCardMarkdownStyle(presentation),
+            content: summaryContent(snapshot, cotActive, presentation),
+          },
+        })
+      }
+      if (snapshot.allowedActions.length > 0) {
+        batchElements.push({
+          operation: "update_actions",
+          element: actionsElement(snapshot, options.webEntryBaseUrl, cotActive, presentation),
+        })
+      }
+      batchElements = batchElements.filter(({ operation: part, element }) => {
+        rendered[part] = deterministicUuid(JSON.stringify(element))
+        return previousContent?.[part] !== rendered[part]
+      })
+      // Keep single-element updates cheap, but always reconcile a persisted
+      // batch before deriving any fresh mutation from the latest snapshot.
+      if (!current.pendingMutation && batchElements.length < 2) {
+        return batchElements.length === 0
+          ? ref
+          : mutate(ref, snapshot, batchElements[0].operation, checkpoint)
+      }
+    }
     const sequence = current.lastAcknowledgedSequence + 1
     const mutationUuid = (kind: string) =>
       deterministicUuid(`card-mutation:${snapshot.runId}:${sequence}:${kind}`)
     const desired: PendingCardMutation =
-      operation === "stream_summary"
+      operation === "batch_update"
         ? {
             safetyVersion: MUTATION_SAFETY_VERSION,
             sequence,
-            uuid: mutationUuid("summary"),
+            uuid: mutationUuid("batch"),
             operation,
-            method: "PUT",
-            path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.summary}/content`,
+            method: "POST",
+            path: `/cardkit/v1/cards/${current.cardId}/batch_update`,
             body: {
-              content: summaryContent(snapshot, cotActive),
+              actions: JSON.stringify(
+                batchElements.map(({ element }) => ({
+                  action: "update_element",
+                  params: { element_id: element.element_id, element },
+                }))
+              ),
               sequence,
-              uuid: mutationUuid("summary"),
+              uuid: mutationUuid("batch"),
             },
           }
-        : operation === "update_actions"
+        : operation === "stream_summary"
           ? {
               safetyVersion: MUTATION_SAFETY_VERSION,
               sequence,
-              uuid: mutationUuid("actions"),
+              uuid: mutationUuid("summary"),
               operation,
               method: "PUT",
-              path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.actions}`,
+              path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.summary}/content`,
               body: {
-                element: JSON.stringify(
-                  actionsElement(snapshot, options.webEntryBaseUrl, cotActive)
-                ),
+                content: summaryContent(snapshot, cotActive, presentation),
                 sequence,
-                uuid: mutationUuid("actions"),
+                uuid: mutationUuid("summary"),
               },
             }
-          : {
-              safetyVersion: MUTATION_SAFETY_VERSION,
-              sequence,
-              uuid: mutationUuid("replace"),
-              operation,
-              method: "PUT",
-              path: `/cardkit/v1/cards/${current.cardId}`,
-              body: {
-                card: {
-                  type: "card_json",
-                  data: serializeCard(
-                    snapshot,
-                    snapshot.status === "running" || snapshot.status === "queued",
-                    options.webEntryBaseUrl,
-                    cotActive
+          : operation === "update_actions" ||
+              operation === "update_status" ||
+              operation === "update_summary"
+            ? {
+                safetyVersion: MUTATION_SAFETY_VERSION,
+                sequence,
+                uuid: mutationUuid(operation),
+                operation,
+                method: "PUT",
+                path: `/cardkit/v1/cards/${current.cardId}/elements/${operation === "update_status" ? STATUS_ELEMENT_ID : operation === "update_summary" ? current.elementIds.summary : current.elementIds.actions}`,
+                body: {
+                  element: JSON.stringify(
+                    operation === "update_status"
+                      ? statusElement(snapshot, presentation)
+                      : operation === "update_summary"
+                        ? {
+                            tag: "markdown",
+                            element_id: current.elementIds.summary,
+                            ...larkCardMarkdownStyle(presentation),
+                            content: summaryContent(snapshot, cotActive, presentation),
+                          }
+                        : actionsElement(snapshot, options.webEntryBaseUrl, cotActive, presentation)
                   ),
+                  sequence,
+                  uuid: mutationUuid(operation),
                 },
+              }
+            : {
+                safetyVersion: MUTATION_SAFETY_VERSION,
                 sequence,
                 uuid: mutationUuid("replace"),
-              },
-            }
+                operation,
+                method: "PUT",
+                path: `/cardkit/v1/cards/${current.cardId}`,
+                body: {
+                  card: {
+                    type: "card_json",
+                    data: serializeCard(
+                      snapshot,
+                      snapshot.status === "running" || snapshot.status === "queued",
+                      options.webEntryBaseUrl,
+                      cotActive,
+                      presentation
+                    ),
+                  },
+                  sequence,
+                  uuid: mutationUuid("replace"),
+                },
+              }
+    const content = deterministicUuid(
+      operation === "replace_card"
+        ? (desired.body.card as { data: string }).data
+        : String(desired.body.content ?? desired.body.element ?? desired.body.actions)
+    )
+    // An ambiguous request must be reconciled even if its desired content is
+    // already on screen. Advancing the checkpoint is part of delivery.
+    if (!current.pendingMutation && previousContent?.[operation] === content) return ref
     const pending = current.pendingMutation ?? desired
     const pendingRef: RunPresentationRef = {
       ...ref,
@@ -1051,7 +1263,10 @@ export function createLarkRunPresentationDriver(
     try {
       await requestMutation(pending)
     } catch (error) {
-      if (errorCode(error) === 300309 && pending.operation === "stream_summary") {
+      if (
+        [300309, 200850].includes(errorCode(error) ?? -1) &&
+        pending.operation === "stream_summary"
+      ) {
         // Streaming may already be closed on a persisted/recovered card.
         // Retire the rejected operation and repair this SAME card with JSON 2.0.
         return mutate(
@@ -1060,6 +1275,7 @@ export function createLarkRunPresentationDriver(
             opaqueState: {
               ...ref.opaqueState,
               pendingMutation: undefined,
+              presentedContent: undefined,
               lastAcknowledgedSequence: pending.sequence,
             },
           },
@@ -1073,16 +1289,34 @@ export function createLarkRunPresentationDriver(
       }
       throw error
     }
+    const matchesDesired =
+      pending.operation === desired.operation &&
+      JSON.stringify(pending.body) === JSON.stringify(desired.body)
     const acknowledged: RunPresentationRef = {
       ...ref,
       opaqueState: {
         ...ref.opaqueState,
         lastAcknowledgedSequence: pending.sequence,
+        presentedContent: matchesDesired
+          ? operation === "replace_card"
+            ? renderedContent(snapshot, options.webEntryBaseUrl, cotActive, presentation)
+            : operation === "batch_update"
+              ? {
+                  ...previousContent,
+                  replace_card: undefined,
+                  ...Object.fromEntries(
+                    batchElements.map(({ operation: part }) => [part, rendered[part]])
+                  ),
+                }
+              : { ...previousContent, replace_card: undefined, [operation]: content }
+          : undefined,
         ...(pending.operation === "replace_card"
           ? {
-              presentedStatus: snapshot.status,
-              presentedGraph: graphSignature(snapshot),
-              presentedCot: cotActive,
+              presentedStatus: matchesDesired ? snapshot.status : undefined,
+              presentedGraph: matchesDesired ? graphSignature(snapshot) : undefined,
+              presentedCot: matchesDesired ? cotActive : undefined,
+              presentedLayout: matchesDesired ? CARD_LAYOUT_VERSION : undefined,
+              presentedPreferences: matchesDesired ? JSON.stringify(presentation) : undefined,
             }
           : {}),
         pendingMutation: undefined,
@@ -1090,10 +1324,7 @@ export function createLarkRunPresentationDriver(
       },
     }
     await checkpoint?.(acknowledged)
-    if (
-      pending.operation !== desired.operation ||
-      JSON.stringify(pending.body) !== JSON.stringify(desired.body)
-    ) {
+    if (!matchesDesired) {
       return mutate(acknowledged, snapshot, operation, checkpoint)
     }
     return acknowledged
@@ -1145,7 +1376,8 @@ export function createLarkRunPresentationDriver(
       ref = await syncCot(ref, snapshot, mutationOptions?.checkpoint)
       const current = state(ref)
       if (
-        !["running", "queued"].includes(snapshot.status) ||
+        ref.opaqueState?.presentedLayout !== CARD_LAYOUT_VERSION ||
+        ref.opaqueState?.presentedPreferences !== JSON.stringify(presentation) ||
         current.hasActions !== snapshot.allowedActions.length > 0 ||
         ref.opaqueState?.presentedStatus !== snapshot.status ||
         (ref.opaqueState?.presentedGraph ?? "") !== graphSignature(snapshot) ||
@@ -1155,9 +1387,22 @@ export function createLarkRunPresentationDriver(
       ) {
         return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
       }
-      const streamed = await mutate(ref, snapshot, "stream_summary", mutationOptions?.checkpoint)
-      if (snapshot.allowedActions.length === 0) return streamed
-      return mutate(streamed, snapshot, "update_actions", mutationOptions?.checkpoint)
+      if (current.pendingMutation) {
+        // Resume the original operation first so a successfully replayed batch
+        // retains its per-component acknowledgement cache across restarts.
+        ref = await mutate(
+          ref,
+          snapshot,
+          current.pendingMutation.operation,
+          mutationOptions?.checkpoint
+        )
+      }
+      if (["running", "queued"].includes(snapshot.status)) {
+        // Streaming content requires its dedicated API. All other component
+        // changes share one batch, sequenced after the stream acknowledgement.
+        ref = await mutate(ref, snapshot, "stream_summary", mutationOptions?.checkpoint)
+      }
+      return mutate(ref, snapshot, "batch_update", mutationOptions?.checkpoint)
     },
     async finish(ref, snapshot, mutationOptions) {
       ref = await ensureFollowUpControl(

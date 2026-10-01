@@ -20,6 +20,7 @@ import {
   unclaimSending,
   recoverStaleSendingJobs,
   sweepTerminalOutboundRows,
+  deleteOutboundJob,
   findDeliveredByIdempotencyKey,
   findOlderActiveOutboundSibling,
   findNextActiveOutboundSibling,
@@ -711,6 +712,30 @@ describe("outbound-jobs", () => {
       expect(remaining).toEqual(["old-failed", "old-pending", "young-sent"])
     })
 
+    it("tombstones every swept id and none of the kept ones", async () => {
+      await getDb().syncTombstones.clear()
+      const now = Date.now()
+      const old = now - OUTBOUND_TERMINAL_RETENTION_MS - 1_000
+      await seedRow("old-sent", "sent", old)
+      await seedRow("old-dead", "deadlettered", old)
+      await seedRow("old-pending", "pending", old)
+      await seedRow("young-sent", "sent", now - 60_000)
+
+      expect(await sweepTerminalOutboundRows({ now })).toBe(2)
+
+      const tombs = await getDb().syncTombstones.where("table").equals("outboundQueue").toArray()
+      expect(tombs.map((t) => t.id).sort()).toEqual(["old-dead", "old-sent"])
+      // The sweep stamps its own clock on the tombstones.
+      expect(tombs.every((t) => t.deletedAt === now)).toBe(true)
+    })
+
+    it("records no tombstones when nothing is swept", async () => {
+      await getDb().syncTombstones.clear()
+      await seedRow("young-sent", "sent", Date.now() - 60_000)
+      expect(await sweepTerminalOutboundRows()).toBe(0)
+      expect(await getDb().syncTombstones.where("table").equals("outboundQueue").count()).toBe(0)
+    })
+
     it("caps one run at batchLimit and reports the deleted count", async () => {
       const now = Date.now()
       const old = now - OUTBOUND_TERMINAL_RETENTION_MS - 1_000
@@ -724,6 +749,30 @@ describe("outbound-jobs", () => {
 
     it("returns 0 on an empty / all-young table", async () => {
       expect(await sweepTerminalOutboundRows()).toBe(0)
+    })
+  })
+
+  describe("deleteOutboundJob", () => {
+    it("removes the row and records an outboundQueue sync tombstone", async () => {
+      await getDb().syncTombstones.clear()
+      const job = await enqueue({
+        adapterId: "adp_del",
+        conversationKey: "c_del",
+        request: makeRequest(),
+      })
+      const keep = await enqueue({
+        adapterId: "adp_del",
+        conversationKey: "c_keep",
+        request: makeRequest(),
+      })
+
+      await deleteOutboundJob(job.id)
+
+      expect(await getDb().outboundQueue.get(job.id)).toBeUndefined()
+      expect(await getDb().outboundQueue.get(keep.id)).toBeDefined()
+      const tombs = await getDb().syncTombstones.where("table").equals("outboundQueue").toArray()
+      expect(tombs.map((t) => t.id)).toEqual([job.id])
+      expect(tombs[0]?.deletedAt).toEqual(expect.any(Number))
     })
   })
 

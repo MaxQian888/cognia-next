@@ -1,4 +1,4 @@
-import { LARK_CAPS } from "./capability"
+import { LARK_CAPS, LARK_A2UI_CAPABILITY } from "./capability"
 
 describe("LARK_CAPS", () => {
   it("contains all expected Phase-1 capabilities plus send.a2ui", () => {
@@ -11,6 +11,7 @@ describe("LARK_CAPS", () => {
       "rich-card.lark",
       "send.a2ui",
       "send.card",
+      "send.ephemeral",
       "send.file",
       "send.image",
       "send.markdown",
@@ -46,4 +47,19 @@ describe("LARK_CAPS", () => {
     const unique = new Set(LARK_CAPS)
     expect(unique.size).toBe(LARK_CAPS.length)
   })
+})
+
+it("declares implemented Card 2.0 controls without claiming full table interactions", () => {
+  for (const kind of [
+    "Checkbox",
+    "TextArea",
+    "DateTimePicker",
+    "FormGroup",
+    "Collapsible",
+  ] as const) {
+    expect(LARK_A2UI_CAPABILITY[kind]).toBe("native")
+  }
+  expect(LARK_A2UI_CAPABILITY.Table).toBe("simulated")
+  expect(LARK_A2UI_CAPABILITY.Chart).toBe("simulated")
+  expect(LARK_A2UI_CAPABILITY.Dialog).toBe("simulated")
 })

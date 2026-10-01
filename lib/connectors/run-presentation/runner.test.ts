@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 import { createSlackRunPresentationDriver } from "./slack-driver"
 
 import {
@@ -11,6 +12,8 @@ import {
   resolveFallbackDeliveryMode,
   shouldDeliverFallbackUpdate,
   waitForExecutionRunPresentationFreeze,
+  startExecutionRunPresentationRunner,
+  __resetExecutionRunPresentationRunnerForTesting,
 } from "./runner"
 import type {
   ExecutionRunBinding,
@@ -59,6 +62,41 @@ const snapshot: RunProjectionSnapshot = {
   artifacts: [],
   allowedActions: ["stop"],
 }
+
+describe("run presentation refresh scheduling", () => {
+  afterEach(() => {
+    __resetExecutionRunPresentationRunnerForTesting()
+    jest.restoreAllMocks()
+    jest.useRealTimers()
+  })
+
+  it.each(["waiting", "completed"] as const)(
+    "does not delay %s behind a coalesced progress refresh",
+    async (status) => {
+      jest.useFakeTimers()
+      let next!: (
+        rows: Array<{ binding: ExecutionRunBinding; snapshot: RunProjectionSnapshot }>
+      ) => void
+      jest.spyOn(Dexie, "liveQuery").mockReturnValue({
+        subscribe: (observer: { next: typeof next }) => {
+          next = observer.next
+          return { unsubscribe: jest.fn() }
+        },
+      } as unknown as ReturnType<typeof Dexie.liveQuery>)
+      const read = jest.spyOn(getDb().executionRunBindings, "get").mockResolvedValue(undefined)
+      startExecutionRunPresentationRunner()
+      const projectedBinding = { ...binding, lastProjectedRevision: 1 }
+      next([{ binding: projectedBinding, snapshot }])
+      await jest.advanceTimersByTimeAsync(100)
+      expect(read).not.toHaveBeenCalled()
+      next([{ binding: projectedBinding, snapshot: { ...snapshot, revision: 3, status } }])
+      await jest.advanceTimersByTimeAsync(1)
+      expect(read).toHaveBeenCalledTimes(1)
+      await jest.advanceTimersByTimeAsync(2_000)
+      expect(read).toHaveBeenCalledTimes(1)
+    }
+  )
+})
 
 describe("execution run presentation projection", () => {
   it("falls back to the command channel when no replyable Slack message exists", async () => {

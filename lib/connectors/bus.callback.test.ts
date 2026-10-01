@@ -106,6 +106,29 @@ beforeEach(async () => {
 }, 30_000)
 
 describe("ConnectorBus.dispatchConnectorCallback", () => {
+  it("keeps a concurrent duplicate retryable until the active callback finishes", async () => {
+    const bus = getBus()
+    let entered!: () => void
+    let finish!: () => void
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    bus.callbackHandler = jest.fn(async () => {
+      entered()
+      await pending
+    })
+    const first = bus.dispatchConnectorCallback(makeEvent())
+    await started
+    await expect(bus.dispatchConnectorCallback(makeEvent())).resolves.toBe("retry")
+    finish()
+    await expect(first).resolves.toBe("terminal")
+    await expect(bus.dispatchConnectorCallback(makeEvent())).resolves.toBe("terminal")
+    expect(bus.callbackHandler).toHaveBeenCalledTimes(1)
+  })
+
   it("calls the handler and writes a callback.received audit row", async () => {
     const bus = getBus()
     const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
@@ -255,7 +278,9 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
       .mockImplementationOnce(() => {
         throw new Error("dexie hiccup")
       })
-    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    await expect(
+      bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    ).resolves.toBe("retry")
     whereSpy.mockRestore()
 
     // The click was NOT processed and NOT consumed.
@@ -266,11 +291,15 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
     ).toBe(true)
 
     // Platform redelivery of the SAME triggerId now goes through.
-    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    await expect(
+      bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    ).resolves.toBe("terminal")
     expect(handler).toHaveBeenCalledTimes(1)
 
     // And a THIRD delivery is deduped (the success committed the ledger).
-    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    await expect(
+      bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    ).resolves.toBe("terminal")
     expect(handler).toHaveBeenCalledTimes(1)
   })
 

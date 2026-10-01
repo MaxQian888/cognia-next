@@ -5,6 +5,7 @@
 import {
   upsertByConversationKey,
   readForResolution,
+  deleteByConversationKey,
   patchConversationOverride,
   updateConversationConfigSection,
   setPinned,
@@ -71,6 +72,37 @@ describe("conversation-overrides", () => {
 
   it("readForResolution returns undefined for unknown key", async () => {
     expect(await readForResolution("unknown:key")).toBeUndefined()
+  })
+
+  it("deleteByConversationKey removes the row and tombstones its id for paired clients", async () => {
+    const row = await upsertByConversationKey(baseInput())
+    const other = await upsertByConversationKey({
+      ...baseInput(),
+      conversationKey: "telegram:adp_1:chat_456",
+    })
+
+    expect(await deleteByConversationKey(row.conversationKey)).toBe(true)
+
+    expect(await readForResolution(row.conversationKey)).toBeUndefined()
+    expect(await readForResolution(other.conversationKey)).toBeDefined()
+    const tombstones = await getDb()
+      .syncTombstones.where("table")
+      .equals("conversationOverrides")
+      .toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        table: "conversationOverrides",
+        id: row.id,
+        deletedAt: expect.any(Number),
+      }),
+    ])
+  })
+
+  it("deleteByConversationKey is a no-op without a tombstone for an unknown key", async () => {
+    expect(await deleteByConversationKey("unknown:key")).toBe(false)
+    expect(
+      await getDb().syncTombstones.where("table").equals("conversationOverrides").count()
+    ).toBe(0)
   })
 
   describe("patchConversationOverride", () => {

@@ -2817,6 +2817,20 @@ describe("installRuntime — ai-run Lark result card", () => {
     return seg.card.payload as CardPayload
   }
 
+  it("uses the persisted card preferences when queueing a final reply", async () => {
+    await seedLark({
+      settings: {
+        cardPresentation: { title: "Release", theme: "purple", width: "fill", showFooter: false },
+      },
+    })
+    await callHandler(larkEvent(), "ai-run")
+    const [job] = await getDb().outboundQueue.toArray()
+    const payload = cardPayloadOf(job)
+    expect(payload.header).toMatchObject({ title: { content: "Release" }, template: "purple" })
+    expect(payload.config?.width_mode).toBe("fill")
+    expect(payload.body?.elements.some((el) => el.element_id === "footer")).toBe(false)
+  })
+
   it("ships the completed answer as a standalone Card 2.0 segment", async () => {
     await seedLark({ settings: { webEntryBaseUrl: "https://app.example.com" } })
     await callHandler(larkEvent(), "ai-run")
@@ -2835,9 +2849,7 @@ describe("installRuntime — ai-run Lark result card", () => {
     expect(md).toContain("Hello back from Claude!")
 
     // Footer: initiator at-mention + run-details link + elapsed readout.
-    const note = elements.find((el) => el.tag === "note") as
-      { elements: { content: string }[] } | undefined
-    const footer = note?.elements[0]?.content ?? ""
+    const footer = String(elements.find((el) => el.element_id === "footer")?.content ?? "")
     expect(footer).toContain("<at id=ou_alice></at>")
     expect(footer).toContain("https://app.example.com/agent-runs?run=")
     expect(footer).toContain("耗时")

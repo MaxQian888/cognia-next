@@ -21,6 +21,7 @@ import { createDiscordAdapter } from "./adapters/discord"
 import { fetchDiscordBotUser } from "./whoami/discord-whoami"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
+import { normalizeLarkCardPresentation } from "./adapters/lark/card-presentation"
 import { createOneBotAdapter } from "./adapters/onebot"
 import { createWeComAdapter } from "./adapters/wecom"
 import type { WeComAdapterSettings } from "./adapters/wecom/welcome"
@@ -312,6 +313,7 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
     sendAsUser: settings.sendAsUser === true,
     replyInThread: settings.replyInThread !== false,
     webEntryBaseUrl: resolveWebEntryBase(row),
+    cardPresentation: normalizeLarkCardPresentation(settings.cardPresentation),
     transport,
   })
 }

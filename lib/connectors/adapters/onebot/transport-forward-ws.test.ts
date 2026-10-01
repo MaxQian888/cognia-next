@@ -132,6 +132,38 @@ describe("createForwardWsTransport", () => {
     await transport.stop()
   })
 
+  it("does not settle a call from an echo-carrying frame that is not a response", async () => {
+    const bus = createBus()
+    mockListen.mockImplementation(bus.impl)
+    mockWsOpen.mockResolvedValue("h1")
+    mockWsSend.mockImplementation(async (_id: string, data: string) => {
+      const call = JSON.parse(data) as { echo: string }
+      setTimeout(() => {
+        bus.trigger(
+          "connectors://ws/h1/message",
+          JSON.stringify({ post_type: "meta_event", echo: call.echo })
+        )
+        bus.trigger(
+          "connectors://ws/h1/message",
+          JSON.stringify({ status: "ok", retcode: 0, data: { message_id: 9 }, echo: call.echo })
+        )
+      }, 0)
+    })
+
+    const handlers = noopHandlers()
+    const transport = createForwardWsTransport({ adapterId: "ob-fw", url: "ws://x" })
+    await transport.start(handlers)
+
+    const resp = await transport.send({ action: "send_msg", echo: "e-meta", params: {} })
+    expect(resp.retcode).toBe(0)
+    expect((resp.data as { message_id: number }).message_id).toBe(9)
+    expect(handlers.onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ post_type: "meta_event", echo: "e-meta" })
+    )
+
+    await transport.stop()
+  })
+
   it("send() rejects on response timeout", async () => {
     const bus = createBus()
     mockListen.mockImplementation(bus.impl)
@@ -245,6 +277,75 @@ describe("createForwardWsTransport", () => {
     expect(mockWsOpen).toHaveBeenCalledTimes(2)
     expect(handlers.onOpen).toHaveBeenCalledTimes(2)
 
+    await transport.stop()
+  })
+})
+
+describe("forward WS lifecycle races", () => {
+  it("closes a socket that finishes opening after stop", async () => {
+    const bus = createBus()
+    mockListen.mockImplementation(bus.impl)
+    let finish!: (id: string) => void
+    mockWsOpen.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve
+        })
+    )
+    const transport = createForwardWsTransport({ adapterId: "late", url: "ws://x" })
+    const handlers = noopHandlers()
+    const starting = transport.start(handlers)
+    await transport.stop()
+    finish("late-handle")
+    await starting
+    expect(handlers.onOpen).not.toHaveBeenCalled()
+    expect(mockWsClose).toHaveBeenCalledWith("late-handle")
+    expect(mockListen).not.toHaveBeenCalled()
+  })
+
+  it("unsubscribes a listener whose registration completes after stop", async () => {
+    let registered!: (fn: () => void) => void
+    mockWsOpen.mockResolvedValue("h1")
+    mockListen.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          registered = resolve
+        })
+    )
+    const transport = createForwardWsTransport({ adapterId: "late", url: "ws://x" })
+    const handlers = noopHandlers()
+    const starting = transport.start(handlers)
+    await Promise.resolve()
+    await transport.stop()
+    const unlisten = jest.fn()
+    registered(unlisten)
+    await starting
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    expect(handlers.onOpen).not.toHaveBeenCalled()
+  })
+
+  it("rejects pending RPCs at stop and permits a clean restart", async () => {
+    const bus = createBus()
+    mockListen.mockImplementation(bus.impl)
+    mockWsOpen.mockResolvedValueOnce("h1").mockResolvedValue("h2")
+    mockWsSend.mockResolvedValue(undefined)
+    const transport = createForwardWsTransport({
+      adapterId: "late",
+      url: "ws://x",
+      _backoffBaseMs: 1,
+    })
+    const handlers = noopHandlers()
+    await transport.start(handlers)
+    const sent = transport.send({ action: "send_msg", echo: "pending-stop", params: {} })
+    const rejected = expect(sent).rejects.toThrow(/stopped/)
+    await transport.stop()
+    await rejected
+    await transport.start(handlers)
+    bus.trigger("connectors://ws/h1/message", JSON.stringify({ type: "old" }))
+    expect(handlers.onEvent).not.toHaveBeenCalled()
+    bus.trigger("connectors://ws/h2/close", "")
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(mockWsOpen).toHaveBeenCalledTimes(3)
     await transport.stop()
   })
 })

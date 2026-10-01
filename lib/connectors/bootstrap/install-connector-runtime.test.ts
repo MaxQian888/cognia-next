@@ -210,8 +210,17 @@ jest.mock("@/lib/connectors/lifecycle", () => ({
 const mockAdapterInstancesUpdate = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
+    name: "connector-bootstrap-test",
     adapterInstances: { update: (...args: unknown[]) => mockAdapterInstancesUpdate(...args) },
   }),
+}))
+
+// Execution bridge behavior has its own tests. Bootstrap owns starting and
+// disposing it, not its IndexedDB subscriptions.
+const mockStopWorkflowBridge = jest.fn()
+const mockStartWorkflowBridge = jest.fn(() => mockStopWorkflowBridge)
+jest.mock("@/lib/execution/workflow-bridge", () => ({
+  startWorkflowExecutionBridge: () => mockStartWorkflowBridge(),
 }))
 
 const makeTelegramRow = (id = "cai_tg_1") => ({
@@ -295,6 +304,15 @@ afterEach(async () => {
 })
 
 describe("installConnectorRuntime", () => {
+  it("starts and disposes the execution bridge with the runtime", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([])
+    const dispose = install()
+    await waitFor(() => expect(mockStartWorkflowBridge).toHaveBeenCalledTimes(1))
+    await dispose()
+    expect(mockStopWorkflowBridge).toHaveBeenCalledTimes(1)
+  })
+
   it("does nothing in web mode", async () => {
     mockedIsTauri.mockReturnValue(false)
     install()

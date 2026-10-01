@@ -7,6 +7,7 @@
 import { PLATFORMS } from "../platforms.mjs"
 import { createDiscordDriver } from "./discord.mjs"
 import { createLarkDriver } from "./lark.mjs"
+import { createOneBotDriver } from "./onebot.mjs"
 import { createMatrixDriver } from "./matrix.mjs"
 import { createSlackDriver } from "./slack.mjs"
 import { createTelegramDriver } from "./telegram.mjs"
@@ -17,6 +18,7 @@ export const DRIVER_FACTORIES = Object.freeze({
   discord: createDiscordDriver,
   lark: createLarkDriver,
   matrix: createMatrixDriver,
+  onebot: createOneBotDriver,
 })
 
 /** Methods `run.mjs` and `doctor.mjs` rely on. */

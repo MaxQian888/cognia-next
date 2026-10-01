@@ -17,7 +17,7 @@
  * the OS keyring.
  */
 
-import { useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -32,7 +32,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
+import {
+  createAdapterInstance,
+  updateAdapterInstance,
+  patchAdapterInstanceSettings,
+} from "@/lib/db/adapter-instances"
 import { Switch } from "@/components/ui/switch"
 import { openUrl } from "@/lib/native/opener"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
@@ -62,6 +66,12 @@ import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import { LarkWhitelistEditor } from "./lark/lark-whitelist-editor"
 import { LarkQuickCommandsEditor } from "./lark/lark-quick-commands-editor"
 import type { LarkQuickCommand } from "@/lib/connectors/adapters/lark/quick-commands"
+import {
+  normalizeLarkCardPresentation,
+  validateLarkCardPresentation,
+} from "@/lib/connectors/adapters/lark/card-presentation"
+import { LarkCardPresentationEditor } from "./lark/lark-card-presentation-editor"
+import { LarkSetupGuide } from "./lark/lark-setup-guide"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -113,10 +123,16 @@ async function testLarkConnection(appId: string, appSecret: string): Promise<Tat
       tenant_access_token?: string
       msg?: string
     }
-    if (parsed.code === 0 && parsed.tenant_access_token) {
+    if (
+      resp.status >= 200 &&
+      resp.status < 300 &&
+      parsed.code === 0 &&
+      typeof parsed.tenant_access_token === "string" &&
+      parsed.tenant_access_token.trim()
+    ) {
       return { ok: true, appId }
     }
-    return { ok: false, error: parsed.msg ?? `code ${parsed.code}` }
+    return { ok: false, error: parsed.msg ?? `HTTP ${resp.status}, code ${parsed.code}` }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
@@ -187,12 +203,44 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   const [sendAsUser, setSendAsUser] = useState<boolean>(persistedSettings.sendAsUser === true)
   const [redirectUri, setRedirectUri] = useState<string>(persistedSettings.redirectUri ?? "")
   const connectedUser = persistedSettings.connectedUser
+  const [cardPresentation, setCardPresentation] = useState(() =>
+    normalizeLarkCardPresentation(persistedSettings.cardPresentation)
+  )
 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TatTestResult | null>(null)
   const [refreshingOpenId, setRefreshingOpenId] = useState(false)
   const [authorizing, setAuthorizing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const credentialTestGeneration = useRef(0)
+  const [validationInputs, setValidationInputs] = useState({
+    appId,
+    appSecret,
+    open,
+    adapterId: row?.id,
+  })
+
+  // A receipt belongs only to the credentials checked in this dialog session.
+  // Adjust local state before rendering children, so stale success is never
+  // painted and an effect does not cause a second cascading render.
+  if (
+    validationInputs.appId !== appId ||
+    validationInputs.appSecret !== appSecret ||
+    validationInputs.open !== open ||
+    validationInputs.adapterId !== row?.id
+  ) {
+    setValidationInputs({ appId, appSecret, open, adapterId: row?.id })
+    setTestResult(null)
+    setTesting(false)
+  }
+
+  // Cancel asynchronous responses across input changes, close and unmount.
+  useEffect(() => {
+    credentialTestGeneration.current += 1
+    return () => {
+      credentialTestGeneration.current += 1
+    }
+  }, [appId, appSecret, open, row?.id])
 
   // Two different questions `isTauri()` used to answer at once. The ingress
   // shape, cloudflared versus a public origin, now belongs to
@@ -219,7 +267,9 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
     quietHours !== (row?.quietHours ?? null) ||
     sendAsUser !== (persistedSettings.sendAsUser === true) ||
     redirectUri.trim() !== (persistedSettings.redirectUri ?? "") ||
-    JSON.stringify(quickCommands) !== JSON.stringify(persistedSettings.quickCommands ?? [])
+    JSON.stringify(quickCommands) !== JSON.stringify(persistedSettings.quickCommands ?? []) ||
+    JSON.stringify(cardPresentation) !==
+      JSON.stringify(normalizeLarkCardPresentation(persistedSettings.cardPresentation))
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -230,7 +280,9 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
     }
     setTesting(true)
     setTestResult(null)
+    const generation = ++credentialTestGeneration.current
     const result = await testLarkConnection(appId.trim(), appSecret.trim())
+    if (generation !== credentialTestGeneration.current) return
     setTestResult(result)
     setTesting(false)
     if (result.ok) {
@@ -320,6 +372,11 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   }
 
   const handleSave = async () => {
+    const appearanceError = validateLarkCardPresentation(cardPresentation)
+    if (appearanceError) {
+      toast.error(t(`cardPresentation.${appearanceError}`))
+      return
+    }
     if (!displayName.trim()) {
       toast.error(t("displayNameRequired"))
       return
@@ -351,13 +408,10 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
       const transportMode = transport === "long-connection" ? "gateway" : "webhook"
       const nextSettings: LarkPersistedSettings = {
         transport,
-        ...(selfBotOpenId ? { selfBotOpenId } : {}),
-        ...(quickCommands.length > 0 ? { quickCommands } : {}),
-        // Preserve the OAuth-stamped connected-user metadata across saves —
-        // rebuilding nextSettings from scratch would otherwise drop it.
-        ...(connectedUser ? { connectedUser } : {}),
-        ...(sendAsUser ? { sendAsUser: true } : {}),
-        ...(redirectUri.trim() ? { redirectUri: redirectUri.trim() } : {}),
+        quickCommands,
+        sendAsUser,
+        redirectUri: redirectUri.trim() || undefined,
+        cardPresentation: normalizeLarkCardPresentation(cardPresentation),
       }
 
       if (isNew) {
@@ -383,7 +437,6 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         const update: Parameters<typeof updateAdapterInstance>[1] = {
           displayName: displayName.trim(),
           transportMode,
-          settings: nextSettings,
           muted,
           // Repair a row created before the OAuth-minted accounts were listed,
           // so the purge on delete reaches them.
@@ -397,6 +450,9 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         // doesn't get wiped accidentally.
         update.quietHours = quietHours ?? undefined
         await updateAdapterInstance(adapterId, update)
+        // Merge into the latest stored settings so OAuth and other settings
+        // panels cannot be overwritten by this dialog's opening snapshot.
+        await patchAdapterInstanceSettings(adapterId, nextSettings)
       }
 
       // Encrypt Key is optional per the Lark Open Platform: blank means
@@ -571,10 +627,37 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <AdapterFormSections
             sections={[
+              {
+                id: "setup-guide",
+                label: t("setupGuide.title"),
+                description: t("setupGuide.description"),
+                defaultOpen: true,
+                children: (
+                  <LarkSetupGuide
+                    appId={appId}
+                    transport={transport}
+                    isNew={isNew}
+                    credentialsVerified={testResult?.ok === true}
+                    botIdentityKnown={!!selfBotOpenId && !credentials.dirty}
+                  />
+                ),
+              },
               identitySection,
               deliverySection,
               ...(sendAsUserSection ? [sendAsUserSection] : []),
               quickCommandsSection,
+              {
+                id: "card-presentation",
+                label: t("cardPresentation.section"),
+                description: t("cardPresentation.description"),
+                children: (
+                  <LarkCardPresentationEditor
+                    value={cardPresentation}
+                    onChange={setCardPresentation}
+                    disabled={saving}
+                  />
+                ),
+              },
               advancedSection,
             ]}
             onSubmit={handleSave}
@@ -871,6 +954,8 @@ function IdentityFields(p: IdentityFieldsProps) {
           </span>
         </div>
       )}
+
+      <p className="text-xs leading-relaxed text-muted-foreground">{t("credentialTestHelp")}</p>
 
       <ConnectorHostNotice reach={p.reach} />
 

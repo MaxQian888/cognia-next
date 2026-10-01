@@ -72,7 +72,7 @@ export function QQOfficialConfigDialog({
   const appId = credentials.value("appId")
   const clientSecret = credentials.value("clientSecret")
   const [transportMode, setTransportMode] = useState<"gateway" | "webhook">(
-    row?.transportMode === "webhook" ? "webhook" : "gateway"
+    isNew || row?.transportMode === "webhook" ? "webhook" : "gateway"
   )
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
@@ -115,9 +115,12 @@ export function QQOfficialConfigDialog({
     setTestResult(null)
     try {
       const accessToken = await getQQAccessToken(appId.trim(), clientSecret.trim())
-      const gatewayUrl = await getQQGatewayUrl(accessToken)
+      const gatewayUrl =
+        transportMode === "gateway" ? await getQQGatewayUrl(accessToken) : undefined
       setTestResult({ ok: true, gatewayUrl })
-      toast.success(t("testSucceededToast", { gatewayUrl }))
+      toast.success(
+        gatewayUrl ? t("testSucceededToast", { gatewayUrl }) : t("testWebhookCredentialsSucceeded")
+      )
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       setTestResult({ ok: false, error })
@@ -271,7 +274,9 @@ export function QQOfficialConfigDialog({
               <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
             )}
             {testResult.ok
-              ? t("testGatewayUrl", { gatewayUrl: testResult.gatewayUrl ?? "" })
+              ? testResult.gatewayUrl
+                ? t("testGatewayUrl", { gatewayUrl: testResult.gatewayUrl })
+                : t("testWebhookCredentialsSucceeded")
               : testResult.error}
           </div>
         )}
@@ -305,8 +310,11 @@ export function QQOfficialConfigDialog({
         <Label>{t("transportLabel")}</Label>
         <RadioGroup
           value={transportMode}
-          onValueChange={(value) => setTransportMode(value as "gateway" | "webhook")}
-          disabled={saving}
+          onValueChange={(value) => {
+            setTransportMode(value as "gateway" | "webhook")
+            setTestResult(null)
+          }}
+          disabled={saving || testing}
           className="gap-3"
         >
           <div className="flex items-start gap-3">

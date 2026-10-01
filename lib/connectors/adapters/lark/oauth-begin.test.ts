@@ -33,7 +33,11 @@ describe("beginLarkOAuth", () => {
     expect(url.searchParams.get("state")).toBe("lark:lk-1:nonce123")
     expect(url.searchParams.get("code_challenge_method")).toBe("S256")
     expect(url.searchParams.get("code_challenge")).toBeTruthy()
-    expect(url.searchParams.get("scope")).toContain("im:message")
+    expect(url.searchParams.get("scope")?.split(" ")).toEqual([
+      "offline_access",
+      "im:message",
+      "im:message.send_as_user",
+    ])
 
     // The verifier is the secret half — it must never ride the URL.
     expect(result.authorizeUrl).not.toContain("verifier-fixed-value")
@@ -56,11 +60,20 @@ describe("beginLarkOAuth", () => {
   it("merges extra scopes into the authorize URL without repeating the base set", async () => {
     const { deps } = makeDeps()
     const result = await beginLarkOAuth(
-      { adapterId: "lk-1", redirectUri: REDIRECT, extraScopes: "task:task:read im:message" },
+      {
+        adapterId: "lk-1",
+        redirectUri: REDIRECT,
+        extraScopes: "task:task:read im:message im:message.send_as_user",
+      },
       deps
     )
     const scope = new URL(result.authorizeUrl).searchParams.get("scope") ?? ""
-    expect(scope.split(" ")).toEqual(["offline_access", "im:message", "task:task:read"])
+    expect(scope.split(" ")).toEqual([
+      "offline_access",
+      "im:message",
+      "im:message.send_as_user",
+      "task:task:read",
+    ])
   })
 
   it("persists before returning, so a failed write never yields a dead link", async () => {

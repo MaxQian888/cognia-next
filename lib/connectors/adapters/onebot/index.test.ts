@@ -1,5 +1,10 @@
 import { listen } from "@tauri-apps/api/event"
 import { createOneBotAdapter } from "./index"
+import * as serializer from "./serialize"
+jest.mock("./serialize", () => {
+  const actual = jest.requireActual("./serialize")
+  return { ...actual, serializeOutboundV11: jest.fn(actual.serializeOutboundV11) }
+})
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import { __resetOneBotVariantCacheForTesting } from "./parse"
 
@@ -19,7 +24,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
   updateAdapterInstance: jest.fn().mockResolvedValue(undefined),
   getAdapterInstance: jest.fn().mockResolvedValue(undefined),
 }))
-import { updateAdapterInstance } from "@/lib/db/adapter-instances"
+import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 
 // The inbound media pass is inert off-desktop anyway; mocked so the DEPS the
 // adapter hands it are observable — which address the download floor is
@@ -501,6 +506,12 @@ describe("createOneBotAdapter — identity probe", () => {
 
     const call = mockOnebotSend.mock.calls.find((c) => String(c[1]).includes("get_self_info"))
     expect(call).toBeDefined()
+    expect(JSON.parse(call![1]).self).toEqual(v12Msg.self)
+    await adapter.delete!("message-2")
+    const deletion = mockOnebotSend.mock.calls.find(
+      (c) => JSON.parse(c[1]).action === "delete_message"
+    )
+    expect(JSON.parse(deletion![1]).self).toEqual(v12Msg.self)
     expect(mockUpdateAdapter).toHaveBeenCalledWith(
       "ob-v12who",
       expect.objectContaining({
@@ -670,7 +681,7 @@ describe("createOneBotAdapter — merged-forward", () => {
     await adapter.stop()
   })
 
-  it("forwardMessage() surfaces a retryable error when the transport send fails", async () => {
+  it("forwardMessage() does not retry an ambiguous native send failure", async () => {
     const bus = createEventBus()
     mockListen.mockImplementation(bus.listenImpl)
     // Reject the native command so sendToOneBot rejects immediately.
@@ -685,8 +696,8 @@ describe("createOneBotAdapter — merged-forward", () => {
 
     const result = await adapter.forwardMessage!({ messageIds: ["1"], target: "g:1" })
     expect(result.ok).toBe(false)
-    expect(result.error?.code).toBe("platform_5xx")
-    expect(result.error?.retryable).toBe(true)
+    expect(result.error?.code).toBe("delivery_unknown")
+    expect(result.error?.retryable).toBe(false)
     await adapter.stop()
   })
 
@@ -939,4 +950,102 @@ describe("createOneBotAdapter — identity probe edge cases", () => {
     )
     await adapter.stop()
   })
+})
+
+describe("OneBot action acknowledgements", () => {
+  it.each([
+    [{ status: "failed", retcode: 1400, data: null, wording: "permission denied" }, "platform_4xx"],
+    [{ status: "async", retcode: 1, data: null }, "delivery_unknown"],
+    [{ status: "ok", retcode: 1400, data: { message_id: 9 } }, "delivery_unknown"],
+    [{ status: "ok", retcode: 0, data: {} }, "delivery_unknown"],
+  ])("does not report a rejected or unconfirmed send as delivered: %j", async (response, code) => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    const adapter = makeAdapter("ack")
+    await adapter.start(makeCtx().ctx)
+    bus.trigger("connectors://onebot/ack/event", JSON.stringify({ post_type: "meta_event" }))
+    mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+      const call = JSON.parse(payload)
+      bus.trigger(
+        "connectors://onebot/ack/response",
+        JSON.stringify({ ...response, echo: call.echo })
+      )
+    })
+    const result = await adapter.send({
+      conversationRef: { platform: "onebot", adapterId: "ack", chatKey: "p:200001" },
+      segments: [{ type: "text", text: "hello" }],
+      metadata: { idempotencyKey: "ack" },
+    })
+    expect(result).toMatchObject({ ok: false, error: { code, retryable: false } })
+    await adapter.stop()
+  })
+
+  it("surfaces negative acknowledgements for forwards, deletes and both reaction operations", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    const adapter = makeAdapter("reject")
+    await adapter.start(makeCtx().ctx)
+    bus.trigger("connectors://onebot/reject/event", JSON.stringify({ post_type: "meta_event" }))
+    respondByAction(bus, "reject", {}, [
+      "send_group_forward_msg",
+      "delete_msg",
+      "set_msg_emoji_like",
+    ])
+    ;(getAdapterInstance as jest.Mock).mockResolvedValue({
+      implMetadata: { features: ["set_msg_emoji_like"] },
+    })
+    try {
+      expect(await adapter.forwardMessage!({ messageId: "7", target: "g:123" })).toMatchObject({
+        ok: false,
+        error: { code: "platform_4xx", retryable: false },
+      })
+      await expect(adapter.delete!("7")).rejects.toThrow(/1404/)
+      await expect(adapter.addReaction!("7", "1")).rejects.toThrow(/1404/)
+      await expect(adapter.removeReaction!("7", "1")).rejects.toThrow(/1404/)
+    } finally {
+      ;(getAdapterInstance as jest.Mock).mockResolvedValue(undefined)
+      await adapter.stop()
+    }
+  })
+})
+
+it("stops after partial delivery and forbids retrying already delivered parts", async () => {
+  const bus = createEventBus()
+  mockListen.mockImplementation(bus.listenImpl)
+  const adapter = makeAdapter("partial")
+  await adapter.start(makeCtx().ctx)
+  bus.trigger("connectors://onebot/partial/event", JSON.stringify({ post_type: "meta_event" }))
+  ;(serializer.serializeOutboundV11 as jest.Mock).mockReturnValueOnce([
+    { action: "send_private_msg", echo: "part-1", params: {} },
+    { action: "send_private_msg", echo: "part-2", params: {} },
+    { action: "send_private_msg", echo: "part-3", params: {} },
+  ])
+  mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+    const call = JSON.parse(payload)
+    bus.trigger(
+      "connectors://onebot/partial/response",
+      JSON.stringify({
+        echo: call.echo,
+        ...(call.echo === "part-1"
+          ? { status: "ok", retcode: 0, data: { message_id: 19 } }
+          : { status: "failed", retcode: 1400 }),
+      })
+    )
+  })
+  try {
+    expect(
+      await adapter.send({
+        conversationRef: { platform: "onebot", adapterId: "partial", chatKey: "p:2" },
+        segments: [{ type: "text", text: "parts" }],
+        metadata: { idempotencyKey: "parts" },
+      })
+    ).toMatchObject({
+      ok: false,
+      platformMessageId: "19",
+      error: { code: "delivery_unknown", retryable: false },
+    })
+    expect(mockOnebotSend).toHaveBeenCalledTimes(2)
+  } finally {
+    await adapter.stop()
+  }
 })

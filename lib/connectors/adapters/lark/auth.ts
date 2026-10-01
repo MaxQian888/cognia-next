@@ -44,11 +44,12 @@ const LARK_USER_INFO_URL = "https://open.feishu.cn/open-apis/authen/v1/user_info
 
 /**
  * Scopes requested for the send-as-user flow. `offline_access` is mandatory —
- * Feishu only issues a `refresh_token` when it is granted; `im:message` lets the
- * user token send messages. The exact set must be enabled + approved for the app
- * in the Lark console (Permissions), and the granted scopes must cover these.
+ * Feishu only issues a `refresh_token` when it is granted. Sending as a user
+ * requires both `im:message` and `im:message.send_as_user`. The exact set must be
+ * enabled + approved for the app in the Lark console (Permissions), and the
+ * granted scopes must cover these.
  */
-export const LARK_SENDAS_SCOPES = "offline_access im:message"
+export const LARK_SENDAS_SCOPES = "offline_access im:message im:message.send_as_user"
 
 /**
  * Scopes the issue tracker's Lark Task sync needs on the USER identity

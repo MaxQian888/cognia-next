@@ -94,6 +94,7 @@ describe("OneBotConfigDialog — create new", () => {
   it("renders Bearer Token input", () => {
     render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     expect(screen.getByLabelText(/bearer token/i)).toBeInTheDocument()
+    expect(screen.getByText("token", { selector: "code" })).toBeInTheDocument()
   })
 
   it("renders Expected Client select", () => {

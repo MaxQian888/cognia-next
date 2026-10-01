@@ -12,6 +12,7 @@
  */
 
 import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { MAX_INLINE_BYTES } from "../_shared/inbound-media"
 import {
   buildMediaInitFrame,
   buildMediaChunkFrame,
@@ -20,6 +21,9 @@ import {
   type WeComFrameEnvelope,
 } from "./protocol"
 import { md5Hex } from "./md5"
+
+/** Match the shared inbound OCR/document persistence budget. */
+export const WECOM_INBOUND_MEDIA_MAX_BYTES = MAX_INLINE_BYTES
 
 /** Decode a base64 string into raw bytes (browser + jsdom safe). */
 export function base64ToBytes(b64: string): Uint8Array {
@@ -61,8 +65,8 @@ export async function decryptWeComMedia(
 /**
  * Fetch an encrypted media URL and decrypt it. Best-effort: when `aeskey` is
  * absent the raw bytes are returned undecrypted (some payloads ship in the
- * clear). Throws on network / decrypt failure so the caller can degrade to a
- * URL marker.
+ * clear). Rejects oversized bodies before decryption, with at most one AES
+ * block of padding overhead. Throws so callers can mark the resource unavailable.
  */
 export async function fetchAndDecryptMedia(
   url: string,
@@ -72,9 +76,46 @@ export async function fetchAndDecryptMedia(
   // `connect-src` allowlist, so a renderer `fetch` never left the WebView.
   const resp = await proxyFetch(url)
   if (!resp.ok) throw new Error(`wecom media fetch failed: ${resp.status}`)
-  const buf = await resp.arrayBuffer()
-  if (!aeskeyBase64) return new Uint8Array(buf)
-  return decryptWeComMedia(buf, aeskeyBase64)
+  const maxDownloadBytes = WECOM_INBOUND_MEDIA_MAX_BYTES + (aeskeyBase64 ? 16 : 0)
+  if (Number(resp.headers?.get("content-length")) > maxDownloadBytes) {
+    await resp.body?.cancel()
+    throw new Error("wecom media exceeds inbound byte limit")
+  }
+  let bytes: Uint8Array
+  if (resp.body) {
+    const reader = resp.body.getReader()
+    const chunks: Uint8Array[] = []
+    let size = 0
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        size += value.byteLength
+        if (size > maxDownloadBytes) {
+          await reader.cancel()
+          throw new Error("wecom media exceeds inbound byte limit")
+        }
+        chunks.push(value)
+      }
+    } finally {
+      reader.releaseLock()
+    }
+    bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+  } else {
+    bytes = new Uint8Array(await resp.arrayBuffer())
+    if (bytes.byteLength > maxDownloadBytes)
+      throw new Error("wecom media exceeds inbound byte limit")
+  }
+  const plain = aeskeyBase64 ? await decryptWeComMedia(bytes, aeskeyBase64) : bytes
+  if (!plain.byteLength) throw new Error("wecom media is empty")
+  if (plain.byteLength > WECOM_INBOUND_MEDIA_MAX_BYTES)
+    throw new Error("wecom media exceeds inbound byte limit")
+  return plain
 }
 
 /** Request/response RPC over the long connection (resolves the matching ack). */

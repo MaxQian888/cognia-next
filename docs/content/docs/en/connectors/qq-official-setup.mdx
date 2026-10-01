@@ -1,11 +1,11 @@
 ---
 title: "QQ Official Bot Setup"
-description: "Create a QQ Official Bot, get the App ID and Client Secret, and connect through the WebSocket gateway."
+description: "Create a QQ Official Bot, get the App ID and Client Secret, and connect through an HTTPS webhook."
 ---
 
 # QQ Official Bot Setup Guide
 
-This guide walks through creating an officially authorized bot in the **QQ Open Platform**, collecting the **App ID** and **Client Secret**, and connecting cognia-next through the QQ WebSocket gateway. This is the official QQ bot channel and is separate from the unofficial OneBot / NapCat path.
+This guide walks through creating an officially authorized bot in the **QQ Open Platform**, collecting the **App ID** and **Client Secret**, and connecting cognia-next through an HTTPS webhook. This is the official QQ bot channel and is separate from the unofficial OneBot / NapCat path.
 
 ---
 
@@ -33,7 +33,9 @@ This guide walks through creating an officially authorized bot in the **QQ Open 
    - **Client Secret** — the QQ Open Platform **AppSecret**. cognia-next uses it to mint access tokens.
 4. Click **Create**.
 
-The **App ID** and **Client Secret** are encrypted in the OS keyring. The adapter uses them to call `https://bots.qq.com/app/getAppAccessToken`, caches the short-lived access token, resolves the gateway URL through `GET /gateway`, and then connects over WebSocket. Like Discord Gateway mode, this is a persistent outbound connection and does **not** require a public webhook URL.
+New configurations default to **HTTPS webhook**. Save the adapter, reopen it, and copy its callback URL into the QQ console. The desktop host needs a reachable HTTPS ingress (shown in the form); a loopback URL is not a public callback. Complete the console’s callback validation and event subscriptions.
+
+The credentials are encrypted in the OS keyring and exchanged at `https://bots.qq.com/app/getAppAccessToken`. **Test credentials** in webhook mode checks token issuance only; validate real event delivery separately. The optional gateway compatibility mode additionally resolves `GET /gateway`; resolving a URL does not establish a WebSocket session. Existing gateway adapters retain their transport. Tencent’s [BotGo guidance](https://github.com/tencent-connect/botgo) recommends webhook; only select gateway when your app still has access.
 
 ---
 
@@ -56,5 +58,5 @@ If the adapter shows **stopped** or **degraded**:
 - **Official channel**: this is the official QQ bot integration, separate from the OneBot / NapCat path. If you want to connect a personal QQ account, see [QQ via OneBot — FAQ](./qq-via-onebot-faq).
 - **Automatic access-token refresh**: QQ uses short-lived application access tokens, not a static bot token. The adapter caches them per `(App ID, Client Secret)` and refreshes about one minute before expiry. The gateway IDENTIFY frame and every REST send use the same `Authorization: QQBot <access_token>` scheme.
 - **Conversation coverage depends on QQ platform approval**: channel, group, and C2C availability depend on the abilities granted to your bot in QQ Open Platform. cognia-next subscribes to the supported event families, but a conversation type only works after the platform grants that scope.
-- **Gateway reconnects**: cognia-next connects over the QQ WebSocket gateway using Discord-like HELLO / IDENTIFY / heartbeat / RESUME flow. Disconnects are retried with exponential backoff and resumed when possible.
+- **Gateway compatibility only**: cognia-next connects over the QQ WebSocket gateway using Discord-like HELLO / IDENTIFY / heartbeat / RESUME flow. Disconnects are retried with exponential backoff and resumed when possible.
 - **Message capability scope**: the current adapter receives messages and sends text-only passive replies. QQ Markdown templates and interactive buttons require per-template platform approval, so rich / interactive assistant output falls back to the plain-text mirror.

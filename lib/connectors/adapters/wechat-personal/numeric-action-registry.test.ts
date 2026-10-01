@@ -62,6 +62,11 @@ describe("__peekNumericActionForTesting TTL", () => {
 })
 
 describe("consumeNumericAction", () => {
+  it("does not remove a newer menu when acknowledging an older callback", () => {
+    setNumericAction("conv", 1, "new-action", 1_000)
+    expect(consumeNumericAction("conv", 1, 1_001, "old-action")).toBeUndefined()
+    expect(__peekNumericActionForTesting("conv", 1, 1_002)).toBe("new-action")
+  })
   it("returns + removes the actionId so a second consume misses", () => {
     setNumericAction("conv", 1, "wc:a", 1_000)
     expect(consumeNumericAction("conv", 1, 1_000)).toBe("wc:a")

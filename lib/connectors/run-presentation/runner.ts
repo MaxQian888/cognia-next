@@ -376,6 +376,10 @@ async function deliverMilestone(
   binding: ExecutionRunBinding,
   snapshot: RunProjectionSnapshot
 ): Promise<void> {
+  const row =
+    deliveryConversationRef(binding).platform === "lark"
+      ? await getDb().adapterInstances.get(binding.adapterId)
+      : undefined
   const segments =
     deliveryConversationRef(binding).platform === "lark"
       ? [
@@ -384,6 +388,7 @@ async function deliverMilestone(
           // projected snapshot is already PII-safe, so its timeline markdown
           // and run link can go straight into the card body.
           buildLarkResultCardSegment({
+            presentation: row?.settings?.cardPresentation,
             answer: markdown(snapshot),
             status:
               snapshot.status === "completed"
@@ -475,6 +480,10 @@ async function deliverFallback(
   const followUpEligible =
     binding.deliveryTarget?.address.scopeKind === "private" && snapshot.allowedActions.length > 0
   const followUpItems = followUpEligible ? buildFollowUpItems(snapshot) : []
+  const row =
+    deliveryConversationRef(binding).platform === "lark"
+      ? await getDb().adapterInstances.get(binding.adapterId)
+      : undefined
   const job = await enqueueOutbound({
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
@@ -483,7 +492,11 @@ async function deliverFallback(
       deliveryTarget: binding.deliveryTarget,
       segments: [
         deliveryConversationRef(binding).platform === "lark"
-          ? buildLarkRunFallbackSegment(snapshot, resolveWebEntryBase())
+          ? buildLarkRunFallbackSegment(
+              snapshot,
+              resolveWebEntryBase(row),
+              row?.settings?.cardPresentation
+            )
           : buildA2UISegment(`execution-run:${snapshot.runId}`, surface),
       ],
       ...(editTargetMessageId ? { editTargetMessageId } : {}),
@@ -589,7 +602,7 @@ const defaultDependencies: ProjectionDependencies = {
 
 let subscription: Subscription | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-const timers = new Map<string, ReturnType<typeof setTimeout>>()
+const timers = new Map<string, { timer: ReturnType<typeof setTimeout>; immediate: boolean }>()
 const projecting = new Map<string, Promise<void>>()
 
 async function projectLatest(bindingId: string): Promise<void> {
@@ -697,20 +710,26 @@ function schedule(
   snapshot: RunProjectionSnapshot,
   latestEventType?: RunEventType
 ): void {
-  if (timers.has(binding.id) || projecting.has(binding.id)) return
+  if (projecting.has(binding.id)) return
   const delay =
     binding.lastProjectedRevision === 0 ||
     TERMINAL.has(snapshot.status) ||
+    ["waiting", "paused", "recovery_required"].includes(snapshot.status) ||
     (latestEventType !== undefined && IMMEDIATE_EVENT_TYPES.has(latestEventType))
       ? 0
       : COALESCE_MS
-  timers.set(
-    binding.id,
-    setTimeout(() => {
+  const pending = timers.get(binding.id)
+  if (pending) {
+    if (pending.immediate || delay > 0) return
+    clearTimeout(pending.timer)
+  }
+  timers.set(binding.id, {
+    immediate: delay === 0,
+    timer: setTimeout(() => {
       timers.delete(binding.id)
       void projectLatest(binding.id)
-    }, delay)
-  )
+    }, delay),
+  })
 }
 
 export function heartbeatExecutionRunBinding(bindingId: string): Promise<void> {
@@ -851,7 +870,7 @@ function stopExecutionRunPresentationRunner(): void {
   subscription = null
   if (heartbeatTimer) clearInterval(heartbeatTimer)
   heartbeatTimer = null
-  for (const timer of timers.values()) clearTimeout(timer)
+  for (const { timer } of timers.values()) clearTimeout(timer)
   timers.clear()
 }
 

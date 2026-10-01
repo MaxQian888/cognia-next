@@ -37,6 +37,7 @@
 import type { PlatformAdapter } from "@/types/connectors"
 import { createMutex, computeBackoffDelay } from "@cognia/primitives"
 import {
+  deleteOutboundJob,
   listDueNow,
   peekNextWakeAt,
   subscribeOutboundEnqueued,
@@ -729,6 +730,44 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       ? { ...job.request, conversationRef: job.request.deliveryTarget.conversationRef }
       : { ...job.request }
     const { idempotencyKey } = request.metadata
+    const ephemeral = request.metadata.larkEphemeral !== undefined
+    const ephemeralAdapter = ephemeral ? opts.adapters.get(adapterId) : undefined
+    if (
+      ephemeral &&
+      ((ephemeralAdapter &&
+        (ephemeralAdapter.meta.type !== "lark" ||
+          !ephemeralAdapter.meta.capabilities.includes("send.ephemeral"))) ||
+        request.conversationRef.platform !== "lark" ||
+        request.editTargetMessageId ||
+        request.metadata.failoverFromAdapterId ||
+        request.metadata.balancedFromAdapterId)
+    ) {
+      const message =
+        "Recipient-only Lark cards require the original adapter with send.ephemeral support and cannot use normal message editing"
+      await markDeadlettered(job.id, "validation", message)
+      await appendAudit({
+        adapterId,
+        kind: "delivery.deadlettered",
+        at: now,
+        conversationKey,
+        idempotencyKey,
+        reason: "validation",
+        message,
+      })
+      return
+    }
+
+    if (ephemeral && !ephemeralAdapter) {
+      // A bot may briefly be absent while its saved credentials reload. Keep
+      // the app-scoped recipient queued for that same bot, without rerouting.
+      await markFailed(
+        job.id,
+        "adapter_not_found",
+        "Lark adapter is not registered yet",
+        now + 1_000
+      )
+      return
+    }
 
     // ── Cross-pass FIFO guard ─────────────────────────────────────────────
     // The drain resolves the true conversation head before entering this
@@ -931,7 +970,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
           }
         )
         if (decision.action === "block") {
-          await getDb().outboundQueue.delete(job.id)
+          await deleteOutboundJob(job.id)
           await appendAudit({
             adapterId,
             kind: "plugin.outbound_blocked",
@@ -981,6 +1020,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // over once (metadata guard) stays put so two open-circuit bots can't
       // ping-pong it forever.
       if (
+        !ephemeral &&
         adapterRow &&
         request.metadata.failoverFromAdapterId === undefined &&
         request.metadata.balancedFromAdapterId === undefined
@@ -1046,6 +1086,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // (`rerouteJob` dead-letters the original with a reroute pointer, so
       // the `sending` claim needs no separate rollback on this path.)
       if (
+        !ephemeral &&
         adapterRow &&
         request.metadata.failoverFromAdapterId === undefined &&
         request.metadata.balancedFromAdapterId === undefined
@@ -1123,7 +1164,7 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      if (adapter.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
+      if (ephemeral || adapter.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
         await markDeliveryUnknown(job.id, "delivery_unknown", msg)
         breaker.recordFailure()
         await appendAudit({
@@ -1265,8 +1306,10 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         return
       }
       const ambiguousRemoteFailure =
-        adapter.runtimeCapabilities?.ambiguousDelivery === "reconciliation_required" &&
-        (err.code === "network" || err.code === "platform_5xx")
+        err.code === "delivery_unknown" ||
+        ((ephemeral ||
+          adapter.runtimeCapabilities?.ambiguousDelivery === "reconciliation_required") &&
+          (err.code === "network" || err.code === "platform_5xx"))
       if (ambiguousRemoteFailure) {
         await markDeliveryUnknown(job.id, "delivery_unknown", err.message)
         breaker.recordFailure()
@@ -1395,7 +1438,10 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
           const recoveredRows = await recoverStaleSendingJobs(clock())
           for (const row of recoveredRows) {
             const recoveredAdapter = opts.adapters.get(row.adapterId)
-            if (recoveredAdapter?.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
+            if (
+              row.request.metadata.larkEphemeral !== undefined ||
+              recoveredAdapter?.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent"
+            ) {
               await markDeliveryUnknown(
                 row.id,
                 "stale_sending_delivery_unknown",

@@ -42,6 +42,7 @@ test("each driver's conversationId is the platform's own conversation field", ()
     discord: "targetChannelId",
     lark: "targetChatId",
     matrix: "targetRoomId",
+    onebot: "targetGroupId",
   }
   for (const platform of PLATFORMS) {
     const values = valuesFor(platform)

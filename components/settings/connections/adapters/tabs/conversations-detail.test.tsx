@@ -37,10 +37,12 @@ jest.mock("@/lib/db/schema", () => ({
 
 const mockSetPinned = jest.fn().mockResolvedValue(undefined)
 const mockSetArchived = jest.fn().mockResolvedValue(undefined)
+const mockDeleteByConversationKey = jest.fn().mockResolvedValue(true)
 
 jest.mock("@/lib/db/conversation-overrides", () => ({
   setPinned: (...args: unknown[]) => mockSetPinned(...args),
   setArchived: (...args: unknown[]) => mockSetArchived(...args),
+  deleteByConversationKey: (...args: unknown[]) => mockDeleteByConversationKey(...args),
 }))
 
 // ---------------------------------------------------------------------------
@@ -308,12 +310,14 @@ describe("ConversationsDetail — pin / archive / delete", () => {
     })
   })
 
-  it("delete button calls db.conversationOverrides.delete(id)", async () => {
+  it("delete button removes the override through the tombstoning helper", async () => {
     render(withIntl(<ConversationsDetail adapterId={ADAPTER_ID} />))
     fireEvent.click(screen.getByRole("button", { name: /delete override/i }))
     await waitFor(() => {
-      expect(mockDbDelete).toHaveBeenCalledWith("ov1")
+      expect(mockDeleteByConversationKey).toHaveBeenCalledWith(`telegram:${ADAPTER_ID}:100`)
     })
+    // A raw table delete would skip the sync tombstone paired clients need.
+    expect(mockDbDelete).not.toHaveBeenCalled()
   })
 })
 

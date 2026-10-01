@@ -1954,6 +1954,21 @@ export class ConnectorBus {
       })
       return result
     }
+    if (
+      req.metadata.larkEphemeral !== undefined &&
+      (a.meta.type !== "lark" ||
+        !a.meta.capabilities.includes("send.ephemeral") ||
+        req.editTargetMessageId)
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "validation",
+          message: "Recipient-only cards require Lark send, never normal editing",
+          retryable: false,
+        },
+      }
+    }
     try {
       const result = await a.send(req)
       void trackEvent("connector.message.sent", {
@@ -1999,6 +2014,16 @@ export class ConnectorBus {
         error: { code: "adapter_not_found", message: adapterId, retryable: false },
       }
     }
+    if (patch.metadata.larkEphemeral !== undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "validation",
+          message: "Recipient-only cards cannot use normal message editing",
+          retryable: false,
+        },
+      }
+    }
     if (!a.edit) {
       return {
         ok: false,
@@ -2028,6 +2053,28 @@ export class ConnectorBus {
       }
     }
     await a.delete(messageId)
+    return { ok: true }
+  }
+
+  /** Delete a recipient-only card without falling back to ordinary message deletion. */
+  async deleteEphemeralCard(adapterId: string, messageId: string): Promise<OutboundResult> {
+    const adapter = this.adapters.get(adapterId)
+    if (!adapter)
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    if (adapter.meta.type !== "lark" || !adapter.deleteEphemeralCard) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "adapter cannot delete recipient-only cards",
+          retryable: false,
+        },
+      }
+    }
+    await adapter.deleteEphemeralCard(messageId)
     return { ok: true }
   }
 
@@ -2321,13 +2368,16 @@ export class ConnectorBus {
    * first delivery is still processing is guarded by the in-memory
    * `callbackInFlight` set.
    */
-  async dispatchConnectorCallback(event: ConnectorCallbackEvent): Promise<void> {
+  async dispatchConnectorCallback(event: ConnectorCallbackEvent): Promise<"terminal" | "retry"> {
     const flightKey = `${event.adapterId}:${event.triggerId}`
+    let terminal = false
     try {
       // ── Step 1: Dedup (check now, commit on terminal outcome) ──────
-      const duplicate =
-        this.callbackInFlight.has(flightKey) ||
-        (await isRecordedInbound(event.adapterId, event.triggerId, "callback"))
+      // An in-flight callback can still fail transiently. Its concurrent
+      // delivery must not acknowledge or consume a numeric menu binding.
+      if (this.callbackInFlight.has(flightKey)) return "retry"
+      const duplicate = await isRecordedInbound(event.adapterId, event.triggerId, "callback")
+      if (this.callbackInFlight.has(flightKey)) return "retry"
       if (duplicate) {
         await appendAudit({
           adapterId: event.adapterId,
@@ -2338,13 +2388,13 @@ export class ConnectorBus {
           message: `triggerId=${event.triggerId}`,
           fields: { actionType: event.actionType },
         })
-        return
+        return "terminal"
       }
       this.callbackInFlight.add(flightKey)
       // Terminal by default: an unexpected throw below still commits the
       // triggerId (re-processing an exploding callback forever helps nobody)
       // and is audited by the outer catch.
-      let terminal = true
+      terminal = true
       try {
         terminal = await this.runConnectorCallback(event)
       } finally {
@@ -2355,6 +2405,7 @@ export class ConnectorBus {
         }
         this.callbackInFlight.delete(flightKey)
       }
+      return terminal ? "terminal" : "retry"
     } catch (err) {
       console.error("[connector-bus] callback pipeline failed", err)
       await appendAudit({
@@ -2366,6 +2417,7 @@ export class ConnectorBus {
         message: err instanceof Error ? err.message : String(err),
         fields: { triggerId: event.triggerId },
       }).catch(() => undefined)
+      return terminal ? "terminal" : "retry"
     }
   }
 

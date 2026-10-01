@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { createLarkAdapter } from "./index"
+import { normalizeLarkCardPresentation } from "./card-presentation"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 
 const mockInvoke = invoke as jest.Mock
@@ -146,6 +147,72 @@ function createFakeLongConnSession() {
 // ---------------------------------------------------------------------------
 
 describe("createLarkAdapter", () => {
+  it("uses configured card appearance in the real run presentation driver", async () => {
+    const requests: Array<{ url: string; body?: string }> = []
+    mockInvoke.mockImplementation(
+      async (cmd: string, args: { req?: { url: string; body?: string } }) => {
+        if (cmd !== "connectors_http_request") return undefined
+        const req = args.req!
+        requests.push(req)
+        if (req.url.includes("tenant_access_token")) return makeTatOkResp()
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            code: 0,
+            data: { card_id: "styled-card", message_id: "message" },
+          }),
+        }
+      }
+    )
+    const adapter = createLarkAdapter({
+      id: "lark-styled",
+      displayName: "Styled",
+      appId: async () => "cli_style",
+      appSecret: async () => "secret",
+      verificationToken: async () => "verify",
+      selfBotOpenId: "ou_self",
+      transport: "webhook",
+      cardPresentation: normalizeLarkCardPresentation({ theme: "purple", processMode: "card" }),
+    })
+    await adapter.runPresentation!.open(
+      {
+        adapterId: "lark-styled",
+        conversationKey: "chat",
+        deliveryTarget: {
+          address: {
+            platform: "lark",
+            adapterId: "lark-styled",
+            conversationKey: "chat",
+            scopeKind: "group",
+            containerId: "oc_chat",
+          },
+          conversationRef: { platform: "lark", adapterId: "lark-styled", channelId: "oc_chat" },
+          refreshedAt: 1,
+        },
+      },
+      {
+        runId: "run",
+        kind: "agent-turn",
+        title: "Task",
+        status: "running",
+        revision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+        progress: { completed: 0, total: 0, trustworthy: false },
+        activeSteps: [],
+        recentSteps: [],
+        pendingSteps: [],
+        pendingStepCount: 0,
+        elapsedMs: 0,
+        artifacts: [],
+        allowedActions: [],
+      }
+    )
+    expect(requests.some((req) => req.url.includes("message_cot"))).toBe(false)
+    const create = requests.find((req) => req.url.endsWith("/cardkit/v1/cards"))!
+    expect(JSON.parse(JSON.parse(create.body!).data).header.template).toBe("purple")
+  })
   beforeEach(() => {
     mockInvoke.mockReset()
     mockListen.mockReset()
@@ -1320,6 +1387,158 @@ describe("createLarkAdapter", () => {
     segments: [{ type: "text" as const, text: "x" }],
     metadata: { idempotencyKey: "ke" },
   }
+
+  const templateRequest = () => ({
+    ...sendReq,
+    replyTo: { messageId: "om_original" },
+    conversationRef: { ...sendReq.conversationRef, threadTs: "omt_thread" },
+    segments: [
+      {
+        type: "card" as const,
+        card: {
+          kind: "lark" as const,
+          payload: {
+            type: "template",
+            data: {
+              template_id: "AA_template",
+              template_version_name: "1.0.0",
+              template_variable: { answer: "Answer" },
+            },
+            fallback: {
+              schema: "2.0",
+              body: { elements: [{ tag: "markdown", content: "Answer" }] },
+            },
+          },
+        },
+      },
+    ],
+  })
+
+  it("wires private group card delivery and deletion without public sends", async () => {
+    const calls: Array<{ url: string; body?: string }> = []
+    mockInvoke.mockImplementation(
+      async (cmd: string, args: { req?: { url: string; body?: string } }) => {
+        if (cmd !== "connectors_http_request") return null
+        const req = args.req!
+        if (req.url.includes("tenant_access_token")) return makeTatOkResp()
+        calls.push(req)
+        return req.url.includes("/chats/")
+          ? {
+              status: 200,
+              headers: {},
+              body: JSON.stringify({ code: 0, data: { chat_mode: "group", chat_type: "private" } }),
+            }
+          : makeSendOkResp()
+      }
+    )
+    const adapter = makeAdapter()
+    const request = templateRequest()
+    const result = await adapter.send({
+      ...request,
+      replyTo: undefined,
+      conversationRef: { ...sendReq.conversationRef },
+      metadata: { idempotencyKey: "private-1", larkEphemeral: { recipientOpenId: "ou_recipient" } },
+    })
+    expect(result).toMatchObject({ ok: true, platformMessageId: "om_resp_001" })
+    const send = calls.find((call) => call.url.endsWith("/ephemeral/v1/send"))
+    expect(JSON.parse(send!.body!)).toMatchObject({
+      chat_id: "oc_chat_e",
+      open_id: "ou_recipient",
+      msg_type: "interactive",
+      card: { type: "template" },
+    })
+    expect(JSON.parse(send!.body!).card.fallback).toBeUndefined()
+    expect(calls.some((call) => call.url.includes("/messages"))).toBe(false)
+    await adapter.deleteEphemeralCard!("om_resp_001")
+    expect(calls.at(-1)?.url).toContain("/ephemeral/v1/delete")
+  })
+
+  it("sends a versioned result template without its internal fallback, preserving topic routing", async () => {
+    const sent: Array<{ url: string; body: string }> = []
+    mockInvoke.mockImplementation(
+      async (cmd: string, args: { req?: { url: string; body: string } }) => {
+        if (cmd !== "connectors_http_request") return null
+        if (args.req!.url.includes("tenant_access_token")) return makeTatOkResp()
+        sent.push(args.req!)
+        return makeSendOkResp()
+      }
+    )
+    expect((await makeAdapter().send(templateRequest())).ok).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].url).toContain("/messages/om_original/reply")
+    const body = JSON.parse(sent[0].body)
+    expect(body.reply_in_thread).toBe(true)
+    expect(JSON.parse(body.content)).toEqual({
+      type: "template",
+      data: templateRequest().segments[0].card.payload.data,
+    })
+  })
+
+  it("falls back only after an explicit template rejection, retaining the delivery UUID", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mockInvoke.mockImplementation(
+      async (cmd: string, args: { req?: { url: string; body: string } }) => {
+        if (cmd !== "connectors_http_request") return null
+        if (args.req!.url.includes("tenant_access_token")) return makeTatOkResp()
+        bodies.push(JSON.parse(args.req!.body))
+        return bodies.length === 1
+          ? {
+              status: 400,
+              headers: {},
+              body: JSON.stringify({ code: 230099, msg: "invalid template" }),
+            }
+          : makeSendOkResp()
+      }
+    )
+    const result = await makeAdapter().send(templateRequest())
+    expect(result).toMatchObject({ ok: true, platformMessageId: "om_resp_001" })
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].uuid).toBe(bodies[1].uuid)
+    expect(JSON.parse(bodies[1].content as string).schema).toBe("2.0")
+  })
+
+  it("preserves surrounding text when a templated result is part of a mixed reply", async () => {
+    const calls: Array<{ url: string; body: string }> = []
+    mockInvoke.mockImplementation(
+      async (cmd: string, args: { req?: { url: string; body: string } }) => {
+        if (cmd !== "connectors_http_request") return null
+        if (args.req!.url.includes("tenant_access_token")) return makeTatOkResp()
+        calls.push(args.req!)
+        return makeSendOkResp()
+      }
+    )
+    const req = templateRequest()
+    const result = await makeAdapter().send({
+      ...req,
+      segments: [{ type: "text", text: "Context" }, ...req.segments],
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      downgrades: [{ reason: "lark_result_template_mixed_content" }],
+    })
+    expect(calls).toHaveLength(1)
+    const card = JSON.parse(JSON.parse(calls[0].body).content)
+    expect(card.body.elements.map((element: { content?: string }) => element.content)).toEqual([
+      "Context",
+      "Answer",
+    ])
+  })
+
+  it.each([
+    [403, 99991672, "auth_failed"],
+    [429, 99991400, "rate_limited"],
+    [502, 0, "platform_5xx"],
+    [400, 230002, "platform_4xx"],
+  ])("does not replace a template after HTTP %s code %s", async (status, code, expected) => {
+    send400({ code, msg: "rejected" }, status)
+    expect((await makeAdapter().send(templateRequest())).error?.code).toBe(expected)
+    const calls = mockInvoke.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "connectors_http_request" &&
+        (args as { req: { url: string } }).req.url.includes("/messages/")
+    )
+    expect(calls).toHaveLength(1)
+  })
 
   it("send() maps a 4xx business error (invalid receive_id) to non-retryable platform_4xx", async () => {
     send400({ code: 230002, msg: "invalid receive_id" })

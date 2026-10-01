@@ -18,7 +18,7 @@ import { walkA2UISurface, type A2UIWalkNode } from "@/lib/connectors/adapters/_s
  * Produce the OneBot-native projection of an A2UI surface. Walks the
  * surface tree, emitting text segments for Text/Card-title/Alert/Link
  * and image segments for Image. All interactive components collapse
- * into a leading "actions list" text segment built from
+ * into an explicitly read-only text preview built from
  * `plainTextMirror`.
  */
 export function buildOneBotA2UISegments(
@@ -98,11 +98,18 @@ export function buildOneBotA2UISegments(
     segments.push({ type: "text", text: lines.join("\n") })
   }
 
-  // When the surface contained interactive components OneBot can't
-  // render, append the text mirror so the user sees the "menu" that
-  // would have been buttons.
-  if (sawInteractive && plainTextMirror) {
-    segments.push({ type: "text", text: `\n— Available actions —\n${plainTextMirror}` })
+  // Text labels must not imply that QQ buttons or numeric replies execute
+  // callbacks. Supported approvals remain available in Cognia's run controls.
+  if (sawInteractive) {
+    segments.push({
+      type: "text",
+      text: [
+        plainTextMirror,
+        "QQ 中仅展示预览，按钮和数字回复不可用。请在 Cognia 的关联会话或运行中处理。 / Read-only preview in QQ; buttons and numeric replies are unavailable. Use the linked conversation or run in Cognia.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    })
   }
 
   // If the surface produced nothing visible, fall back to the mirror so

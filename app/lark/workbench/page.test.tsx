@@ -68,6 +68,7 @@ beforeEach(() => {
     workspaces: 1,
     members: 1,
     orgMember: true,
+    legs: ["workspaces", "issues", "activity"],
     plans: 0,
     runs: 0,
   })

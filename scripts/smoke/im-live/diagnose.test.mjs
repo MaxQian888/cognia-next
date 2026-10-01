@@ -123,3 +123,10 @@ test("formatDiagnosis stays short when there is nothing to diagnose", () => {
   )
   assert.equal(text.split("\n").length, 1)
 })
+
+test("only Feishu timeouts suggest the published include_bot scopes", () => {
+  const diagnose = (platform) =>
+    diagnoseTurn({ fixtureHit: null, replies: [], marker: buildMarker(platform, "cafe", 1) })
+  assert.ok(diagnose("lark").causes.some((c) => c.code === "lark_include_bot_permission"))
+  assert.ok(!diagnose("onebot").causes.some((c) => c.code === "lark_include_bot_permission"))
+})

@@ -5,7 +5,7 @@
 // convenience for local runs; `.gitignore` already covers `.env*`.
 //
 // Every field names its own environment variable explicitly instead of being
-// derived from a prefix. That is what keeps the five platforms isolated: a
+// derived from a prefix. That is what keeps the platforms isolated: a
 // Slack credential cannot become a Telegram credential through a typo in a
 // prefix computation, and the table below doubles as the documented contract.
 
@@ -55,11 +55,19 @@ export const PLATFORM_FIELDS = {
     driverAppSecret: { env: "IM_LIVE_LARK_DRIVER_APP_SECRET", secret: true },
     targetChatId: { env: "IM_LIVE_LARK_TARGET_CHAT_ID" },
     targetBotOpenId: { env: "IM_LIVE_LARK_TARGET_BOT_OPEN_ID" },
+    targetAppId: { env: "IM_LIVE_LARK_TARGET_APP_ID" },
     apiBase: {
       env: "IM_LIVE_LARK_API_BASE",
       optional: true,
       default: "https://open.feishu.cn/open-apis",
     },
+  },
+  onebot: {
+    apiBase: { env: "IM_LIVE_ONEBOT_API_BASE" },
+    bearerToken: { env: "IM_LIVE_ONEBOT_BEARER_TOKEN", secret: true },
+    targetGroupId: { env: "IM_LIVE_ONEBOT_TARGET_GROUP_ID" },
+    targetBotUin: { env: "IM_LIVE_ONEBOT_TARGET_BOT_UIN" },
+    driverUserUin: { env: "IM_LIVE_ONEBOT_DRIVER_USER_UIN" },
   },
   matrix: {
     homeserver: { env: "IM_LIVE_MATRIX_HOMESERVER" },

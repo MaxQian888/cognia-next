@@ -91,18 +91,16 @@ describe("buildLarkA2UICard", () => {
     }
     const body = await buildLarkA2UICard(baseInput(surface))
     expect(body.msg_type).toBe("interactive")
-    const parsed = JSON.parse(body.content) as {
-      header: { title: { content: string } }
-      elements: Array<Record<string, unknown>>
-    }
+    const parsed = JSON.parse(body.content)
     expect(parsed.header.title.content).toBe("Approve?")
-    // The Buttons collapse into a single `action` element with two buttons.
-    const actionEl = parsed.elements.find((e) => e.tag === "action") as
-      { actions: Array<Record<string, unknown>> } | undefined
-    expect(actionEl).toBeDefined()
-    expect(actionEl!.actions).toHaveLength(2)
-    expect(actionEl!.actions[0]).toMatchObject({ type: "primary", text: { content: "Yes" } })
-    expect(actionEl!.actions[1]).toMatchObject({ type: "danger" })
+    expect(parsed.schema).toBe("2.0")
+    expect(parsed.body.elements).toHaveLength(2)
+    expect(parsed.body.elements[0]).toMatchObject({
+      tag: "button",
+      type: "primary",
+      text: { content: "Yes" },
+    })
+    expect(parsed.body.elements[1]).toMatchObject({ tag: "button", type: "danger" })
     // Bindings round-trip.
     const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:b1:yes")
     expect(binding?.componentId).toBe("b1")
@@ -153,114 +151,51 @@ describe("buildLarkA2UICard", () => {
       rootId: "root",
     }
     const body = await buildLarkA2UICard(baseInput(surface))
-    const parsed = JSON.parse(body.content) as {
-      elements: Array<{ tag: string; actions?: Array<{ tag: string }> }>
-    }
-    const tags = parsed.elements.flatMap((e) =>
-      e.tag === "action" && e.actions ? e.actions.map((a) => a.tag) : [e.tag]
-    )
+    const parsed = JSON.parse(body.content)
+    const tags = parsed.body.elements.map((e: { tag: string }) => e.tag)
     expect(tags).toContain("select_static")
     expect(tags).toContain("picker_date")
   })
 
-  // B4 — simulated Checkbox stand-in (ADR-0009 v41).
-  it("renders Checkbox as a two-option select_static (simulated tier)", async () => {
-    const surface: A2UISegmentContent = {
-      components: {
-        root: { id: "root", component: "Column", children: ["chk"] },
-        chk: { id: "chk", component: "Checkbox", label: "I agree", value: false, action: "agree" },
-      },
-      dataModel: {},
-      rootId: "root",
+  it("renders native checker with canonical checked binding and legacy value", async () => {
+    for (const raw of [{ checked: true, value: false }, { value: true }, { checked: false }]) {
+      const body = await buildLarkA2UICard(
+        baseInput({
+          rootId: "chk",
+          dataModel: {},
+          components: { chk: { component: "Checkbox", label: "Agree", ...raw } },
+        })
+      )
+      const card = JSON.parse(body.content)
+      expect(card.body.elements[0]).toMatchObject({
+        tag: "checker",
+        checked: raw.checked ?? raw.value ?? false,
+        text: { content: "Agree" },
+      })
     }
-    const body = await buildLarkA2UICard(baseInput(surface))
-    const parsed = JSON.parse(body.content) as {
-      elements: Array<{
-        tag: string
-        actions?: Array<{
-          tag: string
-          options?: Array<{ value: string; text: { content: string } }>
-          initial_option?: string
-          value?: { simulatedCheckbox?: boolean }
-        }>
-      }>
-    }
-    const selects = parsed.elements
-      .flatMap((e) => e.actions ?? [])
-      .filter((a) => a.tag === "select_static")
-    expect(selects).toHaveLength(1)
-    const sel = selects[0]
-    expect(sel.options?.map((o) => o.value).sort()).toEqual(["false", "true"])
-    expect(sel.initial_option).toBe("false")
-    expect(sel.value?.simulatedCheckbox).toBe(true)
-    // Each option's label embeds the field name so the trigger surface
-    // tells the user what's being checked.
-    expect(sel.options?.[0].text.content).toContain("I agree")
   })
 
-  it("renders Checkbox with initial_option=true when value is truthy", async () => {
-    const surface: A2UISegmentContent = {
-      components: {
-        root: { id: "root", component: "Column", children: ["chk"] },
-        chk: { id: "chk", component: "Checkbox", label: "Subscribe", value: true },
-      },
-      dataModel: {},
-      rootId: "root",
-    }
-    const body = await buildLarkA2UICard(baseInput(surface))
-    const parsed = JSON.parse(body.content) as {
-      elements: Array<{
-        actions?: Array<{ tag: string; initial_option?: string }>
-      }>
-    }
-    const sel = parsed.elements
-      .flatMap((e) => e.actions ?? [])
-      .find((a) => a.tag === "select_static")
-    expect(sel?.initial_option).toBe("true")
-  })
-
-  // Lark's message-card schema only accepts `input` inside an action
-  // module's actions array — a root-level {tag:"input"} element makes the
-  // whole card undeliverable.
-  it("renders TextField / TextArea as inputs INSIDE action modules (never root-level)", async () => {
-    const surface: A2UISegmentContent = {
-      components: {
-        root: { id: "root", component: "Column", children: ["t", "a"] },
-        t: { id: "t", component: "TextField", value: "", label: "Name" },
-        a: { id: "a", component: "TextArea", value: "", label: "Body" },
-      },
-      dataModel: {},
-      rootId: "root",
-    }
-    const body = await buildLarkA2UICard(baseInput(surface))
-    const parsed = JSON.parse(body.content) as {
-      elements: Array<{
-        tag: string
-        actions?: Array<{
-          tag: string
-          name?: string
-          rows?: number
-          required?: boolean
-          value?: { actionId?: string; componentId?: string }
-        }>
-      }>
-    }
-    // No root-level input elements — Lark rejects the card otherwise.
-    expect(parsed.elements.some((e) => e.tag === "input")).toBe(false)
-    const inputs = parsed.elements
-      .filter((e) => e.tag === "action")
-      .flatMap((e) => e.actions ?? [])
-      .filter((a) => a.tag === "input")
-    expect(inputs).toHaveLength(2)
-    // Unsupported props are dropped; name + baked value binding round-trip.
-    expect(inputs[0].rows).toBeUndefined()
-    expect(inputs[0].required).toBeUndefined()
-    expect(inputs[0].name).toBe("t")
-    expect(inputs[1].name).toBe("a")
-    expect(inputs[0].value?.componentId).toBe("t")
-    // Bindings persisted so the inbound input_value callback resolves.
-    const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:t:t")
-    expect(binding?.componentId).toBe("t")
+  it("renders direct Card 2.0 inputs with real multiline text", async () => {
+    const body = await buildLarkA2UICard(
+      baseInput({
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: { component: "Column", children: ["t", "a"] },
+          t: { component: "TextField", label: "Name", required: true },
+          a: { component: "TextArea", label: "Body", rows: 3 },
+        },
+      })
+    )
+    const elements = JSON.parse(body.content).body.elements
+    expect(elements).toHaveLength(2)
+    expect(elements[0]).toMatchObject({ tag: "input", input_type: "text" })
+    expect(elements[0].required).toBeUndefined()
+    expect(elements[1]).toMatchObject({ tag: "input", input_type: "multiline_text", rows: 3 })
+    expect(elements[0].behaviors[0].value.componentId).toBe("t")
+    expect(await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:t:t")).toMatchObject({
+      componentId: "t",
+    })
   })
 })
 
@@ -282,17 +217,10 @@ describe("segmentsToLarkBodyAsync — composition with text segments", () => {
       { adapterId: "adp_lk", conversationKey: "lark:adp_lk:oc_chat" }
     )
     expect(body.msg_type).toBe("interactive")
-    const parsed = JSON.parse(body.content) as {
-      header: { title: { content: string } }
-      elements: Array<Record<string, unknown>>
-    }
+    const parsed = JSON.parse(body.content)
     expect(parsed.header.title.content).toBe("Survey")
-    // First element is the intro div; later elements contain the action.
-    const firstDiv = parsed.elements.find((e) => e.tag === "div") as
-      { text: { content: string } } | undefined
-    expect(firstDiv?.text.content).toContain("Intro paragraph")
-    const action = parsed.elements.find((e) => e.tag === "action")
-    expect(action).toBeDefined()
+    expect(parsed.body.elements[0]).toMatchObject({ tag: "markdown", content: "Intro paragraph" })
+    expect(parsed.body.elements.some((e: { tag: string }) => e.tag === "button")).toBe(true)
   })
 
   it("delegates to segmentsToLarkBody when no a2ui segment is present", async () => {
@@ -317,15 +245,15 @@ describe("segmentsToLarkBodyAsync — composition with text segments", () => {
       { adapterId: "adp_lk" }
     )
     expect(body.msg_type).toBe("interactive")
-    const parsed = JSON.parse(body.content) as {
-      elements: Array<{ tag: string; text?: { tag: string; content: string } }>
-    }
-    const contents = parsed.elements.map((e) => e.text?.content ?? "")
-    expect(contents.some((c) => c.includes("Summary below"))).toBe(true)
-    expect(contents.some((c) => c.includes("**bold** point"))).toBe(true)
-    expect(contents.some((c) => c.includes("```ts\nconst x = 1\n```"))).toBe(true)
+    const parsed = JSON.parse(body.content)
+    const contents = parsed.body.elements.map((e: { content?: string }) => e.content ?? "")
+    expect(contents.some((c: string) => c.includes("Summary below"))).toBe(true)
+    expect(contents.some((c: string) => c.includes("**bold** point"))).toBe(true)
+    expect(contents.some((c: string) => c.includes("```ts\nconst x = 1\n```"))).toBe(true)
     // No placeholder degradation anywhere.
-    expect(contents.some((c) => c.includes("[markdown]") || c.includes("[code]"))).toBe(false)
+    expect(contents.some((c: string) => c.includes("[markdown]") || c.includes("[code]"))).toBe(
+      false
+    )
   })
 
   it("renders mention segments with the lark_md at-syntax inside combined cards", async () => {
@@ -337,10 +265,10 @@ describe("segmentsToLarkBodyAsync — composition with text segments", () => {
       { adapterId: "adp_lk" }
     )
     expect(body.msg_type).toBe("interactive")
-    const parsed = JSON.parse(body.content) as {
-      elements: Array<{ text?: { content: string } }>
-    }
-    expect(parsed.elements.some((e) => e.text?.content === "<at id=ou_rev_1></at>")).toBe(true)
+    const parsed = JSON.parse(body.content)
+    expect(
+      parsed.body.elements.some((e: { content?: string }) => e.content === "<at id=ou_rev_1></at>")
+    ).toBe(true)
   })
 
   it("keeps single markdown segments on the plain segmentToLarkBody path", async () => {
@@ -550,24 +478,17 @@ describe("buildLarkA2UICard — overlay surfaces (Dialog / Drawer / Sheet)", () 
     }
     const body = await buildLarkA2UICard(baseInput(surface))
     expect(body.msg_type).toBe("interactive")
-    const parsed = JSON.parse(body.content) as { elements: Array<Record<string, unknown>> }
-    const tags = parsed.elements.map((e) => e.tag)
+    const parsed = JSON.parse(body.content)
+    const tags = parsed.body.elements.map((e: { tag: string }) => e.tag)
     // Divider + bold title precede the dialog's children.
     expect(tags).toContain("hr")
-    const titleEl = parsed.elements.find(
-      (e) =>
-        e.tag === "div" &&
-        ((e.text as { content?: string })?.content ?? "").includes("Fill the form")
+    const titleEl = parsed.body.elements.find(
+      (e: { tag: string; content?: string }) =>
+        e.tag === "markdown" && e.content?.includes("Fill the form")
     )
     expect(titleEl).toBeDefined()
-    // Children still render (input inside an action module + submit button)
-    // with live bindings.
-    expect(tags).toContain("action")
-    const nestedTags = parsed.elements
-      .filter((e) => e.tag === "action")
-      .flatMap((e) => (e.actions as Array<{ tag: string }> | undefined) ?? [])
-      .map((a) => a.tag)
-    expect(nestedTags).toContain("input")
+    expect(tags).toContain("input")
+    expect(tags).toContain("button")
     const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:b1:submit")
     expect(binding?.componentId).toBe("b1")
   })
@@ -592,8 +513,8 @@ describe("segmentsToLarkBodyAsync — resolved media in combined cards", () => {
       ],
       { adapterId: "adp_lk", conversationKey: "lark:adp_lk:oc_chat" }
     )
-    const parsed = JSON.parse(body.content) as { elements: Array<Record<string, unknown>> }
-    const img = parsed.elements.find((e) => e.tag === "img") as
+    const parsed = JSON.parse(body.content)
+    const img = parsed.body.elements.find((e: { tag: string }) => e.tag === "img") as
       { img_key: string; alt: { content: string } } | undefined
     expect(img).toBeDefined()
     expect(img!.img_key).toBe("img_v3_abc123")
@@ -613,8 +534,8 @@ describe("segmentsToLarkBodyAsync — resolved media in combined cards", () => {
       ],
       { adapterId: "adp_lk" }
     )
-    const parsed = JSON.parse(body.content) as { elements: Array<Record<string, unknown>> }
-    expect(parsed.elements.some((e) => e.tag === "img")).toBe(false)
+    const parsed = JSON.parse(body.content)
+    expect(parsed.body.elements.some((e: { tag: string }) => e.tag === "img")).toBe(false)
   })
 })
 
@@ -712,4 +633,381 @@ it("uses the shared frame and keeps the empty task-list description", async () =
   const card = JSON.parse(body.content)
   expect(card.schema).toBe("2.0")
   expect(card.body.elements).toEqual([{ tag: "markdown", content: "No tasks" }])
+})
+
+describe("Card 2.0 native controls", () => {
+  it("preserves multiline, checked, disabled and multiple bound values", async () => {
+    const body = await buildLarkA2UICard(
+      baseInput({
+        rootId: "root",
+        dataModel: { agreed: true, choices: ["a", "b"] },
+        components: {
+          root: {
+            component: "FormGroup",
+            children: ["body", "check", "select", "submit", "reset"],
+          },
+          body: {
+            component: "TextArea",
+            label: "Details",
+            rows: 4,
+            required: true,
+            value: "line1\nline2",
+          },
+          check: {
+            component: "Checkbox",
+            label: "Agree",
+            checked: { path: "/agreed" },
+            disabled: true,
+          },
+          select: {
+            component: "Select",
+            multiple: true,
+            value: { path: "/choices" },
+            options: [
+              { value: "a", label: "A" },
+              { value: "b", label: "B" },
+            ],
+          },
+          submit: { component: "Button", text: "Submit", action: "submit" },
+          reset: { component: "Button", text: "Reset", action: "reset" },
+        },
+      })
+    )
+    const card = JSON.parse(body.content)
+    expect(card.schema).toBe("2.0")
+    expect(card.elements).toBeUndefined()
+    const form = card.body.elements[0]
+    expect(form.tag).toBe("form")
+    expect(form.elements[0]).toMatchObject({
+      tag: "input",
+      input_type: "multiline_text",
+      rows: 4,
+      required: true,
+      default_value: "line1\nline2",
+    })
+    expect(form.elements[1]).toMatchObject({ tag: "checker", checked: true, disabled: true })
+    expect(form.elements[2]).toMatchObject({
+      tag: "multi_select_static",
+      selected_values: ["a", "b"],
+    })
+    expect(form.elements[3]).toMatchObject({ tag: "button", form_action_type: "submit" })
+    expect(form.elements[4]).toMatchObject({ tag: "button", form_action_type: "reset" })
+    expect(await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:submit:submit")).toMatchObject({
+      componentId: "submit",
+    })
+  })
+
+  it("keeps nested layouts, data tables and unknown content visible", async () => {
+    const body = await buildLarkA2UICard(
+      baseInput({
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: { component: "Column", children: ["row", "panel", "table", "chart", "unknown"] },
+          row: { component: "Row", children: ["left", "right"] },
+          left: { component: "Text", text: "Left" },
+          right: { component: "Text", text: "Right" },
+          panel: { component: "Collapsible", title: "Details", open: false, children: ["detail"] },
+          detail: { component: "Text", text: "Still present" },
+          table: {
+            component: "Table",
+            columns: [{ key: "count", header: "Count", type: "number" }],
+            data: [{ count: 3 }],
+            pageSize: 99,
+          },
+          chart: { component: "Chart", chartType: "bar", data: [{ name: "A", value: 4 }] },
+          unknown: { component: "UnsupportedWidget", label: "Retained", value: "value" },
+        },
+      })
+    )
+    const card = JSON.parse(body.content)
+    expect(card.body.elements[0]).toMatchObject({
+      tag: "column_set",
+      columns: [{ tag: "column" }, { tag: "column" }],
+    })
+    expect(card.body.elements[1]).toMatchObject({
+      tag: "collapsible_panel",
+      expanded: false,
+      elements: [{ tag: "markdown", content: "Still present" }],
+    })
+    expect(card.body.elements[2]).toMatchObject({
+      tag: "table",
+      page_size: 10,
+      rows: [{ count: 3 }],
+    })
+    expect(card.body.elements[3]).toMatchObject({
+      tag: "chart",
+      chart_spec: { type: "bar", data: { values: [{ name: "A", value: 4 }] } },
+    })
+    expect(body.content).toContain("Retained")
+  })
+})
+
+it("keeps independent form names unique and normalizes submitted names to component IDs", async () => {
+  const surface: A2UISegmentContent = {
+    rootId: "form",
+    dataModel: {},
+    components: {
+      form: { component: "FormGroup", children: ["field", "submit"] },
+      field: { component: "TextField", label: "Name", required: true },
+      submit: { component: "Button", text: "Save", action: "save", formAction: "submit" },
+    },
+  }
+  const body = await segmentsToLarkBodyAsync(
+    ["one", "two"].map((surfaceId) => ({
+      type: "a2ui" as const,
+      surfaceId,
+      content: surface,
+      plainTextMirror: "Form",
+    })),
+    { adapterId: "adp_lk" }
+  )
+  const forms = JSON.parse(body.content).body.elements
+  expect(forms[0].name).not.toBe(forms[1].name)
+  const form = forms[1]
+  const callback = parseLarkInteractiveCallback("adp_lk", "BOT", {
+    schema: "2.0",
+    header: { event_id: "form_2", event_type: "card.action.trigger" },
+    event: {
+      operator: { open_id: "ou_user" },
+      action: {
+        tag: "button",
+        value: form.elements[1].behaviors[0].value,
+        form_value: { [form.elements[0].name]: "Alice" },
+      },
+    },
+  } as LarkEventEnvelope)
+  expect(callback).toMatchObject({
+    actionType: "submit",
+    surfaceId: "two",
+    componentId: "submit",
+    payload: { field: "Alice" },
+  })
+})
+
+it("wraps standalone multiple selectors in a valid form and preserves array values", async () => {
+  const body = await buildLarkA2UICard(
+    baseInput({
+      rootId: "pick",
+      dataModel: {},
+      components: {
+        pick: {
+          component: "Select",
+          multiple: true,
+          options: [
+            { value: "a", label: "A" },
+            { value: "b", label: "B" },
+          ],
+        },
+      },
+    })
+  )
+  const form = JSON.parse(body.content).body.elements[0]
+  expect(form.tag).toBe("form")
+  expect(form.elements[0].required).toBe(false)
+  const cb = parseLarkInteractiveCallback("adp_lk", "BOT", {
+    schema: "2.0",
+    header: { event_id: "multi", event_type: "card.action.trigger" },
+    event: {
+      operator: { open_id: "ou_user" },
+      action: {
+        tag: "button",
+        value: form.elements[1].behaviors[0].value,
+        form_value: { [form.elements[0].name]: ["a", "b"] },
+      },
+    },
+  } as LarkEventEnvelope)
+  expect(cb).toMatchObject({
+    actionType: "select",
+    componentId: "pick",
+    value: '["a","b"]',
+    payload: { values: ["a", "b"] },
+  })
+})
+
+it("avoids illegal form/table nesting without losing content", async () => {
+  const body = await buildLarkA2UICard(
+    baseInput({
+      rootId: "panel",
+      dataModel: {},
+      components: {
+        panel: { component: "Collapsible", title: "Panel", children: ["form"] },
+        form: { component: "FormGroup", children: ["nested", "table"] },
+        nested: { component: "FormGroup", children: ["field"] },
+        field: { component: "TextField", value: "kept", required: true },
+        table: {
+          component: "Table",
+          columns: [{ key: "k", header: "K" }],
+          data: [{ k: "entire row" }],
+        },
+      },
+    })
+  )
+  const card = JSON.parse(body.content)
+  expect(body.content.match(/"tag":"form"/g)).toHaveLength(1)
+  expect(body.content).not.toContain('"tag":"collapsible_panel"')
+  expect(body.content).not.toContain('"tag":"table"')
+  expect(body.content).toContain("entire row")
+  const form = card.body.elements.find((e: { tag: string }) => e.tag === "form")
+  expect(form.elements[0]).toMatchObject({ tag: "input", required: true })
+  expect(form.elements.at(-1)).toMatchObject({ tag: "button", form_action_type: "submit" })
+})
+
+it("preserves multiple children within a Row column", async () => {
+  const body = await buildLarkA2UICard(
+    baseInput({
+      rootId: "row",
+      dataModel: {},
+      components: {
+        row: { component: "Row", children: ["column", "other"] },
+        column: { component: "Column", children: ["a", "b"] },
+        a: { component: "Text", text: "A" },
+        b: { component: "Text", text: "B" },
+        other: { component: "Text", text: "Other" },
+      },
+    })
+  )
+  const columns = JSON.parse(body.content).body.elements[0].columns
+  expect(columns).toHaveLength(2)
+  expect(columns[0].elements.map((e: { content: string }) => e.content)).toEqual(["A", "B"])
+})
+
+it("keeps result card content and style when appended to an A2UI surface", async () => {
+  const body = await segmentsToLarkBodyAsync(
+    [
+      {
+        type: "a2ui",
+        surfaceId: "controls",
+        plainTextMirror: "Pick",
+        content: {
+          rootId: "go",
+          dataModel: {},
+          components: { go: { component: "Button", text: "Go", action: "go" } },
+        },
+      },
+      {
+        type: "card",
+        card: {
+          kind: "lark",
+          payload: {
+            schema: "2.0",
+            config: {
+              width_mode: "fill",
+              style: { text_size: { normal: { default: "normal", pc: "heading" } } },
+            },
+            header: { title: { tag: "plain_text", content: "Answer" } },
+            body: { padding: "8px", elements: [{ tag: "markdown", content: "Complete answer" }] },
+          },
+        },
+      },
+    ],
+    { adapterId: "adp_lk" }
+  )
+  const card = JSON.parse(body.content)
+  expect(card.config.width_mode).toBe("fill")
+  expect(card.config.style.text_size.normal.pc).toBe("heading")
+  expect(card.header.title.content).toBe("Answer")
+  expect(card.body.padding).toBe("8px")
+  expect(card.body.elements).toMatchObject([
+    { tag: "button" },
+    { tag: "markdown", content: "Complete answer" },
+  ])
+  expect(body.content).not.toContain("[card]")
+})
+
+it("does not turn ordinary form buttons or links into submit actions", async () => {
+  const body = await buildLarkA2UICard(
+    baseInput({
+      rootId: "form",
+      dataModel: {},
+      components: {
+        form: { component: "FormGroup", children: ["field", "cancel", "link"] },
+        field: { component: "TextField", required: true },
+        cancel: { component: "Button", text: "Cancel", action: "cancel" },
+        link: {
+          component: "Button",
+          text: "Help",
+          action: "help",
+          href: "https://example.com/help",
+        },
+      },
+    })
+  )
+  const elements = JSON.parse(body.content).body.elements[0].elements
+  expect(elements[1].form_action_type).toBeUndefined()
+  expect(elements[2].form_action_type).toBeUndefined()
+  expect(elements[2].behaviors[0]).toEqual({
+    type: "open_url",
+    default_url: "https://example.com/help",
+  })
+  expect(elements[3]).toMatchObject({ tag: "button", form_action_type: "submit" })
+})
+
+it("preserves every value when a generated card exceeds the element limit", async () => {
+  const components = Object.fromEntries(
+    Array.from({ length: 205 }, (_, i) => [`text_${i}`, { component: "Text", text: `Retain ${i}` }])
+  )
+  const body = await buildLarkA2UICard(
+    baseInput({
+      rootId: "root",
+      dataModel: {},
+      components: {
+        root: { component: "Column", children: Object.keys(components) },
+        ...components,
+      },
+    })
+  )
+  const elements = JSON.parse(body.content).body.elements
+  expect(elements).toHaveLength(1)
+  expect(elements[0].content).toContain("controls are shown as text")
+  for (let i = 0; i < 205; i++) expect(elements[0].content).toContain(`Retain ${i}`)
+})
+
+it("deduplicates composed card IDs and preserves independent named styles", async () => {
+  const payloads = ["one", "two"].map((name) => ({
+    schema: "2.0",
+    config: { style: { text_size: { [name]: { default: "normal" } } } },
+    body: { elements: [{ tag: "markdown", element_id: "answer", content: name }] },
+  }))
+  const body = await segmentsToLarkBodyAsync(
+    payloads.map((payload) => ({ type: "card" as const, card: { kind: "lark", payload } })),
+    { adapterId: "adp_lk" }
+  )
+  const card = JSON.parse(body.content)
+  expect(card.config.style.text_size).toHaveProperty("one")
+  expect(card.config.style.text_size).toHaveProperty("two")
+  const ids = card.body.elements.map((e: { element_id: string }) => e.element_id)
+  expect(new Set(ids).size).toBe(2)
+  expect(payloads[1].body.elements[0].element_id).toBe("answer")
+})
+
+it("keeps pie charts on the first metric and normalizes table page sizes", async () => {
+  const body = await buildLarkA2UICard(
+    baseInput({
+      rootId: "root",
+      dataModel: {},
+      components: {
+        root: { component: "Column", children: ["chart", "table"] },
+        chart: {
+          component: "Chart",
+          chartType: "pie",
+          yKeys: ["sales", "cost"],
+          data: [{ name: "A", sales: 10, cost: 5 }],
+        },
+        table: {
+          component: "Table",
+          columns: [{ key: "name", header: "Name" }],
+          data: [{ name: "A" }],
+          pageSize: 2.5,
+        },
+      },
+    })
+  )
+  const elements = JSON.parse(body.content).body.elements
+  expect(elements[0].chart_spec).toMatchObject({
+    type: "pie",
+    valueField: "sales",
+    data: { values: [{ name: "A", sales: 10, cost: 5 }] },
+  })
+  expect(elements[1].page_size).toBe(2)
 })

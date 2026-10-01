@@ -627,7 +627,7 @@ describe("ConversationOverrideForm", () => {
     expect(await getDb().conversationOverrides.count()).toBe(1)
   })
 
-  it("Delete-Override button removes the existing row", async () => {
+  it("Delete-Override button removes the existing row and tombstones it for paired clients", async () => {
     await getDb().conversationOverrides.put({
       id: "co-delete",
       conversationKey: "lark:lark-1:oc_delete",
@@ -649,6 +649,11 @@ describe("ConversationOverrideForm", () => {
     fireEvent.click(screen.getByTestId("conv-override-delete"))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     expect(await getDb().conversationOverrides.get("co-delete")).toBeUndefined()
+    expect(await getDb().syncTombstones.get(["conversationOverrides", "co-delete"])).toMatchObject({
+      table: "conversationOverrides",
+      id: "co-delete",
+      deletedAt: expect.any(Number),
+    })
   })
 
   it("Cancel button invokes onCancel without persisting changes", () => {

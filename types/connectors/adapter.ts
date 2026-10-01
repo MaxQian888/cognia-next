@@ -250,6 +250,8 @@ export interface PlatformAdapter {
   streamReply?(req: StreamReplyRequest): Promise<void>
   edit?(messageId: string, patch: OutboundRequest): Promise<OutboundResult>
   delete?(messageId: string): Promise<void>
+  /** Delete a recipient-only Lark card through its distinct ephemeral lifecycle. */
+  deleteEphemeralCard?(messageId: string): Promise<void>
   /**
    * Add an emoji reaction to an existing platform message. `emojiType` is
    * the platform's reaction code (Lark reaction type like "THUMBSUP") or a

@@ -172,8 +172,8 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
       }
       return { kind: "errcode", errcode: body.errcode, errmsg: body.errmsg }
     }
-    // Non-2xx status or an unparseable body (gateway HTML, truncated proxy
-    // response) means the message was NOT delivered — never report success.
+    // A missing business result cannot prove non-delivery: the message may
+    // have arrived even when a proxy truncated its acknowledgement.
     if (resp.status >= 400 || body?.errcode !== 0) {
       return {
         kind: "transport",
@@ -209,11 +209,16 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     return {
       ok: false,
       error: {
-        code: attempt.status >= 500 ? "platform_5xx" : "platform_4xx",
+        code:
+          attempt.status >= 200 && attempt.status < 300
+            ? "delivery_unknown"
+            : attempt.status >= 500
+              ? "platform_5xx"
+              : "platform_4xx",
         message: attempt.unparseable
           ? `WeChat OA send returned a non-JSON body (status ${attempt.status}): ${attempt.bodySnippet}`
           : `WeChat OA send failed with HTTP ${attempt.status}: ${attempt.bodySnippet}`,
-        retryable: true,
+        retryable: attempt.status < 200 || attempt.status >= 300,
       },
     }
   }

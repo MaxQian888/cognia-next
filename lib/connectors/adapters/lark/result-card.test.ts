@@ -7,6 +7,7 @@ import {
   buildLarkResultCard,
   buildLarkResultCardSegment,
   withLarkResultCard,
+  isLarkResultTemplatePayload,
   type LarkResultCardInput,
 } from "./result-card"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -25,7 +26,88 @@ function markdownTexts(card: Record<string, unknown>): string[] {
 
 const BASE: LarkResultCardInput = { answer: "All done.", status: "done" }
 
+it("builds a fixed-version template with a safe built-in fallback only on success", () => {
+  const presentation = {
+    resultTemplateEnabled: true,
+    resultTemplateId: "AA_template",
+    resultTemplateVersion: "1.0.0",
+    showQuote: false,
+    showElapsed: false,
+  }
+  const segment = buildLarkResultCardSegment({
+    ...BASE,
+    answer: "<at id=all>everyone</at>",
+    quote: "private question",
+    elapsedMs: 999,
+    detailsUrl: "javascript:alert(1)",
+    presentation,
+  })
+  if (segment.type !== "card" || !isLarkResultTemplatePayload(segment.card.payload))
+    throw new Error("expected template")
+  expect(segment.card.payload.data).toMatchObject({
+    template_id: "AA_template",
+    template_version_name: "1.0.0",
+    template_variable: { status: "done", quote: "", elapsed_ms: 0, details_url: "" },
+  })
+  expect(segment.card.payload.data.template_variable.answer).not.toContain("<at")
+  expect(segment.card.payload.fallback.schema).toBe("2.0")
+  for (const status of ["error", "interrupted"] as const) {
+    const special = buildLarkResultCardSegment({ ...BASE, status, presentation })
+    expect(special.type === "card" && isLarkResultTemplatePayload(special.card.payload)).toBe(false)
+  }
+  expect(isLarkResultTemplatePayload(null)).toBe(false)
+  expect(isLarkResultTemplatePayload({ type: "template", data: {} })).toBe(false)
+})
+
+it("applies responsive answer text and header decorations without changing markdown", () => {
+  const card = buildLarkResultCard({
+    ...BASE,
+    presentation: {
+      subtitle: "Weekly report",
+      headerTags: "team,report",
+      headerIconKey: "img_v3_test",
+      mobileTextSize: "heading-4",
+    },
+  })
+  expect(card.header).toMatchObject({
+    title: { content: "回复 / Reply" },
+    subtitle: { content: "Weekly report" },
+    text_tag_list: [
+      { tag: "text_tag", text: { tag: "plain_text", content: "team" }, color: "neutral" },
+      { tag: "text_tag", text: { tag: "plain_text", content: "report" }, color: "neutral" },
+    ],
+  })
+  expect(elements(card).find((el) => el.element_id === "answer")).toMatchObject({
+    content: BASE.answer,
+    text_size: "cognia-body",
+  })
+})
+
 describe("buildLarkResultCard — card shape", () => {
+  it("applies saved appearance and quote/footer visibility without dropping the answer", () => {
+    const card = buildLarkResultCard({
+      ...BASE,
+      quote: "Question",
+      presentation: {
+        theme: "purple",
+        density: "compact",
+        width: "fill",
+        title: "Release",
+        showQuote: false,
+        showFooter: false,
+      },
+    })
+    expect(card.header).toMatchObject({ title: { content: "Release" }, template: "purple" })
+    expect(card.config).toMatchObject({ width_mode: "fill" })
+    expect(card.body).toMatchObject({ padding: "8px", vertical_spacing: "4px" })
+    expect(
+      elements(card).some((el) => el.element_id === "quote" || el.element_id === "footer")
+    ).toBe(false)
+    expect(elements(card).some((el) => el.element_id === "answer")).toBe(true)
+    expect(
+      buildLarkResultCard({ ...BASE, status: "error", presentation: { theme: "purple" } }).header
+    ).toMatchObject({ template: "red" })
+  })
   it("emits schema 2.0 with update_multi + answer summary", () => {
     const card = buildLarkResultCard(BASE)
     expect(card.schema).toBe("2.0")
@@ -226,15 +308,12 @@ describe("buildLarkResultCard — image extraction", () => {
 
 describe("buildLarkResultCard — footer", () => {
   const footerContent = (card: Record<string, unknown>): string | undefined => {
-    const note = elements(card).find((el) => el.tag === "note")
-    if (!note) return undefined
-    const inner = (note.elements as { content: string }[])[0]
-    return inner.content
+    return elements(card).find((el) => el.element_id === "footer")?.content as string | undefined
   }
 
   it("omits the footer entirely when there is nothing to say", () => {
     const card = buildLarkResultCard(BASE)
-    expect(elements(card).some((el) => el.tag === "hr" || el.tag === "note")).toBe(false)
+    expect(elements(card).some((el) => el.tag === "hr" || el.element_id === "footer")).toBe(false)
   })
 
   it("joins at + details + elapsed with ` · `, after an hr", () => {
@@ -245,7 +324,9 @@ describe("buildLarkResultCard — footer", () => {
       elapsedMs: 4230,
     })
     const els = elements(card)
-    const noteIndex = els.findIndex((el) => el.tag === "note")
+    const noteIndex = els.findIndex((el) => el.element_id === "footer")
+    expect(els[noteIndex]).toMatchObject({ tag: "markdown", text_size: "notation" })
+    expect(els.some((el) => el.tag === "note")).toBe(false)
     expect(els[noteIndex - 1].tag).toBe("hr")
     expect(footerContent(card)).toBe(
       "<at id=ou_abc123></at> · [查看详情 / Details](https://app.example.com/agent-runs?run=r1) · 耗时 4.2s / elapsed"

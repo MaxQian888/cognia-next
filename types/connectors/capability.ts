@@ -10,6 +10,8 @@ export const ALL_CAPABILITIES = [
   "send.video",
   "send.file",
   "send.card",
+  // Recipient-only group messages; unsupported adapters must fail closed.
+  "send.ephemeral",
   "send.poll",
   "send.location",
   "send.reply",
@@ -102,6 +104,7 @@ export const A2UI_COMPONENT_KINDS = [
   "DatePicker",
   "TimePicker",
   "DateTimePicker",
+  "FormGroup",
   // Layout
   "Card",
   "Row",

@@ -444,7 +444,12 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       onCancel?.()
       return
     }
-    await getDb().conversationOverrides.delete(initialRow.id)
+    // The same mutation the save path uses, so a thin client asks its Host and
+    // the Host records the tombstone its paired clients need.
+    await mutateConversationOverride({
+      kind: "delete",
+      conversationKey: initialRow.conversationKey,
+    })
     onDone?.()
   }
 

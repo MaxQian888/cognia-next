@@ -1,13 +1,14 @@
 /**
  * Lark Interactive Card v2 → InboundA2UIBlock projection.
  *
- * Lark cards have a `header` (with `title.content`), an `elements`
- * array (or `i18n_elements`) plus optional `card_link`. Inside each
+ * Lark cards have an optional `header` (with `title.content`), a Card 2.0
+ * `body.elements` array or legacy `elements` / `i18n_elements`, plus
+ * optional `card_link`. Inside each
  * element the structure is recursive: `div`, `markdown`, `column_set`,
  * `image`, `button`, `select_static`, `form`, `action`, etc.
  *
- * We project the major shapes into InboundA2UIBlock. Unknown / form
- * elements fall through into `raw` so the operator can drop into the
+ * We project the major shapes into InboundA2UIBlock. Unknown
+ * elements fall through into `raw_json` so the operator can drop into the
  * `<details>` JSON view.
  */
 
@@ -30,9 +31,14 @@ interface LarkCardElement {
   elements?: LarkCardElement[]
   actions?: LarkCardElement[]
   href?: string
+  i18n_content?: Record<string, string>
+  header?: { title?: { tag?: string; content?: string } }
+  behaviors?: Array<{ type?: string; default_url?: string; value?: Record<string, unknown> }>
 }
 
 interface LarkCardPayload {
+  schema?: string
+  body?: { elements?: LarkCardElement[] }
   header?: {
     title?: { content?: string; tag?: string }
     subtitle?: { content?: string }
@@ -45,6 +51,8 @@ interface LarkCardPayload {
 
 function textOf(el: LarkCardElement | undefined): string {
   if (!el) return ""
+  const localized = el.i18n_content?.en_us ?? el.i18n_content?.zh_cn
+  if (localized) return localized
   if (el.content) return el.content
   if (el.text?.content) return el.text.content
   if (el.title?.content) return el.title.content
@@ -57,10 +65,16 @@ function mapAction(action: LarkCardElement): InboundA2UINode | null {
       return {
         kind: "button",
         label: textOf(action),
-        url: action.url || action.multi_url?.url,
-        actionId: (action.value?.action_id as string | undefined) ?? undefined,
-        style:
-          action.type === "primary" ? "primary" : action.type === "danger" ? "danger" : "default",
+        url:
+          action.behaviors?.find((behavior) => behavior.type === "open_url")?.default_url ||
+          action.url ||
+          action.multi_url?.url,
+        actionId: actionIdOf(action),
+        style: action.type?.startsWith("primary")
+          ? "primary"
+          : action.type?.startsWith("danger")
+            ? "danger"
+            : "default",
       }
     case "select_static":
       return {
@@ -73,8 +87,29 @@ function mapAction(action: LarkCardElement): InboundA2UINode | null {
   }
 }
 
+function actionIdOf(action: LarkCardElement): string | undefined {
+  const value =
+    action.behaviors?.find((behavior) => behavior.type === "callback")?.value ?? action.value
+  const id = value?.actionId ?? value?.action_id
+  return typeof id === "string" ? id : undefined
+}
+
 function mapElement(el: LarkCardElement): InboundA2UINode | null {
+  if (!el || typeof el !== "object") return null
   switch (el.tag) {
+    case "button":
+    case "select_static":
+      return mapAction(el)
+    case "form":
+    case "interactive_container":
+    case "column":
+      return { kind: "column", children: flatten((el.elements ?? []).map(mapElement)) }
+    case "collapsible_panel":
+      return {
+        kind: "card",
+        title: el.header?.title?.content,
+        children: flatten((el.elements ?? []).map(mapElement)),
+      }
     case "div":
     case "markdown":
       return { kind: "text", text: textOf(el) }
@@ -110,7 +145,9 @@ function mapElement(el: LarkCardElement): InboundA2UINode | null {
       // Note elements are small italicised footers in Lark cards.
       return { kind: "text", text: textOf(el), emphasis: "muted" }
     default:
-      return null
+      // Retain unsupported content at its original position, including native
+      // tables/charts/forms that the shared inbound vocabulary cannot express.
+      return { kind: "raw_json", label: el.tag, payload: el }
   }
 }
 
@@ -150,7 +187,10 @@ function resolveCardPayload(payload: LarkCardPayload | LarkEnvelopeLike): LarkCa
     const message = payload.event?.message
     if (!message || message.message_type !== "interactive" || !message.content) return null
     try {
-      return JSON.parse(message.content) as LarkCardPayload
+      const parsed: unknown = JSON.parse(message.content)
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as LarkCardPayload)
+        : null
     } catch {
       return null
     }
@@ -161,15 +201,20 @@ function resolveCardPayload(payload: LarkCardPayload | LarkEnvelopeLike): LarkCa
 /**
  * Convert a Lark interactive-card payload into an InboundA2UIBlock.
  * Accepts the full schema-2.0 event envelope (the production shape), the
- * new schema-2.0 card payload, and the older flat shape; mappers gracefully
- * skip elements they don't recognise.
+ * new schema-2.0 card payload, and the older flat shape; unknown components
+ * retain their raw JSON at the original position.
  */
 export function larkInboundToA2UI(
   payload: LarkCardPayload | LarkEnvelopeLike
 ): InboundA2UIBlock | null {
   const card = resolveCardPayload(payload)
   if (!card) return null
-  const elements = card.elements ?? card.i18n_elements?.en_us ?? card.i18n_elements?.zh_cn ?? []
+  const elements =
+    card.body?.elements ??
+    card.elements ??
+    card.i18n_elements?.en_us ??
+    card.i18n_elements?.zh_cn ??
+    []
   if (elements.length === 0 && !card.header?.title?.content) return null
   const body: InboundA2UINode[] = []
   const headerTitle = card.header?.title?.content

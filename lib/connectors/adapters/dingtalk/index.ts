@@ -406,6 +406,18 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
             msgKey: serialized.msgKey,
             msgParam,
           })
+          // HTTP 200 acknowledges the batch, not every recipient. We send
+          // exactly one user per request, so only that user's rejection may
+          // fail/retry this delivery; unrelated partial failures must not.
+          if (Array.isArray(body.invalidStaffIdList) && body.invalidStaffIdList.includes(staffId)) {
+            throw new DingTalkApiError("DingTalk rejected the recipient staffId", 400)
+          }
+          if (
+            Array.isArray(body.flowControlledStaffIdList) &&
+            body.flowControlledStaffIdList.includes(staffId)
+          ) {
+            throw new DingTalkApiError("DingTalk rate limited the recipient", 429)
+          }
           const processQueryKey =
             typeof body.processQueryKey === "string" ? body.processQueryKey : ""
           if (processQueryKey && robotCode) {

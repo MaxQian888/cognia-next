@@ -5,9 +5,8 @@
  * plaintext mirror with "回复 1 同意 / 2 取消" hints. Users reply with a
  * digit; the outbound mapper (`a2ui-mapper.ts:buildIlinkA2UISurface`)
  * records the mapping and the inbound parser
- * (`parse.ts:tryParseNumericCallback`) consumes it via
- * `consumeNumericAction`, emitting a `ConnectorCallbackEvent` against the
- * corresponding binding.
+ * (`parse.ts:tryParseNumericCallback`) resolves it without consuming it.
+ * The adapter acknowledges the entry after a terminal callback outcome.
  *
  * Why a per-conversation map: numbers reset when the assistant emits a
  * fresh surface. Carrying the registry across conversations would
@@ -59,11 +58,10 @@ export function setNumericAction(
 }
 
 /**
- * Look up a numeric reply without consuming it — tests only. Production
- * routing consumes via `consumeNumericAction` so a double-tap doesn't fire
- * twice.
+ * Resolve a numeric reply without consuming it so transient dispatch failures
+ * can be retried. Consumption happens only after a terminal outcome.
  */
-export function __peekNumericActionForTesting(
+export function peekNumericAction(
   conversationKey: string,
   numeric: number,
   nowMs: number = Date.now()
@@ -75,15 +73,18 @@ export function __peekNumericActionForTesting(
   return live.find((e) => e.numeric === numeric)?.actionId
 }
 
+/** Compatibility alias for existing registry tests. */
+export const __peekNumericActionForTesting = peekNumericAction
+
 /**
- * Consume a numeric binding (lookup + delete). `tryParseNumericCallback`
- * uses this to route exactly once. Returns undefined when no live binding
- * matches.
+ * Acknowledge a numeric binding after dispatch. The expected action prevents
+ * a late acknowledgement from removing a newer menu at the same digit.
  */
 export function consumeNumericAction(
   conversationKey: string,
   numeric: number,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  expectedActionId?: string
 ): string | undefined {
   const entries = byConversation.get(conversationKey)
   if (!entries || entries.length === 0) return undefined
@@ -94,6 +95,7 @@ export function consumeNumericAction(
     return undefined
   }
   const hit = live[idx]
+  if (expectedActionId !== undefined && hit.actionId !== expectedActionId) return undefined
   const next = live.filter((_, i) => i !== idx)
   if (next.length === 0) byConversation.delete(conversationKey)
   else byConversation.set(conversationKey, next)

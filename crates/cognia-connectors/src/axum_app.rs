@@ -436,7 +436,7 @@ async fn webhook_handler(
 
     // QQ Official Bot — in-band responses again: the op-13 URL-validation
     // challenge must be answered with a seeded-Ed25519 signature, and ordinary
-    // pushes are ACK'd with `{"op":12}` (HTTP Callback ACK).
+    // pushes are ACK'd with `{"op":12,"d":0}` (successful HTTP Callback ACK).
     if adapter_type == "qq-official" {
         return qq_official_webhook_handler(&adapter_id, &headers, &body, emitter.as_ref()).await;
     }
@@ -576,9 +576,9 @@ async fn slack_webhook_handler(
 ///     signature = hex(sign(event_ts ++ plain_token)) with the same seeded
 ///     key. Not emitted — the console handshake carries no event.
 ///   - op 0 (DISPATCH) → emit the raw envelope on
-///     `connectors://webhook/<adapterId>` and ACK with `{"op":12}` (the
+///     `connectors://webhook/<adapterId>` and ACK with `{"op":12,"d":0}` (the
 ///     documented HTTP Callback ACK opcode).
-///   - anything else → ACK `{"op":12}` without emitting (nothing else is
+///   - anything else → ACK `{"op":12,"d":0}` without emitting (nothing else is
 ///     defined for the webhook channel; forwarding would dead-letter).
 async fn qq_official_webhook_handler(
     adapter_id: &str,
@@ -644,10 +644,10 @@ async fn qq_official_webhook_handler(
         // DISPATCH — forward the raw envelope to the renderer.
         Some(0) => {
             emitter.emit_webhook(adapter_id, &payload);
-            json_response(StatusCode::OK, &serde_json::json!({ "op": 12 }))
+            json_response(StatusCode::OK, &serde_json::json!({ "op": 12, "d": 0 }))
         }
         // Unknown / undocumented op over webhook — ACK, do not forward.
-        _ => json_response(StatusCode::OK, &serde_json::json!({ "op": 12 })),
+        _ => json_response(StatusCode::OK, &serde_json::json!({ "op": 12, "d": 0 })),
     }
 }
 
@@ -2614,7 +2614,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // QQ Official Bot — seeded-Ed25519 verification, op-13 challenge,
-    // op-0 dispatch emit + {"op":12} ACK.
+    // op-0 dispatch emit + {"op":12,"d":0} ACK.
     // -----------------------------------------------------------------------
 
     const QQ_TEST_SECRET: &str = "DG5g3B4j9X2KOErG";
@@ -2707,7 +2707,8 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(body_string(resp).await, r#"{"op":12}"#);
+        let ack: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(ack, serde_json::json!({ "op": 12, "d": 0 }));
 
         let events = emitter.events.lock();
         assert_eq!(events.len(), 1);
@@ -2803,7 +2804,8 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(body_string(resp).await, r#"{"op":12}"#);
+        let ack: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(ack, serde_json::json!({ "op": 12, "d": 0 }));
         assert!(emitter.events.lock().is_empty());
 
         super::super::keyring::delete(adapter_id, "clientSecret").unwrap();

@@ -13,7 +13,7 @@ cognia-next 通过 **OneBot** 协议接入 QQ，支持两种 WebSocket 连接方
 
 支持的客户端：
 
-- [NapCat](https://github.com/NapNeko/NapCatQQ) —— 适用于 Windows/Linux 的 QQ，更新频率最快
+- [NapCat](https://github.com/NapNeko/NapCatQQ) —— QQ 接入，提供 macOS 安装器
 - [Lagrange](https://github.com/LagrangeDev/Lagrange.Core) —— 跨平台 NTQQ
 - [LLOneBot](https://github.com/LLOneBot/LLOneBot) —— 适用于 QQNT 的 LiteLoader 插件
 
@@ -34,7 +34,7 @@ cognia-next 通过 **OneBot** 协议接入 QQ，支持两种 WebSocket 连接方
 2. 点击 **添加连接器** → **OneBot (QQ)**。
 3. 填写：
    - **Bot UIN（QQ 号）** —— 机器人账号的 QQ 号（例如 `123456789`）。
-   - **Bearer Token** —— 使用带认证的连接时，填写与 OneBot 客户端 `accessToken` 相同的值。
+   - **Bearer Token** —— 使用带认证的连接时，填写与 NapCat 网络连接项 `token` 相同的值。
    - **预期客户端** —— 选择 NapCat、Lagrange 或 LLOneBot（仅作显示用途）。
    - **连接方式** —— 客户端连接到 cognia-next 时选择 **反向 WS**；cognia-next 连接到客户端
      WebSocket 服务端时选择 **正向 WS**。
@@ -42,9 +42,9 @@ cognia-next 通过 **OneBot** 协议接入 QQ，支持两种 WebSocket 连接方
 
 如果选择 **反向 WS**，对话框会显示端点 URL，例如：
 
-   ```
-   ws://127.0.0.1:7842/ws/onebot/<adapterId>
-   ```
+```
+ws://127.0.0.1:7842/ws/onebot/<adapterId>
+```
 
 复制此 URL —— 接下来你会把它粘贴到 NapCat / Lagrange / LLOneBot 配置中。
 
@@ -57,21 +57,28 @@ cognia-next 通过 **OneBot** 协议接入 QQ，支持两种 WebSocket 连接方
 
 ### 方案 A：反向 WS
 
-编辑你的 NapCat `napcat.json`（或使用 NapCat WebUI），添加 cognia-next 显示的 reverse-WS URL：
+在 NapCat WebUI → 网络配置 → 新建 WebSocket 客户端（反向 WS），保存时启用。对应文件为 `config/onebot11_<QQ>.json`，把下面网络连接项合入已有配置：
 
 ```json
 {
-  "wsReverse": [
-    {
-      "enable": true,
-      "url": "ws://127.0.0.1:7842/ws/onebot/<adapterId>",
-      "reconnectInterval": 3000
-    }
-  ]
+  "network": {
+    "websocketClients": [
+      {
+        "name": "cognia",
+        "enable": true,
+        "url": "ws://127.0.0.1:7842/ws/onebot/<adapterId>",
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "reconnectInterval": 5000,
+        "token": "replace-with-your-token",
+        "heartInterval": 30000
+      }
+    ]
+  }
 }
 ```
 
-将 `<adapterId>` 替换为 cognia-next 对话框中显示的值。
+将 `<adapterId>` 替换为 Cognia 显示的 ID，token 必须与 Cognia 的 Bearer Token 相同。
 
 ### Lagrange
 
@@ -108,6 +115,27 @@ ws://127.0.0.1:7842/ws/onebot/<adapterId>
 ws://127.0.0.1:3001
 ```
 
+当前 NapCat 正向 WS 配置（合入已有文件）：
+
+```json
+{
+  "network": {
+    "websocketServers": [
+      {
+        "name": "cognia-forward",
+        "enable": true,
+        "host": "127.0.0.1",
+        "port": 3001,
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "token": "replace-with-your-token",
+        "heartInterval": 30000
+      }
+    ]
+  }
+}
+```
+
 如果填写了 **Bearer Token**，cognia-next 会在打开正向 WebSocket 时发送
 `Authorization: Bearer <token>`。
 
@@ -118,20 +146,7 @@ ws://127.0.0.1:3001
 对于反向 WS，入站端点默认 fail-closed：如果没有配置 bearer token，cognia-next 会拒绝连接，
 除非你在适配器对话框中显式开启 **允许未认证的连接**。
 
-推荐配置：
-
-1. 在 NapCat `napcat.json` 中设置：
-
-   ```json
-   {
-     "accessToken": "my-secret-token"
-   }
-   ```
-
-2. 在 cognia-next 适配器对话框中，将 `my-secret-token` 粘贴到 **Bearer Token（可选）** 字段。
-
-cognia-next 会拒绝发送错误或缺失令牌的反向 WS 连接。只有在可信本机客户端确实不使用
-access token 时，才开启 **允许未认证的连接**。
+在对应 `network.websocketClients` 或 `network.websocketServers` 连接项设置 `token`，并填入 Cognia。它与 WebUI 登录 token 是两个不同配置。反向端点拒绝错误或缺失的 token。
 
 ---
 
@@ -174,3 +189,17 @@ access token 时，才开启 **允许未认证的连接**。
 ## 故障排查
 
 常见问题请参阅 [QQ via OneBot FAQ](./qq-via-onebot-faq.md)。
+
+## macOS / NapCat
+
+使用 [NapCat macOS 安装器](https://github.com/NapNeko/NapCat-Mac-Installer)。当前 README 推荐 Mac App Store 版 QQ，并要求在“系统设置 → 隐私与安全性 → App 管理”授权安装器切换 QQ 入口。安装器会备份 `package.json` 为 `package.json.bak`，可通过“原版 QQ”切换恢复启动入口。安装会修改 QQ 应用入口，请先保存工作并退出 QQ。
+
+启动 NapCat、登录测试 QQ 后，打开启动日志中的 WebUI 地址。默认端口通常为 `6099`，被占用时会递增。当前同一台 Mac 的场景建议使用带 token 的反向 WS，地址为 `127.0.0.1:7842`。准备另一个 QQ 账号，在安静的测试群中 @ 机器人或引用它的回复。
+
+## 验收与能力边界
+
+运行[本地真实测试](./local-live-testing)并指定 `--platform onebot`。测试通过额外的、带认证的本机 HTTP 服务读取 NapCat 历史，并提示真人发送两条消息；产品连接仍使用 WebSocket。测试同时核验模型 fixture 与每轮唯一回复，QQ 消息保留供手动清理。
+
+OneBot 不提供原生消息编辑、输入状态和交互卡片按钮。只读预览不代表审批成功。草稿编辑及支持的审批通过 Cognia 收件箱和关联会话/运行处理；文本命令可发送 `/help` 查看。附件、工作流审批及恢复必须逐项完成真实测试指南中的功能验收表。
+
+来源（核对日期 2026-10-01）：[NapCat 网络配置](https://doc.napneko.icu/config/basic)、[macOS 安装器](https://github.com/NapNeko/NapCat-Mac-Installer)。

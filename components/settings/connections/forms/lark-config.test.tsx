@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 
 // ---------------------------------------------------------------------------
@@ -13,6 +13,7 @@ const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-lark-id
 const mockKeyringList = jest.fn().mockResolvedValue([])
 const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
+const mockPatchAdapterInstanceSettings = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringGet = jest.fn().mockResolvedValue("cli_app_x")
 const mockConnectorsKeyringDelete = jest.fn().mockResolvedValue(undefined)
@@ -22,6 +23,7 @@ const mockOpenUrl = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: (...args: unknown[]) => mockCreateAdapterInstance(...args),
   updateAdapterInstance: (...args: unknown[]) => mockUpdateAdapterInstance(...args),
+  patchAdapterInstanceSettings: (...args: unknown[]) => mockPatchAdapterInstanceSettings(...args),
   getAdapterInstance: jest.fn().mockResolvedValue(null),
 }))
 
@@ -143,7 +145,7 @@ describe("LarkConfigDialog — create new", () => {
 
   it("renders Test connection button", () => {
     render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
-    expect(screen.getByRole("button", { name: /test connection/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /test credentials/i })).toBeInTheDocument()
   })
 
   it("shows success status block after successful connection test", async () => {
@@ -152,7 +154,7 @@ describe("LarkConfigDialog — create new", () => {
 
     fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_ok" } })
     fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_ok" } })
-    fireEvent.click(screen.getByRole("button", { name: /test connection/i }))
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
 
     await waitFor(() => {
       expect(mockConnectorsHttpRequest).toHaveBeenCalledWith(
@@ -160,10 +162,13 @@ describe("LarkConfigDialog — create new", () => {
           url: expect.stringContaining("tenant_access_token"),
         })
       )
-      expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringContaining("Connected"))
+      expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringContaining("Credentials verified"))
     })
 
     expect(screen.getByRole("status")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveAccessibleName("Credentials verified")
+    expect(screen.getByText(/Validates App ID and App Secret only/)).toBeInTheDocument()
+    expect(screen.getByText("Credentials verified this session")).toBeInTheDocument()
   })
 
   it("shows error status block on failed connection test", async () => {
@@ -172,12 +177,79 @@ describe("LarkConfigDialog — create new", () => {
 
     fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_bad" } })
     fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "bad_secret" } })
-    fireEvent.click(screen.getByRole("button", { name: /test connection/i }))
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalled()
       expect(screen.getByRole("status")).toBeInTheDocument()
     })
+  })
+
+  it("clears credential verification after either credential changes", async () => {
+    mockConnectorsHttpRequest.mockResolvedValue(makeTatOkResponse())
+    render(<LarkConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_first" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_first" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    await screen.findByRole("status")
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_second" } })
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    await screen.findByRole("status")
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_second" } })
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("ignores an old credential check when a newer check has started", async () => {
+    let finishOld!: (response: TauriHttpResponse) => void
+    mockConnectorsHttpRequest
+      .mockImplementationOnce(
+        () =>
+          new Promise<TauriHttpResponse>((resolve) => {
+            finishOld = resolve
+          })
+      )
+      .mockResolvedValueOnce(makeTatFailResponse("new_credentials_rejected"))
+    render(<LarkConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_first" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_first" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_second" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    await screen.findByText("new_credentials_rejected")
+    await act(async () => finishOld(makeTatOkResponse()))
+    expect(screen.getByText("new_credentials_rejected")).toBeInTheDocument()
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("does not report success for an unsuccessful HTTP response with a token-shaped body", async () => {
+    mockConnectorsHttpRequest.mockResolvedValue({ ...makeTatOkResponse(), status: 503 })
+    render(<LarkConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_test" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_test" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("ignores a credential response after the dialog closes", async () => {
+    let finish!: (response: TauriHttpResponse) => void
+    mockConnectorsHttpRequest.mockImplementationOnce(
+      () =>
+        new Promise<TauriHttpResponse>((resolve) => {
+          finish = resolve
+        })
+    )
+    const onOpenChange = jest.fn()
+    const { rerender } = render(<LarkConfigDialog open onOpenChange={onOpenChange} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_test" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_test" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+    rerender(<LarkConfigDialog open={false} onOpenChange={onOpenChange} row={null} />)
+    await act(async () => finish(makeTatOkResponse()))
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    rerender(<LarkConfigDialog open onOpenChange={onOpenChange} row={null} />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
   it("calls createAdapterInstance + connectorsKeyringSet on Create", async () => {
@@ -190,7 +262,7 @@ describe("LarkConfigDialog — create new", () => {
     })
     fireEvent.change(screen.getByLabelText(/encrypt key/i), { target: { value: "enc-key-001" } })
 
-    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
 
     await waitFor(() => {
       expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
@@ -213,7 +285,7 @@ describe("LarkConfigDialog — create new", () => {
 
   it("shows error toast when App ID is empty on Save", async () => {
     render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
-    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
     })
@@ -223,7 +295,7 @@ describe("LarkConfigDialog — create new", () => {
   it("shows error toast when App Secret is empty on Save", async () => {
     render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_x" } })
-    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
     })
@@ -245,7 +317,7 @@ describe("LarkConfigDialog — create new", () => {
     })
     fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
 
-    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
 
     await waitFor(() => {
       expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
@@ -303,6 +375,53 @@ describe("LarkConfigDialog — edit existing", () => {
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
     })
+  })
+
+  it("saves an appearance-only edit through a settings merge without replacing other panels", async () => {
+    render(
+      <LarkConfigDialog
+        open
+        onOpenChange={jest.fn()}
+        row={{
+          ...existingRow,
+          settings: {
+            transport: "long-connection",
+            webEntryBaseUrl: "https://example.com",
+            connectedUser: { openId: "ou_test" },
+            cardPresentation: { title: "Old title" },
+          },
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /card appearance/i }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom card title" }), {
+      target: { value: "Release" },
+    })
+    await clickSave()
+    await waitFor(() =>
+      expect(mockPatchAdapterInstanceSettings).toHaveBeenCalledWith(
+        "lark-existing",
+        expect.objectContaining({ cardPresentation: expect.objectContaining({ title: "Release" }) })
+      )
+    )
+    expect(mockUpdateAdapterInstance.mock.calls[0][1]).not.toHaveProperty("settings")
+    expect(mockPatchAdapterInstanceSettings.mock.calls[0][1]).not.toHaveProperty("connectedUser")
+    expect(mockPatchAdapterInstanceSettings.mock.calls[0][1]).not.toHaveProperty("webEntryBaseUrl")
+  })
+
+  it("blocks saving an enabled template without a fixed version", async () => {
+    render(<LarkConfigDialog open onOpenChange={jest.fn()} row={existingRow} />)
+    fireEvent.click(screen.getByRole("button", { name: /card appearance/i }))
+    fireEvent.click(screen.getByRole("switch", { name: "Use a template for successful replies" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Template ID" }), {
+      target: { value: "AA_template" },
+    })
+    await clickSave()
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+    expect(mockPatchAdapterInstanceSettings).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Enter a template ID and fixed published version"
+    )
   })
 
   it("derives the webhook URL against the real axum route (/webhook/lark/<id>)", () => {
@@ -366,7 +485,7 @@ describe("LarkConfigDialog — send as user", () => {
     expect(url.pathname).toContain("authen/v1/authorize")
     expect(url.searchParams.get("client_id")).toBe("cli_app_x")
     expect(url.searchParams.get("response_type")).toBe("code")
-    expect(url.searchParams.get("scope")).toBe("offline_access im:message")
+    expect(url.searchParams.get("scope")).toBe("offline_access im:message im:message.send_as_user")
     expect(url.searchParams.get("code_challenge")).toBeTruthy()
     expect(url.searchParams.get("code_challenge_method")).toBe("S256")
     // Redirect defaults to the tunnel-derived relay URL.
@@ -480,7 +599,7 @@ describe("LarkConfigDialog — cloud host", () => {
     fireEvent.change(screen.getByLabelText(/verification token/i), { target: { value: "vt" } })
 
     // No transport interaction at all — the default alone must land on webhook.
-    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
 
     await waitFor(() => {
       expect(mockCreateAdapterInstance).toHaveBeenCalledWith(

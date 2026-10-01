@@ -10,6 +10,39 @@ const ADAPTER_ID = "adp_sl"
 const SELF_ID = "U_BOT"
 
 describe("parseSlackInteractivePayload", () => {
+  it.each([
+    ["multi_static_select", "selected_options", []],
+    ["multi_static_select", "selected_options", [{ value: "one" }]],
+    ["multi_external_select", "selected_options", [{ value: "one" }, { value: "two" }]],
+    ["users_select", "selected_user", "U1"],
+    ["channels_select", "selected_channel", "C1"],
+    ["conversations_select", "selected_conversation", "D1"],
+    ["multi_users_select", "selected_users", ["U1"]],
+    ["multi_channels_select", "selected_channels", []],
+    ["multi_conversations_select", "selected_conversations", ["C1", "D1"]],
+  ])("preserves %s %s in both actions and modal submissions", (type, field, selected) => {
+    const action = { type: type as string, action_id: "a", [field as string]: selected }
+    const values = Array.isArray(selected)
+      ? selected.map((entry) => (typeof entry === "string" ? entry : entry.value))
+      : selected
+    const callback = parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, {
+      type: "block_actions",
+      user: { id: "U" },
+      actions: [action],
+    })
+    expect(callback).toMatchObject({
+      actionType: "select",
+      value: Array.isArray(values) ? (values[0] ?? "") : values,
+      ...(Array.isArray(values) ? { payload: { values } } : {}),
+    })
+    const submission = parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, {
+      type: "view_submission",
+      user: { id: "U" },
+      view: { id: "v", type: "modal", state: { values: { block: { a: action } } } },
+    })
+    expect(submission?.payload).toEqual({ a: values })
+  })
+
   it("block_actions / button → actionType=button with action_id as triggerId", () => {
     const payload: SlackInteractivePayload = {
       type: "block_actions",
@@ -136,5 +169,29 @@ it.each([{ selected_options: [] }, { selected_options: [{ value: "true" }] }])(
       value: selected_options[0]?.value ?? "",
       payload: { values: selected_options.map((option) => option.value) },
     })
+  }
+)
+
+it.each([null, [], [{ value: "one" }], [{ value: "one" }, { value: "two" }]])(
+  "preserves checkbox form state including cleared values: %j",
+  (selected_options) => {
+    const field = { type: "checkboxes", action_id: "checks", selected_options }
+    const values = (selected_options ?? []).map((option) => option.value)
+    const action = parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, {
+      type: "block_actions",
+      user: { id: "U" },
+      actions: [field],
+    })
+    expect(action).toMatchObject({
+      actionType: "checkbox",
+      value: values[0] ?? "",
+      payload: { values },
+    })
+    const submit = parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, {
+      type: "view_submission",
+      user: { id: "U" },
+      view: { id: "v", type: "modal", state: { values: { b: { checks: field } } } },
+    })
+    expect(submit?.payload).toEqual({ checks: values })
   }
 )

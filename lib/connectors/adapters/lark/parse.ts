@@ -899,6 +899,8 @@ export interface LarkInteractiveAction {
   value?: LarkInteractiveValue
   /** select_static — the chosen option value. */
   option?: string
+  /** Person and multiple selectors may return selected IDs. */
+  options?: string[]
   /** picker_date — selected date in ISO 8601. */
   selected_date?: string
   /** picker_time — selected time HH:mm. */
@@ -965,12 +967,54 @@ export function parseLarkInteractiveCallback(
   let actionType: ConnectorCallbackActionType = "button"
   let value = ""
   let payload: Record<string, unknown> | undefined
-  if (action.form_value && typeof action.form_value === "object") {
+  if (
+    action.form_value &&
+    typeof action.form_value === "object" &&
+    !Array.isArray(action.form_value)
+  ) {
     // Card 2.0 form container submit — the whole form travels in one
     // callback; the bridge consumes it as `actionType: "submit"`.
-    actionType = "submit"
-    payload = action.form_value
-  } else if (action.tag === "select_static") {
+    const selectField = action.value?.selectField
+    if (typeof selectField === "string") {
+      actionType = "select"
+      const selected = action.form_value[selectField]
+      payload = {
+        values: Array.isArray(selected)
+          ? selected.filter((v): v is string => typeof v === "string")
+          : [],
+      }
+      value = JSON.stringify(payload.values)
+    } else {
+      actionType = "submit"
+      payload =
+        action.value?.formNames === true
+          ? Object.fromEntries(
+              Object.entries(action.form_value).map(([name, submitted]) => {
+                try {
+                  const names: unknown = JSON.parse(name)
+                  if (
+                    Array.isArray(names) &&
+                    names.length === 2 &&
+                    names[0] === action.value?.surfaceId &&
+                    typeof names[1] === "string"
+                  )
+                    return [names[1], submitted]
+                } catch {
+                  /* Older externally-authored forms use literal field names. */
+                }
+                return [name, submitted]
+              })
+            )
+          : action.form_value
+    }
+  } else if (action.tag === "multi_select_static" || action.tag === "multi_select_person") {
+    actionType = "select"
+    const values = Array.isArray(action.options)
+      ? action.options.filter((v): v is string => typeof v === "string")
+      : []
+    value = JSON.stringify(values)
+    payload = { values }
+  } else if (action.tag === "select_static" || action.tag === "select_person") {
     actionType = "select"
     value = action.option ?? ""
     // B4 — simulated Checkbox (ADR-0009 v41). The mapper marks the wire
@@ -986,10 +1030,15 @@ export function parseLarkInteractiveCallback(
       actionType = "checkbox"
       value = value === "true" ? "true" : "false"
     }
-  } else if (action.tag === "picker_date" || action.tag === "picker_time") {
+  } else if (
+    action.tag === "picker_date" ||
+    action.tag === "picker_time" ||
+    action.tag === "picker_datetime"
+  ) {
     actionType = "input"
     value =
-      action.tag === "picker_date" ? (action.selected_date ?? "") : (action.selected_time ?? "")
+      action.option ??
+      (action.tag === "picker_date" ? (action.selected_date ?? "") : (action.selected_time ?? ""))
   } else if (action.tag === "input") {
     actionType = "input"
     value = action.input_value ?? ""

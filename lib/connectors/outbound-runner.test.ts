@@ -2075,3 +2075,183 @@ describe("outbound-runner — drain error visibility", () => {
     }
   })
 })
+
+describe("outbound-runner — recipient-only Lark cards", () => {
+  async function enqueuePrivate(adapterId = "private-lark", patch: Record<string, unknown> = {}) {
+    return enqueueOutbound({
+      adapterId,
+      conversationKey: `lark:${adapterId}:oc_group`,
+      source: "plugin",
+      request: {
+        conversationRef: { platform: "lark", adapterId, channelId: "oc_group" },
+        segments: [
+          {
+            type: "card",
+            card: { kind: "lark", payload: { schema: "2.0", body: { elements: [] } } },
+          },
+        ],
+        metadata: {
+          idempotencyKey: crypto.randomUUID(),
+          larkEphemeral: { recipientOpenId: "ou_person" },
+        },
+        ...patch,
+      },
+    })
+  }
+  function larkAdapter(send: () => Promise<OutboundResult>, id = "private-lark") {
+    const adapter = makeAdapter(id, send)
+    Object.assign(adapter.meta, { type: "lark", capabilities: ["send.ephemeral"] })
+    Object.assign(adapter, { runtimeCapabilities: builtInConnectorRuntimeCapabilities("lark") })
+    return adapter
+  }
+
+  it("refuses non-Lark dispatch before calling a public send", async () => {
+    const adapter = makeAdapter("private-lark", async () => ({ ok: true }))
+    const job = await enqueuePrivate()
+    await runOnce(new Map([[adapter.id, adapter]]))
+    expect(adapter.send).not.toHaveBeenCalled()
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "deadlettered",
+      lastErrorCode: "validation",
+    })
+  })
+
+  it("rejects a Lark adapter that does not advertise recipient-only support", async () => {
+    const adapter = makeAdapter("private-lark", async () => ({ ok: true }))
+    Object.assign(adapter.meta, { type: "lark" })
+    const job = await enqueuePrivate()
+    await runOnce(new Map([[adapter.id, adapter]]))
+    expect(adapter.send).not.toHaveBeenCalled()
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "deadlettered",
+      lastErrorCode: "validation",
+    })
+  })
+
+  it("defers a missing Lark adapter then delivers after registration", async () => {
+    const adapters = new Map<string, PlatformAdapter>()
+    const job = await enqueuePrivate()
+    await runOnce(adapters)
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "failed",
+      lastErrorCode: "adapter_not_found",
+      attempts: 0,
+    })
+    const adapter = larkAdapter(async () => ({ ok: true, platformMessageId: "om_private" }))
+    adapters.set(adapter.id, adapter)
+    await getDb().outboundQueue.update(job.id, { nextAttemptAt: Date.now() - 1 })
+    await runOnce(adapters)
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "sent",
+      platformMessageId: "om_private",
+    })
+  })
+
+  it("refuses normal editing even when a Lark adapter supports edit", async () => {
+    const adapter = larkAdapter(async () => ({ ok: true }))
+    adapter.edit = jest.fn().mockResolvedValue({ ok: true })
+    const job = await enqueuePrivate(adapter.id, { editTargetMessageId: "om_public" })
+    await runOnce(new Map([[adapter.id, adapter]]))
+    expect(adapter.send).not.toHaveBeenCalled()
+    expect(adapter.edit).not.toHaveBeenCalled()
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "deadlettered",
+      lastErrorCode: "validation",
+    })
+  })
+
+  it.each(["throw", "network", "platform_5xx", "delivery_unknown"])(
+    "stops ambiguous %s failures despite normal Lark remote idempotency",
+    async (failure) => {
+      const adapter = larkAdapter(async () => {
+        if (failure === "throw") throw new Error("response lost")
+        return {
+          ok: false,
+          error: {
+            code: failure,
+            message: "response lost",
+            retryable: failure !== "delivery_unknown",
+          },
+        }
+      })
+      const job = await enqueuePrivate()
+      await runOnce(new Map([[adapter.id, adapter]]))
+      expect(adapter.send).toHaveBeenCalledTimes(1)
+      expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+        status: "delivery_unknown",
+        lastErrorCode: "delivery_unknown",
+      })
+    }
+  )
+
+  it.each(["rate_limited", "preparation_failed"])(
+    "permits safe %s retries on the same bot",
+    async (code) => {
+      const adapter = larkAdapter(async () => ({
+        ok: false,
+        error: { code, message: "retry later", retryable: true, retryAfterMs: 10000 },
+      }))
+      const job = await enqueuePrivate()
+      await runOnce(new Map([[adapter.id, adapter]]))
+      expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+        status: "failed",
+        lastErrorCode: code,
+      })
+      expect(adapter.send).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("never replays a stale ephemeral sending claim", async () => {
+    const adapter = larkAdapter(async () => ({ ok: true }))
+    const job = await enqueuePrivate()
+    await getDb().outboundQueue.update(job.id, {
+      status: "sending",
+      attempts: 1,
+      claimedAt: Date.now() - STALE_SENDING_GRACE_MS - 60000,
+    })
+    await runOnce(new Map([[adapter.id, adapter]]))
+    expect(adapter.send).not.toHaveBeenCalled()
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "delivery_unknown",
+      lastErrorCode: "stale_sending_delivery_unknown",
+    })
+  })
+
+  it.each(["failover", "balanced"])(
+    "never %s-reroutes recipient ids to another app",
+    async (mode) => {
+      const id = "private-lark"
+      await seedInstance(id, {
+        type: "lark",
+        failoverAdapterIds: ["sibling"],
+        balanceAdapterIds: ["sibling"],
+        outboundTuning:
+          mode === "failover"
+            ? { breakerMinEvents: 1 }
+            : { rateCapacity: 1, rateRefillPerSec: 0.001 },
+      })
+      await seedInstance("sibling", { type: "lark" })
+      const adapter = larkAdapter(async () =>
+        mode === "failover"
+          ? { ok: false, error: { code: "platform_4xx", message: "failure", retryable: false } }
+          : { ok: true, platformMessageId: "om_sent" }
+      )
+      const sibling = larkAdapter(async () => ({ ok: true }), "sibling")
+      await enqueuePrivate()
+      const second = await enqueuePrivate()
+      await runOnce(
+        new Map([
+          [id, adapter],
+          [sibling.id, sibling],
+        ])
+      )
+      expect(sibling.send).not.toHaveBeenCalled()
+      expect(await getDb().outboundQueue.get(second.id)).toMatchObject({
+        status: "failed",
+        lastErrorCode: mode === "failover" ? "circuit_open" : "rate_limited",
+      })
+      expect(await getDb().outboundQueue.count()).toBe(2)
+    }
+  )
+})

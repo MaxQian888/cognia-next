@@ -135,12 +135,8 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
       return {
         msg_type: "interactive",
         content: JSON.stringify({
-          elements: [
-            {
-              tag: "div",
-              text: { content: escaped, tag: "lark_md" },
-            },
-          ],
+          schema: "2.0",
+          body: { elements: [{ tag: "markdown", content: escaped }] },
         }),
       }
     }
@@ -273,14 +269,13 @@ export function isLarkCardPayload(payload: unknown): payload is Record<string, u
     Array.isArray(p["elements"]) ||
     (typeof p["i18n_elements"] === "object" && p["i18n_elements"] !== null) ||
     (typeof p["header"] === "object" && p["header"] !== null) ||
-    typeof p["schema"] === "string"
+    typeof p["schema"] === "string" ||
+    (p.type === "template" && isRecord(p.data) && typeof p.data.template_id === "string")
   )
 }
 
 // ---------------------------------------------------------------------------
 // Lark A2UI mapper — Interactive Card projection (G3.4)
-// GAP: this mapper emits card JSON 1.0; migration to Card 2.0 (schema:"2.0",
-// body.elements, form containers, native input/checker) is out of scope here.
 // ---------------------------------------------------------------------------
 
 export interface LarkA2UIMapperInput {
@@ -295,375 +290,496 @@ interface LarkCardElement {
   [k: string]: unknown
 }
 
-/**
- * Project an A2UI surface into a Lark Interactive Card body.
- *
- * Native rendering:
- *   - Card title → `header.title.content`
- *   - Text / Link → `div` + `lark_md`
- *   - Divider → `hr`
- *   - Image → `img`
- *   - Button / ButtonGroup → `action` with `button` actions
- *   - Select → `select_static` inside `action`
- *   - DatePicker / TimePicker → `picker_date` / `picker_time` inside `action`
- *   - TextField / TextArea → `input` element
- *   - Alert → coloured `div` with prefix
- *
- * Returns a single `LarkMessageBody` with `msg_type=interactive`. When
- * the surface has no native components the body is a plain text mirror.
- */
+/** Project the resolved A2UI tree to Card 2.0 while preserving callback bindings. */
 export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<LarkMessageBody> {
-  const elements: LarkCardElement[] = []
+  const nodes = new Map<string, A2UIWalkNode>()
+  walkA2UISurface(input.surface, (node) => nodes.set(node.id, node))
+  const visited = new Set<string>()
   let header: { title: { content: string; tag: string } } | undefined
-  let currentAction: { tag: string; actions: LarkCardElement[] } | null = null
-
-  const flushAction = () => {
-    if (currentAction && currentAction.actions.length > 0) {
-      elements.push(currentAction as unknown as LarkCardElement)
-      currentAction = null
-    } else if (currentAction) {
-      currentAction = null
+  let tableCount = 0
+  const plain = (content: string) => ({ tag: "plain_text", content })
+  const markdown = (content: string): LarkCardElement => ({ tag: "markdown", content })
+  const formName = (id: string) => JSON.stringify([input.surfaceId, id])
+  const callback = async (node: A2UIWalkNode, extra: Record<string, unknown> = {}) => {
+    const action = stringValue(node.raw.action) || node.id
+    const actionId = buildActionId(input.surfaceId, node.id, action)
+    await recordCallbackBinding({
+      adapterId: input.adapterId,
+      actionId,
+      surfaceId: input.surfaceId,
+      componentId: node.id,
+      conversationKey: input.conversationKey,
+      ...bindingHintFields(node.raw),
+    })
+    return [
+      {
+        type: "callback",
+        value: { actionId, surfaceId: input.surfaceId, componentId: node.id, ...extra },
+      },
+    ]
+  }
+  const render = async (id: string, inForm = false, depth = 0): Promise<LarkCardElement[]> => {
+    if (visited.has(id)) return []
+    visited.add(id)
+    const node = nodes.get(id)
+    if (!node) return []
+    const raw = node.raw
+    const children = async (form = inForm, level = depth) => {
+      const result: LarkCardElement[] = []
+      for (const child of node.childIds) result.push(...(await render(child, form, level)))
+      return result
     }
-  }
-  const ensureAction = () => {
-    if (!currentAction) currentAction = { tag: "action", actions: [] }
-    return currentAction
-  }
-
-  const nodes: A2UIWalkNode[] = []
-  walkA2UISurface(input.surface, (node) => {
-    nodes.push(node)
-  })
-
-  for (const node of nodes) {
+    const label = stringValue(raw.label) || stringValue(raw.placeholder)
+    const common = {
+      ...(raw.disabled === true ? { disabled: true } : {}),
+      ...(inForm
+        ? { name: formName(id), ...(raw.required === true ? { required: true } : {}) }
+        : {}),
+    }
     switch (node.component) {
       case "Card": {
-        flushAction()
-        const title = stringValue(node.raw.title)
-        if (title) {
-          header = { title: { content: title, tag: "plain_text" } }
-        }
-        const description = stringValue(node.raw.description)
-        if (description) {
-          elements.push({
-            tag: "div",
-            text: { tag: "lark_md", content: escapeLarkMarkdown(description) },
-          })
-        }
-        break
-      }
-      case "Alert": {
-        flushAction()
-        const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
-        elements.push({
-          tag: "div",
-          text: {
-            tag: "lark_md",
-            content: `⚠️ **${escapeLarkMarkdown(title || "Alert")}**${title && text ? " — " : ""}${escapeLarkMarkdown(text)}`,
-          },
-        })
-        break
+        const title = stringValue(raw.title)
+        const result: LarkCardElement[] = []
+        if (title && !header) header = { title: plain(title) }
+        else if (title) result.push(markdown(`**${escapeLarkMarkdown(title)}**`))
+        if (raw.description) result.push(markdown(escapeLarkMarkdown(stringValue(raw.description))))
+        return [...result, ...(await children())]
       }
       case "Text": {
-        flushAction()
-        const text = stringValue(node.raw.text)
-        if (!text) break
-        const variant = stringValue(node.raw.variant)
-        const md =
-          variant === "heading1" || variant === "heading2" || variant === "heading3"
-            ? `**${escapeLarkMarkdown(text)}**`
-            : escapeLarkMarkdown(text)
-        elements.push({ tag: "div", text: { tag: "lark_md", content: md } })
-        break
+        const text = escapeLarkMarkdown(stringValue(raw.text))
+        return text
+          ? [markdown(/^heading[123]$/.test(stringValue(raw.variant)) ? `**${text}**` : text)]
+          : []
       }
-      case "Link": {
-        flushAction()
-        const text = stringValue(node.raw.text) || stringValue(node.raw.href)
-        const href = stringValue(node.raw.href)
-        if (!href) break
-        elements.push({
-          tag: "div",
-          text: { tag: "lark_md", content: `[${escapeLarkMarkdown(text || href)}](${href})` },
-        })
-        break
-      }
-      case "Divider": {
-        flushAction()
-        elements.push({ tag: "hr" })
-        break
-      }
+      case "Link":
+        return raw.href
+          ? [
+              markdown(
+                `[${escapeLarkMarkdown(stringValue(raw.text) || stringValue(raw.href))}](${stringValue(raw.href)})`
+              ),
+            ]
+          : []
+      case "Alert":
+        return [
+          markdown(
+            `⚠️ **${escapeLarkMarkdown(stringValue(raw.title) || "Alert")}** ${escapeLarkMarkdown(stringValue(raw.message) || stringValue(raw.text))}`
+          ),
+        ]
+      case "Divider":
+        return [{ tag: "hr" }]
       case "Image": {
-        flushAction()
-        const url = stringValue(node.raw.src) || stringValue(node.raw.url)
-        if (!url) break
-        // Lark `img` requires an `img_key` (file_key) — bare URLs aren't
-        // accepted by the card runtime. Until upload pre-pass is wired
-        // for cards we fall back to a markdown link.
-        if (!url.includes("://")) {
-          elements.push({
-            tag: "img",
-            img_key: url,
-            alt: { tag: "plain_text", content: stringValue(node.raw.alt) || "image" },
-          })
-        } else {
-          elements.push({
-            tag: "div",
-            text: {
-              tag: "lark_md",
-              content: `[${escapeLarkMarkdown(stringValue(node.raw.alt) || "image")}](${url})`,
-            },
-          })
-        }
-        break
+        const src = stringValue(raw.src) || stringValue(raw.url)
+        if (!src) return []
+        const alt = stringValue(raw.alt) || "image"
+        return [
+          src.includes("://")
+            ? markdown(`[${escapeLarkMarkdown(alt)}](${src})`)
+            : { tag: "img", img_key: src, alt: plain(alt) },
+        ]
       }
       case "Button": {
-        const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
-        const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
-        // A button may carry an explicit binding-kind hint (e.g. a
-        // help/welcome card's quick-command button sets
-        // `bindingKind: "help_quick_command"` + `bindingPayload`). When
-        // present we record under that kind so the bus routes the click
-        // to the matching short-circuit; absent, the default
-        // `callback_query` kind keeps every existing button working.
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-          ...bindingHintFields(node.raw),
-        })
-        const variant = stringValue(node.raw.variant)
-        const type =
-          variant === "primary" ? "primary" : variant === "destructive" ? "danger" : "default"
-        const href = stringValue(node.raw.href) || stringValue(node.raw.url)
-        const row = ensureAction()
-        row.actions.push({
-          tag: "button",
-          text: { tag: "plain_text", content: label },
-          type,
-          ...(href
-            ? { url: href }
-            : { value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id } }),
-        })
-        break
+        const href = stringValue(raw.href) || stringValue(raw.url)
+        const action = stringValue(raw.action)
+        const formAction = inForm
+          ? raw.formAction === "reset" || action === "reset"
+            ? "reset"
+            : raw.formAction === "submit" || action === "submit" || action === "formSubmit"
+              ? "submit"
+              : undefined
+          : undefined
+        return [
+          {
+            tag: "button",
+            ...common,
+            text: plain(stringValue(raw.text) || action || "Button"),
+            type:
+              raw.variant === "primary"
+                ? "primary"
+                : raw.variant === "destructive"
+                  ? "danger"
+                  : "default",
+            ...(formAction ? { form_action_type: formAction } : {}),
+            ...(formAction === "reset"
+              ? {}
+              : {
+                  behaviors: href
+                    ? [{ type: "open_url", default_url: href }]
+                    : await callback(node, inForm ? { formNames: true } : {}),
+                }),
+          },
+        ]
       }
+      case "Checkbox":
+        return [
+          {
+            tag: "checker",
+            ...common,
+            checked:
+              raw.checked === true ||
+              (raw.checked === undefined && (raw.value === true || raw.value === "true")),
+            text: plain(label || stringValue(raw.text) || "Checkbox"),
+            behaviors: await callback(node),
+          },
+        ]
+      case "TextField":
+      case "TextArea":
+        return [
+          {
+            tag: "input",
+            ...common,
+            placeholder: plain(label || "Input"),
+            ...(raw.label ? { label: plain(stringValue(raw.label)) } : {}),
+            default_value: stringValue(raw.value),
+            input_type:
+              node.component === "TextArea"
+                ? "multiline_text"
+                : raw.type === "password"
+                  ? "password"
+                  : "text",
+            ...(node.component === "TextArea"
+              ? { rows: Math.max(1, Math.min(20, Math.floor(Number(raw.rows) || 5))) }
+              : {}),
+            ...(typeof raw.maxLength === "number"
+              ? { max_length: Math.max(1, Math.min(1000, Math.floor(raw.maxLength))) }
+              : {}),
+            behaviors: await callback(node),
+          },
+        ]
       case "Select":
       case "RadioGroup": {
-        flushAction()
-        const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-        })
-        const options = Array.isArray(node.raw.options)
-          ? (node.raw.options as Array<Record<string, unknown>>)
-              .filter((o) => o && (typeof o.value === "string" || typeof o.value === "number"))
+        const options = Array.isArray(raw.options)
+          ? raw.options
+              .filter(isRecord)
+              .filter((o) => typeof o.value === "string" || typeof o.value === "number")
               .map((o) => ({
-                text: { tag: "plain_text", content: stringValue(o.label) || stringValue(o.value) },
+                text: plain(stringValue(o.label) || stringValue(o.value)),
                 value: String(o.value),
               }))
           : []
-        if (options.length === 0) break
-        const row = ensureAction()
-        row.actions.push({
-          tag: "select_static",
-          placeholder: {
-            tag: "plain_text",
-            content: stringValue(node.raw.placeholder) || stringValue(node.raw.label) || "Select",
-          },
+        if (!options.length) return [markdown(label || "Select")]
+        const multiple = raw.multiple === true
+        const selected = (Array.isArray(raw.value) ? raw.value : [raw.value])
+          .map(stringValue)
+          .filter((v) => options.some((o) => o.value === v))
+        const control: LarkCardElement = {
+          tag: multiple ? "multi_select_static" : "select_static",
+          ...common,
+          placeholder: plain(label || "Select"),
           options,
-          value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
-        })
-        flushAction()
-        break
-      }
-      case "Checkbox": {
-        // B4 — simulated stand-in (ADR-0009 v41). Lark interactive cards
-        // 2.0 have no native single-checkbox element, so we render the
-        // component as a two-option `select_static` ("✓" / "✗"). The
-        // assistant treats the inbound value as a boolean.
-        flushAction()
-        const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-        })
-        const label = stringValue(node.raw.label) || stringValue(node.raw.text) || "Checkbox"
-        const initial =
-          node.raw.value === true || stringValue(node.raw.value) === "true" ? "true" : "false"
-        const row = ensureAction()
-        row.actions.push({
-          tag: "select_static",
-          placeholder: { tag: "plain_text", content: label },
-          // Lark renders the selected option's text in the trigger so
-          // labelling each option with its own glyph makes the toggle
-          // legible even before the user opens the dropdown.
-          options: [
+          ...(multiple
+            ? { name: formName(id), selected_values: selected, required: raw.required === true }
+            : {
+                ...(selected[0] ? { initial_option: selected[0] } : {}),
+                behaviors: await callback(node),
+              }),
+        }
+        if (multiple && !inForm) {
+          // Multi-select is legal only inside a form. A one-field form keeps
+          // the canonical Select callback when the user submits the choices.
+          return [
             {
-              text: { tag: "plain_text", content: `${label}: ✓` },
-              value: "true",
+              tag: "form",
+              name: formName(`${id}:form`),
+              elements: [
+                control,
+                {
+                  tag: "button",
+                  name: formName(`${id}:submit`),
+                  text: plain("Submit"),
+                  form_action_type: "submit",
+                  behaviors: await callback(node, { selectField: formName(id) }),
+                },
+              ],
             },
-            {
-              text: { tag: "plain_text", content: `${label}: ✗` },
-              value: "false",
-            },
-          ],
-          initial_option: initial,
-          value: {
-            actionId: fullId,
-            surfaceId: input.surfaceId,
-            componentId: node.id,
-            // Mark the wire payload as a simulated checkbox so the parser
-            // can coerce the returned "true"/"false" string back into a
-            // boolean before handing the event to the A2UI bridge.
-            simulatedCheckbox: true,
-          },
-        })
-        flushAction()
-        break
+          ]
+        }
+        return [control]
       }
       case "DatePicker":
-      case "TimePicker": {
-        flushAction()
-        const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-        })
-        const row = ensureAction()
-        row.actions.push({
-          tag: node.component === "DatePicker" ? "picker_date" : "picker_time",
-          placeholder: {
-            tag: "plain_text",
-            content:
-              stringValue(node.raw.label) || (node.component === "DatePicker" ? "Date" : "Time"),
+      case "TimePicker":
+      case "DateTimePicker": {
+        const kind =
+          node.component === "DatePicker"
+            ? "date"
+            : node.component === "TimePicker"
+              ? "time"
+              : "datetime"
+        const initial = stringValue(raw.value)
+        // Card initial values are wall-clock strings, not ISO timestamps.
+        // Omit zone-bearing datetimes rather than silently changing their zone.
+        const valid =
+          kind === "date"
+            ? /^\d{4}-\d{2}-\d{2}$/.test(initial)
+            : kind === "time"
+              ? /^\d{2}:\d{2}$/.test(initial)
+              : /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$/.test(initial)
+        return [
+          {
+            tag: `picker_${kind}`,
+            ...common,
+            placeholder: plain(label || "Select"),
+            ...(valid ? { [`initial_${kind}`]: initial.replace("T", " ") } : {}),
+            behaviors: await callback(node),
           },
-          value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
-        })
-        flushAction()
-        break
+        ]
       }
-      case "TextField":
-      case "TextArea": {
-        flushAction()
-        const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-          // Text inputs may carry binding hints too (e.g. an `ask_user`
-          // free-text field must resolve its pending prompt, not a digest
-          // turn). Same seam as the Button case.
-          ...bindingHintFields(node.raw),
-        })
-        // Lark's message-card schema only accepts `input` INSIDE an action
-        // module's `actions` array — a root-level `{tag:"input"}` element
-        // fails delivery of the whole card. There is no rows/required prop
-        // in this schema (TextArea renders as the same single-line input);
-        // `name` is kept for form-style callbacks and the baked `value`
-        // object is what `parseLarkInteractiveCallback` resolves bindings
-        // from (the submitted text arrives as `action.input_value`).
-        const defaultValue = stringValue(node.raw.value)
-        const row = ensureAction()
-        row.actions.push({
-          tag: "input",
-          name: node.id,
-          placeholder: {
-            tag: "plain_text",
-            content: stringValue(node.raw.placeholder) || stringValue(node.raw.label) || "Input",
+      case "FormGroup": {
+        const contents = await children(true, depth + 1)
+        const prefix = [raw.legend, raw.description]
+          .filter(Boolean)
+          .map((v) => markdown(escapeLarkMarkdown(stringValue(v))))
+        if (inForm) return [...prefix, ...contents]
+        const hasSubmit = (items: LarkCardElement[]): boolean =>
+          items.some(
+            (e) =>
+              e.form_action_type === "submit" ||
+              (Array.isArray(e.elements) && hasSubmit(e.elements)) ||
+              (Array.isArray(e.columns) && hasSubmit(e.columns))
+          )
+        if (!hasSubmit(contents))
+          contents.push({
+            tag: "button",
+            name: formName(`${id}:submit`),
+            text: plain("Submit"),
+            form_action_type: "submit",
+            behaviors: await callback(node, { formNames: true }),
+          })
+        return [...prefix, { tag: "form", name: formName(id), elements: contents }]
+      }
+      case "Row": {
+        const columns: LarkCardElement[][] = []
+        for (const child of node.childIds) columns.push(await render(child, inForm, depth + 2))
+        const rendered = columns.flat()
+        // Tables and forms must remain at their legal root placement. Deep
+        // layouts flatten before exceeding Feishu's five-container limit.
+        if (depth >= 3 || containsTag(rendered, ["table", "form"])) return rendered
+        return rendered.length
+          ? [
+              {
+                tag: "column_set",
+                flex_mode: "flow",
+                columns: columns
+                  .filter((c) => c.length)
+                  .map((elements) => ({ tag: "column", width: "weighted", weight: 1, elements })),
+              },
+            ]
+          : []
+      }
+      case "Collapsible": {
+        const rendered = await children(inForm, depth + 1)
+        if (depth >= 4 || containsTag(rendered, ["table", "form"]))
+          return [markdown(`**${escapeLarkMarkdown(stringValue(raw.title))}**`), ...rendered]
+        return [
+          {
+            tag: "collapsible_panel",
+            expanded: raw.open === true || raw.defaultOpen === true,
+            header: { title: plain(stringValue(raw.title) || "Details") },
+            elements: rendered,
           },
-          ...(defaultValue ? { default_value: defaultValue } : {}),
-          value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
-        })
-        flushAction()
-        break
+        ]
+      }
+      case "Table": {
+        const columns = Array.isArray(raw.columns) ? raw.columns.filter(isRecord) : []
+        const rows = Array.isArray(raw.data) ? raw.data.filter(isRecord) : []
+        const title = raw.title
+          ? [markdown(`**${escapeLarkMarkdown(stringValue(raw.title))}**`)]
+          : []
+        // Root-only table placement and five-table/50-column limits are
+        // platform constraints. Preserve all values as text outside them.
+        if (inForm || tableCount >= 5 || columns.length > 50 || !columns.length)
+          return [...title, markdown(JSON.stringify(rows))]
+        tableCount++
+        return [
+          ...title,
+          {
+            tag: "table",
+            page_size: Math.max(1, Math.min(10, Math.floor(Number(raw.pageSize) || 5))),
+            columns: columns.map((c) => ({
+              name: stringValue(c.key),
+              display_name: stringValue(c.header),
+              data_type: c.type === "number" ? "number" : "text",
+              ...(c.align ? { horizontal_align: c.align } : {}),
+            })),
+            rows,
+          },
+        ]
+      }
+      case "Chart": {
+        const data = Array.isArray(raw.data) ? raw.data.filter(isRecord) : []
+        const type = stringValue(raw.chartType)
+        if (inForm || !["bar", "line", "area", "pie", "donut", "scatter", "radar"].includes(type))
+          return [markdown(JSON.stringify(data))]
+        const xKey = stringValue(raw.xKey) || "name"
+        const yKeys = Array.isArray(raw.yKeys)
+          ? raw.yKeys.filter((v): v is string => typeof v === "string")
+          : ["value"]
+        const multi = yKeys.length > 1 && !["pie", "donut"].includes(type)
+        const values = multi
+          ? data.flatMap((d) => yKeys.map((k) => ({ category: d[xKey], series: k, value: d[k] })))
+          : data
+        const xField = multi ? "category" : xKey
+        const yField = multi ? "value" : yKeys[0] || "value"
+        return [
+          {
+            tag: "chart",
+            chart_spec: {
+              type: type === "donut" ? "pie" : type,
+              data: { values },
+              ...(["pie", "donut"].includes(type)
+                ? {
+                    categoryField: xField,
+                    valueField: yField,
+                    ...(type === "donut" ? { innerRadius: 0.6 } : {}),
+                  }
+                : type === "radar"
+                  ? { categoryField: xField, valueField: yField }
+                  : { xField, yField }),
+              ...(multi ? { seriesField: "series" } : {}),
+              ...(raw.title ? { title: { text: stringValue(raw.title) } } : {}),
+              legends: { visible: raw.showLegend !== false },
+              ...(Array.isArray(raw.colors) ? { color: raw.colors } : {}),
+            },
+          },
+        ]
       }
       case "Dialog":
       case "Drawer":
-      case "Sheet": {
-        // Simulated overlay projection — Lark v1 interactive cards have
-        // no modal/drawer runtime, so the overlay's children (already
-        // visited by `walkA2UISurface` via `body` / `children`) render
-        // inline. Emit a divider + bold title so the section reads as a
-        // distinct form block instead of blending into the card body.
-        flushAction()
-        elements.push({ tag: "hr" })
-        const title = stringValue(node.raw.title)
-        if (title) {
-          elements.push({
-            tag: "div",
-            text: { tag: "lark_md", content: `**${escapeLarkMarkdown(title)}**` },
-          })
-        }
-        break
-      }
-      case "Row":
+      case "Sheet":
+        return [
+          { tag: "hr" },
+          ...(raw.title ? [markdown(`**${escapeLarkMarkdown(stringValue(raw.title))}**`)] : []),
+          ...(await children()),
+        ]
       case "Column":
       case "List":
       case "ButtonGroup":
-        flushAction()
-        break
+        return children()
       default:
-        break
+        return [
+          markdown(
+            [
+              `[${node.component}]`,
+              stringValue(raw.title),
+              stringValue(raw.label),
+              stringValue(raw.text),
+              stringValue(raw.value),
+            ]
+              .filter(Boolean)
+              .join(" ")
+          ),
+          ...(await children()),
+        ]
     }
   }
-  flushAction()
+  const elements = await render(input.surface.rootId)
+  if (!elements.length && !header)
+    return { msg_type: "text", content: JSON.stringify({ text: "[empty]" }) }
+  const card = usesCommandFrame(input.surfaceId)
+    ? buildLarkCommandFrame(header?.title.content ?? input.surface.title ?? "Cognia", elements)
+    : { schema: "2.0", ...(header ? { header } : {}), body: { elements } }
+  return { msg_type: "interactive", content: JSON.stringify(boundGeneratedCard(card)) }
+}
 
-  if (elements.length === 0 && !header) {
-    return {
-      msg_type: "text",
-      content: JSON.stringify({ text: "[empty]" }),
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function containsTag(elements: LarkCardElement[], tags: string[]): boolean {
+  return elements.some(
+    (e) =>
+      tags.includes(e.tag) ||
+      (Array.isArray(e.elements) && containsTag(e.elements, tags)) ||
+      (Array.isArray(e.columns) && containsTag(e.columns, tags))
+  )
+}
+
+/** Locally composed cards share one element-ID namespace. */
+function uniqueMergedElementIds(elements: Record<string, unknown>[]): Record<string, unknown>[] {
+  const reserved = new Set<string>()
+  const seen = new Set<string>()
+  let next = 0
+  const walk = (value: unknown, rename: boolean): unknown => {
+    if (Array.isArray(value)) return value.map((child) => walk(child, rename))
+    if (!isRecord(value)) return value
+    const result = { ...value }
+    if (typeof value.tag === "string" && typeof value.element_id === "string") {
+      if (!rename) reserved.add(value.element_id)
+      else if (seen.has(value.element_id)) {
+        let id: string
+        do {
+          id = `merged_${next++}`
+        } while (reserved.has(id))
+        result.element_id = id
+        reserved.add(id)
+      } else seen.add(value.element_id)
     }
-  }
-
-  if (usesCommandFrame(input.surfaceId)) {
-    const modern = elements.flatMap((element): Record<string, unknown>[] => {
-      if (element.tag === "div") {
-        const text = element.text as { content: string }
-        return [{ tag: "markdown", content: text.content.replace(/\\@/g, "@") }]
-      }
-      if (element.tag === "action") {
-        return (element.actions as Record<string, unknown>[]).map((button) => {
-          const { value, url, ...rest } = button
-          return {
-            ...rest,
-            behaviors: [url ? { type: "open_url", default_url: url } : { type: "callback", value }],
-          }
-        })
-      }
-      return [element]
-    })
-    return {
-      msg_type: "interactive",
-      content: JSON.stringify(
-        buildLarkCommandFrame(header?.title.content ?? input.surface.title ?? "Cognia", modern)
-      ),
+    for (const key of ["elements", "columns", "header", "title", "text"]) {
+      if (value[key]) result[key] = walk(value[key], rename)
     }
+    return result
   }
+  walk(elements, false)
+  return walk(elements, true) as Record<string, unknown>[]
+}
 
-  const card: Record<string, unknown> = { elements }
-  if (header) card.header = header
+/** Card 2.0 counts text/option nodes too; keep oversized replies readable. */
+function boundGeneratedCard(card: Record<string, unknown>): Record<string, unknown> {
+  const count = (value: unknown): number => {
+    if (Array.isArray(value)) return value.reduce((sum, child) => sum + count(child), 0)
+    if (!isRecord(value)) return 0
+    return (
+      (typeof value.tag === "string" ? 1 : 0) +
+      Object.entries(value)
+        .filter(
+          ([key]) =>
+            key !== "behaviors" && key !== "value" && key !== "chart_spec" && key !== "rows"
+        )
+        .reduce((sum, [, child]) => sum + count(child), 0)
+    )
+  }
+  if (count(card) <= 200 || !isRecord(card.body) || !Array.isArray(card.body.elements)) return card
+  const text = (value: unknown): string => {
+    if (Array.isArray(value)) return value.map(text).filter(Boolean).join("\n")
+    if (!isRecord(value)) return stringValue(value)
+    if (value.tag === "table")
+      return [text(value.columns), JSON.stringify(value.rows)].filter(Boolean).join("\n")
+    if (value.tag === "chart" && isRecord(value.chart_spec))
+      return [text(value.chart_spec.title), JSON.stringify(value.chart_spec.data)].join("\n")
+    if (value.tag === "hr") return "---"
+    return [
+      value.content,
+      value.text,
+      value.title,
+      value.header,
+      value.label,
+      value.display_name,
+      value.placeholder,
+      value.default_value,
+      value.selected_values,
+      value.initial_option,
+      typeof value.checked === "boolean" ? (value.checked ? "[x]" : "[ ]") : undefined,
+      value.options,
+      value.elements,
+      value.columns,
+      value.alt,
+    ]
+      .map(text)
+      .filter(Boolean)
+      .join("\n")
+  }
   return {
-    msg_type: "interactive",
-    content: JSON.stringify(card),
+    ...card,
+    body: {
+      ...card.body,
+      elements: [
+        {
+          tag: "markdown",
+          content:
+            "卡片超过 200 个元素，交互控件以文本展示。 / This card exceeds 200 elements; controls are shown as text.\n\n" +
+            text(card.body.elements),
+        },
+      ],
+    },
   }
 }
 
@@ -706,13 +822,18 @@ export async function segmentsToLarkBodyAsync(
   // A single markdown segment already renders as its own interactive card
   // via `segmentToLarkBody`; only multi-segment markdown needs the combiner.
   const needsMarkdownCard = segments.length > 1 && segments.some((s) => s.type === "markdown")
-  if (!hasA2UI && !needsMarkdownCard) return segmentsToLarkBody(segments)
+  const hasNativeCard =
+    segments.length > 1 &&
+    segments.some((seg) => seg.type === "card" && isLarkCardPayload(seg.card.payload))
+  if (!hasA2UI && !needsMarkdownCard && !hasNativeCard) return segmentsToLarkBody(segments)
 
   // Compose a single interactive card that interleaves text/markdown
-  // segments as `div` elements with each a2ui surface's projected
+  // segments as Card 2.0 markdown elements with each a2ui surface's projected
   // elements. Header taken from the first a2ui surface's `title`.
   const combinedElements: Record<string, unknown>[] = []
   let header: Record<string, unknown> | undefined
+  let config: Record<string, unknown> | undefined
+  let bodyLayout: Record<string, unknown> = {}
 
   for (const seg of segments) {
     if (seg.type === "a2ui") {
@@ -725,10 +846,44 @@ export async function segmentsToLarkBodyAsync(
       if (body.msg_type === "interactive") {
         const parsed = JSON.parse(body.content) as {
           header?: Record<string, unknown>
-          elements?: Record<string, unknown>[]
+          body?: { elements?: Record<string, unknown>[] }
         }
         if (!header && parsed.header) header = parsed.header
-        if (parsed.elements) combinedElements.push(...parsed.elements)
+        if (parsed.body?.elements) combinedElements.push(...parsed.body.elements)
+      } else {
+        const text = (JSON.parse(body.content) as { text?: string }).text || seg.plainTextMirror
+        if (text) combinedElements.push({ tag: "markdown", content: escapeLarkMarkdown(text) })
+      }
+      continue
+    }
+    if (seg.type === "card" && isLarkCardPayload(seg.card.payload)) {
+      const payload = seg.card.payload
+      if (!header && isRecord(payload.header)) header = payload.header
+      if (isRecord(payload.config)) {
+        const oldStyle = isRecord(config?.style) ? config.style : {}
+        const newStyle = isRecord(payload.config.style) ? payload.config.style : {}
+        const style: Record<string, unknown> = { ...oldStyle, ...newStyle }
+        for (const key of Object.keys(newStyle)) {
+          if (isRecord(oldStyle[key]) && isRecord(newStyle[key]))
+            style[key] = { ...oldStyle[key], ...newStyle[key] }
+        }
+        config = { ...config, ...payload.config, ...(Object.keys(style).length ? { style } : {}) }
+      }
+      if (
+        payload.schema === "2.0" &&
+        isRecord(payload.body) &&
+        Array.isArray(payload.body.elements)
+      ) {
+        const { elements, ...layout } = payload.body
+        bodyLayout = { ...bodyLayout, ...layout }
+        combinedElements.push(...elements.filter(isRecord))
+      } else {
+        // Legacy/custom card dialects cannot be nested in Card 2.0. Keep a
+        // readable full payload instead of silently losing the reply.
+        combinedElements.push({
+          tag: "markdown",
+          content: `\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``,
+        })
       }
       continue
     }
@@ -736,8 +891,8 @@ export async function segmentsToLarkBodyAsync(
       const text = seg.type === "text" ? seg.text : seg.md
       if (!text) continue
       combinedElements.push({
-        tag: "div",
-        text: { tag: "lark_md", content: escapeLarkMarkdown(text) },
+        tag: "markdown",
+        content: escapeLarkMarkdown(text),
       })
       continue
     }
@@ -747,8 +902,8 @@ export async function segmentsToLarkBodyAsync(
     if (seg.type === "code") {
       const lang = seg.language ?? ""
       combinedElements.push({
-        tag: "div",
-        text: { tag: "lark_md", content: `\`\`\`${lang}\n${seg.code}\n\`\`\`` },
+        tag: "markdown",
+        content: `\`\`\`${lang}\n${seg.code}\n\`\`\``,
       })
       continue
     }
@@ -756,8 +911,8 @@ export async function segmentsToLarkBodyAsync(
     // which differs from the text-message `<at user_id=…>` syntax.
     if (seg.type === "mention") {
       combinedElements.push({
-        tag: "div",
-        text: { tag: "lark_md", content: `<at id=${seg.userId}></at>` },
+        tag: "markdown",
+        content: `<at id=${seg.userId}></at>`,
       })
       continue
     }
@@ -776,16 +931,26 @@ export async function segmentsToLarkBodyAsync(
     // placeholder element — Lark cards can't host those media kinds
     // mid-card.
     combinedElements.push({
-      tag: "div",
-      text: { tag: "lark_md", content: `[${seg.type}]` },
+      tag: "markdown",
+      content: `[${seg.type}]`,
     })
   }
 
-  const card: Record<string, unknown> = { elements: combinedElements }
+  // The five-table limit applies to the combined message, not each surface.
+  let tables = 0
+  const elements = combinedElements.map((element) => {
+    if (element.tag !== "table" || ++tables <= 5) return element
+    return { tag: "markdown", content: JSON.stringify(element.rows) }
+  })
+  const card: Record<string, unknown> = {
+    schema: "2.0",
+    ...(config ? { config } : {}),
+    body: { ...bodyLayout, elements: uniqueMergedElementIds(elements) },
+  }
   if (header) card.header = header
   return {
     msg_type: "interactive",
-    content: JSON.stringify(card),
+    content: JSON.stringify(boundGeneratedCard(card)),
   }
 }
 

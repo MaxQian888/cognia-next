@@ -28,8 +28,7 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { registerWeComLiveConnection, weComCredentialFingerprint } from "./live-connection"
-import type { MessageSegment } from "@/types/connectors/segment"
-import { buildConversationKey } from "@/types/connectors/event"
+import { buildConversationKey, type NormalizedInboundEvent } from "@/types/connectors/event"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -62,7 +61,7 @@ import { parseWeComMessage, type WeComConversationRef } from "./parse"
 import { serializeSegments, clampUtf8, type WeComMediaSegment } from "./serialize"
 import { buildWeComTemplateCard, parseTemplateCardEvent, buildAckUpdateCard } from "./a2ui-mapper"
 import { uploadWeComMedia, fetchAndDecryptMedia, bytesToBase64, base64ToBytes } from "./media"
-import { sniffImageMediaType } from "../_shared/inbound-media"
+import { enrichInboundMedia, sniffImageMediaType } from "../_shared/inbound-media"
 import { resolveWelcomeMessage, type WeComAdapterSettings } from "./welcome"
 import { buildMenuClickInboundEvent, buildWeComMenuCard, parseMenuButtonClick } from "./menu-card"
 import { normalizeQuickCommandList, resolveQuickCommand } from "@/lib/connectors/quick-commands"
@@ -335,8 +334,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     const event = parseWeComMessage(opts.id, selfId, body, reqId)
     if (!event) return
     recordActiveReq(reqId, (event.conversationRef as WeComConversationRef).chatId)
-    // Best-effort: decrypt + inline an image so the model receives it.
-    await resolveInboundImage(event.segments, body)
+    await resolveInboundMedia(event, body)
     if (!(await gateInboundEvent(opts.id, event))) return
     lastActivityAt = Date.now()
     await ctx?.emit(event)
@@ -411,32 +409,78 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   }
 
   /**
-   * Decrypt inbound and quoted images and inline base64 on each segment so
-   * `inboundEventToSendContent` hands the model a real image. Best-effort: any
-   * fetch / decrypt failure leaves the URL marker untouched.
+   * Resolve encrypted inbound/quoted media into bounded usable resources.
+   * The shared enrichment pass extracts document text from the decrypted
+   * bytes. A failed attachment keeps its metadata but never its encrypted URL
+   * as a usable resource; other attachments still resolve independently.
    */
-  async function resolveInboundImage(
-    segments: MessageSegment[],
+  async function resolveInboundMedia(
+    event: NormalizedInboundEvent,
     body: WeComInboundMsgBody
   ): Promise<void> {
-    const refs = [body.quote, body].flatMap((content) => {
-      if (content?.msgtype === "image" && content.image) return [content.image]
+    const refs = [body.quote, body].flatMap((content: Partial<WeComInboundMsgBody> | undefined) => {
+      if (content?.msgtype === "image" && content.image)
+        return [{ ...content.image, type: "image" }]
+      if (content?.msgtype === "file" && content.file) return [{ ...content.file, type: "file" }]
+      if (content?.msgtype === "video" && content.video)
+        return [{ ...content.video, type: "video" }]
+      if (content?.msgtype === "voice" && content.voice?.url)
+        return [{ ...content.voice, url: content.voice.url, type: "voice" }]
       if (content?.msgtype === "mixed")
-        return (content.mixed?.msg_item ?? []).flatMap((item) => (item.image ? [item.image] : []))
+        return (content.mixed?.msg_item ?? []).flatMap((item) =>
+          item.image ? [{ ...item.image, type: "image" }] : []
+        )
       return []
     })
-    for (const seg of segments) {
-      if (seg.type !== "image") continue
-      const ref = refs.find((candidate) => candidate.url === seg.url)
-      if (!ref) continue
+    const decryptedFiles = new Map<string, string>()
+    for (const seg of event.segments) {
+      if (
+        seg.type !== "image" &&
+        seg.type !== "file" &&
+        seg.type !== "video" &&
+        seg.type !== "voice"
+      )
+        continue
+      const refIndex = refs.findIndex(
+        (candidate) => candidate.type === seg.type && candidate.url === seg.url
+      )
+      if (refIndex < 0) continue
+      const [ref] = refs.splice(refIndex, 1)
+      seg.rawUrl = seg.url
       try {
         const bytes = await fetchAndDecryptMedia(ref.url, ref.aeskey)
-        seg.dataBase64 = bytesToBase64(bytes)
-        seg.mimeType = sniffImageMediaType(seg.dataBase64) ?? "image/png"
+        const encoded = bytesToBase64(bytes)
+        seg.mimeType =
+          sniffImageMediaType(encoded) ??
+          seg.mimeType ??
+          (seg.type === "image"
+            ? "image/png"
+            : seg.type === "video"
+              ? "video/mp4"
+              : "application/octet-stream")
+        seg.url = `data:${seg.mimeType};base64,${encoded}`
+        if (seg.type === "image") seg.dataBase64 = encoded
+        if (seg.type === "file") {
+          seg.sizeBytes = bytes.byteLength
+          decryptedFiles.set(seg.url, encoded)
+        }
       } catch {
-        /* Preserve the URL marker and continue resolving the remaining images. */
+        seg.url = ""
+        if (seg.type === "image") seg.alt = "[unavailable image]"
       }
     }
+    await enrichInboundMedia(
+      event,
+      {
+        ref: (seg) => (decryptedFiles.has(seg.url) ? seg.url : undefined),
+        source: () => undefined,
+        extractLabel: "wecom-inbound",
+      },
+      {
+        enabled: true,
+        readAttachment: async (_adapterId, ref) => decryptedFiles.get(ref) ?? null,
+      }
+    )
   }
 
   // ── connection lifecycle ────────────────────────────────────────────────

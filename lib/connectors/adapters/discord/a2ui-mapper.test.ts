@@ -24,6 +24,42 @@ const baseInput = (surface: A2UISegmentContent) => ({
 })
 
 describe("buildDiscordA2UIPayload", () => {
+  it.each(["Button", "Select", "Dialog"])(
+    "keeps long %s callback identities distinct across surfaces",
+    async (component) => {
+      const surface: A2UISegmentContent = {
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: {
+            id: "root",
+            component,
+            text: "Open",
+            action: "go",
+            body: ["field"],
+            options: [{ value: "one", label: "One" }],
+          },
+          field: { id: "field", component: "TextField", label: "Name" },
+        },
+      }
+      const wireIds: string[] = []
+      const surfaceIds = ["first-", "second-"].map((prefix) => prefix + "x".repeat(110))
+      for (const surfaceId of surfaceIds) {
+        const payload = await buildDiscordA2UIPayload({ ...baseInput(surface), surfaceId })
+        const row = payload.components![0] as { components: Array<{ custom_id: string }> }
+        wireIds.push(row.components[0].custom_id)
+      }
+      expect(wireIds[0]).not.toBe(wireIds[1])
+      for (const [index, wireId] of wireIds.entries()) {
+        expect(wireId.length).toBeLessThanOrEqual(100)
+        expect(await resolveCallbackBinding("adp_dc", wireId)).toMatchObject({
+          surfaceId: surfaceIds[index],
+          componentId: "root",
+        })
+      }
+    }
+  )
+
   it("renders Card + Text into a rich embed", async () => {
     const surface: A2UISegmentContent = {
       components: {

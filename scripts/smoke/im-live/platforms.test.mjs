@@ -14,7 +14,7 @@ test("every platform has a driver, and every driver a platform", () => {
 
 test("the reported order is fixed", () => {
   // Results are printed in this order, and the report fixtures assume it.
-  assert.deepEqual(PLATFORMS, ["telegram", "slack", "discord", "lark", "matrix"])
+  assert.deepEqual(PLATFORMS, ["telegram", "slack", "discord", "lark", "matrix", "onebot"])
 })
 
 test("the list has no duplicates", () => {

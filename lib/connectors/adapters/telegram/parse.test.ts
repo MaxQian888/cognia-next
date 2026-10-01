@@ -1,5 +1,5 @@
 import { parseTelegramUpdate, parseTelegramCallbackQuery } from "./parse"
-import type { TelegramUpdate } from "./parse"
+import type { TelegramUpdate, TelegramRichBlock } from "./parse"
 
 import privateMsgFixture from "./fixtures/private-message.json"
 import groupMentionFixture from "./fixtures/group-mention.json"
@@ -13,6 +13,281 @@ const ADAPTER_ID = "tg-adapter-1"
 const SELF_ID = "987654321"
 
 describe("parseTelegramUpdate", () => {
+  const richEvent = (blocks: TelegramRichBlock[]) =>
+    parseTelegramUpdate(ADAPTER_ID, SELF_ID, {
+      update_id: 123,
+      message: {
+        message_id: 42,
+        date: 1,
+        chat: { id: 1, type: "private" },
+        rich_message: { blocks },
+      },
+    })!
+
+  it.each([
+    "bold",
+    "italic",
+    "underline",
+    "strikethrough",
+    "spoiler",
+    "date_time",
+    "subscript",
+    "superscript",
+    "marked",
+    "code",
+  ])("preserves nested %s rich text without interpreting entity offsets", (type) => {
+    const event = richEvent([
+      {
+        type: "paragraph",
+        text: [
+          "😀 ",
+          {
+            type,
+            text: [
+              { type: "text_mention", text: "Bot", user: { id: Number(SELF_ID) } },
+              { type: "text_mention", text: "Bot", user: { id: Number(SELF_ID) } },
+            ],
+          },
+        ],
+      },
+    ])
+    expect(event.plainText).toBe("😀 BotBot")
+    expect(event.mentions).toEqual({ selfMentioned: true, users: [SELF_ID] })
+  })
+
+  it("keeps rich text semantic targets, inline buttons, and unknown text readable", () => {
+    const event = richEvent([
+      {
+        type: "paragraph",
+        text: [
+          { type: "email_address", text: "Contact", email_address: "a@example.com" },
+          " ",
+          { type: "phone_number", text: "Call", phone_number: "+12345" },
+          " ",
+          { type: "bank_card_number", text: "Card", bank_card_number: "1234" },
+          " ",
+          { type: "hashtag", text: "#topic" },
+          " ",
+          { type: "cashtag", text: "$USD" },
+          " ",
+          { type: "bot_command", text: "/help" },
+          " ",
+          { type: "anchor", name: "top" },
+          " ",
+          { type: "anchor_link", text: "Top", anchor_name: "top" },
+          " ",
+          { type: "mathematical_expression", expression: "y=2x" },
+          " ",
+          { type: "button", button: { text: "App", web_app: { url: "https://example.com/app" } } },
+          " ",
+          { type: "future_inline", text: "Retained" },
+        ],
+      },
+    ])
+    expect(event.plainText).toBe(
+      "Contact (a@example.com) Call (+12345) Card (1234) #topic $USD /help [anchor: top] Top (#top) y=2x App (https://example.com/app) [unsupported rich text: future_inline] Retained"
+    )
+  })
+
+  it("preserves rich table cells, list labels, references, links, and unknown content", () => {
+    const event = richEvent([
+      { type: "heading", text: "Report" },
+      {
+        type: "list",
+        items: [
+          {
+            label: "1.",
+            has_checkbox: true,
+            is_checked: true,
+            blocks: [
+              {
+                type: "paragraph",
+                text: [
+                  { type: "url", text: "Docs", url: "https://example.com" },
+                  " ",
+                  { type: "custom_emoji", alternative_text: "🎉" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        type: "table",
+        cells: [
+          [{ text: "Name" }, { text: "Value" }],
+          [{ text: "Total" }, { text: "42" }],
+        ],
+        caption: "Results",
+      },
+      {
+        type: "blockquote",
+        blocks: [
+          { type: "paragraph", text: { type: "reference", name: "source", text: "Evidence" } },
+        ],
+        credit: "Author",
+      },
+      {
+        type: "paragraph",
+        text: { type: "reference_link", reference_name: "source", text: "Read" },
+      },
+      { type: "mathematical_expression", expression: "x^2" },
+      { type: "anchor", name: "end" },
+      { type: "divider" },
+      {
+        type: "future_widget",
+        text: "Future content",
+        blocks: [{ type: "paragraph", text: "Nested content" }],
+      },
+      { type: "future_empty" },
+    ])
+    expect(event.plainText).toBe(
+      [
+        "Report",
+        "[x] 1.",
+        "Docs (https://example.com) 🎉",
+        "Name | Value\nTotal | 42",
+        "Results",
+        "[source: Evidence]",
+        "Author",
+        "Read [reference: source]",
+        "x^2",
+        "[anchor: end]",
+        "———",
+        "[unsupported rich block: future_widget]",
+        "Future content",
+        "Nested content",
+        "[unsupported rich block: future_empty]",
+      ].join("\n")
+    )
+  })
+
+  it.each([
+    [
+      "animation",
+      { animation: { file_id: "animation", width: 10, height: 10, duration: 2 } },
+      "video",
+    ],
+    ["video", { video: { file_id: "video", width: 10, height: 10, duration: 2 } }, "video"],
+    ["audio", { audio: { file_id: "audio", title: "Song", duration: 2 } }, "file"],
+    ["document", { document: { file_id: "document", file_name: "report.pdf" } }, "file"],
+    ["voice_note", { voice_note: { file_id: "voice_note", duration: 2 } }, "voice"],
+  ] as const)(
+    "retains %s rich media file IDs for the existing enrichment path",
+    (type, media, kind) => {
+      const event = richEvent([{ type, ...media, caption: { text: "Caption", credit: "Credit" } }])
+      expect(event.segments[0]).toMatchObject({ type: kind, url: `tg://file/${type}` })
+      expect(event.plainText).toContain("Caption\nCredit")
+    }
+  )
+
+  it("preserves maps, captions, buttons, and mentions inside nested containers", () => {
+    const event = richEvent([
+      {
+        type: "collage",
+        blocks: [
+          {
+            type: "slideshow",
+            blocks: [
+              { type: "map", location: { latitude: 1, longitude: 2 }, caption: { text: "Map" } },
+              {
+                type: "buttons",
+                buttons: [
+                  { text: "User", url: `tg://user?id=${SELF_ID}` },
+                  { text: "Copy", copy_text: { text: "Copy value" } },
+                  { text: "Wait", callback_data: "secret", disabled: {} },
+                ],
+              },
+              { type: "expandable_blockquote", text: "Expanded", credit: "A" },
+              { type: "pullquote", text: "Quote", credit: "B" },
+              { type: "footer", text: "Footer" },
+              { type: "thinking", text: "Thinking" },
+            ],
+          },
+        ],
+      },
+    ])
+    expect(event.segments[0]).toMatchObject({ type: "location", lat: 1, lon: 2 })
+    for (const content of [
+      "Map",
+      "User",
+      "Copy value",
+      "Wait [disabled]",
+      "Expanded",
+      "Quote",
+      "Footer",
+      "Thinking",
+    ]) {
+      expect(event.plainText).toContain(content)
+    }
+    expect(event.plainText).not.toContain("secret")
+    expect(event.mentions).toEqual({ selfMentioned: true, users: [SELF_ID] })
+  })
+
+  it("preserves nested rich text, mentions, media, and rich reply snippets", () => {
+    const update = {
+      update_id: 123,
+      message: {
+        message_id: 42,
+        date: 1,
+        chat: { id: 1, type: "private" },
+        rich_message: {
+          blocks: [
+            {
+              type: "paragraph",
+              text: [
+                "Hello ",
+                { type: "bold", text: "world" },
+                " ",
+                { type: "text_mention", text: "Bot", user: { id: Number(SELF_ID) } },
+              ],
+            },
+            {
+              type: "details",
+              summary: "Photos",
+              blocks: [
+                {
+                  type: "photo",
+                  photo: [
+                    { file_id: "small", file_unique_id: "s", width: 20, height: 20 },
+                    { file_id: "large", file_unique_id: "l", width: 100, height: 100 },
+                  ],
+                  caption: {
+                    text: ["By ", { type: "mention", text: "@alice", username: "alice" }],
+                    credit: "Alice",
+                  },
+                },
+              ],
+            },
+            { type: "pre", language: "js", text: "console.log(1)" },
+          ],
+        },
+        reply_to_message: {
+          message_id: 41,
+          date: 1,
+          chat: { id: 1, type: "private" },
+          rich_message: { blocks: [{ type: "paragraph", text: "Original rich message" }] },
+        },
+      },
+    } as TelegramUpdate
+    const event = parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)!
+    expect(event.segments).toEqual([
+      { type: "text", text: "Hello world Bot" },
+      { type: "text", text: "\n" },
+      { type: "text", text: "Photos" },
+      { type: "text", text: "\n" },
+      { type: "image", url: "tg://file/large", width: 100, height: 100 },
+      { type: "text", text: "\n" },
+      { type: "text", text: "By @alice" },
+      { type: "text", text: "\n" },
+      { type: "text", text: "Alice" },
+      { type: "text", text: "\n" },
+      { type: "code", language: "js", code: "console.log(1)" },
+    ])
+    expect(event.mentions).toEqual({ selfMentioned: true, users: [SELF_ID, "@alice"] })
+    expect(event.replyTo?.snippet).toBe("Original rich message")
+  })
+
   describe("private text DM", () => {
     const update = privateMsgFixture as TelegramUpdate
     const result = parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)

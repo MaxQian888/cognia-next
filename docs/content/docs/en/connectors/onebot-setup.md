@@ -14,7 +14,7 @@ cognia-next connects to QQ through the **OneBot** protocol over two WebSocket to
 
 Supported clients:
 
-- [NapCat](https://github.com/NapNeko/NapCatQQ) — QQ for Windows/Linux, updated most frequently
+- [NapCat](https://github.com/NapNeko/NapCatQQ) — QQ integration, with a macOS installer available
 - [Lagrange](https://github.com/LagrangeDev/Lagrange.Core) — cross-platform NTQQ
 - [LLOneBot](https://github.com/LLOneBot/LLOneBot) — a LiteLoader plugin for QQNT
 
@@ -38,7 +38,7 @@ Supported clients:
 3. Fill in:
    - **Bot UIN (QQ number)** — the bot account's QQ number (e.g. `123456789`).
    - **Bearer Token** — when using an authenticated connection, set this to the same value
-     as the OneBot client's `accessToken`.
+     as the NapCat network entry's `token`.
    - **Expected client** — pick NapCat, Lagrange, or LLOneBot (display only).
    - **Transport** — choose **Reverse WS** when the client dials into cognia-next, or
      **Forward WS** when cognia-next dials the client's WebSocket server.
@@ -46,9 +46,9 @@ Supported clients:
 
 If you chose **Reverse WS**, the dialog shows an endpoint URL such as:
 
-   ```
-   ws://127.0.0.1:7842/ws/onebot/<adapterId>
-   ```
+```
+ws://127.0.0.1:7842/ws/onebot/<adapterId>
+```
 
 Copy this URL — you will paste it into the NapCat / Lagrange / LLOneBot config next.
 
@@ -61,22 +61,28 @@ If you chose **Forward WS**, enter the OneBot client's WebSocket server address,
 
 ### Option A: Reverse WS
 
-Edit your NapCat `napcat.json` (or use the NapCat WebUI) and add the reverse-WS URL shown
-by cognia-next:
+Use NapCat WebUI → Network → New WebSocket client (reverse WS). Enable the entry when saving. The equivalent file is `config/onebot11_<QQ>.json`; merge this network entry with existing entries:
 
 ```json
 {
-  "wsReverse": [
-    {
-      "enable": true,
-      "url": "ws://127.0.0.1:7842/ws/onebot/<adapterId>",
-      "reconnectInterval": 3000
-    }
-  ]
+  "network": {
+    "websocketClients": [
+      {
+        "name": "cognia",
+        "enable": true,
+        "url": "ws://127.0.0.1:7842/ws/onebot/<adapterId>",
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "reconnectInterval": 5000,
+        "token": "replace-with-your-token",
+        "heartInterval": 30000
+      }
+    ]
+  }
 }
 ```
 
-Replace `<adapterId>` with the value shown in the cognia-next dialog.
+Replace `<adapterId>` with Cognia’s displayed ID. The token must match Cognia’s Bearer Token.
 
 ### Lagrange
 
@@ -113,6 +119,27 @@ WebSocket address** field. A common NapCat address is:
 ws://127.0.0.1:3001
 ```
 
+Current NapCat forward-WS configuration (merge into your existing file):
+
+```json
+{
+  "network": {
+    "websocketServers": [
+      {
+        "name": "cognia-forward",
+        "enable": true,
+        "host": "127.0.0.1",
+        "port": 3001,
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "token": "replace-with-your-token",
+        "heartInterval": 30000
+      }
+    ]
+  }
+}
+```
+
 If a **Bearer Token** is set, cognia-next sends `Authorization: Bearer <token>` when it
 opens the forward WebSocket.
 
@@ -124,22 +151,7 @@ For reverse WS, the inbound endpoint is fail-closed by default: with no bearer t
 configured, cognia-next rejects the connection unless you explicitly enable **Allow
 unauthenticated connections** in the adapter dialog.
 
-Recommended setup:
-
-1. In NapCat `napcat.json`, set:
-
-   ```json
-   {
-     "accessToken": "my-secret-token"
-   }
-   ```
-
-2. In the cognia-next adapter dialog, paste `my-secret-token` into the **Bearer Token
-   (optional)** field.
-
-cognia-next rejects reverse-WS connections that send the wrong or a missing token. Only
-enable **Allow unauthenticated connections** when a trusted loopback client genuinely does
-not use an access token.
+Set `token` on the selected `network.websocketClients` or `network.websocketServers` entry, and enter the same value in Cognia. This is separate from the WebUI login token. Wrong or missing tokens are rejected by the reverse endpoint.
 
 ---
 
@@ -188,3 +200,17 @@ reactions via `set_msg_emoji_like` on NapCat upstreams.
 ## Troubleshooting
 
 See the [QQ via OneBot FAQ](./qq-via-onebot-faq.md) for common issues.
+
+## macOS / NapCat
+
+Use the [NapCat macOS installer](https://github.com/NapNeko/NapCat-Mac-Installer). Its current README recommends the Mac App Store QQ build and requires macOS Settings → Privacy & Security → App Management permission to switch QQ’s entry point. It backs up `package.json` as `package.json.bak`; use the installer’s original-QQ switch to restore normal startup. Installation changes QQ’s application entry point, so save work and exit QQ before installing.
+
+Start NapCat, log into the test QQ account, and open the WebUI address printed in its startup log. The usual port is `6099`, but an occupied port increments it. For this same-Mac setup, prefer reverse WS to `127.0.0.1:7842` with a token. Use a second QQ account to mention or quote the bot in a quiet test group.
+
+## Acceptance and limitations
+
+Run the [local live test](./local-live-testing) with `--platform onebot`. It reads NapCat history over an additional authenticated loopback HTTP server and prompts a human for two messages; the production connector still uses WebSocket. It checks the model fixture and exactly one reply per turn. It retains QQ messages for manual cleanup.
+
+OneBot has no native editable messages, typing indicator, or interactive card buttons. Read-only previews must not be counted as successful approvals. Use Cognia’s Inbox and the linked session/run for draft edits and supported approvals; use `/help` to discover supported text commands. Complete the functional acceptance table in the live-test guide before declaring attachments, workflow approvals, or recovery verified.
+
+Sources (verified 2026-10-01): [NapCat network configuration](https://doc.napneko.icu/config/basic), [macOS installer](https://github.com/NapNeko/NapCat-Mac-Installer).

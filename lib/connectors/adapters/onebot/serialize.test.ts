@@ -418,3 +418,18 @@ describe("serializeSendForwardMsgV11", () => {
     expect(serializeSendForwardMsgV11({ target: "g:1" })).toBeNull()
   })
 })
+
+it("preserves the v12 account selector for upload, delete and identity actions", async () => {
+  const self = { platform: "qq", user_id: "100000" }
+  const req = makePrivateReq("hello")
+  req.conversationRef.self = self
+  req.segments = [{ type: "image", url: "https://example.com/a.png" }]
+  const send = jest.fn().mockResolvedValue({ status: "ok", retcode: 0, data: { file_id: "fid" } })
+  await uploadOutboundV12Media(req, { send })
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ action: "upload_file", self }))
+  expect(serializeDeleteV12("mid", "100000", self)).toMatchObject({
+    action: "delete_message",
+    self,
+  })
+  expect(serializeGetLoginInfoV12(self)).toMatchObject({ action: "get_self_info", self })
+})

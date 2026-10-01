@@ -23,6 +23,7 @@ import type {
 } from "./connector-types"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { append as appendConnectorAudit } from "./connector-audit"
 import { resolveScopeProjectId } from "./project-scope"
 import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
@@ -465,8 +466,27 @@ export async function sweepTerminalOutboundRows(opts?: {
     .limit(batchLimit)
     .toArray()
   if (victims.length === 0) return 0
-  await db.outboundQueue.bulkDelete(victims.map((r) => r.id))
+  const ids = victims.map((r) => r.id)
+  await db.transaction("rw", db.outboundQueue, db.syncTombstones, async () => {
+    await db.outboundQueue.bulkDelete(ids)
+    // Paired clients mirror the delivery-status projection; without the
+    // tombstone a swept row stays in their outbound list for good.
+    await recordTombstones("outboundQueue", ids, now)
+  })
   return victims.length
+}
+
+/**
+ * Remove one outbound job: an operator cancel, or a plugin guard blocking the
+ * send. Paired clients mirror `outboundQueue` as a status projection, and hear
+ * about a removed job only through the tombstone written here.
+ */
+export async function deleteOutboundJob(id: string): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.outboundQueue, db.syncTombstones, async () => {
+    await db.outboundQueue.delete(id)
+    await recordTombstones("outboundQueue", [id])
+  })
 }
 
 /**

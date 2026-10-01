@@ -114,7 +114,12 @@ describe("enrichOneBotInboundMedia", () => {
       })
     const d = deps()
     const e = event([image("fid")])
+    e.conversationRef.self = { platform: "qq", user_id: "10001" }
     await enrichOneBotInboundMedia(e, { ...d, transport: { send } })
+    expect(send.mock.calls.map(([call]) => call.self)).toEqual([
+      e.conversationRef.self,
+      e.conversationRef.self,
+    ])
     expect(send.mock.calls[1][0].params).toEqual({ file_id: "fid", type: "url" })
     expect(d._fetch).toHaveBeenCalledWith("ob-1", "onebot:/gchatpic_new/1/2/0", CDN, {
       Authorization: "Bearer media",

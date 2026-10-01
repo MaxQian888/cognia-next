@@ -6,7 +6,7 @@
  * Migrated to the shared `AdapterFormSections` shell. OneBot uses a
  * reverse-WebSocket connection — the QQ client (NapCat / Lagrange /
  * LLOneBot) connects TO cognia-next, so the Delivery section surfaces the
- * exact `ws://` URL the operator must paste into the client's `wsReverse`
+ * exact `ws://` URL the operator must paste into the client's `network.websocketClients`
  * config plus a Verify-connection probe. Advanced holds the cross-cutting
  * Quiet-Hours + Mute controls.
  */
@@ -361,7 +361,7 @@ export function OneBotConfigDialog({
             <p className="text-xs text-muted-foreground">
               {t("bearerTokenHelpPrefix")}{" "}
               {/* i18n-exempt: literal OneBot client configuration key */}
-              <code className="text-xs">accessToken</code> {t("bearerTokenHelpSuffix")}
+              <code className="text-xs">token</code> {t("bearerTokenHelpSuffix")}
             </p>
             <CredentialInput
               id="ob-bearer"
@@ -459,7 +459,7 @@ export function OneBotConfigDialog({
         <Label className="text-xs font-medium">{t("endpointLabel")}</Label>
         <p className="text-xs text-muted-foreground">
           {t("endpointHelpPrefix")} {/* i18n-exempt: literal OneBot client configuration key */}
-          <code className="text-xs">wsReverse</code> {t("endpointHelpSuffix")}
+          <code className="text-xs">network.websocketClients</code> {t("endpointHelpSuffix")}
         </p>
         <div
           className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all"

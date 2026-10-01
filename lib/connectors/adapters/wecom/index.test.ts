@@ -49,6 +49,10 @@ jest.mock("./a2ui-mapper", () => ({
 }))
 const mockBuildCard = buildWeComTemplateCard as jest.Mock
 const mockDecryptMedia = jest.fn()
+const mockProcessDocument = jest.fn()
+jest.mock("@cognia/document/document-processor", () => ({
+  processDocumentAsync: (...args: unknown[]) => mockProcessDocument(...args),
+}))
 jest.mock("./media", () => ({
   ...jest.requireActual("./media"),
   fetchAndDecryptMedia: (...args: Parameters<typeof mockDecryptMedia>) => mockDecryptMedia(...args),
@@ -143,6 +147,7 @@ function makeAcker(
 
 beforeEach(() => {
   mockDecryptMedia.mockReset()
+  mockProcessDocument.mockReset()
   mockListen.mockReset()
   mockWsOpen.mockReset()
   mockWsSend.mockReset()
@@ -506,9 +511,21 @@ describe("createWeComAdapter — inbound", () => {
     await tick()
     const event = emit.mock.calls[0][0]
     expect(event.segments).toEqual([
-      { type: "image", url: "https://cdn/quote", dataBase64: "/9j/4A==", mimeType: "image/jpeg" },
-      { type: "image", url: "https://cdn/bad" },
-      { type: "image", url: "https://cdn/current", dataBase64: "/9j/4A==", mimeType: "image/jpeg" },
+      {
+        type: "image",
+        url: "data:image/jpeg;base64,/9j/4A==",
+        rawUrl: "https://cdn/quote",
+        dataBase64: "/9j/4A==",
+        mimeType: "image/jpeg",
+      },
+      { type: "image", url: "", rawUrl: "https://cdn/bad", alt: "[unavailable image]" },
+      {
+        type: "image",
+        url: "data:image/jpeg;base64,/9j/4A==",
+        rawUrl: "https://cdn/current",
+        dataBase64: "/9j/4A==",
+        mimeType: "image/jpeg",
+      },
     ])
     expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/quote", "quote-key")
     expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/current", "current-key")
@@ -519,6 +536,106 @@ describe("createWeComAdapter — inbound", () => {
     expect(sentFrames().find((f) => f.cmd === "aibot_respond_msg")?.headers?.req_id).toBe(
       "r-private"
     )
+    await adapter.stop()
+  })
+
+  it("decrypts videos and quoted documents, preserving file metadata and extracting decrypted text", async () => {
+    const emit = makeEmit()
+    const { adapter, bus } = await startSubscribed(emit)
+    mockDecryptMedia.mockImplementation(async (url: string) =>
+      new TextEncoder().encode(url.endsWith("doc") ? "document text" : "video bytes")
+    )
+    mockProcessDocument.mockResolvedValue({ content: " extracted document text " })
+    bus.trigger(
+      "connectors://ws/h1/message",
+      JSON.stringify({
+        cmd: "aibot_msg_callback",
+        headers: { req_id: "r-media" },
+        body: {
+          msgid: "media",
+          aibotid: "bot_x",
+          chattype: "single",
+          from: { userid: "alice" },
+          msgtype: "video",
+          video: { url: "https://cdn/video", aeskey: "video-key" },
+          quote: {
+            msgtype: "file",
+            file: {
+              url: "https://cdn/doc",
+              aeskey: "doc-key",
+              filename: "report.pdf",
+              fileext: "pdf",
+            },
+          },
+        },
+      })
+    )
+    await tick()
+    expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/doc", "doc-key")
+    expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/video", "video-key")
+    const event = emit.mock.calls[0][0]
+    expect(event.segments).toEqual([
+      {
+        type: "file",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 13,
+        rawUrl: "https://cdn/doc",
+        url: `data:application/pdf;base64,${btoa("document text")}`,
+        ocrText: "extracted document text",
+      },
+      {
+        type: "video",
+        mimeType: "video/mp4",
+        rawUrl: "https://cdn/video",
+        url: `data:video/mp4;base64,${btoa("video bytes")}`,
+      },
+    ])
+    expect(mockProcessDocument).toHaveBeenCalledWith(
+      "wecom-inbound:report.pdf",
+      "report.pdf",
+      expect.any(ArrayBuffer)
+    )
+    expect(new TextDecoder().decode(mockProcessDocument.mock.calls[0][2])).toBe("document text")
+    await adapter.stop()
+  })
+
+  it.each(["file", "video"])("clears an encrypted %s URL when decryption fails", async (type) => {
+    const emit = makeEmit()
+    const { adapter, bus } = await startSubscribed(emit)
+    mockDecryptMedia.mockRejectedValue(new Error("invalid ciphertext"))
+    bus.trigger(
+      "connectors://ws/h1/message",
+      JSON.stringify({
+        cmd: "aibot_msg_callback",
+        headers: { req_id: `r-${type}` },
+        body: {
+          msgid: type,
+          aibotid: "bot_x",
+          chattype: "single",
+          from: { userid: "alice" },
+          msgtype: type,
+          [type]: {
+            url: "https://cdn/encrypted",
+            aeskey: "bad-key",
+            filename: "report.pdf",
+            fileext: "pdf",
+          },
+        },
+      })
+    )
+    await tick()
+    expect(emit.mock.calls[0][0].segments[0]).toMatchObject({
+      type,
+      url: "",
+      rawUrl: "https://cdn/encrypted",
+    })
+    if (type === "file")
+      expect(emit.mock.calls[0][0].segments[0]).toMatchObject({
+        name: "report.pdf",
+        mimeType: "application/pdf",
+      })
+    expect(mockProcessDocument).not.toHaveBeenCalled()
     await adapter.stop()
   })
 })

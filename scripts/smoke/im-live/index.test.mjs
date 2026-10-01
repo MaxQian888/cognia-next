@@ -111,7 +111,7 @@ test("--allow-unconfigured runs the rest and reports the others as NOT_CONFIGURE
   assert.equal(await main(args), 0, "an absent platform must not fail the run")
   assert.ok(out.log.some((l) => l.includes("slack: NOT_CONFIGURED")))
   assert.ok(out.log.some((l) => l.includes("IM_LIVE_SLACK_DRIVER_USER_TOKEN")))
-  assert.ok(out.log.some((l) => l.includes("1 PASS, 4 NOT_CONFIGURED")))
+  assert.ok(out.log.some((l) => l.includes("1 PASS, 5 NOT_CONFIGURED")))
 })
 
 test("--doctor prints the checks and never posts anything", async () => {

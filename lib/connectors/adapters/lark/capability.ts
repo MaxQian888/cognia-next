@@ -39,6 +39,7 @@ export const LARK_CAPS: readonly Capability[] = [
   "rich-card.lark",
   "send.a2ui",
   "send.card",
+  "send.ephemeral",
   "send.file",
   "send.image",
   "send.markdown",
@@ -56,47 +57,11 @@ export const LARK_CAPS: readonly Capability[] = [
 ] as const
 
 /**
- * A2UI capability matrix for the Lark adapter (G3.4, extended at ADR-0009
- * v41 / B4 for Checkbox simulated tier; Dialog / Drawer / Sheet render as
- * inline titled sections — the mapper emits card JSON 1.0 which has no
- * modal runtime and never emits Card 2.0 `form_dialog` containers).
- *
- * Native rendering (via `buildLarkA2UICard`):
- *   - Text / Link / Divider / Card (header) / Alert → div+lark_md / hr.
- *   - Image → `img` (when the URL is already a Lark file_key).
- *   - Button / ButtonGroup → `action[].button` with callback bindings.
- *   - Select / RadioGroup → `action[].select_static`.
- *   - DatePicker / TimePicker → `action[].picker_date` / `picker_time`.
- *   - TextField / TextArea → `input` inside an `action` module (the
- *     message-card schema rejects root-level inputs; TextArea renders as
- *     the same single-line input — there is no rows prop).
- *   - Row / Column / List → layout-only.
- *
- * Simulated (functional but multi-step UX, or stand-in component):
- *   - Checkbox → two-option `select_static` ("✓" / "✗") labelled with
- *     the field name. Lark interactive cards 2.0 have no native single-
- *     checkbox element, so the mapper renders the component as a
- *     `select_static` with two options + `simulatedCheckbox: true` on
- *     the wire value. `parseLarkInteractiveCallback` lifts the event
- *     back into `actionType: "checkbox"` with a canonical "true" /
- *     "false" string so the A2UI bridge sees the same shape as on
- *     platforms with native checkbox support. The user-visible UX is
- *     "tap the dropdown, pick ✓ or ✗" — single round-trip but two
- *     visible steps, hence simulated.
- *   - Dialog / Drawer / Sheet → inline section projection. Lark v1
- *     interactive cards have no modal/drawer runtime, so the mapper
- *     renders the overlay as a divider + bold title followed by its
- *     children inline (TextField / Select / DatePicker / Button all keep
- *     their individual callback bindings). The overlay semantics degrade
- *     to "titled form section in the same card" — functional but not an
- *     actual overlay, hence simulated. The mapper never emits Card 2.0
- *     form containers, so `form_value` submits only arrive from cards
- *     produced elsewhere; when they do, `parseLarkInteractiveCallback`
- *     lifts them to `actionType: "submit"`.
- *
- * Fallback (renders via plain text mirror):
- *   - Slider / Table / Chart / Pagination.
- *   - Tabs / Accordion / Sidebar / Collapsible.
+ * Card 2.0 native display and form controls. Multi-select uses a form
+ * submission; Dialog/Drawer/Sheet remain titled inline sections rather
+ * than modal overlays. Table/Chart render their data natively, while
+ * app-specific row selection/sorting/chart-click actions remain unavailable.
+ * Unsupported/deeply nested layouts preserve a readable text projection.
  */
 export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMatrix({
   Text: "native",
@@ -115,9 +80,14 @@ export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMat
   Row: "native",
   Column: "native",
   List: "native",
-  Checkbox: "simulated",
+  Checkbox: "native",
+  DateTimePicker: "native",
+  FormGroup: "native",
+  Collapsible: "native",
+  Table: "simulated",
+  Chart: "simulated",
   // Overlays render inline as titled sections (divider + bold title +
-  // children); card JSON 1.0 has no modal / form_dialog runtime.
+  // children); native form_dialog overlays are not projected from A2UI.
   Dialog: "simulated",
   Drawer: "simulated",
   Sheet: "simulated",

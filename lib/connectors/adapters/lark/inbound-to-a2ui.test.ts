@@ -1,6 +1,91 @@
 import { larkInboundToA2UI } from "./inbound-to-a2ui"
 
 describe("larkInboundToA2UI", () => {
+  it("reads Card 2.0 body without requiring a header", () => {
+    const card = {
+      schema: "2.0",
+      body: { elements: [{ tag: "markdown", content: "A complete answer" }] },
+    }
+    expect(larkInboundToA2UI(card)?.body).toEqual([{ kind: "text", text: "A complete answer" }])
+  })
+
+  it("preserves nested Card 2.0 forms, panels, buttons and unknown components", () => {
+    const chart = { tag: "chart", chart_spec: { type: "bar" } }
+    const out = larkInboundToA2UI({
+      body: {
+        elements: [
+          {
+            tag: "collapsible_panel",
+            header: { title: { tag: "plain_text", content: "Details" } },
+            elements: [
+              {
+                tag: "form",
+                elements: [
+                  { tag: "markdown", content: "Review this" },
+                  {
+                    tag: "button",
+                    text: { content: "Continue" },
+                    type: "primary_filled",
+                    behaviors: [{ type: "open_url", default_url: "https://example.com" }],
+                  },
+                ],
+              },
+              chart,
+            ],
+          },
+        ],
+      },
+    })
+    expect(out?.body).toEqual([
+      {
+        kind: "card",
+        title: "Details",
+        children: [
+          {
+            kind: "column",
+            children: [
+              { kind: "text", text: "Review this" },
+              {
+                kind: "button",
+                label: "Continue",
+                url: "https://example.com",
+                actionId: undefined,
+                style: "primary",
+              },
+            ],
+          },
+          { kind: "raw_json", label: "chart", payload: chart },
+        ],
+      },
+    ])
+  })
+
+  it("reads localized Card 2.0 content and callback behaviors", () => {
+    expect(
+      larkInboundToA2UI({
+        body: {
+          elements: [
+            { tag: "markdown", i18n_content: { en_us: "English", zh_cn: "中文" } },
+            {
+              tag: "button",
+              text: { content: "Submit" },
+              behaviors: [{ type: "callback", value: { actionId: "form-submit" } }],
+            },
+          ],
+        },
+      })?.body
+    ).toMatchObject([
+      { kind: "text", text: "English" },
+      { kind: "button", actionId: "form-submit" },
+    ])
+  })
+
+  it.each(["null", "[]", "42", '"text"'])("ignores non-object JSON content %s", (content) => {
+    expect(
+      larkInboundToA2UI({ event: { message: { message_type: "interactive", content } } })
+    ).toBeNull()
+  })
+
   it("returns null when payload has no header or elements", () => {
     expect(larkInboundToA2UI({})).toBeNull()
   })

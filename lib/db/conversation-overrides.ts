@@ -10,6 +10,7 @@ import type { AssignmentEventKind } from "./crm-types"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { parseConversationKey } from "@/types/connectors/event"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { appendAssignmentEvent } from "./conversation-assignment-events"
 import { resolveSessionProjectId } from "./project-scope"
 import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
@@ -110,7 +111,13 @@ export async function upsertByConversationKey(
 export async function deleteByConversationKey(conversationKey: string): Promise<boolean> {
   const row = await readForResolution(conversationKey)
   if (!row) return false
-  await getDb().conversationOverrides.delete(row.id)
+  const db = getDb()
+  await db.transaction("rw", db.conversationOverrides, db.syncTombstones, async () => {
+    await db.conversationOverrides.delete(row.id)
+    // Paired clients mirror `conversationOverrides` (pinned, archived, unread
+    // buckets) and hear about a delete only through this tombstone.
+    await recordTombstones("conversationOverrides", [row.id])
+  })
   invalidate(conversationKey)
   return true
 }

@@ -14,7 +14,7 @@ import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import { ilinkMediaUrl, ILINK_ITEM, ILINK_MSG, type IlinkItem, type IlinkMessage } from "./protocol"
-import { consumeNumericAction } from "./numeric-action-registry"
+import { peekNumericAction } from "./numeric-action-registry"
 
 export interface WechatPersonalConversationRef extends ConversationReference {
   platform: "wechat-personal"
@@ -171,8 +171,8 @@ function extractTextForNumeric(msg: IlinkMessage): string {
  * the outbound mapper stashed in `numeric-action-registry`. Returns null
  * for any non-numeric reply or when no live binding matches.
  *
- * The function CONSUMES the registry entry — a second tap on the same
- * digit won't fire twice, matching native button behaviour.
+ * Resolution does not consume the entry. The adapter acknowledges it only
+ * after the bus reaches a terminal outcome and records the message receipt.
  *
  * `surfaceId` / `componentId` are intentionally left empty; the bus's
  * `resolveCallbackBinding(adapterId, triggerId)` reads the persisted
@@ -192,7 +192,7 @@ export function tryParseNumericCallback(
   if (!match) return null
   const numeric = Number.parseInt(match[1], 10)
   const conversationKey = buildConversationKey("wechat-personal", adapterId, msg.from_user_id)
-  const wireActionId = consumeNumericAction(conversationKey, numeric, now)
+  const wireActionId = peekNumericAction(conversationKey, numeric, now)
   if (!wireActionId) return null
 
   const userId = msg.from_user_id

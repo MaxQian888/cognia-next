@@ -39,6 +39,13 @@ export const FAILING_STATUSES = Object.freeze([
  */
 const INBOUND_NEVER_ARRIVED = [
   {
+    code: "lark_include_bot_permission",
+    detail:
+      "For a Feishu bot-driven test, the target needs the published im.message.receive_v1 subscription and im:message.group_at_msg.include_bot:readonly (or im:message.group_msg.include_bot:read).",
+    where:
+      "Feishu Developer Console: target app permissions, events and published version. The driver doctor cannot inspect the target app configuration.",
+  },
+  {
     code: "transport_not_connected",
     detail:
       "The target adapter's transport is not connected, so the platform never delivered the event.",
@@ -146,7 +153,9 @@ export function diagnoseTurn({ fixtureHit, replies = [], marker }) {
         summary:
           "The prompt never reached the model fixture and the target bot never replied — " +
           "the inbound message was dropped before the AI turn.",
-        causes: INBOUND_NEVER_ARRIVED,
+        causes: INBOUND_NEVER_ARRIVED.filter(
+          (c) => c.code !== "lark_include_bot_permission" || marker?.startsWith("cognia-e2e:lark:")
+        ),
       }
     }
     return {

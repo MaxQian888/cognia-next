@@ -642,7 +642,7 @@ describe("createMatrixAdapter", () => {
     mockInvoke.mockResolvedValue(httpResp(200, { event_id: "$edit" }))
     const res = await adapter().edit!("$orig", sendReq([{ type: "text", text: "fixed" }]))
     expect(res.ok).toBe(true)
-    expect(res.platformMessageId).toBe("!r:matrix.org|$edit")
+    expect(res.platformMessageId).toBe("!r:matrix.org|$orig")
     const req = mockInvoke.mock.calls[0][1].req
     // Retries must dedup server-side: txn derives from the idempotency key.
     expect(req.url).toContain(encodeURIComponent("idem-1:edit"))
@@ -661,6 +661,25 @@ describe("createMatrixAdapter", () => {
     expect(req.url).toContain("/rooms/" + encodeURIComponent("!other:matrix.org") + "/send/")
     const body = JSON.parse(req.body)
     expect(body["m.relates_to"]).toEqual({ rel_type: "m.replace", event_id: "$orig" })
+  })
+
+  it("keeps repeated progress updates targeting the original event", async () => {
+    mockInvoke
+      .mockResolvedValueOnce(httpResp(200, { event_id: "$edit1" }))
+      .mockResolvedValueOnce(httpResp(200, { event_id: "$edit2" }))
+    const a = adapter()
+    const first = await a.edit!("!other:matrix.org|$orig", sendReq([{ type: "text", text: "one" }]))
+    const second = await a.edit!(first.platformMessageId!, {
+      ...sendReq([{ type: "text", text: "two" }]),
+      metadata: { idempotencyKey: "idem-2" },
+    })
+    expect(second.platformMessageId).toBe("!other:matrix.org|$orig")
+    for (const [, { req }] of mockInvoke.mock.calls) {
+      expect(JSON.parse(req.body)["m.relates_to"]).toEqual({
+        rel_type: "m.replace",
+        event_id: "$orig",
+      })
+    }
   })
 
   it("delete() redacts when given a roomId|eventId composite", async () => {

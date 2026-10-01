@@ -101,6 +101,9 @@ export async function uploadOutboundV12Media(
       action: "upload_file",
       echo: nextEcho(),
       params: data ? { type: "data", name, data } : { type: "url", name, url: segment.url },
+      ...(req.conversationRef.self
+        ? { self: req.conversationRef.self as SerializedOneBotCall["self"] }
+        : {}),
     })
     if (response.status !== "ok" || response.retcode !== 0) {
       const message = `OneBot 12 upload_file failed: ${response.retcode}`
@@ -293,11 +296,16 @@ export function serializeDeleteV11(messageId: string, _selfId: string): Serializ
   }
 }
 
-export function serializeDeleteV12(messageId: string, _selfId: string): SerializedOneBotCall {
+export function serializeDeleteV12(
+  messageId: string,
+  _selfId: string,
+  self?: SerializedOneBotCall["self"]
+): SerializedOneBotCall {
   return {
     action: "delete_message",
     echo: nextEcho(),
     params: { message_id: messageId },
+    ...(self ? { self } : {}),
   }
 }
 
@@ -389,8 +397,10 @@ export function serializeGetLoginInfoV11(): SerializedOneBotCall {
  * Serialise the OneBot v12 self-identity action `get_self_info`. The response
  * `data` carries `{ user_id, user_name, user_displayname }`.
  */
-export function serializeGetLoginInfoV12(): SerializedOneBotCall {
-  return { action: "get_self_info", echo: nextEcho(), params: {} }
+export function serializeGetLoginInfoV12(
+  self?: SerializedOneBotCall["self"]
+): SerializedOneBotCall {
+  return { action: "get_self_info", echo: nextEcho(), params: {}, ...(self ? { self } : {}) }
 }
 
 // ---------------------------------------------------------------------------

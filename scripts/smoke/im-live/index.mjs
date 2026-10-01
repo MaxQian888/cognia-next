@@ -9,7 +9,7 @@
 //   pnpm im:test:live   -- --platform telegram # terminal 2 — the P0 scenario
 //
 // Flags:
-//   --platform <telegram|slack|discord|lark|matrix|all>   default: all
+//   --platform <telegram|slack|discord|lark|matrix|onebot|all>   default: all
 //   --allow-unconfigured   report missing platforms as NOT_CONFIGURED instead
 //                          of refusing to start
 //   --doctor               run the preflight only, post nothing
@@ -120,7 +120,7 @@ export async function main({
     }
 
     const values = config.platforms[platform].values
-    const driver = makeDriver(platform, { values })
+    const driver = makeDriver(platform, { values, log: say, humanTimeoutMs: config.turnTimeoutMs })
     const runId = makeRunId()
 
     if (args.doctorOnly) {

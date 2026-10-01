@@ -406,6 +406,51 @@ describe("ConnectorBus — adapter-operation wrappers", () => {
     expect((await bus.editOutbound("a1", "m", makeRequest())).error?.code).toBe("unsupported")
   })
 
+  it("blocks recipient-only sends on non-Lark and all normal edits", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("ephemeral")
+    adapter.edit = jest.fn().mockResolvedValue({ ok: true })
+    bus.registerAdapter(adapter)
+    const req = makeRequest()
+    req.metadata.larkEphemeral = { recipientOpenId: "ou_person" }
+    expect((await bus.sendOutbound(adapter.id, req)).error?.code).toBe("validation")
+    expect((await bus.editOutbound(adapter.id, "om_public", req)).error?.code).toBe("validation")
+    expect(adapter.send).not.toHaveBeenCalled()
+    expect(adapter.edit).not.toHaveBeenCalled()
+  })
+
+  it("requires explicit recipient-only support before direct Lark delivery", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("ephemeral")
+    Object.assign(adapter.meta, { type: "lark" })
+    bus.registerAdapter(adapter)
+    const req = makeRequest()
+    req.metadata.larkEphemeral = { recipientOpenId: "ou_person" }
+    expect((await bus.sendOutbound(adapter.id, req)).error?.code).toBe("validation")
+    expect(adapter.send).not.toHaveBeenCalled()
+    Object.assign(adapter.meta, { capabilities: ["send.ephemeral"] })
+    await bus.sendOutbound(adapter.id, req)
+    expect(adapter.send).toHaveBeenCalledWith(req)
+  })
+
+  it("deletes recipient-only cards through the distinct Lark method without ordinary fallback", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("ephemeral")
+    Object.assign(adapter.meta, { type: "lark" })
+    adapter.delete = jest.fn()
+    bus.registerAdapter(adapter)
+    expect((await bus.deleteEphemeralCard("missing", "om_private")).error?.code).toBe(
+      "adapter_not_found"
+    )
+    expect((await bus.deleteEphemeralCard(adapter.id, "om_private")).error?.code).toBe(
+      "unsupported"
+    )
+    expect(adapter.delete).not.toHaveBeenCalled()
+    adapter.deleteEphemeralCard = jest.fn().mockResolvedValue(undefined)
+    expect(await bus.deleteEphemeralCard(adapter.id, "om_private")).toEqual({ ok: true })
+    expect(adapter.deleteEphemeralCard).toHaveBeenCalledWith("om_private")
+  })
+
   it("deleteOutbound delegates and reports ok:true", async () => {
     const bus = getBus()
     const a = makeAdapter("a1") as PlatformAdapter & { delete: jest.Mock }
@@ -670,7 +715,7 @@ describe("ConnectorBus — passive callback observers", () => {
     bus.subscribeCallback(() => {
       throw new Error("cb observer boom")
     })
-    await expect(bus.dispatchConnectorCallback(makeCallback())).resolves.toBeUndefined()
+    await expect(bus.dispatchConnectorCallback(makeCallback())).resolves.toBe("terminal")
   })
 })
 

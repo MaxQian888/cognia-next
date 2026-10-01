@@ -7,6 +7,7 @@ import { withFakePlatform } from "./fake-platform.mjs"
 
 const CHAT = "oc_qa1234567890"
 const TARGET = "ou_target0987654321"
+const TARGET_APP = "cli_target001"
 const MARKER = buildMarker("lark", "abcd1234", 1)
 
 function driverFor(baseUrl, overrides = {}) {
@@ -16,6 +17,7 @@ function driverFor(baseUrl, overrides = {}) {
       driverAppSecret: "driver-secret-value-0001",
       targetChatId: CHAT,
       targetBotOpenId: TARGET,
+      targetAppId: TARGET_APP,
       apiBase: baseUrl,
       ...overrides,
     },
@@ -29,7 +31,7 @@ function routes(extra = {}) {
       json: { code: 0, tenant_access_token: "t-driver-token-abcdefghijkl", expire: 7200 },
     }),
     "GET /bot/v3/info": () => ({
-      json: { code: 0, data: { bot: { open_id: "ou_driver1122334455", app_name: "QA Driver" } } },
+      json: { code: 0, bot: { open_id: "ou_driver1122334455", app_name: "QA Driver" } },
     }),
     [`GET /im/v1/chats/${CHAT}`]: () => ({ json: { code: 0, data: { name: "QA Group" } } }),
     "GET /im/v1/messages": () => ({ json: { code: 0, data: { items: [] } } }),
@@ -46,7 +48,7 @@ function routes(extra = {}) {
 
 const targetItem = (id, text, extra = {}) => ({
   message_id: id,
-  sender: { id: TARGET, id_type: "open_id", sender_type: "app" },
+  sender: { id: TARGET_APP, id_type: "app_id", sender_type: "app" },
   body: { content: JSON.stringify({ text }) },
   create_time: "1700000005000",
   ...extra,
@@ -113,7 +115,7 @@ test("doctor stops at the token when credentials are wrong, instead of cascading
 test("doctor fails when the driver app IS the target app", async () => {
   await withFakePlatform(
     routes({
-      "GET /bot/v3/info": () => ({ json: { code: 0, data: { bot: { open_id: TARGET } } } }),
+      "GET /bot/v3/info": () => ({ json: { code: 0, bot: { open_id: TARGET } } }),
     }),
     async ({ baseUrl }) => {
       const check = (await driverFor(baseUrl).doctor()).find(
@@ -259,6 +261,134 @@ test("cleanup deletes probes and replies, and reports a refusal", async () => {
       assert.deepEqual(result.deleted, ["om_probe0001"])
       assert.equal(result.ok, false)
       assert.match(result.retained[0].reason, /no permission to delete/)
+    }
+  )
+})
+
+test("history follows pages and thread containers, deduplicating by message_id", async () => {
+  await withFakePlatform(
+    routes({
+      "GET /im/v1/messages": ({ query }) => {
+        let data
+        if (query.container_id_type === "thread") {
+          assert.equal(query.start_time, undefined)
+          assert.equal(query.container_id, "omt_topic")
+          data = {
+            items: [
+              targetItem("om_root", MARKER),
+              targetItem("om_thread", MARKER, { thread_id: "omt_topic" }),
+            ],
+          }
+        } else if (!query.page_token) {
+          data = {
+            items: [targetItem("om_root", MARKER, { thread_id: "omt_topic" })],
+            has_more: true,
+            page_token: "next",
+          }
+        } else {
+          assert.equal(query.page_token, "next")
+          data = { items: [targetItem("om_page2", MARKER)] }
+        }
+        return { json: { code: 0, data } }
+      },
+    }),
+    async ({ baseUrl }) => {
+      const driver = driverFor(baseUrl)
+      const lease = await driver.prepare()
+      assert.deepEqual(
+        (await driver.pollTargetMessages(lease)).map((m) => m.messageId),
+        ["om_root", "om_page2", "om_thread"]
+      )
+      assert.deepEqual(await driver.pollTargetMessages(lease), [])
+    }
+  )
+})
+
+test("a failed later page does not consume earlier replies", async () => {
+  let fail = true
+  await withFakePlatform(
+    routes({
+      "GET /im/v1/messages": ({ query }) =>
+        !query.page_token
+          ? {
+              json: {
+                code: 0,
+                data: {
+                  items: [targetItem("om_first", MARKER)],
+                  has_more: true,
+                  page_token: "next",
+                },
+              },
+            }
+          : {
+              json: fail
+                ? { code: 99991672, msg: "no permission" }
+                : { code: 0, data: { items: [] } },
+            },
+    }),
+    async ({ baseUrl }) => {
+      const driver = driverFor(baseUrl)
+      const lease = await driver.prepare()
+      await assert.rejects(driver.pollTargetMessages(lease), /no permission/)
+      fail = false
+      assert.equal((await driver.pollTargetMessages(lease)).length, 1)
+    }
+  )
+})
+
+test("invalid pagination fails instead of looping or silently truncating", async () => {
+  for (const pageToken of [undefined, "repeated"]) {
+    await withFakePlatform(
+      routes({
+        "GET /im/v1/messages": () => ({
+          json: { code: 0, data: { items: [], has_more: true, page_token: pageToken } },
+        }),
+      }),
+      async ({ baseUrl }) => {
+        const driver = driverFor(baseUrl)
+        await assert.rejects(driver.pollTargetMessages(await driver.prepare()), /pagination/)
+      }
+    )
+  }
+})
+
+test("doctor reports history permissions and identity API errors as failed checks", async () => {
+  await withFakePlatform(
+    routes({
+      "GET /bot/v3/info": () => ({ json: { code: 99991672, msg: "identity denied" } }),
+      "GET /im/v1/messages": () => ({ json: { code: 99991672, msg: "history denied" } }),
+    }),
+    async ({ baseUrl }) => {
+      const checks = await driverFor(baseUrl).doctor()
+      assert.ok(checks.some((c) => c.name === "driver identity" && !c.ok))
+      assert.ok(checks.some((c) => c.name === "target history readable" && !c.ok))
+    }
+  )
+})
+
+test("reply response retains a topic whose root is outside the chat time window", async () => {
+  await withFakePlatform(
+    routes({
+      "POST /im/v1/messages/:messageId/reply": () => ({
+        json: { code: 0, data: { message_id: "om_probe", thread_id: "omt_old" } },
+      }),
+      "GET /im/v1/messages": ({ query }) => ({
+        json: {
+          code: 0,
+          data: {
+            items:
+              query.container_id_type === "thread"
+                ? [targetItem("om_reply", MARKER, { thread_id: "omt_old" })]
+                : [],
+          },
+        },
+      }),
+    }),
+    async ({ baseUrl }) => {
+      const driver = driverFor(baseUrl)
+      const lease = await driver.prepare()
+      await driver.replyToTarget(lease, { messageId: "om_old_root" }, MARKER)
+      assert.equal((await driver.pollTargetMessages(lease))[0].threadId, "omt_old")
     }
   )
 })

@@ -99,6 +99,398 @@ const snapshot = (
 })
 
 describe("Lark run presentation driver", () => {
+  it("keeps responsive typography and header branding through partial updates", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body?: unknown) => ({
+      data: { card_id: "style-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, {
+      cot: false,
+      presentation: {
+        subtitle: "Release assistant",
+        headerTags: "Team",
+        desktopTextSize: "heading-3",
+        mobileTextSize: "notation",
+        panelColorLight: "#ffffff",
+        panelColorDark: "#112233",
+      },
+    })
+    const initial = snapshot(1, "waiting")
+    const ref = await driver.open(topicTarget, initial)
+    const card = JSON.parse(
+      (request.mock.calls.find(([, path]) => path === "/cardkit/v1/cards")![2] as { data: string })
+        .data
+    )
+    expect(card.config.style.text_size["cognia-body"]).toMatchObject({
+      pc: "heading-3",
+      mobile: "notation",
+    })
+    expect(card.header.subtitle.content).toBe("Release assistant")
+    const panel = card.body.elements.find(
+      (element: { tag: string }) => element.tag === "collapsible_panel"
+    )
+    expect(panel.background_color).toBe("cognia-panel")
+    expect(panel.elements[0].text_size).toBe("cognia-body")
+    request.mockClear()
+    await driver.update(ref, { ...initial, revision: 2, elapsedMs: 2_000, pendingStepCount: 5 })
+    const batch = request.mock.calls.find(([, path]) => path.endsWith("/batch_update"))
+    expect(batch).toBeDefined()
+    const actions = JSON.parse((batch![2] as { actions: string }).actions)
+    expect(
+      actions.every(
+        (action: { params: { element: { text_size: string } } }) =>
+          action.params.element.text_size === "cognia-body"
+      )
+    ).toBe(true)
+  })
+
+  it("applies custom appearance consistently to creation, partial updates, and fallback cards", async () => {
+    const presentation = {
+      theme: "purple" as const,
+      density: "compact" as const,
+      width: "fill" as const,
+      processMode: "card" as const,
+      history: "collapsed" as const,
+      showElapsed: false,
+      showProgress: false,
+      showArtifacts: false,
+      title: "Release bot",
+    }
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "styled-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { presentation })
+    const initial = snapshot(1)
+    const ref = await driver.open(topicTarget, initial)
+    expect(request.mock.calls.some((call) => call[1].includes("message_cot"))).toBe(false)
+    const create = request.mock.calls.find((call) => call[1] === "/cardkit/v1/cards")!
+    const card = JSON.parse((create[2] as { data: string }).data)
+    expect(card.header).toMatchObject({
+      template: "purple",
+      title: { content: "Release bot · Working" },
+    })
+    expect(card.body).toMatchObject({ padding: "8px", vertical_spacing: "4px" })
+    expect(card.config.width_mode).toBe("fill")
+    expect(JSON.stringify(card)).not.toContain("Elapsed")
+    expect(JSON.stringify(card)).not.toContain("■■")
+    expect(
+      card.body.elements.find((el: Record<string, unknown>) => el.element_id === "run_progress")
+        .expanded
+    ).toBe(false)
+    const fallback = buildLarkRunFallbackSegment(initial, undefined, presentation)
+    expect(JSON.stringify(fallback)).toContain('"template":"purple"')
+    request.mockClear()
+    await driver.update(ref, { ...initial, elapsedMs: 6000 })
+    expect(request).not.toHaveBeenCalled()
+    await driver.update(ref, { ...snapshot(2), connectorQueueDepth: 5 })
+    expect(JSON.stringify(request.mock.calls)).not.toContain("Elapsed")
+  })
+  it("keeps status and approval guidance outside the collapsible process panel", () => {
+    const card = buildLarkRunFallbackSegment({
+      ...snapshot(2, "waiting"),
+      locale: "zh-CN",
+      pendingInterrupt: { id: "permission-1", title: "Permission" },
+      allowedActions: ["approve", "deny"],
+    })
+    const payload = (
+      card as { card: { payload: { body: { elements: Record<string, unknown>[] } } } }
+    ).card.payload
+    expect(payload.body.elements[0]).toMatchObject({
+      tag: "markdown",
+      element_id: "run_status",
+      content: expect.stringContaining("需要你的操作"),
+    })
+    const panel = payload.body.elements.find((element) => element.element_id === "run_progress")
+    expect(JSON.stringify(panel)).not.toContain("用时")
+    expect(JSON.stringify(panel)).toContain("src/release.ts")
+  })
+
+  it("replaces an existing card once when saved appearance changes", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "appearance-card", message_id: "same-message" },
+    }))
+    const initial = createLarkRunPresentationDriver(request, { cot: false })
+    const opened = await initial.open(topicTarget, snapshot(1))
+    request.mockClear()
+    const updatedDriver = createLarkRunPresentationDriver(request, {
+      cot: false,
+      presentation: { density: "compact", theme: "purple", history: "collapsed" },
+    })
+    const updated = await updatedDriver.update(opened, snapshot(1))
+    expect(request.mock.calls.map((call) => call[1])).toEqual(["/cardkit/v1/cards/appearance-card"])
+    expect(updated.platformMessageId).toBe("same-message")
+    request.mockClear()
+    await updatedDriver.update(updated, snapshot(1))
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("updates only elapsed status on a heartbeat and skips an unchanged snapshot after restart", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "quiet-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { cot: false })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    request.mockClear()
+    const heartbeat = { ...snapshot(1), elapsedMs: 6_000 }
+    const updated = await driver.update(opened, heartbeat)
+    expect(request.mock.calls.map((call) => call[1])).toEqual([
+      "/cardkit/v1/cards/quiet-card/elements/run_status",
+    ])
+    request.mockClear()
+    const restarted = createLarkRunPresentationDriver(request, { cot: false })
+    await restarted.update(JSON.parse(JSON.stringify(updated)), heartbeat)
+    expect(request).not.toHaveBeenCalled()
+    await restarted.update(updated, { ...heartbeat, revision: 2 })
+    expect(request.mock.calls.map((call) => call[1])).toEqual([
+      "/cardkit/v1/cards/quiet-card/elements/run_actions",
+    ])
+  })
+
+  it("batches changed status and controls while keeping active text streaming separate", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "batch-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { cot: false })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    request.mockClear()
+    const changed = { ...snapshot(2), elapsedMs: 6_000, connectorQueueDepth: 5 }
+    const updated = await driver.update(opened, changed)
+    expect(request.mock.calls.map(([method, path]) => [method, path])).toEqual([
+      ["PUT", "/cardkit/v1/cards/batch-card/elements/run_summary/content"],
+      ["POST", "/cardkit/v1/cards/batch-card/batch_update"],
+    ])
+    const body = request.mock.calls[1][2] as { actions: string; sequence: number }
+    expect(body.sequence).toBe(2)
+    const actions = JSON.parse(body.actions)
+    expect(
+      actions.map((action: { params: { element_id: string } }) => action.params.element_id)
+    ).toEqual(["run_status", "run_actions"])
+    expect(
+      actions.every(
+        (action: { action: string; params: { element: unknown } }) =>
+          action.action === "update_element" && typeof action.params.element === "object"
+      )
+    ).toBe(true)
+    request.mockClear()
+    await driver.update(JSON.parse(JSON.stringify(updated)), changed)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("replays an ambiguous non-streaming batch exactly after restart before newer controls", async () => {
+    let fail = false
+    let saved: RunPresentationRef = {}
+    const request = jest.fn(async (_method: string, path: string, _body: unknown) => {
+      if (fail && path.endsWith("/batch_update")) throw new Error("batch response lost")
+      return { data: { card_id: "batch-retry", message_id: "message" } }
+    })
+    const driver = createLarkRunPresentationDriver(request, {
+      cot: false,
+      sleep: async () => undefined,
+    })
+    const waiting = {
+      ...snapshot(1, "waiting"),
+      allowedActions: ["approve", "deny"] as ("approve" | "deny")[],
+    }
+    const opened = await driver.open(topicTarget, waiting)
+    fail = true
+    const changed = { ...waiting, revision: 2, elapsedMs: 6_000, connectorQueueDepth: 5 }
+    await expect(
+      driver.update(opened, changed, {
+        checkpoint: async (ref) => {
+          saved = ref
+        },
+      })
+    ).rejects.toThrow("batch response lost")
+    const pending = saved.opaqueState?.pendingMutation as {
+      body: unknown
+      sequence: number
+      uuid: string
+    }
+    const attempts = request.mock.calls.filter((call) => call[1].endsWith("/batch_update"))
+    expect(attempts).toHaveLength(3)
+    expect(attempts.every((call) => JSON.stringify(call[2]) === JSON.stringify(pending.body))).toBe(
+      true
+    )
+    fail = false
+    request.mockClear()
+    const restarted = createLarkRunPresentationDriver(request, { cot: false })
+    const latest = { ...changed, revision: 3, elapsedMs: 8_000 }
+    const restored = await restarted.update(JSON.parse(JSON.stringify(saved)), latest)
+    expect(request.mock.calls[0]).toEqual([
+      "POST",
+      "/cardkit/v1/cards/batch-retry/batch_update",
+      pending.body,
+    ])
+    expect(request.mock.calls.every((call) => !call[1].endsWith("/content"))).toBe(true)
+    const finalBody = request.mock.calls.at(-1)![2] as { sequence: number; uuid: string }
+    expect(finalBody.sequence).toBeGreaterThan(pending.sequence)
+    expect(finalBody.uuid).not.toBe(pending.uuid)
+    expect(restored.opaqueState?.pendingMutation).toBeUndefined()
+    request.mockClear()
+    await restarted.update(restored, latest)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("acknowledges the original running batch after restart without redundant writes", async () => {
+    let fail = false
+    let saved: RunPresentationRef = {}
+    const request = jest.fn(async (_method: string, path: string, _body: unknown) => {
+      if (fail && path.endsWith("/batch_update")) throw new Error("batch response lost")
+      return { data: { card_id: "same-batch", message_id: "message" } }
+    })
+    const driver = createLarkRunPresentationDriver(request, {
+      cot: false,
+      sleep: async () => undefined,
+    })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    fail = true
+    const changed = { ...snapshot(2), elapsedMs: 6_000, connectorQueueDepth: 5 }
+    await expect(
+      driver.update(opened, changed, {
+        checkpoint: async (ref) => {
+          saved = ref
+        },
+      })
+    ).rejects.toThrow("batch response lost")
+    const pending = saved.opaqueState?.pendingMutation as { body: unknown }
+    fail = false
+    request.mockClear()
+    const restarted = createLarkRunPresentationDriver(request, { cot: false })
+    const restored = await restarted.update(JSON.parse(JSON.stringify(saved)), changed)
+    expect(request.mock.calls).toEqual([
+      ["POST", "/cardkit/v1/cards/same-batch/batch_update", pending.body],
+    ])
+    request.mockClear()
+    await restarted.update(restored, changed)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("resumes legacy single-element pending records before applying newer changes", async () => {
+    let fail = false
+    let saved: RunPresentationRef = {}
+    const request = jest.fn(async (_method: string, path: string, _body: unknown) => {
+      if (fail && path.endsWith("/run_actions")) throw new Error("control response lost")
+      return { data: { card_id: "legacy-pending", message_id: "message" } }
+    })
+    const driver = createLarkRunPresentationDriver(request, {
+      cot: false,
+      sleep: async () => undefined,
+    })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    fail = true
+    await expect(
+      driver.update(opened, snapshot(2), {
+        checkpoint: async (ref) => {
+          saved = ref
+        },
+      })
+    ).rejects.toThrow("control response lost")
+    const pending = saved.opaqueState?.pendingMutation as { body: unknown; operation: string }
+    expect(pending.operation).toBe("update_actions")
+    fail = false
+    request.mockClear()
+    const restarted = createLarkRunPresentationDriver(request, { cot: false })
+    const latest = { ...snapshot(3), elapsedMs: 6_000, connectorQueueDepth: 4 }
+    const restored = await restarted.update(JSON.parse(JSON.stringify(saved)), latest)
+    expect(request.mock.calls[0]).toEqual([
+      "PUT",
+      "/cardkit/v1/cards/legacy-pending/elements/run_actions",
+      pending.body,
+    ])
+    expect(restored.opaqueState?.pendingMutation).toBeUndefined()
+    expect(restored.platformMessageId).toBe(opened.platformMessageId)
+    request.mockClear()
+    await restarted.update(restored, latest)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("recovers streaming timeout 200850 on the same Card 2.0 entity", async () => {
+    const paths: string[] = []
+    const driver = createLarkRunPresentationDriver(
+      async (_, path) => {
+        paths.push(path)
+        if (path.endsWith("/content")) throw { code: 200850 }
+        return { data: { card_id: "timeout-card", message_id: "message" } }
+      },
+      { cot: false }
+    )
+    const opened = await driver.open(topicTarget, snapshot(1))
+    await driver.update(opened, { ...snapshot(2), connectorQueueDepth: 3 })
+    expect(paths).toContain("/cardkit/v1/cards/timeout-card")
+    expect(paths.filter((path) => path === "/cardkit/v1/cards")).toHaveLength(1)
+  })
+
+  it("reconciles an ambiguous write before restoring the latest content after restart", async () => {
+    let fail = false
+    let saved: RunPresentationRef = {}
+    const request = jest.fn(async (_method: string, path: string, _body: unknown) => {
+      if (fail && path.endsWith("/content")) throw new Error("connection reset")
+      return { data: { card_id: "replay-card", message_id: "message" } }
+    })
+    const driver = createLarkRunPresentationDriver(request, {
+      cot: false,
+      sleep: async () => undefined,
+    })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    fail = true
+    await expect(
+      driver.update(
+        opened,
+        { ...snapshot(2), connectorQueueDepth: 3 },
+        {
+          checkpoint: async (ref) => {
+            saved = ref
+          },
+        }
+      )
+    ).rejects.toThrow("connection reset")
+    const pending = saved.opaqueState?.pendingMutation
+    fail = false
+    request.mockClear()
+    const restarted = createLarkRunPresentationDriver(request, { cot: false })
+    const restored = await restarted.update(JSON.parse(JSON.stringify(saved)), snapshot(3))
+    const writes = request.mock.calls.filter((call) => call[1].endsWith("/content"))
+    expect(writes).toHaveLength(2)
+    expect(writes[0][2]).toEqual((pending as { body: unknown }).body)
+    expect((writes[1][2] as { content: string }).content).toContain("2")
+    expect(restored.opaqueState?.pendingMutation).toBeUndefined()
+    const sequences = request.mock.calls.map((call) => (call[2] as { sequence: number }).sequence)
+    expect(sequences.every((sequence, i) => i === 0 || sequence > sequences[i - 1])).toBe(true)
+  })
+
+  it("upgrades a persisted layout once and preserves the message and card identity", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "old-card", message_id: "old-message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { cot: false })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    delete opened.opaqueState?.presentedLayout
+    delete opened.opaqueState?.presentedContent
+    request.mockClear()
+    const upgraded = await driver.update(opened, snapshot(2))
+    expect(request.mock.calls.map((call) => call[1])).toEqual(["/cardkit/v1/cards/old-card"])
+    expect(upgraded.platformMessageId).toBe("old-message")
+    request.mockClear()
+    await driver.update(upgraded, snapshot(2))
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("collapses completed history while retaining the outcome and details", () => {
+    const card = JSON.stringify(buildLarkRunFallbackSegment(snapshot(3, "completed")))
+    expect(card).toContain('"expanded":false')
+    expect(card).toContain('"element_id":"run_status"')
+    expect(card).toContain("src/release.ts")
+  })
+
+  it("creates an already completed run with streaming disabled", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "done-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { cot: false })
+    await driver.open(topicTarget, snapshot(3, "completed"))
+    const create = request.mock.calls.find((call) => call[1] === "/cardkit/v1/cards")!
+    expect(JSON.parse((create[2] as { data: string }).data).config.streaming_mode).toBe(false)
+  })
+
   it("refreshes thread text controls when a run waits for authorization", async () => {
     const paths: string[] = []
     const driver = createLarkRunPresentationDriver(async (_method, path) => {
@@ -136,7 +528,7 @@ describe("Lark run presentation driver", () => {
     })
 
     const ref = await driver.open(topicTarget, snapshot(1))
-    const updated = await driver.update(ref, snapshot(2))
+    const updated = await driver.update(ref, { ...snapshot(2), elapsedMs: 6_000 })
     await driver.finish(updated, snapshot(3, "completed"))
 
     expect(calls.map((call) => [call.method, call.path])).toEqual([
@@ -367,11 +759,15 @@ describe("Lark run presentation driver", () => {
     )
     const opened = await driver.open(topicTarget, snapshot(1))
 
-    const updated = await driver.update(opened, snapshot(2), {
-      checkpoint: async (ref) => {
-        checkpoints.push(ref.opaqueState ?? {})
-      },
-    })
+    const updated = await driver.update(
+      opened,
+      { ...snapshot(2), connectorQueueDepth: 3 },
+      {
+        checkpoint: async (ref) => {
+          checkpoints.push(ref.opaqueState ?? {})
+        },
+      }
+    )
 
     expect(updates).toHaveLength(3)
     expect(updates[1]).toEqual(updates[0])
@@ -449,7 +845,7 @@ describe("Lark run presentation driver", () => {
     const long = snapshot(1)
     long.runId = `execution:agent:${"session".repeat(20)}:${"message".repeat(20)}`
     const opened = await driver.open(topicTarget, long)
-    const next = { ...long, revision: 2 }
+    const next = { ...long, revision: 2, connectorQueueDepth: 3 }
 
     await driver.update(opened, next)
 
@@ -701,7 +1097,9 @@ it("never streams heartbeats into a waiting card with streaming mode closed", as
   ref = await driver.update(ref, snapshot(2, "waiting"))
   paths.length = 0
   await driver.update(ref, snapshot(2, "waiting"))
-  expect(paths).toEqual(["/cardkit/v1/cards/wait-card"])
+  expect(paths).toEqual([])
+  await driver.update(ref, { ...snapshot(2, "waiting"), elapsedMs: 6_000 })
+  expect(paths).toEqual(["/cardkit/v1/cards/wait-card/elements/run_status"])
 })
 it("repairs a closed-stream operation on the existing card without schema downgrade", async () => {
   const paths: string[] = []
@@ -711,7 +1109,7 @@ it("repairs a closed-stream operation on the existing card without schema downgr
     return { data: { card_id: "closed-card", message_id: "message" } }
   })
   const ref = await driver.open(topicTarget, snapshot(1))
-  await driver.update(ref, snapshot(2))
+  await driver.update(ref, { ...snapshot(2), connectorQueueDepth: 3 })
   expect(paths).toContain("/cardkit/v1/cards/closed-card")
   expect(paths.filter((path) => path === "/cardkit/v1/cards")).toHaveLength(1)
   expect(JSON.stringify(buildLarkRunFallbackSegment(snapshot(3)))).toContain('"schema":"2.0"')
@@ -790,6 +1188,23 @@ describe("Lark COT presentation", () => {
     })
     expect(JSON.stringify(card)).toContain("Process shown in the thinking timeline above")
     expect(JSON.stringify(card)).not.toContain("collapsible_panel")
+  })
+
+  it("updates COT-backed waiting status without reopening the stream or replacing approval controls", async () => {
+    const calls: CotCall[] = []
+    const driver = createLarkRunPresentationDriver(cotAwareMock(calls))
+    let ref = await driver.open(topicTarget, snapshot(1))
+    const waiting = { ...snapshot(2, "waiting"), allowedActions: ["approve", "deny"] as const }
+    ref = await driver.update(ref, { ...waiting, allowedActions: [...waiting.allowedActions] })
+    calls.length = 0
+    const heartbeat = { ...waiting, allowedActions: [...waiting.allowedActions], elapsedMs: 6_000 }
+    ref = await driver.update(ref, heartbeat)
+    expect(calls.map((call) => call.path)).toEqual([
+      "/cardkit/v1/cards/card-cot/elements/run_summary",
+    ])
+    calls.length = 0
+    await driver.update(ref, heartbeat)
+    expect(calls).toHaveLength(0)
   })
 
   it("opens the card alone when message_cot is unsupported and skips the probe next time", async () => {

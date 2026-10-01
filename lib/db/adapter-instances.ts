@@ -9,6 +9,7 @@
 import type { AdapterInstanceRow } from "./connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newId(): string {
   return "cai_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -218,7 +219,12 @@ export async function patchAdapterInstanceSettings(
 
 export async function deleteAdapterInstance(id: string): Promise<void> {
   const db = getDb()
-  await db.adapterInstances.delete(id)
+  await db.transaction("rw", db.adapterInstances, db.syncTombstones, async () => {
+    await db.adapterInstances.delete(id)
+    // Paired clients mirror `adapterInstances` and hear about a removed
+    // connector only through this tombstone.
+    await recordTombstones("adapterInstances", [id])
+  })
   // v51 — Heartbeats live in their own `connectorHeartbeats` table whose only
   // bound is the per-adapter 48h retention sweep inside `recordHeartbeatNow`,
   // which runs ONLY while the adapter is running. A deleted adapter never
