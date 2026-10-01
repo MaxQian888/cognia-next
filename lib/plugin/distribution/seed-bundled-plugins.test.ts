@@ -6,6 +6,7 @@ import {
   bundledPluginCatalog,
   readSeedMarker,
   seedBundledPlugins,
+  seedBundledPluginsOnHost,
   SEED_MARKER_KEY,
   STAGED_PLUGIN_ROOT,
   writeSeedMarker,
@@ -13,7 +14,19 @@ import {
 } from "./seed-bundled-plugins"
 
 jest.mock("@cognia/logging", () => ({
-  loggers: { plugin: { child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn() }) } },
+  loggers: {
+    plugin: {
+      child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn() }),
+      warn: jest.fn(),
+    },
+  },
+}))
+jest.mock("@tauri-apps/api/path", () => ({
+  resolveResource: jest.fn(async (relative: string) => `/Bundle/${relative}`),
+}))
+jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn(async () => undefined) }))
+jest.mock("@/lib/db/plugin-install-origins", () => ({
+  putInstallOrigin: jest.fn(async () => undefined),
 }))
 
 const CATALOG = {
@@ -41,6 +54,19 @@ function deps(over: Partial<SeedBundledPluginsDeps> = {}) {
 }
 
 describe("seedBundledPlugins", () => {
+  it("hands the catalog entry to the installer", async () => {
+    const seen: Array<{ dir: string; id: string; version: string }> = []
+    const { base } = deps({
+      installFromDirectory: async (dir, entry) => {
+        seen.push({ dir, id: entry.id, version: entry.version })
+      },
+    })
+    await seedBundledPlugins(base)
+    expect(seen).toEqual([
+      { dir: `/Bundle/${STAGED_PLUGIN_ROOT}/repowiki`, id: "cognia-repowiki", version: "0.1.0" },
+    ])
+  })
+
   it("installs a staged plugin from the resource tree and records its version", async () => {
     const { base, marker, installed } = deps()
     const outcome = await seedBundledPlugins(base)
@@ -176,5 +202,28 @@ describe("the generated catalog", () => {
     expect(catalog.entries.repowiki?.id).toBe("cognia-repowiki")
     expect(catalog.entries.repowiki.files.length).toBeGreaterThan(20)
     expect(catalog.entries.repowiki.files.map((f) => f.path)).toContain("plugin.json")
+  })
+})
+
+describe("seedBundledPluginsOnHost", () => {
+  it("installs each staged plugin and records it as shipping with the app", async () => {
+    localStorage.removeItem(SEED_MARKER_KEY)
+    const { invoke } = jest.requireMock("@tauri-apps/api/core")
+    const { putInstallOrigin } = jest.requireMock("@/lib/db/plugin-install-origins")
+    const outcome = await seedBundledPluginsOnHost()
+    const entries = Object.entries(bundledPluginCatalog().entries)
+    expect(outcome.seeded).toEqual(entries.map(([directory]) => directory))
+    for (const [directory, entry] of entries) {
+      expect(invoke).toHaveBeenCalledWith("plugin_install_from_directory", {
+        sourceDir: `/Bundle/${STAGED_PLUGIN_ROOT}/${directory}`,
+      })
+      expect(putInstallOrigin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: entry.id,
+          version: entry.version,
+          origin: { kind: "builtin" },
+        })
+      )
+    }
   })
 })

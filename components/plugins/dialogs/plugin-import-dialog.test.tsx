@@ -13,6 +13,10 @@ jest.mock("next-intl", () => ({
 }))
 
 const upsertPluginMock = jest.fn(async (..._args: unknown[]) => ({}) as never)
+const putInstallOriginMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/db/plugin-install-origins", () => ({
+  putInstallOrigin: (...args: unknown[]) => putInstallOriginMock(...args),
+}))
 jest.mock("@/lib/db/plugins", () => ({
   upsertPlugin: (...args: unknown[]) => upsertPluginMock(...args),
 }))
@@ -80,6 +84,17 @@ describe("PluginImportDialog", () => {
     fireEvent.click(screen.getByText(/^confirm:2/))
     await waitFor(() => expect(usePluginsStore.getState().importStaging).toBeNull())
     expect(upsertPluginMock).toHaveBeenCalledTimes(2)
+    // Each imported manifest is recorded as a local origin, so it exports embedded.
+    expect(putInstallOriginMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginId: "p1",
+        version: "1.0.0",
+        origin: { kind: "local", via: "manifest-import" },
+      })
+    )
+    expect(putInstallOriginMock).toHaveBeenCalledWith(
+      expect.objectContaining({ pluginId: "p2", version: "0.5.0" })
+    )
   })
 
   it("cancel clears staging without calling upsertPlugin", () => {

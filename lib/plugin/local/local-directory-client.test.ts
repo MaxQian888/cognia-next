@@ -52,7 +52,10 @@ describe("createLocalDirectoryClient", () => {
     const client = createLocalDirectoryClient("C:/plugins/demo")
     await client.getPlugin("demo")
     const receipt = await client.installPlugin("demo")
-    expect(mockInstall).toHaveBeenCalledWith("C:/plugins/demo", { pluginName: "Demo Plugin" })
+    expect(mockInstall).toHaveBeenCalledWith("C:/plugins/demo", {
+      pluginName: "Demo Plugin",
+      version: "1.0.0",
+    })
     expect(receipt).toMatchObject({ pluginId: "demo" })
   })
 

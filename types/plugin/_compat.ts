@@ -287,6 +287,14 @@ export interface Project {
     mcpServer?: Record<string, boolean>
   }
   /**
+   * The cogset this workspace runs (ADR-0209). Plugins are not overlaid per
+   * workspace; instead, opening the workspace makes this cogset the effective
+   * one, and the host reconciles to it through the plugin manager
+   * (`lib/plugin/cogset/`). Absent means the workspace follows the global
+   * cogset.
+   */
+  pluginCogsetId?: string
+  /**
    * Worktree provisioning this device accepted for this workspace — cache
    * directories to link and gitignored files to copy into a managed worktree.
    *

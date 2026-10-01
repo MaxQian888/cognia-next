@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { upsertPlugin } from "@/lib/db/plugins"
+import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
 import { usePluginsStore } from "@/stores/plugins"
 import type { PluginPermission } from "@/types/plugin"
 import { PermissionListCard } from "./plugin-pre-install-dialog"
@@ -74,6 +75,13 @@ export function PluginImportDialog() {
           capabilities: Array.isArray((draft.manifest as { capabilities?: string[] })?.capabilities)
             ? (draft.manifest as { capabilities: string[] }).capabilities
             : [],
+        })
+        // A manifest with no files behind it has nothing to fetch again, so a
+        // cogpack carrying it embeds whatever is on disk (ADR-0209).
+        await recordInstallOrigin({
+          pluginId: draft.id,
+          version: draft.version,
+          origin: { kind: "local", via: "manifest-import" },
         })
       }
       setStaging(null)

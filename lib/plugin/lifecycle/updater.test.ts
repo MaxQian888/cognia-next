@@ -1,8 +1,15 @@
 /**
+ * @jest-environment jsdom
+ *
  * Tests for Plugin Updater
  */
 
-import { PluginUpdater, getPluginUpdater, resetPluginUpdater } from "./updater"
+import {
+  PLUGIN_UPDATES_AVAILABLE_EVENT,
+  PluginUpdater,
+  getPluginUpdater,
+  resetPluginUpdater,
+} from "./updater"
 
 jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
@@ -824,6 +831,82 @@ describe("PluginUpdater", () => {
       })
       updater.stopAutoUpdate()
       // No error means success
+    })
+  })
+
+  describe("Auto Update and cogset pins (ADR-0209)", () => {
+    const updates = [
+      { pluginId: "pinned", currentVersion: "1.0.0", latestVersion: "1.1.0" },
+      { pluginId: "free", currentVersion: "1.0.0", latestVersion: "1.1.0" },
+      { pluginId: "pinned-to-latest", currentVersion: "1.0.0", latestVersion: "2.0.0" },
+    ]
+    const pins = new Map([
+      ["pinned", { cogsetId: "c", cogsetName: "Writing", pinnedVersion: "1.0.0" }],
+      ["pinned-to-latest", { cogsetId: "c", cogsetName: "Writing", pinnedVersion: "2.0.0" }],
+    ])
+
+    function pinnedUpdater(resolve = async () => pins) {
+      const u = new PluginUpdater({}, { resolveCogsetPins: resolve })
+      jest.spyOn(u, "checkForUpdates").mockResolvedValue(updates)
+      const install = jest.spyOn(u, "update").mockResolvedValue({ success: true } as never)
+      const events: Array<{ pluginId: string; pinned: boolean }[]> = []
+      const listener = (event: Event) =>
+        events.push(
+          (
+            event as CustomEvent<{ updates: Array<{ pluginId: string; pinnedByCogset?: unknown }> }>
+          ).detail.updates.map((x) => ({ pluginId: x.pluginId, pinned: !!x.pinnedByCogset }))
+        )
+      window.addEventListener(PLUGIN_UPDATES_AVAILABLE_EVENT, listener)
+      return {
+        u,
+        install,
+        events,
+        done: () => window.removeEventListener(PLUGIN_UPDATES_AVAILABLE_EVENT, listener),
+      }
+    }
+
+    const config = (autoInstall: boolean) => ({
+      enabled: false,
+      checkInterval: 3600000,
+      autoInstall,
+      notifyOnly: !autoInstall,
+      excludePlugins: [],
+      allowPrerelease: false,
+    })
+
+    it("auto-install skips an update that would break a pin and offers it instead", async () => {
+      const t = pinnedUpdater()
+      t.u.configureAutoUpdate(config(true))
+      await t.u.runAutoUpdateOnce()
+      expect(t.install.mock.calls.map((call) => call[0])).toEqual(["free", "pinned-to-latest"])
+      expect(t.events).toEqual([[{ pluginId: "pinned", pinned: true }]])
+      t.done()
+    })
+
+    it("notify-only marks pinned updates in the notification", async () => {
+      const t = pinnedUpdater()
+      t.u.configureAutoUpdate(config(false))
+      await t.u.runAutoUpdateOnce()
+      expect(t.install).not.toHaveBeenCalled()
+      expect(t.events).toEqual([
+        [
+          { pluginId: "pinned", pinned: true },
+          { pluginId: "free", pinned: false },
+          { pluginId: "pinned-to-latest", pinned: false },
+        ],
+      ])
+      t.done()
+    })
+
+    it("holds everything when the pins cannot be read", async () => {
+      const t = pinnedUpdater(async () => {
+        throw new Error("db closed")
+      })
+      t.u.configureAutoUpdate(config(true))
+      await t.u.runAutoUpdateOnce()
+      expect(t.install).not.toHaveBeenCalled()
+      expect(t.events[0]).toHaveLength(3)
+      t.done()
     })
   })
 

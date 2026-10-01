@@ -21,6 +21,8 @@ import { dispatchPluginError } from "@/lib/plugin/error-bus"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 import type { PluginManifest } from "@/types/plugin"
+import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
+import type { CogpackProvenance, PluginInstallOrigin } from "@/types/plugin/plugin-cogset"
 
 export interface InstallFromDirectoryReceipt {
   pluginId: string
@@ -42,6 +44,40 @@ export interface InstallFromDirectoryOptions {
    * renderer cannot widen it.
    */
   generatedFiles?: Record<string, string>
+  /**
+   * Where this directory came from (ADR-0209). Defaults to a local directory,
+   * which exports embedded; a cogpack passes `cogpack-embedded` and its
+   * provenance.
+   */
+  origin?: PluginInstallOrigin
+  viaCogpack?: CogpackProvenance
+  /** The manifest version, when the caller already knows it. */
+  version?: string
+}
+
+function overlayVersion(generatedFiles: Record<string, string> | undefined): string | undefined {
+  const text = generatedFiles?.["plugin.json"]
+  if (!text) return undefined
+  try {
+    const version = (JSON.parse(text) as { version?: unknown }).version
+    return typeof version === "string" ? version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Best-effort manifest version for the origin record; the row is authoritative. */
+async function resolveInstalledVersion(
+  sourceDir: string,
+  options: InstallFromDirectoryOptions
+): Promise<string> {
+  const known = options.version ?? overlayVersion(options.generatedFiles)
+  if (known) return known
+  try {
+    return (await previewLocalManifest(sourceDir)).version ?? ""
+  } catch {
+    return ""
+  }
 }
 
 /**
@@ -75,6 +111,12 @@ export async function installPluginFromDirectory(
       { sourceDir, generatedFiles: options.generatedFiles }
     )
     loggers.plugin.info(`[local-install] installed ${result.pluginId} from ${sourceDir}`)
+    await recordInstallOrigin({
+      pluginId: result.pluginId,
+      version: await resolveInstalledVersion(sourceDir, options),
+      origin: options.origin ?? { kind: "local", via: "directory" },
+      viaCogpack: options.viaCogpack,
+    })
     return {
       pluginId: result.pluginId,
       warnings: result.warnings ?? [],

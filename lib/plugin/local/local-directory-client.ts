@@ -62,6 +62,7 @@ export function createLocalDirectoryClient(
       const receipt = await installPluginFromDirectory(sourceDir, {
         pluginName,
         generatedFiles: conversion?.generatedFiles,
+        version: cachedManifest?.version,
       })
       return receipt
     },

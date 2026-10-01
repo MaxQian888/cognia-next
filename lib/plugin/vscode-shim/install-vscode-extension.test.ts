@@ -16,6 +16,9 @@ import JSZip from "jszip"
 jest.mock("@/lib/db/plugins", () => ({ upsertPlugin: jest.fn(async (draft) => draft) }))
 jest.mock("@/lib/native/utils", () => ({ canUseTauriInvoke: jest.fn(() => false) }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
+jest.mock("@/lib/db/plugin-install-origins", () => ({
+  putInstallOrigin: jest.fn(async () => undefined),
+}))
 jest.mock("@cognia/logging", () => ({
   loggers: { plugin: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() } },
 }))
@@ -28,7 +31,10 @@ import {
   commitVscodeExtension,
   installVscodeExtensionFromBytes,
   prepareVscodeExtension,
+  vscodeInstallOrigin,
 } from "./install-vscode-extension"
+import { putInstallOrigin } from "@/lib/db/plugin-install-origins"
+import type { VsCodeExtensionBlock } from "@/types/plugin/plugin-vscode"
 
 const upsertPluginMock = upsertPlugin as jest.Mock
 const canUseTauriInvokeMock = canUseTauriInvoke as jest.Mock
@@ -114,6 +120,39 @@ describe("commitVscodeExtension", () => {
     expect(draft.manifest.vscodeExtension.identifier).toBe("cognia.hello")
     expect(draft.type).toBe("vscode-extension")
     expect(draft.enabled).toBe(false)
+  })
+
+  it("records an Open VSX origin pinned by version and VSIX hash, with cogpack provenance", async () => {
+    const prepared = await prepareVscodeExtension(
+      await buildVsix(BENIGN),
+      "openvsx",
+      "darwin-arm64"
+    )
+    await commitVscodeExtension(prepared, {
+      viaCogpack: { cogpackId: "coder", version: "2.0.0", fingerprint: "f" },
+    })
+    expect(putInstallOrigin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginId: prepared.adapted.manifest.id,
+        origin: {
+          kind: "openvsx",
+          namespace: "cognia",
+          name: "hello",
+          version: "1.0.0",
+          sha256: prepared.vsix.sha256,
+          targetPlatform: "darwin-arm64",
+        },
+        viaCogpack: { cogpackId: "coder", version: "2.0.0", fingerprint: "f" },
+      })
+    )
+  })
+
+  it("records a dropped .vsix as local, since there is nothing to fetch again", async () => {
+    const prepared = await prepareVscodeExtension(await buildVsix(BENIGN), "vsix-upload")
+    await commitVscodeExtension(prepared)
+    expect(putInstallOrigin).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: { kind: "local", via: "vsix" } })
+    )
   })
 
   it("maps the manifest source onto the PluginRow source vocabulary", async () => {
@@ -232,5 +271,43 @@ describe("hostile manifests", () => {
       source: "vsix-upload",
     })
     expect(prepared.adapted.manifest.permissions).toContain("process:spawn")
+  })
+})
+
+describe("vscodeInstallOrigin", () => {
+  const block: VsCodeExtensionBlock = {
+    identifier: "acme.tools.pro",
+    version: "3.1.0",
+    engineVscode: "^1.80.0",
+    vsixSha256: "x",
+    source: "openvsx",
+    bundleFormat: "cjs",
+    activationEvents: [],
+  }
+
+  it("splits the namespace from a name that itself contains dots", () => {
+    expect(vscodeInstallOrigin(block, "abc")).toEqual({
+      kind: "openvsx",
+      namespace: "acme",
+      name: "tools.pro",
+      version: "3.1.0",
+      sha256: "abc",
+    })
+  })
+
+  it("falls back to local for dev, drag-drop and malformed identifiers", () => {
+    expect(vscodeInstallOrigin({ ...block, source: "dev" }, "a")).toEqual({
+      kind: "local",
+      via: "directory",
+    })
+    expect(vscodeInstallOrigin({ ...block, source: null }, "a")).toEqual({
+      kind: "local",
+      via: "vsix",
+    })
+    expect(vscodeInstallOrigin({ ...block, identifier: "nodot" }, "a")).toEqual({
+      kind: "local",
+      via: "vsix",
+    })
+    expect(vscodeInstallOrigin(undefined, "a")).toEqual({ kind: "local", via: "vsix" })
   })
 })

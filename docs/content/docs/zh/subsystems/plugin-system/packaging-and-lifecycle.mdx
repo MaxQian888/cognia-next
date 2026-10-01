@@ -71,7 +71,7 @@ if (conflict) {
 | HTTP 注册中心 | `marketplace.ts` | registry URL + `pluginId` | `proxyFetch(registryUrl/plugins)`；Rust `plugin_install` / `plugin_download_version` | `getPlugin :584`、`searchPluginsStrict :526`、`installPlugin :786` |
 | GitHub 市场仓库 | `github-marketplace.ts` | owner/repo ref | GitHub contents API 取 `marketplace.json`（3 个候选路径 `:12-16`），解析 `plugins[]` | `fetchMarketplaceCatalog :59`、`fetchAllSourceEntries :110` |
 | GitHub 来源（按插件） | `github-source.ts` | `owner/repo[@ref][/sub]` 或 URL | 经 contents API 的 `fetchGithubFile`（base64 解码 `:130-142`）；经 Rust `installPluginFromGithub` 安装 | `parseGithubPluginRef :63`、`fetchGithubPluginPreview :176`、`makeGithubMarketplaceClient :229` |
-| Git 仓库（WASM 构建） | `git-installer.ts` | `repoUrl` + branch | Tauri `plugin_wasm_install_from_git` —— 浅克隆 + `cargo component build` | `installFromGit :67` |
+| Git 仓库（预构建 WASM） | `git-installer.ts` | `repoUrl` + 分支或确切提交 | Tauri `plugin_wasm_install_from_git`：浅克隆分支，或精确获取指定提交；返回实际安装的提交（ADR-0209） | `installFromGit :67` |
 | HTTP zip 包 | `http-installer.ts` | `bundleUrl`（+ `signatureUrl`、`expectedPublicKeyBase64`） | Tauri `plugin_wasm_install_from_url`；Ed25519 校验；记录 `trustedPublishers` | `installFromUrl :99`、`previewBundleManifest :89`、`isPublisherKeyTrusted :157` |
 | 本地目录 | `local/install-from-directory.ts` | 含 `plugin.json` 的绝对 `sourceDir` | Tauri `plugin_install_from_directory`；经 `preview_local_manifest` 预览 | `installPluginFromDirectory :45`、`previewLocalManifest :94` |
 | 本地（客户端适配器） | `local/local-directory-client.ts` | `sourceDir` | 将上述两者包成一个 `{ getPlugin, installPlugin }` 客户端 | `createLocalDirectoryClient :25` |
@@ -183,6 +183,10 @@ flowchart TD
   class UPD,BAK,APPLY,ROLL,RESTORE,ROT,RB lifecycle
   class CD,DR helper
 ```
+
+## 插件组合
+
+市场预设、齿轮组（可在其间切换的具名插件集合）和齿轮包（携带齿轮组并锁定版本的签名文件）见[齿轮组、齿轮包与安装来源](./cogsets-and-cogpacks)。上述每种安装来源都会把插件来源记录到 `pluginInstallOrigins`，这使齿轮包可以复现。
 
 ## 9. 注意事项
 

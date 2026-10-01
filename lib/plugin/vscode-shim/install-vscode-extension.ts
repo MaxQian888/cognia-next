@@ -34,6 +34,8 @@
  * manifests do not have, so its permission review was always empty.
  */
 
+import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
+import type { CogpackProvenance, PluginInstallOrigin } from "@/types/plugin/plugin-cogset"
 import { loggers } from "@cognia/logging"
 import { upsertPlugin } from "@/lib/db/plugins"
 import { canUseTauriInvoke } from "@/lib/native/utils"
@@ -109,7 +111,10 @@ export async function prepareVscodeExtension(
  * Browser mode skips the native unpack and records a `vsix://` placeholder
  * path, matching how the loader already degrades outside Tauri.
  */
-export async function commitVscodeExtension(prepared: PreparedVscodeExtension): Promise<PluginRow> {
+export async function commitVscodeExtension(
+  prepared: PreparedVscodeExtension,
+  provenance: { viaCogpack?: CogpackProvenance } = {}
+): Promise<PluginRow> {
   const { bytes, vsix, adapted, stagedPath } = prepared
   let installPath: string | null = null
 
@@ -140,7 +145,7 @@ export async function commitVscodeExtension(prepared: PreparedVscodeExtension): 
     }
   }
 
-  return upsertPlugin({
+  const row = await upsertPlugin({
     id: adapted.manifest.id,
     name: adapted.manifest.name,
     version: adapted.manifest.version,
@@ -153,6 +158,40 @@ export async function commitVscodeExtension(prepared: PreparedVscodeExtension): 
     enabled: false,
     capabilities: adapted.manifest.capabilities,
   })
+  await recordInstallOrigin({
+    pluginId: adapted.manifest.id,
+    version: adapted.manifest.version,
+    origin: vscodeInstallOrigin(adapted.manifest.vscodeExtension, vsix.sha256),
+    viaCogpack: provenance.viaCogpack,
+  })
+  return row
+}
+
+/**
+ * The origin of a committed extension (ADR-0209). An Open VSX install is pinned
+ * by namespace, name, version and the verified VSIX hash; the namespace is the
+ * `publisher` half of the `publisher.name` identifier. A dropped `.vsix` has
+ * nothing to fetch again, so it exports embedded.
+ */
+export function vscodeInstallOrigin(
+  block: VsCodeExtensionBlock | undefined,
+  sha256: string
+): PluginInstallOrigin {
+  if (block?.source === "openvsx") {
+    const [namespace, ...rest] = block.identifier.split(".")
+    const name = rest.join(".")
+    if (namespace && name) {
+      return {
+        kind: "openvsx",
+        namespace,
+        name,
+        version: block.version,
+        sha256,
+        ...(block.targetPlatform ? { targetPlatform: block.targetPlatform } : {}),
+      }
+    }
+  }
+  return { kind: "local", via: block?.source === "dev" ? "directory" : "vsix" }
 }
 
 /** Parse, adapt, unpack, and record in one call. */

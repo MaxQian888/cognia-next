@@ -138,8 +138,14 @@ const RESERVED_PLUGIN_IDS = new Set([".host-state", "_marketplace_cache", "_back
 const MAX_PLUGIN_ID_LENGTH = 128
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
 
-function isValidPluginId(id: string): boolean {
+/** The plugin id rule every manifest is held to; exported so packagers apply the same one. */
+export function isValidPluginId(id: string): boolean {
   return id.length <= MAX_PLUGIN_ID_LENGTH && ID_PATTERN.test(id) && !RESERVED_PLUGIN_IDS.has(id)
+}
+
+/** The manifest `version` rule, for code that validates plugin versions outside a manifest. */
+export function isValidPluginVersion(version: string): boolean {
+  return VERSION_PATTERN.test(version)
 }
 
 // Shared validators for the ADR-0026 lazy-factory manifest fields.

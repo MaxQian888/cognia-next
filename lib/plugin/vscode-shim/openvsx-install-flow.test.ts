@@ -308,6 +308,17 @@ describe("consent", () => {
     )
   })
 
+  it("passes cogpack provenance to every node it commits", async () => {
+    const viaCogpack = { cogpackId: "coder", version: "1.0.0", fingerprint: "f" }
+    const deps = stagingDeps(["b.dep", "a.root"], {}, { viaCogpack })
+    const client = createOpenVsxInstallClient(deps)
+    await approvingChain(client, "a.root").result
+    expect(deps.commit).toHaveBeenCalledTimes(2)
+    for (const call of deps.commit.mock.calls) {
+      expect(call[1]).toEqual({ viaCogpack })
+    }
+  })
+
   it("installs nothing when the user declines the one prompt", async () => {
     const deps = stagingDeps(["b.dep", "a.root"], { "b.dep": ["process:spawn"] })
     const client = createOpenVsxInstallClient(deps)

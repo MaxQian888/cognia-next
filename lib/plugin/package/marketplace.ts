@@ -15,6 +15,8 @@ import { isTauri } from "@/lib/native/utils"
 import { loggers } from "../core/logger"
 import { buildExtensionDescriptor } from "../core/descriptor"
 import { validatePluginManifest } from "../core/validation"
+import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
+import type { CogpackProvenance } from "@/types/plugin/plugin-cogset"
 import { compareVersions, satisfiesConstraint } from "./dependency-resolver"
 import { resolvePluginIcon } from "../utils/icon"
 import { getPluginSignatureVerifier } from "../security/signature"
@@ -828,13 +830,23 @@ export class PluginMarketplace {
     }
   }
 
+  /** The registry this client installs from; a cogpack pins against it (ADR-0209). */
+  getRegistryUrl(): string {
+    return this.config.registryUrl
+  }
+
   /**
    * Install a plugin from the marketplace
    */
   async installPlugin(
     pluginId: string,
     version?: string,
-    options: { installDependencies?: boolean; operation?: InstallOperation } = {}
+    options: {
+      installDependencies?: boolean
+      operation?: InstallOperation
+      /** Set when a cogpack import drives this install (ADR-0209). */
+      viaCogpack?: CogpackProvenance
+    } = {}
   ): Promise<PluginInstallResult> {
     const operation = options.operation || "install"
     try {
@@ -1038,6 +1050,21 @@ export class PluginMarketplace {
         path: pluginPath,
         pluginDirectory: pluginDir,
         installRootKind: "installed",
+      })
+
+      // ADR-0209: this path never writes the plugin row (the next discovery
+      // pass does), so the origin is the only record of which registry and
+      // version were installed.
+      await recordInstallOrigin({
+        pluginId,
+        version: targetVersion.version,
+        origin: {
+          kind: "registry",
+          registryUrl: this.config.registryUrl,
+          version: targetVersion.version,
+          ...(targetVersion.checksum ? { checksum: targetVersion.checksum } : {}),
+        },
+        viaCogpack: options.viaCogpack,
       })
 
       this.emitProgress({

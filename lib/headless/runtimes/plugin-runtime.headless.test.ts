@@ -34,6 +34,19 @@ jest.mock("@/lib/plugin/devtools/plugin-log-bridge", () => ({
   installPluginRuntimeLogBridge: () => mockInstallPluginRuntimeLogBridge(),
 }))
 
+const mockEnsureDefaultCogset = jest.fn(async () => true)
+const mockStopWriteThrough = jest.fn()
+const mockStopFollower = jest.fn()
+jest.mock("@/lib/plugin/cogset/bootstrap-default", () => ({
+  ensureDefaultCogsetOnHost: () => mockEnsureDefaultCogset(),
+}))
+jest.mock("@/lib/plugin/cogset/write-through", () => ({
+  startDefaultCogsetWriteThrough: async () => ({ stop: mockStopWriteThrough }),
+}))
+jest.mock("@/lib/plugin/cogset/follower", () => ({
+  startDefaultCogsetFollower: async () => ({ stop: mockStopFollower }),
+}))
+
 beforeAll(async () => {
   __resetHeadlessRuntimesForTesting()
   await import("./plugin-runtime")
@@ -145,5 +158,36 @@ describe("character-pack warning refresh", () => {
 
     await result.stop()
     expect(mockDisposePackWarnings).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("cogsets (ADR-0209)", () => {
+  it("starts cogsets with the runtime and stops them on teardown", async () => {
+    mockSubscribe.mockReturnValue(() => undefined)
+    const runtime = {
+      start: jest.fn(async () => undefined),
+      reconcile: jest.fn(async () => undefined),
+    }
+    const { ctx } = context(runtime)
+    const result = await bootstrapHeadlessRuntimes(ctx)
+    expect(result.started).toContain("plugin-runtime")
+    expect(mockEnsureDefaultCogset).toHaveBeenCalledTimes(1)
+    await result.stop()
+    expect(mockStopWriteThrough).toHaveBeenCalledTimes(1)
+    expect(mockStopFollower).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the plugin runtime up when cogsets fail to start", async () => {
+    mockSubscribe.mockReturnValue(() => undefined)
+    mockEnsureDefaultCogset.mockRejectedValueOnce(new Error("db locked"))
+    const runtime = {
+      start: jest.fn(async () => undefined),
+      reconcile: jest.fn(async () => undefined),
+    }
+    const { ctx, logs } = context(runtime)
+    const result = await bootstrapHeadlessRuntimes(ctx)
+    expect(result.started).toContain("plugin-runtime")
+    expect(logs).toContainEqual(["warn", "cogsets failed to start: db locked"])
+    await result.stop()
   })
 })

@@ -15,7 +15,7 @@ import {
   listWasmGrantRecords,
   replaceWasmGrantRecords,
 } from "@/lib/db/wasm-grant-ledger"
-import { getPermissionGuard } from "./permission-guard"
+import { getPermissionGuard, WASM_UNIMPLEMENTED_PERMISSIONS } from "./permission-guard"
 import type { PluginPermission } from "@/types/plugin"
 
 const wasmGrantLogger = loggers.manager.child
@@ -26,6 +26,25 @@ export interface WasmCapabilityGrantDecision {
   pluginId: string
   grantedPermissions: PluginPermission[]
   grantedPreopens: string[]
+}
+
+/**
+ * What the grant sheet pre-selects for `manifest`: every declared permission
+ * the WASM host actually implements, and every declared preopen. Also what a
+ * cogpack import grants after the user approved the combined review
+ * (ADR-0209), so both consents mean the same thing.
+ */
+export function defaultWasmGrantDecision(manifest: {
+  id: string
+  permissions?: PluginPermission[]
+  wasm?: { fs?: { preopens?: string[] } }
+}): WasmCapabilityGrantDecision {
+  const unimplemented = new Set<PluginPermission>(WASM_UNIMPLEMENTED_PERMISSIONS)
+  return {
+    pluginId: manifest.id,
+    grantedPermissions: (manifest.permissions ?? []).filter((p) => !unimplemented.has(p)).sort(),
+    grantedPreopens: [...(manifest.wasm?.fs?.preopens ?? [])].sort(),
+  }
 }
 
 export interface ApplyWasmGrantOptions {

@@ -30,6 +30,10 @@ jest.mock("@/lib/plugin/error-bus", () => ({
   dispatchPluginError: jest.fn(),
 }))
 
+jest.mock("@/lib/db/plugin-install-origins", () => ({
+  putInstallOrigin: jest.fn(async () => undefined),
+}))
+
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
@@ -46,6 +50,53 @@ beforeEach(() => {
 })
 
 describe("installPluginFromDirectory", () => {
+  it("records a local-directory origin with the version read from the source", async () => {
+    const { putInstallOrigin } = jest.requireMock("@/lib/db/plugin-install-origins")
+    putInstallOrigin.mockClear()
+    mockInvoke
+      .mockResolvedValueOnce({ pluginId: "demo-plugin", warnings: [] })
+      .mockResolvedValueOnce({ id: "demo-plugin", version: "2.1.0" })
+    await installPluginFromDirectory("C:/plugins/demo")
+    expect(mockInvoke).toHaveBeenLastCalledWith("preview_local_manifest", {
+      sourceDir: "C:/plugins/demo",
+    })
+    expect(putInstallOrigin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginId: "demo-plugin",
+        version: "2.1.0",
+        origin: { kind: "local", via: "directory" },
+      })
+    )
+  })
+
+  it("records the caller's origin, provenance and version, or the overlay's version", async () => {
+    const { putInstallOrigin } = jest.requireMock("@/lib/db/plugin-install-origins")
+    putInstallOrigin.mockClear()
+    mockInvoke.mockResolvedValueOnce({ pluginId: "embedded", warnings: [] })
+    await installPluginFromDirectory("/tmp/cogpack/plugins/embedded", {
+      origin: { kind: "local", via: "cogpack-embedded" },
+      viaCogpack: { cogpackId: "writer", version: "1.0.0", fingerprint: "f" },
+      version: "0.3.0",
+    })
+    expect(putInstallOrigin).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        pluginId: "embedded",
+        version: "0.3.0",
+        origin: { kind: "local", via: "cogpack-embedded" },
+        viaCogpack: { cogpackId: "writer", version: "1.0.0", fingerprint: "f" },
+      })
+    )
+
+    mockInvoke.mockResolvedValueOnce({ pluginId: "converted", warnings: [] })
+    await installPluginFromDirectory("/src/claude-bundle", {
+      generatedFiles: { "plugin.json": JSON.stringify({ id: "converted", version: "4.0.0" }) },
+    })
+    expect(putInstallOrigin).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pluginId: "converted", version: "4.0.0" })
+    )
+    expect(mockInvoke).not.toHaveBeenCalledWith("preview_local_manifest", expect.anything())
+  })
+
   it("calls plugin_install_from_directory and returns the receipt", async () => {
     mockInvoke.mockResolvedValueOnce({ pluginId: "demo-plugin", warnings: [] })
     const receipt: InstallFromDirectoryReceipt = await installPluginFromDirectory("C:/plugins/demo")

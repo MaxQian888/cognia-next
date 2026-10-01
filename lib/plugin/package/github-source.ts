@@ -182,7 +182,8 @@ function refQuery(ref?: string): string {
   return ref ? `?ref=${encodeURIComponent(ref)}` : ""
 }
 
-async function resolveGithubCommit(ref: GithubPluginRef): Promise<GithubPluginRef> {
+/** Resolve `ref.ref` (a branch, tag or HEAD) to the full commit it names right now. */
+export async function resolveGithubCommit(ref: GithubPluginRef): Promise<GithubPluginRef> {
   const requested = ref.ref ?? "HEAD"
   const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/commits/${encodeURIComponent(requested)}`
   const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })

@@ -44,6 +44,7 @@ pub mod marketplace;
 #[cfg(feature = "tauri-host")]
 pub mod notification;
 pub mod permissions;
+pub mod plugin_tree;
 pub mod process_ops;
 pub mod python;
 pub mod scan;

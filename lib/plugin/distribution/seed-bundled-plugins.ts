@@ -32,6 +32,7 @@
  */
 
 import { loggers } from "@cognia/logging"
+import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
 
 import stagedCatalog from "./bundled-plugins.generated.json"
 
@@ -62,7 +63,7 @@ export interface SeedBundledPluginsDeps {
   /** Absolute path of a directory inside the bundle's resource directory. */
   resolveResource: (relative: string) => Promise<string>
   /** `plugin_install_from_directory`, an atomic replace plus host registration. */
-  installFromDirectory: (sourceDir: string) => Promise<void>
+  installFromDirectory: (sourceDir: string, entry: StagedPluginEntry) => Promise<void>
   readMarker: () => Record<string, string>
   writeMarker: (next: Record<string, string>) => void
   /** Defaults to the generated catalog. Overridden only by tests. */
@@ -139,7 +140,7 @@ export async function seedBundledPlugins(deps: SeedBundledPluginsDeps): Promise<
     }
     try {
       const sourceDir = await deps.resolveResource(`${STAGED_PLUGIN_ROOT}/${directory}`)
-      await deps.installFromDirectory(sourceDir)
+      await deps.installFromDirectory(sourceDir, entry)
       // Recorded only after the install returns. A marker written first would
       // turn one failed copy into a plugin that never appears again.
       next[directory] = entry.version
@@ -167,8 +168,15 @@ export async function seedBundledPluginsOnHost(): Promise<SeedOutcome> {
   ])
   return seedBundledPlugins({
     resolveResource: (relative) => resolveResource(relative),
-    installFromDirectory: async (sourceDir) => {
+    installFromDirectory: async (sourceDir, entry) => {
       await invoke("plugin_install_from_directory", { sourceDir })
+      // Ships with the installer, so it exports as a reference, never as a
+      // copy of its files (ADR-0209).
+      await recordInstallOrigin({
+        pluginId: entry.id,
+        version: entry.version,
+        origin: { kind: "builtin" },
+      })
     },
     readMarker: () => readSeedMarker(),
     writeMarker: (nextMarker) => writeSeedMarker(nextMarker),

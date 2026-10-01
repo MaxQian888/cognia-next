@@ -33,6 +33,7 @@ jest.mock("@/lib/plugin/package/local-installer", () => ({
 }))
 
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
+  ...jest.requireActual("@/lib/plugin/security/wasm-grant"),
   applyWasmCapabilityGrant: async (decision: {
     grantedPermissions: string[]
     grantedPreopens: string[]

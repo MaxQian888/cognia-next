@@ -100,6 +100,13 @@ const MANUAL_ENABLE_ONLY_BUILTINS = new Set([
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
+import {
+  githubInstallOrigin,
+  isFullCommitSha,
+  recordInstallOrigin,
+} from "@/lib/plugin/origin/install-origin"
+import type { CogpackProvenance } from "@/types/plugin/plugin-cogset"
+import { emitPluginIntentChange } from "./plugin-intent-events"
 import { collectPluginRuntimeProfileDiagnostics } from "@/lib/plugin/core/runtime-compatibility"
 import {
   applyPluginTables,
@@ -1522,6 +1529,8 @@ export class PluginManager {
     } else if (intent === "enabled") {
       await this.enablePlugin(pluginId, reason)
     }
+    // After the transition, and only when it did not throw (ADR-0209).
+    emitPluginIntentChange({ pluginId, intent, reason })
   }
 
   async recoverPluginRuntime(pluginId: string): Promise<boolean> {
@@ -2673,6 +2682,13 @@ export class PluginManager {
     }
 
     await this.persistDiscoveredPluginRow(manifest, projection.source, dir)
+    if (!existing) {
+      await recordInstallOrigin({
+        pluginId: manifest.id,
+        version: manifest.version,
+        origin: { kind: "local", via: "disk" },
+      })
+    }
 
     this.registerPluginPermissions(manifest.id, manifest.permissions || [])
   }
@@ -2714,7 +2730,16 @@ export class PluginManager {
         installType: type,
         pluginDir: this.config.pluginDirectory,
       })
-      return await this.registerBackendInstall(result, type, txn)
+      const plugin = await this.registerBackendInstall(result, type, txn)
+      // This entry point takes an unpinned source string (a path, a clone URL
+      // or a registry id with no version), so it cannot claim a reproducible
+      // origin. Recording it as local makes it export embedded.
+      await recordInstallOrigin({
+        pluginId: result.manifest.id,
+        version: result.manifest.version,
+        origin: { kind: "local", via: type === "local" ? "directory" : "unpinned" },
+      })
+      return plugin
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
@@ -2843,8 +2868,19 @@ export class PluginManager {
     repo: string,
     gitRef?: string,
     subdir?: string,
-    generatedFiles: Record<string, string> = {}
+    generatedFiles: Record<string, string> = {},
+    provenance?: { viaCogpack?: CogpackProvenance }
   ): Promise<Plugin> {
+    // Pin before downloading (ADR-0209). The preview path already hands us a
+    // commit; any other caller's branch or tag is resolved here, so the origin
+    // recorded below names exactly what was installed.
+    if (!isFullCommitSha(gitRef)) {
+      const [owner, name] = repo.split("/")
+      if (!owner || !name) throw new Error(`Invalid GitHub repository: ${repo}`)
+      const { resolveGithubCommit } = await import("@/lib/plugin/package/github-source")
+      const pinned = await resolveGithubCommit({ owner, repo: name, ref: gitRef, subdir })
+      gitRef = pinned.ref
+    }
     const { plugin, result } = await this.installStagedBundle(
       () =>
         invoke<
@@ -2878,6 +2914,14 @@ export class PluginManager {
         }
       )
     }
+    const origin = githubInstallOrigin({ repo: result.repo, gitRef: result.gitRef, subdir })
+    await recordInstallOrigin({
+      pluginId: result.manifest.id,
+      version: result.manifest.version,
+      // The host echoes the ref it downloaded; it is the commit resolved above.
+      origin: origin ?? { kind: "local", via: "directory" },
+      viaCogpack: provenance?.viaCogpack,
+    })
     return plugin
   }
 
@@ -3012,13 +3056,19 @@ export class PluginManager {
       grantDecision
     )
     await recordInstalledPublisher(installed.result)
+    await recordInstallOrigin({
+      pluginId: installed.result.manifest.id,
+      version: installed.result.manifest.version,
+      origin: { kind: "local", via: "wasm-file" },
+    })
     return installed.plugin
   }
 
   /** Register signed URL installs with the canonical runtime/store pipeline. */
   async installWasmPluginFromUrl(
     args: HttpInstallArgs,
-    grantDecision?: WasmCapabilityGrantDecision
+    grantDecision?: WasmCapabilityGrantDecision,
+    provenance?: { viaCogpack?: CogpackProvenance }
   ): Promise<HttpInstallResult> {
     const installed = await this.installStagedBundle(
       () => installFromUrl({ ...args, deferCommit: true }),
@@ -3026,6 +3076,20 @@ export class PluginManager {
       grantDecision
     )
     await recordInstalledPublisher(installed.result)
+    await recordInstallOrigin({
+      pluginId: installed.result.manifest.id,
+      version: installed.result.manifest.version,
+      // Pinned by the bytes that were verified, not by the URL, which can
+      // start serving something else.
+      origin: {
+        kind: "url",
+        bundleUrl: args.bundleUrl,
+        sha256: installed.result.bundleSha256,
+        ...(args.signatureUrl ? { signatureUrl: args.signatureUrl } : {}),
+        ...(args.expectedPublicKeyBase64 ? { publicKey: args.expectedPublicKeyBase64 } : {}),
+      },
+      viaCogpack: provenance?.viaCogpack,
+    })
     return installed.result
   }
 

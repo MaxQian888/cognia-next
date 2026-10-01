@@ -51,23 +51,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Surface } from "@/components/surface/surface"
-import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
+import { getPlugin } from "@/lib/db/plugins"
+import { applyPluginConfig } from "@/lib/plugin/core/apply-plugin-config"
 import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
 import type { PluginRow } from "@/lib/db/plugin-types"
-
-/**
- * Best-effort config-change fan-out (JS onConfigChange hook + python host
- * push). Persisting via setPluginConfig stays the source of truth — a
- * missing/uninitialized manager (web mode, tests) must never fail the save.
- */
-async function notifyConfigChanged(pluginId: string, config: Record<string, unknown>) {
-  try {
-    const { getPluginManager } = await import("@/lib/plugin/core/manager")
-    await getPluginManager().notifyPluginConfigChanged(pluginId, config)
-  } catch {
-    // Manager not initialized — config still applies on next plugin load.
-  }
-}
 
 type FieldType =
   | "string"
@@ -557,8 +544,7 @@ function SchemaConfigBody({
     if (hasErrors) return
     setSaving(true)
     try {
-      await setPluginConfig(pluginId, values)
-      await notifyConfigChanged(pluginId, values)
+      await applyPluginConfig(pluginId, values)
       toast.success(t("saved", { name: displayName }))
       onClose()
     } catch (error) {
@@ -685,8 +671,7 @@ function CustomConfigBody({
   const handleSave = useCallback(
     async (next: Record<string, unknown>) => {
       try {
-        await setPluginConfig(pluginId, next)
-        await notifyConfigChanged(pluginId, next)
+        await applyPluginConfig(pluginId, next)
       } catch (error) {
         toast.error(t("saveFailed", { name: displayName }), {
           description: error instanceof Error ? error.message : String(error),

@@ -34,6 +34,7 @@ import {
   FileArchiveIcon,
   GitMergeIcon,
   ArrowRightLeftIcon,
+  PackageIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,6 +55,9 @@ import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
 import { useLoadUnpackedFlow } from "./dialogs/load-unpacked-button"
 import { PluginConversionDialog } from "./dialogs/plugin-conversion-dialog"
 import { CliStatusChip } from "./cli-status-chip"
+import { CogsetSwitcher } from "./cogsets/cogset-switcher"
+import { useCogpackImport } from "./cogpacks/use-cogpack-import"
+import { isMirroredPluginClient } from "@/lib/plugin/core/mirrored-client"
 
 const PluginVsixInstallDialog = dynamic(
   () => import("./dialogs/plugin-vsix-install-dialog").then((mod) => mod.PluginVsixInstallDialog),
@@ -89,6 +93,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
   const [signedUrlDialogOpen, setSignedUrlDialogOpen] = useState(false)
   const [vsixDialogOpen, setVsixDialogOpen] = useState(false)
   const [wasmGitDialogOpen, setWasmGitDialogOpen] = useState(false)
+  const cogpackImport = useCogpackImport()
   const wasmLocal = useInstallWasmFromLocal()
   const loadUnpacked = useLoadUnpackedFlow()
   const wasmAvailable = canUseTauriInvoke()
@@ -165,6 +170,16 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
             <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>
               <GlobeIcon className="size-3.5 mr-2" />
               {t("fromUrl")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("groupCogpack")}</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={cogpackImport.pick}
+              disabled={isMirroredPluginClient()}
+              data-testid="plugin-install-from-cogpack"
+            >
+              <PackageIcon className="size-3.5 mr-2" />
+              {t("fromCogpack")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="flex items-center justify-between gap-2">
@@ -244,6 +259,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
           <ArrowRightLeftIcon className="size-3.5 lg:mr-1.5" />
           <span className="hidden lg:inline">{t("convertPlugin")}</span>
         </Button>
+        <CogsetSwitcher />
         <Button size="sm" variant="outline" onClick={onCheckUpdates} aria-label={t("checkUpdates")}>
           <RefreshCcwIcon className="size-3.5 lg:mr-1.5" />
           <span className="hidden lg:inline">{t("checkUpdates")}</span>
@@ -297,6 +313,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
       {wasmAvailable && (
         <PluginWasmFromGitDialog open={wasmGitDialogOpen} onOpenChange={setWasmGitDialogOpen} />
       )}
+      {cogpackImport.element}
       {wasmLocal.sheet}
       {loadUnpacked.dialog}
     </>

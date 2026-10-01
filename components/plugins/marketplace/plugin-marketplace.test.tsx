@@ -47,6 +47,11 @@ jest.mock("@/hooks/plugins/use-github-marketplace-sources", () => ({
 // Preset bundles install through the shared sequential runner — mocked at the
 // lib seam so the suite asserts the component's wiring and toast branches, not
 // the runner's own mechanics (covered by preset-install.test.ts).
+const createCogsetFromPluginsMock = jest.fn(async (..._args: unknown[]) => ({ id: "cogset-1" }))
+jest.mock("@/lib/plugin/cogset/actions", () => ({
+  createCogsetFromPlugins: (...args: unknown[]) => createCogsetFromPluginsMock(...args),
+}))
+jest.mock("@/lib/plugin/core/mirrored-client", () => ({ isMirroredPluginClient: () => false }))
 const runPresetInstallMock = jest.fn()
 jest.mock("@/lib/plugin/marketplace/preset-install", () => ({
   runPresetInstall: (args: unknown) => runPresetInstallMock(args),
@@ -601,6 +606,37 @@ describe("PluginMarketplace", () => {
       expect(typeof args.install).toBe("function")
       expect(typeof args.onProgress).toBe("function")
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("presets.resultInstalled"))
+    })
+
+    it("offers to save the installed and already-present plugins as a cogset", async () => {
+      githubSourcePresets.push(preset("acme/repo:writer", ["p-one", "p-two"]))
+      runPresetInstallMock.mockResolvedValue(result({ installed: ["p-one"], skipped: ["p-two"] }))
+      render(<PluginMarketplace />)
+      act(() => usePluginsStore.getState().setDiscoverOrigin("workspace"))
+      fireEvent.click(await screen.findByTestId("preset-install-acme/repo:writer"))
+      await waitFor(() =>
+        expect(mockToast.message).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            action: expect.objectContaining({ label: "presets.saveAsCogset" }),
+          })
+        )
+      )
+      const call = mockToast.message.mock.calls.find(
+        (entry) =>
+          (entry[1] as { action?: { label: string } } | undefined)?.action?.label ===
+          "presets.saveAsCogset"
+      )!
+      ;(call[1] as { action: { onClick: () => void } }).action.onClick()
+      await waitFor(() =>
+        expect(createCogsetFromPluginsMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            pluginIds: ["p-one", "p-two"],
+            source: expect.objectContaining({ kind: "preset", presetId: "acme/repo:writer" }),
+          })
+        )
+      )
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("presets.savedAsCogset"))
     })
 
     it("toasts the cancelled, all-skipped, and failed result branches", async () => {

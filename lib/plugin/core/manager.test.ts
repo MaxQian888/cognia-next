@@ -144,6 +144,17 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginEnabled: jest.fn(async () => undefined),
 }))
 
+const PINNED_SHA = "0123456789abcdef0123456789abcdef01234567"
+jest.mock("@/lib/db/plugin-install-origins", () => ({
+  putInstallOrigin: jest.fn(async () => undefined),
+}))
+jest.mock("@/lib/plugin/package/github-source", () => ({
+  resolveGithubCommit: jest.fn(async (ref: { ref?: string }) => ({
+    ...ref,
+    ref: "0123456789abcdef0123456789abcdef01234567",
+  })),
+}))
+
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
   applyWasmCapabilityGrant: jest.fn(
     async (decision: { grantedPermissions?: string[]; grantedPreopens?: string[] }) => ({
@@ -436,7 +447,7 @@ describe("PluginManager", () => {
         readme: "# Demo",
         licenseText: "MIT",
         repo: "acme/gh",
-        gitRef: "main",
+        gitRef: PINNED_SHA,
         transactionId: "github-install-1",
       })
 
@@ -447,13 +458,30 @@ describe("PluginManager", () => {
       }
       const plugin = await manager.installPluginFromGithub("acme/gh", "main", "sub", generatedFiles)
 
+      // A branch is pinned to the commit it names before anything downloads.
+      expect(
+        jest.requireMock("@/lib/plugin/package/github-source").resolveGithubCommit
+      ).toHaveBeenCalledWith({
+        owner: "acme",
+        repo: "gh",
+        ref: "main",
+        subdir: "sub",
+      })
       expect(mockInvoke).toHaveBeenCalledWith("plugin_install_from_github", {
         repo: "acme/gh",
-        gitRef: "main",
+        gitRef: PINNED_SHA,
         subdir: "sub",
         generatedFiles,
         deferCommit: true,
       })
+      expect(
+        jest.requireMock("@/lib/db/plugin-install-origins").putInstallOrigin
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: "gh-plugin",
+          origin: { kind: "github", owner: "acme", repo: "gh", subdir: "sub", commit: PINNED_SHA },
+        })
+      )
       expect(store.discoverPlugin).toHaveBeenCalledWith(
         manifest,
         "git",
@@ -1390,16 +1418,20 @@ describe("PluginManager", () => {
       store.installPlugin.mockRejectedValueOnce(new Error("github registration failed"))
       mockInvoke.mockImplementation(async (command) => {
         if (command === "plugin_install_from_github")
-          return { ...result, repo: "acme/plugin", gitRef: "exact-sha" }
+          return { ...result, repo: "acme/plugin", gitRef: PINNED_SHA }
         return undefined
       })
-      await expect(manager.installPluginFromGithub("acme/plugin", "exact-sha")).rejects.toThrow(
+      await expect(manager.installPluginFromGithub("acme/plugin", PINNED_SHA)).rejects.toThrow(
         "github registration failed"
       )
       expect(mockInvoke).toHaveBeenCalledWith(
         "plugin_install_from_github",
-        expect.objectContaining({ deferCommit: true, gitRef: "exact-sha" })
+        expect.objectContaining({ deferCommit: true, gitRef: PINNED_SHA })
       )
+      // A failed install records no origin.
+      expect(
+        jest.requireMock("@/lib/db/plugin-install-origins").putInstallOrigin
+      ).not.toHaveBeenCalledWith(expect.objectContaining({ pluginId: manifest.id }))
       expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
         pluginId: manifest.id,
         transactionId: "wasm-txn-1",
@@ -7085,6 +7117,31 @@ describe("PluginManager", () => {
       })
       expect(resumeSpy).not.toHaveBeenCalled()
       resumeSpy.mockRestore()
+    })
+
+    it("announces a completed intent change with its reason, and nothing when it throws", async () => {
+      const { subscribePluginIntentChanges } = await import("./plugin-intent-events")
+      const store = {
+        plugins: { p: mkPlugin("p", "suspended", { activationEvents: ["onTool:*"] }) },
+        setPluginStatus: jest.fn((id: string, status: Plugin["status"]) => {
+          ;(store.plugins as Record<string, Plugin>)[id].status = status
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const seen: unknown[] = []
+      const off = subscribePluginIntentChanges((change) => seen.push(change))
+      try {
+        await manager.setPluginIntent("p", "disabled", "cogset")
+        expect(seen).toEqual([{ pluginId: "p", intent: "disabled", reason: "cogset" }])
+
+        const failing = jest.spyOn(manager, "enablePlugin").mockRejectedValueOnce(new Error("nope"))
+        await expect(manager.setPluginIntent("p", "enabled")).rejects.toThrow("nope")
+        expect(seen).toHaveLength(1)
+        failing.mockRestore()
+      } finally {
+        off()
+      }
     })
 
     it("does NOT lazy-activate a DISABLED plugin for an undeclared event", async () => {

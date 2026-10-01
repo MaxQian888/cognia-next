@@ -38,6 +38,9 @@ pub struct WasmInstallResult {
     pub transaction_id: Option<String>,
     pub author_public_key: Option<String>,
     pub author_fingerprint: Option<String>,
+    /// The exact commit a Git install checked out (ADR-0209). `None` for
+    /// bundle installs, which are pinned by `bundle_sha256` instead.
+    pub resolved_commit: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -514,6 +517,7 @@ fn install_downloaded_wasm_bundle(
         transaction_id,
         author_public_key: author_pk,
         author_fingerprint: author_fp,
+        resolved_commit: None,
     })
 }
 
@@ -625,39 +629,153 @@ pub async fn plugin_wasm_install_from_git(
     state: State<'_, PluginRuntimeState>,
     repo_url: String,
     branch: Option<String>,
+    commit: Option<String>,
 ) -> Result<WasmInstallResult, String> {
     let install_root = state.plugin_install_dir.clone();
     tokio::task::spawn_blocking(move || {
-        install_prebuilt_wasm_from_git(&install_root, &repo_url, branch.as_deref())
+        install_prebuilt_wasm_from_git(
+            &install_root,
+            &repo_url,
+            branch.as_deref(),
+            commit.as_deref(),
+        )
     })
     .await
     .map_err(|error| format!("WASM Git install task failed: {error}"))?
+}
+
+/// True for a full 40-hex SHA-1 commit id. An abbreviated id or a ref name is
+/// not a pin: it can name a different commit tomorrow.
+pub(crate) fn is_full_commit_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn run_git(args: &[&std::ffi::OsStr], context: &str) -> Result<std::process::Output, String> {
+    // Never prompt: a cogpack names the repository, and a private or missing
+    // HTTPS repo must fail instead of blocking this thread on a credential ask.
+    let output = Command::new("git")
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("{context} (is git installed?): {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{context} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(output)
+}
+
+/// Check the repository out into `staging` and return the commit it is at.
+///
+/// With `commit`, fetch exactly that commit (shallow) and refuse anything else:
+/// this is how a cogpack reinstalls the revision it pinned (ADR-0209). Without
+/// it, shallow-clone `branch` (or the default branch) as before and report the
+/// commit that produced, so the install can be pinned afterwards.
+pub(crate) fn checkout_git_source(
+    staging: &Path,
+    repo_url: &str,
+    branch: Option<&str>,
+    commit: Option<&str>,
+) -> Result<String, String> {
+    use std::ffi::OsStr;
+    let dir = staging.as_os_str();
+    if let Some(commit) = commit {
+        if !is_full_commit_sha(commit) {
+            return Err(format!(
+                "git commit must be a full 40-character SHA: {commit:?}"
+            ));
+        }
+        run_git(
+            &[OsStr::new("init"), OsStr::new("--quiet"), dir],
+            "git init",
+        )?;
+        run_git(
+            &[
+                OsStr::new("-C"),
+                dir,
+                OsStr::new("remote"),
+                OsStr::new("add"),
+                OsStr::new("origin"),
+                OsStr::new("--"),
+                OsStr::new(repo_url),
+            ],
+            "git remote add",
+        )?;
+        run_git(
+            &[
+                OsStr::new("-C"),
+                dir,
+                OsStr::new("fetch"),
+                OsStr::new("--depth=1"),
+                OsStr::new("origin"),
+                OsStr::new(commit),
+            ],
+            "git fetch",
+        )?;
+        run_git(
+            &[
+                OsStr::new("-C"),
+                dir,
+                OsStr::new("checkout"),
+                OsStr::new("--quiet"),
+                OsStr::new("--detach"),
+                OsStr::new("FETCH_HEAD"),
+            ],
+            "git checkout",
+        )?;
+    } else {
+        let mut args: Vec<&OsStr> = vec![OsStr::new("clone"), OsStr::new("--depth=1")];
+        if let Some(b) = branch {
+            args.push(OsStr::new("--branch"));
+            args.push(OsStr::new(b));
+        }
+        args.push(OsStr::new("--"));
+        args.push(OsStr::new(repo_url));
+        args.push(dir);
+        run_git(&args, "git clone")?;
+    }
+    let head = run_git(
+        &[
+            OsStr::new("-C"),
+            dir,
+            OsStr::new("rev-parse"),
+            OsStr::new("HEAD"),
+        ],
+        "git rev-parse",
+    )?;
+    let resolved = String::from_utf8_lossy(&head.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if !is_full_commit_sha(&resolved) {
+        return Err(format!(
+            "git rev-parse returned an invalid commit: {resolved:?}"
+        ));
+    }
+    if let Some(commit) = commit {
+        if !resolved.eq_ignore_ascii_case(commit) {
+            return Err(format!(
+                "git checked out {resolved} but the pinned commit is {commit}"
+            ));
+        }
+    }
+    Ok(resolved)
 }
 
 fn install_prebuilt_wasm_from_git(
     install_root: &Path,
     repo_url: &str,
     branch: Option<&str>,
+    commit: Option<&str>,
 ) -> Result<WasmInstallResult, String> {
     let staging = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
     let staging_path = staging.path().to_path_buf();
 
-    // Step 1 — shallow clone.
-    let mut git = Command::new("git");
-    git.arg("clone").arg("--depth=1");
-    if let Some(b) = branch {
-        git.arg("--branch").arg(b);
-    }
-    git.arg("--").arg(repo_url).arg(&staging_path);
-    let clone = git
-        .output()
-        .map_err(|e| format!("git clone (is git installed?): {e}"))?;
-    if !clone.status.success() {
-        return Err(format!(
-            "git clone failed: {}",
-            String::from_utf8_lossy(&clone.stderr)
-        ));
-    }
+    // Step 1 — check out the source, pinned when a commit is given.
+    let resolved_commit = checkout_git_source(&staging_path, repo_url, branch, commit)?;
 
     // Reject repository-authored symlinks before reading a manifest or running
     // a build. Build output directories are created only after this gate.
@@ -710,6 +828,7 @@ fn install_prebuilt_wasm_from_git(
         transaction_id: None,
         author_public_key: author_pk,
         author_fingerprint: author_fp,
+        resolved_commit: Some(resolved_commit),
     })
 }
 
@@ -773,6 +892,94 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use std::io::Write;
+
+    fn git_available() -> bool {
+        Command::new("git").arg("--version").output().is_ok()
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A local repository with two commits; returns (dir, first, second).
+    fn two_commit_repo() -> (tempfile::TempDir, String, String) {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "--quiet", "--initial-branch=main"]);
+        std::fs::write(repo.path().join("plugin.json"), "{\"v\":1}").unwrap();
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "--quiet", "-m", "one"]);
+        let first = git(repo.path(), &["rev-parse", "HEAD"]);
+        std::fs::write(repo.path().join("plugin.json"), "{\"v\":2}").unwrap();
+        git(repo.path(), &["commit", "--quiet", "-am", "two"]);
+        let second = git(repo.path(), &["rev-parse", "HEAD"]);
+        (repo, first, second)
+    }
+
+    #[test]
+    fn full_commit_sha_is_forty_hex_characters() {
+        assert!(is_full_commit_sha(&"a".repeat(40)));
+        assert!(is_full_commit_sha(
+            "0123456789ABCDEF0123456789abcdef01234567"
+        ));
+        assert!(!is_full_commit_sha(&"a".repeat(39)));
+        assert!(!is_full_commit_sha("main"));
+        assert!(!is_full_commit_sha(&"g".repeat(40)));
+    }
+
+    #[test]
+    fn unpinned_checkout_reports_the_commit_it_cloned() {
+        if !git_available() {
+            return;
+        }
+        let (repo, _first, second) = two_commit_repo();
+        let url = format!("file://{}", repo.path().display());
+        let staging = tempfile::tempdir().unwrap();
+        let resolved = checkout_git_source(staging.path(), &url, None, None).unwrap();
+        assert_eq!(resolved, second);
+    }
+
+    #[test]
+    fn pinned_checkout_fetches_exactly_the_commit() {
+        if !git_available() {
+            return;
+        }
+        let (repo, first, _second) = two_commit_repo();
+        git(
+            repo.path(),
+            &["config", "uploadpack.allowReachableSHA1InWant", "true"],
+        );
+        let url = format!("file://{}", repo.path().display());
+        let staging = tempfile::tempdir().unwrap();
+        let resolved = checkout_git_source(staging.path(), &url, None, Some(&first)).unwrap();
+        assert_eq!(resolved, first);
+        assert_eq!(
+            std::fs::read_to_string(staging.path().join("plugin.json")).unwrap(),
+            "{\"v\":1}"
+        );
+    }
+
+    #[test]
+    fn pinned_checkout_refuses_an_abbreviated_commit() {
+        let staging = tempfile::tempdir().unwrap();
+        let error = checkout_git_source(staging.path(), "file:///nowhere", None, Some("abc123"))
+            .unwrap_err();
+        assert!(error.contains("full 40-character SHA"), "{error}");
+    }
 
     fn make_test_zip(plugin_json: &str, wasm_bytes: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();

@@ -6,6 +6,14 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
+// The cogset switcher has its own suite; here it only needs to render.
+jest.mock("@/components/plugins/cogsets/cogset-switcher", () => ({
+  CogsetSwitcher: () => null,
+}))
+jest.mock("@/components/plugins/cogsets/always-on-menu-item", () => ({
+  AlwaysOnMenuItem: () => null,
+}))
+
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {

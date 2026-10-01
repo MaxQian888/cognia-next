@@ -30,6 +30,7 @@ import {
   DANGEROUS_PERMISSIONS,
   WASM_UNIMPLEMENTED_PERMISSIONS,
 } from "@/lib/plugin/security/permission-guard"
+import { defaultWasmGrantDecision } from "@/lib/plugin/security/wasm-grant"
 import { usePermissionDescription } from "@/hooks/plugins/use-permission-description"
 import { cn } from "@/lib/utils"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
@@ -135,10 +136,13 @@ export function WasmCapabilityGrantSheet({
   // Start with all "required" perms checked, all optional unchecked. Stubbed
   // (not-implemented) capabilities are never pre-granted — granting them would
   // imply a working capability that the WASM host actually refuses at runtime.
+  // `defaultWasmGrantDecision` is that rule, shared with cogpack imports.
   const [granted, setGranted] = useState<Set<PluginPermission>>(
-    () => new Set(declared.filter((p) => !UNIMPLEMENTED.has(p)))
+    () => new Set(defaultWasmGrantDecision(manifest).grantedPermissions)
   )
-  const [grantedPreopens, setGrantedPreopens] = useState<Set<string>>(() => new Set(preopens))
+  const [grantedPreopens, setGrantedPreopens] = useState<Set<string>>(
+    () => new Set(defaultWasmGrantDecision(manifest).grantedPreopens)
+  )
 
   const groupsDeclared = useMemo(() => groupPermissions(declared), [declared])
   const groupsOptional = useMemo(() => groupPermissions(optional), [optional])

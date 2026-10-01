@@ -17,6 +17,8 @@
 // `uninstallPluginForHost`): it used to call a registry method that never
 // existed, so every marketplace Uninstall click threw.
 
+import { createCogsetFromPlugins } from "@/lib/plugin/cogset/actions"
+import { isMirroredPluginClient } from "@/lib/plugin/core/mirrored-client"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -250,6 +252,29 @@ export function PluginMarketplace() {
           )
         } else {
           toast.success(t("presets.resultInstalled", { installed: installed.length, total }))
+        }
+        // The preset's plugins, installed now or already there, can become a
+        // cogset (ADR-0209). Offered, not done: a preset is a starting point.
+        const resolved = [...installed, ...result.skipped]
+        if (resolved.length > 0 && !isMirroredPluginClient()) {
+          toast.message(preset.name, {
+            action: {
+              label: t("presets.saveAsCogset"),
+              onClick: () =>
+                void createCogsetFromPlugins({
+                  name: preset.name,
+                  description: preset.description,
+                  pluginIds: resolved,
+                  source: { kind: "preset", presetId: preset.id, presetName: preset.name },
+                })
+                  .then(() => toast.success(t("presets.savedAsCogset", { name: preset.name })))
+                  .catch((error: unknown) =>
+                    toast.error(t("presets.saveAsCogsetFailed"), {
+                      description: error instanceof Error ? error.message : String(error),
+                    })
+                  ),
+            },
+          })
         }
       })
       .finally(() => setPresetRun(null))

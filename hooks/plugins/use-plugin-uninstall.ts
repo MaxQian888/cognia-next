@@ -22,8 +22,9 @@
  * # Where uninstall is refused, and why it says so
  *
  * - A mirrored client (paired phone, web companion) owns no plugin runtime and
- *   the host exposes no queued uninstall command (`plugin_set_enabled` is the
- *   only plugin write in `MOBILE_OUTBOUND_COMMANDS`). Deleting the mirror row
+ *   the host exposes no queued uninstall command (the plugin writes in
+ *   `MOBILE_OUTBOUND_COMMANDS` are `plugin_set_enabled`, `plugin_cogset_activate`
+ *   and `plugin_install_origin_record`; none removes a plugin). Deleting the mirror row
  *   would be undone by the next `sync_pull`, so the action is labelled "remove
  *   it on your desktop" instead of pretending.
  * - A built-in plugin ships inside the app bundle: removing its row and runtime

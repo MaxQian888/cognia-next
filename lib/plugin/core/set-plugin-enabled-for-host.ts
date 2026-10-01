@@ -39,8 +39,7 @@
 
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
-import { isCapacitor } from "@/lib/platform/detect"
-import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { isMirroredPluginClient } from "./mirrored-client"
 
 import { PLUGIN_ANALYTIC_KEYS, recordPluginAnalytic } from "@/lib/plugin/analytics/record"
 
@@ -55,14 +54,7 @@ export interface SetPluginEnabledResult extends TogglePluginResult {
   queued: boolean
 }
 
-/**
- * True when this runtime's `plugins` rows mirror some host's rather than being
- * the authority. Exported so surfaces can label the affordance honestly, since
- * a queued toggle is not the same promise as an applied one.
- */
-export function isMirroredPluginClient(): boolean {
-  return isCapacitor() || hasWebCompanionTarget()
-}
+export { isMirroredPluginClient } from "./mirrored-client"
 
 export async function setPluginEnabledForHost(
   pluginId: string,

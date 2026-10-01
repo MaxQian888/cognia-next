@@ -6,6 +6,7 @@
 import "fake-indexeddb/auto"
 
 import {
+  defaultWasmGrantDecision,
   WASM_GRANT_DRIFT_WARNING,
   applyWasmCapabilityGrant,
   clearWasmCapabilityGrant,
@@ -14,13 +15,45 @@ import {
 } from "./wasm-grant"
 import { listWasmGrantRecords } from "@/lib/db/wasm-grant-ledger"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { getPermissionGuard, resetPermissionGuard } from "./permission-guard"
+import {
+  getPermissionGuard,
+  resetPermissionGuard,
+  WASM_UNIMPLEMENTED_PERMISSIONS,
+} from "./permission-guard"
 
 beforeEach(async () => {
   resetPermissionGuard()
   if (typeof localStorage !== "undefined") localStorage.clear()
   await getDb().delete()
   __resetDbForTesting()
+})
+
+describe("defaultWasmGrantDecision", () => {
+  it("pre-grants implemented declared permissions and every declared preopen", () => {
+    const decision = defaultWasmGrantDecision({
+      id: "w",
+      permissions: ["network:fetch", "clipboard:read"],
+      wasm: { fs: { preopens: ["/b", "/a"] } },
+    })
+    expect(decision.pluginId).toBe("w")
+    expect(decision.grantedPreopens).toEqual(["/a", "/b"])
+    for (const permission of decision.grantedPermissions) {
+      expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain(permission)
+    }
+    expect(defaultWasmGrantDecision({ id: "empty" })).toEqual({
+      pluginId: "empty",
+      grantedPermissions: [],
+      grantedPreopens: [],
+    })
+  })
+
+  it("never pre-grants a capability the WASM host stubs", () => {
+    const stub = WASM_UNIMPLEMENTED_PERMISSIONS[0]
+    if (!stub) return
+    expect(defaultWasmGrantDecision({ id: "w", permissions: [stub] }).grantedPermissions).toEqual(
+      []
+    )
+  })
 })
 
 describe("applyWasmCapabilityGrant", () => {

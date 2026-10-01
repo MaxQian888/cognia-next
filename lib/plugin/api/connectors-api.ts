@@ -351,6 +351,8 @@ export interface PluginConnectorsAPI {
   editMessage(adapterId: string, messageId: string, patch: OutboundRequest): Promise<OutboundResult>
   /** Delete an already-sent message (when the platform supports it). */
   deleteMessage(adapterId: string, messageId: string): Promise<OutboundResult>
+  /** Delete a Lark recipient-only card sent with enqueueSend metadata.larkEphemeral. */
+  deleteEphemeralCard(adapterId: string, messageId: string): Promise<OutboundResult>
   /**
    * Add an emoji reaction to a message. The result carries the platform
    * `reactionId` (when surfaced) so it can later be removed via
@@ -626,6 +628,8 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     editMessage: (adapterId, messageId, patch) =>
       getBus().editOutbound(adapterId, messageId, patch),
     deleteMessage: (adapterId, messageId) => getBus().deleteOutbound(adapterId, messageId),
+    deleteEphemeralCard: (adapterId, messageId) =>
+      getBus().deleteEphemeralCard(adapterId, messageId),
     addReaction: (adapterId, messageId, emojiType) =>
       getBus().addReactionOutbound(adapterId, messageId, emojiType),
     removeReaction: (adapterId, messageId, reactionId) =>
@@ -739,6 +743,7 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
       sendText: "connectors:send",
       editMessage: "connectors:send",
       deleteMessage: "connectors:send",
+      deleteEphemeralCard: "connectors:send",
       addReaction: "connectors:send",
       removeReaction: "connectors:send",
       forwardMessage: "connectors:send",

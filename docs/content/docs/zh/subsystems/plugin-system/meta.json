@@ -10,6 +10,7 @@
     "security",
     "messaging-and-sandbox",
     "packaging-and-lifecycle",
+    "cogsets-and-cogpacks",
     "dexie-and-devtools",
     "vscode-and-lsp"
   ]

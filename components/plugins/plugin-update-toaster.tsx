@@ -46,8 +46,10 @@ export function PluginUpdateToaster() {
       if (lastRef.current?.key === key && now - lastRef.current.at < DEDUPE_WINDOW_MS) return
       lastRef.current = { key, at: now }
 
+      // A cogset pin is why an update was held rather than installed (ADR-0209).
+      const pinned = updates.filter((u) => u.pinnedByCogset).length
       toast.message(t("title", { count: updates.length }), {
-        description: t("description"),
+        description: pinned > 0 ? t("descriptionPinned", { count: pinned }) : t("description"),
         action: {
           label: t("review"),
           // Lands on the Library already narrowed to the rows that have one,

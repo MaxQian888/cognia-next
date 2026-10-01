@@ -38,6 +38,9 @@ jest.mock("../security/signature", () => ({
   getPluginSignatureVerifier: jest.fn(),
 }))
 
+jest.mock("@/lib/db/plugin-install-origins", () => ({
+  putInstallOrigin: jest.fn(async () => undefined),
+}))
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
 }))
@@ -461,6 +464,16 @@ describe("PluginMarketplace", () => {
         expect(verify).toHaveBeenCalledWith("/plugins/trusted-plugin")
         expect(result.success).toBe(true)
         expect(mockRecordSilentFailure).not.toHaveBeenCalled()
+        // ADR-0209: the registry and exact version are recorded as the origin.
+        expect(
+          jest.requireMock("@/lib/db/plugin-install-origins").putInstallOrigin
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            pluginId: "trusted-plugin",
+            version: "1.0.0",
+            origin: expect.objectContaining({ kind: "registry", version: "1.0.0" }),
+          })
+        )
       })
 
       it("(b) invalid signature + toggle on → install rejects with signature_invalid", async () => {

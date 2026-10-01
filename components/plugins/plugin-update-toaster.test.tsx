@@ -23,7 +23,9 @@ import { PLUGIN_UPDATES_AVAILABLE_EVENT } from "@/lib/plugin/lifecycle/updater"
 
 import { PluginUpdateToaster } from "./plugin-update-toaster"
 
-function fire(updates: Array<{ pluginId: string; latestVersion: string }>) {
+function fire(
+  updates: Array<{ pluginId: string; latestVersion: string; pinnedByCogset?: unknown }>
+) {
   act(() => {
     window.dispatchEvent(new CustomEvent(PLUGIN_UPDATES_AVAILABLE_EVENT, { detail: { updates } }))
   })
@@ -48,6 +50,19 @@ describe("PluginUpdateToaster", () => {
     ])
     expect(toastMessage).toHaveBeenCalledTimes(1)
     expect(toastMessage.mock.calls[0][0]).toContain('"count":2')
+  })
+
+  it("says how many were held because the active cogset pins them", () => {
+    render(<PluginUpdateToaster />)
+    fire([
+      {
+        pluginId: "a",
+        latestVersion: "2.0.0",
+        pinnedByCogset: { cogsetId: "c", cogsetName: "Writing", pinnedVersion: "1.0.0" },
+      },
+      { pluginId: "b", latestVersion: "1.1.0" },
+    ])
+    expect(toastMessage.mock.calls[0][1].description).toBe('descriptionPinned:{"count":1}')
   })
 
   it("says nothing for an empty announcement", () => {

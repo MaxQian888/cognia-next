@@ -71,7 +71,7 @@ if (conflict) {
 | HTTP registry | `marketplace.ts` | registry URL + `pluginId` | `proxyFetch(registryUrl/plugins)`; Rust `plugin_install` / `plugin_download_version` | `getPlugin :584`, `searchPluginsStrict :526`, `installPlugin :786` |
 | GitHub marketplace repo | `github-marketplace.ts` | owner/repo ref | GitHub contents API for `marketplace.json` (3 candidate paths `:12-16`), parses `plugins[]` | `fetchMarketplaceCatalog :59`, `fetchAllSourceEntries :110` |
 | GitHub source (per-plugin) | `github-source.ts` | `owner/repo[@ref][/sub]` or URL | `fetchGithubFile` via contents API (base64-decode `:130-142`); install via Rust `installPluginFromGithub` | `parseGithubPluginRef :63`, `fetchGithubPluginPreview :176`, `makeGithubMarketplaceClient :229` |
-| Git repo (WASM build) | `git-installer.ts` | `repoUrl` + branch | Tauri `plugin_wasm_install_from_git` — shallow clone + `cargo component build` | `installFromGit :67` |
+| Git repo (prebuilt WASM) | `git-installer.ts` | `repoUrl` + branch or exact commit | Tauri `plugin_wasm_install_from_git`: shallow clone of the branch, or a fetch of exactly the given commit; reports the commit it installed (ADR-0209) | `installFromGit :67` |
 | HTTP zip bundle | `http-installer.ts` | `bundleUrl` (+ `signatureUrl`, `expectedPublicKeyBase64`) | Tauri `plugin_wasm_install_from_url`; Ed25519 verify; records `trustedPublishers` | `installFromUrl :99`, `previewBundleManifest :89`, `isPublisherKeyTrusted :157` |
 | Local directory | `local/install-from-directory.ts` | absolute `sourceDir` with `plugin.json` | Tauri `plugin_install_from_directory`; preview via `preview_local_manifest` | `installPluginFromDirectory :45`, `previewLocalManifest :94` |
 | Local (client adapter) | `local/local-directory-client.ts` | `sourceDir` | wraps the two above into a `{ getPlugin, installPlugin }` client | `createLocalDirectoryClient :25` |
@@ -183,6 +183,10 @@ flowchart TD
   class UPD,BAK,APPLY,ROLL,RESTORE,ROT,RB lifecycle
   class CD,DR helper
 ```
+
+## Plugin sets
+
+Marketplace presets, cogsets (named plugin sets you switch between) and cogpacks (signed files that carry a cogset, pinned) are documented in [Cogsets, cogpacks & install origins](./cogsets-and-cogpacks). Every install source above records where the plugin came from in `pluginInstallOrigins`, which is what makes a cogpack reproducible.
 
 ## 9. Gotchas
 

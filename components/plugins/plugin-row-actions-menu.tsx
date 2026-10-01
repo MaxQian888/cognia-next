@@ -38,6 +38,7 @@ import {
 import { usePluginEnableGate } from "@/hooks/plugins/use-plugin-enable-gate"
 import { usePluginRollbackAvailable } from "@/hooks/plugins/use-plugin-rollback-availability"
 import { pluginUninstallBlockReason } from "@/hooks/plugins/use-plugin-uninstall"
+import { AlwaysOnMenuItem } from "./cogsets/always-on-menu-item"
 import { cn } from "@/lib/utils"
 
 export interface PluginRowActionsMenuProps {
@@ -109,6 +110,7 @@ export function PluginRowActionsMenu({
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
+        <AlwaysOnMenuItem pluginId={plugin.id} pluginName={displayName} />
         <DropdownMenuItem
           disabled={enableBlocked}
           onClick={() => onToggleEnabled(plugin)}

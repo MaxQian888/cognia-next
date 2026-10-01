@@ -28,6 +28,7 @@ jest.mock("@/lib/connectors/audit", () => ({
 // ── bus mock ──────────────────────────────────────────────────────────────────
 const sendOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m1" }))
 const editOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m2" }))
+const deleteEphemeralCard = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
 const deleteOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
 const addReactionOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, reactionId: "rx_1" }))
 const removeReactionOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
@@ -106,6 +107,7 @@ jest.mock("@/lib/connectors/bus", () => ({
     sendOutbound: (...a: unknown[]) => sendOutbound(...a),
     editOutbound: (...a: unknown[]) => editOutbound(...a),
     deleteOutbound: (...a: unknown[]) => deleteOutbound(...a),
+    deleteEphemeralCard: (...a: unknown[]) => deleteEphemeralCard(...a),
     addReactionOutbound: (...a: unknown[]) => addReactionOutbound(...a),
     removeReactionOutbound: (...a: unknown[]) => removeReactionOutbound(...a),
     forwardOutbound: (...a: unknown[]) => forwardOutbound(...a),
@@ -356,6 +358,7 @@ describe("createConnectorsAPI", () => {
       expect(() => api.send("tg", {} as never)).toThrow(PermissionError)
       expect(() => api.editMessage("tg", "m", {} as never)).toThrow(PermissionError)
       expect(() => api.deleteMessage("tg", "m")).toThrow(PermissionError)
+      expect(() => api.deleteEphemeralCard("tg", "m")).toThrow(PermissionError)
       expect(() => api.setTyping("tg", "k", true)).toThrow(PermissionError)
       expect(() => api.uploadFile("tg", { url: "u" })).toThrow(PermissionError)
       expect(() => api.streamReply("tg", {} as never)).toThrow(PermissionError)
@@ -530,6 +533,8 @@ describe("createConnectorsAPI", () => {
       })
       expect(editOutbound).toHaveBeenCalledWith("tg", "pm_1", patch)
       expect(await api.deleteMessage("tg", "pm_1")).toEqual({ ok: true })
+      expect(await api.deleteEphemeralCard("lk", "om_private")).toEqual({ ok: true })
+      expect(deleteEphemeralCard).toHaveBeenCalledWith("lk", "om_private")
       expect(deleteOutbound).toHaveBeenCalledWith("tg", "pm_1")
     })
 
@@ -797,6 +802,29 @@ describe("createConnectorsAPI", () => {
         nextAttemptAt: 100,
         idempotencyKey: "idem-9",
       })
+    })
+
+    it("preserves recipient-only intent through the governed enqueue API", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { platform: "lark", adapterId: "lk", channelId: "oc_group" },
+        segments: [
+          {
+            type: "card",
+            card: { kind: "lark", payload: { schema: "2.0", body: { elements: [] } } },
+          },
+        ],
+        metadata: {
+          idempotencyKey: "private-key",
+          larkEphemeral: { recipientOpenId: "ou_person" },
+        },
+      }
+      await api.enqueueSend("lk", "lark:lk:oc_group", req as never)
+      expect(hasNoLeakingPiiDeep).toHaveBeenCalledWith(req.segments)
+      expect(enqueueOutbound).toHaveBeenCalledWith(
+        expect.objectContaining({ request: req, source: "plugin" })
+      )
+      expect(sendOutbound).not.toHaveBeenCalled()
     })
 
     it("rejects leaking payloads before anything reaches the queue", async () => {

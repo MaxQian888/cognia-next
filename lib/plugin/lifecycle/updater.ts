@@ -57,6 +57,35 @@ export interface UpdateInfo {
   downloadSize?: number
   breaking?: boolean
   minAppVersion?: string
+  /**
+   * Set when the active cogset pins this plugin to another version (ADR-0209).
+   * Auto-update never installs such an update; it is offered to the user.
+   */
+  pinnedByCogset?: CogsetPin
+}
+
+/** A version the applied cogset expects for one plugin. */
+export interface CogsetPin {
+  cogsetId: string
+  cogsetName: string
+  pinnedVersion: string
+}
+
+/** Pins of the applied cogset, by plugin id. */
+export async function resolveAppliedCogsetPins(): Promise<Map<string, CogsetPin>> {
+  const { getCogset, getCogsetState } = await import("@/lib/db/plugin-cogsets")
+  const state = await getCogsetState()
+  const cogset = state.appliedCogsetId ? await getCogset(state.appliedCogsetId) : undefined
+  const pins = new Map<string, CogsetPin>()
+  for (const member of cogset?.members ?? []) {
+    if (!member.expectedVersion) continue
+    pins.set(member.pluginId, {
+      cogsetId: cogset!.id,
+      cogsetName: cogset!.name,
+      pinnedVersion: member.expectedVersion,
+    })
+  }
+  return pins
 }
 
 export interface UpdateResult {
@@ -182,6 +211,9 @@ async function mapWithConcurrency<T, R>(
  */
 export const PLUGIN_UPDATES_AVAILABLE_EVENT = "plugin:updates-available"
 
+/** Stands in for a pin when the pins could not be read. */
+const UNKNOWN_PIN: CogsetPin = { cogsetId: "", cogsetName: "", pinnedVersion: "" }
+
 export interface PluginUpdatesAvailableDetail {
   updates: UpdateInfo[]
 }
@@ -195,7 +227,13 @@ export class PluginUpdater {
   private checkInterval: ReturnType<typeof setInterval> | null = null
   private isChecking = false
 
-  constructor(config: Partial<UpdaterConfig> = {}) {
+  private resolveCogsetPins: () => Promise<Map<string, CogsetPin>>
+
+  constructor(
+    config: Partial<UpdaterConfig> = {},
+    deps: { resolveCogsetPins?: () => Promise<Map<string, CogsetPin>> } = {}
+  ) {
+    this.resolveCogsetPins = deps.resolveCogsetPins ?? resolveAppliedCogsetPins
     this.config = {
       autoCheck: false,
       checkIntervalMs: 3600000, // 1 hour
@@ -777,12 +815,28 @@ export class PluginUpdater {
   }
 
   private async runAutoUpdate(): Promise<void> {
+    await this.runAutoUpdateOnce()
+  }
+
+  /** One auto-update pass: what the interval runs. Public for tests. */
+  async runAutoUpdateOnce(): Promise<void> {
     if (!this.autoUpdateConfig) return
 
     const updates = await this.checkForUpdates()
-    const filteredUpdates = updates.filter(
-      (u) => !this.autoUpdateConfig!.excludePlugins.includes(u.pluginId)
-    )
+    let pins: Map<string, CogsetPin>
+    try {
+      pins = await this.resolveCogsetPins()
+    } catch {
+      // Without knowing the pins, installing could break one; hold everything
+      // for the user rather than guess.
+      pins = new Map(updates.map((u) => [u.pluginId, UNKNOWN_PIN]))
+    }
+    const filteredUpdates = updates
+      .filter((u) => !this.autoUpdateConfig!.excludePlugins.includes(u.pluginId))
+      .map((u) => {
+        const pin = pins.get(u.pluginId)
+        return pin && pin.pinnedVersion !== u.latestVersion ? { ...u, pinnedByCogset: pin } : u
+      })
 
     if (filteredUpdates.length === 0) return
 
@@ -800,10 +854,20 @@ export class PluginUpdater {
     }
 
     if (this.autoUpdateConfig.autoInstall) {
+      // A cogset pin is a request not to move this plugin (ADR-0209). Those
+      // updates are offered instead of installed.
+      const held = filteredUpdates.filter((u) => u.pinnedByCogset)
       for (const update of filteredUpdates) {
-        if (!update.breaking) {
+        if (!update.breaking && !update.pinnedByCogset) {
           await this.update(update.pluginId)
         }
+      }
+      if (held.length > 0) {
+        window.dispatchEvent(
+          new CustomEvent<PluginUpdatesAvailableDetail>(PLUGIN_UPDATES_AVAILABLE_EVENT, {
+            detail: { updates: held },
+          })
+        )
       }
     }
   }

@@ -11,7 +11,7 @@
  */
 
 import { usePluginStore } from "@/stores/plugin-runtime"
-import { setPluginConfig } from "@/lib/db/plugins"
+import { applyPluginConfig } from "@/lib/plugin/core/apply-plugin-config"
 import { validatePluginConfig } from "@/lib/plugin/core/validation"
 import { seedPluginConfigDefaults } from "@/lib/plugin/core/config-defaults"
 import { loggers } from "../core/logger"
@@ -26,8 +26,29 @@ interface ConfigManager {
 // manager calls from its single config-change fan-out point.
 const listeners = new Map<string, Set<(config: Record<string, unknown>) => void>>()
 
+// Host-side observers of every plugin's config (the cogset write-through,
+// ADR-0209). Separate from `listeners`, which are a plugin's own subscribers.
+const anyListeners = new Set<(pluginId: string, config: Record<string, unknown>) => void>()
+
+/** Observe config changes for every plugin. Returns the unsubscribe. */
+export function subscribeAnyPluginConfigChange(
+  listener: (pluginId: string, config: Record<string, unknown>) => void
+): () => void {
+  anyListeners.add(listener)
+  return () => {
+    anyListeners.delete(listener)
+  }
+}
+
 /** Notify `ctx.configuration.onChange` subscribers for a plugin. */
 export function emitPluginConfigChange(pluginId: string, config: Record<string, unknown>): void {
+  for (const listener of anyListeners) {
+    try {
+      listener(pluginId, config)
+    } catch (error) {
+      loggers.manager.warn(`[plugin:${pluginId}] host config observer threw (ignored):`, error)
+    }
+  }
   const set = listeners.get(pluginId)
   if (!set) return
   for (const cb of set) {
@@ -42,6 +63,7 @@ export function emitPluginConfigChange(pluginId: string, config: Record<string, 
 /** Test-only: clear all registered config listeners. */
 export function __resetConfigListenersForTesting(): void {
   listeners.clear()
+  anyListeners.clear()
 }
 
 export function createConfigAPI(pluginId: string, manager: ConfigManager): PluginConfigAPI {
@@ -77,9 +99,7 @@ export function createConfigAPI(pluginId: string, manager: ConfigManager): Plugi
           `Invalid config for "${key}": ${keyErrors.map((e) => e.message).join("; ")}`
         )
       }
-      await setPluginConfig(pluginId, merged)
-      usePluginStore.getState().setPluginConfig?.(pluginId, merged)
-      await manager.notifyPluginConfigChanged(pluginId, merged)
+      await applyPluginConfig(pluginId, merged, manager)
     },
 
     onChange: (listener: (config: Record<string, unknown>) => void): (() => void) => {

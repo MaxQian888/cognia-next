@@ -9,6 +9,7 @@
 
 import type { PluginRow } from "./plugin-types"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 /** Stable-prefix id generator matching the convention used by other CRUD modules. */
 function newId() {
@@ -248,5 +249,15 @@ export async function recordPluginUsage(id: string): Promise<void> {
 }
 
 export async function deletePlugin(id: string): Promise<void> {
-  await getDb().plugins.delete(id)
+  const db = getDb()
+  await db.transaction("rw", db.plugins, db.syncTombstones, db.pluginInstallOrigins, async () => {
+    await db.plugins.delete(id)
+    // The origin describes an install that no longer exists. A reinstall
+    // records its own; a stale one would export the old source (ADR-0209).
+    await db.pluginInstallOrigins.delete(id)
+    // Paired clients mirror `plugins` and learn about an uninstall only from
+    // this tombstone. A reinstall under the same id is safe: the Host sends
+    // the live row and never a tombstone for an id it is also sending.
+    await recordTombstones("plugins", [id])
+  })
 }

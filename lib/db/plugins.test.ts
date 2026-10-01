@@ -255,6 +255,27 @@ describe("plugins CRUD", () => {
     expect(await getPlugin("p1")).toBeUndefined()
   })
 
+  it("deletePlugin drops the install origin with the row", async () => {
+    await upsertPlugin(makeDraft())
+    await getDb().pluginInstallOrigins.put({
+      pluginId: "p1",
+      version: "1.0.0",
+      origin: { kind: "local", via: "directory" },
+      recordedAt: 1,
+    })
+    await deletePlugin("p1")
+    expect(await getDb().pluginInstallOrigins.get("p1")).toBeUndefined()
+  })
+
+  it("deletePlugin records a `plugins` sync tombstone for paired clients", async () => {
+    await upsertPlugin(makeDraft())
+    await deletePlugin("p1")
+    const tombstones = await getDb().syncTombstones.where("table").equals("plugins").toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({ table: "plugins", id: "p1", deletedAt: expect.any(Number) }),
+    ])
+  })
+
   it("listPlugins returns ordered by name", async () => {
     await upsertPlugin(makeDraft({ id: "c", name: "Charlie" }))
     await upsertPlugin(makeDraft({ id: "a", name: "Alpha" }))

@@ -46,6 +46,7 @@
  * (`partial_install_never_persisted`).
  */
 
+import type { CogpackProvenance } from "@/types/plugin/plugin-cogset"
 import { loggers } from "@cognia/logging"
 import { deletePlugin } from "@/lib/db/plugins"
 import { readBinaryFile, removeFile } from "@/lib/file/file-operations"
@@ -112,6 +113,8 @@ export interface OpenVsxInstallFlowDeps {
   uninstall?: (row: PluginRow) => Promise<void>
   allowPrerelease?: boolean
   requestedVersion?: string
+  /** Set when a cogpack import drives this install (ADR-0209). */
+  viaCogpack?: CogpackProvenance
 }
 
 // =============================================================================
@@ -314,7 +317,7 @@ export async function commitGraph(
     const created: PluginRow[] = []
     try {
       for (const item of graph.staged) {
-        created.push(await commit(item.prepared))
+        created.push(await commit(item.prepared, { viaCogpack: deps.viaCogpack }))
       }
       return created
     } catch (error) {

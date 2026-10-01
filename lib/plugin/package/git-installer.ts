@@ -11,12 +11,21 @@
 
 import type { PluginManifest } from "@/types/plugin"
 import { canUseTauriInvoke } from "@/lib/native/utils"
+import { isFullCommitSha, recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
+import type { CogpackProvenance } from "@/types/plugin/plugin-cogset"
 
 export interface GitInstallArgs {
   /** HTTPS / SSH URL of the repository. */
   repoUrl: string
-  /** Optional branch / tag / commit-ish to check out. */
+  /** Optional branch / tag to check out. Ignored when `commit` is set. */
   branch?: string
+  /**
+   * Exact 40-hex commit to install. The host fetches that commit and refuses
+   * anything else; this is how a cogpack reinstalls a pinned revision.
+   */
+  commit?: string
+  /** Set when a cogpack import drives this install (ADR-0209). */
+  viaCogpack?: CogpackProvenance
 }
 
 export interface GitInstallResult {
@@ -24,6 +33,8 @@ export interface GitInstallResult {
   path: string
   authorPublicKey?: string
   authorFingerprint?: string
+  /** The exact commit the host checked out. */
+  resolvedCommit?: string
 }
 
 export class GitToolchainMissingError extends Error {
@@ -79,14 +90,24 @@ export async function installFromGit(args: GitInstallArgs): Promise<GitInstallRe
       "plugin_wasm_install_from_git",
       {
         repoUrl: args.repoUrl,
-        branch: args.branch ?? null,
+        branch: args.commit ? null : (args.branch ?? null),
+        commit: args.commit ?? null,
       }
     )
+    await recordInstallOrigin({
+      pluginId: result.manifest.id,
+      version: result.manifest.version,
+      origin: isFullCommitSha(result.resolvedCommit)
+        ? { kind: "git", url: args.repoUrl, commit: result.resolvedCommit.toLowerCase() }
+        : { kind: "local", via: "unpinned" },
+      viaCogpack: args.viaCogpack,
+    })
     return {
       manifest: result.manifest,
       path: result.path,
       authorPublicKey: result.authorPublicKey,
       authorFingerprint: result.authorFingerprint,
+      ...(result.resolvedCommit ? { resolvedCommit: result.resolvedCommit } : {}),
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

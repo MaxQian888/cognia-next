@@ -4,6 +4,15 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+// The cogset switcher has its own suite; here it only needs to render.
+jest.mock("@/components/plugins/cogsets/cogset-switcher", () => ({
+  CogsetSwitcher: () => null,
+}))
+const cogpackPick = jest.fn()
+jest.mock("@/components/plugins/cogpacks/use-cogpack-import", () => ({
+  useCogpackImport: () => ({ pick: cogpackPick, element: null }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
@@ -193,6 +202,12 @@ describe("PluginPanelToolbar", () => {
     render(<PluginPanelToolbar onSyncRegistry={jest.fn()} syncing={true} />)
     const sync = screen.getAllByRole("button").find((b) => b.textContent?.includes("syncRegistry"))!
     expect(sync).toBeDisabled()
+  })
+
+  it("Cogpack menu item opens the cogpack picker", () => {
+    render(<PluginPanelToolbar />)
+    fireEvent.click(screen.getByTestId("plugin-install-from-cogpack"))
+    expect(cogpackPick).toHaveBeenCalled()
   })
 
   it("From URL menu item opens the URL dialog", async () => {

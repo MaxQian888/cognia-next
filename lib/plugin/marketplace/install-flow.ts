@@ -192,7 +192,7 @@ export type RunMarketplaceInstallResult =
  * Additional rules (signing required, incompatible dependency, etc.) can be
  * folded in here without changing the orchestrator.
  */
-async function detectConflicts(
+export async function detectConflicts(
   pluginId: string,
   candidateManifest: PluginManifest | null
 ): Promise<PreInstallConflict | null> {
@@ -242,7 +242,7 @@ async function detectConflicts(
   return reasons.length > 0 ? { pluginId, reasons } : null
 }
 
-function hasConfigSchema(manifest: PluginManifest): boolean {
+export function hasConfigSchema(manifest: PluginManifest): boolean {
   const schema = (manifest as { configSchema?: unknown }).configSchema
   if (!schema || typeof schema !== "object") return false
   const obj = schema as Record<string, unknown>
@@ -259,7 +259,7 @@ function hasConfigSchema(manifest: PluginManifest): boolean {
  * `detectBinary` is injected by the orchestrator (defaulting to the real
  * `detectCli`) so this stays unit-testable without spawning processes.
  */
-async function resolveMissingBinaries(
+export async function resolveMissingBinaries(
   manifest: PluginManifest,
   detectBinary: (name: string) => Promise<{ available: boolean; version: string | null }>
 ): Promise<PreInstallBinaryPayload["missing"]> {
@@ -278,7 +278,7 @@ async function resolveMissingBinaries(
 }
 
 /** Default binary probe — lazy-loads the real detector. */
-async function defaultDetectBinary(
+export async function defaultDetectBinary(
   name: string
 ): Promise<{ available: boolean; version: string | null }> {
   try {
@@ -300,7 +300,7 @@ async function defaultDetectBinary(
  * `checkInstalled` is injected (defaulting to `getPlugin`) so this stays
  * unit-testable without a live Dexie.
  */
-async function resolveDependencyIssues(
+export async function resolveDependencyIssues(
   pluginId: string,
   manifest: PluginManifest,
   checkInstalled: (id: string) => Promise<{ version: string } | null>

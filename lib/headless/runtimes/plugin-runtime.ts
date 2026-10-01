@@ -50,6 +50,31 @@ registerHeadlessRuntime({
       await import("@/lib/plugin/devtools/plugin-log-bridge")
     const disposePluginLogs = installPluginRuntimeLogBridge()
 
+    // Cogsets (ADR-0209). A headless host owns its plugin runtime, so it owns
+    // the cogset state too: a paired client's switch arrives here as
+    // `plugin_cogset_activate` and the follower applies it. Best effort — a
+    // cogset failure must not take the plugin runtime down with it.
+    const cogsetStops: Array<() => void> = []
+    try {
+      const [
+        { ensureDefaultCogsetOnHost },
+        { startDefaultCogsetWriteThrough },
+        { startDefaultCogsetFollower },
+      ] = await Promise.all([
+        import("@/lib/plugin/cogset/bootstrap-default"),
+        import("@/lib/plugin/cogset/write-through"),
+        import("@/lib/plugin/cogset/follower"),
+      ])
+      await ensureDefaultCogsetOnHost()
+      cogsetStops.push((await startDefaultCogsetWriteThrough()).stop)
+      cogsetStops.push((await startDefaultCogsetFollower()).stop)
+    } catch (error) {
+      ctx.log(
+        "warn",
+        `cogsets failed to start: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+
     let pending = Promise.resolve()
     const unsubscribe = transport.subscribe<unknown>("plugin://runtime-changed", (payload) => {
       const change = parsePluginChange(payload)
@@ -72,6 +97,7 @@ registerHeadlessRuntime({
 
     return async () => {
       unsubscribe()
+      for (const stop of cogsetStops.splice(0)) stop()
       disposePackWarnings()
       disposePluginLogs()
       await pending
