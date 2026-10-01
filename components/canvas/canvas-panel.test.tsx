@@ -17,6 +17,7 @@ import {
 import { CanvasPanel } from "./canvas-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
+import { flushPendingCanvasEdits } from "@/lib/canvas/pending-edits"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 
@@ -183,6 +184,19 @@ jest.mock("@/components/editor/light-code-editor", () => ({
   ),
 }))
 
+// Inactive unless a test binds it: the collaboration path is exercised in
+// its own suites, and the panel only needs to know whether a binding is live.
+const mockCollaborative = {
+  current: {
+    active: false,
+    bindMonaco: async () => null,
+    codeMirrorExtensions: [] as unknown[],
+  },
+}
+jest.mock("@/hooks/canvas/use-canvas-collaborative-editor", () => ({
+  useCanvasCollaborativeEditor: () => mockCollaborative.current,
+}))
+
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
 }
@@ -200,6 +214,7 @@ describe("CanvasPanel", () => {
   beforeEach(() => {
     window.localStorage.clear()
     mobileRef.current = false
+    mockCollaborative.current = { ...mockCollaborative.current, active: false }
     mockActionsState.running = false
     mockActionsState.error = null
     mockActionsState.runResult = ""
@@ -296,6 +311,79 @@ describe("CanvasPanel", () => {
       })
       expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
         "hello world"
+      )
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("hands its waiting keystrokes to a reader that asks for them", () => {
+    // Joining a collaboration session reads the store to decide what the
+    // document says. Reading it a debounce behind the buffer would drop the
+    // last keystrokes from both the shared text and the saved local copy.
+    mobileRef.current = true
+    let id = ""
+    act(() => {
+      id = useArtifactStore.getState().createCanvasDocument({
+        title: "Flush",
+        content: "hello",
+        language: "markdown",
+        type: "text",
+      })
+      useArtifactStore.getState().setActiveCanvas(id)
+    })
+    renderWithProviders(<CanvasPanel />)
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        fireEvent.change(screen.getByTestId("light-code-editor"), {
+          target: { value: "hello there" },
+        })
+      })
+      act(() => {
+        flushPendingCanvasEdits(id)
+      })
+      expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
+        "hello there"
+      )
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("drops a waiting batch when a collaborative binding goes live", () => {
+    // The batch belongs to the text the shared document just replaced.
+    // Landing it after the bind would put the pre-join buffer back.
+    mobileRef.current = true
+    let id = ""
+    act(() => {
+      id = useArtifactStore.getState().createCanvasDocument({
+        title: "Bind",
+        content: "hello",
+        language: "markdown",
+        type: "text",
+      })
+      useArtifactStore.getState().setActiveCanvas(id)
+    })
+    const { rerender } = renderWithProviders(<CanvasPanel />)
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        fireEvent.change(screen.getByTestId("light-code-editor"), {
+          target: { value: "pre-join typing" },
+        })
+      })
+      mockCollaborative.current = { ...mockCollaborative.current, active: true }
+      rerender(
+        <TooltipProvider>
+          <CanvasPanel />
+        </TooltipProvider>
+      )
+      act(() => {
+        jest.advanceTimersByTime(CANVAS_EDIT_COMMIT_DEBOUNCE_MS * 4)
+      })
+      expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
+        "hello"
       )
     } finally {
       jest.useRealTimers()

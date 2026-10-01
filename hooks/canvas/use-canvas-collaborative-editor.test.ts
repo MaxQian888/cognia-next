@@ -12,13 +12,24 @@ import { CANVAS_PRESENCE_STYLE_ID } from "@/lib/canvas/collaboration/editor-bind
 
 jest.mock("y-monaco", () => ({ MonacoBinding: jest.fn() }))
 jest.mock("y-codemirror.next", () => ({ yCollab: jest.fn(() => "collab") }))
-jest.mock("y-protocols/awareness", () => ({
-  Awareness: jest.fn().mockImplementation(() => ({
+/**
+ * The session's awareness, which the store owns. The hook must read this one
+ * rather than construct its own: a private instance is a client the socket
+ * never carries, which is why no peer used to see anybody else's cursor.
+ */
+function fakeAwareness() {
+  let state: Record<string, unknown> | null = {}
+  return {
     outdatedTimeout: 30_000,
+    getLocalState: () => state,
     setLocalStateField: jest.fn(),
+    setLocalState: jest.fn((next: Record<string, unknown> | null) => {
+      state = next
+    }),
     destroy: jest.fn(),
-  })),
-}))
+  }
+}
+let awareness = fakeAwareness()
 
 /** A minimal `Y.Text` stand-in: enough to observe and to read back. */
 function fakeText(initial: string) {
@@ -50,6 +61,7 @@ jest.mock("@/lib/canvas/collaboration/crdt-store", () => ({
     sessionIdForDocument: () => sessionId,
     getYDoc: () => ({ id: "doc" }),
     getYText: () => text,
+    getAwareness: () => awareness,
     getSession: () => ({ id: "session-1", participants }),
     getLocalParticipantId: () => "p-self",
   },
@@ -83,6 +95,7 @@ beforeEach(() => {
   jest.useFakeTimers()
   sessionId = "session-1"
   text = fakeText("hello")
+  awareness = fakeAwareness()
   canvasDocuments["doc-1"] = { content: "hello" }
   collaboration.enabled = true
   collaboration.showCursors = true
@@ -242,18 +255,47 @@ describe("presence timeout", () => {
     collaboration.presenceTimeout = 12_000
     const { result } = render()
     await waitFor(() => expect(result.current.active).toBe(true))
-    const { Awareness } = jest.requireMock("y-protocols/awareness") as { Awareness: jest.Mock }
-    const instance = Awareness.mock.results[0].value as { outdatedTimeout: number }
-    expect(instance.outdatedTimeout).toBe(12_000)
+    expect(awareness.outdatedTimeout).toBe(12_000)
   })
 
   it("clamps a cutoff that would evict everybody immediately", async () => {
     collaboration.presenceTimeout = 0
     const { result } = render()
     await waitFor(() => expect(result.current.active).toBe(true))
-    const { Awareness } = jest.requireMock("y-protocols/awareness") as { Awareness: jest.Mock }
-    const instance = Awareness.mock.results[0].value as { outdatedTimeout: number }
-    expect(instance.outdatedTimeout).toBeGreaterThanOrEqual(5_000)
+    expect(awareness.outdatedTimeout).toBeGreaterThanOrEqual(5_000)
+  })
+})
+
+describe("the session's awareness", () => {
+  it("publishes who this peer is on the awareness the socket carries", async () => {
+    const { result } = render()
+    await waitFor(() => expect(result.current.active).toBe(true))
+    expect(awareness.setLocalStateField).toHaveBeenCalledWith(
+      "user",
+      expect.objectContaining({ name: "Ada", participantId: "p-self" })
+    )
+  })
+
+  it("re-arms an awareness a previous editor cleared, so it can publish again", async () => {
+    // While the local state is null every setLocalStateField call is a no-op,
+    // so returning to a document would never show this caret again.
+    awareness.setLocalState(null)
+    awareness.setLocalState.mockClear()
+    const { result } = render()
+    await waitFor(() => expect(result.current.active).toBe(true))
+    expect(awareness.setLocalState).toHaveBeenCalledWith({})
+  })
+
+  it("clears this editor's state on the way out but leaves the awareness alive", async () => {
+    // Destroying it here would kill the instance the store still announces;
+    // clearing the local state is what tells peers this caret is gone.
+    const { result, unmount } = render()
+    await waitFor(() => expect(result.current.active).toBe(true))
+    act(() => {
+      unmount()
+    })
+    expect(awareness.setLocalState).toHaveBeenCalledWith(null)
+    expect(awareness.destroy).not.toHaveBeenCalled()
   })
 })
 

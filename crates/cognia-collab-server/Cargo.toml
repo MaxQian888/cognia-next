@@ -51,6 +51,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
+tokio-tungstenite = { workspace = true, features = ["connect"] }
 tower = { workspace = true, features = ["util"] }
 
 [lints]

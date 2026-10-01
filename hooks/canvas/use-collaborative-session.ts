@@ -18,12 +18,15 @@ import {
   type ConnectionState,
 } from "@/lib/canvas/collaboration/websocket-provider"
 import {
+  catchUpCanvasDocument,
+  hydrateCanvasSession,
   publishCanvasDocument,
   resolveCanvasShareTarget,
   resolveCanvasTransport,
   type CanvasTransportBinding,
 } from "@/lib/canvas/collaboration/canvas-transport"
 import { loggers } from "@cognia/logging"
+import { flushPendingCanvasEdits } from "@/lib/canvas/pending-edits"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { CanvasShareTarget } from "@/lib/canvas/collaboration/share-link"
 
@@ -96,6 +99,12 @@ export interface CollaborativeSessionConfig {
   resolveTransport?: (documentId: string) => Promise<CanvasTransportBinding | null>
   onStateChange?: (state: CanvasCollaborationRuntimeState) => void
   onRemoteContentChange?: (content: string) => void
+  /**
+   * The version-history label for this device's copy of a document when the
+   * plane's copy differs from it and replaces it in the editor. Translated by
+   * the caller, since this hook renders nothing.
+   */
+  localCopyVersionLabel?: string
 }
 
 const DEFAULT_CONFIG: CollaborativeSessionConfig = {
@@ -114,6 +123,7 @@ export function useCollaborativeSession(
   const resolveTransport = config.resolveTransport ?? resolveCanvasTransport
   const onStateChange = config.onStateChange
   const onRemoteContentChange = config.onRemoteContentChange
+  const localCopyVersionLabel = config.localCopyVersionLabel
 
   const [session, setSession] = useState<CollaborativeSession | null>(null)
   const [participants, setParticipants] = useState<Participant[]>([])
@@ -133,7 +143,10 @@ export function useCollaborativeSession(
     return participantIdRef.current
   }, [])
   const sessionIdRef = useRef<string | null>(null)
-  /** Detaches the document update bus, so a closed session stops broadcasting. */
+  /**
+   * Detaches the document and awareness update buses, so a closed session
+   * stops broadcasting.
+   */
   const localUpdateUnsubscribeRef = useRef<(() => void) | null>(null)
 
   const createLocalParticipant = useCallback(
@@ -243,20 +256,108 @@ export function useCollaborativeSession(
   )
 
   /**
-   * Bring one session onto the plane, when there is a plane to bring it onto.
+   * The document's text as this device has it right now: the artifact store,
+   * after the editor's debounced keystrokes have been committed to it.
+   */
+  const readLocalContent = useCallback((documentId: string, fallback: string): string => {
+    flushPendingCanvasEdits(documentId)
+    return useArtifactStore.getState().canvasDocuments[documentId]?.content ?? fallback
+  }, [])
+
+  /**
+   * Keep a session on this device only: insert the content here and let the
+   * editor bind. What `connect` does when there is no plane to reach, or no
+   * write access to publish the document onto it.
    *
-   * Both entry points used to carry their own copy of this, differing only in
-   * whether they called `requestSync` afterwards. They now differ in exactly
-   * that, and nothing else.
+   * The content is read now, not taken from when `connect` was called: the
+   * plane was asked first, and whatever was typed while it answered is part
+   * of the document.
+   */
+  const settleLocally = useCallback(
+    (sessionId: string, documentId: string, fallback: string) => {
+      storeRef.current.seedLocally(sessionId, readLocalContent(documentId, fallback))
+      storeRef.current.markSessionReady(sessionId)
+    },
+    [readLocalContent]
+  )
+
+  /**
+   * Hand the editor the plane's copy of the document, without losing this
+   * device's.
+   *
+   * The local text is read now rather than when the session opened, so text
+   * typed while connecting is compared too. When it differs from what the
+   * plane holds and is not empty, it is kept as a version before the plane's
+   * text replaces it: the plane is the shared truth, and a copy edited on this
+   * device alone has no claim to overwrite what other people wrote, but it is
+   * still somebody's work.
+   *
+   * `false`, touching nothing, when the session no longer has a document. An
+   * empty string is not a stand-in for "no document": treating it as one is
+   * how ending a session mid-join used to blank the local copy.
+   */
+  const adoptPlaneContent = useCallback(
+    (sessionId: string, documentId: string): boolean => {
+      const shared = storeRef.current.getDocumentContent(sessionId)
+      if (shared === null) return false
+      const local = readLocalContent(documentId, "")
+      if (local !== shared) {
+        const artifacts = useArtifactStore.getState()
+        if (local.length > 0) artifacts.saveCanvasVersion(documentId, localCopyVersionLabel)
+        artifacts.updateCanvasDocument(documentId, { content: shared, updatedAt: new Date() })
+      }
+      storeRef.current.markSessionReady(sessionId)
+      return true
+    },
+    [localCopyVersionLabel, readLocalContent]
+  )
+
+  /**
+   * Bring a pending session onto the plane, or keep it on this device when
+   * there is no plane to bring it onto.
+   *
+   * The order matters, and each step is there because the old order lost
+   * something:
+   *
+   * 1. The update and awareness buses are subscribed before anything else, so
+   *    nothing this device does while the socket comes up goes unsent. The
+   *    provider queues edits until it is connected.
+   * 2. The socket opens before the catch-up, so an update written while the
+   *    catch-up is in flight arrives live instead of falling in the gap
+   *    between the two.
+   * 3. The document is hydrated from the plane, and only seeded from this
+   *    device when the plane holds nothing (`hydrateCanvasSession`).
+   * 4. Only then does the editor see the session. Binding earlier would show
+   *    an empty buffer and project it over the stored document.
+   *
+   * Every await is followed by asking whether the session is still the one
+   * this hook holds. The panel offers "End session" as soon as the session
+   * exists, and closing the tab unmounts it, so the user can end the session
+   * at any point in here. Carrying on after that published a seed nobody
+   * asked for, wrote an empty document over the local one, and left a socket
+   * open that nothing would ever close.
    */
   const attachTransport = useCallback(
     async (
       sessionId: string,
       documentId: string,
       participant: Participant,
-      options: { sync: boolean }
+      content: string
     ): Promise<void> => {
-      if (providerRef.current) return
+      const store = storeRef.current
+      const stillCurrent = () =>
+        sessionIdRef.current === sessionId && store.getSession(sessionId) !== undefined
+
+      // A document whose text was inserted on this device cannot join the
+      // plane: its Yjs items exist nowhere else, and merging them with the
+      // plane's state would put the text in twice. It stays local. So does a
+      // session opened while this hook already has a live provider, which
+      // belongs to another session.
+      if (providerRef.current || store.isSeededLocally(sessionId)) {
+        settleLocally(sessionId, documentId, content)
+        return
+      }
+
       let binding: CanvasTransportBinding | null = null
       try {
         binding = await resolveTransport(documentId)
@@ -264,11 +365,27 @@ export function useCollaborativeSession(
         // A plane that is configured but unreachable is not a reason to lose
         // the local document.
         log.warn("canvas transport unavailable", { error: String(error) })
+      }
+      if (!stillCurrent()) return
+      if (!binding) {
+        settleLocally(sessionId, documentId, content)
         return
       }
-      if (!binding) return
 
       const document = useArtifactStore.getState().getCanvasDocumentForWorkspace(documentId)
+      let provider: CanvasWebSocketProvider | null = null
+      let unsubscribe: (() => void) | null = null
+      // Tear down what this call built, and only that: by the time it runs,
+      // `disconnect` may already have cleared the refs, or a later `connect`
+      // may have filled them with its own.
+      const abandon = () => {
+        unsubscribe?.()
+        if (localUpdateUnsubscribeRef.current === unsubscribe) {
+          localUpdateUnsubscribeRef.current = null
+        }
+        provider?.disconnect()
+        if (providerRef.current === provider) providerRef.current = null
+      }
       try {
         // The socket needs a row to attach to, and a document created locally
         // has none until somebody with write access publishes it.
@@ -276,40 +393,85 @@ export function useCollaborativeSession(
           title: document?.title ?? "Untitled",
           language: document?.language ?? "markdown",
         })
-        if (!published) return
+        if (!stillCurrent()) return
+        if (!published) {
+          settleLocally(sessionId, documentId, content)
+          return
+        }
 
-        const provider = new CanvasWebSocketProvider(storeRef.current, {
-          openSocket: binding.openSocket,
+        const activeBinding = binding
+        provider = new CanvasWebSocketProvider(store, {
+          openSocket: activeBinding.openSocket,
+          catchUp: async (since) =>
+            (await catchUpCanvasDocument(activeBinding, store, sessionId, since)).latestSequence,
           reconnectAttempts,
         })
         providerRef.current = provider
         attachProviderEvents(provider, handleCollaborationEvent)
 
+        const live = provider
+        const unsubscribeUpdates = store.onLocalUpdate(sessionId, (operation) =>
+          live.broadcastOperation(operation)
+        )
+        const unsubscribeAwareness = store.onLocalAwarenessUpdate(sessionId, (update) =>
+          live.broadcastAwareness(update)
+        )
+        unsubscribe = () => {
+          unsubscribeUpdates()
+          unsubscribeAwareness()
+        }
+        localUpdateUnsubscribeRef.current?.()
+        localUpdateUnsubscribeRef.current = unsubscribe
+
         setConnectionState("connecting")
         await provider.connect(sessionId, participant)
-        // One subscription per session, covering every way this device can
-        // change the document. Before this the CRDT could receive and never
-        // send: the only producer of an operation was `updateContent`, and
-        // nothing called it.
-        localUpdateUnsubscribeRef.current?.()
-        localUpdateUnsubscribeRef.current = storeRef.current.onLocalUpdate(sessionId, (operation) =>
-          provider.broadcastOperation(operation)
+        if (!stillCurrent()) {
+          abandon()
+          return
+        }
+        const hydration = await hydrateCanvasSession(activeBinding, store, sessionId, () =>
+          readLocalContent(documentId, content)
         )
-        if (options.sync) provider.requestSync()
+        if (!stillCurrent()) {
+          abandon()
+          return
+        }
+        provider.noteCaughtUpTo(hydration.latestSequence)
+        if (!adoptPlaneContent(sessionId, documentId)) abandon()
       } catch (error) {
+        abandon()
+        // A session the user already ended is not a failure to report.
+        if (!stillCurrent()) return
         log.error("Failed to open the Canvas transport", error as Error)
-        providerRef.current = null
+        // Nothing half-joined is left behind: the session never became
+        // visible to the editor, so closing it leaves the local document
+        // exactly as it was.
+        store.closeSession(sessionId)
+        sessionIdRef.current = null
+        setSession(null)
+        setParticipants([])
+        setLocalParticipant(null)
         setConnectionState("error")
       }
     },
-    [handleCollaborationEvent, reconnectAttempts, resolveTransport]
+    [
+      adoptPlaneContent,
+      handleCollaborationEvent,
+      readLocalContent,
+      reconnectAttempts,
+      resolveTransport,
+      settleLocally,
+    ]
   )
 
   const connect = useCallback(
     async (documentId: string, content: string): Promise<string> => {
       const store = storeRef.current
 
-      const newSession = store.createSession(documentId, content)
+      // Pending: the document starts empty and stays hidden from the editor
+      // until `attachTransport` has either hydrated it from the plane or
+      // settled it on this device.
+      const newSession = store.createSession(documentId, content, { pending: true })
       sessionIdRef.current = newSession.id
       setSession(newSession)
 
@@ -319,10 +481,7 @@ export function useCollaborativeSession(
       setLocalParticipant(localParticipant)
       setParticipants([localParticipant])
 
-      // The opener syncs too. Its local content seeds the session, but the
-      // plane may already hold edits from another device, and Yjs merging the
-      // two is exactly right where picking one would lose work.
-      await attachTransport(newSession.id, documentId, localParticipant, { sync: true })
+      await attachTransport(newSession.id, documentId, localParticipant, content)
 
       return newSession.id
     },
@@ -418,32 +577,38 @@ export function useCollaborativeSession(
     return resolveCanvasShareTarget(current.documentId)
   }, [])
 
+  /**
+   * Rejoin a session this tab already holds.
+   *
+   * A session with a live provider only needs its state republished. One
+   * without is reopened from scratch rather than attached in place: its
+   * document was either settled on this device, whose text exists nowhere
+   * else and would be inserted a second time if merged with the plane, or it
+   * failed to attach and was closed. A fresh session hydrates from the plane
+   * the same way `connect` does.
+   */
   const joinSession = useCallback(
     async (sessionId: string): Promise<void> => {
       const store = storeRef.current
       const existingSession = store.getSession(sessionId)
+      if (!existingSession) return
 
-      if (existingSession) {
+      if (providerRef.current) {
         sessionIdRef.current = sessionId
         setSession(existingSession)
-
-        const currentParticipant = createLocalParticipant()
-        store.joinSession(sessionId, currentParticipant)
-        store.setLocalParticipantId(getParticipantId())
-        setLocalParticipant(currentParticipant)
         setParticipants(existingSession.participants)
-
         const latestContent = store.getDocumentContent(sessionId)
-        if (latestContent !== null) {
-          onRemoteContentChange?.(latestContent)
-        }
-
-        await attachTransport(sessionId, existingSession.documentId, currentParticipant, {
-          sync: true,
-        })
+        if (latestContent !== null) onRemoteContentChange?.(latestContent)
+        return
       }
+
+      const documentId = existingSession.documentId
+      const content = readLocalContent(documentId, store.getDocumentContent(sessionId) ?? "")
+      store.leaveSession(sessionId, getParticipantId())
+      store.closeSession(sessionId)
+      await connect(documentId, content)
     },
-    [attachTransport, createLocalParticipant, getParticipantId, onRemoteContentChange]
+    [connect, getParticipantId, onRemoteContentChange, readLocalContent]
   )
 
   /**

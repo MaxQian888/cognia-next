@@ -4,7 +4,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { CanvasCRDTStore, crdtStore } from "./crdt-store"
+import { CanvasCRDTStore, canvasSeedOperationId, crdtStore, encodeSeedUpdate } from "./crdt-store"
 import type { Participant, ContentUpdate } from "@/types/canvas/collaboration"
 import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -718,5 +718,210 @@ describe("the session registry", () => {
     dispose()
     store.createSession("doc-1", "hello")
     expect(changes).toEqual([])
+  })
+})
+
+describe("sessions headed for the plane", () => {
+  const stores: CanvasCRDTStore[] = []
+  const store = () => {
+    const created = new CanvasCRDTStore()
+    stores.push(created)
+    return created
+  }
+  const opened: Array<[CanvasCRDTStore, string]> = []
+  const open = (target: CanvasCRDTStore, documentId: string, content: string) => {
+    const session = target.createSession(documentId, content, { pending: true })
+    opened.push([target, session.id])
+    return session.id
+  }
+
+  afterEach(() => {
+    // Closing destroys each awareness, which is what stops its interval.
+    for (const [target, sessionId] of opened.splice(0)) target.closeSession(sessionId)
+    stores.length = 0
+  })
+
+  it("stays empty and hidden from the editor until it is marked ready", () => {
+    const device = store()
+    const sessionId = open(device, "doc-plane", "local text")
+
+    expect(device.getDocumentContent(sessionId)).toBe("")
+    expect(device.sessionIdForDocument("doc-plane")).toBeNull()
+    expect(device.isSeededLocally(sessionId)).toBe(false)
+
+    const changed = jest.fn()
+    device.onSessionsChanged(changed)
+    device.markSessionReady(sessionId)
+    expect(device.sessionIdForDocument("doc-plane")).toBe(sessionId)
+    expect(changed).toHaveBeenCalledTimes(1)
+
+    // Idempotent: a second call announces nothing.
+    device.markSessionReady(sessionId)
+    expect(changed).toHaveBeenCalledTimes(1)
+  })
+
+  it("can be settled on this device instead, and then says so", () => {
+    const device = store()
+    const sessionId = open(device, "doc-local", "")
+    device.seedLocally(sessionId, "only here")
+    expect(device.getDocumentContent(sessionId)).toBe("only here")
+    expect(device.isSeededLocally(sessionId)).toBe(true)
+    // Seeding is for an empty document only.
+    device.seedLocally(sessionId, "again")
+    expect(device.getDocumentContent(sessionId)).toBe("only here")
+  })
+
+  it("treats a session opened the old way as seeded here", () => {
+    const device = store()
+    const session = device.createSession("doc-legacy", "text")
+    opened.push([device, session.id])
+    expect(device.isSeededLocally(session.id)).toBe(true)
+    expect(device.sessionIdForDocument("doc-legacy")).toBe(session.id)
+  })
+
+  it("converges when both devices take one baseline, where two local seeds duplicate the text", () => {
+    // The old path: each device inserted its own copy of the same text.
+    const a = store()
+    const b = store()
+    const legacyA = a.createSession("doc-dup", "hello")
+    const legacyB = b.createSession("doc-dup", "hello")
+    opened.push([a, legacyA.id], [b, legacyB.id])
+    b.applyRemoteUpdate(legacyB.id, {
+      id: "seed-a",
+      update: a.encodeSnapshot(legacyA.id)!,
+      origin: "a",
+      timestamp: 1,
+    })
+    expect(b.getDocumentContent(legacyB.id)).toBe("hellohello")
+
+    // The plane's path: one seed, built off to the side, applied by both.
+    const c = store()
+    const d = store()
+    const onC = open(c, "doc-one", "")
+    const onD = open(d, "doc-one", "")
+    const seed = encodeSeedUpdate("hello")
+    for (const [device, sessionId] of [
+      [c, onC],
+      [d, onD],
+    ] as const) {
+      device.applyRemoteUpdate(sessionId, {
+        id: "seed",
+        update: seed,
+        origin: "plane",
+        timestamp: 1,
+      })
+    }
+    const edit = c.applyLocalUpdate(onC, createContentUpdate("insert", 5, " world"))
+    d.applyRemoteUpdate(onD, edit)
+    expect(c.getDocumentContent(onC)).toBe("hello world")
+    expect(d.getDocumentContent(onD)).toBe("hello world")
+  })
+
+  it("does not broadcast what arrived from the plane", () => {
+    const device = store()
+    const sessionId = open(device, "doc-quiet", "")
+    const sent = jest.fn()
+    device.onLocalUpdate(sessionId, sent)
+    device.applyRemoteUpdate(sessionId, {
+      id: "seed",
+      update: encodeSeedUpdate("from the plane"),
+      origin: "plane",
+      timestamp: 1,
+    })
+    expect(sent).not.toHaveBeenCalled()
+  })
+
+  it("names the seed operation after the document, so racing seeds collide on purpose", () => {
+    expect(canvasSeedOperationId("doc-9")).toBe("canvas-seed:doc-9")
+  })
+
+  describe("awareness", () => {
+    it("is one instance per document, shared by whoever asks", () => {
+      const device = store()
+      const sessionId = open(device, "doc-aw", "")
+      expect(device.getAwareness(sessionId)).toBe(device.getAwareness(sessionId))
+      expect(device.getAwareness("missing")).toBeNull()
+    })
+
+    it("carries this device's state to a peer, and forgets the peer when it leaves", () => {
+      const a = store()
+      const b = store()
+      const onA = open(a, "doc-caret", "")
+      const onB = open(b, "doc-caret", "")
+      const outbound: string[] = []
+      a.onLocalAwarenessUpdate(onA, (update) => outbound.push(update))
+
+      expect(a.encodeLocalAwareness(onA)).toBeNull()
+      a.getAwareness(onA)!.setLocalStateField("user", { name: "Ada", participantId: "p-ada" })
+      expect(outbound).toHaveLength(1)
+      expect(a.encodeLocalAwareness(onA)).not.toBeNull()
+
+      b.applyRemoteAwareness(onB, outbound[0])
+      const clientA = a.getAwareness(onA)!.clientID
+      expect(b.getAwareness(onB)!.getStates().get(clientA)).toEqual({
+        user: { name: "Ada", participantId: "p-ada" },
+      })
+
+      b.removeRemoteAwareness(onB, "p-ada")
+      expect(b.getAwareness(onB)!.getStates().has(clientA)).toBe(false)
+    })
+
+    it("does not echo a peer's awareness back out", () => {
+      const a = store()
+      const b = store()
+      const onA = open(a, "doc-echo", "")
+      const onB = open(b, "doc-echo", "")
+      a.getAwareness(onA)!.setLocalStateField("user", { participantId: "p-ada" })
+      const fromB = jest.fn()
+      b.onLocalAwarenessUpdate(onB, fromB)
+      b.applyRemoteAwareness(onB, a.encodeLocalAwareness(onA)!)
+      expect(fromB).not.toHaveBeenCalled()
+    })
+
+    it("renews under a new clock so a peer that dropped this client accepts it again", () => {
+      // A peer keeps the last clock it saw for a departed client and ignores
+      // a resend under it, which hid a reconnected caret until it moved.
+      const a = store()
+      const b = store()
+      const onA = open(a, "doc-renew", "")
+      const onB = open(b, "doc-renew", "")
+      const bus = jest.fn()
+      a.onLocalAwarenessUpdate(onA, bus)
+      a.getAwareness(onA)!.setLocalStateField("user", { participantId: "p-ada" })
+      b.applyRemoteAwareness(onB, a.encodeLocalAwareness(onA)!)
+      b.removeRemoteAwareness(onB, "p-ada")
+      const clientA = a.getAwareness(onA)!.clientID
+
+      b.applyRemoteAwareness(onB, a.encodeLocalAwareness(onA)!)
+      expect(b.getAwareness(onB)!.getStates().has(clientA)).toBe(false)
+
+      bus.mockClear()
+      const renewed = a.renewLocalAwareness(onA)!
+      // The caller sends it; the bus does not send it a second time.
+      expect(bus).not.toHaveBeenCalled()
+      b.applyRemoteAwareness(onB, renewed)
+      expect(b.getAwareness(onB)!.getStates().has(clientA)).toBe(true)
+    })
+
+    it("renews nothing for a client that has published nothing", () => {
+      const device = store()
+      const sessionId = open(device, "doc-blank", "")
+      expect(device.renewLocalAwareness(sessionId)).toBeNull()
+    })
+
+    it("ignores a malformed awareness update instead of throwing", () => {
+      const device = store()
+      const sessionId = open(device, "doc-bad", "")
+      expect(() => device.applyRemoteAwareness(sessionId, "!!not base64!!")).not.toThrow()
+    })
+
+    it("is destroyed with the session", () => {
+      const device = store()
+      const session = device.createSession("doc-gone", "", { pending: true })
+      const awareness = device.getAwareness(session.id)!
+      const destroy = jest.spyOn(awareness, "destroy")
+      device.closeSession(session.id)
+      expect(destroy).toHaveBeenCalled()
+    })
   })
 })

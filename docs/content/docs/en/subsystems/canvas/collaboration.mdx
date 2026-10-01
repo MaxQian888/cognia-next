@@ -14,9 +14,11 @@ description: Optional real-time multi-user co-editing on Yjs — Monaco and Code
   a binding is live the artifact store's `content` is a debounced projection of the `Y.Text`. The
   transport is the collaboration server (ADR-0149, `crates/cognia-collab-server/src/canvas_api.rs`),
   which stores opaque updates in order, deduplicates by `(document_id, operation_id)`, never decodes
-  them, and re-resolves the caller's workspace role on every inbound edit frame. Membership is the
-  workspace's ladder: viewer reads, member edits and comments, maintainer compacts and deletes. Off
-  by default behind `COLLAB_CANVAS_ENABLED` and `canvas.collaboration.enabled`.
+  them, and re-resolves the caller's workspace role on every inbound edit frame. A joining client
+  takes the plane's state before its editor binds, and only seeds an empty document; cursors travel
+  as y-protocols awareness. Membership is the workspace's ladder: viewer reads, member edits and
+  comments, maintainer compacts and deletes. Off by default behind `COLLAB_CANVAS_ENABLED` and
+  `canvas.collaboration.enabled`.
 </TLDR>
 
 <StatGrid>
@@ -72,14 +74,14 @@ it by subscribing to the store's registry rather than by holding it. That split 
 
 | File | Role |
 | --- | --- |
-| `lib/canvas/collaboration/crdt-store.ts` | `CanvasCRDTStore` and the `crdtStore` singleton: one `Y.Doc` per document, the session registry, the local-update bus, remote apply, snapshots |
+| `lib/canvas/collaboration/crdt-store.ts` | `CanvasCRDTStore` and the `crdtStore` singleton: one `Y.Doc` and one `Awareness` per document, the session registry (with pending sessions), the local-update and local-awareness buses, remote apply, snapshots, `encodeSeedUpdate` |
 | `lib/canvas/collaboration/editor-binding.ts` | `bindMonacoEditor` (y-monaco), `codeMirrorCollabExtensions` (y-codemirror.next), the awareness user, the presence stylesheet |
-| `lib/canvas/collaboration/websocket-provider.ts` | `CanvasWebSocketProvider`: the socket factory, reconnect, heartbeat, in-memory queue, frame routing |
-| `lib/canvas/collaboration/canvas-transport.ts` | `resolveCanvasTransport`, `publishCanvasDocument`, `resolveCanvasShareTarget`: binds a document to the org, workspace and plane |
+| `lib/canvas/collaboration/websocket-provider.ts` | `CanvasWebSocketProvider`: the socket factory, reconnect and catch-up, heartbeat, in-memory queue, frame routing, the last applied sequence |
+| `lib/canvas/collaboration/canvas-transport.ts` | `resolveCanvasTransport`, `publishCanvasDocument`, `resolveCanvasShareTarget`, and the plane-side sync: `catchUpCanvasDocument` (paged) and `hydrateCanvasSession` (join or seed) |
 | `lib/canvas/collaboration/relative-anchor.ts` | `encodeCrdtAnchor` / `resolveCrdtAnchor`: comment anchors as Yjs relative positions |
 | `lib/canvas/collaboration/share-link.ts` | `buildCanvasSharePath` / `parseCanvasShareLink`: an ids-only join link |
 | `hooks/canvas/use-canvas-collaborative-editor.ts` | Binds the active editor to the live session and projects the `Y.Text` back to the artifact store |
-| `hooks/canvas/use-collaborative-session.ts` | Creates, connects and tears down a session for the panel |
+| `hooks/canvas/use-collaborative-session.ts` | Creates, hydrates, connects and tears down a session for the panel |
 | `hooks/canvas/use-canvas-comment-anchors.ts` | Encodes and resolves comment anchors against the live document |
 | `lib/collab/client.ts` | `CollabClient`: the Canvas REST methods and `openCanvasStream` |
 | `crates/cognia-collab-server/src/canvas_api.rs` | Routes, stream tickets, the per-document hub, frame handling |
@@ -111,8 +113,8 @@ sequenceDiagram
   S->>S: may_edit: re-resolve the caller's workspace role
   S->>DB: append_update (dedupe on document_id + operation_id)
   DB-->>S: stored row with its sequence
-  S-->>PB: broadcast "operation" (the sender's own echo is skipped)
-  PB->>YB: applyRemoteUpdate → Y.applyUpdate(..., CANVAS_REMOTE_ORIGIN)
+  S-->>PB: broadcast "operation" with its sequence (the sender's own echo is skipped)
+  PB->>YB: applyRemoteUpdate → Y.applyUpdate(..., CANVAS_REMOTE_ORIGIN); note the sequence
   Note over YB: the sentinel origin keeps it off the local bus
   YB->>AS: Y.Text observe → 400 ms debounce → updateCanvasDocument
 ```
@@ -120,17 +122,31 @@ sequenceDiagram
 ## The Document and Its Session
 
 `CanvasCRDTStore.ensureDocument` creates one `Y.Doc` per document id and reads its text as
-`doc.getText(CANVAS_TEXT_KEY)`, where `CANVAS_TEXT_KEY = "content"`. A non-empty starting body is
-inserted into the `Y.Text`, and one `text.observe` keeps the record's `content` and `version` in step.
+`doc.getText(CANVAS_TEXT_KEY)`, where `CANVAS_TEXT_KEY = "content"`. One `text.observe` keeps the
+record's `content` and `version` in step.
 
-- **Sessions.** `createSession(documentId, content)` mints `session-<timestamp>-<random>`, marks the
-  creator's permissions and persists the session's metadata to the Dexie `canvasSessions` table
-  through `lib/db/canvas-sessions.ts`. Only metadata is stored there. Yjs state is not persisted
-  locally; the plane holds it. `joinSession`, `leaveSession`, `adoptSession` and `closeSession`
-  complete the lifecycle, and `closeSession` destroys the `Y.Doc`.
+- **Sessions.** `createSession(documentId, content, { pending })` mints
+  `session-<timestamp>-<random>`, marks the creator's permissions and persists the session's
+  metadata to the Dexie `canvasSessions` table through `lib/db/canvas-sessions.ts`. Only metadata is
+  stored there. Yjs state is not persisted locally; the plane holds it. `joinSession`,
+  `leaveSession`, `adoptSession` and `closeSession` complete the lifecycle, and `closeSession`
+  destroys the awareness and the `Y.Doc`.
+- **Pending sessions.** With `pending: true` (what `connect` uses) the document starts empty and
+  `sessionIdForDocument` does not return it until `markSessionReady`. The editor binds to whatever
+  that returns, so binding before the plane has answered would show an empty buffer and project it
+  over the stored document. Without `pending` the content is inserted on this device and the document
+  is marked `seededLocally`; `seedLocally` does the same for a pending session that stays local. A
+  locally seeded document never joins the plane, because its Yjs items exist nowhere else and merging
+  them with the plane's would insert the text twice.
 - **The registry.** `onSessionsChanged(listener)` and `sessionIdForDocument(documentId)` are what
   the editor hook feeds to `useSyncExternalStore`. `sessionIdForDocument` returns a string on
   purpose, because that is what a snapshot comparison can compare.
+- **Awareness.** `getAwareness(sessionId)` returns the document's one `y-protocols` `Awareness`,
+  created on first use (it runs an interval for its idle cutoff). `onLocalAwarenessUpdate` fires only
+  for changes to this client's own state, encoded for the wire; remote states are applied with
+  `applyRemoteAwareness` under the remote sentinel, `removeRemoteAwareness(participantId)` drops a
+  peer that left (matched through the `user.participantId` the binding publishes), and
+  `encodeLocalAwareness` is what a newcomer is sent.
 - **The local-update bus.** The store listens to `doc.on("update")` once per document. Any
   transaction whose origin is not `CANVAS_REMOTE_ORIGIN` (`"cognia:canvas:remote"`) is local: it is
   wrapped as a `CRDTOperation` (`id`, base64 `update`, `origin`, `timestamp`) and handed to
@@ -153,9 +169,11 @@ It returns `active`, `bindMonaco(editor)` and `codeMirrorExtensions`.
 1. `useSessionId` subscribes to the registry and yields the live session for the document, only when
    both the hook's `enabled` (the `canvas.collaboration.v1` feature flag) and
    `CanvasSettings.collaboration.enabled` are on.
-2. For that session it creates a `y-protocols` `Awareness` over the `Y.Doc`, publishes the local
-   user as the awareness `user` field (`name`, `color`, `participantId`), applies the presence
-   timeout and builds the CodeMirror extensions.
+2. For that session it reads the store's `Awareness` (it never creates one: a second instance would
+   be a client the socket does not carry), publishes the local user as the awareness `user` field
+   (`name`, `color`, `participantId`), applies the presence timeout and builds the CodeMirror
+   extensions. When the editor leaves the document it clears its local state, which tells peers the
+   caret is gone; the store destroys the awareness with the session.
 3. **Monaco** (desktop): `bindMonacoEditor` creates a `MonacoBinding(ytext, model, editors, awareness)`
    inside Monaco's `onMount`; the teardown runs when the active document changes or the editor
    unmounts.
@@ -200,15 +218,53 @@ through the Rust proxy path and so honours the desktop proxy settings. Before co
 `publishCanvasDocument` gets the document on the plane and creates it on a 404, with operation id
 `canvas-create:<documentId>`; a 403 or 404 on create means no write access.
 
+### Joining a document
+
+`useCollaborativeSession.connect(documentId, content)` opens a pending session and
+`attachTransport` brings it onto the plane in a fixed order:
+
+1. Resolve the transport and publish the document row. With no plane, or no write access to create
+   the row, the session is settled on this device (`seedLocally`, then `markSessionReady`), seeded with
+   the text as it is at that moment rather than when `connect` was called. A document that was
+   already seeded on this device never joins the plane.
+2. Build the provider and subscribe it to the local-update and local-awareness buses **before** the
+   socket opens, so nothing this device does while connecting goes unsent.
+3. Open the socket, so an update written during the catch-up arrives live instead of falling into
+   the gap.
+4. `hydrateCanvasSession` pages the plane's state in with `catchUpCanvasDocument`. If the plane holds
+   nothing, the local copy is published as the seed. It is read from the artifact store at that moment,
+   after `flushPendingCanvasEdits` (`lib/canvas/pending-edits.ts`) has made the editor commit the
+   keystrokes still waiting on its debounce, so text typed while connecting is included. The seed is built in a scratch `Y.Doc` by `encodeSeedUpdate` and posted
+   with the operation id `canvas-seed:<documentId>`. Two devices racing to seed collide on that id,
+   and the server returns the first seed to the second, so both converge on one baseline instead of
+   two copies of the text. A viewer who finds the plane empty gets `CanvasSeedForbiddenError`.
+5. `adoptPlaneContent` compares the shared text with the artifact store. If they differ and the local
+   copy is not empty, the local copy is saved as a version ("This device's copy, before joining the
+   shared document") before the shared text replaces it. Then the session is marked ready and the
+   editor binds.
+
+After every await, `attachTransport` checks that the session is still the one the hook holds: "End
+session" is offered as soon as the session exists, and closing the panel tab unmounts it, so the user
+can end it at any point. If it has ended, the call tears down only what it built (its subscriptions
+and its provider) and touches neither the artifact store nor the plane. `adoptPlaneContent` also
+refuses a session that no longer has a document rather than treating that as empty text. If a step
+fails while the session is still current, the same teardown runs, the session is closed and the state
+becomes `error`; the session never became visible to the editor, so the local document is untouched.
+When a binding goes live, the canvas panel cancels any keystroke batch still waiting, because it
+belongs to the text the shared document has just replaced. Calling `joinSession` for a session with
+no live provider closes it and runs `connect` again rather than attaching it in place.
+
 ### `CanvasWebSocketProvider`
 
 | Concern | Behavior |
 | --- | --- |
 | Construction | Takes an `openSocket` factory, never a URL or token. Without one, `connect` throws `CanvasTransportUnavailableError` (`CANVAS_REMOTE_AUTH_REQUIRED`): the transport fails closed |
-| Connect | Calls the factory, sets `connected`, starts the heartbeat, sends `presence` `join` with the real participant, then flushes the queue |
-| Reconnect | `handleDisconnect` retries after a fixed `reconnectInterval` (1000 ms), up to `reconnectAttempts` (5), calling the factory again each time so a fresh single-use ticket is minted. It rejoins as the stored participant and calls `requestSync` afterwards. There is no exponential backoff |
+| Connect | Calls the factory, sets `connected`, starts the heartbeat, sends `presence` `join` with the real participant, then flushes the queue. A socket that finishes opening after `disconnect()` is closed instead of kept |
+| Reconnect | `handleDisconnect` retries after a fixed `reconnectInterval` (1000 ms), up to `reconnectAttempts` (5), calling the factory again each time so a fresh single-use ticket is minted. It rejoins as the stored participant, then runs the `catchUp` callback (the paged HTTP catch-up) from its last applied sequence, falling back to a socket `sync` request from that sequence if the catch-up fails. There is no exponential backoff |
+| Sequence | Every relayed `operation` and every `sync` response names its server sequence. The provider keeps a watermark: every sequence at or below it has been applied. `noteSequence` records one update and only advances over a contiguous run, because the server relays each update from the request that wrote it and 6 can arrive before 5; `noteCaughtUpTo` covers everything below a catch-up or a snapshot frame (`snapshot: true`). The client's own updates are never echoed, so the watermark stops at its first edit and a resume refetches a little it has, which Yjs ignores |
 | Heartbeat | `presence` `heartbeat` every 30 000 ms while connected |
-| Queue | `dispatch` queues frames while the socket is not connected or a send fails; `flushMessageQueue` drains them in order after the join frame. The queue is in memory and does not survive a reload |
+| Queue | `dispatch` queues frames while the socket is not connected or a send fails; `flushMessageQueue` drains them in order after the join frame. `cursor`, `selection` and `awareness` are volatile and never queued. The queue is in memory and does not survive a reload |
+| Awareness | After joining, renews this client's awareness under a new clock (`renewLocalAwareness`), since peers that dropped it ignore a resend under the old one; sends it again whenever another participant joins; removes a departed participant's awareness on `presence` `leave` |
 | Errors | A socket error, a factory throw or a server `error` frame report `error`; `disconnected` is reported only for a deliberate `disconnect()` or exhausted retries |
 
 ### Frames
@@ -218,10 +274,11 @@ Every frame is JSON text of the shape `type`, `sessionId` (the document id on th
 
 | `type` | Client sends | Server does |
 | --- | --- | --- |
-| `operation` | `data` is the `CRDTOperation` | Re-checks edit rights, appends, broadcasts after the write is durable |
+| `operation` | `data` is the `CRDTOperation` | Re-checks edit rights, appends, broadcasts after the write is durable, adding the row's `sequence` |
 | `presence` | `join`, `heartbeat`, `leave` | `join` records presence with the ticket's user id and replays the roster to the joiner; `heartbeat` refreshes it; `leave` closes |
-| `sync` | `action: "request"`, `since` | Replies with the snapshot (when the caller is behind it) and each later update, one `sync` `response` frame per payload, from participant `"server"` |
-| `cursor`, `selection` | cursor / line range | Relayed to the room, not stored, no per-frame role check |
+| `sync` | `action: "request"`, `since` (the watermark) | Replies with the snapshot (when the caller is behind it, flagged `snapshot: true`) and each later update, one `sync` `response` frame per payload with its `sequence`, from participant `"server"`, paging until the log is exhausted (at most 64 pages of 512) |
+| `awareness` | `update`: base64 y-protocols awareness update | Relayed to the room under the participant id the connection joined as (not the one the frame names), not stored, no per-frame role check; dropped before a join, when empty, or above 64 KiB |
+| `cursor`, `selection` | cursor / line range | Relayed to the room, not stored, no per-frame role check. The client no longer sends these; carets travel as awareness |
 | `error` | none | Surfaced by the provider as `error` |
 
 ## The Server Side
@@ -266,9 +323,11 @@ There is no per-document member table. `CanvasAction` maps onto the workspace la
   resend return the stored row instead of recording the edit twice, which is what makes a replayed
   queue safe. Payloads are 1 byte to 1 MiB.
 - **Hub.** One `tokio::sync::broadcast` channel of 512 per document. The writer skips a connection's
-  own frames; a lagging receiver is closed so it reconnects and catches up.
+  own frames. A receiver that lags ends the writer, which closes the socket, and the read loop stops
+  with it, so the client reconnects and catches up instead of staying open and hearing nothing.
 - **Catch-up.** `catch_up(since, 512)` raises the floor to the snapshot sequence when `since` is
-  behind it and includes the snapshot. The HTTP route reports `hasMore`.
+  behind it and includes the snapshot. The HTTP route reports `hasMore`, and the client's
+  `catchUpCanvasDocument` follows it to the end; the socket `sync` reply walks the pages itself.
 - **Compaction.** A maintainer's client posts `Y.encodeStateAsUpdate` with `coversSequence`. The
   store refuses a marker that moves backwards or past `latest_sequence` (403 `snapshot does not cover
   a stored range`), stores the snapshot, and deletes the updates it covers.
@@ -334,24 +393,18 @@ state is derived as `live` or `local-copy` inside an `onStateChange` callback no
 These are read from the code, not observed in a two-machine run. The proposed 2026-09-30 amendment to
 [ADR-0158](../../adr/0158-artifacts-and-canvas) lists what has to land before the default flips.
 
-- **Remote cursors do not cross the network.** The `Awareness` is local to each client: nothing
-  encodes or applies awareness updates over the socket, so y-monaco and y-codemirror draw only local
-  state. The provider's `cursor` / `selection` frames feed `useCollaborativeSession`'s
-  `remoteCursors`, which nothing renders, and nothing calls `updateCursor` / `updateSelection`.
-- **The seed is not shared.** Each `createSession` inserts the current content into a fresh `Y.Doc`
-  before the local-update subscription exists, and nothing pushes a snapshot. Two devices that each
-  start a session on a non-empty document hold independent Yjs items; a joiner is expected to start
-  empty and apply the opener's snapshot. Edits made while the session is still connecting are not
-  sent for the same reason.
-- **Socket catch-up is one page from zero.** `requestSync` always sends `since = 0`, and the socket
-  reply is at most 512 updates with no continuation. The paged HTTP catch-up (`pullCanvasUpdates`)
-  has no caller.
-- **Most plane methods have no caller.** Of the Canvas methods on `CollabClient`, only
-  `getCanvasDocument`, `createCanvasDocument` and `openCanvasStream` are used. Snapshots (so
-  compaction), comments, versions, presence, rename, delete and the HTTP update path are unused.
 - **The replay queue is in memory**, so it covers a blip but not a reload.
-- **Joining by session id only works in the same tab.** `useCollaborativeSession.joinSession` finds
-  sessions already in this tab's store; there is no path that joins a session another device opened.
+- **Compaction, comments and versions are not on the plane.** `pushCanvasSnapshot`,
+  `createCanvasComment`, `createCanvasVersion`, `readCanvasPresence`, rename and delete have no
+  caller, so nothing compacts and comments stay in the local `contextComments` table.
+- **A recipient can only open a document this device already has.** The join page resolves the
+  document locally; it does not create a local copy from the plane.
+- **Local edits made outside a session lose to the plane.** When the plane already holds the document
+  and this device's copy differs, the plane's text wins and the local copy is kept only as a version.
+  There is no three-way merge of offline edits.
+- **Legacy cursor frames.** `useCollaborativeSession` still exposes `updateCursor` /
+  `updateSelection` and a `remoteCursors` list fed by `cursor` / `selection` frames. Nothing calls or
+  renders them; carets are drawn from awareness.
 
 ## Next
 

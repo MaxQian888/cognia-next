@@ -54,6 +54,7 @@ import {
 } from "@/hooks/canvas/use-canvas-document-summaries"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
+import { registerCanvasEditFlusher } from "@/lib/canvas/pending-edits"
 import { useSharedCanvasActions } from "./canvas-actions-context"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
@@ -216,7 +217,22 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const collaborativeRef = useRef(false)
   useEffect(() => {
     collaborativeRef.current = collaborative.active
-  }, [collaborative.active])
+    // A batch still waiting when a binding goes live belongs to the text the
+    // shared document has already replaced. Landing it now would put the
+    // pre-join buffer back into the store behind the projection's back.
+    if (collaborative.active) {
+      pendingValueRef.current = null
+      cancelCommit()
+    }
+  }, [collaborative.active, cancelCommit])
+
+  // Let a reader that decides what this document says (joining a
+  // collaboration session) take the keystrokes still waiting on the debounce,
+  // rather than read the store a moment behind the buffer.
+  useEffect(() => {
+    if (!activeId) return
+    return registerCanvasEditFlusher(activeId, flushCommit)
+  }, [activeId, flushCommit])
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {

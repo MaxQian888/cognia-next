@@ -32,6 +32,12 @@
 
 import * as Y from "yjs"
 import { fromBase64, toBase64 } from "lib0/buffer"
+import {
+  Awareness,
+  applyAwarenessUpdate,
+  encodeAwarenessUpdate,
+  removeAwarenessStates,
+} from "y-protocols/awareness"
 import type {
   CollaborativeSession,
   Participant,
@@ -56,6 +62,40 @@ export const CANVAS_TEXT_KEY = "content"
  * Inverting it makes the default correct: whatever this device did, it says.
  */
 export const CANVAS_REMOTE_ORIGIN = "cognia:canvas:remote"
+
+/**
+ * The operation id a document's first content is published under.
+ *
+ * Deterministic on purpose. Two devices that find the same document empty on
+ * the plane both try to seed it, and the server keeps one row per
+ * `(document_id, operation_id)`: the second attempt gets the first device's
+ * seed back instead of storing a second copy of the text beside it.
+ */
+export function canvasSeedOperationId(documentId: string): string {
+  return `canvas-seed:${documentId}`
+}
+
+/**
+ * A document's starting text as one Yjs update, built in a scratch document.
+ *
+ * Never inserted into the live `Y.Doc` directly. Whether this text or another
+ * device's becomes the shared baseline is the server's decision, and the live
+ * document applies whichever one it answers with.
+ */
+export function encodeSeedUpdate(content: string): string {
+  const scratch = new Y.Doc()
+  try {
+    if (content.length > 0) scratch.getText(CANVAS_TEXT_KEY).insert(0, content)
+    return toBase64(Y.encodeStateAsUpdate(scratch))
+  } finally {
+    scratch.destroy()
+  }
+}
+
+/** The awareness field an editor binding publishes the local user under. */
+interface AwarenessUserState {
+  user?: { participantId?: unknown }
+}
 
 function persistSessionMetadata(label: string, session: CollaborativeSession): void {
   canvasSessionsDb.upsertSession(session).catch((err) => {
@@ -89,6 +129,18 @@ export interface CRDTDocument {
   version: number
   doc: Y.Doc
   text: Y.Text
+  /**
+   * Cursors, selections and who is here, per document. Created on first use:
+   * an `Awareness` runs an interval for its idle cutoff, and a document nobody
+   * binds or connects should not.
+   */
+  awareness: Awareness | null
+  /**
+   * True when the text was inserted on this device rather than received. Such
+   * a document cannot join the plane: its items exist nowhere else, so merging
+   * it with the server's state would put the text in twice.
+   */
+  seededLocally: boolean
 }
 
 /**
@@ -121,6 +173,19 @@ export class CanvasCRDTStore {
   private localUpdateListeners: Map<string, Set<(operation: CRDTOperation) => void>> = new Map()
   /** Watchers of the session set itself, for surfaces outside the hook that owns it. */
   private sessionListeners: Set<() => void> = new Set()
+  /** Per document, the callbacks watching this device's own awareness changes. */
+  private localAwarenessListeners: Map<string, Set<(update: string) => void>> = new Map()
+  /**
+   * Sessions whose document is still being brought up to the plane's state.
+   *
+   * Hidden from `sessionIdForDocument` until `markSessionReady`, because the
+   * editor binds to whatever that returns. Binding to a document that has not
+   * received its baseline would show an empty buffer, and the projection would
+   * then write that empty buffer over the stored document.
+   */
+  private pendingSessions: Set<string> = new Set()
+  /** Set while `renewLocalAwareness` bumps the clock, so the bus stays quiet. */
+  private suppressLocalAwareness = false
 
   setLocalParticipantId(id: string): void {
     this.localParticipantId = id
@@ -149,15 +214,146 @@ export class CanvasCRDTStore {
     return this.documents.get(session.documentId)?.text ?? null
   }
 
-  private ensureDocument(documentId: string, content: string): CRDTDocument {
+  /**
+   * The awareness for a session's document, created on first request.
+   *
+   * One per document rather than one per editor: the socket that carries it
+   * and the editor that draws it live in different components, and two
+   * instances would be two clients, with the socket announcing one while the
+   * editor moved the other.
+   */
+  getAwareness(sessionId: string): Awareness | null {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const record = this.documents.get(session.documentId)
+    if (!record) return null
+    return this.ensureAwareness(record)
+  }
+
+  private ensureAwareness(record: CRDTDocument): Awareness {
+    if (record.awareness) return record.awareness
+    const awareness = new Awareness(record.doc)
+    awareness.on(
+      "update",
+      (changes: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+        if (origin === CANVAS_REMOTE_ORIGIN || this.suppressLocalAwareness) return
+        // Only this client's own state leaves the device. Peers time each
+        // other out independently, and relaying those removals would have
+        // every peer announce every other peer's departure.
+        const own = awareness.clientID
+        const touched = [...changes.added, ...changes.updated, ...changes.removed]
+        if (!touched.includes(own)) return
+        const listeners = this.localAwarenessListeners.get(record.id)
+        if (!listeners?.size) return
+        const update = toBase64(encodeAwarenessUpdate(awareness, [own]))
+        for (const listener of listeners) listener(update)
+      }
+    )
+    record.awareness = awareness
+    return awareness
+  }
+
+  /** Watch this device's own awareness changes, encoded for the wire. */
+  onLocalAwarenessUpdate(sessionId: string, listener: (update: string) => void): () => void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return () => {}
+    const documentId = session.documentId
+    const listeners = this.localAwarenessListeners.get(documentId) ?? new Set()
+    listeners.add(listener)
+    this.localAwarenessListeners.set(documentId, listeners)
+    return () => {
+      const current = this.localAwarenessListeners.get(documentId)
+      current?.delete(listener)
+      if (current && current.size === 0) this.localAwarenessListeners.delete(documentId)
+    }
+  }
+
+  /**
+   * This client's current awareness state, for a peer that just arrived.
+   *
+   * Awareness only sends changes, so without this a newcomer would see
+   * nobody's cursor until each of them next moved it.
+   */
+  encodeLocalAwareness(sessionId: string): string | null {
+    const awareness = this.getAwareness(sessionId)
+    if (!awareness) return null
+    // An awareness starts with an empty state, and no editor has published
+    // anything into it yet: nothing worth announcing.
+    const state = awareness.getLocalState()
+    if (!state || Object.keys(state).length === 0) return null
+    return toBase64(encodeAwarenessUpdate(awareness, [awareness.clientID]))
+  }
+
+  /**
+   * Bump this client's awareness clock and return the encoded state, without
+   * firing the local awareness bus (the caller sends it itself).
+   *
+   * A peer that dropped this client keeps the last clock it saw and ignores a
+   * resend under it, so a reconnect needs a new one to be seen at all.
+   */
+  renewLocalAwareness(sessionId: string): string | null {
+    const awareness = this.getAwareness(sessionId)
+    if (!awareness) return null
+    const state = awareness.getLocalState()
+    if (!state || Object.keys(state).length === 0) return null
+    this.suppressLocalAwareness = true
+    try {
+      awareness.setLocalState(state)
+    } finally {
+      this.suppressLocalAwareness = false
+    }
+    return toBase64(encodeAwarenessUpdate(awareness, [awareness.clientID]))
+  }
+
+  /** Merge a peer's awareness update. A malformed one is logged and ignored. */
+  applyRemoteAwareness(sessionId: string, update: string): void {
+    const awareness = this.getAwareness(sessionId)
+    if (!awareness) return
+    try {
+      applyAwarenessUpdate(awareness, fromBase64(update), CANVAS_REMOTE_ORIGIN)
+    } catch (err) {
+      loggers.canvas.warn("crdt remote awareness rejected", { sessionId, error: String(err) })
+    }
+  }
+
+  /**
+   * Forget a peer that left.
+   *
+   * Awareness keys its states by Yjs client id, which the roster never sees.
+   * The binding publishes the participant id inside the `user` field, and
+   * that is what a leave names. Without this a departed peer's caret would
+   * stay on screen until the idle cutoff.
+   */
+  removeRemoteAwareness(sessionId: string, participantId: string): void {
+    const awareness = this.getAwareness(sessionId)
+    if (!awareness) return
+    const departed: number[] = []
+    awareness.getStates().forEach((state, clientId) => {
+      if (clientId === awareness.clientID) return
+      const user = (state as AwarenessUserState).user
+      if (user?.participantId === participantId) departed.push(clientId)
+    })
+    if (departed.length > 0) removeAwarenessStates(awareness, departed, CANVAS_REMOTE_ORIGIN)
+  }
+
+  private ensureDocument(documentId: string, content: string, seed = true): CRDTDocument {
     const existing = this.documents.get(documentId)
     if (existing) return existing
 
     const doc = new Y.Doc()
     const text = doc.getText(CANVAS_TEXT_KEY)
-    if (content.length > 0) text.insert(0, content)
+    const seededLocally = seed && content.length > 0
+    if (seededLocally) text.insert(0, content)
 
-    const record: CRDTDocument = { id: documentId, content: text.toString(), version: 0, doc, text }
+    const record: CRDTDocument = {
+      id: documentId,
+      content: text.toString(),
+      version: 0,
+      doc,
+      text,
+      awareness: null,
+      seededLocally,
+    }
     // One observer keeps the string projection true for every local and remote
     // change, so no caller has to remember to re-read it.
     text.observe(() => {
@@ -213,9 +409,41 @@ export class CanvasCRDTStore {
    */
   sessionIdForDocument(documentId: string): string | null {
     for (const session of this.sessions.values()) {
-      if (session.documentId === documentId && session.isActive) return session.id
+      if (
+        session.documentId === documentId &&
+        session.isActive &&
+        !this.pendingSessions.has(session.id)
+      ) {
+        return session.id
+      }
     }
     return null
+  }
+
+  /** Make a pending session visible to the editor, once its document is current. */
+  markSessionReady(sessionId: string): void {
+    if (!this.pendingSessions.delete(sessionId)) return
+    this.notifySessionsChanged()
+  }
+
+  /** Whether the session's text was inserted here rather than received. */
+  isSeededLocally(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    return this.documents.get(session.documentId)?.seededLocally ?? false
+  }
+
+  /**
+   * Insert the starting text on this device, for a session that will never
+   * reach the plane. Only valid on an empty document.
+   */
+  seedLocally(sessionId: string, content: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const record = this.documents.get(session.documentId)
+    if (!record || record.text.length > 0 || content.length === 0) return
+    record.text.insert(0, content)
+    record.seededLocally = true
   }
 
   /**
@@ -239,10 +467,25 @@ export class CanvasCRDTStore {
     }
   }
 
-  createSession(documentId: string, content: string): CollaborativeSession {
+  /**
+   * Open a session on a document.
+   *
+   * `pending` is the path to the plane: the document starts empty and stays
+   * invisible to the editor until the caller has applied the server's state
+   * and called `markSessionReady`. Without it the content is inserted here,
+   * which is right for a session that stays on this device and wrong for one
+   * that joins the plane, where every device would contribute its own copy of
+   * the same text.
+   */
+  createSession(
+    documentId: string,
+    content: string,
+    options: { pending?: boolean } = {}
+  ): CollaborativeSession {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-    this.ensureDocument(documentId, content)
+    this.ensureDocument(documentId, content, !options.pending)
+    if (options.pending) this.pendingSessions.add(sessionId)
 
     const session: CollaborativeSession = {
       id: sessionId,
@@ -487,12 +730,17 @@ export class CanvasCRDTStore {
     if (session) {
       session.isActive = false
       this.sessions.delete(sessionId)
+      this.pendingSessions.delete(sessionId)
       // Destroying the doc releases its observers. Leaving it would keep the
-      // whole history alive for the life of the tab.
-      this.documents.get(session.documentId)?.doc.destroy()
+      // whole history alive for the life of the tab. The awareness goes first
+      // because it runs an interval of its own.
+      const record = this.documents.get(session.documentId)
+      record?.awareness?.destroy()
+      record?.doc.destroy()
       this.documents.delete(session.documentId)
       this.listeners.delete(sessionId)
       this.localUpdateListeners.delete(session.documentId)
+      this.localAwarenessListeners.delete(session.documentId)
       persistSessionClose(sessionId)
       this.notifySessionsChanged()
     }

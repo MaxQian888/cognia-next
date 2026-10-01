@@ -62,6 +62,15 @@ const SOCKET_TICKET_TTL_MS: i64 = 30_000;
 /// pages with `since`, which is also what stops a very old peer from asking
 /// for a response the server has to build in memory all at once.
 const CATCH_UP_PAGE: i64 = 512;
+/// Pages one socket `sync` request may walk. A client far enough behind to
+/// need more is better served by the paged HTTP route, and the bound keeps one
+/// request from holding the connection's writer for an unbounded time.
+const SOCKET_CATCH_UP_MAX_PAGES: usize = 64;
+/// The largest awareness frame relayed, in bytes of its base64 payload. An
+/// awareness state is a cursor, a selection and a name: kilobytes at most.
+/// Every frame is fanned out to the whole room, so the cap is what stops one
+/// connection from using the room as an amplifier.
+const MAX_AWARENESS_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 struct SocketTicket {
@@ -600,6 +609,9 @@ fn broadcast_update(
             "update": record.payload,
             "origin": participant_id,
             "timestamp": record.created_at,
+            // What lets a client resume from where it stopped reading rather
+            // than asking for the whole log again after every reconnect.
+            "sequence": record.sequence,
         }),
         timestamp: record.created_at,
     };
@@ -927,7 +939,7 @@ async fn stream_loop(
     // frame into it. It merges two sources: what this connection is answering
     // directly, and what the document is broadcasting to everyone.
     let mine = connection.participant_id.clone();
-    let writer = tokio::spawn(async move {
+    let mut writer = tokio::spawn(async move {
         loop {
             let frame = tokio::select! {
                 direct = outbound_rx.recv() => match direct {
@@ -959,9 +971,23 @@ async fn stream_loop(
                 break;
             }
         }
+        // Closing is what tells the client to reconnect and catch up. The
+        // writer used to just stop, which left a lagged connection open and
+        // silent: the client kept sending, never heard anything again, and
+        // had no reason to recover.
+        let _ = sink.close().await;
     });
 
-    while let Some(Ok(message)) = stream.next().await {
+    loop {
+        let message = tokio::select! {
+            next = stream.next() => match next {
+                Some(Ok(message)) => message,
+                _ => break,
+            },
+            // The writer gave up (lagged, or the socket failed). Reading on
+            // would keep a connection nobody can hear from.
+            _ = &mut writer => break,
+        };
         let Message::Text(text) = message else {
             // Binary, ping and pong need no handling: axum answers pings, and
             // every Canvas frame is JSON.
@@ -1035,9 +1061,34 @@ async fn handle_frame(
             let _ = state.canvas_hub.sender(&connection.document_id).send(frame);
             true
         }
+        // Awareness is the same kind of fact in y-protocols' own encoding:
+        // who is here and where their caret is. Relayed, never stored, and
+        // opaque to the server exactly as document updates are.
+        "awareness" => {
+            relay_awareness(state, connection, frame);
+            true
+        }
         "sync" => handle_sync(state, connection, outbound, frame).await,
         _ => true,
     }
+}
+
+fn relay_awareness(state: &AppState, connection: &Connection, mut frame: CanvasFrame) {
+    let Some(update) = frame.data.get("update").and_then(|value| value.as_str()) else {
+        return;
+    };
+    if update.is_empty() || update.len() > MAX_AWARENESS_BYTES {
+        return;
+    }
+    // Relayed under the participant this connection joined as, not the one
+    // the frame names. Peers match a departure to awareness by that id, so a
+    // frame claiming somebody else's would let one connection's caret outlive
+    // the other's, or be dropped when the other leaves. No join yet, no relay.
+    let Some(participant_id) = connection.participant_id.read().clone() else {
+        return;
+    };
+    frame.participant_id = participant_id;
+    let _ = state.canvas_hub.sender(&connection.document_id).send(frame);
 }
 
 async fn handle_presence(
@@ -1179,39 +1230,97 @@ async fn handle_sync(
         .and_then(|value| value.as_i64())
         .unwrap_or(0)
         .max(0);
-    let Ok(caught_up) = state
-        .canvas_store
-        .catch_up(
-            &connection.org_id,
-            &connection.document_id,
-            since,
-            CATCH_UP_PAGE,
-        )
-        .await
-    else {
-        return true;
-    };
-    // Baseline first, then each update in order. Applying them one at a time
-    // is equivalent to applying a merged update, which is what lets this
-    // server relay Yjs without linking it.
-    let mut payloads: Vec<String> = Vec::new();
-    if let Some(snapshot) = caught_up.snapshot {
-        payloads.push(snapshot);
-    }
-    payloads.extend(caught_up.updates.into_iter().map(|update| update.payload));
-    for payload in payloads {
-        let sent = outbound
-            .send(CanvasFrame {
-                kind: "sync".into(),
-                session_id: connection.document_id.clone(),
-                participant_id: "server".into(),
-                data: serde_json::json!({ "action": "response", "state": payload }),
-                timestamp: (state.now)(),
-            })
-            .await;
-        if sent.is_err() {
-            return false;
+    send_catch_up(
+        state,
+        connection,
+        outbound,
+        since,
+        CATCH_UP_PAGE,
+        SOCKET_CATCH_UP_MAX_PAGES,
+    )
+    .await
+}
+
+/// Send everything after `since` as `sync` frames, page by page.
+///
+/// Baseline first, then each update in order, each frame naming the sequence
+/// it brings the client up to. Applying them one at a time is equivalent to
+/// applying a merged update, which is what lets this server relay Yjs without
+/// linking it.
+///
+/// This used to send one page and stop, with nothing in the frames to say more
+/// was waiting, so a client whose document had more history than a page
+/// silently lost the tail on every join.
+async fn send_catch_up(
+    state: &AppState,
+    connection: &Connection,
+    outbound: &tokio::sync::mpsc::Sender<CanvasFrame>,
+    since: i64,
+    page_size: i64,
+    max_pages: usize,
+) -> bool {
+    let mut cursor = since;
+    for _ in 0..max_pages {
+        let Ok(caught_up) = state
+            .canvas_store
+            .catch_up(
+                &connection.org_id,
+                &connection.document_id,
+                cursor,
+                page_size,
+            )
+            .await
+        else {
+            return true;
+        };
+        // The flag tells the client a frame covers every sequence up to its
+        // own, rather than being that one update: a snapshot replaces the
+        // updates it folded in, which no longer exist to be sent.
+        let mut payloads: Vec<(String, i64, bool)> = Vec::new();
+        if let Some(snapshot) = caught_up.snapshot {
+            payloads.push((snapshot, caught_up.snapshot_sequence, true));
         }
+        payloads.extend(
+            caught_up
+                .updates
+                .iter()
+                .map(|update| (update.payload.clone(), update.sequence, false)),
+        );
+        let next = payloads
+            .iter()
+            .map(|(_, sequence, _)| *sequence)
+            .max()
+            .unwrap_or(cursor)
+            .max(cursor);
+        for (payload, sequence, snapshot) in payloads {
+            let sent = outbound
+                .send(CanvasFrame {
+                    kind: "sync".into(),
+                    session_id: connection.document_id.clone(),
+                    participant_id: "server".into(),
+                    data: serde_json::json!({
+                        "action": "response",
+                        "state": payload,
+                        "sequence": sequence,
+                        "snapshot": snapshot,
+                    }),
+                    timestamp: (state.now)(),
+                })
+                .await;
+            if sent.is_err() {
+                return false;
+            }
+        }
+        let has_more = caught_up
+            .updates
+            .last()
+            .is_some_and(|update| update.sequence < caught_up.latest_sequence);
+        // A page that did not move the cursor forward cannot be followed by
+        // one that does, so asking again would only repeat it.
+        if !has_more || next == cursor {
+            return true;
+        }
+        cursor = next;
     }
     true
 }
@@ -1695,6 +1804,302 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    fn test_state(store: InMemoryStore, canvas: Arc<InMemoryCanvasStore>) -> AppState {
+        let mut state = AppState::new(
+            Arc::new(store),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        )
+        .with_canvas_store(canvas)
+        .with_canvas_enabled(true);
+        state.now = Arc::new(|| 1_000);
+        state
+    }
+
+    fn connection_for(user: &UserId) -> Connection {
+        Connection {
+            org_id: ORG.into(),
+            document_id: DOCUMENT.into(),
+            workspace_id: "proj-1".into(),
+            user_id: user.as_str().into(),
+            participant_id: Arc::new(RwLock::new(Some("p-self".into()))),
+        }
+    }
+
+    async fn push_updates(store: &InMemoryStore, canvas: &Arc<InMemoryCanvasStore>, count: usize) {
+        for index in 0..count {
+            let (status, _) = call(
+                app(store.clone(), canvas.clone()),
+                request(
+                    "POST",
+                    &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/updates"),
+                    &token_for(&ada()),
+                    Some(serde_json::json!({
+                        "update": encode(format!("update {index}").as_bytes()),
+                        "operationId": format!("op_{index}"),
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_socket_catch_up_walks_every_page_and_names_each_sequence() {
+        let (store, canvas) = with_document().await;
+        push_updates(&store, &canvas, 5).await;
+        let state = test_state(store, canvas);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+        assert!(send_catch_up(&state, &connection_for(&ada()), &tx, 0, 2, 16).await);
+        drop(tx);
+        let mut sequences = Vec::new();
+        while let Some(frame) = rx.recv().await {
+            assert_eq!(frame.kind, "sync");
+            assert_eq!(frame.data["action"], "response");
+            sequences.push(frame.data["sequence"].as_i64().unwrap());
+        }
+        assert_eq!(
+            sequences,
+            vec![1, 2, 3, 4, 5],
+            "a page smaller than the log must not cut the tail off"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_socket_catch_up_resumes_after_the_sequence_the_client_names() {
+        let (store, canvas) = with_document().await;
+        push_updates(&store, &canvas, 4).await;
+        let state = test_state(store, canvas);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+        assert!(send_catch_up(&state, &connection_for(&ada()), &tx, 2, 512, 16).await);
+        drop(tx);
+        let mut sequences = Vec::new();
+        while let Some(frame) = rx.recv().await {
+            sequences.push(frame.data["sequence"].as_i64().unwrap());
+        }
+        assert_eq!(sequences, vec![3, 4]);
+    }
+
+    #[tokio::test]
+    async fn a_relayed_update_names_its_sequence() {
+        let (store, canvas) = with_document().await;
+        let state = test_state(store, canvas);
+        let mut receiver = state.canvas_hub.sender(DOCUMENT).subscribe();
+        let (status, _) = call(
+            crate::api::router(state.clone()),
+            request(
+                "POST",
+                &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/updates"),
+                &token_for(&ada()),
+                Some(serde_json::json!({
+                    "update": encode(b"first"),
+                    "operationId": "op_first",
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let frame = receiver
+            .try_recv()
+            .expect("the update is relayed to the room");
+        assert_eq!(frame.kind, "operation");
+        assert_eq!(frame.data["sequence"], 1);
+        assert_eq!(frame.data["id"], "op_first");
+    }
+
+    #[tokio::test]
+    async fn awareness_is_relayed_to_the_room_and_never_stored() {
+        let (store, canvas) = with_document().await;
+        let state = test_state(store, canvas.clone());
+        let mut receiver = state.canvas_hub.sender(DOCUMENT).subscribe();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let frame = CanvasFrame {
+            kind: "awareness".into(),
+            session_id: DOCUMENT.into(),
+            participant_id: "p-self".into(),
+            data: serde_json::json!({ "update": encode(b"caret") }),
+            timestamp: 1,
+        };
+
+        // A viewer may be seen: awareness is read-level, like a cursor.
+        assert!(handle_frame(&state, &connection_for(&viv()), &tx, frame).await);
+        let relayed = receiver.try_recv().expect("awareness reaches the room");
+        assert_eq!(relayed.kind, "awareness");
+        assert_eq!(relayed.data["update"], encode(b"caret"));
+        assert_eq!(relayed.participant_id, "p-self");
+
+        let (_, caught_up) = call(
+            app(seeded(), canvas),
+            request(
+                "GET",
+                &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/updates?since=0"),
+                &token_for(&ada()),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(
+            caught_up["latestSequence"], 0,
+            "awareness is not a document update"
+        );
+    }
+
+    #[tokio::test]
+    async fn awareness_is_relayed_as_the_participant_the_connection_joined_as() {
+        let (store, canvas) = with_document().await;
+        let state = test_state(store, canvas);
+        let mut receiver = state.canvas_hub.sender(DOCUMENT).subscribe();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let spoofed = CanvasFrame {
+            kind: "awareness".into(),
+            session_id: DOCUMENT.into(),
+            participant_id: "somebody-else".into(),
+            data: serde_json::json!({ "update": encode(b"caret") }),
+            timestamp: 1,
+        };
+        assert!(handle_frame(&state, &connection_for(&ada()), &tx, spoofed.clone()).await);
+        assert_eq!(receiver.try_recv().unwrap().participant_id, "p-self");
+
+        // A connection that has not joined has no participant to speak for.
+        let mut unjoined = connection_for(&ada());
+        unjoined.participant_id = Arc::new(RwLock::new(None));
+        assert!(handle_frame(&state, &unjoined, &tx, spoofed).await);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn a_socket_catch_up_marks_the_snapshot_as_covering_what_it_folded_in() {
+        let (store, canvas) = with_document().await;
+        push_updates(&store, &canvas, 3).await;
+        let (status, _) = call(
+            app(store.clone(), canvas.clone()),
+            request(
+                "POST",
+                &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/snapshots"),
+                &token_for(&ada()),
+                Some(serde_json::json!({ "snapshot": encode(b"folded"), "coversSequence": 2 })),
+            ),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK, "a member may not compact");
+        store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Maintainer);
+        let (status, _) = call(
+            app(store.clone(), canvas.clone()),
+            request(
+                "POST",
+                &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/snapshots"),
+                &token_for(&ada()),
+                Some(serde_json::json!({ "snapshot": encode(b"folded"), "coversSequence": 2 })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let state = test_state(store, canvas);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        assert!(send_catch_up(&state, &connection_for(&ada()), &tx, 0, 512, 16).await);
+        drop(tx);
+        let mut frames = Vec::new();
+        while let Some(frame) = rx.recv().await {
+            frames.push((
+                frame.data["sequence"].as_i64().unwrap(),
+                frame.data["snapshot"].as_bool().unwrap(),
+            ));
+        }
+        assert_eq!(frames, vec![(2, true), (3, false)]);
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_falls_behind_is_closed_rather_than_left_silent() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let (store, canvas) = with_document().await;
+        let state = test_state(store, canvas);
+        let (status, body) = call(
+            crate::api::router(state.clone()),
+            request(
+                "POST",
+                &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/stream-tickets"),
+                &token_for(&ada()),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let ticket = body["ticket"].as_str().unwrap().to_owned();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let state_for_server = state.clone();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, crate::api::router(state_for_server)).await;
+        });
+
+        let mut handshake =
+            format!("ws://{address}/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/stream")
+                .into_client_request()
+                .unwrap();
+        handshake.headers_mut().insert(
+            "sec-websocket-protocol",
+            format!("{CANVAS_SUBPROTOCOL}, {ticket}").parse().unwrap(),
+        );
+        let (mut client, _) = tokio_tungstenite::connect_async(handshake).await.unwrap();
+
+        // The test runtime is single-threaded, so nothing drains the
+        // connection's receiver while these are published: it lags.
+        let sender = state.canvas_hub.sender(DOCUMENT);
+        for index in 0..600 {
+            let _ = sender.send(CanvasFrame {
+                kind: "cursor".into(),
+                session_id: DOCUMENT.into(),
+                participant_id: "p-other".into(),
+                data: serde_json::json!({ "line": index }),
+                timestamp: index,
+            });
+        }
+
+        let ended = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(message) = client.next().await {
+                match message {
+                    Ok(tokio_tungstenite::tungstenite::Message::Close(_)) | Err(_) => return,
+                    Ok(_) => {}
+                }
+            }
+        })
+        .await;
+        assert!(
+            ended.is_ok(),
+            "a lagged connection must be closed so the client reconnects and catches up"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn an_oversized_or_empty_awareness_frame_is_dropped() {
+        let (store, canvas) = with_document().await;
+        let state = test_state(store, canvas);
+        let mut receiver = state.canvas_hub.sender(DOCUMENT).subscribe();
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        for update in [String::new(), "A".repeat(MAX_AWARENESS_BYTES + 1)] {
+            let frame = CanvasFrame {
+                kind: "awareness".into(),
+                session_id: DOCUMENT.into(),
+                participant_id: "p-self".into(),
+                data: serde_json::json!({ "update": update }),
+                timestamp: 1,
+            };
+            assert!(handle_frame(&state, &connection_for(&ada()), &tx, frame).await);
+        }
+        assert!(
+            receiver.try_recv().is_err(),
+            "nothing unbounded is fanned out to the room"
+        );
     }
 
     fn ticket(expires_at: i64) -> SocketTicket {

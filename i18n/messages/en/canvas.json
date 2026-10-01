@@ -219,6 +219,7 @@
   "linesCount": "{count, plural, =1 {# line} other {# lines}}",
   "linesRange": "Lines {start}–{end}",
   "loadingEditor": "Loading editor…",
+  "localCopyBeforeCollaboration": "This device's copy, before joining the shared document",
   "modified": "Modified",
   "moreVersions": "+{count} more",
   "new": "New",

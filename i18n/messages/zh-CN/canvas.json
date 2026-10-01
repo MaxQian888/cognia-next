@@ -219,6 +219,7 @@
   "linesCount": "{count, plural, other {# 行}}",
   "linesRange": "第 {start}–{end} 行",
   "loadingEditor": "加载编辑器中…",
+  "localCopyBeforeCollaboration": "加入共享文档前本设备上的副本",
   "modified": "已修改",
   "moreVersions": "+{count} 个版本",
   "new": "新建",

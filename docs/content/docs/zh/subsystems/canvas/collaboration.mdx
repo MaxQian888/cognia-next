@@ -12,7 +12,7 @@ description: 基于 Yjs 的可选实时多人协同编辑 —— Monaco 与 Code
   CodeMirror 写入它的 `Y.Text`（`editor-binding.ts`），一条文档级更新总线把每次本地改动发出去，包括 AI 应用、
   模型工具写入和插件写入。绑定生效期间，artifact store 的 `content` 是 `Y.Text` 的防抖投影。传输走协同服务端
   （ADR-0149，`crates/cognia-collab-server/src/canvas_api.rs`）：按序存储不透明更新，按
-  `(document_id, operation_id)` 去重，从不解码，并在每个入站编辑帧上重新解析调用者的工作区角色。成员关系沿用
+  `(document_id, operation_id)` 去重，从不解码，并在每个入站编辑帧上重新解析调用者的工作区角色。加入的客户端在编辑器绑定之前先取得协同平面的状态，只有文档为空时才用本地内容做种子；光标以 y-protocols awareness 传递。成员关系沿用
   工作区的角色阶梯：viewer 只读，member 编辑和评论，maintainer 压缩和删除。默认关闭，由
   `COLLAB_CANVAS_ENABLED` 与 `canvas.collaboration.enabled` 控制。
 </TLDR>
@@ -69,14 +69,14 @@ flowchart LR
 
 | 文件 | 职责 |
 | --- | --- |
-| `lib/canvas/collaboration/crdt-store.ts` | `CanvasCRDTStore` 与 `crdtStore` 单例：每个文档一个 `Y.Doc`、会话注册表、本地更新总线、远端应用、快照 |
+| `lib/canvas/collaboration/crdt-store.ts` | `CanvasCRDTStore` 与 `crdtStore` 单例：每个文档一个 `Y.Doc` 和一个 `Awareness`、会话注册表（含待定会话）、本地更新与本地 awareness 两条总线、远端应用、快照、`encodeSeedUpdate` |
 | `lib/canvas/collaboration/editor-binding.ts` | `bindMonacoEditor`（y-monaco）、`codeMirrorCollabExtensions`（y-codemirror.next）、awareness 用户、在线状态样式表 |
-| `lib/canvas/collaboration/websocket-provider.ts` | `CanvasWebSocketProvider`：连接工厂、重连、心跳、内存队列、帧路由 |
-| `lib/canvas/collaboration/canvas-transport.ts` | `resolveCanvasTransport`、`publishCanvasDocument`、`resolveCanvasShareTarget`：把文档绑定到组织、工作区和协同平面 |
+| `lib/canvas/collaboration/websocket-provider.ts` | `CanvasWebSocketProvider`：连接工厂、重连与追赶、心跳、内存队列、帧路由、最后应用的序号 |
+| `lib/canvas/collaboration/canvas-transport.ts` | `resolveCanvasTransport`、`publishCanvasDocument`、`resolveCanvasShareTarget`，以及协同平面侧的同步：`catchUpCanvasDocument`（分页）与 `hydrateCanvasSession`（加入或做种子） |
 | `lib/canvas/collaboration/relative-anchor.ts` | `encodeCrdtAnchor` / `resolveCrdtAnchor`：以 Yjs 相对位置表示的评论锚点 |
 | `lib/canvas/collaboration/share-link.ts` | `buildCanvasSharePath` / `parseCanvasShareLink`：只含 id 的加入链接 |
 | `hooks/canvas/use-canvas-collaborative-editor.ts` | 把当前编辑器绑定到实时会话，并把 `Y.Text` 投影回 artifact store |
-| `hooks/canvas/use-collaborative-session.ts` | 为面板创建、连接和拆除会话 |
+| `hooks/canvas/use-collaborative-session.ts` | 为面板创建、水合、连接和拆除会话 |
 | `hooks/canvas/use-canvas-comment-anchors.ts` | 针对实时文档编码和解析评论锚点 |
 | `lib/collab/client.ts` | `CollabClient`：Canvas 的 REST 方法和 `openCanvasStream` |
 | `crates/cognia-collab-server/src/canvas_api.rs` | 路由、流票据、按文档的 hub、帧处理 |
@@ -107,8 +107,8 @@ sequenceDiagram
   S->>S: may_edit：重新解析调用者的工作区角色
   S->>DB: append_update（按 document_id + operation_id 去重）
   DB-->>S: 带序号的已存行
-  S-->>PB: 广播 "operation"（跳过发送者自己的回声）
-  PB->>YB: applyRemoteUpdate → Y.applyUpdate(..., CANVAS_REMOTE_ORIGIN)
+  S-->>PB: 广播带序号的 "operation"（跳过发送者自己的回声）
+  PB->>YB: applyRemoteUpdate → Y.applyUpdate(..., CANVAS_REMOTE_ORIGIN)；记下序号
   Note over YB: 哨兵 origin 让它不进入本地总线
   YB->>AS: Y.Text observe → 400 ms 防抖 → updateCanvasDocument
 ```
@@ -116,13 +116,20 @@ sequenceDiagram
 ## 文档与会话
 
 `CanvasCRDTStore.ensureDocument` 为每个文档 id 创建一个 `Y.Doc`，并以 `doc.getText(CANVAS_TEXT_KEY)` 读取文本，其中
-`CANVAS_TEXT_KEY = "content"`。非空的起始正文会被插入 `Y.Text`，一个 `text.observe` 让记录的 `content` 与 `version` 保持同步。
+`CANVAS_TEXT_KEY = "content"`。一个 `text.observe` 让记录的 `content` 与 `version` 保持同步。
 
-- **会话。** `createSession(documentId, content)` 生成 `session-<timestamp>-<random>`，标记创建者的权限，并通过
+- **会话。** `createSession(documentId, content, { pending })` 生成 `session-<timestamp>-<random>`，标记创建者的权限，并通过
   `lib/db/canvas-sessions.ts` 把会话元数据持久化到 Dexie 的 `canvasSessions` 表。那里只存元数据；Yjs 状态不在本地持久化，由协同平面保存。
-  `joinSession`、`leaveSession`、`adoptSession` 和 `closeSession` 构成完整生命周期，`closeSession` 会销毁 `Y.Doc`。
+  `joinSession`、`leaveSession`、`adoptSession` 和 `closeSession` 构成完整生命周期，`closeSession` 会销毁 awareness 和 `Y.Doc`。
+- **待定会话。** 使用 `pending: true`（`connect` 就这样用）时，文档从空开始，在 `markSessionReady` 之前 `sessionIdForDocument` 不会返回它。
+  编辑器绑定到它返回的会话，因此在协同平面应答之前绑定，会显示一个空缓冲区并把它投影覆盖存储的文档。不带 `pending` 时，内容在本设备插入，
+  文档被标记为 `seededLocally`；`seedLocally` 对保持本地的待定会话做同样的事。本地做种子的文档永远不会加入协同平面，因为它的 Yjs 条目在别处都不存在，
+  与协同平面的状态合并会把文本插入两遍。
 - **注册表。** `onSessionsChanged(listener)` 和 `sessionIdForDocument(documentId)` 是编辑器 hook 交给
   `useSyncExternalStore` 的两样东西。`sessionIdForDocument` 刻意返回字符串，因为快照比较能比较的正是它。
+- **Awareness。** `getAwareness(sessionId)` 返回该文档唯一的 `y-protocols` `Awareness`，首次使用时才创建（它为空闲截止运行一个定时器）。
+  `onLocalAwarenessUpdate` 只在本客户端自身状态变化时触发，并已编码为线上格式；远端状态以远端哨兵经 `applyRemoteAwareness` 应用，
+  `removeRemoteAwareness(participantId)` 移除离开的对端（通过绑定发布的 `user.participantId` 匹配），`encodeLocalAwareness` 是发给新加入者的内容。
 - **本地更新总线。** store 对每个文档监听一次 `doc.on("update")`。origin 不是 `CANVAS_REMOTE_ORIGIN`
   （`"cognia:canvas:remote"`）的任何事务都算本地：它被包装成 `CRDTOperation`（`id`、base64 `update`、`origin`、`timestamp`），交给
   `onLocalUpdate` 的订阅者。按唯一的远端哨兵过滤，而不是按一份本地来源清单过滤，正是 AI 应用、模型工具写入和插件写入能与打字以同样方式发出的原因。
@@ -138,8 +145,9 @@ sequenceDiagram
 
 1. `useSessionId` 订阅注册表，给出该文档的实时会话；前提是 hook 的 `enabled`（`canvas.collaboration.v1` 功能开关）和
    `CanvasSettings.collaboration.enabled` 都已开启。
-2. 针对该会话，它在 `Y.Doc` 上创建一个 `y-protocols` 的 `Awareness`，把本地用户发布为 awareness 的 `user` 字段（`name`、`color`、
-   `participantId`），应用在线超时，并构建 CodeMirror 扩展。
+2. 针对该会话，它读取 store 的 `Awareness`（从不自己创建：第二个实例就是一个连接不会承载的客户端），把本地用户发布为 awareness 的
+   `user` 字段（`name`、`color`、`participantId`），应用在线超时，并构建 CodeMirror 扩展。编辑器离开文档时清空自己的本地状态，
+   这会告诉对端这个光标已经消失；awareness 随会话一起由 store 销毁。
 3. **Monaco**（桌面）：`bindMonacoEditor` 在 Monaco 的 `onMount` 中创建 `MonacoBinding(ytext, model, editors, awareness)`；
    当前文档切换或编辑器卸载时执行拆除。**CodeMirror**（移动端 `LightCodeEditor`）：`codeMirrorCollabExtensions` 返回
    `yCollab(ytext, awareness)`。
@@ -174,15 +182,39 @@ sequenceDiagram
 因此遵循桌面端的代理设置。连接之前，`publishCanvasDocument` 在协同平面上获取文档，遇到 404 就以操作 id `canvas-create:<documentId>`
 创建它；创建时遇到 403 或 404 表示没有写权限。
 
+### 加入文档
+
+`useCollaborativeSession.connect(documentId, content)` 打开一个待定会话，`attachTransport` 按固定顺序把它带上协同平面：
+
+1. 解析传输并发布文档行。没有协同平面，或没有创建该行的写权限时，会话在本设备落定（`seedLocally`，然后 `markSessionReady`），
+   用的是此刻的文本，而不是调用 `connect` 时的文本。已经在本设备做过种子的文档永远不会加入协同平面。
+2. 创建 provider，并在连接打开**之前**把它订阅到本地更新与本地 awareness 两条总线，这样本设备在连接期间做的任何事都不会漏发。
+3. 打开连接，使追赶期间写入的更新实时到达，而不是落进两者之间的空隙。
+4. `hydrateCanvasSession` 用 `catchUpCanvasDocument` 分页取回协同平面的状态。如果协同平面什么都没有，就把本地副本作为种子发布。
+   本地副本此时才从 artifact store 读取，且先由 `flushPendingCanvasEdits`（`lib/canvas/pending-edits.ts`）让编辑器提交仍在防抖中等待的按键，
+   因此包含连接期间输入的文字。种子由 `encodeSeedUpdate` 在一个临时 `Y.Doc` 中构建，并以操作 id
+   `canvas-seed:<documentId>` 提交。两台设备竞争做种子时会在这个 id 上冲突，服务端把第一份种子返回给第二台，于是两者收敛到同一个基线，
+   而不是两份文本。发现协同平面为空的 viewer 会得到 `CanvasSeedForbiddenError`。
+5. `adoptPlaneContent` 比较共享文本与 artifact store。两者不同且本地副本非空时，先把本地副本保存为一个版本（「加入共享文档前本设备上的副本」），
+   再用共享文本替换它。然后会话被标记为就绪，编辑器开始绑定。
+
+每次 await 之后，`attachTransport` 都会确认会话仍是 hook 持有的那个：会话一存在就提供「结束会话」，关闭面板标签页也会卸载它，所以用户随时可能结束会话。
+若已结束，这次调用只拆除自己建立的东西（订阅和 provider），既不碰 artifact store，也不碰协同平面。`adoptPlaneContent` 也会拒绝已经没有文档的会话，
+而不是把它当作空文本。会话仍有效时某一步失败，同样执行拆除、关闭会话并进入 `error`；会话从未对编辑器可见，所以本地文档保持原样。
+绑定生效时，canvas 面板会取消仍在等待的按键批次，因为它属于刚被共享文档替换掉的文本。对没有活动 provider 的会话调用 `joinSession`，
+会关闭它并重新运行 `connect`，而不是原地接入。
+
 ### `CanvasWebSocketProvider`
 
 | 关注点 | 行为 |
 | --- | --- |
 | 构造 | 接收一个 `openSocket` 工厂，从不接收 URL 或令牌。没有工厂时，`connect` 抛出 `CanvasTransportUnavailableError`（`CANVAS_REMOTE_AUTH_REQUIRED`）：传输层以关闭的方式失败 |
-| 连接 | 调用工厂，置为 `connected`，启动心跳，以真实参与者发送 `presence` `join`，然后刷出队列 |
-| 重连 | `handleDisconnect` 在固定的 `reconnectInterval`（1000 ms）后重试，最多 `reconnectAttempts`（5）次，每次都重新调用工厂，从而申请新的一次性票据。它以已保存的参与者身份重新加入，之后调用 `requestSync`。没有指数退避 |
+| 连接 | 调用工厂，置为 `connected`，启动心跳，以真实参与者发送 `presence` `join`，然后刷出队列。在 `disconnect()` 之后才打开完成的连接会被关闭，而不是保留 |
+| 重连 | `handleDisconnect` 在固定的 `reconnectInterval`（1000 ms）后重试，最多 `reconnectAttempts`（5）次，每次都重新调用工厂，从而申请新的一次性票据。它以已保存的参与者身份重新加入，然后从最后应用的序号运行 `catchUp` 回调（分页的 HTTP 追赶）；追赶失败时退回到从该序号发起的连接 `sync` 请求。没有指数退避 |
+| 序号 | 每个转发的 `operation` 和每个 `sync` 响应都带有服务端序号。provider 维护一个水位：不超过它的每个序号都已应用。`noteSequence` 记录单条更新，只在连续序列上推进水位，因为服务端从写入它的请求中转发每条更新，6 可能先于 5 到达；`noteCaughtUpTo` 覆盖一次追赶或一个快照帧（`snapshot: true`）之下的全部序号。客户端自己的更新从不回传，所以水位停在它的第一次编辑处，恢复时会重取少量已有的更新，Yjs 会忽略它们 |
 | 心跳 | 连接期间每 30 000 ms 发送一次 `presence` `heartbeat` |
-| 队列 | 连接未就绪或发送失败时，`dispatch` 把帧排队；`flushMessageQueue` 在 join 帧之后按顺序排空。队列在内存中，重新加载后不保留 |
+| 队列 | 连接未就绪或发送失败时，`dispatch` 把帧排队；`flushMessageQueue` 在 join 帧之后按顺序排空。`cursor`、`selection` 和 `awareness` 是易失帧，从不排队。队列在内存中，重新加载后不保留 |
+| Awareness | 加入后以新的时钟续发本客户端的 awareness（`renewLocalAwareness`），因为丢弃过它的对端会忽略旧时钟下的重发；每当有其他参与者加入时再发一次；收到 `presence` `leave` 时移除离开者的 awareness |
 | 错误 | 连接错误、工厂抛错或服务端 `error` 帧都报告 `error`；只有主动 `disconnect()` 或重试耗尽才报告 `disconnected` |
 
 ### 帧
@@ -191,10 +223,11 @@ sequenceDiagram
 
 | `type` | 客户端发送 | 服务端处理 |
 | --- | --- | --- |
-| `operation` | `data` 为 `CRDTOperation` | 重新检查编辑权限，追加，在写入持久化之后广播 |
+| `operation` | `data` 为 `CRDTOperation` | 重新检查编辑权限，追加，在写入持久化之后广播，并附上该行的 `sequence` |
 | `presence` | `join`、`heartbeat`、`leave` | `join` 以票据中的用户 id 记录在线状态，并向加入者重放成员列表；`heartbeat` 刷新；`leave` 关闭连接 |
-| `sync` | `action: "request"`、`since` | 回复快照（调用者落后于快照时）和其后的每条更新，每个载荷一帧 `sync` `response`，发送者为 `"server"` |
-| `cursor`、`selection` | 光标 / 行范围 | 转发给房间，不存储，不逐帧检查角色 |
+| `sync` | `action: "request"`、`since`（水位） | 回复快照（调用者落后于快照时，标记 `snapshot: true`）和其后的每条更新，每个载荷一帧带 `sequence` 的 `sync` `response`，发送者为 `"server"`，一直分页到日志末尾（最多 64 页、每页 512 条） |
+| `awareness` | `update`：base64 的 y-protocols awareness 更新 | 以连接加入时的参与者 id（而不是帧里声称的 id）转发给房间，不存储，不逐帧检查角色；加入之前、为空或超过 64 KiB 时丢弃 |
+| `cursor`、`selection` | 光标 / 行范围 | 转发给房间，不存储，不逐帧检查角色。客户端已不再发送它们，光标改由 awareness 传递 |
 | `error` | 无 | provider 以 `error` 上报 |
 
 ## 服务端
@@ -229,8 +262,10 @@ sequenceDiagram
 
 - **不透明、有序的更新。** `append_update` 锁定文档行（`FOR UPDATE`），分配 `next_sequence`，不解码地存储载荷。`UNIQUE (document_id, operation_id)`
   让重发返回已存的行，而不是把编辑记录两遍，这正是重放队列安全的原因。载荷大小为 1 字节到 1 MiB。
-- **Hub。** 每个文档一个容量 512 的 `tokio::sync::broadcast` 通道。写出任务跳过连接自己的帧；落后的接收方会被关闭，于是它重连并追赶。
-- **追赶。** `catch_up(since, 512)` 在 `since` 落后于快照时把下限提到快照序号，并附上快照。HTTP 路由会报告 `hasMore`。
+- **Hub。** 每个文档一个容量 512 的 `tokio::sync::broadcast` 通道。写出任务跳过连接自己的帧。落后的接收方会结束写出任务，写出任务关闭连接，读取循环也随之停止，
+  于是客户端重连并追赶，而不是保持连接却什么都收不到。
+- **追赶。** `catch_up(since, 512)` 在 `since` 落后于快照时把下限提到快照序号，并附上快照。HTTP 路由会报告 `hasMore`，客户端的
+  `catchUpCanvasDocument` 会一直跟到末尾；连接上的 `sync` 回复自己逐页发送。
 - **压缩。** 维护者的客户端发送 `Y.encodeStateAsUpdate` 以及 `coversSequence`。存储拒绝回退或越过 `latest_sequence` 的标记（403
   `snapshot does not cover a stored range`），保存快照，并删除它覆盖的更新。
 - **表。** `canvas_documents`（title、language、revision、`snapshot`、`snapshot_sequence`、`next_sequence`）、`canvas_document_updates`、
@@ -280,16 +315,14 @@ provider 的 `ConnectionState` 有五个值（`disconnected`、`connecting`、`c
 
 以下内容读自代码，并未在两台机器上实际运行观察。[ADR-0158](../../adr/0158-artifacts-and-canvas) 2026-09-30 的提议修订列出了默认值翻转之前必须落地的内容。
 
-- **远端光标不跨网络。** `Awareness` 只存在于各自的客户端：没有任何东西通过连接编码或应用 awareness 更新，所以 y-monaco 和 y-codemirror
-  只绘制本地状态。provider 的 `cursor` / `selection` 帧进入 `useCollaborativeSession` 的 `remoteCursors`，而它没有被渲染，也没有任何东西调用
-  `updateCursor` / `updateSelection`。
-- **初始内容不共享。** 每次 `createSession` 都在本地更新订阅建立之前把当前内容插入一个新的 `Y.Doc`，而且没有任何东西推送快照。两台设备各自在非空文档上启动会话，
-  持有的是互相独立的 Yjs 条目；加入者本应从空文档开始并应用发起者的快照。出于同样的原因，会话仍在连接时做的编辑不会被发送。
-- **连接上的追赶只有一页，且从零开始。** `requestSync` 总是发送 `since = 0`，连接上的回复最多 512 条更新，没有后续。分页的 HTTP 追赶（`pullCanvasUpdates`）没有调用者。
-- **协同平面的大多数方法没有调用者。** `CollabClient` 上的 Canvas 方法中，只有 `getCanvasDocument`、`createCanvasDocument` 和 `openCanvasStream`
-  被使用。快照（因而压缩）、评论、版本、在线状态、重命名、删除以及 HTTP 更新路径都未被使用。
 - **重放队列在内存中**，覆盖短暂断线，但覆盖不了重新加载。
-- **按会话 id 加入只在同一个标签页内有效。** `useCollaborativeSession.joinSession` 只能找到这个标签页 store 里已有的会话；没有任何路径能加入另一台设备打开的会话。
+- **压缩、评论和版本不在协同平面上。** `pushCanvasSnapshot`、`createCanvasComment`、`createCanvasVersion`、`readCanvasPresence`、
+  重命名和删除都没有调用者，所以没有任何东西执行压缩，评论也仍然留在本地的 `contextComments` 表里。
+- **接收者只能打开本设备已有的文档。** 加入页在本地解析文档，不会根据协同平面创建本地副本。
+- **会话之外的本地编辑会输给协同平面。** 协同平面已有该文档而本设备的副本不同时，以协同平面的文本为准，本地副本只作为一个版本保留。
+  没有对离线编辑的三方合并。
+- **遗留的光标帧。** `useCollaborativeSession` 仍然暴露 `updateCursor` / `updateSelection`，以及由 `cursor` / `selection` 帧填充的
+  `remoteCursors` 列表。没有任何东西调用或渲染它们；光标由 awareness 绘制。
 
 ## 下一步
 

@@ -61,6 +61,7 @@ export function CollaborationPanel({
 
   const sessionApi = useCollaborativeSession({
     participantName: t("anonymousParticipant"),
+    localCopyVersionLabel: t("localCopyBeforeCollaboration"),
   })
   const { session, participants, connectionState, connect, disconnect, shareTarget, joinSession } =
     collaboration || sessionApi

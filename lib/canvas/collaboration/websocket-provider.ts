@@ -27,6 +27,23 @@
  *
  * No factory means no socket. A Canvas with no collaboration server configured
  * stays local rather than half-connecting.
+ *
+ * # It knows how far it has read
+ *
+ * Every update the server relays carries its sequence, and the provider keeps
+ * the highest sequence below which it has applied everything. A reconnect
+ * resumes from there through `catchUp`, which pages until the server says
+ * there is nothing more. It used to ask the socket for everything since 0 and
+ * get one page back, so a document with more history than a page lost its
+ * tail on every rejoin.
+ *
+ * It is a watermark, not a running maximum. The server relays each update
+ * from the request that wrote it, so 6 can arrive before 5, and a socket that
+ * drops between them has seen 6 and not 5. Resuming from the maximum would
+ * never fetch 5, and every later edit from that author would wait on it for
+ * good. The cost is the other direction: this client's own updates are never
+ * echoed back, so the watermark stops at its first edit and a resume fetches
+ * a little it already has. Yjs applies those as no-ops.
  */
 
 import type {
@@ -43,7 +60,7 @@ import { loggers } from "@cognia/logging"
 const log = loggers.canvas
 
 export interface WebSocketMessage {
-  type: "operation" | "cursor" | "selection" | "presence" | "sync" | "error"
+  type: "operation" | "cursor" | "selection" | "presence" | "sync" | "awareness" | "error"
   sessionId: string
   participantId: string
   data: unknown
@@ -62,10 +79,27 @@ export type CanvasSocketFactory = (
 
 export interface WebSocketProviderConfig {
   openSocket?: CanvasSocketFactory
+  /**
+   * Bring the document up to date from `since`, returning the highest
+   * sequence now applied. Run after every reconnect. Without it the provider
+   * falls back to asking the socket, which answers from the same log.
+   */
+  catchUp?: (since: number) => Promise<number>
   reconnectAttempts?: number
   reconnectInterval?: number
   heartbeatInterval?: number
 }
+
+/**
+ * Frames worth nothing once they are stale. Cursors and awareness describe
+ * where somebody is now, so a queue replaying them after a reconnect would
+ * only move carets through positions the peer has already left.
+ */
+const VOLATILE_FRAMES: ReadonlySet<WebSocketMessage["type"]> = new Set([
+  "cursor",
+  "selection",
+  "awareness",
+])
 
 /** Thrown when a socket is asked for on an install with no server configured. */
 export class CanvasTransportUnavailableError extends Error {
@@ -95,6 +129,10 @@ export class CanvasWebSocketProvider {
   private messageQueue: WebSocketMessage[] = []
   /** Set by `disconnect`, so a deliberate close does not schedule a retry. */
   private closing = false
+  /** Every server sequence at or below this has been applied. */
+  private lastSequence = 0
+  /** Sequences applied above the watermark, waiting for the gap to close. */
+  private appliedAhead = new Set<number>()
 
   constructor(crdtStore: CanvasCRDTStore, config: WebSocketProviderConfig) {
     this.crdtStore = crdtStore
@@ -114,8 +152,9 @@ export class CanvasWebSocketProvider {
     this.participant = participant
     this.connectionState = "connecting"
 
+    let socket: PlatformWebSocket
     try {
-      this.socket = await this.config.openSocket({
+      socket = await this.config.openSocket({
         onMessage: (data) => this.handleMessage(data),
         onClose: () => this.handleDisconnect(),
         onError: (message) => {
@@ -124,10 +163,18 @@ export class CanvasWebSocketProvider {
         },
       })
     } catch (error) {
+      if (this.closing) return
       this.connectionState = "error"
       this.emitEvent({ type: "error", timestamp: new Date(), data: error })
       throw error
     }
+    // `disconnect` ran while the socket was opening. Keeping it would leave a
+    // connection and a heartbeat that nothing will ever close.
+    if (this.closing) {
+      void socket.close()
+      return
+    }
+    this.socket = socket
 
     this.connectionState = "connected"
     this.reconnectAttempts = 0
@@ -143,6 +190,7 @@ export class CanvasWebSocketProvider {
       timestamp: Date.now(),
     })
     await this.flushMessageQueue()
+    this.announceLocalAwareness()
     this.emitEvent({ type: "connected", timestamp: new Date() })
   }
 
@@ -183,6 +231,49 @@ export class CanvasWebSocketProvider {
     })
   }
 
+  /** Send this client's awareness change (base64 of a y-protocols update). */
+  broadcastAwareness(update: string): void {
+    if (!this.sessionId || !this.participantId) return
+    void this.dispatch({
+      type: "awareness",
+      sessionId: this.sessionId,
+      participantId: this.participantId,
+      data: { update },
+      timestamp: Date.now(),
+    })
+  }
+
+  /**
+   * Record that the document holds everything up to `sequence`.
+   *
+   * Called by whoever applied updates outside the socket, such as the initial
+   * catch-up over HTTP, and for a snapshot, which covers every sequence it
+   * folded in. The next reconnect does not fetch them again.
+   */
+  noteCaughtUpTo(sequence: number): void {
+    if (!Number.isFinite(sequence) || sequence <= this.lastSequence) return
+    this.lastSequence = sequence
+    for (const ahead of this.appliedAhead) {
+      if (ahead <= sequence) this.appliedAhead.delete(ahead)
+    }
+    this.advanceWatermark()
+  }
+
+  /** Record that one update, and only that one, has been applied. */
+  noteSequence(sequence: number): void {
+    if (!Number.isFinite(sequence) || sequence <= this.lastSequence) return
+    this.appliedAhead.add(sequence)
+    this.advanceWatermark()
+  }
+
+  private advanceWatermark(): void {
+    while (this.appliedAhead.delete(this.lastSequence + 1)) this.lastSequence += 1
+  }
+
+  getLastSequence(): number {
+    return this.lastSequence
+  }
+
   broadcastCursor(cursor: CursorPosition): void {
     if (!this.sessionId || !this.participantId) return
     void this.dispatch({
@@ -213,7 +304,7 @@ export class CanvasWebSocketProvider {
    * equivalent to applying a merged update, which is what lets the server relay
    * Yjs without decoding it.
    */
-  requestSync(since = 0): void {
+  requestSync(since = this.lastSequence): void {
     if (!this.sessionId || !this.participantId) return
     void this.dispatch({
       type: "sync",
@@ -240,8 +331,9 @@ export class CanvasWebSocketProvider {
   }
 
   private async dispatch(message: WebSocketMessage): Promise<void> {
+    const volatile = VOLATILE_FRAMES.has(message.type)
     if (!this.socket || this.connectionState !== "connected") {
-      this.messageQueue.push(message)
+      if (!volatile) this.messageQueue.push(message)
       return
     }
     try {
@@ -249,9 +341,30 @@ export class CanvasWebSocketProvider {
     } catch (error) {
       // A send that fails means the socket is already gone. Queue the frame so
       // the reconnect delivers it rather than dropping the edit.
-      this.messageQueue.push(message)
+      if (!volatile) this.messageQueue.push(message)
       log.warn("canvas frame not sent", { error: String(error) })
     }
+  }
+
+  /** Tell a peer that just arrived where this client is, if it is anywhere. */
+  private sendLocalAwareness(): void {
+    if (!this.sessionId) return
+    const update = this.crdtStore.encodeLocalAwareness(this.sessionId)
+    if (update) this.broadcastAwareness(update)
+  }
+
+  /**
+   * Announce this client after (re)joining, under a new clock.
+   *
+   * Peers dropped this client's state when it left, and they keep the clock
+   * they last saw. Resending the same state under that clock is ignored, so
+   * a reconnected caret stayed invisible until it next moved or the renewal
+   * came round.
+   */
+  private announceLocalAwareness(): void {
+    if (!this.sessionId) return
+    const update = this.crdtStore.renewLocalAwareness(this.sessionId)
+    if (update) this.broadcastAwareness(update)
   }
 
   private async flushMessageQueue(): Promise<void> {
@@ -282,6 +395,9 @@ export class CanvasWebSocketProvider {
         case "sync":
           this.handleSync(message)
           break
+        case "awareness":
+          this.handleRemoteAwareness(message)
+          break
         case "error":
           this.emitEvent({
             type: "error",
@@ -301,6 +417,7 @@ export class CanvasWebSocketProvider {
     const operation = this.deserializeOperation(message.data)
     if (!operation) return
     this.crdtStore.applyRemoteUpdate(this.sessionId, operation)
+    this.noteSequence(sequenceOf(message.data))
 
     this.emitEvent({
       type: "content-updated",
@@ -332,10 +449,20 @@ export class CanvasWebSocketProvider {
     })
   }
 
+  private handleRemoteAwareness(message: WebSocketMessage): void {
+    if (!this.sessionId || message.participantId === this.participantId) return
+    const update = (message.data as { update?: unknown } | null)?.update
+    if (typeof update !== "string") return
+    this.crdtStore.applyRemoteAwareness(this.sessionId, update)
+  }
+
   private handlePresence(message: WebSocketMessage): void {
     const presenceData = message.data as { action: string; participant?: Participant }
 
     if (presenceData.action === "join" && presenceData.participant) {
+      // A newcomer has no idea where anybody is until they next move, because
+      // awareness only ever sends changes. Tell them now.
+      if (message.participantId !== this.participantId) this.sendLocalAwareness()
       this.emitEvent({
         type: "participant-joined",
         timestamp: new Date(),
@@ -343,6 +470,8 @@ export class CanvasWebSocketProvider {
         data: presenceData.participant,
       })
     } else if (presenceData.action === "leave") {
+      if (this.sessionId)
+        this.crdtStore.removeRemoteAwareness(this.sessionId, message.participantId)
       this.emitEvent({
         type: "participant-left",
         timestamp: new Date(),
@@ -367,7 +496,14 @@ export class CanvasWebSocketProvider {
     if (syncData.action !== "response" || typeof syncData.state !== "string" || !this.sessionId) {
       return
     }
-    this.crdtStore.applySnapshot(this.sessionId, syncData.state)
+    if (this.crdtStore.applySnapshot(this.sessionId, syncData.state)) {
+      const sequence = sequenceOf(message.data)
+      if ((message.data as { snapshot?: unknown }).snapshot === true) {
+        this.noteCaughtUpTo(sequence)
+      } else {
+        this.noteSequence(sequence)
+      }
+    }
   }
 
   private handleDisconnect(): void {
@@ -392,13 +528,27 @@ export class CanvasWebSocketProvider {
     this.reconnectTimer = setTimeout(() => {
       if (!sessionId || !participant) return
       this.connect(sessionId, participant)
-        .then(() => {
-          // The server may have moved on while this client was away, and the
-          // updates it missed are not replayed by the socket on its own.
-          this.requestSync()
-        })
+        .then(() => this.resume())
         .catch(() => this.handleDisconnect())
     }, this.config.reconnectInterval)
+  }
+
+  /**
+   * Fetch what the server stored while this client was away. The socket only
+   * relays what happens while it is open, so without this the updates written
+   * during the gap would never arrive.
+   */
+  private async resume(): Promise<void> {
+    if (!this.config.catchUp) {
+      this.requestSync()
+      return
+    }
+    try {
+      this.noteCaughtUpTo(await this.config.catchUp(this.lastSequence))
+    } catch (error) {
+      log.warn("canvas catch-up after reconnect failed", { error: String(error) })
+      this.requestSync()
+    }
   }
 
   private startHeartbeat(): void {
@@ -449,6 +599,12 @@ export class CanvasWebSocketProvider {
       timestamp: typeof raw.timestamp === "number" ? raw.timestamp : Date.now(),
     }
   }
+}
+
+/** The server sequence a relayed frame names, or 0 when it names none. */
+function sequenceOf(data: unknown): number {
+  const sequence = (data as { sequence?: unknown } | null)?.sequence
+  return typeof sequence === "number" && Number.isFinite(sequence) ? sequence : 0
 }
 
 export default CanvasWebSocketProvider

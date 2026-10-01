@@ -499,3 +499,312 @@ describe("heartbeat", () => {
     expect(socket.send).not.toHaveBeenCalled()
   })
 })
+
+describe("awareness over the socket", () => {
+  async function connected() {
+    const crdt = new CanvasCRDTStore()
+    const session = crdt.createSession("doc-aw", "", { pending: true })
+    const p = makeProvider(crdt)
+    return { p, crdt, sessionId: session.id }
+  }
+
+  it("announces this client's awareness once it has joined", async () => {
+    const { p, crdt, sessionId } = await connected()
+    crdt.getAwareness(sessionId)!.setLocalStateField("user", { participantId: "p-self" })
+    await p.connect(sessionId, PARTICIPANT)
+    const frames = sentFrames(last())
+    const joinIndex = frames.findIndex((frame) => frame.data?.action === "join")
+    const awarenessIndex = frames.findIndex((frame) => frame.type === "awareness")
+    expect(awarenessIndex).toBeGreaterThan(joinIndex)
+    crdt.closeSession(sessionId)
+  })
+
+  it("applies a peer's awareness and ignores its own echo", async () => {
+    const { p, crdt, sessionId } = await connected()
+    await p.connect(sessionId, PARTICIPANT)
+    const apply = jest.spyOn(crdt, "applyRemoteAwareness")
+    const frame = (participantId: string) =>
+      JSON.stringify({
+        type: "awareness",
+        sessionId,
+        participantId,
+        data: { update: "AQID" },
+        timestamp: 1,
+      })
+    last().handlers.onMessage?.(frame("p-self"))
+    expect(apply).not.toHaveBeenCalled()
+    last().handlers.onMessage?.(frame("p-peer"))
+    expect(apply).toHaveBeenCalledWith(sessionId, "AQID")
+    crdt.closeSession(sessionId)
+  })
+
+  it("tells a newcomer where this client is, and forgets a peer that leaves", async () => {
+    const { p, crdt, sessionId } = await connected()
+    crdt.getAwareness(sessionId)!.setLocalStateField("user", { participantId: "p-self" })
+    await p.connect(sessionId, PARTICIPANT)
+    last().send.mockClear()
+    const remove = jest.spyOn(crdt, "removeRemoteAwareness")
+
+    last().handlers.onMessage?.(
+      JSON.stringify({
+        type: "presence",
+        sessionId,
+        participantId: "p-peer",
+        data: { action: "join", participant: { id: "p-peer", name: "Peer" } },
+        timestamp: 1,
+      })
+    )
+    expect(sentFrames(last()).some((frame) => frame.type === "awareness")).toBe(true)
+
+    last().handlers.onMessage?.(
+      JSON.stringify({
+        type: "presence",
+        sessionId,
+        participantId: "p-peer",
+        data: { action: "leave" },
+        timestamp: 2,
+      })
+    )
+    expect(remove).toHaveBeenCalledWith(sessionId, "p-peer")
+    crdt.closeSession(sessionId)
+  })
+
+  it("drops awareness raised while disconnected instead of replaying it later", async () => {
+    // A caret position from before a reconnect is somewhere the peer has
+    // already left. Edits are queued; where somebody was looking is not.
+    const p = makeProvider()
+    await p.connect("s1", PARTICIPANT)
+    last().handlers.onClose?.({ code: 1006, reason: null })
+    p.broadcastAwareness("AQID")
+    p.broadcastOperation({ id: "op-1", update: "AQE=", origin: "p-self", timestamp: 1 })
+    await jest.advanceTimersByTimeAsync(150)
+    const types = sentFrames(last()).map((frame) => frame.type)
+    expect(types).toContain("operation")
+    expect(types).not.toContain("awareness")
+  })
+})
+
+describe("sequence tracking", () => {
+  async function connected(config: { catchUp?: (since: number) => Promise<number> } = {}) {
+    const crdt = new CanvasCRDTStore()
+    const session = crdt.createSession("doc-seq", "")
+    const p = new CanvasWebSocketProvider(crdt, {
+      openSocket,
+      reconnectAttempts: 2,
+      reconnectInterval: 100,
+      heartbeatInterval: 5_000,
+      ...config,
+    })
+    await p.connect(session.id, PARTICIPANT)
+    return { p, crdt, sessionId: session.id }
+  }
+
+  function relay(sessionId: string, op: CRDTOperation, sequence: number) {
+    last().handlers.onMessage?.(
+      JSON.stringify({
+        type: "operation",
+        sessionId,
+        participantId: "p-peer",
+        data: { ...op, sequence },
+        timestamp: 1,
+      })
+    )
+  }
+
+  function peerOperation() {
+    const other = new CanvasCRDTStore()
+    const peer = other.createSession("doc-seq", "")
+    const op = other.applyLocalUpdate(peer.id, {
+      type: "insert",
+      position: 0,
+      text: "x",
+      origin: "p-peer",
+    })
+    other.closeSession(peer.id)
+    return op
+  }
+
+  it("advances only over sequences it has applied without a gap", async () => {
+    const { p, crdt, sessionId } = await connected()
+    const op = peerOperation()
+    relay(sessionId, op, 2)
+    relay(sessionId, op, 1)
+    relay(sessionId, op, 3)
+    expect(p.getLastSequence()).toBe(3)
+    crdt.closeSession(sessionId)
+  })
+
+  it("holds at a gap, so a resume fetches the update that was overtaken", async () => {
+    // The server relays each update from the request that wrote it, so 6 can
+    // arrive before 5. Resuming from 6 would never fetch 5.
+    const { p, crdt, sessionId } = await connected()
+    const op = peerOperation()
+    relay(sessionId, op, 1)
+    relay(sessionId, op, 3)
+    expect(p.getLastSequence()).toBe(1)
+    relay(sessionId, op, 2)
+    expect(p.getLastSequence()).toBe(3)
+    crdt.closeSession(sessionId)
+  })
+
+  it("treats a catch-up or a snapshot as covering everything below it", async () => {
+    const { p, crdt, sessionId } = await connected()
+    const op = peerOperation()
+    relay(sessionId, op, 7)
+    p.noteCaughtUpTo(5)
+    expect(p.getLastSequence()).toBe(5)
+    relay(sessionId, op, 6)
+    expect(p.getLastSequence()).toBe(7)
+
+    const snapshot = crdt.encodeSnapshot(sessionId)!
+    last().handlers.onMessage?.(
+      JSON.stringify({
+        type: "sync",
+        sessionId,
+        participantId: "server",
+        data: { action: "response", state: snapshot, sequence: 20, snapshot: true },
+        timestamp: 2,
+      })
+    )
+    expect(p.getLastSequence()).toBe(20)
+    // A plain update frame does not vouch for the ones before it.
+    last().handlers.onMessage?.(
+      JSON.stringify({
+        type: "sync",
+        sessionId,
+        participantId: "server",
+        data: { action: "response", state: snapshot, sequence: 30, snapshot: false },
+        timestamp: 3,
+      })
+    )
+    expect(p.getLastSequence()).toBe(20)
+    crdt.closeSession(sessionId)
+  })
+
+  it("asks the socket for what comes after that sequence, not for everything", async () => {
+    const { p, crdt, sessionId } = await connected()
+    p.noteCaughtUpTo(12)
+    last().send.mockClear()
+    p.requestSync()
+    const sync = sentFrames(last()).find((frame) => frame.type === "sync")
+    expect(sync?.data).toEqual({ action: "request", since: 12 })
+    crdt.closeSession(sessionId)
+  })
+
+  it("resumes through catchUp after a reconnect and keeps what it reports", async () => {
+    const catchUp = jest.fn(async () => 20)
+    const { p, crdt, sessionId } = await connected({ catchUp })
+    p.noteCaughtUpTo(8)
+    last().handlers.onClose?.({ code: 1006, reason: null })
+    await jest.advanceTimersByTimeAsync(150)
+    expect(catchUp).toHaveBeenCalledWith(8)
+    expect(p.getLastSequence()).toBe(20)
+    // The HTTP catch-up replaced the socket's one-page answer.
+    expect(sentFrames(last()).some((frame) => frame.type === "sync")).toBe(false)
+    crdt.closeSession(sessionId)
+  })
+
+  it("falls back to the socket when the catch-up fails", async () => {
+    const catchUp = jest.fn(async () => {
+      throw new Error("plane unreachable")
+    })
+    const { p, crdt, sessionId } = await connected({ catchUp })
+    p.noteCaughtUpTo(3)
+    last().handlers.onClose?.({ code: 1006, reason: null })
+    await jest.advanceTimersByTimeAsync(150)
+    const sync = sentFrames(last()).find((frame) => frame.type === "sync")
+    expect(sync?.data).toEqual({ action: "request", since: 3 })
+    crdt.closeSession(sessionId)
+  })
+})
+
+describe("two clients over one room", () => {
+  /**
+   * Behaves like the server's hub for what matters here: every frame goes to
+   * every other socket, and an operation is stamped with the next sequence
+   * before it is relayed.
+   */
+  function room() {
+    const sockets: Array<{ participantId: string; handlers: PlatformWebSocketHandlers }> = []
+    let sequence = 0
+    const factoryFor =
+      (participantId: string) =>
+      async (handlers: PlatformWebSocketHandlers): Promise<PlatformWebSocket> => {
+        sockets.push({ participantId, handlers })
+        return {
+          id: `room-${participantId}`,
+          kind: "browser",
+          send: async (raw: string) => {
+            const frame = JSON.parse(raw)
+            if (frame.type === "operation") {
+              sequence += 1
+              frame.data = { ...frame.data, sequence }
+            }
+            for (const socket of sockets) {
+              if (socket.participantId !== frame.participantId) {
+                socket.handlers.onMessage?.(JSON.stringify(frame))
+              }
+            }
+          },
+          close: async () => {},
+        }
+      }
+    return { factoryFor }
+  }
+
+  it("carries text and carets both ways, without echoing either", async () => {
+    const hub = room()
+    const clients = ["p-ada", "p-bob"].map((participantId) => {
+      const store = new CanvasCRDTStore()
+      const session = store.createSession("doc-room", "", { pending: true })
+      const provider = new CanvasWebSocketProvider(store, {
+        openSocket: hub.factoryFor(participantId),
+        heartbeatInterval: 60_000,
+      })
+      store.onLocalUpdate(session.id, (op) => provider.broadcastOperation(op))
+      store.onLocalAwarenessUpdate(session.id, (update) => provider.broadcastAwareness(update))
+      return { participantId, store, sessionId: session.id, provider }
+    })
+    const [ada, bob] = clients
+    for (const client of clients) {
+      await client.provider.connect(client.sessionId, {
+        ...PARTICIPANT,
+        id: client.participantId,
+      })
+    }
+
+    ada.store.applyLocalUpdate(ada.sessionId, {
+      type: "insert",
+      position: 0,
+      text: "hello",
+      origin: "p-ada",
+    })
+    bob.store.applyLocalUpdate(bob.sessionId, {
+      type: "insert",
+      position: 5,
+      text: " world",
+      origin: "p-bob",
+    })
+    await Promise.resolve()
+    expect(ada.store.getDocumentContent(ada.sessionId)).toBe("hello world")
+    expect(bob.store.getDocumentContent(bob.sessionId)).toBe("hello world")
+    expect(bob.provider.getLastSequence()).toBe(1)
+    // Ada's own update (1) is never echoed to her, so her watermark holds
+    // below it: a resume refetches a little she has, which Yjs ignores.
+    expect(ada.provider.getLastSequence()).toBe(0)
+
+    ada.store
+      .getAwareness(ada.sessionId)!
+      .setLocalStateField("user", { name: "Ada", participantId: "p-ada" })
+    await Promise.resolve()
+    const adaClient = ada.store.getAwareness(ada.sessionId)!.clientID
+    expect(bob.store.getAwareness(bob.sessionId)!.getStates().get(adaClient)).toEqual({
+      user: { name: "Ada", participantId: "p-ada" },
+    })
+
+    for (const client of clients) {
+      client.provider.disconnect()
+      client.store.closeSession(client.sessionId)
+    }
+  })
+})

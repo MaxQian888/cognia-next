@@ -176,34 +176,36 @@ export function useCanvasCollaborativeEditor(
 
   usePresenceStylesheet(presence, Boolean(sessionId))
 
-  // One awareness and one extension set per session, torn down with it.
-  // Keeping either across sessions would republish this peer's stale state
-  // into the next document.
+  // One extension set per session, built over the session's own awareness.
+  //
+  // The awareness belongs to the store, not to this hook. It used to be created
+  // here, which made it a second client nobody had told the socket about: the
+  // editor drew carets from it and the socket never carried it, so no peer
+  // ever saw anyone else's cursor. The store owns one per document, the
+  // session hook sends it, and this only reads it.
   useEffect(() => {
     if (!sessionId) return
-    const doc = crdtStore.getYDoc(sessionId)
     const text = crdtStore.getYText(sessionId)
-    if (!doc || !text) return
+    const awareness = crdtStore.getAwareness(sessionId)
+    if (!text || !awareness) return
 
     let disposed = false
-    let created: Awareness | null = null
+    // The cleanup below clears the local state, and the awareness outlives
+    // this effect. While it is null every `setLocalStateField` is a no-op
+    // (y-protocols' own, the bindings' and ours), so an editor returning to a
+    // document it left would never show its caret or name again. Re-arm it.
+    if (awareness.getLocalState() === null) awareness.setLocalState({})
+    awarenessRef.current = awareness
+    applyPresenceTimeout(awareness, presenceRef.current.presenceTimeout)
 
-    void import("y-protocols/awareness")
-      .then(async ({ Awareness }) => {
+    void codeMirrorCollabExtensions({
+      ytext: text,
+      awareness,
+      settings: presenceRef.current,
+    })
+      .then((extensions) => {
         if (disposed) return
-        created = new Awareness(doc)
-        awarenessRef.current = created
-        applyPresenceTimeout(created, presenceRef.current.presenceTimeout)
-        const extensions = await codeMirrorCollabExtensions({
-          ytext: text,
-          awareness: created,
-          settings: presenceRef.current,
-        })
-        if (disposed) {
-          created.destroy()
-          return
-        }
-        setBinding({ sessionId, awareness: created, extensions })
+        setBinding({ sessionId, awareness, extensions })
       })
       .catch((error) => {
         log.warn("canvas collaborative binding unavailable", { error: String(error) })
@@ -211,8 +213,11 @@ export function useCanvasCollaborativeEditor(
 
     return () => {
       disposed = true
-      if (awarenessRef.current === created) awarenessRef.current = null
-      created?.destroy()
+      if (awarenessRef.current === awareness) awarenessRef.current = null
+      // Not destroyed here: the store destroys it with the session, and the
+      // socket is still announcing it until then. Clearing the local state is
+      // what tells peers this editor stopped looking at the document.
+      awareness.setLocalState(null)
     }
   }, [sessionId])
 
