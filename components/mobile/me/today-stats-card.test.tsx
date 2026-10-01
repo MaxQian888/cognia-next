@@ -138,6 +138,31 @@ describe("<TodayStatsCard />", () => {
     expect(grid?.className).toMatch(/bg-border/)
   })
 
+  it("marks the stats grid as a hairline grid whose children are the tiles", async () => {
+    // Over a wallpaper the grid becomes one translucent plate and the cells go
+    // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+    // the grid whose direct children are the stat tiles.
+    const { container } = render(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 1,
+          pendingDrafts: async () => 0,
+          lastBackupMs: async () => null,
+          storageBytes: async () => 1024,
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("stat-tile-sessions")).toHaveTextContent("1")
+    })
+    const grid = container.querySelector("[data-hairline-grid]")
+    expect(grid).not.toBeNull()
+    for (const id of ["sessions", "drafts", "backup", "storage"]) {
+      expect(screen.getByTestId(`stat-tile-${id}`).parentElement).toBe(grid)
+    }
+    expect(screen.getByTestId("stat-tile-sessions")).toHaveTextContent("Chats")
+  })
+
   it("renders token + cost tiles once usage exists, and hides them otherwise", async () => {
     const { rerender } = render(
       <TodayStatsCard

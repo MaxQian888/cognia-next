@@ -16,22 +16,18 @@ import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
 /**
  * Mobile boot splash overlay.
  *
- * The Android 12 system splash (`windowSplashScreenAnimatedIcon`) and the iOS
- * launch storyboard can only show a *static* raster of the brand mark on a
- * flat colour. This overlay takes over the instant the native splash hands
- * off — both paint the same `#01061e`, so the seam is invisible — and renders
- * `MobileBootScreen`: the branded motion the native surface can't, plus the
- * live timeline of what the phone is doing (native bridge, pairing, host
- * link, first sync — reported into `lib/boot/mobile-boot-stages` by
- * `CompanionBootProvider`).
+ * Android 12+ plays the dedicated native vector mark while the WebView starts;
+ * iOS uses its launch storyboard. Both hand off to the same `#01061e` backdrop.
+ * Account and preference gates show MobileBootScreen first; this final overlay
+ * then reports local pairing progress from CompanionBootProvider. It does not
+ * require a second brand animation or a successful host connection to finish.
  *
- * Dismissal is signal-driven with two guard rails:
+ * Dismissal follows local readiness, without a minimum brand hold:
  *
- *   - it holds for at least `MIN_HOLD_MS`, so a fast boot still gets a
- *     legible brand moment instead of a flash;
- *   - it leaves as soon as the boot has **settled** (the host is linked, or
- *     is not going to be, or there is none to link — see the store), so the
- *     user waits for what matters and not for a stopwatch;
+ *   - once the local account, preferences and pairing have resolved, the
+ *     interface can show its cached content while the host connects;
+ *   - settled failures also release the interface, where the existing
+ *     connection state explains recovery;
  *   - it never waits past `MAX_HOLD_MS`. A stage that fails to report — the
  *     native bridge missing, a provider that threw — cannot strand anyone on
  *     a splash: the ceiling fires and the app underneath is theirs, with the
@@ -47,12 +43,10 @@ import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
  * in the browser + Tauri shells, where this renders `null`.
  */
 
-/** Visible before the earliest possible fade-out. */
-export const MIN_HOLD_MS = 1200
 /** Hard ceiling — leaves regardless of what the stages report. */
 export const MAX_HOLD_MS = 4500
 /** Opacity fade-out duration; keep in sync with `.mboot--boot` transition. */
-export const FADE_MS = 450
+export const FADE_MS = 180
 
 type Phase = "visible" | "leaving" | "done"
 
@@ -65,21 +59,20 @@ export function AppSplash() {
     getServerMobileBootSnapshot
   )
 
-  const [minElapsed, setMinElapsed] = useState(false)
   const [maxElapsed, setMaxElapsed] = useState(false)
   const [gone, setGone] = useState(false)
+  const [released, setReleased] = useState(false)
 
-  // Derived, not stored: the overlay may leave once the floor has passed and
-  // either the boot has settled or the ceiling has passed.
-  const leaving = minElapsed && (boot.settled || maxElapsed)
+  // A reconnect must never cover an interface the user has already reached.
+  const ready = boot.settled || boot.stages.companion.status === "done" || maxElapsed
+  if (mobile && ready && !released) setReleased(true)
+  const leaving = released
   const phase: Phase = gone ? "done" : leaving ? "leaving" : "visible"
 
   useEffect(() => {
     if (!mobile) return
-    const minTimer = setTimeout(() => setMinElapsed(true), MIN_HOLD_MS)
     const maxTimer = setTimeout(() => setMaxElapsed(true), MAX_HOLD_MS)
     return () => {
-      clearTimeout(minTimer)
       clearTimeout(maxTimer)
     }
   }, [mobile])

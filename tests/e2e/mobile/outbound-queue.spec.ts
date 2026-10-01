@@ -76,6 +76,8 @@ const COMMAND_KINDS = [
   "character_bind_twin",
   "skill_set_enabled",
   "plugin_set_enabled",
+  "plugin_cogset_activate",
+  "plugin_install_origin_record",
   "mcp_set_enabled",
   "mcp_set_tool_rules",
   "adapter_update_policy",

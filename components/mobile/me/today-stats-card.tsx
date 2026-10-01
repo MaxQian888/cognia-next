@@ -226,7 +226,7 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
       className={cn("overflow-hidden border", className)}
       data-testid="today-stats-card"
     >
-      <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4" data-hairline-grid>
         {tiles.map((tile) => {
           const Icon = tile.icon
           const body = (

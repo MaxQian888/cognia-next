@@ -585,6 +585,35 @@ describe("createOutboundRunner", () => {
     await runner.stop()
   })
 
+  it("files the clashing fields of a field-level conflict with the row", async () => {
+    const fields = { title: { yours: "a", theirs: "b", changedAt: 4, changedBy: null } }
+    const conflict = Object.assign(new Error("field conflict"), {
+      status: 409,
+      authoritative: { revision: 4 },
+      fields,
+    })
+    const runner = createOutboundRunner({
+      dispatcher: {
+        call: async () => {
+          throw conflict
+        },
+      },
+      enforceMobile: false,
+      scope,
+    })
+    const row = await enqueue({
+      command: "collab_issue_patch",
+      payload: {},
+      protocol: "collab-v1",
+    })
+    await runner.kick()
+    expect(await getDb().mobileOutboundQueue.get(row.id)).toMatchObject({
+      status: "conflicted",
+      conflictFields: fields,
+    })
+    await runner.stop()
+  })
+
   it.each([
     [{ results: [] }, "host_state_malformed_response"],
     [

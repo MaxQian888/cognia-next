@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brand lettering drawn as paths so native launch needs no font or WebView. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="80dp"
+    android:viewportWidth="200"
+    android:viewportHeight="80">
+    <path
+        android:pathData="M53,35 C42,28 35,37 39,45 C42,51 49,51 53,47 M76,41 C76,29 59,29 59,41 C59,53 76,53 76,41 M99,34 L99,51 C99,60 88,61 83,56 M99,41 C99,29 82,29 82,41 C82,53 99,53 99,41 M109,49 L109,33 M109,40 C109,31 125,30 125,40 L125,49 M136,34 L136,49 M164,41 C164,29 147,29 147,41 C147,53 164,53 164,41 M164,33 L164,49"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#DDE4FF"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path android:pathData="M134.3,26 A1.7,1.7 0,1 1,137.7,26 A1.7,1.7 0,1 1,134.3,26 Z"
+        android:fillColor="#67DCFF" />
+</vector>

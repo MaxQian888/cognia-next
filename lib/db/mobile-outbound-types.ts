@@ -1,3 +1,5 @@
+import type { CollabFieldClash } from "@/lib/collab/client"
+
 // Mobile outbound queue row shapes (Wave 2.1, schema v25).
 //
 // One row per write operation enqueued from the phone — chat sends, draft
@@ -71,6 +73,13 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "character_bind_twin",
   "skill_set_enabled",
   "plugin_set_enabled",
+  // Cogsets (ADR-0209): a paired client can switch the host's cogset. The host
+  // decides the scope and defers the reconciliation while agent runs are in
+  // flight; editing cogsets stays on the host.
+  "plugin_cogset_activate",
+  // An install a paired client drove records its origin on the host, which is
+  // the only database a cogpack export reads.
+  "plugin_install_origin_record",
   // MCP servers (ADR-0056 Wave 4 follow-up): a paired client can flip a
   // server on/off and rewrite its per-tool deny rules. Creating, editing and
   // deleting a definition stays desktop-only — those carry credentials and a
@@ -194,4 +203,9 @@ export interface MobileOutboundJobRow {
   currentRevision?: number
   /** Server-authoritative resource retained for a manual 409 rebase/discard UI. */
   conflictAuthoritative?: unknown
+  /**
+   * The fields a field-level 409 named (ADR-0208). Absent on a whole-record
+   * conflict, where the panel falls back to showing both records.
+   */
+  conflictFields?: Record<string, CollabFieldClash>
 }

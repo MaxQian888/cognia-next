@@ -23,6 +23,7 @@ import type {
 } from "./mobile-outbound-types"
 import { decideNextAttempt } from "@/lib/queue/retry-policy"
 import { getDb } from "./schema"
+import type { CollabFieldClash } from "@/lib/collab/client"
 import {
   getActiveRuntimeTargetContext,
   type RuntimeTargetScope,
@@ -735,7 +736,8 @@ export async function markHostStateResult(
 export async function markCollabConflict(
   id: string,
   error: string,
-  authoritative: unknown
+  authoritative: unknown,
+  fields?: Record<string, CollabFieldClash>
 ): Promise<void> {
   const currentRevision =
     typeof authoritative === "object" &&
@@ -747,6 +749,7 @@ export async function markCollabConflict(
     status: "conflicted",
     lastError: error,
     conflictAuthoritative: authoritative,
+    conflictFields: fields,
     currentRevision,
     claimedAt: undefined,
   })

@@ -203,7 +203,10 @@ export function HostAutomationPanel() {
 
         {/* One bordered block whose cells are separated by a border-coloured
             ground, not four bordered boxes inside an already-bordered section. */}
-        <Surface className="grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-4">
+        <Surface
+          className="grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-4"
+          data-hairline-grid
+        >
           <CountCell label={t("countsTotal")} value={snapshot.counts.total} />
           <CountCell label={t("countsAllow")} value={snapshot.counts.allow} />
           <CountCell label={t("countsDeny")} value={snapshot.counts.deny} />

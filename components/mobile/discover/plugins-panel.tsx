@@ -15,6 +15,7 @@
  * standalone browser, where the local manager owns the runtime.
  */
 
+import { CogsetSwitcher } from "@/components/plugins/cogsets/cogset-switcher"
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -49,11 +50,26 @@ export function PluginsPanel() {
     [t]
   )
 
+  // The cogset control heads the panel, empty or not: a paired phone switches
+  // the host's cogset here (ADR-0209), and the host applies it.
+  const cogsets = (
+    <div className="flex" data-testid="plugins-panel-cogset">
+      <CogsetSwitcher />
+    </div>
+  )
+
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("empty")}</p>
+    return (
+      <div className="flex flex-col gap-2">
+        {cogsets}
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+      </div>
+    )
   }
 
   return (
+    <div className="flex flex-col gap-2">
+      {cogsets}
     <ItemGroup className="gap-2" data-testid="plugins-panel">
       {rows.map((row) => {
         const name = row.name ?? row.id
@@ -87,5 +103,6 @@ export function PluginsPanel() {
         )
       })}
     </ItemGroup>
+    </div>
   )
 }

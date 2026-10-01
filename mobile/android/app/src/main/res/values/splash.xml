@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 7–11 show the final vector; Android 12+ use the animated override. -->
+    <item name="cognia_launch_mark" type="drawable">@drawable/cognia_launch_art</item>
+</resources>

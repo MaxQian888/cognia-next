@@ -40,7 +40,8 @@ const config: CapacitorConfig = {
       // hideSplash() (e.g. the native SplashScreen plugin didn't register, the
       // exact bug that froze the app on the launch icon), the splash MUST still
       // dismiss rather than strand the user forever. CompanionBootProvider
-      // calls hideSplash() right after React's first paint, which dismisses it
+      // is a fallback; MobileNativeSplashInitializer hides above the account
+      // gate as soon as React commits its first screen, which dismisses it
       // well before this ceiling — the timeout only fires if that call never
       // lands. The web <AppSplash> overlay shares the #01061e backdrop, so the
       // native→web handoff shows no flash of unstyled content either way.
@@ -48,10 +49,9 @@ const config: CapacitorConfig = {
       launchAutoHide: true,
       // Android 12+ routes the splash through the system SplashScreen API,
       // which ignores `hide({ fadeOutDuration })` — this is the only knob that
-      // fades the native → web hand-over there instead of cutting. Same 300ms
-      // the boot provider passes to hide() for iOS / legacy Android, so both
-      // paths dissolve into the web <MobileBootScreen> at the same pace.
-      launchFadeOutDuration: 300,
+      // fades the native → web hand-over there instead of cutting. The early
+      // initializer passes the same 180ms for iOS / legacy Android.
+      launchFadeOutDuration: 180,
       // Deep-navy to match the splash illustration + @color/splash_background.
       // Only the legacy (pre-Android-12 / fallback) ImageView path reads this;
       // Android 12+ uses the theme's windowSplashScreenBackground.

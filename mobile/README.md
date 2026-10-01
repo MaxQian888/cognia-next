@@ -41,6 +41,29 @@ iOS development requires macOS with Xcode 26+ selected through `xcode-select`.
 The iOS workspace uses CocoaPods because some shipped plugins do not publish
 Swift Package Manager manifests. See [`IOS_BOOTSTRAP.md`](./IOS_BOOTSTRAP.md).
 
+## Android Release APK
+
+After `pnpm mobile:sync:android`, run `./gradlew :app:assembleRelease
+:app:testReleaseUnitTest` from `mobile/android/` with JDK 21 and the Android SDK
+configured. Release enables R8 code optimization and resource shrinking;
+Debug retains its normal development behavior. All supported ABIs remain in
+the universal APK. Release excludes asset directories named `qa` (icon review
+previews); runtime icons, language data, models and web assets remain packaged.
+
+The APK is `android/app/build/outputs/apk/release/app-release-unsigned.apk`
+until a distribution signing configuration is supplied. Sign it with the
+existing app's release key before distribution. A copy signed with the local
+debug key is only for device testing, not publication; the build does not
+silently fall back to debug signing. Preserve
+`android/app/build/outputs/mapping/release/mapping.txt` alongside each shipped
+APK so optimized crash stack traces can be retraced.
+
+Capacitor and ACRA provide their reflection keep rules. App-specific rules
+preserve ACRA's reflective BuildConfig fields and resources looked up by name
+from `capacitor.config.json`. When adding such a resource, update
+`android/app/src/main/res/raw/com_cognia_mobile_keep.xml` and smoke-test the
+optimized Release build, not just Debug.
+
 ## Talking to a desktop server
 
 The mobile shell is a _client_. It pairs with a desktop server (Tauri app

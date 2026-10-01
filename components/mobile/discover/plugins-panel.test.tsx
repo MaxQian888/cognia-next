@@ -30,6 +30,10 @@ jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
   setPluginEnabledForHost: jest.fn().mockResolvedValue({ ok: true, queued: false }),
 }))
 
+// The switcher has its own suite; here it only has to be mounted in place.
+jest.mock("@/components/plugins/cogsets/cogset-switcher", () => ({
+  CogsetSwitcher: () => <div data-testid="cogset-switcher-stub" />,
+}))
 jest.mock("sonner", () => ({
   toast: { error: jest.fn(), success: jest.fn(), info: jest.fn() },
 }))
@@ -56,6 +60,8 @@ describe("PluginsPanel", () => {
     useLiveQueryMock.mockReturnValue([])
     render(<PluginsPanel />)
     expect(screen.getByText("empty")).toBeInTheDocument()
+    // The cogset control heads the panel even with nothing installed.
+    expect(screen.getByTestId("cogset-switcher-stub")).toBeInTheDocument()
     expect(screen.queryByTestId("plugins-panel")).not.toBeInTheDocument()
   })
 

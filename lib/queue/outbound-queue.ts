@@ -39,6 +39,7 @@ import {
 } from "@/lib/db/mobile-outbound-queue"
 import { acknowledgeMobileStepResultChunk } from "@/lib/db/mobile-step-receipts"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
+import type { CollabFieldClash } from "@/lib/collab/client"
 import { isHostStateAction, isHostStateSubmitResponse } from "@cognia/agent-config-types/host-state"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
@@ -403,7 +404,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
       }
     } catch (err) {
       if (row.protocol === "collab-v1" && isCollabConflict(err)) {
-        await markCollabConflict(row.id, err.message, err.authoritative)
+        await markCollabConflict(row.id, err.message, err.authoritative, err.fields)
         return
       }
       if (row.protocol === "host-state") {
@@ -468,9 +469,13 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
   }
 }
 
-function isCollabConflict(
-  error: unknown
-): error is { status: 409; message: string; authoritative: unknown } {
+function isCollabConflict(error: unknown): error is {
+  status: 409
+  message: string
+  authoritative: unknown
+  /** Present on a field-level 409 (ADR-0208). */
+  fields?: Record<string, CollabFieldClash>
+} {
   return (
     error instanceof Error &&
     (error as { status?: unknown }).status === 409 &&

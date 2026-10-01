@@ -358,6 +358,26 @@ describe("mobile outbound queue target isolation", () => {
     })
   })
 
+  it("keeps the clashing fields of a field-level conflict on the row", async () => {
+    const row = await enqueueCollabMutation({
+      ...scope,
+      command: "collab_issue_patch",
+      orgId: "org_1",
+      entityType: "issue",
+      entityId: "iss_1",
+      payload: { issueId: "iss_1", baseRevision: 1, status: "done" },
+      operationId: "op-field",
+    })
+    const fields = { status: { yours: "done", theirs: "todo", changedAt: 2, changedBy: "usr_b" } }
+    await markCollabConflict(row.id, "field conflict", { id: "iss_1", revision: 3 }, fields)
+    const stored = await getDb().mobileOutboundQueue.get(row.id)
+    expect(stored).toMatchObject({
+      status: "conflicted",
+      currentRevision: 3,
+      conflictFields: fields,
+    })
+  })
+
   it("keeps collab conflicts for explicit discard or rebase", async () => {
     const row = await enqueueCollabMutation({
       ...scope,

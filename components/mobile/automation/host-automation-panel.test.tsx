@@ -101,6 +101,26 @@ describe("HostAutomationPanel", () => {
     }
   })
 
+  it("marks the decision counts as a hairline grid whose children are the count cells", async () => {
+    // Over a wallpaper the grid becomes one translucent plate and the cells go
+    // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+    // the grid whose direct children are the four count cells.
+    readAutomationSupervision.mockResolvedValue(
+      snapshot({ counts: { total: 7, allow: 4, deny: 2, consent: 1 } })
+    )
+    const { container } = renderPanel()
+    await waitFor(() => expect(screen.getByTestId("host-automation-panel")).toBeInTheDocument())
+
+    const grid = container.querySelector("[data-hairline-grid]")
+    expect(grid).not.toBeNull()
+    const cells = Array.from(grid?.children ?? [])
+    expect(cells).toHaveLength(4)
+    expect(cells[0]).toHaveTextContent(copy.countsTotal)
+    expect(cells[0]).toHaveTextContent("7")
+    expect(cells[1]).toHaveTextContent(copy.countsAllow)
+    expect(cells[3]).toHaveTextContent(copy.countsConsent)
+  })
+
   it("marks a halted host", async () => {
     readAutomationSupervision.mockResolvedValue(snapshot({ killSwitchEngaged: true }))
     renderPanel()

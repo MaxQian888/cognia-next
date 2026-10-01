@@ -25,9 +25,18 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType('release')) { variant ->
+        // Icon contact sheets and visual QA previews are authoring artifacts.
+        // Keep them in source/debug builds, but not in the distributed app.
+        variant.androidResources.ignoreAssetsPatterns.add('!qa')
     }
 }
 

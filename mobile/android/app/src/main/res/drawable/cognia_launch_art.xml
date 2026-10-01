@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dedicated launch artwork. All strokes fit inside the system's 192dp mask. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <path
+        android:name="crown"
+        android:pathData="M185,97 C174,86 160,80 144,80 C108.65,80 80,108.65 80,144"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#67DCFF"
+        android:strokeWidth="15"
+        android:strokeLineCap="round" />
+    <path
+        android:name="base"
+        android:pathData="M80,144 C80,179.35 108.65,208 144,208 C160,208 174,202 185,191"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#B8AEFF"
+        android:strokeWidth="15"
+        android:strokeLineCap="round" />
+    <group android:name="signal">
+        <path
+            android:pathData="M155,144 L198,144"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#67DCFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round" />
+        <path
+            android:name="core"
+            android:pathData="M144,125 L163,144 L144,163 L125,144 Z"
+            android:fillColor="#ECEAFF" />
+        <path
+            android:name="endpoint"
+            android:pathData="M202,138 A6,6 0,1 1,202,150 A6,6 0,1 1,202,138 Z"
+            android:fillColor="#67DCFF" />
+    </group>
+</vector>

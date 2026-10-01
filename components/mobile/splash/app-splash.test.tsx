@@ -10,7 +10,7 @@ import {
   markMobileBootSettled,
 } from "@/lib/boot/mobile-boot-stages"
 
-import { AppSplash, FADE_MS, MAX_HOLD_MS, MIN_HOLD_MS } from "./app-splash"
+import { AppSplash, FADE_MS, MAX_HOLD_MS } from "./app-splash"
 import { __resetMobileBootScreenForTesting, MOBILE_SPLASH_BACKDROP } from "./mobile-boot-screen"
 
 // `usePlatform` drives the mobile gate; flip it per test. (Jest allows factory
@@ -74,20 +74,12 @@ describe("AppSplash", () => {
     expect(getMobileBootSnapshot().overlayVisible).toBe(false)
   })
 
-  it("leaves as soon as the boot settles once the floor has passed, then unmounts", () => {
+  it("leaves immediately when boot settles, without a minimum brand hold", () => {
     markMobileBootIntroPlayed()
     render(<AppSplash />)
 
-    // Settled early: still held until MIN_HOLD_MS so a fast boot isn't a flash.
     act(() => {
       markMobileBootSettled()
-      jest.advanceTimersByTime(MIN_HOLD_MS - 1)
-    })
-    expect(screen.getByTestId("app-splash")).toHaveAttribute("data-state", "settled")
-    expect(getMobileBootSnapshot().overlayVisible).toBe(true)
-
-    act(() => {
-      jest.advanceTimersByTime(1)
     })
     const leaving = screen.getByTestId("app-splash")
     expect(leaving).toHaveAttribute("data-state", "leaving")
@@ -101,17 +93,35 @@ describe("AppSplash", () => {
     expect(screen.queryByTestId("app-splash")).not.toBeInTheDocument()
   })
 
-  it("waits for the boot to settle after the floor, and reacts the moment it does", () => {
+  it("waits for local setup, then releases the interface while the host connects", () => {
     render(<AppSplash />)
     act(() => {
-      jest.advanceTimersByTime(MIN_HOLD_MS + 500)
+      jest.advanceTimersByTime(100)
     })
     expect(screen.getByTestId("app-splash")).toHaveAttribute("data-state", "running")
 
     act(() => {
-      markMobileBootSettled()
+      beginMobileBootStage("companion")
+      endMobileBootStage("companion", { detail: "paired" })
+      beginMobileBootStage("host")
     })
     expect(screen.getByTestId("app-splash")).toHaveAttribute("data-state", "leaving")
+    expect(getMobileBootSnapshot().settled).toBe(false)
+  })
+
+  it("does not cover the app again when host setup restarts during the fade", () => {
+    render(<AppSplash />)
+    act(() => {
+      beginMobileBootStage("companion")
+      endMobileBootStage("companion", { detail: "paired" })
+    })
+    expect(screen.getByTestId("app-splash")).toHaveAttribute("data-state", "leaving")
+    act(() => {
+      beginMobileBootStage("companion")
+    })
+    expect(screen.getByTestId("app-splash")).toHaveAttribute("data-state", "leaving")
+    act(() => jest.advanceTimersByTime(FADE_MS))
+    expect(screen.queryByTestId("app-splash")).not.toBeInTheDocument()
   })
 
   it("never waits past the ceiling, even when no stage ever reports back", () => {
@@ -147,7 +157,6 @@ describe("AppSplash", () => {
     syncStatusBarMock.mockClear()
     act(() => {
       markMobileBootSettled()
-      jest.advanceTimersByTime(MIN_HOLD_MS)
     })
     expect(syncStatusBarMock).not.toHaveBeenCalled()
   })
