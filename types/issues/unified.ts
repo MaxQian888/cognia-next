@@ -90,7 +90,12 @@ export type IssueSourceMutation =
   | { kind: "addLabel"; labelId: string }
   | { kind: "removeLabel"; labelId: string }
   | { kind: "project"; issueProjectId: string }
-  | { kind: "comment"; body: string }
+  /**
+   * `mentions` are declared `usr_…` ids picked in the composer (ADR-0207 §2).
+   * Only the collaboration source sends them; local and GitHub rows ignore
+   * them because neither has a membership to resolve an id against.
+   */
+  | { kind: "comment"; body: string; mentions?: readonly string[] }
   | { kind: "delete" }
 
 /** Where a row came from, and how to reach its native surface. */

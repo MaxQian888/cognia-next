@@ -129,7 +129,7 @@ export function issueProjectLocalRoot(
 
 export interface GithubLoopRunAdapterDeps {
   isAvailable: () => boolean
-  resolveAccount: () => Promise<IntegrationAccount | null>
+  resolveAccount: (repoFullName: string) => Promise<IntegrationAccount | null>
   execute: typeof executeIntegrationAction
   approve: typeof approveIntegrationActionJob
   cancelJob: (jobId: string) => Promise<unknown>
@@ -207,7 +207,9 @@ export function createGithubLoopRunAdapter(
       return { ok: false, reason: "no-github-repo", detail: target.issue.githubRef.repoFullName }
     }
     if (!deps.isAvailable()) return { ok: false, reason: "desktop-only" }
-    if (!(await deps.resolveAccount())) return { ok: false, reason: "no-github-account" }
+    if (!(await deps.resolveAccount(target.issue.githubRef.repoFullName))) {
+      return { ok: false, reason: "no-github-account" }
+    }
     return { ok: true }
   }
 
@@ -218,9 +220,10 @@ export function createGithubLoopRunAdapter(
     async start(target: IssueRunTarget, context: IssueRunStartContext): Promise<IssueRun> {
       const verdict = await canRun(target)
       if (!verdict.ok) throw new Error(`github-loop adapter refused: ${verdict.reason}`)
-      const account = (await deps.resolveAccount())!
       const { issue } = target
       const ref = issue.githubRef!
+      const account = await deps.resolveAccount(ref.repoFullName)
+      if (!account) throw new Error("github-loop adapter refused: no-github-account")
       const head = githubLoopHeadBranch(issue.identifier)
       const stackOnOption = context.options?.[GITHUB_LOOP_STACK_ON_OPTION]
       const stackOn =

@@ -184,6 +184,16 @@ describe("canRun", () => {
 })
 
 describe("start", () => {
+  it("resolves the linked repository and refuses an account removed after eligibility", async () => {
+    const resolveAccount = jest.fn().mockResolvedValueOnce(account).mockResolvedValueOnce(null)
+    const harness = makeDeps({ resolveAccount })
+    const adapter = createGithubLoopRunAdapter(harness.deps)
+    await expect(adapter.start(target(), { by: HUMAN, origin: "interactive" })).rejects.toThrow(
+      "no-github-account"
+    )
+    expect(resolveAccount).toHaveBeenCalledWith("octo/repo")
+    expect(harness.executed).toHaveLength(0)
+  })
   it("enqueues runIssueLoop with an idempotency key, approves the write, records the run", async () => {
     const harness = makeDeps()
     const adapter = createGithubLoopRunAdapter(harness.deps)

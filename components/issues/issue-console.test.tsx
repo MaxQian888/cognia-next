@@ -788,6 +788,23 @@ describe("IssueConsole", () => {
       expect(screen.queryByTestId("detail-stub")).not.toBeInTheDocument()
     })
 
+    it("opens on a deep-linked local issue", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole initialSelectedId="i1" />)
+      expect(await screen.findByTestId("detail-stub")).toBeInTheDocument()
+    })
+
+    it("opens on a deep-linked shared issue, whose id looks like a local one", async () => {
+      // A local and a collaboration issue can share an id; the source decides.
+      mockListAll.mockResolvedValue({
+        items: [item({ title: "Local twin" }), item({ kind: "collab", title: "Shared" })],
+        errors: [],
+      })
+      render(<IssueConsole initialSelectedId="i1" initialSelectedSource="collab" />)
+      expect(await screen.findByTestId("detail-stub")).toBeInTheDocument()
+      expect((detailProps.item as UnifiedIssueItem | undefined)?.unifiedId).toBe("collab:i1")
+    })
+
     it("opens on the selected row and resolves its labels through the catalogue", async () => {
       mockListAll.mockResolvedValue({ items: [item()], errors: [] })
       render(<IssueConsole />)

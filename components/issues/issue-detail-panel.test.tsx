@@ -10,6 +10,16 @@ jest.mock("next-intl", () => ({
           .filter((v) => v !== "")
           .join(",")}`
       : key,
+  useFormatter: () => ({ list: (items: string[]) => items.join(", ") }),
+}))
+
+const mockMentionCandidates = jest.fn<
+  readonly { userId: string; displayName: string }[],
+  [{ orgId: string; workspaceId: string } | null]
+>(() => [])
+jest.mock("@/hooks/collab/use-collab-mention-candidates", () => ({
+  useCollabMentionCandidates: (scope: { orgId: string; workspaceId: string } | null) =>
+    mockMentionCandidates(scope),
 }))
 
 const mockListIssueEvents = jest.fn()
@@ -37,17 +47,20 @@ let liveValue: unknown = []
 let runsValue: unknown[] = []
 let collabWorkspaceValue: { id: string; orgId: string } | undefined
 let localIssueValue: unknown
+let collabIssueValue: { orgId: string; workspaceId: string } | undefined
 jest.mock("@/hooks/data", () => ({
   // Several live queries share the hook: the activity trail, the run history,
   // the collab workspace and the stored issue row.
   useClientLiveQuery: (fn: () => unknown) =>
-    fn.toString().includes("listIssueRuns")
-      ? runsValue
-      : fn.toString().includes("getCollabWorkspace")
-        ? collabWorkspaceValue
-        : fn.toString().includes("getIssue")
-          ? localIssueValue
-          : liveValue,
+    fn.toString().includes("getCollabIssue")
+      ? collabIssueValue
+      : fn.toString().includes("listIssueRuns")
+        ? runsValue
+        : fn.toString().includes("getCollabWorkspace")
+          ? collabWorkspaceValue
+          : fn.toString().includes("getIssue")
+            ? localIssueValue
+            : liveValue,
 }))
 let mockPublishTargets: unknown[] = []
 jest.mock("@/lib/issues/publish", () => ({
@@ -169,6 +182,9 @@ beforeEach(() => {
   liveValue = []
   runsValue = []
   collabWorkspaceValue = undefined
+  collabIssueValue = undefined
+  mockMentionCandidates.mockReset()
+  mockMentionCandidates.mockReturnValue([])
   mockPublishRun.mockClear()
   pickerProps = null
   mockSetIssueAssignee.mockResolvedValue(undefined)
@@ -689,6 +705,13 @@ describe("editing", () => {
     )
   })
 
+  it("offers no mention picker on a local issue, which has no roster to notify", () => {
+    mockMentionCandidates.mockReturnValue([{ userId: "usr_bob", displayName: "Bob" }])
+    editable()
+    expect(mockMentionCandidates).toHaveBeenCalledWith(null)
+    expect(screen.queryByRole("button", { name: "detail.mention.trigger" })).toBeNull()
+  })
+
   it("routes delete through a confirmation", async () => {
     const user = userEvent.setup()
     const onRequestDelete = jest.fn()
@@ -744,6 +767,58 @@ describe("editing", () => {
       await user.click(screen.getByTestId("issue-comment-submit"))
       expect(onAction).toHaveBeenCalledWith({ kind: "comment", body: "shared update" })
       expect(mockAddIssueComment).not.toHaveBeenCalled()
+    })
+
+    it("offers the issue's workspace members as mentions and sends the declared ids", async () => {
+      collabIssueValue = { orgId: "org-1", workspaceId: "ws-shared" }
+      mockMentionCandidates.mockReturnValue([{ userId: "usr_bob", displayName: "Bob" }])
+      const user = userEvent.setup()
+      const onAction = jest.fn()
+      render(
+        <IssueDetailPanel
+          item={item({
+            kind: "collab",
+            unifiedId: "collab:issue-1",
+            capabilities: { ...READ_ONLY_ISSUE_CAPABILITIES, canComment: true },
+          })}
+          onAction={onAction}
+        />
+      )
+
+      // Scoped by the mirrored row, which is what the server validates against.
+      expect(mockMentionCandidates).toHaveBeenCalledWith({
+        orgId: "org-1",
+        workspaceId: "ws-shared",
+      })
+      await user.type(screen.getByTestId("issue-comment-input"), "ping")
+      await user.click(screen.getByRole("button", { name: "detail.mention.trigger" }))
+      await user.click(await screen.findByRole("option", { name: "Bob" }))
+      await user.click(screen.getByTestId("issue-comment-submit"))
+
+      expect(onAction).toHaveBeenCalledWith({
+        kind: "comment",
+        body: "ping @Bob",
+        mentions: ["usr_bob"],
+      })
+    })
+
+    it("offers no picker while the mirrored row is not loaded", () => {
+      mockMentionCandidates.mockImplementation((scope) =>
+        scope ? [{ userId: "usr_bob", displayName: "Bob" }] : []
+      )
+      render(
+        <IssueDetailPanel
+          item={item({
+            kind: "collab",
+            unifiedId: "collab:issue-1",
+            capabilities: { ...READ_ONLY_ISSUE_CAPABILITIES, canComment: true },
+          })}
+          onAction={jest.fn()}
+        />
+      )
+      expect(mockMentionCandidates).toHaveBeenCalledWith(null)
+      expect(screen.getByTestId("issue-comment-composer")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "detail.mention.trigger" })).toBeNull()
     })
 
     it("never offers delete", () => {

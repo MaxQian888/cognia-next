@@ -57,6 +57,21 @@ describe("IssuesPage", () => {
     expect(consoleProps).toMatchObject({ initialSelectedId: "iss_42" })
   })
 
+  it("forwards the ?source= of a deep link to a shared issue", () => {
+    search = new URLSearchParams("id=iss_42&source=collab")
+    render(<IssuesPage />)
+    expect(consoleProps).toMatchObject({
+      initialSelectedId: "iss_42",
+      initialSelectedSource: "collab",
+    })
+  })
+
+  it("ignores a ?source= this build does not know", () => {
+    search = new URLSearchParams("id=iss_42&source=bogus")
+    render(<IssuesPage />)
+    expect(consoleProps).toMatchObject({ initialSelectedSource: undefined })
+  })
+
   it("passes undefined rather than null when there is no deep link", () => {
     render(<IssuesPage />)
     expect(consoleProps).toMatchObject({ initialSelectedId: undefined })

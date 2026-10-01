@@ -23,6 +23,8 @@ import {
   executeIntegrationAction,
 } from "@/lib/integrations/action-runner"
 import { listIntegrationAccounts } from "@/lib/db/integrations"
+import { GITHUB_DOT_COM } from "@/lib/github/host"
+import { githubReadAccountsFor } from "@/lib/integrations/github-read-credential"
 import type { IntegrationAccount, IntegrationActionJob } from "@/types/plugin/plugin-integration"
 
 export const GITHUB_DELIVERY_PLUGIN_ID = "github-delivery"
@@ -58,17 +60,23 @@ export class GithubWritebackError extends Error {
 }
 
 /**
- * The enabled `github-delivery` account to write through.
- *
- * Multiple accounts are possible (a PAT and an App install, say). The newest
- * enabled one wins — `listIntegrationAccounts` already sorts by `updatedAt`
- * descending, so this is "the one the user most recently set up", which is the
- * least surprising default. The UI names the account in the confirmation
- * dialog so the choice is never invisible.
+ * Issue bindings currently name public GitHub repositories. Reuse the read
+ * path's host and owner selection so a newer GHES account cannot redirect a
+ * write to its same-named repository. A confirmed account never falls back to
+ * another account if it was removed, disabled, or disconnected meanwhile.
  */
-export async function resolveGithubWritebackAccount(): Promise<IntegrationAccount | null> {
-  const accounts = await listIntegrationAccounts(GITHUB_DELIVERY_PLUGIN_ID, GITHUB_INTEGRATION_ID)
-  return accounts.find((account) => account.enabled) ?? null
+export async function resolveGithubWritebackAccount(
+  repoFullName = "",
+  accountId?: string
+): Promise<IntegrationAccount | null> {
+  const accounts = await githubReadAccountsFor(repoFullName, GITHUB_DOT_COM, {
+    listAccounts: () => listIntegrationAccounts(GITHUB_DELIVERY_PLUGIN_ID, GITHUB_INTEGRATION_ID),
+    hostForSession: async (sessionId) => {
+      const { githubHostForSession } = await import("@/lib/integrations/github-auth")
+      return githubHostForSession(sessionId)
+    },
+  })
+  return accounts.find((account) => accountId === undefined || account.id === accountId) ?? null
 }
 
 /** Action id + payload for the underlying integration action. */
@@ -93,6 +101,8 @@ export function toIntegrationAction(
 export interface RunGithubWritebackInput {
   target: GithubWritebackTarget
   action: GithubWritebackAction
+  /** The account shown in the confirmation dialog, when there is one. */
+  accountId?: string
   /**
    * Present ONLY when a human has confirmed this exact write in a dialog that
    * showed them the payload. Omitting it leaves the job parked in
@@ -117,8 +127,8 @@ export async function runGithubWriteback(
   const execute = deps.execute ?? executeIntegrationAction
   const approve = deps.approve ?? approveIntegrationActionJob
 
-  const account = await resolveAccount()
-  if (!account) {
+  const account = await resolveAccount(input.target.repoFullName, input.accountId)
+  if (!account || (input.accountId !== undefined && account.id !== input.accountId)) {
     throw new GithubWritebackError(
       "no-account",
       "No enabled GitHub account is connected; connect one in Settings → Connections."
@@ -188,7 +198,7 @@ export async function createGithubIssue(
   const execute = deps.execute ?? executeIntegrationAction
   const approve = deps.approve ?? approveIntegrationActionJob
 
-  const account = await resolveAccount()
+  const account = await resolveAccount(input.repoFullName)
   if (!account) {
     throw new GithubWritebackError(
       "no-account",

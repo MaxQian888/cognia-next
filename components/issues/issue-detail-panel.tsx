@@ -47,6 +47,8 @@ import { collapseActivity } from "@/lib/issues/activity-feed"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
+import { getCollabIssue } from "@/lib/db/collab-issue-mirror"
+import { useCollabMentionCandidates } from "@/hooks/collab/use-collab-mention-candidates"
 import { addIssueComment, getIssue, setIssueAssignee } from "@/lib/db/issues"
 import { listPublishTargets } from "@/lib/issues/publish"
 import { actorKey } from "@/lib/issues/board-model"
@@ -148,6 +150,21 @@ export function IssueDetailPanel({
   const parsed = parseUnifiedIssueId(item.unifiedId)
   const localId = parsed?.kind === "local" ? parsed.sourceId : null
   const writesCollabComments = parsed?.kind === "collab" && Boolean(onAction)
+  const collabIssueId = writesCollabComments && parsed ? parsed.sourceId : null
+  // The mirrored row names the org and workspace the comment's mentions are
+  // validated against (ADR-0207 §2); the unified item does not carry them.
+  const collabIssue = useClientLiveQuery(
+    () => (collabIssueId ? getCollabIssue(collabIssueId) : Promise.resolve(undefined)),
+    [collabIssueId],
+    undefined
+  )
+  const mentionScope = useMemo(
+    () => (collabIssue ? { orgId: collabIssue.orgId, workspaceId: collabIssue.workspaceId } : null),
+    [collabIssue]
+  )
+  // Empty when collaboration is unconfigured, offline or refused: the
+  // composer then offers no picker, and commenting still works.
+  const mentionCandidates = useCollabMentionCandidates(mentionScope)
   const events = useClientLiveQuery(
     () =>
       localId
@@ -238,12 +255,15 @@ export function IssueDetailPanel({
     [item.title, item.description]
   )
 
-  async function handleComment(body: string) {
+  async function handleComment(body: string, mentions: string[] = []) {
     try {
       if (localId) {
+        // A local issue has no membership to resolve a mention against.
         await addIssueComment(localId, body, { kind: "human" })
       } else if (writesCollabComments) {
-        await onAction?.({ kind: "comment", body })
+        await onAction?.(
+          mentions.length > 0 ? { kind: "comment", body, mentions } : { kind: "comment", body }
+        )
       }
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause))
@@ -783,7 +803,10 @@ export function IssueDetailPanel({
                 way to write one, because `addIssueComment` had no caller.
               */}
               {item.capabilities.canComment ? (
-                <IssueCommentComposer onSubmit={handleComment} />
+                <IssueCommentComposer
+                  onSubmit={handleComment}
+                  {...(writesCollabComments ? { mentionCandidates } : {})}
+                />
               ) : null}
             </section>
           </>

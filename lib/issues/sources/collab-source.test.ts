@@ -178,6 +178,58 @@ describe("collabIssueSource.mutate", () => {
   })
 })
 
+describe("collabIssueSource.mutate comment mentions", () => {
+  const BOB = "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+  const CAT = "usr_cccccccccccccccccccccccc"
+
+  async function queuedComment() {
+    const { getDb } = await import("@/lib/db/schema")
+    const queued = await getDb().mobileOutboundQueue.toArray()
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.command).toBe("collab_issue_append_event")
+    return queued[0]?.payload as { issueId: string; kind: string; payload: unknown }
+  }
+
+  it("puts declared mentions into the event payload, de-duplicated", async () => {
+    await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_c1", revision: 1 })])
+
+    await collabIssueSource.mutate?.(
+      "iss_c1",
+      { kind: "comment", body: "@Bob @Cat look", mentions: [BOB, CAT, BOB] },
+      { kind: "human", id: ADA }
+    )
+
+    const payload = await queuedComment()
+    expect(payload).toMatchObject({ issueId: "iss_c1", kind: "commented" })
+    expect(payload.payload).toEqual({ body: "@Bob @Cat look", mentions: [BOB, CAT] })
+  })
+
+  it("omits the field entirely when nobody was mentioned", async () => {
+    await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_c2", revision: 1 })])
+
+    await collabIssueSource.mutate?.(
+      "iss_c2",
+      { kind: "comment", body: "plain", mentions: [] },
+      { kind: "human", id: ADA }
+    )
+
+    expect((await queuedComment()).payload).toEqual({ body: "plain" })
+  })
+
+  it("never derives mentions from @text in the body", async () => {
+    // Display names are not unique (ADR-0207 §2), so only declared ids count.
+    await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_c3", revision: 1 })])
+
+    await collabIssueSource.mutate?.(
+      "iss_c3",
+      { kind: "comment", body: "@Bob please" },
+      { kind: "human", id: ADA }
+    )
+
+    expect((await queuedComment()).payload).toEqual({ body: "@Bob please" })
+  })
+})
+
 describe("registerCollabIssueSource", () => {
   it("registers under the collab kind", () => {
     const registry = createIssueSourceRegistry()

@@ -49,3 +49,18 @@ it("reports web as unavailable and missing local credentials as unauthenticated"
   })
   await expect(local.getAuthenticationState()).resolves.toBe("unauthenticated")
 })
+
+it("authenticates GHES roots without requiring a github.com credential", async () => {
+  const host = parseGithubHost("https://ghe.acme.io")!
+  const getToken = jest.fn(async () => null)
+  const provider = createGitHubPullRequestProvider({
+    isLocalRuntime: () => true,
+    getToken,
+    resolveRepository: async (root) =>
+      root === "/enterprise" ? { fullName: "acme/repo", defaultBranch: "main", host } : null,
+    resolveClient: async (_name, target) => (target?.id === host.id ? client : null),
+  })
+  await expect(provider.getAuthenticationState("/enterprise")).resolves.toBe("authenticated")
+  await expect(provider.getAuthenticationState("/missing")).resolves.toBe("unavailable")
+  expect(getToken).not.toHaveBeenCalled()
+})

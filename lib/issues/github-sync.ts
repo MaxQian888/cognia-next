@@ -6,12 +6,11 @@
  * `/issues` reads Dexie only, so a slow or expired token degrades to
  * stale-but-visible rather than a blank board.
  *
- * The incremental contract is `since` + `ETag`:
+ * The incremental contract is an overlapping `since` watermark:
  *   - `since` is the newest `updatedAt` already mirrored, so a routine sync
  *     asks only for what changed.
- *   - the ETag revalidates that answer; a 304 means the cache is current and
- *     nothing is written. This is the path `proxyFetch`'s null-body bug used to
- *     break, which is why that fix ships alongside.
+ *   - row ETags lack query/completeness provenance and cannot revalidate a
+ *     different `since` window. They are deliberately not sent on this path.
  *
  * Deps are injected so the whole flow is testable without a network, a
  * keyring, or Dexie mocking games.
@@ -28,6 +27,7 @@ import {
 export interface SyncRepoIssuesDeps {
   resolveOctokit: (repoFullName: string) => Promise<OctokitLike>
   latestMirroredUpdate?: typeof latestMirroredUpdate
+  /** Legacy injection point; row ETags are no longer safe to reuse. */
   repoMirrorEtag?: typeof repoMirrorEtag
   upsertGithubIssues?: typeof upsertGithubIssues
   pruneRepoMirror?: typeof pruneRepoMirror
@@ -61,10 +61,8 @@ export interface SyncRepoIssuesResult {
 }
 
 /**
- * `since` must be strictly newer than nothing and inclusive of the last known
- * change — GitHub's `since` is inclusive, so passing the exact watermark
- * re-returns the boundary issue. That is deliberate: re-writing one unchanged
- * row is cheaper than risking a missed edit that landed in the same second.
+ * Pass the stored watermark to the shared reader, which overlaps it by one
+ * second so updates at the boundary are included.
  */
 function sinceFor(watermark: number | undefined): string | undefined {
   return watermark === undefined ? undefined : new Date(watermark).toISOString()
@@ -75,14 +73,11 @@ export async function syncRepoIssues(
   deps: SyncRepoIssuesDeps
 ): Promise<SyncRepoIssuesResult> {
   const readWatermark = deps.latestMirroredUpdate ?? latestMirroredUpdate
-  const readEtag = deps.repoMirrorEtag ?? repoMirrorEtag
   const write = deps.upsertGithubIssues ?? upsertGithubIssues
   const prune = deps.pruneRepoMirror ?? pruneRepoMirror
   const now = deps.now ?? Date.now
 
-  const [watermark, etag] = input.full
-    ? [undefined, undefined]
-    : await Promise.all([readWatermark(input.repoFullName), readEtag(input.repoFullName)])
+  const watermark = input.full ? undefined : await readWatermark(input.repoFullName)
 
   const octokit = await deps.resolveOctokit(input.repoFullName)
   const result = await fetchRepoIssues(octokit, {
@@ -90,7 +85,6 @@ export async function syncRepoIssues(
     issueProjectId: input.issueProjectId,
     now: now(),
     ...(sinceFor(watermark) ? { since: sinceFor(watermark) } : {}),
-    ...(etag ? { etag } : {}),
   })
 
   if (!result.notModified && result.rows.length > 0) {

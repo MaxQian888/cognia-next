@@ -67,23 +67,24 @@ export function GithubWritebackDialog({
   const [body, setBody] = useState("")
   const [labels, setLabels] = useState("")
   const [reason, setReason] = useState<"completed" | "not_planned">("completed")
-  const [accountLabel, setAccountLabel] = useState<string | null>(null)
-  const [accountChecked, setAccountChecked] = useState(false)
+  const [resolvedAccount, setResolvedAccount] = useState<{
+    repoFullName: string
+    account: { id: string; label: string } | null
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void resolveGithubWritebackAccount().then((account) => {
+    void resolveGithubWritebackAccount(target.repoFullName).then((account) => {
       if (cancelled) return
-      setAccountLabel(account?.label ?? null)
-      setAccountChecked(true)
+      setResolvedAccount({ repoFullName: target.repoFullName, account })
     })
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, target.repoFullName])
 
   /**
    * Cleared on the way out rather than by an effect watching `open`: an effect
@@ -96,7 +97,7 @@ export function GithubWritebackDialog({
     setLabels("")
     setReason("completed")
     setError(null)
-    setAccountChecked(false)
+    setResolvedAccount(null)
     onOpenChange(false)
   }
 
@@ -105,7 +106,9 @@ export function GithubWritebackDialog({
     .map((label) => label.trim())
     .filter(Boolean)
 
-  const hasAccount = accountChecked && accountLabel !== null
+  const accountChecked = resolvedAccount?.repoFullName === target.repoFullName
+  const account = accountChecked ? resolvedAccount.account : null
+  const hasAccount = account !== null
   const inputReady =
     kind === "comment" ? body.trim().length > 0 : kind === "label" ? parsedLabels.length > 0 : true
   const canSubmit = hasAccount && inputReady && !busy
@@ -123,6 +126,7 @@ export function GithubWritebackDialog({
       await runGithubWriteback({
         target,
         action: buildAction(),
+        accountId: account?.id,
         approval: "user-confirmed",
       })
       toast.success(t("writeback.success"))
@@ -212,7 +216,7 @@ export function GithubWritebackDialog({
             {!accountChecked
               ? t("writeback.accountChecking")
               : hasAccount
-                ? t("writeback.account", { account: accountLabel ?? "" })
+                ? t("writeback.account", { account: account?.label ?? "" })
                 : t("writeback.error.no-account")}
           </p>
 

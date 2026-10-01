@@ -85,7 +85,7 @@ import {
 import { useIssueViewStore } from "@/stores/issues/issue-view-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { IssueCycle, IssueActor, IssueStatus } from "@/types/issues"
-import type { UnifiedIssueItem } from "@/types/issues/unified"
+import type { IssueSourceKind, UnifiedIssueItem } from "@/types/issues/unified"
 import { makeUnifiedIssueId, parseUnifiedIssueId } from "@/types/issues/unified"
 import { DeleteIssueDialog } from "./delete-issue-dialog"
 import { IssueContextMenu } from "./issue-context-menu"
@@ -118,6 +118,12 @@ export interface IssueConsoleProps {
   /** Deep-linked issue (`/issues?id=…`), since a static export has no `[id]`. */
   initialSelectedId?: string
   /**
+   * Which source the deep-linked id belongs to (`/issues?…&source=…`). Absent
+   * means a local issue; a collaboration notification (ADR-0207) names
+   * `collab`, whose ids look the same as local ones.
+   */
+  initialSelectedSource?: IssueSourceKind
+  /**
    * Deep-linked container filter (`/issues?project=…`), which is what the
    * projects console's "view these issues" produces.
    */
@@ -128,6 +134,7 @@ export interface IssueConsoleProps {
 
 export function IssueConsole({
   initialSelectedId,
+  initialSelectedSource,
   initialProjectId,
   initialCycleId,
 }: IssueConsoleProps) {
@@ -174,7 +181,9 @@ export function IssueConsole({
   }, [initialProjectId, initialCycleId])
 
   const [selectedId, setSelectedId] = useState<string | undefined>(
-    initialSelectedId ? `local:${initialSelectedId}` : undefined
+    initialSelectedId
+      ? makeUnifiedIssueId(initialSelectedSource ?? "local", initialSelectedId)
+      : undefined
   )
   const searchRef = useRef<HTMLInputElement>(null)
 

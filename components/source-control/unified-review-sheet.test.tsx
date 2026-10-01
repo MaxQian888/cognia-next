@@ -37,7 +37,9 @@ function pr(repository: string, number: number): PullRequestRef {
 
 const provider = {
   id: "github",
-  getAuthenticationState: jest.fn(async () => "authenticated" as const),
+  getAuthenticationState: jest.fn(
+    async (_root?: string): Promise<"authenticated" | "unauthenticated"> => "authenticated"
+  ),
   findForBranch: jest.fn(async (root: string) =>
     root === "/repo" ? pr("acme/repo", 7) : pr("acme/second", 9)
   ),
@@ -94,6 +96,7 @@ beforeEach(() => {
     hunks: [hunk(`hash:${ref.path}`)],
   }))
   gitStatusMock.mockReset().mockResolvedValue({ branch: "feature" })
+  provider.getAuthenticationState.mockReset().mockResolvedValue("authenticated")
   provider.push.mockClear()
   provider.create.mockClear()
   provider.publishFeedback.mockClear().mockResolvedValue(undefined)
@@ -280,4 +283,24 @@ it("has a label for every delivery status and unavailable reason, in both locale
     expect([reason, typeof en.unavailable[reason]]).toEqual([reason, "string"])
     expect([reason, typeof zh.unavailable[reason]]).toEqual([reason, "string"])
   }
+})
+
+it("enables only the authenticated root in a mixed public and enterprise workspace", async () => {
+  provider.getAuthenticationState.mockImplementation(async (root) =>
+    root === "/second" ? "authenticated" : "unauthenticated"
+  )
+  renderSheet(["/repo", "/second"])
+  await waitForAuth()
+  const pushes = screen.getAllByRole("button", { name: "Push branch" })
+  expect(pushes[0]).toBeDisabled()
+  expect(pushes[1]).toBeEnabled()
+  fireEvent.change(screen.getByRole("textbox", { name: "Pull request title" }), {
+    target: { value: "Change" },
+  })
+  const creates = screen.getAllByRole("button", { name: "Create pull request" })
+  expect(creates[0]).toBeDisabled()
+  expect(creates[1]).toBeEnabled()
+  fireEvent.click(screen.getByRole("button", { name: "Find pull requests" }))
+  await waitFor(() => expect(provider.findForBranch).toHaveBeenCalledTimes(1))
+  expect(provider.findForBranch).toHaveBeenCalledWith("/second", "feature")
 })

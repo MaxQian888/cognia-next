@@ -1,0 +1,6 @@
+GHES-only authenticationState: unauthenticated
+GHES direct lookup with valid host client succeeded: true
+Push remote despite resolved repo: ["/upstream-only",{"remote":"origin","branch":"feature","setUpstream":true}]
+Cached PR repo: old-owner/old-repo published request: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews",{"owner":"new-owner","repo":"new-repo","pull_number":42,"event":"COMMENT","body":"Old repo review","comments":[{"path":"a.ts","line":1,"side":"RIGHT","body":"Review","commit_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}]
+Writeback selected account: new-ghes input: {"actionId":"commentIssue","input":{"repoFullName":"acme/repo","issueNumber":42,"body":"From github.com issue"}}
+Writeback destination for public issue: [["https://ghe.example/api/v3/repos/acme/repo/issues/42/comments",{"method":"POST","headers":{"accept":"application/vnd.github+json","x-github-api-version":"2022-11-28","content-type":"application/json"},"body":"{\"body\":\"From github.com issue\"}"}]]

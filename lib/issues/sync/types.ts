@@ -73,6 +73,8 @@ export interface RemoteIssue {
 /** A remote milestone, iteration or section, normalised to `issueCycles`. */
 export interface RemoteCycle {
   externalId: string
+  /** Previous identities eligible for an in-place upgrade within the same binding. */
+  legacyExternalIds?: readonly string[]
   kind: IssueCycleKind
   name: string
   status?: IssueCycleStatus

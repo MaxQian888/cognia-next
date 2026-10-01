@@ -1,0 +1,64 @@
+[
+  {
+    "case": "HTTP 404 full refresh erases cached mirror",
+    "result": {
+      "repoFullName": "a/r",
+      "written": 0,
+      "removed": 2,
+      "notModified": false,
+      "truncated": false
+    },
+    "remaining": 0
+  },
+  {
+    "case": "1001 issues never complete after truncated import and incremental refresh",
+    "first": {
+      "repoFullName": "a/r",
+      "written": 1000,
+      "removed": 0,
+      "notModified": false,
+      "truncated": true
+    },
+    "second": {
+      "repoFullName": "a/r",
+      "written": 1,
+      "removed": 0,
+      "notModified": false,
+      "truncated": false
+    },
+    "imported": 1000,
+    "missing": [1]
+  },
+  {
+    "case": "Projects v2 cross-repository same-number collision",
+    "received": "iteration/foreign-iteration",
+    "expected": "iteration/right-iteration"
+  },
+  {
+    "case": "Iteration change is reported applied with no remote write",
+    "pushResult": {
+      "status": "applied"
+    },
+    "remoteWrites": 0
+  },
+  {
+    "case": "Different repositories produce same globally-indexed milestone key",
+    "milestoneKeys": [
+      {
+        "repo": "a/r",
+        "externalId": "milestone/1"
+      },
+      {
+        "repo": "b/other",
+        "externalId": "milestone/1"
+      }
+    ]
+  },
+  {
+    "case": "Actual sync engine overwrites first workspace milestone with second repository milestone",
+    "count": 1,
+    "retainedWorkspace": "workspace",
+    "name": "b/other",
+    "binding": "b/other"
+  }
+]

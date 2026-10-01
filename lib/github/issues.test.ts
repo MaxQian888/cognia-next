@@ -145,7 +145,7 @@ describe("fetchRepoIssues", () => {
   it("passes `since` when the caller has a watermark", async () => {
     const { client, calls } = octokit([{ data: [] }])
     await fetchRepoIssues(client, { repoFullName: "o/r", since: "2026-01-01T00:00:00Z" })
-    expect(calls[0]).toMatchObject({ since: "2026-01-01T00:00:00Z" })
+    expect(calls[0]).toMatchObject({ since: "2025-12-31T23:59:59.000Z" })
   })
 
   it("sends the ETag only on the first page", async () => {
@@ -209,21 +209,34 @@ describe("fetchRepoIssues", () => {
     expect(result.truncated).toBe(false)
   })
 
-  it("keeps the FIRST page's ETag, which is what a conditional request revalidates", async () => {
+  it("does not retain a first-page ETag for a multipage listing", async () => {
     const { client } = octokit([
       { data: [rawIssue()], headers: { link: '<x>; rel="next"', etag: 'W/"p1"' } },
       { data: [], headers: { etag: 'W/"p2"' } },
     ])
-    expect((await fetchRepoIssues(client, { repoFullName: "o/r" })).etag).toBe('W/"p1"')
+    const result = await fetchRepoIssues(client, { repoFullName: "o/r" })
+    expect(result.etag).toBeUndefined()
+    expect(result.rows.every((row) => row.etag === undefined)).toBe(true)
   })
 
-  it("stops at the page cap and says so rather than pretending it finished", async () => {
+  it("fails at the safety ceiling without returning a partial watermark", async () => {
     const { client, calls } = octokit([
       { data: [rawIssue()], headers: { link: '<x>; rel="next"' } },
     ])
-    const result = await fetchRepoIssues(client, { repoFullName: "o/r", now: NOW })
+    await expect(fetchRepoIssues(client, { repoFullName: "o/r", now: NOW })).rejects.toThrow(
+      /incomplete.*page limit/i
+    )
     expect(calls).toHaveLength(MAX_ISSUE_PAGES)
-    expect(result.truncated).toBe(true)
+  })
+
+  it.each([401, 403, 404, 429, 500])("rejects a resolved HTTP %s response", async (status) => {
+    const { client } = octokit([{ status, data: { message: "Unavailable" } }])
+    await expect(fetchRepoIssues(client, { repoFullName: "o/r" })).rejects.toMatchObject({ status })
+  })
+
+  it("rejects a malformed success body instead of treating it as an empty listing", async () => {
+    const { client } = octokit([{ data: { message: "unexpected" } }])
+    await expect(fetchRepoIssues(client, { repoFullName: "o/r" })).rejects.toThrow(/response/i)
   })
 
   it("surfaces the remaining rate-limit budget", async () => {

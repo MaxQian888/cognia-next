@@ -56,6 +56,13 @@ function binding(): IssueSyncBinding {
 }
 
 describe("pure transforms", () => {
+  it("scopes milestone identity by repository and GitHub host", () => {
+    expect(milestoneExternalId(1, "acme/one")).not.toBe(milestoneExternalId(1, "acme/two"))
+    expect(milestoneExternalId(1, "acme/one", "ghe.example")).not.toBe(
+      milestoneExternalId(1, "acme/one")
+    )
+  })
+
   it("extracts identifiers of this container and #numbers of this repo", () => {
     const out = extractIssueMentions(
       "Fixes MERC-12 and merc-3, also closes #7 and see #7 again, not VEN-1 nor foo#9",
@@ -85,7 +92,7 @@ describe("pure transforms", () => {
       status: "canceled",
       assigneeLabel: "a",
       labels: ["bug"],
-      cycleExternalId: milestoneExternalId(2),
+      cycleExternalId: milestoneExternalId(2, "acme/one"),
       remoteUpdatedAt: 99,
       meta: { etag: "e" },
     })
@@ -114,7 +121,7 @@ describe("pure transforms", () => {
         description: null,
         status: "done",
         labels: ["a"],
-        cycleExternalId: "milestone/3",
+        cycleExternalId: milestoneExternalId(3, "acme/one"),
       })
     ).toEqual({
       repoFullName: "acme/one",
@@ -131,10 +138,18 @@ describe("pure transforms", () => {
       issueNumber: 5,
       milestone: null,
     })
-    expect(toUpdateIssueInput("acme/one", 5, { cycleExternalId: "iteration/x" })).toEqual({
-      repoFullName: "acme/one",
-      issueNumber: 5,
-    })
+    expect(() => toUpdateIssueInput("acme/one", 5, { cycleExternalId: "iteration/x" })).toThrow(
+      /iteration/
+    )
+    expect(
+      toUpdateIssueInput("acme/one", 5, { cycleExternalId: milestoneExternalId(3, "acme/one") })
+    ).toMatchObject({ milestone: 3 })
+    expect(() =>
+      toUpdateIssueInput("acme/one", 5, { cycleExternalId: milestoneExternalId(3, "acme/two") })
+    ).toThrow(/repository/)
+    expect(() => toUpdateIssueInput("acme/one", 5, { cycleExternalId: "milestone/3" })).toThrow(
+      /repository/
+    )
   })
 })
 
@@ -219,8 +234,28 @@ describe("pull", () => {
               items: {
                 nodes: [
                   {
-                    content: { number: 1 },
+                    content: {
+                      __typename: "Issue",
+                      number: 1,
+                      repository: { nameWithOwner: "acme/one" },
+                    },
                     fieldValues: { nodes: [{ iterationId: "it1", title: "Sprint 1" }] },
+                  },
+                  {
+                    content: {
+                      __typename: "Issue",
+                      number: 1,
+                      repository: { nameWithOwner: "acme/two" },
+                    },
+                    fieldValues: { nodes: [{ iterationId: "wrong-repo" }] },
+                  },
+                  {
+                    content: {
+                      __typename: "PullRequest",
+                      number: 1,
+                      repository: { nameWithOwner: "acme/one" },
+                    },
+                    fieldValues: { nodes: [{ iterationId: "wrong-type" }] },
                   },
                 ],
                 pageInfo: { hasNextPage: false, endCursor: null },
@@ -252,7 +287,7 @@ describe("pull", () => {
     })
     expect(result.cycles?.map((c) => c.externalId).sort()).toEqual([
       iterationExternalId("it1"),
-      milestoneExternalId(9),
+      milestoneExternalId(9, "acme/one"),
     ])
     const iteration = result.cycles?.find((c) => c.kind === "cycle")
     expect(iteration).toMatchObject({ name: "Sprint 1", startsAt: Date.parse("2026-01-01") })
@@ -319,8 +354,134 @@ describe("pull", () => {
 })
 
 describe("push", () => {
+  it.each([
+    { cycleExternalId: "iteration/new" },
+    { cycleExternalId: "iteration/new", title: "new title" },
+  ])("rejects iteration changes without publishing or consuming the patch: %j", async (patch) => {
+    const execute = jest.fn()
+    const provider = createGithubSyncProvider({ execute: execute as never })
+    await expect(
+      provider.push!(
+        binding(),
+        { provider: "github", externalId: "acme/one#5" },
+        patch,
+        { id: "i1" } as never,
+        { idempotencyKey: "k", by: { kind: "agent" } }
+      )
+    ).rejects.toThrow(/iteration/i)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   const ref: IssueExternalRef = { provider: "github", externalId: "acme/one#5" }
   const issue = { id: "i1" } as never
+
+  it.each([null, "milestone/github.com/acme/one/3"])(
+    "refuses replacing an existing Project iteration with %s",
+    async (cycleExternalId) => {
+      const execute = jest.fn()
+      const request = jest.fn(async () => ({
+        status: 200,
+        headers: {},
+        data: {
+          data: {
+            repository: {
+              projectV2: {
+                items: {
+                  nodes: [
+                    {
+                      content: {
+                        __typename: "Issue",
+                        number: 5,
+                        repository: { nameWithOwner: "acme/one" },
+                      },
+                      fieldValues: { nodes: [{ iterationId: "current" }] },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false },
+                },
+              },
+            },
+          },
+        },
+      }))
+      const provider = createGithubSyncProvider({
+        execute: execute as never,
+        resolveOctokitOrNull: async () => ({ request }) as OctokitLike,
+      })
+      await expect(
+        provider.push!(binding(), ref, { cycleExternalId }, issue, {
+          idempotencyKey: "k",
+          by: { kind: "agent" },
+        })
+      ).rejects.toThrow(/iteration/)
+      expect(execute).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    { errors: [{ message: "Forbidden" }] },
+    { data: { repository: { projectV2: null } } },
+    { data: { repository: { projectV2: { fields: { pageInfo: { hasNextPage: true } } } } } },
+    {
+      data: {
+        repository: {
+          projectV2: { items: { nodes: [{ fieldValues: { pageInfo: { hasNextPage: true } } }] } },
+        },
+      },
+    },
+  ])(
+    "refuses milestone writes when the configured Project cannot be fully verified",
+    async (data) => {
+      const execute = jest.fn()
+      const provider = createGithubSyncProvider({
+        execute: execute as never,
+        resolveOctokitOrNull: async () =>
+          ({ request: async () => ({ status: 200, headers: {}, data }) }) as OctokitLike,
+      })
+      await expect(
+        provider.push!(binding(), ref, { cycleExternalId: null }, issue, {
+          idempotencyKey: "k",
+          by: { kind: "agent" },
+        })
+      ).rejects.toThrow(/iteration/)
+      expect(execute).not.toHaveBeenCalled()
+    }
+  )
+
+  it("still queues milestone changes when the Project confirms no iteration assignment", async () => {
+    const execute = jest.fn(async () => ({ id: "job", status: "awaiting_approval" }))
+    const provider = createGithubSyncProvider({
+      execute: execute as never,
+      resolveAccount: async () => ({ id: "acct" }) as never,
+      resolveOctokitOrNull: async () =>
+        ({
+          request: async () => ({
+            status: 200,
+            headers: {},
+            data: {
+              data: {
+                repository: {
+                  projectV2: { items: { nodes: [], pageInfo: { hasNextPage: false } } },
+                },
+              },
+            },
+          }),
+        }) as OctokitLike,
+    })
+    await expect(
+      provider.push!(
+        binding(),
+        { ...ref, meta: { cycleKind: "iteration" } },
+        { cycleExternalId: milestoneExternalId(3, "acme/one") },
+        issue,
+        { idempotencyKey: "k", by: { kind: "agent" } }
+      )
+    ).resolves.toMatchObject({ status: "queued" })
+    expect(execute).toHaveBeenCalledWith(
+      "github-delivery",
+      expect.objectContaining({ input: { repoFullName: "acme/one", issueNumber: 5, milestone: 3 } })
+    )
+  })
 
   it("queues an updateIssue action under the engine's idempotency key", async () => {
     const execute = jest.fn(async () => ({ id: "job-1", status: "awaiting_approval" }))

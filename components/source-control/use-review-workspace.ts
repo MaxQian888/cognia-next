@@ -103,7 +103,17 @@ export function useReviewWorkspace(options: UseReviewWorkspaceOptions) {
   const [staleCommentCount, setStaleCommentCount] = useState(0)
   const [unavailableRoots, setUnavailableRoots] = useState<UnavailableReviewRoot[]>([])
   const [summary, setSummary] = useState("")
-  const [auth, setAuth] = useState<AuthState>("unavailable")
+  const [authByRoot, setAuthByRoot] = useState<Record<string, AuthState>>({})
+  const authForRoot = useCallback(
+    (repositoryRoot: string): AuthState => authByRoot[repositoryRoot] ?? "unavailable",
+    [authByRoot]
+  )
+  const selectedAuth = [...selectedRoots].map(authForRoot)
+  const auth: AuthState = selectedAuth.includes("authenticated")
+    ? "authenticated"
+    : selectedAuth.includes("unauthenticated")
+      ? "unauthenticated"
+      : "unavailable"
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [delivery, setDelivery] = useState<ReviewDelivery | null>(null)
@@ -112,13 +122,21 @@ export function useReviewWorkspace(options: UseReviewWorkspaceOptions) {
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void provider.getAuthenticationState().then((state) => {
-      if (!cancelled) setAuth(state)
+    void Promise.all(
+      [...selectedRoots].map(
+        async (root) =>
+          [
+            root,
+            await provider.getAuthenticationState(root).catch(() => "unavailable" as const),
+          ] as const
+      )
+    ).then((entries) => {
+      if (!cancelled) setAuthByRoot(Object.fromEntries(entries))
     })
     return () => {
       cancelled = true
     }
-  }, [open, provider])
+  }, [open, provider, selectedRoots])
 
   const rootState = useCallback(
     (repositoryRoot: string): ReviewRootState =>
@@ -357,6 +375,7 @@ export function useReviewWorkspace(options: UseReviewWorkspaceOptions) {
     () =>
       run(async () => {
         for (const repositoryRoot of selectedRoots) {
+          if ((await provider.getAuthenticationState(repositoryRoot)) !== "authenticated") continue
           // Each repository has its own checked-out branch; the primary root's
           // branch is not a fact about any of the others.
           const status = await gitStatus(repositoryRoot)
@@ -410,6 +429,7 @@ export function useReviewWorkspace(options: UseReviewWorkspaceOptions) {
     (options: { retry?: boolean } = {}) =>
       run(async () => {
         const bundle = await buildBundle()
+        if (options.retry && delivery) bundle.id = delivery.bundleId
         const result = await publishReviewFeedback({
           provider,
           bundle,
@@ -441,6 +461,7 @@ export function useReviewWorkspace(options: UseReviewWorkspaceOptions) {
     summary,
     setSummary,
     auth,
+    authForRoot,
     busy,
     error,
     delivery,

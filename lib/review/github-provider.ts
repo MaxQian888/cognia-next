@@ -1,3 +1,6 @@
+import { GITHUB_DOT_COM, remoteHostname, type GithubHost } from "@/lib/github/host"
+import { publishGithubReview } from "@/plugins/github-delivery/src/review"
+import { sha256Hex } from "@/lib/share/hash"
 import { gitPush } from "@/lib/git/commands"
 import { assertSingleRootBundle } from "./bundle"
 import type {
@@ -23,11 +26,15 @@ export interface GitHubRepositoryBinding {
   owner: string
   repo: string
   fullName: string
+  host?: GithubHost
+  remote?: string
   client: GitHubRequestClient
 }
 
 export interface GitHubPullRequestProviderOptions {
-  authenticationState(): Promise<"authenticated" | "unauthenticated" | "unavailable">
+  authenticationState(
+    repositoryRoot?: string
+  ): Promise<"authenticated" | "unauthenticated" | "unavailable">
   resolveRepository(repositoryRoot: string): Promise<GitHubRepositoryBinding>
 }
 
@@ -90,17 +97,19 @@ function wrapError(
 }
 
 function mapPullRequest(
-  repository: string,
+  binding: GitHubRepositoryBinding,
   data: Record<string, unknown>,
   fallback: { headRef: string; baseRef: string; title: string }
 ): PullRequestRef {
   const merged = data.merged === true || Boolean(data.merged_at)
   const state = merged ? "merged" : data.state === "closed" ? "closed" : "open"
-  const head = data.head as { ref?: string } | undefined
+  const head = data.head as { ref?: string; sha?: string } | undefined
   const base = data.base as { ref?: string } | undefined
   return {
     provider: "github",
-    repository,
+    repository: binding.fullName,
+    host: (binding.host ?? GITHUB_DOT_COM).id,
+    headSha: head?.sha,
     number: Number(data.number),
     url: String(data.html_url ?? data.url ?? ""),
     headRef: head?.ref ?? fallback.headRef,
@@ -115,8 +124,10 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
 
   constructor(private readonly options: GitHubPullRequestProviderOptions) {}
 
-  getAuthenticationState(): Promise<"authenticated" | "unauthenticated" | "unavailable"> {
-    return this.options.authenticationState()
+  getAuthenticationState(
+    repositoryRoot?: string
+  ): Promise<"authenticated" | "unauthenticated" | "unavailable"> {
+    return this.options.authenticationState(repositoryRoot)
   }
 
   async findForBranch(repositoryRoot: string, branch: string): Promise<PullRequestRef | null> {
@@ -133,7 +144,7 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
         ? (response.data[0] as Record<string, unknown> | undefined)
         : undefined
       return first
-        ? mapPullRequest(binding.fullName, first, { headRef: branch, baseRef: "", title: "" })
+        ? mapPullRequest(binding, first, { headRef: branch, baseRef: "", title: "" })
         : null
     } catch (error) {
       throw wrapError(error, "lookup")
@@ -176,7 +187,9 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
 
   async push(repositoryRoot: string, branch: string): Promise<void> {
     try {
-      await gitPush(repositoryRoot, { remote: "origin", branch, setUpstream: true })
+      const binding = await this.options.resolveRepository(repositoryRoot)
+      if (!binding.remote) throw new Error("The selected GitHub remote is unavailable")
+      await gitPush(repositoryRoot, { remote: binding.remote, branch, setUpstream: true })
     } catch (error) {
       throw wrapError(error, "push")
     }
@@ -194,7 +207,7 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
         body: input.body,
         draft: input.draft ?? false,
       })
-      return mapPullRequest(binding.fullName, response.data as Record<string, unknown>, {
+      return mapPullRequest(binding, response.data as Record<string, unknown>, {
         headRef: input.headRef,
         baseRef: input.baseRef,
         title: input.title,
@@ -221,21 +234,55 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
       if (!root) throw new Error("Review feedback has no repository root")
       const live = assertSingleRootBundle(bundle, root)
       const binding = await this.options.resolveRepository(root)
+      const host = pullRequest.host ?? remoteHostname(pullRequest.url)
+      if (
+        pullRequest.provider !== this.id ||
+        binding.fullName.toLowerCase() !== pullRequest.repository.toLowerCase() ||
+        host !== (binding.host ?? GITHUB_DOT_COM).id
+      ) {
+        throw new Error("Pull request repository or host changed; refresh the pull request")
+      }
+      const commitId = pullRequest.headSha
+      if (!commitId) throw new Error("Review publication requires an immutable head SHA")
+      if (
+        live.some((comment) => comment.anchor.commitSha && comment.anchor.commitSha !== commitId)
+      ) {
+        throw new Error("Review comment SHA differs from the pull request head")
+      }
       const comments = live.map((comment) => ({
         path: comment.anchor.path,
         line: comment.anchor.line,
         side: comment.anchor.side === "before" ? "LEFT" : "RIGHT",
         body: comment.body,
-        ...(comment.anchor.commitSha ? { commit_id: comment.anchor.commitSha } : {}),
       }))
-      await binding.client.request("POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews", {
-        owner: binding.owner,
-        repo: binding.repo,
-        pull_number: pullRequest.number,
-        event: "COMMENT",
-        body: bundle.summary,
-        comments,
-      })
+      // Bundle identity survives a retry; ordinary reviews by other users
+      // cannot accidentally satisfy this publication's reconciliation check.
+      const marker = `<!-- cognia-review:${await sha256Hex(bundle.id)} -->`
+      const body = bundle.summary.trim() ? `${bundle.summary}\n\n${marker}` : marker
+      const targetPath = `/repos/${binding.fullName}/pulls/${pullRequest.number}`
+      await publishGithubReview(
+        {
+          repoFullName: binding.fullName,
+          prNumber: pullRequest.number,
+          commitId,
+          event: "COMMENT",
+          body,
+          comments,
+        },
+        async <T>(path: string, method = "GET", body?: unknown) => {
+          const [pathname, query] = path.split("?")
+          const route = pathname.replace(targetPath, "/repos/{owner}/{repo}/pulls/{pull_number}")
+          const response = await binding.client.request(`${method} ${route}`, {
+            owner: binding.owner,
+            repo: binding.repo,
+            pull_number: pullRequest.number,
+            ...Object.fromEntries(new URLSearchParams(query)),
+            ...(body as Record<string, unknown> | undefined),
+          })
+          return { data: response.data as T }
+        },
+        { allowDraftComment: true }
+      )
     } catch (error) {
       throw wrapError(error, "feedback")
     }

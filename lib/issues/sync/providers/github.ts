@@ -106,8 +106,12 @@ export function nextGithubAssignees(current: readonly string[], login: string | 
   return [login, ...rest]
 }
 
-export function milestoneExternalId(number: number): string {
-  return `milestone/${number}`
+export function milestoneExternalId(
+  number: number,
+  repoFullName: string,
+  host = "github.com"
+): string {
+  return `milestone/${host.toLowerCase()}/${repoFullName.toLowerCase()}/${number}`
 }
 
 export function iterationExternalId(id: string): string {
@@ -147,10 +151,12 @@ interface RawPull {
 }
 
 interface ProjectV2Response {
+  errors?: Array<{ message?: string }>
   data?: {
     repository?: {
       projectV2?: {
         fields?: {
+          pageInfo?: { hasNextPage?: boolean }
           nodes?: Array<{
             __typename?: string
             name?: string
@@ -167,8 +173,15 @@ interface ProjectV2Response {
         }
         items?: {
           nodes?: Array<{
-            content?: { number?: number } | null
-            fieldValues?: { nodes?: Array<{ iterationId?: string; title?: string }> }
+            content?: {
+              __typename?: string
+              number?: number
+              repository?: { nameWithOwner?: string }
+            } | null
+            fieldValues?: {
+              nodes?: Array<{ iterationId?: string; title?: string }>
+              pageInfo?: { hasNextPage?: boolean }
+            }
           }>
           pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
         }
@@ -182,6 +195,7 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     projectV2(number: $number) {
       fields(first: 50) {
+        pageInfo { hasNextPage }
         nodes {
           __typename
           ... on ProjectV2IterationField {
@@ -195,8 +209,9 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
       }
       items(first: 100, after: $after) {
         nodes {
-          content { ... on Issue { number } }
+          content { __typename ... on Issue { number repository { nameWithOwner } } }
           fieldValues(first: 20) {
+            pageInfo { hasNextPage }
             nodes { ... on ProjectV2ItemFieldIterationValue { iterationId title } }
           }
         }
@@ -263,10 +278,13 @@ export function toRemoteIssue(
     cycleExternalId: iteration
       ? iterationExternalId(iteration)
       : row.milestoneNumber !== undefined
-        ? milestoneExternalId(row.milestoneNumber)
+        ? milestoneExternalId(row.milestoneNumber, repoFullName)
         : null,
     remoteUpdatedAt: row.updatedAt,
-    ...(row.etag ? { meta: { etag: row.etag } } : {}),
+    meta: {
+      ...(row.etag ? { etag: row.etag } : {}),
+      cycleKind: iteration ? "iteration" : "milestone",
+    },
   }
 }
 
@@ -305,8 +323,17 @@ export function toUpdateIssueInput(
   if (patch.labels !== undefined) input.labels = [...patch.labels]
   if (patch.cycleExternalId !== undefined) {
     if (patch.cycleExternalId === null) input.milestone = null
-    else if (patch.cycleExternalId.startsWith("milestone/")) {
-      input.milestone = Number(patch.cycleExternalId.slice("milestone/".length))
+    else {
+      const prefix = `milestone/github.com/${repoFullName.toLowerCase()}/`
+      const number = patch.cycleExternalId.startsWith(prefix)
+        ? patch.cycleExternalId.slice(prefix.length)
+        : undefined
+      if (!number || !/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number))) {
+        throw new Error(
+          "GitHub cycle write requires a milestone from this repository; iteration writes are unsupported"
+        )
+      }
+      input.milestone = Number(number)
     }
   }
   return input
@@ -325,7 +352,8 @@ async function fetchMilestones(
   })
   const rows = Array.isArray(response.data) ? (response.data as RawMilestone[]) : []
   return rows.map((row) => ({
-    externalId: milestoneExternalId(row.number),
+    externalId: milestoneExternalId(row.number, `${owner}/${repo}`),
+    legacyExternalIds: [`milestone/${row.number}`],
     kind: "milestone" as const,
     name: row.title,
     status: row.state === "closed" ? ("completed" as const) : ("active" as const),
@@ -338,7 +366,8 @@ async function fetchProjectV2(
   octokit: OctokitLike,
   owner: string,
   repo: string,
-  number: number
+  number: number,
+  requireComplete = false
 ): Promise<{ cycles: RemoteCycle[]; iterationByIssue: Map<number, string> }> {
   const cycles = new Map<string, RemoteCycle>()
   const iterationByIssue = new Map<number, string>()
@@ -350,8 +379,18 @@ async function fetchProjectV2(
       query: PROJECT_V2_QUERY,
       variables: { owner, repo, number, after },
     })) as { data: ProjectV2Response }
+    if (response.data?.errors?.length) {
+      throw new Error("GitHub Projects iteration read failed")
+    }
     const project = response.data?.data?.repository?.projectV2
-    if (!project) break
+    if (!project) {
+      if (requireComplete)
+        throw new Error("Cannot verify GitHub Projects iteration before cycle write")
+      break
+    }
+    if (requireComplete && project.fields?.pageInfo?.hasNextPage) {
+      throw new Error("Incomplete GitHub Projects iteration fields; cycle write refused")
+    }
     for (const field of project.fields?.nodes ?? []) {
       const configuration = field?.configuration
       if (!configuration) continue
@@ -374,13 +413,25 @@ async function fetchProjectV2(
       }
     }
     for (const item of project.items?.nodes ?? []) {
+      if (requireComplete && item?.fieldValues?.pageInfo?.hasNextPage) {
+        throw new Error("Incomplete GitHub Projects iteration values; cycle write refused")
+      }
       const issueNumber = item?.content?.number
       const iteration = item?.fieldValues?.nodes?.find((value) => value?.iterationId)
-      if (typeof issueNumber === "number" && iteration?.iterationId) {
+      if (
+        item?.content?.__typename === "Issue" &&
+        item.content.repository?.nameWithOwner?.toLowerCase() ===
+          `${owner}/${repo}`.toLowerCase() &&
+        typeof issueNumber === "number" &&
+        iteration?.iterationId
+      ) {
         iterationByIssue.set(issueNumber, iteration.iterationId)
       }
     }
     const pageInfo = project.items?.pageInfo
+    if (requireComplete && pageInfo?.hasNextPage && (!pageInfo.endCursor || page === 19)) {
+      throw new Error("Incomplete GitHub Projects iteration items; cycle write refused")
+    }
     if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break
     after = pageInfo.endCursor
   }
@@ -538,6 +589,27 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
         throw new Error(`Not a GitHub issue ref: ${ref.externalId}`)
       }
 
+      // Reject unsupported planning edits before any part of this patch is queued.
+      toUpdateIssueInput(resource.repoFullName, issueNumber, patch)
+      if (patch.cycleExternalId !== undefined) {
+        if (ref.meta?.cycleKind === "iteration" && !resource.sync?.projectV2Number) {
+          throw new Error("GitHub Projects iteration writes are unsupported")
+        }
+        if (resource.sync?.projectV2Number) {
+          const [owner, repo] = resource.repoFullName.split("/")
+          const project = await fetchProjectV2(
+            await octokitFor(resource.repoFullName),
+            owner,
+            repo,
+            resource.sync.projectV2Number,
+            true
+          )
+          if (project.iterationByIssue.has(issueNumber)) {
+            throw new Error("GitHub Projects iteration writes are unsupported")
+          }
+        }
+      }
+
       // An assignee goes out only when it names a GitHub login (or nobody);
       // an agent or member assignee stays local, as it always has.
       let assignees: string[] | undefined
@@ -564,7 +636,7 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
       // Nothing left to send (the patch was only a local-only assignee).
       if (Object.keys(input).length <= 2) return { status: "applied" }
 
-      const account = await resolveAccount()
+      const account = await resolveAccount(resource.repoFullName)
       if (!account) throw new MissingGithubCredentialError(resource.repoFullName)
       const job = await execute(GITHUB_DELIVERY_PLUGIN_ID, {
         integrationId: GITHUB_INTEGRATION_ID,

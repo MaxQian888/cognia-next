@@ -1,0 +1,14 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node lib/review/github-runtime.test.ts
+PASS jsdom components/source-control/unified-review-sheet.test.tsx
+PASS node lib/github/pr-observe/fetch.test.ts
+PASS node lib/stack/forge-session.test.ts
+PASS node lib/stack/forge/remote.test.ts
+PASS node lib/review/github-provider.test.ts
+PASS node lib/stack/forge/github.test.ts
+
+Test Suites: 7 passed, 7 total
+Tests:       104 passed, 104 total
+Snapshots:   0 total
+Time:        5.045 s, estimated 7 s
+Ran all test suites within paths "lib/review/github-runtime.test.ts", "lib/review/github-provider.test.ts", "lib/stack/forge/github.test.ts", "lib/stack/forge/remote.test.ts", "lib/stack/forge-session.test.ts", "lib/github/pr-observe/fetch.test.ts", "components/source-control/unified-review-sheet.test.tsx" in 2 projects.

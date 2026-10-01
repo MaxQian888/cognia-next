@@ -389,3 +389,48 @@ Yjs 相对位置能在插入、删除以及他人的并发编辑之后依然有�
 - **离线重放队列在内存中。** 连接断开时被拒的帧会被排队，并在重连时刷出，这覆盖了短暂断线，但覆盖不了重新加载。持久队列是一张增量的 Dexie 表，不在这一批里。
 - **评论锚点还没有到达服务端。** `canvas_comments.anchor` 存放 Yjs 相对位置，客户端也会计算它，但 Canvas 评论仍然住在本地的 `contextComments` 表里。通过协同平面的评论路由同步它们，是剩下的另一半。
 - **富文本 Markdown 编辑**尚未发布。计划中点名的是 Milkdown。复用路径是在 `@codemirror/lang-markdown` 之上用 CodeMirror 6 的装饰实现，它本来就是依赖；而且与 ProseMirror 的往返转换不同，它不会丢失不受支持的结构，因为缓冲区始终是 Markdown。
+
+## 修订（提议中），2026-09-30：Canvas 协同默认开启之前必须成立的条件
+
+**本修订状态：** 提议中。来源研究为 `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`，缺口 A5。
+
+那几条修订有意留下三个未决项；拿客户端和服务端对照时又发现第四个：本 ADR 选定的压缩方式没有任何触发点。`CollabClient.pushCanvasSnapshot` 和 `pullCanvasUpdates` 在 `lib/collab/client.ts` 中存在，却没有调用者；`listCanvasComments`、`createCanvasComment`、`listCanvasVersions`、`createCanvasVersion`、`readCanvasPresence` 也一样。服务端的 `canvas_document_updates` 因此无限增长，新加入者要重放写入过的每一条更新。
+
+这里不推翻上文的任何决定：服务端依然从不解码更新，`yrs` 依然不进入构建。
+
+### 1. 重放队列在重新加载后仍在
+
+`CanvasWebSocketProvider.messageQueue` 改为一张 Dexie 表的投影：`canvasPendingUpdates: "[documentId+operationId], documentId, queuedAt"`。这需要修改 `CURRENT_SCHEMA`、提升版本号，并加入 `CORE_TABLE_NAMES`。本地更新先写入这张表，再交给连接发送；服务端确认（即存储后的行）回来时删除。
+
+服务端的 `(document_id, operation_id)` 本来就唯一，所以重新加载后清空这张表，与内存队列在短暂断线后的重发一样安全。这张表只在本地，从不同步到配对手机：未发出的编辑属于做出它的那台设备。
+
+### 2. 由维护者的客户端按规则压缩，而不是手动
+
+压缩仍是维护者的行为，这一点沿用原决定。变化在于：维护者的客户端现在无需被要求就会执行压缩。
+
+- **何时执行：** 快照标记之后的更新超过 500 条，或总量超过 2 MiB。客户端从加入时本就要拉取的 `pullCanvasUpdates` 分页中得知这两个数。
+- **由谁执行：** 完全同步的维护者，即 `canvasPendingUpdates` 中没有待发行、且已追上流的最新位置。若有多位这样的维护者，由 awareness `clientID` 最小的那位执行。
+- **发送什么：** 通过 `pushCanvasSnapshot` 发送 `Y.encodeStateAsUpdate(doc)`，`coversSequence` 为它已应用的最后一个序号。存储已经拒绝回退或越过现有范围的标记，所以两位维护者竞争的代价只是一次白费的上传，不会丢编辑。
+
+没有维护者在线的工作区，会一直等到有维护者上线才压缩。这正是当初选择「只有维护者可以压缩」的用意。
+
+### 3. 评论和命名版本迁到协同平面
+
+- Canvas 评论从 `contextComments` 迁到协同平面的评论路由，并带上上文修订中已经计算好的 Yjs 相对位置锚点。
+- 文档转为协同时，其上已有的本地评论由所有者通过一个明确的「带上评论」步骤发布一次。这与共享聊天的「显式转换」规则一致。
+- 命名版本通过 `createCanvasVersion` 在协同平面上创建，入口是已有的版本历史面板（`components/canvas/version-history-panel.tsx`）。
+- 本地、非协同的文档继续使用 `contextComments` 和本地版本，对它们没有任何变化。
+
+### 4. 只凭证据翻转默认值
+
+只有下列条件全部满足时，`canvas.collaboration.enabled`（`types/canvas/settings.ts`）和 `COLLAB_CANVAS_ENABLED` 才改为默认开启：
+
+- 第 1–3 项已发布；
+- 该改动在 CI 的 `postgres-rls` 任务（`.github/workflows/test.yml`）中通过，且 Canvas 路由在其覆盖范围内；
+- 两台机器的 `tauri-smoke` 通过：并发输入、在连接断开时中途重新加载、在第二台机器上观察到一次压缩；
+- 子系统文档 `subsystems/canvas/collaboration.mdx` 描述的是实际发布的 Yjs 架构。它已于 2026-09-30 按代码重写，第 1–3 项落地时须随之更新。
+
+### 本修订之后仍未决定
+
+- **富文本 Markdown 编辑**，与上文未决列表相同。
+- **在线状态**：目前是 awareness 协议按文档维护的。与设备、共享聊天共用的在线状态模型是来源研究中的路线图 P2-12 项，不属于本修订。

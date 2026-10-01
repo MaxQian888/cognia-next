@@ -412,6 +412,9 @@ function RepositoriesSection({
         return (
           <div key={repositoryRoot} className="space-y-1 rounded border p-2 text-xs">
             <p className="break-all font-mono">{repositoryRoot}</p>
+            <p className="text-muted-foreground">
+              {t("auth", { state: t(`authStates.${workspace.authForRoot(repositoryRoot)}`) })}
+            </p>
             {state.pullRequest ? (
               <a
                 href={state.pullRequest.url}
@@ -432,14 +435,20 @@ function RepositoriesSection({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={workspace.busy || workspace.auth !== "authenticated"}
+                disabled={
+                  workspace.busy || workspace.authForRoot(repositoryRoot) !== "authenticated"
+                }
                 onClick={() => void workspace.pushRoot(repositoryRoot)}
               >
                 {t("push")}
               </Button>
               <Button
                 size="sm"
-                disabled={workspace.busy || workspace.auth !== "authenticated" || !prTitle.trim()}
+                disabled={
+                  workspace.busy ||
+                  workspace.authForRoot(repositoryRoot) !== "authenticated" ||
+                  !prTitle.trim()
+                }
                 onClick={() =>
                   void workspace.createFor(repositoryRoot, {
                     title: prTitle,

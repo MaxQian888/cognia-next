@@ -10,7 +10,7 @@
  * caching layer in the codebase:
  *   - `OctokitLike` keeps the fetch logic decoupled from `@octokit/core`, so
  *     tests inject a plain object.
- *   - `safeRequest` normalises both throw-based and resolve-based 304/404 into
+ *   - `safeRequest` normalises both throw-based and resolve-based 304 into
  *     a resolved `{status}` with no body.
  *   - ETag conditional requests: a 304 means "reuse what you have", which is
  *     the whole reason `proxyFetch` had to stop throwing on null-body statuses.
@@ -42,15 +42,18 @@ export interface OctokitLike {
 /** GitHub caps `per_page` at 100; anything larger is silently clamped anyway. */
 export const ISSUES_PER_PAGE = 100
 
-/** Hard ceiling on pages walked in one sync, so a huge repo can't hang a run. */
-export const MAX_ISSUE_PAGES = 10
+/**
+ * Bound API spend and memory at 100,000 raw records (including PRs). Reaching
+ * this guard fails the whole read; partial rows must never advance a watermark.
+ */
+export const MAX_ISSUE_PAGES = 1_000
 
 export interface FetchRepoIssuesOptions {
   /** `owner/repo`. */
   repoFullName: string
-  /** ISO-8601; only issues updated at or after this are returned. */
+  /** ISO-8601 watermark; overlapped by one second to include boundary updates. */
   since?: string
-  /** ETag from the previous fetch, for conditional revalidation. */
+  /** ETag from a complete single-page fetch with the exact same query. */
   etag?: string
   /** Delivery container to stamp on the mirrored rows. */
   issueProjectId?: string
@@ -65,7 +68,7 @@ export interface FetchRepoIssuesResult {
   notModified: boolean
   /** ETag to persist for the next conditional fetch. */
   etag?: string
-  /** True when the page cap stopped the walk before GitHub ran out. */
+  /** Incomplete reads throw; retained for the shared sync result contract. */
   truncated: boolean
   /** Rate-limit budget left, surfaced so callers can back off. */
   rateLimitRemaining?: number
@@ -88,7 +91,7 @@ async function safeRequest(
       error !== null && typeof error === "object" && "status" in error
         ? Number((error as { status: unknown }).status)
         : NaN
-    if (status === 304 || status === 404) {
+    if (status === 304) {
       const headers =
         error !== null && typeof error === "object" && "response" in error
           ? ((error as { response?: { headers?: Record<string, string | undefined> } }).response
@@ -185,11 +188,11 @@ export function hasNextPage(link: string | undefined): boolean {
 }
 
 /**
- * Fetch a repo's issues, walking pages until GitHub runs out or the cap hits.
+ * Fetch a repo's complete issue listing, or fail without publishing partial rows.
  *
  * The ETag is only meaningful for the FIRST page — that is what a conditional
- * request revalidates. A 304 there means nothing changed since `since`, so the
- * walk short-circuits and the caller keeps its cache untouched.
+ * request revalidates. Only callers with a complete single-page cache for the
+ * same query may provide one. Multipage results never retain that ETag.
  */
 export async function fetchRepoIssues(
   octokit: OctokitLike,
@@ -204,7 +207,11 @@ export async function fetchRepoIssues(
   const rows: GithubIssueMirrorRow[] = []
   let pageEtag: string | undefined
   let rateLimitRemaining: number | undefined
-  let truncated = false
+  // GitHub documents `since` as "after", with second-resolution timestamps.
+  // An overlap also covers another update sharing the last observed second.
+  const since = options.since
+    ? new Date(Date.parse(options.since) - 1_000).toISOString()
+    : undefined
 
   for (let page = 1; page <= MAX_ISSUE_PAGES; page += 1) {
     const conditional = page === 1 && options.etag ? { "if-none-match": options.etag } : {}
@@ -212,9 +219,11 @@ export async function fetchRepoIssues(
       owner,
       repo,
       state: "all",
+      sort: "created",
+      direction: "asc",
       per_page: ISSUES_PER_PAGE,
       page,
-      ...(options.since ? { since: options.since } : {}),
+      ...(since ? { since } : {}),
       headers: { ...conditional },
     })
 
@@ -222,7 +231,7 @@ export async function fetchRepoIssues(
     if (remaining !== undefined) rateLimitRemaining = Number(remaining)
 
     if (page === 1) {
-      if (response.status === 304) {
+      if (response.status === 304 && options.etag) {
         return {
           rows: [],
           notModified: true,
@@ -234,7 +243,15 @@ export async function fetchRepoIssues(
       pageEtag = response.headers.etag
     }
 
-    const batch = Array.isArray(response.data) ? (response.data as RawGithubIssue[]) : []
+    if (response.status !== 200) {
+      throw Object.assign(new Error(`GitHub issues request failed (HTTP ${response.status})`), {
+        status: response.status,
+      })
+    }
+    if (!Array.isArray(response.data)) {
+      throw new Error("Invalid GitHub issues response: expected an array")
+    }
+    const batch = response.data as RawGithubIssue[]
     for (const raw of batch) {
       // GitHub's issues endpoint returns pull requests too; they belong to the
       // PR surface, not the issue board.
@@ -243,29 +260,23 @@ export async function fetchRepoIssues(
         toMirrorRow(raw, {
           repoFullName: options.repoFullName,
           ...(options.issueProjectId ? { issueProjectId: options.issueProjectId } : {}),
-          ...(pageEtag ? { etag: pageEtag } : {}),
           syncedAt,
         })
       )
     }
 
     if (!hasNextPage(response.headers.link)) {
+      const etag = page === 1 ? pageEtag : undefined
+      if (etag) for (const row of rows) row.etag = etag
       return {
         rows,
         notModified: false,
-        ...(pageEtag ? { etag: pageEtag } : {}),
+        ...(etag ? { etag } : {}),
         truncated: false,
         ...(rateLimitRemaining !== undefined ? { rateLimitRemaining } : {}),
       }
     }
-    truncated = page === MAX_ISSUE_PAGES
   }
 
-  return {
-    rows,
-    notModified: false,
-    ...(pageEtag ? { etag: pageEtag } : {}),
-    truncated,
-    ...(rateLimitRemaining !== undefined ? { rateLimitRemaining } : {}),
-  }
+  throw new Error(`GitHub issue listing incomplete: page limit (${MAX_ISSUE_PAGES}) reached`)
 }

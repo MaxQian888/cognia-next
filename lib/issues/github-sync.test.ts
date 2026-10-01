@@ -75,23 +75,21 @@ describe("syncRepoIssues", () => {
     expect(d.written[0][0]).toMatchObject({ id: "o/r#1", issueProjectId: "p1" })
   })
 
-  it("sends the stored watermark and ETag on a routine sync", async () => {
+  it("overlaps the stored watermark without reusing unscoped legacy row ETags", async () => {
     const { client, calls } = octokit([{ data: [] }])
     await syncRepoIssues(INPUT, {
       ...deps(client),
       latestMirroredUpdate: async () => Date.parse("2026-01-05T00:00:00Z"),
       repoMirrorEtag: async () => 'W/"abc"',
     })
-    expect(calls[0]).toMatchObject({ since: "2026-01-05T00:00:00.000Z" })
-    expect(calls[0].headers).toMatchObject({ "if-none-match": 'W/"abc"' })
+    expect(calls[0]).toMatchObject({ since: "2026-01-04T23:59:59.000Z" })
+    expect(calls[0].headers).toEqual({})
   })
 
-  it("writes nothing on a 304 and says the cache is current", async () => {
+  it("rejects an unexpected 304 instead of reusing an unvalidated legacy cache", async () => {
     const { client } = octokit([{ status: 304, headers: { etag: 'W/"abc"' } }])
     const d = deps(client, { repoMirrorEtag: async () => 'W/"abc"' })
-    const result = await syncRepoIssues(INPUT, d)
-
-    expect(result).toMatchObject({ notModified: true, written: 0 })
+    await expect(syncRepoIssues(INPUT, d)).rejects.toMatchObject({ status: 304 })
     expect(d.written).toEqual([])
   })
 
@@ -131,7 +129,7 @@ describe("syncRepoIssues", () => {
     expect(d.pruned).toEqual([])
   })
 
-  it("never prunes on a truncated full read", async () => {
+  it("never writes or prunes when the pagination safety ceiling is reached", async () => {
     // A cap-truncated read omits whatever did not fit; pruning then would
     // delete live issues.
     const pages = Array.from({ length: 40 }, () => ({
@@ -140,14 +138,73 @@ describe("syncRepoIssues", () => {
     }))
     const { client } = octokit(pages)
     const d = deps(client)
-    const result = await syncRepoIssues({ ...INPUT, full: true }, d)
-    expect(result.truncated).toBe(true)
+    await expect(syncRepoIssues({ ...INPUT, full: true }, d)).rejects.toThrow(/incomplete/i)
+    expect(d.written).toEqual([])
     expect(d.pruned).toEqual([])
   })
 
-  it("reports truncation rather than pretending the repo was fully read", async () => {
-    const { client } = octokit([{ data: [rawIssue(1)], headers: { link: '<x>; rel="next"' } }])
-    expect((await syncRepoIssues(INPUT, deps(client))).truncated).toBe(true)
+  it.each([401, 403, 404, 429])("preserves the mirror after a thrown HTTP %s", async (status) => {
+    const d = deps({
+      request: async () => {
+        throw Object.assign(new Error("Unavailable"), { status })
+      },
+    })
+    await expect(syncRepoIssues({ ...INPUT, full: true }, d)).rejects.toMatchObject({ status })
+    expect(d.written).toEqual([])
+    expect(d.pruned).toEqual([])
+  })
+
+  it("preserves the mirror when a later page fails", async () => {
+    const { client } = octokit([
+      { data: [rawIssue(1)], headers: { link: '<x>; rel="next"' } },
+      { status: 404 },
+    ])
+    const d = deps(client)
+    await expect(syncRepoIssues({ ...INPUT, full: true }, d)).rejects.toMatchObject({ status: 404 })
+    expect(d.written).toEqual([])
+    expect(d.pruned).toEqual([])
+  })
+
+  it("imports beyond 1,000 API records including PR-only pages and identical update timestamps", async () => {
+    const records = Array.from({ length: 1201 }, (_, index) =>
+      rawIssue(index + 1, {
+        ...(index < 200 ? { pull_request: { url: "pr" } } : {}),
+      })
+    )
+    const cache = new Map<number, GithubIssueMirrorRow>()
+    const calls: Array<Record<string, unknown>> = []
+    const client: OctokitLike = {
+      request: async (_route, params = {}) => {
+        calls.push(params)
+        const eligible = records.filter(
+          (row) => !params.since || Date.parse(row.updated_at) > Date.parse(String(params.since))
+        )
+        const offset = (Number(params.page) - 1) * Number(params.per_page)
+        return {
+          status: 200,
+          headers: offset + 100 < eligible.length ? { link: '<x>; rel="next"' } : {},
+          data: eligible.slice(offset, offset + 100),
+        }
+      },
+    }
+    const d = deps(client, {
+      upsertGithubIssues: async (rows) => {
+        rows.forEach((row) => cache.set(row.number, row))
+      },
+      latestMirroredUpdate: async () =>
+        cache.size ? Math.max(...[...cache.values()].map((row) => row.updatedAt)) : undefined,
+    })
+    expect(await syncRepoIssues({ ...INPUT, full: true }, d)).toMatchObject({
+      written: 1001,
+      truncated: false,
+    })
+    expect(cache.size).toBe(1001)
+    expect(cache.has(1201)).toBe(true)
+    expect(calls).toHaveLength(13)
+    records.push(rawIssue(1202))
+    await syncRepoIssues(INPUT, d)
+    expect(cache.size).toBe(1002)
+    expect(cache.has(1202)).toBe(true)
   })
 
   it("surfaces the remaining rate-limit budget", async () => {

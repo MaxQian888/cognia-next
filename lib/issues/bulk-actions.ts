@@ -81,8 +81,12 @@ export type IssueBulkAction =
   | { kind: "removeBlocker"; blockerId: string }
   | { kind: "linkExternal"; ref: IssueExternalRef }
   | { kind: "unlinkExternal"; ref: Pick<IssueExternalRef, "provider" | "externalId"> }
-  /** Append a comment. Single-item by nature, like `title`. */
-  | { kind: "comment"; body: string }
+  /**
+   * Append a comment. Single-item by nature, like `title`. `mentions` are the
+   * declared ids from the composer's person picker (ADR-0207 §2); only the
+   * collaboration source forwards them.
+   */
+  | { kind: "comment"; body: string; mentions?: readonly string[] }
   | { kind: "delete" }
 
 export interface IssueBulkOutcome {

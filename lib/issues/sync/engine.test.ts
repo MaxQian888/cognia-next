@@ -10,11 +10,12 @@ import {
   getIssueByExternalKey,
   linkIssueExternal,
   setIssueAssignee,
+  setIssueCycle,
   setIssueDueDate,
   updateIssue,
 } from "@/lib/db/issues"
 import { listIssueEvents, __resetIssueEventClockForTesting } from "@/lib/db/issue-events"
-import { listIssueCycles } from "@/lib/db/issue-cycles"
+import { createIssueCycle, listIssueCycles } from "@/lib/db/issue-cycles"
 import { listLabels } from "@/lib/db/labels"
 import { getDb } from "@/lib/db/schema"
 import type { IssueActor, IssueProject } from "@/types/issues"
@@ -370,6 +371,134 @@ describe("reconcileBinding: field reconciliation", () => {
 })
 
 describe("reconcileBinding: cycles and links", () => {
+  it("keeps equal external cycle identities separate across workspaces and bindings", async () => {
+    const first = fake({
+      pull: {
+        items: [],
+        notModified: false,
+        cycles: [{ externalId: "shared", kind: "milestone", name: "First" }],
+      },
+    })
+    await reconcileBinding(binding(), first.provider)
+    const other = await createIssueProject({ projectId: "w2", name: "Other", key: "OTHER" })
+    const second = fake({
+      pull: {
+        items: [],
+        notModified: false,
+        cycles: [{ externalId: "shared", kind: "milestone", name: "Second" }],
+      },
+    })
+    await reconcileBinding(
+      binding({ projectId: "w2", issueProjectId: other.id, key: "o/other" }),
+      second.provider
+    )
+    await reconcileBinding(
+      binding({ projectId: "w2", issueProjectId: other.id, key: "o/other" }),
+      second.provider
+    )
+    expect((await listIssueCycles({ projectId: "w1" })).map((c) => c.name)).toEqual(["First"])
+    expect((await listIssueCycles({ projectId: "w2" })).map((c) => c.name)).toEqual(["Second"])
+  })
+
+  it("upgrades a legacy cycle ref in place without breaking existing issue references", async () => {
+    const old = await createIssueCycle({
+      projectId: "w1",
+      issueProjectId: container.id,
+      kind: "milestone",
+      name: "Old",
+      externalRefs: [{ provider: "fake", externalId: "milestone/3", meta: { binding: "o/r" } }],
+    })
+    const local = await createIssue({
+      projectId: "w1",
+      issueProjectId: container.id,
+      title: "Already planned",
+      createdBy: HUMAN,
+    })
+    await setIssueCycle(local.id, old.id, HUMAN)
+    const { provider } = fake({
+      pull: {
+        items: [remote({ cycleExternalId: "milestone/github.com/o/r/3" })],
+        cycles: [
+          {
+            externalId: "milestone/github.com/o/r/3",
+            legacyExternalIds: ["milestone/3"],
+            kind: "milestone",
+            name: "New",
+          },
+        ],
+        notModified: false,
+      },
+    })
+    await reconcileBinding(binding(), provider)
+    const cycles = await listIssueCycles({ projectId: "w1" })
+    expect(cycles).toHaveLength(1)
+    expect(cycles[0]).toMatchObject({
+      id: old.id,
+      name: "New",
+      externalKeys: ["fake:milestone/github.com/o/r/3"],
+    })
+    expect((await getIssueByExternalKey("fake", "o/r#1"))!.cycleId).toBe(old.id)
+    expect((await getIssue(local.id))!.cycleId).toBe(old.id)
+  })
+
+  it("does not migrate a legacy ref belonging to another binding in the same container", async () => {
+    const old = await createIssueCycle({
+      projectId: "w1",
+      issueProjectId: container.id,
+      kind: "milestone",
+      name: "Other",
+      externalRefs: [{ provider: "fake", externalId: "milestone/3", meta: { binding: "o/other" } }],
+    })
+    const { provider } = fake({
+      pull: {
+        items: [],
+        cycles: [
+          {
+            externalId: "milestone/github.com/o/r/3",
+            legacyExternalIds: ["milestone/3"],
+            kind: "milestone",
+            name: "This repository",
+          },
+        ],
+        notModified: false,
+      },
+    })
+    await reconcileBinding(binding(), provider)
+    const cycles = await listIssueCycles({ projectId: "w1" })
+    expect(cycles).toHaveLength(2)
+    expect(cycles.find((cycle) => cycle.id === old.id)).toMatchObject({
+      name: "Other",
+      externalKeys: ["fake:milestone/3"],
+    })
+  })
+
+  it("does not consume pending changes when the provider rejects unsupported planning writes", async () => {
+    const initial = fake({ pull: { items: [remote()], notModified: false } })
+    await reconcileBinding(binding(), initial.provider, { now: () => 2000 })
+    const local = (await getIssueByExternalKey("fake", "o/r#1"))!
+    const cycle = await createIssueCycle({
+      projectId: "w1",
+      issueProjectId: container.id,
+      kind: "cycle",
+      name: "Iteration",
+      externalRefs: [{ provider: "fake", externalId: "iteration/new", meta: { binding: "o/r" } }],
+    })
+    await setIssueCycle(local.id, cycle.id, HUMAN)
+    const failing = fake({
+      pushFields: ["cycle"],
+      push: () => {
+        throw new Error("iteration writes unsupported")
+      },
+    })
+    await expect(reconcileBinding(binding(), failing.provider)).rejects.toThrow(/iteration/)
+    const after = (await getIssue(local.id))!
+    expect(after.externalRefs![0].syncedAt).toBe(local.externalRefs![0].syncedAt)
+    expect(after.cycleId).toBe(cycle.id)
+    await expect(reconcileBinding(binding(), failing.provider)).rejects.toThrow(/iteration/)
+    expect(failing.pushes).toHaveLength(2)
+    expect(failing.pushes[0].key).toBe(failing.pushes[1].key)
+  })
+
   it("upserts remote cycles and plans imported issues into them", async () => {
     const { provider } = fake({
       pull: {

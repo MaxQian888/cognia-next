@@ -1,11 +1,15 @@
 /**
  * Collaboration-plane issue source — ADR-0149 §6.
  *
- * Projects `collabIssues` rows onto the same board as local ones. Read-only,
- * because the collaboration server owns them: the board must grey the
- * affordances out rather than accept a gesture it would fail to honour. A write
- * path lands in a later cut, together with a conflict story for rows the client
- * does not own.
+ * Projects `collabIssues` rows onto the same board as local ones. The
+ * collaboration server owns them, so a row is writable only when it carries a
+ * server `revision`, which a server with the write path supplies. Even then it
+ * is writable only for the gestures the server honours: edit, move, assign and
+ * comment. The server still decides authorization. Those go through the durable
+ * outbound queue (`enqueueCollabMutation`) with a `baseRevision`, and a stale
+ * base surfaces as a conflict rather than an overwrite. Run, delete, labels and
+ * project moves stay greyed out, because the board must not accept a gesture
+ * the server would fail to honour.
  *
  * Reads from Dexie only, like every other adapter. Refreshing the mirror is
  * `pullCollabIssues`'s job, so opening the board never blocks on the network
@@ -117,7 +121,12 @@ export const collabIssueSource: IssueSourceAdapter = {
         payload: {
           issueId: row.id,
           kind: "commented",
-          payload: { body: action.body },
+          // Mentions are declared ids, never parsed out of `body`: the server
+          // validates each against workspace membership (ADR-0207 §2).
+          payload:
+            action.mentions && action.mentions.length > 0
+              ? { body: action.body, mentions: [...new Set(action.mentions)] }
+              : { body: action.body },
         },
       })
       return

@@ -31,12 +31,7 @@ import {
   recordIssuePullRequestState,
   touchIssueExternalRef,
 } from "@/lib/db/issues"
-import {
-  createIssueCycle,
-  getIssueCycleByExternalKey,
-  listIssueCycles,
-  updateIssueCycle,
-} from "@/lib/db/issue-cycles"
+import { createIssueCycle, listIssueCycles, updateIssueCycle } from "@/lib/db/issue-cycles"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { hasActiveIssueRun } from "@/lib/db/issue-runs"
 import { listLabels } from "@/lib/db/labels"
@@ -108,8 +103,24 @@ async function upsertCycles(
   cycles: readonly RemoteCycle[]
 ): Promise<Map<string, string>> {
   const byExternalId = new Map<string, string>()
+  // An external record may be imported into more than one workspace. Never
+  // let a global ref lookup transfer one workspace's planning row to another.
+  const owned = (await listIssueCycles({ projectId: binding.projectId })).filter(
+    (cycle) => cycle.issueProjectId === binding.issueProjectId
+  )
   for (const remote of cycles) {
-    const existing = await getIssueCycleByExternalKey(binding.providerId, remote.externalId)
+    const matches = (externalId: string) =>
+      owned.find((cycle) =>
+        cycle.externalRefs.some(
+          (ref) =>
+            ref.provider === binding.providerId &&
+            ref.externalId === externalId &&
+            ref.meta?.binding === binding.key
+        )
+      )
+    const existing =
+      matches(remote.externalId) ??
+      remote.legacyExternalIds?.map(matches).find((cycle) => cycle !== undefined)
     const ref: IssueExternalRef = {
       provider: binding.providerId,
       externalId: remote.externalId,
@@ -123,7 +134,15 @@ async function upsertCycles(
         startsAt: remote.startsAt ?? null,
         endsAt: remote.endsAt ?? null,
         externalRefs: [
-          ...existing.externalRefs.filter((r) => externalKeyOf(r) !== externalKeyOf(ref)),
+          ...existing.externalRefs.filter(
+            (r) =>
+              externalKeyOf(r) !== externalKeyOf(ref) &&
+              !(
+                r.provider === binding.providerId &&
+                r.meta?.binding === binding.key &&
+                remote.legacyExternalIds?.includes(r.externalId)
+              )
+          ),
           ref,
         ],
       })
@@ -139,6 +158,7 @@ async function upsertCycles(
         ...(remote.endsAt !== undefined ? { endsAt: remote.endsAt } : {}),
         externalRefs: [ref],
       })
+      owned.push(created)
       byExternalId.set(remote.externalId, created.id)
     }
   }
@@ -223,7 +243,9 @@ async function buildFieldContext(binding: IssueSyncBinding): Promise<FieldContex
     for (const ref of cycle.externalRefs) {
       if (ref.provider !== binding.providerId) continue
       externalByCycleId.set(cycle.id, ref.externalId)
-      cycleIdByExternal.set(ref.externalId, cycle.id)
+      if (cycle.issueProjectId === binding.issueProjectId && ref.meta?.binding === binding.key) {
+        cycleIdByExternal.set(ref.externalId, cycle.id)
+      }
     }
   }
   return {

@@ -67,11 +67,12 @@ function hunk(hunkHash = "h1") {
 }
 
 function setup(options: Partial<Parameters<typeof useReviewWorkspace>[0]> = {}) {
+  const selectedProvider = options.provider ?? provider()
   return renderHook(() =>
     useReviewWorkspace({
       rootDir: "/a",
       repositoryRoots: ["/a", "/b"],
-      provider: provider(),
+      provider: selectedProvider,
       open: true,
       ...options,
     })
@@ -132,8 +133,9 @@ describe("per-repository refs", () => {
    * The panel supplies one entry — the root the active task run wrote in. Other
    * roots get no run, and the scope collector says so by name.
    */
-  it("seeds a root's last-turn run from the supplied map", () => {
+  it("seeds a root's last-turn run from the supplied map", async () => {
     const { result } = setup({ lastTurnRunIdByRoot: { "/b": "run-b" } })
+    await waitFor(() => expect(result.current.auth).toBe("authenticated"))
     expect(result.current.rootState("/b").refs.lastTurnRunId).toBe("run-b")
     expect(result.current.rootState("/a").refs.lastTurnRunId).toBeUndefined()
   })
@@ -334,6 +336,7 @@ describe("publishing", () => {
     expect(result.current.delivery!.legs.map((l) => l.status)).toEqual(["succeeded", "failed"])
     expect(result.current.failedLegs).toHaveLength(1)
 
+    const firstBundleId = result.current.delivery!.bundleId
     // Retry re-sends the failed repository only; the succeeded leg is carried
     // forward rather than published a second time.
     publishFeedback.mockClear()
@@ -341,5 +344,24 @@ describe("publishing", () => {
       await result.current.publish({ retry: true })
     })
     expect(publishFeedback).toHaveBeenCalledTimes(1)
+    expect(result.current.delivery!.bundleId).toBe(firstBundleId)
   })
+})
+
+it("checks each root's authentication and looks up only authenticated roots", async () => {
+  const getAuthenticationState = jest.fn(async (root?: string) =>
+    root === "/b" ? ("authenticated" as const) : ("unauthenticated" as const)
+  )
+  const findForBranch = jest.fn(async (root: string) => pr(root, 1))
+  const { result } = setup({ provider: provider({ getAuthenticationState, findForBranch }) })
+  await waitFor(() => expect(result.current.auth).toBe("authenticated"))
+  expect(getAuthenticationState).toHaveBeenCalledWith("/a")
+  expect(getAuthenticationState).toHaveBeenCalledWith("/b")
+  expect(result.current.authForRoot("/a")).toBe("unauthenticated")
+  expect(result.current.authForRoot("/b")).toBe("authenticated")
+  await act(async () => {
+    await result.current.lookupAll()
+  })
+  expect(findForBranch).toHaveBeenCalledTimes(1)
+  expect(findForBranch).toHaveBeenCalledWith("/b", "feature")
 })

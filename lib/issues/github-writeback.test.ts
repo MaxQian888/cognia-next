@@ -10,8 +10,12 @@ import {
 import type { IntegrationAccount, IntegrationActionJob } from "@/types/plugin/plugin-integration"
 
 const mockListAccounts = jest.fn()
+const mockHostForSession = jest.fn()
 jest.mock("@/lib/db/integrations", () => ({
   listIntegrationAccounts: (...args: unknown[]) => mockListAccounts(...args),
+}))
+jest.mock("@/lib/integrations/github-auth", () => ({
+  githubHostForSession: (...args: unknown[]) => mockHostForSession(...args),
 }))
 
 jest.mock("@/lib/integrations/action-runner", () => ({
@@ -25,6 +29,8 @@ const account = (over: Partial<IntegrationAccount> = {}): IntegrationAccount =>
     pluginId: GITHUB_DELIVERY_PLUGIN_ID,
     integrationId: GITHUB_INTEGRATION_ID,
     enabled: true,
+    providerId: "github-pat",
+    authSessionId: "public-session",
     label: "acme (PAT)",
     ...over,
   }) as IntegrationAccount
@@ -34,7 +40,18 @@ const job = (over: Partial<IntegrationActionJob> = {}): IntegrationActionJob =>
 
 const target = { repoFullName: "acme/one", number: 7 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  mockHostForSession.mockImplementation(async (id: string) =>
+    id === "enterprise-session"
+      ? {
+          id: "ghe.example",
+          apiBaseUrl: "https://ghe.example/api/v3",
+          webBaseUrl: "https://ghe.example",
+        }
+      : { id: "github.com", apiBaseUrl: "https://api.github.com", webBaseUrl: "https://github.com" }
+  )
+})
 
 describe("toIntegrationAction", () => {
   it("maps a comment onto the plugin's commentIssue contract", () => {
@@ -68,6 +85,40 @@ describe("toIntegrationAction", () => {
 })
 
 describe("resolveGithubWritebackAccount", () => {
+  it("never selects a newer enterprise account for a public issue", async () => {
+    mockListAccounts.mockResolvedValue([
+      account({ id: "enterprise", authSessionId: "enterprise-session" }),
+      account({ id: "public" }),
+    ])
+    await expect(resolveGithubWritebackAccount("acme/one")).resolves.toMatchObject({ id: "public" })
+  })
+
+  it("refuses unreadable or revoked credentials instead of guessing a host", async () => {
+    mockListAccounts.mockResolvedValue([
+      account({ health: "revoked" }),
+      account({ id: "unreadable", authSessionId: "missing" }),
+    ])
+    mockHostForSession.mockResolvedValue(undefined)
+    await expect(resolveGithubWritebackAccount("acme/one")).resolves.toBeNull()
+  })
+
+  it("keeps the account shown at confirmation even if a newer account appears", async () => {
+    mockListAccounts.mockResolvedValue([account({ id: "new" }), account({ id: "shown" })])
+    await expect(resolveGithubWritebackAccount("acme/one", "shown")).resolves.toMatchObject({
+      id: "shown",
+    })
+    await expect(resolveGithubWritebackAccount("acme/one", "removed")).resolves.toBeNull()
+  })
+
+  it("prefers the repository owner's App installation on the correct host", async () => {
+    mockListAccounts.mockResolvedValue([
+      account({ id: "other-install", providerId: "github-app", label: "other" }),
+      account({ id: "owner-install", providerId: "github-app", label: "acme" }),
+    ])
+    await expect(resolveGithubWritebackAccount("acme/one")).resolves.toMatchObject({
+      id: "owner-install",
+    })
+  })
   it("picks the first enabled account (newest, by the query's own ordering)", async () => {
     mockListAccounts.mockResolvedValue([account({ id: "new" }), account({ id: "old" })])
 
@@ -91,6 +142,18 @@ describe("resolveGithubWritebackAccount", () => {
 })
 
 describe("runGithubWriteback", () => {
+  it("refuses an account change after confirmation before enqueue or approval", async () => {
+    const execute = jest.fn()
+    const approve = jest.fn()
+    await expect(
+      runGithubWriteback(
+        { target, accountId: "shown", action: { kind: "close" }, approval: "user-confirmed" },
+        { resolveAccount: async () => account({ id: "different" }), execute, approve }
+      )
+    ).rejects.toMatchObject({ code: "no-account" })
+    expect(execute).not.toHaveBeenCalled()
+    expect(approve).not.toHaveBeenCalled()
+  })
   it("refuses with an actionable code when no account is connected", async () => {
     const execute = jest.fn()
     await expect(

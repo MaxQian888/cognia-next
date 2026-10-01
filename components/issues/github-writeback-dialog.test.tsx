@@ -62,6 +62,7 @@ it("names the account the write goes out on before anything is sent", async () =
   // Two connected accounts is normal; which one is about to comment publicly is
   // exactly what a user cannot recover from getting wrong.
   await accountResolved()
+  expect(mockResolveAccount).toHaveBeenCalledWith("acme/one")
 })
 
 it("blocks confirmation entirely when no account is connected", async () => {
@@ -100,6 +101,7 @@ it("passes the confirmation through as the approval — nothing else may", async
     target: TARGET,
     action: { kind: "comment", body: "looks good" },
     approval: "user-confirmed",
+    accountId: "acct-1",
   })
   expect(mockToastSuccess).toHaveBeenCalledWith("writeback.success")
   expect(onCompleted).toHaveBeenCalledTimes(1)

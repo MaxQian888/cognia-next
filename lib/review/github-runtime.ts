@@ -17,7 +17,7 @@ export interface GitHubRuntimeDeps {
   getToken(): Promise<string | null>
   resolveRepository(
     repositoryRoot: string
-  ): Promise<{ fullName: string; defaultBranch: string; host?: GithubHost } | null>
+  ): Promise<{ fullName: string; defaultBranch: string; host?: GithubHost; remote?: string } | null>
   resolveClient(
     fullName: string,
     host?: GithubHost
@@ -39,8 +39,15 @@ export function createGitHubPullRequestProvider(
   }
 ): GitHubPullRequestProvider {
   return new GitHubPullRequestProvider({
-    authenticationState: async () => {
+    authenticationState: async (repositoryRoot) => {
       if (!deps.isLocalRuntime()) return "unavailable"
+      if (repositoryRoot) {
+        const repository = await deps.resolveRepository(repositoryRoot)
+        if (!repository) return "unavailable"
+        return (await deps.resolveClient(repository.fullName, repository.host))
+          ? "authenticated"
+          : "unauthenticated"
+      }
       return (await deps.getToken()) ? "authenticated" : "unauthenticated"
     },
     resolveRepository: async (repositoryRoot) => {
@@ -51,7 +58,14 @@ export function createGitHubPullRequestProvider(
       if (!client) throw new Error("GitHub authentication is required")
       const [owner, repo] = repository.fullName.split("/")
       if (!owner || !repo) throw new Error("The GitHub remote is invalid")
-      return { owner, repo, fullName: repository.fullName, client }
+      return {
+        owner,
+        repo,
+        fullName: repository.fullName,
+        host: repository.host,
+        remote: repository.remote,
+        client,
+      }
     },
   })
 }

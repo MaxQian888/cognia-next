@@ -13,6 +13,7 @@ const provider = new GitHubPullRequestProvider({
     owner: "owner",
     repo: "repo",
     fullName: "owner/repo",
+    remote: "upstream",
     client: { request },
   }),
 })
@@ -31,14 +32,20 @@ it("reports authentication and discovers the branch PR", async () => {
         html_url: "https://github.com/owner/repo/pull/42",
         title: "Change",
         state: "open",
-        head: { ref: "codex/change" },
+        head: { ref: "codex/change", sha: "abc" },
         base: { ref: "main" },
       },
     ],
   })
   await expect(provider.getAuthenticationState()).resolves.toBe("authenticated")
   await expect(provider.findForBranch("/repo", "codex/change")).resolves.toEqual(
-    expect.objectContaining({ number: 42, repository: "owner/repo", provider: "github" })
+    expect.objectContaining({
+      number: 42,
+      repository: "owner/repo",
+      provider: "github",
+      host: "github.com",
+      headSha: "abc",
+    })
   )
 })
 
@@ -75,7 +82,7 @@ it("fails closed when PR checkout refresh has no immutable SHA", async () => {
 it("pushes through the existing native Git bridge and preserves rejection", async () => {
   await provider.push("/repo", "codex/change")
   expect(gitPushMock).toHaveBeenCalledWith("/repo", {
-    remote: "origin",
+    remote: "upstream",
     branch: "codex/change",
     setUpstream: true,
   })
@@ -108,7 +115,13 @@ it("creates a draft PR", async () => {
 })
 
 it("publishes the editable bundle as one GitHub review and omits stale comments", async () => {
-  request.mockResolvedValue({ status: 200, data: {} })
+  request.mockImplementation(async (route: string) => ({
+    status: 200,
+    data:
+      route.endsWith("/reviews") && route.startsWith("GET")
+        ? []
+        : { state: "open", head: { sha: "abc" } },
+  }))
   const bundle: ReviewFeedbackBundle = {
     id: "bundle-1",
     sessionId: "session-1",
@@ -157,7 +170,8 @@ it("publishes the editable bundle as one GitHub review and omits stale comments"
       provider: "github",
       repository: "owner/repo",
       number: 42,
-      url: "url",
+      url: "https://github.com/owner/repo/pull/42",
+      headSha: "abc",
       headRef: "head",
       baseRef: "main",
       title: "title",
@@ -168,8 +182,9 @@ it("publishes the editable bundle as one GitHub review and omits stale comments"
   expect(request).toHaveBeenCalledWith(
     "POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
     expect.objectContaining({
-      body: "Review summary",
-      comments: [expect.objectContaining({ path: "src/a.ts", line: 4 })],
+      body: expect.stringMatching(/^Review summary\n\n<!-- cognia-review:[a-f0-9]{64} -->$/),
+      commit_id: "abc",
+      comments: [{ path: "src/a.ts", line: 4, side: "RIGHT", body: "Fix this" }],
     })
   )
 })
@@ -313,4 +328,150 @@ it("separates a definite HTTP failure from a request that got no answer", async 
     recoverable: true,
     outcomeUncertain: true,
   })
+})
+
+const reviewTarget = {
+  provider: "github",
+  repository: "owner/repo",
+  host: "github.com",
+  headSha: "abc",
+  number: 42,
+  url: "https://github.com/owner/repo/pull/42",
+  headRef: "feature",
+  baseRef: "main",
+  title: "Change",
+  state: "open" as const,
+}
+const summaryBundle: ReviewFeedbackBundle = {
+  id: "bundle",
+  sessionId: "session",
+  scope: "branch",
+  repositoryRoots: ["/repo"],
+  summary: "Summary",
+  comments: [],
+  state: "draft",
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+it.each([{ repository: "old-owner/old-repo" }, { host: "ghe.example" }])(
+  "rejects cached target identity drift before requests: %j",
+  async (changed) => {
+    await expect(
+      provider.publishFeedback({ ...reviewTarget, ...changed }, summaryBundle)
+    ).rejects.toMatchObject({ operation: "feedback" })
+    expect(request).not.toHaveBeenCalled()
+  }
+)
+
+it("rejects a stale review SHA before writing", async () => {
+  request.mockResolvedValue({ status: 200, data: { state: "open", head: { sha: "new-head" } } })
+  await expect(provider.publishFeedback(reviewTarget, summaryBundle)).rejects.toThrow(/SHA changed/)
+  expect(request.mock.calls.every(([route]) => route.startsWith("GET"))).toBe(true)
+})
+
+it("does not duplicate a review whose prior POST response was lost", async () => {
+  let postedBody: unknown
+  request.mockImplementation(async (route: string, parameters: Record<string, unknown>) => {
+    if (route.startsWith("POST")) {
+      postedBody = parameters.body
+      throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" })
+    }
+    return {
+      status: 200,
+      data: route.endsWith("/reviews")
+        ? postedBody
+          ? [{ id: 1, body: postedBody, commit_id: "abc", state: "COMMENTED" }]
+          : []
+        : { state: "open", head: { sha: "abc" } },
+    }
+  })
+  await expect(provider.publishFeedback(reviewTarget, summaryBundle)).rejects.toMatchObject({
+    outcomeUncertain: true,
+  })
+  await provider.publishFeedback(reviewTarget, summaryBundle)
+  expect(request.mock.calls.filter(([route]) => route.startsWith("POST"))).toHaveLength(1)
+})
+
+it("does not mistake another review with the same summary for this publication", async () => {
+  request.mockImplementation(async (route: string) => ({
+    status: 200,
+    data:
+      route.endsWith("/reviews") && route.startsWith("GET")
+        ? [{ id: 1, body: "Summary", commit_id: "abc", state: "COMMENTED" }]
+        : { state: "open", head: { sha: "abc" } },
+  }))
+  await provider.publishFeedback(reviewTarget, summaryBundle)
+  expect(request.mock.calls.filter(([route]) => route.startsWith("POST"))).toHaveLength(1)
+})
+
+it("allows comments on a draft PR while still pinning its exact head", async () => {
+  request.mockImplementation(async (route: string) => ({
+    status: 200,
+    data:
+      route.endsWith("/reviews") && route.startsWith("GET")
+        ? []
+        : { state: "open", draft: true, head: { sha: "abc" } },
+  }))
+  await provider.publishFeedback(reviewTarget, summaryBundle)
+  expect(request).toHaveBeenCalledWith(
+    "POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+    expect.objectContaining({ commit_id: "abc", event: "COMMENT" })
+  )
+})
+
+it("requires immutable identity for an inline review", async () => {
+  await expect(
+    provider.publishFeedback(
+      { ...reviewTarget, headSha: undefined },
+      {
+        ...summaryBundle,
+        comments: [
+          {
+            id: "c",
+            contentHash: "c",
+            anchor: {
+              repositoryRoot: "/repo",
+              path: "a.ts",
+              hunkHash: "h",
+              side: "after",
+              line: 1,
+            },
+            body: "Fix",
+            status: "draft",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }
+    )
+  ).rejects.toThrow(/exact|immutable/)
+  expect(request).not.toHaveBeenCalled()
+})
+
+it("rejects an anchor authored against another commit before contacting GitHub", async () => {
+  await expect(
+    provider.publishFeedback(reviewTarget, {
+      ...summaryBundle,
+      comments: [
+        {
+          id: "c",
+          contentHash: "c",
+          anchor: {
+            repositoryRoot: "/repo",
+            path: "a.ts",
+            hunkHash: "h",
+            side: "after",
+            line: 1,
+            commitSha: "older",
+          },
+          body: "Fix",
+          status: "draft",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    })
+  ).rejects.toThrow(/SHA differs/)
+  expect(request).not.toHaveBeenCalled()
 })

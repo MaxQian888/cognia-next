@@ -37,6 +37,10 @@ export interface ReviewFeedbackBundle {
 export interface PullRequestRef {
   provider: string
   repository: string
+  /** Deployment identity captured when the PR was resolved. */
+  host?: string
+  /** Immutable head against which feedback was prepared. */
+  headSha?: string
   number: number
   url: string
   headRef: string
@@ -127,7 +131,9 @@ export interface ReviewRepositoryRefs {
 /** Provider-neutral PR boundary; GitHub is the first adapter. */
 export interface PullRequestProvider {
   readonly id: string
-  getAuthenticationState(): Promise<"authenticated" | "unauthenticated" | "unavailable">
+  getAuthenticationState(
+    repositoryRoot?: string
+  ): Promise<"authenticated" | "unauthenticated" | "unavailable">
   findForBranch(repositoryRoot: string, branch: string): Promise<PullRequestRef | null>
   resolveCheckout(
     repositoryRoot: string,

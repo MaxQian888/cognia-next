@@ -1,0 +1,1645 @@
+  Using tsconfig file: tsconfig.build.json
+PASS node plugins/github-delivery/src/index.test.ts
+PASS jsdom components/issues/issue-console.test.tsx (6.378 s)
+PASS jsdom components/issues/create-issue-page.test.tsx (10.72 s)
+PASS jsdom components/issues/issue-detail-panel.test.tsx (6.536 s)
+  ● Console
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+    console.error
+      An update to OpenInProIde inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      855 |     let cancelled = false
+      856 |     void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+    > 857 |       if (!cancelled) setRoot(getActiveProIdeRoot())
+          |                       ^
+      858 |     })
+      859 |     return () => {
+      860 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setRoot (components/issues/issue-detail-panel.tsx:857:23)
+
+PASS jsdom components/source-control/source-control-panel.test.tsx (6.029 s)
+PASS node lib/github/pr-observe/fetch.test.ts
+PASS node lib/issues/sync/engine.test.ts
+PASS node lib/issues/sync/providers/github.test.ts
+PASS node lib/issues/wakeups/model.test.ts
+PASS jsdom components/issues/board/issue-board.test.tsx
+PASS node lib/issues/wakeups/executor.test.ts
+PASS node lib/issues/run/registry.test.ts
+PASS node lib/issues/im/callback-handler.test.ts
+PASS node lib/issues/run/github-loop-adapter.test.ts
+PASS node lib/issues/board-model.test.ts
+PASS node lib/github/workspace.test.ts
+PASS jsdom components/source-control/diff-pane.test.tsx
+  ● Console
+
+    console.error
+      The current testing environment is not configured to support act(...)
+
+      at isConcurrentActEnvironment (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17819:17)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20463:7)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:184:7
+      at setRef (node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:195:12)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:225:23
+          at Array.map (<anonymous>)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:224:34
+      at setRef (node_modules/.pnpm/@radix-ui+react-compose-refs@1.1.5_@types+react@19.3.0_react@19.3.0/node_modules/@radix-ui/react-compose-refs/src/compose-refs.tsx:11:12)
+      at node_modules/.pnpm/@radix-ui+react-compose-refs@1.1.5_@types+react@19.3.0_react@19.3.0/node_modules/@radix-ui/react-compose-refs/src/compose-refs.tsx:25:23
+          at Array.map (<anonymous>)
+      at node_modules/.pnpm/@radix-ui+react-compose-refs@1.1.5_@types+react@19.3.0_react@19.3.0/node_modules/@radix-ui/react-compose-refs/src/compose-refs.tsx:24:27
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at safelyDetachRef (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:14046:37)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15481:13)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15489:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15633:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15489:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15626:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15489:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15489:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15489:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15489:11)
+      at recursivelyTraverseDeletionEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15409:9)
+      at commitDeletionEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15573:11)
+      at recursivelyTraverseMutationEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15773:11)
+      at commitMutationEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15819:11)
+      at recursivelyTraverseMutationEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15794:11)
+      at commitMutationEffectsOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16111:11)
+      at flushMutationEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19680:13)
+      at commitRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19605:12)
+      at completeRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19509:9)
+      at performWorkOnRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:18182:15)
+      at performSyncWorkOnRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20680:7)
+      at flushSyncWorkAcrossRoots_impl (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20522:21)
+      at processRootScheduleInMicrotask (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20561:9)
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20699:13
+      at invokeTheCallbackFunction (node_modules/.pnpm/jsdom@26.1.0_supports-color@8.1.1/node_modules/jsdom/lib/jsdom/living/generated/Function.js:19:26)
+      at node_modules/.pnpm/jsdom@26.1.0_supports-color@8.1.1/node_modules/jsdom/lib/jsdom/browser/Window.js:613:9
+
+    console.error
+      The current testing environment is not configured to support act(...)
+
+      at isConcurrentActEnvironment (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17819:17)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20463:7)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:184:7
+      at setRef (node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:195:12)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:225:23
+          at Array.map (<anonymous>)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:224:34
+      at setRef (node_modules/.pnpm/@radix-ui+react-compose-refs@1.1.5_@types+react@19.3.0_react@19.3.0/node_modules/@radix-ui/react-compose-refs/src/compose-refs.tsx:11:12)
+      at node_modules/.pnpm/@radix-ui+react-compose-refs@1.1.5_@types+react@19.3.0_react@19.3.0/node_modules/@radix-ui/react-compose-refs/src/compose-refs.tsx:25:23
+          at Array.map (<anonymous>)
+      at node_modules/.pnpm/@radix-ui+react-compose-refs@1.1.5_@types+react@19.3.0_react@19.3.0/node_modules/@radix-ui/react-compose-refs/src/compose-refs.tsx:24:27
+      at commitAttachRef (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:13999:44)
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at safelyAttachRef (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:14017:9)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15179:26)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15263:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15263:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15121:11)
+      at flushLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19839:15)
+      at commitRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19605:36)
+      at completeRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19509:9)
+      at performWorkOnRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:18182:15)
+      at performSyncWorkOnRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20680:7)
+      at flushSyncWorkAcrossRoots_impl (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20522:21)
+      at processRootScheduleInMicrotask (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20561:9)
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20699:13
+      at invokeTheCallbackFunction (node_modules/.pnpm/jsdom@26.1.0_supports-color@8.1.1/node_modules/jsdom/lib/jsdom/living/generated/Function.js:19:26)
+      at node_modules/.pnpm/jsdom@26.1.0_supports-color@8.1.1/node_modules/jsdom/lib/jsdom/browser/Window.js:613:9
+
+    console.error
+      The current testing environment is not configured to support act(...)
+
+      at isConcurrentActEnvironment (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17819:17)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20463:7)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchReducerAction (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9503:13)
+      at node_modules/.pnpm/@radix-ui+react-presence@1.1.10_@types+react-dom@19.3.0_@types+react@19.3.0__@types+rea_2fe228634386b203c3622b9fd60e1034/node_modules/@radix-ui/react-presence/src/presence.tsx:165:7
+      at Object.react_stack_bottom_frame (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:28656:20)
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at commitHookEffectListMount (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:13748:29)
+      at commitHookLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:13712:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15041:13)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15263:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15263:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15155:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15039:11)
+      at recursivelyTraverseLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:16482:11)
+      at commitLayoutEffectOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:15121:11)
+      at flushLayoutEffects (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19839:15)
+      at commitRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19605:36)
+      at completeRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:19509:9)
+      at performWorkOnRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:18182:15)
+      at performSyncWorkOnRoot (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20680:7)
+      at flushSyncWorkAcrossRoots_impl (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20522:21)
+      at processRootScheduleInMicrotask (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20561:9)
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20699:13
+      at invokeTheCallbackFunction (node_modules/.pnpm/jsdom@26.1.0_supports-color@8.1.1/node_modules/jsdom/lib/jsdom/living/generated/Function.js:19:26)
+      at node_modules/.pnpm/jsdom@26.1.0_supports-color@8.1.1/node_modules/jsdom/lib/jsdom/browser/Window.js:613:9
+
+PASS node lib/issues/wakeups/gate.test.ts
+PASS jsdom components/issues/project-resource-dialog.test.tsx
+PASS jsdom components/source-control/commit-detail.test.tsx
+PASS jsdom components/source-control/stack-panel.test.tsx
+PASS jsdom components/source-control/commit-box.test.tsx
+PASS node lib/ai/agent/team/pr-feedback/resolvers.test.ts
+PASS jsdom components/source-control/branch-picker.test.tsx
+PASS node lib/review/github-provider.test.ts
+PASS node lib/issues/wakeups/service.test.ts
+PASS jsdom components/source-control/changes-view.test.tsx (6.637 s)
+PASS jsdom components/source-control/use-review-workspace.test.ts
+PASS jsdom components/source-control/unified-review-sheet.test.tsx
+PASS node lib/issues/bulk-actions.test.ts
+PASS node lib/review/scope.test.ts
+PASS node lib/issues/github-writeback.test.ts
+PASS jsdom components/issues/projects/project-console.test.tsx
+PASS node lib/issues/notify.test.ts
+PASS node lib/issues/views.test.ts
+PASS node lib/issues/github-sync.test.ts
+PASS node lib/integrations/github-auth.test.ts
+PASS node lib/integrations/github-account-setup.test.ts
+PASS jsdom components/issues/wakeups/issue-wakeups-section.test.tsx
+PASS node lib/issues/wakeups/bridge.test.ts
+PASS jsdom components/issues/wakeups/wakeup-create-dialog.test.tsx
+PASS node lib/issues/ai-issue-assist.test.ts
+PASS node lib/github/issues.test.ts
+PASS jsdom components/source-control/hunk-review-list.test.tsx
+PASS jsdom components/issues/planning/issue-planning-section.test.tsx
+PASS jsdom components/issues/run-issue-dialog.test.tsx
+PASS jsdom components/issues/board/issue-card.test.tsx
+PASS node lib/issues/sync/providers/lark-api.test.ts
+PASS jsdom components/issues/projects/project-inspector.test.tsx
+PASS node lib/stack/forge/github.test.ts
+PASS node lib/review/delivery.test.ts
+PASS jsdom components/source-control/timeline-view.test.tsx
+  ● Console
+
+    console.error
+      An update to TimelineView inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      90 |         if (!alive) return
+      91 |         deliver(data)
+    > 92 |         setSettled({ key, attempt, data, error: null })
+         |         ^
+      93 |       },
+      94 |       (error: unknown) => {
+      95 |         if (!alive) return
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setSettled (hooks/git/use-git-read.ts:92:9)
+
+    console.error
+      An update to TimelineView inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+       96 |         // Keep a same-key answer: a failed background refresh must not blank
+       97 |         // the last good result, only say that refreshing it failed.
+    >  98 |         setSettled((prev) => ({
+          |         ^
+       99 |           key,
+      100 |           attempt,
+      101 |           data: prev?.key === key ? prev.data : undefined,
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setSettled (hooks/git/use-git-read.ts:98:9)
+
+PASS node lib/issues/menu-model.test.ts
+PASS node lib/issues/publish.test.ts
+PASS jsdom components/source-control/clone-repository-dialog.test.tsx
+PASS jsdom components/issues/issue-context-menu.test.tsx
+PASS jsdom components/source-control/diff-viewer.test.tsx
+PASS node lib/issues/pull-requests.test.ts
+PASS node lib/issues/service.test.ts
+PASS jsdom components/issues/board/issue-collapsed-rail.test.tsx
+PASS jsdom components/source-control/worktree-panel.test.tsx
+PASS jsdom components/source-control/change-item.test.tsx
+PASS node lib/integrations/github-issue-loop.test.ts
+PASS node lib/issues/im/card.test.ts
+PASS jsdom components/issues/rail/issue-rail.test.tsx
+PASS node lib/integrations/github-repo-webhook.test.ts
+PASS jsdom components/source-control/compare-refs-sheet.test.tsx
+PASS jsdom components/issues/filter-bar/issue-filter-bar.test.tsx
+PASS jsdom components/issues/github-writeback-dialog.test.tsx
+PASS node lib/issues/github-event-refresh.test.ts
+PASS jsdom components/issues/projects/create-project-dialog.test.tsx
+PASS node lib/issues/sync/providers/lark-bitable.test.ts
+PASS jsdom components/source-control/interactive-rebase-dialog.test.tsx
+PASS node lib/issues/sync-runner.test.ts
+(node:7386) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS node lib/issues/boot.test.ts
+PASS node lib/issues/import/parse.test.ts
+PASS node lib/stack/forge-session.test.ts
+PASS node lib/issues/sources/collab-source.test.ts
+PASS jsdom components/source-control/git-identity-dialog.test.tsx
+PASS node lib/issues/sync/apply.test.ts
+PASS node lib/integrations/github-vertical.test.ts (5.921 s)
+PASS node lib/issues/run/install.test.ts
+PASS jsdom components/source-control/tag-panel.test.tsx
+PASS jsdom components/issues/list/issue-list.test.tsx
+PASS node lib/github/octokit-factory.test.ts
+PASS node lib/integrations/github-delivery-recovery.test.ts
+PASS node lib/issues/sources/github-source.test.ts
+PASS jsdom components/source-control/remote-panel.test.tsx
+PASS jsdom components/issues/board/dnd-announcements.test.ts
+PASS jsdom components/issues/list/issue-row.test.tsx
+PASS node lib/issues/filter-chips.test.ts
+PASS node lib/github/workspace-backend-registry.test.ts
+PASS jsdom components/issues/assignee-picker.test.tsx
+PASS jsdom components/issues/cycles/cycle-editor-list.test.tsx
+PASS node lib/issues/im/push.test.ts
+PASS node lib/github/host.test.ts
+PASS node lib/review/bundle.test.ts
+PASS jsdom components/source-control/conflict-resolver.test.tsx
+PASS node lib/issues/im/propose.test.ts
+PASS jsdom hooks/issues/use-board-edge-scroll.test.ts
+PASS jsdom components/source-control/status-banners.test.tsx
+PASS node lib/issues/selection.test.ts
+PASS node lib/issues/sources/registry.test.ts
+PASS node lib/integrations/github-read-credential.test.ts
+PASS jsdom components/issues/import/import-issues-dialog.test.tsx
+PASS node lib/issues/relations.test.ts
+PASS node lib/issues/planning-hints.test.ts
+PASS jsdom hooks/issues/use-issue-selection.test.ts
+PASS node lib/issues/github-sync-schedule.test.ts
+PASS jsdom components/source-control/repository-navigator.test.tsx
+PASS node lib/issues/state-machine.test.ts
+PASS node lib/issues/sync/runner.test.ts
+PASS node lib/issues/identifier.test.ts
+PASS jsdom components/issues/rail/manage-cycles-dialog.test.tsx
+PASS node lib/issues/github-label-display.test.ts
+PASS node lib/issues/sources/local-source.test.ts
+PASS node lib/github/auth-app.test.ts
+PASS jsdom components/issues/filter-bar/active-filter-chips.test.tsx
+PASS jsdom components/issues/projects/project-identity-fields.test.tsx
+PASS jsdom components/source-control/restore-dialog.test.tsx
+PASS node lib/issues/import/apply.test.ts
+PASS node lib/issues/run/running.test.ts
+PASS jsdom components/issues/cycles/cycle-console.test.tsx
+PASS jsdom components/issues/publish-issue-dialog.test.tsx
+PASS jsdom components/issues/rail/issue-rail-row.test.tsx
+PASS jsdom components/source-control/root-switcher.test.tsx
+PASS node lib/issues/run/types.test.ts
+PASS jsdom components/issues/editors/issue-property-menu.test.tsx
+PASS jsdom components/issues/github-comments-section.test.tsx
+PASS node lib/stack/forge/remote.test.ts
+PASS jsdom components/source-control/stack-list.test.tsx
+  ● Console
+
+    console.error
+      An update to StackList inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      327 |     void identity(rootDir)
+      328 |       .then((found) => {
+    > 329 |         if (!cancelled) setUser(found.name ?? "")
+          |                         ^
+      330 |       })
+      331 |       .catch(() => {})
+      332 |     return () => {
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setUser (components/source-control/stack-list.tsx:329:25)
+
+    console.error
+      An update to StackList inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      159 |         })
+      160 |       }
+    > 161 |       if (!cancelled) setSettled({ key: requestKey, rows })
+          |                       ^
+      162 |     })()
+      163 |     return () => {
+      164 |       cancelled = true
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+      at setSettled (hooks/git/use-stacks.ts:161:23)
+
+PASS node lib/issues/sync/describe.test.ts
+PASS jsdom components/source-control/change-group.test.tsx
+PASS node lib/issues/shortcuts.test.ts
+PASS jsdom components/source-control/blame-view.test.tsx
+PASS node lib/issues/editor-links.test.ts
+PASS node lib/issues/github-comments.test.ts
+PASS jsdom components/issues/runs/issue-run-steer.test.tsx
+PASS node lib/integrations/github-webhook.test.ts
+PASS jsdom components/issues/editors/menu-entry-presentation.test.tsx
+PASS jsdom components/issues/link-github-issue-dialog.test.tsx
+PASS node lib/issues/board-keyboard.test.ts
+PASS jsdom components/issues/delete-issue-dialog.test.tsx
+PASS jsdom components/source-control/hunk-review-item.test.tsx
+PASS jsdom components/issues/sync-conflicts-panel.test.tsx
+  ● Console
+
+    console.error
+      An update to SyncConflictsPanel inside a test was not wrapped in act(...).
+      
+      When testing, code that causes React state updates should be wrapped into act(...):
+      
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+      
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      at node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20466:19
+      at runWithFiberInDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:1048:13)
+      at warnIfUpdatesNotWrappedWithActDEV (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:20465:9)
+      at scheduleUpdateOnFiber (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:17920:11)
+      at dispatchSetStateInternal (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9556:13)
+      at dispatchSetState (node_modules/.pnpm/react-dom@19.3.0_react@19.3.0/node_modules/react-dom/cjs/react-dom-client.development.js:9513:7)
+
+PASS node lib/issues/sync/conflicts.test.ts
+PASS jsdom components/source-control/ai-explain-popover.test.tsx
+PASS node lib/integrations/github-lifecycle.test.ts
+PASS node lib/stack/forge/fake.test.ts
+PASS node lib/issues/remote-write.test.ts
+PASS node lib/issues/board-autoscroll.test.ts
+PASS jsdom components/issues/issue-comment-composer.test.tsx
+PASS jsdom components/source-control/stash-panel.test.tsx
+PASS node lib/review/github-runtime.test.ts
+PASS node lib/github/pr-observe/discover.test.ts
+PASS node lib/issues/project-progress.test.ts
+PASS jsdom hooks/issues/use-assignee-options.test.ts
+PASS jsdom components/issues/rail/issue-rail-section.test.tsx
+PASS jsdom components/issues/projects/delete-project-dialog.test.tsx
+PASS jsdom hooks/issues/use-issue-shortcuts.test.ts
+PASS jsdom components/issues/planning/planning-badges.test.tsx
+PASS jsdom components/source-control/sheet-width.test.ts
+PASS jsdom components/source-control/commit-graph-view.test.tsx
+PASS jsdom components/issues/deliverables/issue-deliverables-section.test.tsx
+PASS jsdom components/source-control/view-settings.test.tsx
+PASS node lib/issues/activity-values.test.ts
+PASS jsdom components/source-control/branch-header.test.tsx
+PASS node lib/stack/forge/types.test.ts
+PASS node lib/issues/sources/agent-status-map.test.ts
+PASS node lib/issues/sync/types.test.ts
+PASS jsdom components/issues/planning/issue-picker.test.tsx
+PASS jsdom components/issues/rail/manage-labels-dialog.test.tsx (7.683 s)
+PASS node lib/issues/source-label-catalogue.test.ts
+PASS jsdom components/issues/board/squad-run-chip.test.tsx
+PASS node lib/github/pr-observe/predicates.test.ts
+PASS node lib/review/contracts.test.ts
+PASS node lib/issues/deliverables.test.ts
+PASS jsdom components/issues/deliverables/issue-run-artifact-link.test.tsx
+PASS node lib/issues/sync/field-clock.test.ts
+PASS jsdom components/issues/issue-glyphs.test.tsx
+PASS node lib/issues/sync/bindings.test.ts
+PASS jsdom components/source-control/status-bar-branch.test.tsx
+PASS node lib/issues/work-item-link.test.ts
+PASS node plugins/github-delivery/src/review.test.ts
+PASS jsdom components/issues/board/wakeup-cue-chip.test.tsx
+PASS node lib/github/pr-observe/sanitize.test.ts
+PASS jsdom components/source-control/discard-confirm-dialog.test.tsx
+PASS node lib/issues/event-bus.test.ts
+PASS node lib/issues/sync/registry.test.ts
+PASS jsdom components/issues/runs/issue-run-strip.test.tsx
+PASS jsdom components/source-control/git-ref-select.test.tsx
+PASS node lib/github/pr-observe/types.test.ts
+PASS jsdom components/issues/collab-refresh-stale-badge.test.tsx
+PASS jsdom components/source-control/status-decoration.test.ts
+PASS jsdom components/source-control/read-error.test.tsx
+PASS node lib/issues/activity-feed.test.ts
+PASS node lib/issues/hrefs.test.ts
+PASS jsdom components/source-control/sync-toolbar.test.tsx
+PASS node lib/issues/sources/agent-task-source.test.ts
+PASS node lib/issues/run/agent-team-adapter.test.ts
+PASS node lib/issues/sources/agent-team-source.test.ts
+PASS jsdom components/issues/editors/issue-text-editor.test.tsx
+PASS jsdom components/providers/initializers/issue-tracker-initializer.test.tsx (6.879 s)
+PASS jsdom components/issues/list/issue-bulk-toolbar.test.tsx
+PASS jsdom components/issues/collab-conflicts-panel.test.tsx (5.881 s)
+PASS node lib/issues/run/agent-task-adapter.test.ts
+PASS jsdom components/issues/tracker-tabs.test.tsx
+PASS jsdom components/issues/triage/issue-triage-row.test.tsx
+PASS jsdom components/issues/projects/project-table.test.tsx
+PASS node lib/issues/sync/providers/lark-task.test.ts
+PASS node lib/headless/runtimes/issue-tracker.test.ts
+
+Test Suites: 211 passed, 211 total
+Tests:       2610 passed, 2610 total
+Snapshots:   0 total
+Time:        212.57 s
+Ran all test suites matching ^(lib/issues/|lib/github/|lib/review/|lib/integrations/github-|lib/stack/forge|components/issues/|hooks/issues/|components/source-control/|plugins/github-delivery/|lib/ai/agent/team/pr-feedback/resolvers.test|components/providers/initializers/issue-tracker-initializer.test|lib/headless/runtimes/issue-tracker.test) in 2 projects.
+Test results written to: docs/research/repository-integration-audit-2026-10-01/repair-jest.json
