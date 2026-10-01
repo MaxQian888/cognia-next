@@ -132,7 +132,11 @@ export const PackageInfo = ({
 
   return (
     <PackageInfoContext.Provider value={contextValue}>
-      <div className={cn("rounded-lg border bg-background p-4", className)} {...props}>
+      <div
+        data-slot="ai-package-info"
+        className={cn("rounded-lg border bg-background p-4", className)}
+        {...props}
+      >
         {children ?? (
           <>
             <PackageInfoHeader>

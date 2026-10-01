@@ -98,7 +98,10 @@ export function DeploymentPreview({ target }: { target: DeploymentTarget }) {
       .join("\n")
     return (
       <div className="space-y-4">
-        <dl className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2">
+        <dl
+          className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2"
+          data-hairline-grid
+        >
           <div className="bg-background p-3">
             <dt className="text-xs text-muted-foreground">{t("wizard.projectName")}</dt>
             <dd className="mt-1 font-mono text-sm break-all">{projectName}</dd>

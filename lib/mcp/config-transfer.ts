@@ -108,7 +108,7 @@ const RUNNER_TOKENS = new Set([
  * that lost half a line.
  */
 export function tokenizeShellCommand(input: string): string[] | null {
-  const text = input.replace(/\\\r?\n/g, " ").replace(/\r/g, "")
+  const text = input
   const tokens: string[] = []
   let current = ""
   let started = false
@@ -119,6 +119,12 @@ export function tokenizeShellCommand(input: string): string[] | null {
     if (quote === "'") {
       if (char === "'") quote = null
       else current += char
+      continue
+    }
+    // Continuations are syntax only outside single quotes. Literal content
+    // (including CR/LF inside a quoted argument) must round-trip unchanged.
+    if (char === "\\" && (text[i + 1] === "\n" || (text[i + 1] === "\r" && text[i + 2] === "\n"))) {
+      i += text[i + 1] === "\r" ? 2 : 1
       continue
     }
     if (quote === '"') {

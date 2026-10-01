@@ -71,6 +71,17 @@ describe("<EmptyChatState />", () => {
     expect(bloom).toHaveAttribute("aria-hidden", "true")
   })
 
+  it("marks both blooms as ambient glows that step aside over a wallpaper", () => {
+    // A primary-tinted bloom shifts the backdrop behind the greeting by an
+    // amount the wallpaper legibility guard cannot see; globals.css hides
+    // `[data-ambient-glow]` inside an active wallpaper scope.
+    const { container } = render(<EmptyChatState {...baseProps()} />)
+    expect(screen.getByTestId("welcome-bloom")).toHaveAttribute("data-ambient-glow")
+    const glows = container.querySelectorAll("[data-ambient-glow]")
+    expect(glows.length).toBeGreaterThanOrEqual(1)
+    for (const glow of glows) expect(glow.className).toMatch(/blur-3xl/)
+  })
+
   it("adapts the welcome to its pane width instead of the viewport width", () => {
     const { container } = render(<EmptyChatState {...baseProps()} />)
     const scroller = container.firstElementChild

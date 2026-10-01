@@ -11,7 +11,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 export type CommitProps = ComponentProps<typeof Collapsible>
 
 export const Commit = ({ className, children, ...props }: CommitProps) => (
-  <Collapsible className={cn("rounded-lg border bg-background", className)} {...props}>
+  <Collapsible
+    data-slot="ai-commit"
+    className={cn("rounded-lg border bg-background", className)}
+    {...props}
+  >
     {children}
   </Collapsible>
 )

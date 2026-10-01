@@ -66,6 +66,7 @@ export const FileTree = ({
   return (
     <FileTreeContext.Provider value={contextValue}>
       <div
+        data-slot="ai-file-tree"
         className={cn("rounded-lg border bg-background font-mono text-sm", className)}
         role="tree"
         {...props}

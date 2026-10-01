@@ -277,7 +277,10 @@ export function RunList({ workflowId }: { workflowId: string }) {
 
       {runs && runs.length > 0 ? (
         <>
-          <div className="grid grid-cols-2 gap-px border-b bg-border @sm/run-list:grid-cols-4">
+          <div
+            className="grid grid-cols-2 gap-px border-b bg-border @sm/run-list:grid-cols-4"
+            data-hairline-grid
+          >
             <StatCell label={t("stats.total")} value={String(summary.total)} />
             <StatCell
               label={t("stats.successRate")}

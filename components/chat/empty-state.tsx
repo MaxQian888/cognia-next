@@ -370,7 +370,10 @@ export function EmptyChatState({
                 data-testid="welcome-illustration"
                 className="pointer-events-none absolute inset-y-0 right-0 hidden aspect-[3/2] h-full translate-x-10 @xl:block @3xl:translate-x-14"
               >
-                <div className="absolute inset-10 rounded-full bg-primary/10 blur-3xl" />
+                <div
+                  data-ambient-glow
+                  className="absolute inset-10 rounded-full bg-primary/10 blur-3xl"
+                />
                 <Image
                   src="/illustrations/cognia-workspace-hero.png"
                   alt=""
@@ -620,6 +623,7 @@ export function EmptyChatState({
           <div
             aria-hidden
             data-testid="welcome-bloom"
+            data-ambient-glow
             className="pointer-events-none absolute left-1/2 top-[22%] size-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.06] blur-3xl"
           />
         ) : null}

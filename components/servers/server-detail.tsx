@@ -85,7 +85,10 @@ const TABS = ["overview", "deployments", "backups", "logs", "security"] as const
 
 function FactGrid({ items }: { items: ReadonlyArray<readonly [string, React.ReactNode]> }) {
   return (
-    <dl className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2">
+    <dl
+      className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2"
+      data-hairline-grid
+    >
       {items.map(([label, value]) => (
         <div key={label} className="bg-card p-3">
           <dt className="text-xs text-muted-foreground">{label}</dt>

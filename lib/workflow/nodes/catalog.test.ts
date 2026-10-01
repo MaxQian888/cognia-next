@@ -431,3 +431,30 @@ describe("searchCatalog", () => {
     expect(groups.find((g) => g.category === "trigger")?.sections).toBeUndefined()
   })
 })
+
+describe("action.notify.list source filter", () => {
+  const sourceEnum = () => {
+    const schema = nodeCatalogEntry("action.notify.list").paramsSchema as {
+      properties: { source: { enum: string[] } }
+    }
+    return schema.properties.source.enum
+  }
+
+  it("offers the collaboration source (ADR-0207)", () => {
+    expect(sourceEnum()).toContain("collab")
+  })
+
+  it.each([
+    ["en", enMessages],
+    ["zh-CN", zhMessages],
+  ])("labels every offered source in %s", (_locale, messages) => {
+    const options = (
+      nodeMessage(messages as Record<string, unknown>, "action.notify.list") as unknown as {
+        fields: { source: { options: Record<string, string> } }
+      }
+    ).fields.source.options
+    for (const source of sourceEnum()) {
+      expect(options[source]).toEqual(expect.any(String))
+    }
+  })
+})

@@ -10,7 +10,11 @@ import {
 import { createSkill } from "@/lib/db/skills"
 import { createResource } from "@/lib/db/skill-resources"
 import { publishWorkflow, unpublishWorkflow, workflowSkillCanonicalId } from "./publish-workflow"
-import { reconcileWorkflowPublications } from "./publication-lifecycle"
+import {
+  deleteWorkflowWithPublication,
+  reconcileWorkflowPublications,
+  unpublishWorkflowLifecycle,
+} from "./publication-lifecycle"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 const dbFixture = createDbTestFixture()
@@ -20,6 +24,10 @@ beforeEach(async () => {
   await dbFixture.restore()
 })
 afterAll(dbFixture.dispose)
+
+async function skillTombstone(skillId: string) {
+  return getDb().syncTombstones.get(["skills", skillId])
+}
 
 function nodesWithInputSchema(inputSchema: Record<string, unknown>): VisualWorkflow["nodes"] {
   return [
@@ -101,6 +109,73 @@ describe("workflow publication lifecycle", () => {
       revision: 2,
     })
     expect(await getDb().skills.get(published.skillId)).toBeUndefined()
+  })
+
+  it("tombstones the generated skill when a workflow is unpublished", async () => {
+    const workflow = await createWorkflow({
+      name: "Unpublish tombstone",
+      nodes: nodesWithInputSchema({ type: "object" }),
+      edges: [],
+    })
+    const published = await publishWorkflow(workflow.id, 123)
+    expect(await skillTombstone(published.skillId)).toBeUndefined()
+
+    await unpublishWorkflowLifecycle(workflow.id)
+
+    expect(await getDb().skills.get(published.skillId)).toBeUndefined()
+    expect(await skillTombstone(published.skillId)).toMatchObject({
+      table: "skills",
+      id: published.skillId,
+      deletedAt: expect.any(Number),
+    })
+    expect(await getWorkflow(workflow.id)).toBeDefined()
+  })
+
+  it("records no skill tombstone when unpublishing a workflow without a generated skill", async () => {
+    const workflow = await createWorkflow({
+      name: "Never published",
+      nodes: nodesWithInputSchema({ type: "object" }),
+      edges: [],
+    })
+
+    await unpublishWorkflowLifecycle(workflow.id)
+
+    expect(await getDb().syncTombstones.where("table").equals("skills").count()).toBe(0)
+  })
+
+  it("tombstones the generated skill when a published workflow is deleted", async () => {
+    const workflow = await createWorkflow({
+      name: "Delete tombstone",
+      nodes: nodesWithInputSchema({ type: "object" }),
+      edges: [],
+    })
+    const published = await publishWorkflow(workflow.id, 123)
+
+    await deleteWorkflowWithPublication(workflow.id)
+
+    expect(await getWorkflow(workflow.id)).toBeUndefined()
+    expect(await getDb().skills.get(published.skillId)).toBeUndefined()
+    expect(await skillTombstone(published.skillId)).toMatchObject({
+      table: "skills",
+      id: published.skillId,
+      deletedAt: expect.any(Number),
+    })
+  })
+
+  it("tombstones an orphan generated skill removed by reconciliation", async () => {
+    const orphan = await createSkill({
+      name: "Orphan tombstone",
+      description: "Orphan workflow skill",
+      content: "orphan",
+      canonicalId: workflowSkillCanonicalId("wf_gone"),
+      kind: "markdown",
+      source: "generated",
+    })
+
+    expect(await reconcileWorkflowPublications()).toMatchObject({ removedSkills: 1 })
+
+    expect(await getDb().skills.get(orphan.id)).toBeUndefined()
+    expect(await skillTombstone(orphan.id)).toMatchObject({ table: "skills", id: orphan.id })
   })
 
   it("duplicates published workflows as unpublished definitions", async () => {

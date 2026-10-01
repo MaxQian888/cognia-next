@@ -46,10 +46,12 @@ export function AboutHero() {
       {/* Ambient wash — two blurred primary orbs behind the identity block. */}
       <div
         aria-hidden
+        data-ambient-glow
         className="pointer-events-none absolute -top-24 -left-20 -z-10 size-64 rounded-full bg-primary/15 blur-3xl"
       />
       <div
         aria-hidden
+        data-ambient-glow
         className="pointer-events-none absolute -right-24 -bottom-28 -z-10 size-72 rounded-full bg-primary/10 blur-3xl"
       />
 

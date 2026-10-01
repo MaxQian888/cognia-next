@@ -66,6 +66,7 @@ export const WebPreview = ({
   return (
     <WebPreviewContext.Provider value={contextValue}>
       <div
+        data-slot="ai-web-preview"
         className={cn("flex size-full flex-col rounded-lg border bg-card", className)}
         {...props}
       >

@@ -51,7 +51,11 @@ export const EnvironmentVariables = ({
 
   return (
     <EnvironmentVariablesContext.Provider value={contextValue}>
-      <div className={cn("rounded-lg border bg-background", className)} {...props}>
+      <div
+        data-slot="ai-environment-variables"
+        className={cn("rounded-lg border bg-background", className)}
+        {...props}
+      >
         {children}
       </div>
     </EnvironmentVariablesContext.Provider>

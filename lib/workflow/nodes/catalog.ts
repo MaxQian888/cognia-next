@@ -1772,6 +1772,7 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
             "workflow",
             "system",
             "issue",
+            "collab",
           ],
         },
         readStates: {

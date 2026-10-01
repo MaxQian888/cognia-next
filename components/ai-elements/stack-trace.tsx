@@ -204,6 +204,7 @@ export const StackTrace = memo(
     return (
       <StackTraceContext.Provider value={contextValue}>
         <div
+          data-slot="ai-stack-trace"
           className={cn(
             "not-prose w-full overflow-hidden rounded-lg border bg-background font-mono text-sm",
             className

@@ -1,6 +1,7 @@
 "use client"
 
 import { create } from "zustand"
+import { readBootLocalePreference, resolveLocalePreference } from "@/lib/i18n/locale-preference"
 import type {
   AppSettings,
   AppLanguage,
@@ -322,6 +323,7 @@ interface SettingsState {
   setTheme: (mode: AppTheme) => Promise<void>
   setColorTheme: (preset: ColorThemePreset) => Promise<void>
   setLanguage: (language: AppLanguage) => Promise<void>
+  refreshSystemLanguage: () => void
 
   createCustomTheme: (theme: Omit<CustomTheme, "id">) => string
   updateCustomTheme: (id: string, updates: Partial<CustomTheme>) => void
@@ -914,7 +916,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // `SettingsLoadFailedBanner` can say so and offer a retry.
         console.error("settings.load failed", err)
         set({
-          settings: DEFAULTS,
+          settings: { ...DEFAULTS, ...readBootLocalePreference() },
           loaded: true,
           loadFailed: true,
           loadError: err instanceof Error ? err.message : String(err),
@@ -1404,6 +1406,16 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const next = await saveSettings({ colorTheme: preset })
       set({ settings: next })
       emitSystemBusEvent(SystemEvents.THEME_CHANGED, { colorTheme: preset })
+    },
+
+    refreshSystemLanguage: () => {
+      const settings = get().settings
+      if (!settings || settings.languageMode !== "system") return
+      const preference = resolveLocalePreference(settings)
+      if (settings.language !== preference.language) {
+        set({ settings: { ...settings, ...preference } })
+        emitSystemBusEvent(SystemEvents.SETTINGS_CHANGED, { language: preference.language })
+      }
     },
 
     setLanguage: async (language) => {

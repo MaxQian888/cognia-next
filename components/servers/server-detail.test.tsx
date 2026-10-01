@@ -91,6 +91,20 @@ it("queues the read-only operations that previously had no entry point", async (
   expect(actions.onCollectStatus).toHaveBeenLastCalledWith(true)
 })
 
+it("marks the overview fact grid as a hairline grid whose children are the facts", () => {
+  // Over a wallpaper the grid becomes one translucent plate and the cells go
+  // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+  // the grid whose direct children are the fact cells.
+  const { container } = renderDetail()
+
+  const grid = container.querySelector("[data-hairline-grid]")
+  expect(grid?.tagName).toBe("DL")
+  const cells = Array.from(grid?.children ?? [])
+  expect(cells.length).toBeGreaterThan(0)
+  for (const cell of cells) expect(cell.querySelector(":scope > dt")).not.toBeNull()
+  expect(cells.some((cell) => cell.textContent?.includes("https://server.example.com"))).toBe(true)
+})
+
 it("confirms a restore and names the server in the warning", async () => {
   const user = userEvent.setup()
   const { actions } = renderDetail({ backups: [recoveryPoint()] })

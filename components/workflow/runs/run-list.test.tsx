@@ -140,6 +140,20 @@ describe("RunList", () => {
     expect(strip.className).not.toContain("sm:grid-cols-4")
   })
 
+  it("marks the summary as a hairline grid whose children are the stat cells", async () => {
+    // Over a wallpaper the grid becomes one translucent plate and the cells go
+    // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+    // the grid whose direct children are the four stat cells.
+    await seedRun("r1", { status: "succeeded", startedAt: 1000, completedAt: 1200 })
+    const { container } = wrap()
+    await screen.findByTestId("runs-actions-r1")
+    const grid = container.querySelector("[data-hairline-grid]")
+    expect(grid).not.toBeNull()
+    expect(grid?.children).toHaveLength(4)
+    expect(screen.getByText("Total runs").parentElement?.parentElement).toBe(grid)
+    expect(screen.getByText("Success rate").parentElement?.parentElement).toBe(grid)
+  })
+
   it("filters by status", async () => {
     await seedRun("r1", { status: "succeeded" })
     await seedRun("r2", { status: "failed" })

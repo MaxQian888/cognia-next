@@ -205,7 +205,10 @@ export function OperationInspector({
                     </Alert>
                   )}
 
-                  <dl className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2">
+                  <dl
+                    className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2"
+                    data-hairline-grid
+                  >
                     {(
                       [
                         [t("operations.target"), operation.targetId],

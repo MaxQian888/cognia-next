@@ -129,6 +129,7 @@ export function StatStrip({
           className
         )}
         data-testid={testId}
+        data-hairline-grid
       >
         {stats.map((stat) => {
           const body = (

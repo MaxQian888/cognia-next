@@ -203,6 +203,19 @@ describe("SchedulerShell", () => {
       )
     })
 
+    // Over a wallpaper the list pane turns to glass: its tint comes from
+    // `--sidebar-pane-bg` (falling back to the solid sidebar colour) and its
+    // blur from `--sidebar-pane-filter` (see globals.css). A literal
+    // `bg-sidebar` would paint an opaque slab over the wallpaper.
+    it("tints the list pane through the glass-aware sidebar variables", () => {
+      renderShell()
+      const classes = screen.getByTestId("scheduler-list-pane").className.split(/\s+/)
+      expect(classes).toContain("bg-[var(--sidebar-pane-bg,var(--sidebar))]")
+      expect(classes).toContain("[backdrop-filter:var(--sidebar-pane-filter,none)]")
+      expect(classes).not.toContain("bg-sidebar")
+      expect(classes).toContain("text-sidebar-foreground")
+    })
+
     it("renders the rail", () => {
       renderShell()
       expect(screen.getByTestId("shell-rail")).toBeInTheDocument()

@@ -138,7 +138,10 @@ function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShell
           minSize={isListCollapsed ? "0%" : `${PANEL_BOUNDS.listMin}%`}
           maxSize={`${PANEL_BOUNDS.listMax}%`}
           className={cn(
-            "flex flex-col overflow-hidden bg-sidebar text-sidebar-foreground",
+            "flex flex-col overflow-hidden text-sidebar-foreground",
+            // The sidebar tint, as glass inside a wallpaper (see globals.css
+            // `--sidebar-pane-bg`).
+            "bg-[var(--sidebar-pane-bg,var(--sidebar))] [backdrop-filter:var(--sidebar-pane-filter,none)]",
             !isListCollapsed && "border-e"
           )}
           data-testid="scheduler-list-pane"

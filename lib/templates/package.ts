@@ -3,6 +3,7 @@ import {
   SEMVER,
   TEMPLATE_PACKAGE_SCHEMA_VERSION,
   TEMPLATE_PACKAGE_MAX_DEFINITIONS,
+  TEMPLATE_PACKAGE_MAX_PATH_DEPTH,
   safePath,
   validateTemplatePackageManifest,
 } from "./package-manifest"
@@ -12,25 +13,17 @@ export {
   TEMPLATE_PACKAGE_MAX_PATH_DEPTH,
   validateTemplatePackageManifest,
 } from "./package-manifest"
-import type JSZip from "jszip"
-
-/**
- * JSZip is loaded lazily, and must stay that way.
- *
- * `validateTemplatePackageManifest` (below) is imported by
- * `lib/plugin/core/validation.ts`, which the plugin store — and through it
- * project-store, artifact-store and account-store — pulls in at import time.
- * A static `import JSZip from "jszip"` therefore dragged the whole zip library
- * into that graph just to validate a manifest, and jszip bundles the
- * `setimmediate` polyfill, whose ON-IMPORT global patching drove Jest's
- * `fake-indexeddb` off `process.nextTick` and killed every Dexie transaction in
- * the suites that reached it. Only the two archive functions need it, and both
- * are already async.
- */
-async function loadJSZip(): Promise<typeof JSZip> {
-  return (await import("jszip")).default
-}
-
+import {
+  assertNoUndeclaredFiles,
+  openHardenedZip,
+  readDeclaredFile,
+  verifyEd25519PackageSignature,
+  writeDeterministicZip,
+  type ArchiveEntry,
+  type ArchiveLimits,
+  type PackageFileRecord,
+  type PackageSignature,
+} from "@/lib/packaging/signed-zip"
 import { sha256Bytes } from "@/lib/ocr/hash"
 import { sha256Hex } from "@/lib/share/hash"
 import {
@@ -49,25 +42,23 @@ export const TEMPLATE_PACKAGE_MAX_FILES = 1024
 export const TEMPLATE_PACKAGE_MAX_COMPRESSION_RATIO = 200
 
 const MANIFEST_PATH = "manifest.json"
-const FIXED_ZIP_DATE = new Date("1980-01-01T00:00:00.000Z")
-
-export interface TemplatePackageFileRecord {
-  path: string
-  sha256: string
-  size?: number
+const LABEL = "Template package"
+const LIMITS: ArchiveLimits = {
+  maxCompressedBytes: TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES,
+  maxExpandedBytes: TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES,
+  maxFiles: TEMPLATE_PACKAGE_MAX_FILES,
+  maxCompressionRatio: TEMPLATE_PACKAGE_MAX_COMPRESSION_RATIO,
+  maxPathDepth: TEMPLATE_PACKAGE_MAX_PATH_DEPTH,
 }
+
+export type TemplatePackageFileRecord = PackageFileRecord
 
 export interface TemplatePackageDefinitionRecord extends TemplatePackageFileRecord {
   id: string
   version: string
 }
 
-export interface TemplatePackageSignature {
-  algorithm: "ed25519"
-  publisher: string
-  publicKey: string
-  signature: string
-}
+export type TemplatePackageSignature = PackageSignature
 
 /**
  * What can produce a `TemplatePackageSignature` for a manifest.
@@ -140,41 +131,13 @@ export function templatePackageSignaturePayload(manifest: TemplatePackageManifes
   return new TextEncoder().encode(canonicalTemplateStringify(unsigned as unknown as TemplateJson))
 }
 
-function decodeBase64(value: string): Uint8Array {
-  try {
-    const binary = atob(value)
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0))
-  } catch {
-    throw new Error("Template package signature encoding is invalid")
-  }
-}
-
 async function verifyPackageSignature(manifest: TemplatePackageManifest): Promise<void> {
   if (!manifest.signature) return
-  const publicKey = decodeBase64(manifest.signature.publicKey)
-  const signature = decodeBase64(manifest.signature.signature)
-  if (publicKey.byteLength !== 32 || signature.byteLength !== 64) {
-    throw new Error("Template package Ed25519 signature shape is invalid")
-  }
-  try {
-    const key = await crypto.subtle.importKey("raw", Uint8Array.from(publicKey), "Ed25519", false, [
-      "verify",
-    ])
-    const valid = await crypto.subtle.verify(
-      "Ed25519",
-      key,
-      Uint8Array.from(signature),
-      Uint8Array.from(templatePackageSignaturePayload(manifest))
-    )
-    if (!valid) throw new Error("Template package signature verification failed")
-  } catch (error) {
-    if (error instanceof Error && /signature/.test(error.message)) throw error
-    throw new Error(
-      `Template package signature verification failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    )
-  }
+  await verifyEd25519PackageSignature(
+    manifest.signature,
+    templatePackageSignaturePayload(manifest),
+    LABEL
+  )
 }
 
 function definitionKey(definition: Pick<TemplateDefinitionEnvelope, "id" | "version">): string {
@@ -243,10 +206,9 @@ export async function exportTemplatePackage(
   input: ExportTemplatePackageInput
 ): Promise<ExportedTemplatePackage> {
   await validateExportInput(input)
-  const JSZipCtor = await loadJSZip()
   const definitions: TemplatePackageDefinitionRecord[] = []
   const assets: TemplatePackageFileRecord[] = []
-  const zip = new JSZipCtor()
+  const entries: ArchiveEntry[] = []
 
   for (const definition of [...input.definitions].sort((a, b) =>
     definitionKey(a).localeCompare(definitionKey(b))
@@ -261,22 +223,20 @@ export async function exportTemplatePackage(
       sha256: await sha256Hex(body),
       size: new TextEncoder().encode(body).byteLength,
     })
-    zip.file(path, body, { date: FIXED_ZIP_DATE, createFolders: false })
+    entries.push({ path, data: body })
   }
 
   const assetPaths = (input.assets ?? []).map((asset) => safePath(asset.path))
   if (new Set(assetPaths).size !== assetPaths.length) {
     throw new Error("Template package has duplicate asset paths")
   }
-  for (const [index, asset] of [...(input.assets ?? [])]
+  for (const asset of [...(input.assets ?? [])]
     .map((value, sourceIndex) => ({ value, sourceIndex }))
-    .sort((a, b) => assetPaths[a.sourceIndex].localeCompare(assetPaths[b.sourceIndex]))
-    .entries()) {
+    .sort((a, b) => assetPaths[a.sourceIndex].localeCompare(assetPaths[b.sourceIndex]))) {
     const path = assetPaths[asset.sourceIndex]
     const bytes = asset.value.bytes
     assets.push({ path, sha256: await sha256Bytes(bytes), size: bytes.byteLength })
-    zip.file(path, bytes, { date: FIXED_ZIP_DATE, createFolders: false })
-    void index
+    entries.push({ path, data: bytes })
   }
 
   const versionById = new Map(
@@ -295,72 +255,17 @@ export async function exportTemplatePackage(
     ...(input.compatibility ? { compatibility: input.compatibility } : {}),
     ...(input.signature ? { signature: input.signature } : {}),
   }
-  zip.file(MANIFEST_PATH, canonicalTemplateStringify(manifest as unknown as TemplateJson), {
-    date: FIXED_ZIP_DATE,
-    createFolders: false,
+  entries.push({
+    path: MANIFEST_PATH,
+    data: canonicalTemplateStringify(manifest as unknown as TemplateJson),
   })
-  const bytes = await zip.generateAsync({
-    type: "uint8array",
-    compression: "DEFLATE",
-    compressionOptions: { level: 9 },
-    platform: "UNIX",
-  })
-  if (bytes.byteLength > TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES) {
-    throw new Error(
-      `Template package exceeds ${TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES} compressed bytes`
-    )
-  }
+  const bytes = await writeDeterministicZip(entries, LIMITS, LABEL)
   return { bytes, fingerprint: await sha256Bytes(bytes), manifest }
 }
 
 export async function inspectTemplatePackage(bytes: Uint8Array): Promise<InspectedTemplatePackage> {
-  if (bytes.byteLength > TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES) {
-    throw new Error(
-      `Template package exceeds ${TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES} compressed bytes`
-    )
-  }
-  const JSZipCtor = await loadJSZip()
-  let zip: JSZip
-  try {
-    zip = await JSZipCtor.loadAsync(bytes)
-  } catch (error) {
-    throw new Error(
-      `Failed to read template package: ${error instanceof Error ? error.message : String(error)}`
-    )
-  }
-  const files = Object.values(zip.files)
-  if (files.length > TEMPLATE_PACKAGE_MAX_FILES) {
-    throw new Error(`Template package exceeds ${TEMPLATE_PACKAGE_MAX_FILES} files`)
-  }
-  for (const file of files) {
-    if (file.dir) continue
-    const original = (file as JSZip.JSZipObject & { unsafeOriginalName?: string })
-      .unsafeOriginalName
-    safePath(original ?? file.name)
-    safePath(file.name)
-  }
-  const declaredExpandedBytes = files.reduce((total, file) => {
-    if (file.dir) return total
-    const sizes = (
-      file as JSZip.JSZipObject & {
-        _data?: { compressedSize?: number; uncompressedSize?: number }
-      }
-    )._data
-    const expanded = sizes?.uncompressedSize ?? 0
-    const compressed = sizes?.compressedSize ?? 0
-    if (
-      expanded > TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES ||
-      (compressed > 0 && expanded / compressed > TEMPLATE_PACKAGE_MAX_COMPRESSION_RATIO)
-    ) {
-      throw new Error(`Template package file has unsafe archive expansion: ${file.name}`)
-    }
-    return total + expanded
-  }, 0)
-  if (declaredExpandedBytes > TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES) {
-    throw new Error(
-      `Template package exceeds ${TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES} expanded bytes`
-    )
-  }
+  const archive = await openHardenedZip(bytes, LIMITS, LABEL)
+  const { zip } = archive
 
   const manifestBody = await zip.file(MANIFEST_PATH)?.async("string")
   if (!manifestBody) throw new Error("Template package manifest is missing")
@@ -378,25 +283,19 @@ export async function inspectTemplatePackage(bytes: Uint8Array): Promise<Inspect
   const definitionKeys = new Set<string>()
 
   for (const record of manifest.definitions) {
-    if (
-      !record ||
-      typeof record.id !== "string" ||
-      typeof record.version !== "string" ||
-      typeof record.path !== "string" ||
-      typeof record.sha256 !== "string"
-    ) {
+    if (!record || typeof record.id !== "string" || typeof record.version !== "string") {
       throw new Error("Template package definition record is invalid")
     }
-    const path = safePath(record.path)
-    if (knownPaths.has(path)) throw new Error(`Template package has duplicate path ${path}`)
-    knownPaths.add(path)
-    const file = zip.file(path)
-    if (!file || file.dir) throw new Error(`Template package definition is missing: ${path}`)
-    const body = await file.async("string")
-    expandedBytes += new TextEncoder().encode(body).byteLength
-    if ((await sha256Hex(body)) !== record.sha256) {
-      throw new Error(`Template package definition checksum mismatch: ${path}`)
-    }
+    const { path, bytes: content } = await readDeclaredFile(
+      archive,
+      record,
+      knownPaths,
+      LIMITS,
+      LABEL,
+      "definition"
+    )
+    const body = new TextDecoder().decode(content)
+    expandedBytes += content.byteLength
     let definition: TemplateDefinitionEnvelope
     try {
       definition = JSON.parse(body) as TemplateDefinitionEnvelope
@@ -426,19 +325,15 @@ export async function inspectTemplatePackage(bytes: Uint8Array): Promise<Inspect
 
   const assets = new Map<string, Uint8Array>()
   for (const record of manifest.assets) {
-    if (!record || typeof record.path !== "string" || typeof record.sha256 !== "string") {
-      throw new Error("Template package asset record is invalid")
-    }
-    const path = safePath(record.path)
-    if (knownPaths.has(path)) throw new Error(`Template package has duplicate path ${path}`)
-    knownPaths.add(path)
-    const file = zip.file(path)
-    if (!file || file.dir) throw new Error(`Template package asset is missing: ${path}`)
-    const content = await file.async("uint8array")
+    const { path, bytes: content } = await readDeclaredFile(
+      archive,
+      record,
+      knownPaths,
+      LIMITS,
+      LABEL,
+      "asset"
+    )
     expandedBytes += content.byteLength
-    if ((await sha256Bytes(content)) !== record.sha256) {
-      throw new Error(`Template package asset checksum mismatch: ${path}`)
-    }
     assets.set(path, content)
   }
   if (expandedBytes > TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES) {
@@ -446,11 +341,7 @@ export async function inspectTemplatePackage(bytes: Uint8Array): Promise<Inspect
       `Template package exceeds ${TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES} expanded bytes`
     )
   }
-  for (const file of files) {
-    if (!file.dir && !knownPaths.has(file.name)) {
-      throw new Error(`Template package contains undeclared path ${file.name}`)
-    }
-  }
+  assertNoUndeclaredFiles(archive, knownPaths, LABEL)
   const keys = new Set(definitions.map(definitionKey))
   for (const entrypoint of manifest.entrypoints) {
     if (!keys.has(entrypoint)) {

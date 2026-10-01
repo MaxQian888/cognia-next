@@ -366,7 +366,11 @@ export const SchemaDisplay = ({
 
   return (
     <SchemaDisplayContext.Provider value={contextValue}>
-      <div className={cn("overflow-hidden rounded-lg border bg-background", className)} {...props}>
+      <div
+        data-slot="ai-schema-display"
+        className={cn("overflow-hidden rounded-lg border bg-background", className)}
+        {...props}
+      >
         {children ?? (
           <>
             <SchemaDisplayHeader>

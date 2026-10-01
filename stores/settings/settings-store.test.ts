@@ -233,6 +233,8 @@ describe("load", () => {
     expect(s.loaded).toBe(true)
     expect(s.settings).toEqual({
       id: "singleton",
+      language: "en",
+      languageMode: "system",
       permissionMode: "default",
       alwaysAllowTools: [],
       builtinTools: {
@@ -2182,6 +2184,36 @@ describe("fallback branches (existing-map-missing-id and friends)", () => {
 // ----------------------------------------------------------------------------
 
 describe("appearance setters", () => {
+  it("refreshes the effective language in system mode without writing device changes to the host", () => {
+    const languages = jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-Hans-CN"])
+    try {
+      useSettingsStore.setState({
+        settings: {
+          id: "singleton",
+          permissionMode: "default",
+          alwaysAllowTools: [],
+          language: "en",
+          languageMode: "system",
+        },
+      })
+      useSettingsStore.getState().refreshSystemLanguage()
+      expect(useSettingsStore.getState().settings?.language).toBe("zh-CN")
+      expect(useSettingsStore.getState().language).toBe("zh-CN")
+      expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+      useSettingsStore.setState({
+        settings: {
+          ...useSettingsStore.getState().settings!,
+          language: "en",
+          languageMode: "manual",
+        },
+      })
+      useSettingsStore.getState().refreshSystemLanguage()
+      expect(useSettingsStore.getState().settings?.language).toBe("en")
+    } finally {
+      languages.mockRestore()
+    }
+  })
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { DEFAULT_BACKGROUND_SETTINGS } = require("@/types/appearance") as {
     DEFAULT_BACKGROUND_SETTINGS: {

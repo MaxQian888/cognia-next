@@ -44,6 +44,22 @@ describe("StatStrip", () => {
     expect(screen.getByTestId("stat-strip").className).toContain("@lg/device-pane:grid-cols-3")
   })
 
+  /**
+   * Over a wallpaper the grid becomes one translucent plate and the cells go
+   * clear (globals.css `[data-hairline-grid] > *`), so the marker has to sit on
+   * the element whose direct children are the cells.
+   */
+  it("marks the strip as a hairline grid whose direct children are the cells", () => {
+    render(
+      <StatStrip stats={[stat("a"), stat("b", { action: { onSelect: jest.fn(), label: "x" } })]} />
+    )
+    const strip = screen.getByTestId("stat-strip")
+    expect(strip).toHaveAttribute("data-hairline-grid")
+    expect(screen.getByTestId("stat-a").parentElement).toBe(strip)
+    expect(screen.getByTestId("stat-b").parentElement).toBe(strip)
+    expect(strip.children).toHaveLength(2)
+  })
+
   it("renders nothing when there is nothing to report", () => {
     const { container } = render(<StatStrip stats={[]} />)
     expect(container).toBeEmptyDOMElement()

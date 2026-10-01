@@ -72,6 +72,20 @@ it("shows the controller's error code and message on a failure", () => {
   expect(screen.getByText("Another destructive operation is running")).toBeInTheDocument()
 })
 
+it("marks the fact grid as a hairline grid whose children are the facts", () => {
+  // Over a wallpaper the grid becomes one translucent plate and the cells go
+  // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+  // the grid whose direct children are the fact cells. The sheet portals out of
+  // the render container, so look it up on the document.
+  renderInspector(operation())
+
+  const grid = document.querySelector("[data-hairline-grid]")
+  expect(grid?.tagName).toBe("DL")
+  expect(grid?.children).toHaveLength(4)
+  const createdBy = screen.getByText("operator@example.com")
+  expect(createdBy.parentElement?.parentElement).toBe(grid)
+})
+
 it("renders the agent's result payload once there is one", () => {
   renderInspector(operation({ state: "succeeded", result: { recoveryPoints: [{ id: "rp-1" }] } }))
   expect(screen.getByText("Result")).toBeInTheDocument()

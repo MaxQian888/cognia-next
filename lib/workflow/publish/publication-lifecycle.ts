@@ -2,6 +2,7 @@ import type { Skill } from "@cognia/agent-config-types"
 
 import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import { upsertSkillByCanonicalId, workflowSkillBody } from "@/lib/db/skills"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
 import { validateWorkflow } from "@/lib/workflow/definition/validate"
@@ -276,38 +277,56 @@ export async function publishWorkflowLifecycle(
   }
 }
 
+/**
+ * Delete a generated workflow Skill inside the caller's transaction, which
+ * must include `syncTombstones`. Paired clients mirror `skills` and learn about
+ * a delete only from the tombstone, so an unpublished workflow's Skill would
+ * otherwise stay callable-looking on every paired phone.
+ */
+async function deleteGeneratedSkill(skillId: string): Promise<void> {
+  await getDb().skills.delete(skillId)
+  await recordTombstones("skills", [skillId])
+}
+
 /** Explicitly remove a workflow's callable contract and generated Skill. */
 export async function unpublishWorkflowLifecycle(workflowId: string): Promise<void> {
   const accountId = getActiveAccountId()
   const db = getDb()
-  await db.transaction("rw", db.workflows, db.skills, db.workflowDeployments, async () => {
-    const [stored, deployment] = await Promise.all([
-      db.workflows.get(workflowId),
-      db.workflowDeployments
-        .where("[accountId+workflowId+environment]")
-        .equals([accountId, workflowId, "production"])
-        .first(),
-    ])
-    if (stored) {
-      const migrated = migrateWorkflow(stored)
-      await db.workflows.put({
-        ...migrated,
-        interface: undefined,
-        published: undefined,
-        updatedAt: Date.now(),
-      })
+  await db.transaction(
+    "rw",
+    db.workflows,
+    db.skills,
+    db.workflowDeployments,
+    db.syncTombstones,
+    async () => {
+      const [stored, deployment] = await Promise.all([
+        db.workflows.get(workflowId),
+        db.workflowDeployments
+          .where("[accountId+workflowId+environment]")
+          .equals([accountId, workflowId, "production"])
+          .first(),
+      ])
+      if (stored) {
+        const migrated = migrateWorkflow(stored)
+        await db.workflows.put({
+          ...migrated,
+          interface: undefined,
+          published: undefined,
+          updatedAt: Date.now(),
+        })
+      }
+      if (deployment) {
+        await db.workflowDeployments.put({
+          ...deployment,
+          status: "disabled",
+          revision: deployment.revision + 1,
+          updatedAt: Date.now(),
+        })
+      }
+      const skill = await findWorkflowSkill(workflowId)
+      if (skill) await deleteGeneratedSkill(skill.id)
     }
-    if (deployment) {
-      await db.workflowDeployments.put({
-        ...deployment,
-        status: "disabled",
-        revision: deployment.revision + 1,
-        updatedAt: Date.now(),
-      })
-    }
-    const skill = await findWorkflowSkill(workflowId)
-    if (skill) await db.skills.delete(skill.id)
-  })
+  )
 }
 
 /** Atomically point production back to an existing immutable version. */
@@ -451,23 +470,30 @@ export function replaceWorkflowWithPublication(
 export async function deleteWorkflowWithPublication(workflowId: string): Promise<void> {
   const accountId = getActiveAccountId()
   const db = getDb()
-  await db.transaction("rw", db.workflows, db.skills, db.workflowDeployments, async () => {
-    const deployment = await db.workflowDeployments
-      .where("[accountId+workflowId+environment]")
-      .equals([accountId, workflowId, "production"])
-      .first()
-    if (deployment) {
-      await db.workflowDeployments.put({
-        ...deployment,
-        status: "disabled",
-        revision: deployment.revision + 1,
-        updatedAt: Date.now(),
-      })
+  await db.transaction(
+    "rw",
+    db.workflows,
+    db.skills,
+    db.workflowDeployments,
+    db.syncTombstones,
+    async () => {
+      const deployment = await db.workflowDeployments
+        .where("[accountId+workflowId+environment]")
+        .equals([accountId, workflowId, "production"])
+        .first()
+      if (deployment) {
+        await db.workflowDeployments.put({
+          ...deployment,
+          status: "disabled",
+          revision: deployment.revision + 1,
+          updatedAt: Date.now(),
+        })
+      }
+      const skill = await findWorkflowSkill(workflowId)
+      if (skill) await deleteGeneratedSkill(skill.id)
+      await db.workflows.delete(workflowId)
     }
-    const skill = await findWorkflowSkill(workflowId)
-    if (skill) await db.skills.delete(skill.id)
-    await db.workflows.delete(workflowId)
-  })
+  )
 }
 
 export interface WorkflowPublicationReconciliationResult {
@@ -502,11 +528,14 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
 
   return db.transaction(
     "rw",
-    db.workflows,
-    db.skills,
-    db.skillResources,
-    db.workflowVersions,
-    db.workflowDeployments,
+    [
+      db.workflows,
+      db.skills,
+      db.skillResources,
+      db.workflowVersions,
+      db.workflowDeployments,
+      db.syncTombstones,
+    ],
     async () => {
       // Schedule both initial reads before awaiting either result. Some
       // IndexedDB implementations auto-commit a readwrite transaction as soon as
@@ -578,7 +607,7 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
           await db.workflows.put(invalidated)
           workflowById.set(workflow.id, invalidated)
           if (existingSkill) {
-            await db.skills.delete(existingSkill.id)
+            await deleteGeneratedSkill(existingSkill.id)
             deletedSkillIds.add(existingSkill.id)
           }
           result.invalidated += 1
@@ -599,7 +628,7 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
           await db.workflows.put(invalidated)
           workflowById.set(workflow.id, invalidated)
           if (existingSkill) {
-            await db.skills.delete(existingSkill.id)
+            await deleteGeneratedSkill(existingSkill.id)
             deletedSkillIds.add(existingSkill.id)
           }
           result.invalidated += 1
@@ -637,7 +666,7 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
           // pre-repair snapshot. This also recognizes orphan projections whose
           // `kind` drifted away from "workflow".
           if (!activePublishedIds.has(canonicalWorkflowId)) {
-            await db.skills.delete(skill.id)
+            await deleteGeneratedSkill(skill.id)
             result.removedSkills += 1
           }
           continue
@@ -645,7 +674,7 @@ export async function reconcileWorkflowPublications(): Promise<WorkflowPublicati
         if (skill.kind !== "workflow") continue
         const workflow = skill.workflowId ? workflowById.get(skill.workflowId) : undefined
         if (!workflow || !activePublishedIds.has(workflow.id)) {
-          await db.skills.delete(skill.id)
+          await deleteGeneratedSkill(skill.id)
           result.removedSkills += 1
         }
       }

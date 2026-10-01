@@ -25,6 +25,17 @@ describe("MemoryNav", () => {
     expect(onSelect).toHaveBeenCalledWith("learning")
   })
 
+  it("inks the selected row's description for the accent pill, the rest muted", () => {
+    render(<MemoryNav activeId="overview" onSelect={jest.fn()} />)
+    // Muted ink on the accent pill drops toward 1:1 under a saturated or pale
+    // accent (an ocean preset, high-contrast dark), so the selected row's
+    // description takes the pill's own foreground.
+    const desc = (id: string) =>
+      screen.getByTestId(`memory-nav-item-${id}`).querySelector("[data-nav-desc]")
+    expect(desc("overview")).toHaveClass("text-accent-foreground")
+    expect(desc("learning")).toHaveClass("text-muted-foreground")
+  })
+
   it("surfaces conflict and degraded-retrieval badges", () => {
     render(
       <MemoryNav activeId="overview" onSelect={jest.fn()} conflictCount={3} retrievalDegraded />

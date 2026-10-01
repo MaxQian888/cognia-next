@@ -295,10 +295,18 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
 
 function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
   return (
+    // The page ground beside the sidebar reads the `base` tier colour: plain
+    // `--background` normally, the translucent base tint inside a wallpaper
+    // scope instead of an opaque sheet over the image (ADR-0148). The colour
+    // only, not `data-surface-layer`: that attribute also opts into
+    // `backdrop-filter`, which on a page-sized <main> means one huge
+    // compositing layer and a containing block for every `position: fixed`
+    // descendant. When the inset is itself the `[data-bg-target]`, its fill
+    // sits beneath the wallpaper's `::before` and is never seen either way.
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background",
+        "relative flex w-full flex-1 flex-col bg-[var(--surface-bg-base)]",
         "md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
@@ -312,7 +320,7 @@ function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
-      className={cn("h-8 w-full bg-background shadow-none", className)}
+      className={cn("h-8 w-full bg-[var(--control-bg,var(--background))] shadow-none", className)}
       {...props}
     />
   )

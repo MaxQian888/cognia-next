@@ -1,4 +1,6 @@
 /** Pure package contract: shared by author SDK validation and archive I/O. */
+import { safeArchivePath } from "@/lib/packaging/archive-path"
+
 import { TEMPLATE_API_VERSION } from "./contracts"
 import type { TemplatePackageManifest } from "./package"
 
@@ -18,28 +20,7 @@ export const SEMVER =
 export const SHA256 = /^[a-f0-9]{64}$/i
 
 export function safePath(input: string): string {
-  const normalized = input.trim().replaceAll("\\", "/").replace(/^\.\//, "")
-  if (
-    !normalized ||
-    normalized.startsWith("/") ||
-    /^[a-zA-Z]:\//.test(normalized) ||
-    normalized.includes("\0")
-  ) {
-    throw new Error(`Template package path is unsafe: ${input}`)
-  }
-  if (normalized !== normalized.normalize("NFC")) {
-    throw new Error(`Template package path is not canonical Unicode: ${input}`)
-  }
-  const parts: string[] = []
-  for (const part of normalized.split("/")) {
-    if (!part || part === ".") continue
-    if (part === "..") throw new Error(`Template package path escapes its root: ${input}`)
-    parts.push(part)
-  }
-  if (parts.length === 0 || parts.length > TEMPLATE_PACKAGE_MAX_PATH_DEPTH) {
-    throw new Error(`Template package path depth is unsafe: ${input}`)
-  }
-  return parts.join("/")
+  return safeArchivePath(input, TEMPLATE_PACKAGE_MAX_PATH_DEPTH, "Template package")
 }
 
 function parseManifest(raw: unknown): TemplatePackageManifest {

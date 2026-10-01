@@ -82,6 +82,21 @@ describe("SkillListItem", () => {
     )
   })
 
+  it("inks the open row for its accent fill, and only the open row", () => {
+    // Muted ink on a saturated or pale accent drops toward 1:1, so the open
+    // row's name and description take the accent's own foreground.
+    const { rerender } = render(
+      <SkillListItem skill={baseSkill} selected={false} active={true} {...handlers} />
+    )
+    const row = screen.getByRole("button", { name: /Cite sources/ })
+    expect(row).toHaveClass("bg-accent", "text-accent-foreground")
+    expect(screen.getByText(baseSkill.description!)).toHaveClass("text-accent-foreground")
+
+    rerender(<SkillListItem skill={baseSkill} selected={false} active={false} {...handlers} />)
+    expect(screen.getByRole("button", { name: /Cite sources/ })).not.toHaveClass("bg-accent")
+    expect(screen.getByText(baseSkill.description!)).toHaveClass("text-muted-foreground")
+  })
+
   it("shows a disabled badge for disabled skills", () => {
     render(
       <SkillListItem

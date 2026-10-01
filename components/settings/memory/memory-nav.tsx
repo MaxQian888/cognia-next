@@ -92,7 +92,16 @@ export function MemoryNav({
               <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{t(`items.${id}.label`)}</span>
-                <span className="block truncate text-[11px] text-muted-foreground">
+                {/* On the selected row's accent pill, muted ink drops toward 1:1
+                    under a saturated or pale accent; the description takes the
+                    pill's ink. */}
+                <span
+                  className={cn(
+                    "block truncate text-[11px]",
+                    isActive ? "text-accent-foreground" : "text-muted-foreground"
+                  )}
+                  data-nav-desc
+                >
                   {t(`items.${id}.description`)}
                 </span>
               </span>

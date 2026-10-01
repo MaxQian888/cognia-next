@@ -140,6 +140,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     // Language selector lives in the Appearance section (the former "general"
     // section owned it before the merge).
     "language",
+    "languageMode",
     // ADR-0127: message presentation + typography + usage display were
     // defined/edited under Appearance but never claimed here, so "reset this
     // section", the changed-settings review, and appearance export all skipped

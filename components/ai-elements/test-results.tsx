@@ -117,7 +117,11 @@ export const TestResults = ({ summary, className, children, ...props }: TestResu
 
   return (
     <TestResultsContext.Provider value={contextValue}>
-      <div className={cn("rounded-lg border bg-background", className)} {...props}>
+      <div
+        data-slot="ai-test-results"
+        className={cn("rounded-lg border bg-background", className)}
+        {...props}
+      >
         {children ??
           (summary && (
             <TestResultsHeader>

@@ -78,6 +78,10 @@ export const SkillListItem = memo(function SkillListItem({
   const tags = display.showTags ? (skill.tags ?? []).slice(0, MAX_TAG_CHIPS) : []
   const sourceMeta = display.showSource ? getSourceMeta(inferSource(skill)) : null
   const usageCount = skill.usageCount ?? 0
+  // The open row is filled with `bg-accent`; muted ink on a saturated or pale
+  // accent (an ocean preset, high-contrast dark) drops toward 1:1, so its
+  // secondary text takes the accent's own foreground.
+  const subtleInk = active ? "text-accent-foreground" : "text-muted-foreground"
 
   const selectCheckbox = (
     <Checkbox
@@ -117,7 +121,7 @@ export const SkillListItem = memo(function SkillListItem({
           </Badge>
         ))}
         {display.showUsage && (
-          <span className="text-[9px] text-muted-foreground" data-testid="skill-usage-count">
+          <span className={cn("text-[9px]", subtleInk)} data-testid="skill-usage-count">
             {t("card.usageCount", { count: usageCount })}
           </span>
         )}
@@ -173,7 +177,9 @@ export const SkillListItem = memo(function SkillListItem({
           className={cn(
             "h-full w-full items-stretch justify-start whitespace-normal rounded-none border-l-2 border-l-transparent text-left",
             compact ? "p-2" : "p-3",
-            active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50",
+            active
+              ? "border-l-primary bg-accent font-medium text-accent-foreground"
+              : "hover:bg-muted/50",
             status === "disabled" && "opacity-60"
           )}
         >
@@ -183,7 +189,7 @@ export const SkillListItem = memo(function SkillListItem({
               <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>
             </span>
             {display.showDescription && skill.description && (
-              <span className="line-clamp-2 text-[11px] font-normal text-muted-foreground">
+              <span className={cn("line-clamp-2 text-[11px] font-normal", subtleInk)}>
                 {skill.description}
               </span>
             )}
@@ -208,7 +214,9 @@ export const SkillListItem = memo(function SkillListItem({
         className={cn(
           "h-auto min-w-0 flex-1 justify-start gap-2.5 whitespace-normal rounded-none border-l-2 border-l-transparent px-2.5 text-left",
           compact ? "py-1.5" : "py-2",
-          active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50",
+          active
+            ? "border-l-primary bg-accent font-medium text-accent-foreground"
+            : "hover:bg-muted/50",
           status === "disabled" && "opacity-60"
         )}
       >
@@ -216,7 +224,7 @@ export const SkillListItem = memo(function SkillListItem({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm">{skill.name}</span>
           {display.showDescription && skill.description && (
-            <span className="block truncate text-[11px] font-normal text-muted-foreground">
+            <span className={cn("block truncate text-[11px] font-normal", subtleInk)}>
               {skill.description}
             </span>
           )}

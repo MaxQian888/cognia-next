@@ -37,6 +37,21 @@ it("renders the Compose environment the agent will write", () => {
   expect(screen.getByText(/COGNIA_PUBLIC_URL=/)).toBeInTheDocument()
 })
 
+it("marks the Compose fact grid as a hairline grid whose children are the facts", () => {
+  // Over a wallpaper the grid becomes one translucent plate and the cells go
+  // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+  // the grid whose direct children are the fact cells.
+  const { container } = render(<DeploymentPreview target={targetFor({ topology: "compose" })} />)
+
+  const grid = container.querySelector("[data-hairline-grid]")
+  expect(grid).not.toBeNull()
+  expect(grid?.tagName).toBe("DL")
+  const cells = Array.from(grid?.children ?? [])
+  expect(cells).toHaveLength(2)
+  expect(cells[0]).toHaveTextContent("cognia")
+  expect(cells[1]).toHaveTextContent("/opt/cognia")
+})
+
 it("renders each Kubernetes manifest on its own tab", () => {
   render(<DeploymentPreview target={targetFor()} />)
 

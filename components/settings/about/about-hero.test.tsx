@@ -37,6 +37,15 @@ describe("<AboutHero />", () => {
     await waitFor(() => expect(hero).toHaveTextContent("Cognia"))
   })
 
+  it("marks its blurred orbs as ambient glows that step aside over a wallpaper", () => {
+    // globals.css hides `[data-ambient-glow]` inside an active wallpaper scope,
+    // where a primary-tinted bloom would shift the backdrop behind the text.
+    render(<AboutHero />)
+    const glows = screen.getByTestId("about-hero").querySelectorAll("[data-ambient-glow]")
+    expect(glows).toHaveLength(2)
+    for (const glow of glows) expect(glow).toHaveAttribute("aria-hidden", "true")
+  })
+
   it("shows the web-preview badge in the browser shell", () => {
     render(<AboutHero />)
     expect(screen.getByTestId("about-web-badge")).toBeInTheDocument()

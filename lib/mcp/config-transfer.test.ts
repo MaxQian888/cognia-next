@@ -11,6 +11,17 @@ import {
 } from "./config-transfer"
 
 describe("tokenizeShellCommand", () => {
+  it("round-trips quoted argument content without deleting literal line endings", () => {
+    const args = [
+      "line\r\nbreak",
+      "literal\\\ncontinuation",
+      "",
+      'it\'s "quoted"',
+      "C:\\agents\\config",
+    ]
+    expect(tokenizeShellCommand(args.map(shellQuote).join(" "))).toEqual(args)
+  })
+
   it("keeps single-quoted runs literal", () => {
     expect(tokenizeShellCommand(`a 'b c' d`)).toEqual(["a", "b c", "d"])
   })

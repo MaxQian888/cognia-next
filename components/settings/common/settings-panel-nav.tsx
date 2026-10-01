@@ -185,7 +185,15 @@ function SettingsNavRow<Id extends string>({
           <span className="block truncate text-sm font-medium" data-nav-label>
             {label}
           </span>
-          <span className="block truncate text-[11px] text-muted-foreground" data-nav-desc>
+          {/* On the selected row's accent pill, muted ink drops toward 1:1 under a
+              saturated or pale accent; the description takes the pill's ink. */}
+          <span
+            className={cn(
+              "block truncate text-[11px]",
+              isSelected ? "text-accent-foreground" : "text-muted-foreground"
+            )}
+            data-nav-desc
+          >
             {description}
           </span>
         </span>

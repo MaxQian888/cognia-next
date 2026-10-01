@@ -71,6 +71,18 @@ describe("SettingsPanelNav", () => {
     expect(onSelect).toHaveBeenCalledWith("logs")
   })
 
+  it("inks the selected row's description for the accent pill, the rest muted", () => {
+    renderNav()
+    // Muted ink on the accent pill drops toward 1:1 under a saturated or pale
+    // accent (an ocean preset, high-contrast dark), so the selected row's
+    // description takes the pill's own foreground.
+    const desc = (id: string) =>
+      screen.getByTestId(`gateway-nav-item-${id}`).querySelector("[data-nav-desc]")
+    expect(desc("overview")).toHaveClass("text-accent-foreground")
+    expect(desc("overview")).not.toHaveClass("text-muted-foreground")
+    expect(desc("logs")).toHaveClass("text-muted-foreground")
+  })
+
   it("scopes its testids and layout pill to the id prefix", () => {
     // Two navs share this component; a shared `layoutId` would make the
     // selection pill jump between the Gateway and Bridge sections.
