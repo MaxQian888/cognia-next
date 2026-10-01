@@ -35,6 +35,15 @@
   "historyWarningTitle": "Everyone invited later can read the full history",
   "invite": "Invite people",
   "inviteAcceptFailed": "The invitation could not be accepted.",
+  "targetedInvite": {
+    "title": "Join shared conversation?",
+    "description": "You were invited to a shared conversation. Joining makes you a member and opens it here; its full history becomes visible to you.",
+    "accept": "Accept",
+    "accepting": "Joining…",
+    "dismiss": "Not now",
+    "offline": "Reconnect to join this conversation. The invitation is still waiting for you.",
+    "wrongOrg": "This invitation belongs to a different organization than the one this app is signed in to."
+  },
   "inviteAccepted": "Shared conversation joined.",
   "inviteCopied": "Invite token copied.",
   "inviteFailed": "The invite could not be created.",

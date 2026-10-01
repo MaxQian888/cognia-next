@@ -11,6 +11,7 @@
   "updatesAvailable": {
     "description": "Auto-update is set to notify only, so nothing was installed.",
     "review": "Review",
-    "title": "{count, plural, =1 {1 plugin update available} other {# plugin updates available}}"
+    "title": "{count, plural, =1 {1 plugin update available} other {# plugin updates available}}",
+    "descriptionPinned": "{count, plural, =1 {1 of them is pinned by the active cogset, so it was not installed.} other {# of them are pinned by the active cogset, so they were not installed.}}"
   }
 }

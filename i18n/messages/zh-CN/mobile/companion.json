@@ -323,7 +323,9 @@
       "twins": "数字孪生库",
       "workflowDeployments": "工作流部署",
       "workflowRuns": "工作流运行",
-      "workflows": "工作流"
+      "workflows": "工作流",
+      "pluginCogsets": "齿轮组",
+      "pluginCogsetState": "齿轮组状态"
     },
     "title": "同步状态",
     "toastSyncAllOk": "已同步 {count} 张数据表。",

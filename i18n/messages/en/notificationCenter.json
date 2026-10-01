@@ -40,6 +40,17 @@
     "unreadCount": "{count} unread",
     "unsnooze": "Unsnooze"
   },
+  "collab": {
+    "approvalRequestedFallback": "A run in a shared conversation is waiting for you.",
+    "approvalRequestedTitle": "{actor} needs your approval",
+    "genericTitle": "{actor} sent you a notification",
+    "invitedBody": "Open it to accept or decline the invitation.",
+    "invitedTitle": "{actor} invited you to a shared conversation",
+    "issueAssignedTitle": "{actor} assigned you an issue",
+    "issueFallback": "Open the shared issue board to see it.",
+    "issueMentionedTitle": "{actor} mentioned you in an issue",
+    "someone": "A teammate"
+  },
   "delivery": {
     "short": {
       "accepted": "Sent · {count}",
@@ -80,6 +91,7 @@
   },
   "sources": {
     "agent-team": "Agent team",
+    "collab": "Collaboration",
     "connector": "Messages",
     "issue": "Issues",
     "plugin": "Plugins",

@@ -286,5 +286,151 @@
   "variableName": "变量名",
   "variableValue": "明文值",
   "variables": "非敏感变量",
-  "windows": "Windows 脚本"
+  "windows": "Windows 脚本",
+  "bootstrap": {
+    "presets": {
+      "title": "起始配置",
+      "hint": "选择选项后点击应用。应用后的字段仍可编辑，不会自动运行任何命令。",
+      "provider": "模型服务预设",
+      "task": "任务预设",
+      "recipe": "初始化方案",
+      "applyProvider": "应用模型服务",
+      "applyTask": "应用任务",
+      "applyRecipe": "应用初始化方案",
+      "recipeHint": "应用初始化方案会替换设置脚本（含各系统覆盖）、任务、就绪检查和复用路径。命令使用所选 Agent Shell；更换 Shell 后请重新应用方案。应用任何预设都会清除未完成的高级 JSON 编辑。",
+      "localModelHint": "请将 local-model 替换为已安装的模型 ID。可使用独立工具的 models 命令查询本地服务提供的模型。",
+      "providerOptions": {
+        "deepseek": {
+          "label": "DeepSeek",
+          "description": "使用 DeepSeek 兼容接口及 DEEPSEEK_API_KEY。应用模型服务会重置认证、请求头和模型选项。"
+        },
+        "openai": {
+          "label": "OpenAI",
+          "description": "使用 OpenAI Chat Completions 及 OPENAI_API_KEY。应用模型服务会重置认证、请求头和模型选项。"
+        },
+        "openrouter": {
+          "label": "OpenRouter",
+          "description": "使用 OpenRouter 兼容接口及 OPENROUTER_API_KEY。应用模型服务会重置认证、请求头和模型选项。"
+        },
+        "ollama": {
+          "label": "Ollama",
+          "description": "使用端口 11434 上的本地 Ollama，无需认证。应用后请选择已安装的模型。"
+        },
+        "lmstudio": {
+          "label": "LM Studio",
+          "description": "使用端口 1234 上的本地 LM Studio，无需认证。应用后请选择已加载的模型。"
+        }
+      },
+      "taskOptions": {
+        "coding": {
+          "label": "编程",
+          "description": "启用工作区工具，最多 48 步、8192 个响应 token，用于实现和验证修改。"
+        },
+        "debug": {
+          "label": "调试",
+          "description": "启用工作区工具，最多 64 步、8192 个响应 token，用于复现问题并修复根因。"
+        },
+        "chat": {
+          "label": "对话",
+          "description": "禁用工作区工具，最多 8 步、4096 个响应 token，用于回答问题。"
+        },
+        "quick": {
+          "label": "快速任务",
+          "description": "启用工作区工具，最多 12 步、180 秒、2048 个响应 token。"
+        },
+        "explain": {
+          "label": "解释说明",
+          "description": "禁用工作区工具，最多 8 步、8192 个响应 token，用于解释用户提供的材料。"
+        }
+      },
+      "recipeOptions": {
+        "node-pnpm": {
+          "label": "Node.js / pnpm",
+          "description": "按锁文件安装依赖并检查 node_modules，跟踪 package.json 和 pnpm-lock.yaml。"
+        },
+        "python-uv": {
+          "label": "Python / uv",
+          "description": "按锁文件同步项目并检查虚拟环境，跟踪 pyproject.toml 和 uv.lock。"
+        },
+        "rust": {
+          "label": "Rust / Cargo",
+          "description": "获取锁定依赖并离线检查编译，跟踪 Cargo.toml 和 Cargo.lock。"
+        },
+        "go": {
+          "label": "Go modules",
+          "description": "下载并验证模块依赖，跟踪 go.mod 和 go.sum。"
+        }
+      }
+    },
+    "runtime": "Agent 运行方式",
+    "runtimeNative": "原生可执行文件",
+    "runtimeBash": "独立 Bash 脚本",
+    "runtimePowershell": "独立 PowerShell 脚本",
+    "runtimeHint": "将所选脚本安装到执行主机，并在下方填写路径。Bash 版需要 curl 和 jq，PowerShell 版需要 PowerShell 7.4+。初始化脚本和就绪检查必须使用所选 Shell 的语法。",
+    "enabled": "使用 Bootstrap Agent 初始化环境",
+    "description": "先执行初始化脚本，再由独立的小型 Agent 修复失败。所有就绪检查通过后才会启动完整 Agent。",
+    "task": "初始化任务",
+    "baseUrl": "模型 API 地址",
+    "model": "Bootstrap 模型",
+    "apiKeyEnv": "API key 变量名",
+    "binary": "Bootstrap 可执行文件",
+    "credentialHint": "Bearer 或自定义请求头认证需要在下方绑定 API key 变量的系统钥匙串引用。无需认证可连接不需要密钥的本地提供商。其他凭据请求头也必须使用钥匙串变量引用。可执行文件必须安装在实际执行环境所在的主机上。",
+    "checks": "就绪检查",
+    "checkName": "就绪检查名称",
+    "checkCommand": "就绪检查命令",
+    "removeCheck": "移除就绪检查",
+    "addCheck": "添加就绪检查",
+    "checksHint": "至少需要一项检查。命令必须以退出码 0 结束，不能用 Agent 自述成功代替检查。",
+    "maxSteps": "最大步骤数",
+    "totalTimeoutSecs": "总超时（秒）",
+    "commandTimeoutSecs": "命令超时（秒）",
+    "validation": {
+      "runtime": "请选择原生、Bash 或 PowerShell 运行方式。",
+      "task": "请填写初始化任务（最多 32000 个字符）。",
+      "endpoint": "请使用 HTTPS API 地址或 HTTP 本地回环地址，不包含凭据、查询参数或片段。",
+      "model": "请填写模型名（最多 256 个字符，不能包含控制字符）。",
+      "binary": "请填写有效的可执行文件路径，不能包含控制字符。",
+      "credential": "请使用有效的环境变量名引用 API key。",
+      "checks": "请添加 1–32 项检查，名称唯一（字母、数字、点、下划线或连字符），命令不能为空。",
+      "limits": "请使用整数：1–256 步，总超时 1–3600 秒，命令超时 1–600 秒。命令超时不能超过总超时。",
+      "keyring": "请为所有必需的 API key 或凭据请求头变量绑定钥匙串引用，不能使用明文变量。",
+      "reservedVariable": "COGNIA_BOOTSTRAP_BINARY 及以 COGNIA_BOOTSTRAP_CONFIG 开头的变量由初始化机制保留。",
+      "size": "所有操作系统版本的完整配置过大（最多 48000 UTF-8 字节）。",
+      "options": "请修正高级 JSON 和模型参数。不允许未知字段、请求头中的明文密钥或覆盖保留请求字段。",
+      "context": "请使用有效的上下文阈值、重试次数和裁剪大小。保留 token 数必须小于压缩阈值，保留输出大小必须小于裁剪阈值。",
+      "tools": "请使用有效的工具配置、支持的工具配置档和非敏感环境变量。不允许启动钩子或覆盖凭据变量。",
+      "reuse": "请输入唯一的工作目录相对路径，不允许目录穿越。"
+    },
+    "auth": "认证方式",
+    "authBearer": "Bearer API key",
+    "authHeader": "自定义 API key 请求头",
+    "authNone": "无需认证（本地提供商）",
+    "apiKeyHeader": "API key 请求头名称",
+    "endpointPath": "Chat Completions 路径",
+    "requestTimeoutSecs": "模型请求超时（秒）",
+    "maxTokens": "最大响应 token 数",
+    "temperature": "Temperature",
+    "topP": "Top P",
+    "systemPrompt": "自定义系统提示词（可选）",
+    "stream": "流式输出模型响应",
+    "showThinking": "显示模型推理内容",
+    "advanced": "高级自定义",
+    "advancedJson": "高级配置 JSON",
+    "advancedHint": "可以自定义模型请求、上下文策略、工具和复用设置。凭据请求头使用 headersEnv 指定变量名称，并在下方绑定钥匙串引用。请勿在 JSON 中写入密钥。",
+    "advancedSchema": "配置分区：modelOptions（auth、apiKeyHeader、endpointPath、requestTimeoutSecs、maxTokens、temperature、topP、seed、reasoningEffort、thinking、extraBody、headers、headersEnv、stream、showThinking）；context（contextWindowTokens、autoCompact、compactThresholdTokens、compactRetainTokens、compactMaxTokens、compactRetries、maxOverflowRetries、pruneToolResults、pruneThresholdBytes、pruneHeadBytes、pruneTailBytes）；tools（shell、editor、profile、shellExecutable、shellArgs、environment、maxFileBytes）；reuse（inputs、outputs）；maxOutputBytes、maxContextBytes、maxResponseBytes。",
+    "profile": "工具协议配置档",
+    "profileNative": "Cognia 原生工具",
+    "profileDsh": "兼容 d.sh 的工具",
+    "shellExecutable": "Shell 可执行文件",
+    "contextWindowTokens": "上下文窗口（token）",
+    "maxOutputBytes": "工具输出上限（字节）",
+    "maxContextBytes": "上下文消息上限（字节）",
+    "maxResponseBytes": "模型响应上限（字节）",
+    "toolShell": "启用 Shell 工具",
+    "toolEditor": "启用编辑器工具",
+    "autoCompact": "自动压缩上下文",
+    "pruneToolResults": "裁剪较早的工具结果",
+    "reuseInputs": "初始化复用的输入文件（每行一个）",
+    "reuseOutputs": "初始化必需的输出路径（每行一个）"
+  }
 }

@@ -2954,8 +2954,10 @@
         "task_update": "Task update"
       },
       "runtime": {
+        "aider": "Aider",
         "claude": "Claude",
         "claudeCode": "Claude Code",
+        "cline": "Cline",
         "codex": "Codex",
         "codexAcp": "Codex ACP",
         "codexAppServer": "Codex (App Server)",
@@ -2964,12 +2966,15 @@
         "devin": "Devin CLI",
         "droid": "Droid",
         "geminiCli": "Gemini",
+        "goose": "Goose",
+        "kimi": "Kimi Code",
         "kiro": "Kiro",
         "opencodeAcp": "OpenCode (ACP)",
         "opencodeRemote": "OpenCode (Remote)",
         "opencodeServer": "OpenCode",
         "pi": "Pi",
         "piRpc": "Pi (native RPC)",
+        "qoder": "Qoder",
         "qwenCode": "Qwen Code"
       },
       "runtimeStatus": {
@@ -9431,6 +9436,15 @@
     "switchHelp": "Let this machine open conversations that several people share, with the server deciding roles, event order and approvals. Turning it off hides the sharing controls and stops this app pulling shared sessions. Nothing is deleted.",
     "switchLabel": "Shared conversations",
     "takeoverExecution": "Take over execution",
+    "targetedInvite": {
+      "accept": "Accept",
+      "accepting": "Joining…",
+      "description": "You were invited to a shared conversation. Joining makes you a member and opens it here; its full history becomes visible to you.",
+      "dismiss": "Not now",
+      "offline": "Reconnect to join this conversation. The invitation is still waiting for you.",
+      "title": "Join shared conversation?",
+      "wrongOrg": "This invitation belongs to a different organization than the one this app is signed in to."
+    },
     "teamRoomConversion": "A team conversation cannot be shared yet: its replies are produced locally, and a shared session's come from the server.",
     "toggleApprover": "Toggle high-risk approver for {user}",
     "transferBeforeLeaving": "Promote another member to Owner before leaving. The last owner cannot leave.",
@@ -12989,6 +13003,10 @@
       "serverVersion": "Server version",
       "streamCount": "{count, plural, =1 {1 stream} other {# streams}}"
     },
+    "pairingAlert": {
+      "body": "{label} ({platform}) was paired with this host. If this wasn't you, revoke it in Devices.",
+      "title": "New device paired"
+    },
     "placementReason": {
       "capability_mismatch": "Missing a required capability",
       "capacity_exhausted": "At capacity",
@@ -15096,6 +15114,28 @@
     "themeLabel": "Theme"
   },
   "externalAgent": {
+    "authentication": {
+      "cancelLogin": "Cancel login",
+      "keepAccount": "Keep signed in",
+      "login": "Sign in with {method}",
+      "logout": "Sign out",
+      "logoutDescription": "This signs out the native CLI account, ends the active session, and reconnects the agent. Other applications using this CLI account may also be affected.",
+      "logoutTitle": "Sign out of this agent?",
+      "openLoginPage": "Open {url}",
+      "outputUnavailable": "Could not read login output. Retry, or check the native login process.",
+      "signedOut": "Signed out",
+      "status": {
+        "cancelled": "Login cancelled",
+        "completed": "Login completed",
+        "failed": "Login failed",
+        "reconnecting": "Login succeeded; reconnecting…",
+        "running": "Complete the login instructions below.",
+        "starting": "Starting login…"
+      },
+      "terminalOutput": "Login terminal output",
+      "title": "Agent account",
+      "unknown": "Account status is reported by the agent during login; a connected process alone does not confirm authentication."
+    },
     "availableCommands": "Available Commands",
     "builtIn": "Built-in",
     "builtInAgent": "Built-in Agent",
@@ -15137,6 +15177,7 @@
         "adapterMethodMissing": "Cognia's adapter does not implement it",
         "advertisedCompactCommand": "the agent advertises a /compact command",
         "agentOwned": "the external agent runs this itself",
+        "aiderCliBridge": "provided by Cognia’s official Aider CLI adapter and per-session history",
         "attachmentStoreUnavailable": "this runtime has no attachment store to hand the bytes to",
         "cancelKillsRuntime": "cancelling ends the whole runtime, not just the turn",
         "codexOptionsChannel": "carried on the Codex options channel",
@@ -15306,14 +15347,22 @@
       "addExternalAgent": "Add External Agent",
       "addingAgent": "Adding…",
       "advancedOptions": "Advanced",
+      "aiderEnvVarHint": "DeepSeek example: args --model deepseek/deepseek-flash and environment variable DEEPSEEK_API_KEY. Use your provider’s Aider model ID and key for other services.",
+      "aiderSetupHint": "Install with uv tool install --force --python python3.12 --with pip aider-chat==0.86.2. Set --model and the provider API key here. Cognia isolates native .aider.conf.yml, dotenv and OAuth key discovery, and owns per-session history. Only sandboxed automatic confirmations and read-only Plan are supported. Update with the same uv command; deleting an agent keeps the system installation.",
       "autoSpawnServer": "Auto-spawn server",
       "autoSpawnServerHint": "Launch a local `opencode serve` process automatically (desktop only).",
+      "clineEnvVarHint": "Saved OAuth login, or CLINE_API_KEY with CLINE_PROVIDER and CLINE_MODEL. Optional CLINE_DIR selects state. Pinning CLINE_PROVIDER disables provider switching.",
+      "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
       "configureNewExternalAgentConnection": "Configure a new external agent connection.",
       "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts.",
       "customConfiguration": "Custom configuration",
       "customProtocolComingSoon": "Custom (coming soon)",
       "defaultModel": "Default model",
       "defaultModelHint": "Optional. \"provider/model\" id used for every turn unless overridden (e.g. anthropic/claude-sonnet-4-5).",
+      "deleteNativeSession": "Delete native history",
+      "deleteNativeSessionConfirm": "Permanently delete this session from the agent’s stored history? This cannot be undone. Project files are kept.",
+      "deleteNativeSessionFailed": "Failed to delete native history",
+      "deleteNativeSessionSuccess": "Native history deleted",
       "detectionRetry": "Check again",
       "detectionRunning": "Checking this machine...",
       "detectionUnavailable": {
@@ -15380,7 +15429,11 @@
       },
       "fork": "Fork",
       "forkSessionFailed": "Failed to fork session.",
+      "gooseEnvVarHint": "Use your existing Goose configuration, or GOOSE_PROVIDER, GOOSE_MODEL, and your provider API key. For DeepSeek use the OpenAI-compatible provider: GOOSE_PROVIDER=openai, OPENAI_BASE_URL=https://api.deepseek.com/v1, and your DeepSeek key as OPENAI_API_KEY.",
+      "gooseSetupHint": "Install Goose with `brew install block-goose-cli` on macOS, or the official CLI installer on Linux. Run `goose configure` to choose a provider and model, or set GOOSE_PROVIDER, GOOSE_MODEL, and the provider API key in the agent environment. Cognia launches `goose acp --with-builtin developer`; approval stays in Cognia. Update with `brew upgrade block-goose-cli` for Homebrew installs, or `goose update` for script installs. Removing a saved agent keeps your system installation and Goose sessions.",
       "httpProtocolComingSoon": "HTTP (coming soon)",
+      "kimiEnvVarHint": "Subscription login needs no API key. Optional KIMI_CODE_HOME selects state. For a custom provider use KIMI_MODEL_NAME, KIMI_MODEL_PROVIDER_TYPE, KIMI_MODEL_BASE_URL and KIMI_MODEL_API_KEY; these replace subscription model selection.",
+      "kimiSetupHint": "Install npm install -g @moonshot-ai/kimi-code@2.1.1 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp and reuses the CLI login. KIMI_CODE_HOME selects separate state (default ~/.kimi-code). Update separately with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. Use the current Node CLI, not the archived Python kimi-cli.",
       "legacyProtocolUnavailable": "Legacy — no adapter, cannot be started",
       "name": "Name",
       "noEndpoint": "No endpoint",
@@ -15398,6 +15451,8 @@
         "unsupported": "The paired Host does not start agent processes for its devices."
       },
       "protocolViaTransport": "{protocol} via {transport}",
+      "qoderEnvVarHint": "Use an existing Qoder CLI login or QODER_PERSONAL_ACCESS_TOKEN. QODER_CONFIG_DIR selects a separate configuration directory. A provider API key alone does not replace Qoder authentication; BYOK models depend on your account.",
+      "qoderSetupHint": "Install with curl -fsSL https://qoder.com/install | bash, then run qoder login or supply QODER_PERSONAL_ACCESS_TOKEN here. Cognia launches native ACP with explicit default permissions and per-session MCP. Background auto-update is disabled for this process; update separately with qoder update. Removing an agent keeps your system installation and Qoder data. Cognia supports local Qoder hosting on macOS and Linux.",
       "quickStartPreset": "Quick-start preset",
       "refresh": "Refresh",
       "refreshSessions": "Refresh sessions",
@@ -15541,10 +15596,16 @@
       "agentNamePlaceholder": "e.g., Claude Code",
       "agentRemoved": "Agent removed successfully",
       "agentUpdated": "Agent updated successfully",
+      "aiderEnvironment": "Provider environment variables",
+      "aiderEnvironmentKey": "Variable name",
+      "aiderEnvironmentValue": "Variable value",
+      "aiderPresetDescription": "Run the official Aider CLI with streamed replies, file edits, cancellation and separate Cognia session histories. Automatic confirmations run inside the host sandbox; Plan is read-only. Native ACP approvals and MCP are unavailable.",
       "allAgents": "All agents",
       "apiKey": "API Key",
       "apiKeyPlaceholder": "Optional API key for authentication",
       "arguments": "Arguments",
+      "argumentsHint": "Use quotes around arguments containing spaces. Arguments are passed directly; shell expansion is not performed.",
+      "argumentsInvalid": "Close all quotes in the arguments before saving.",
       "autoConnect": "Auto-connect on Startup",
       "autoConnectDesc": "Automatically connect to configured agents when Cognia starts",
       "backoffExponential": "Exponential",
@@ -15555,6 +15616,9 @@
       "chatFailurePolicyDesc": "Behavior when external agent execution fails in chat mode",
       "chatFailurePolicyFallback": "Fallback to built-in agent",
       "chatFailurePolicyStrict": "Strict failure (no fallback)",
+      "clineEnvironment": "Cline authentication and configuration",
+      "clinePresetDescription": "Official Cline CLI with streaming, Plan/Act, tool approvals and session resume.",
+      "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
       "codexAppServer": {
         "account": "Account",
         "managedPolicy": "Managed policy",
@@ -15727,6 +15791,7 @@
       "endpoint": "Endpoint URL",
       "endpointInvalid": "Enter a valid HTTP or HTTPS endpoint URL.",
       "endpointRequired": "Endpoint URL is required for HTTP transport",
+      "environmentInvalid": "Use unique variable names without = or null characters; values cannot contain null characters.",
       "executionTimeoutMs": "Execution Timeout (ms)",
       "fleetBannerCollapsed": "{connected}/{total} connected",
       "fleetBannerConnected": "{connected} of {total} agents connected",
@@ -15735,10 +15800,13 @@
       "fromPreset": "From preset: {name}",
       "globalSettings": "Global settings",
       "globalSettingsDesc": "Defaults that apply to every external agent",
+      "goosePresetDescription": "Run Goose over native ACP with its developer extension, Cognia tools, streamed replies, and tool approval in Cognia. Configure your preferred provider and model with `goose configure`.",
       "inspectorTabAdvanced": "Advanced",
       "inspectorTabConnection": "Connection",
       "inspectorTabOverview": "Overview",
       "inspectorUnsaved": "You have unsaved changes",
+      "kimiEnvironment": "Kimi Code authentication and configuration",
+      "kimiPresetDescription": "Run Kimi Code over native ACP with your Kimi subscription login, images, MCP, tool approvals and persisted sessions.",
       "maxRetries": "Max Retries",
       "maxRetryDelayMs": "Max Retry Delay (ms)",
       "nameRequired": "Agent name is required",
@@ -15813,10 +15881,14 @@
       "piSandboxNote": "Pi always runs inside the strict sandbox, on macOS and Linux only. There is no unsandboxed fallback.",
       "piSectionTitle": "Pi runtime",
       "presetGalleryEmpty": "No presets available.",
+      "processEnvironment": "Process environment variables",
+      "processEnvironmentHint": "Configure the selected execution Host. Secret values use the existing credential store; task-scoped Cognia model routes control their own provider credentials.",
       "protocol": "Protocol",
       "providerUndoWarningReset": "Restore warning",
       "providerUndoWarningSetting": "Provider Undo warning",
       "providerUndoWarningSettingDescription": "The first-use warning is currently acknowledged for this agent.",
+      "qoderEnvironment": "Qoder authentication and configuration",
+      "qoderPresetDescription": "Run Qoder over its official ACP server with streamed replies, tool approval and per-session MCP. Requires Qoder CLI login or a Qoder Personal Access Token.",
       "quickConnect": "Connect {name}",
       "quickDisconnect": "Disconnect {name}",
       "quickStartDescription": "Pick a preset to instantiate an external agent with sensible defaults. You can customize fields after.",
@@ -18128,9 +18200,24 @@
       "skipped": "{count, plural, one {# issue updated} other {# issues updated}}, {skipped} skipped"
     },
     "conflicts": {
+      "changedBy": "Changed by {name} at revision {revision}",
+      "changedByUnknown": "Changed at revision {revision}",
       "description": "The server changed after this edit was queued. Compare both versions, then discard the edit or resubmit it against the latest revision.",
       "discard": "Discard",
+      "emptyValue": "(empty)",
       "failed": "Could not resolve conflict: {reason}",
+      "field": {
+        "assignee": "Assignee",
+        "body": "Description",
+        "description": "Description",
+        "priority": "Priority",
+        "status": "Status",
+        "step": "Step {id}",
+        "title": "Title"
+      },
+      "fieldTheirs": "Theirs",
+      "fieldYours": "Yours",
+      "fieldsHeading": "Changed by someone else since your edit",
       "pendingPatch": "Your pending patch",
       "resubmit": "Resubmit on latest",
       "serverValue": "Current server value",
@@ -18277,6 +18364,13 @@
       "editLabels": "Edit labels",
       "empty": "Select an issue to see its details",
       "labels": "Labels",
+      "mention": {
+        "empty": "No one matches",
+        "heading": "Workspace members",
+        "search": "Search people…",
+        "trigger": "Mention someone",
+        "willNotify": "Notifies {names}"
+      },
       "mobileReadOnly": "Read-only on mobile",
       "openConversation": "Open the conversation it came from",
       "openInGithub": "Open in GitHub",
@@ -19031,6 +19125,53 @@
       }
     }
   },
+  "kimiManagement": {
+    "actions": {
+      "doctor": "Check native configuration",
+      "install": "Install reviewed version",
+      "migrate": "Migrate legacy Kimi data",
+      "native": "Manage native extensions and workflows",
+      "restore": "Restore reviewed version",
+      "uninstall": "Uninstall npm installation",
+      "upgrade": "Check native upgrade",
+      "web": "Open native web management"
+    },
+    "cancel": "Cancel",
+    "cliDocs": "Official CLI documentation",
+    "confirmDescription": "This changes the shared system-owned Kimi package in a visible terminal and can affect every configuration using that installation. Review the exact command below. The terminal may request additional installation confirmation; opening it does not confirm installation success.",
+    "confirmRun": "Run reviewed command",
+    "confirmTitle": "Confirm {action}",
+    "copied": "Command copied",
+    "copy": "Copy",
+    "copyAction": "Copy {action} command",
+    "copyExport": "Copy export command",
+    "disconnectForPackage": "Disconnect all Kimi agents before changing the shared system package; wait for any connecting or reconnecting agents to stop.",
+    "exportNote": "Exports an explicit native session as ZIP, excluding the global log that may contain other projects. Run the command in this agent’s working directory.",
+    "exportSession": "Export native session",
+    "extensions": "Skills can be discovered by Kimi in new sessions. Installing or changing native plugins, agents and hooks may require native reload or a new Cognia session; existing turns are not automatically reconfigured.",
+    "failed": "Could not copy or open the native command. Check the configuration and terminal availability.",
+    "invalidConfiguration": "Invalid executable or KIMI_CODE_HOME",
+    "localTerminalRequired": "Direct launch requires a local macOS/Linux desktop terminal. On other hosts, copy the POSIX recipe or follow the official platform instructions.",
+    "notes": {
+      "doctor": "Validates config.toml and tui.toml without changing them or calling a model.",
+      "install": "Node.js and npm required. This installs the reviewed 2.1.1 package; reconnect Cognia after installation.",
+      "migrate": "Opens the official interactive migration. Review the native prompts before changing legacy data.",
+      "native": "Run /plugins to install, enable, disable, reload or remove native plugins; /usage for subscription usage; /goal, /swarm and /undo for native workflows. Plugin management, Goal, Swarm and Undo are not supported by Kimi ACP; ACP /usage reports session tokens only. Native Skills, agents and hooks use Kimi configuration.",
+      "restore": "Reinstalls version 2.1.1 with npm. This is a package-manager restore, not a Cognia receipt-based rollback. For another installation method, use its original installer.",
+      "uninstall": "Use only if Kimi was installed globally with npm. Native account state and session data are retained. Disconnect running Kimi sessions before uninstalling.",
+      "upgrade": "Checks for the newest official version and prompts before installation. Cognia currently accepts >=2.1.1 and <3.0.0; a newer version may require a compatibility review. Reconnect after updating, or restore 2.1.1 if needed.",
+      "web": "Starts the official local web UI with default loopback binding and bearer authentication. Manage plugins and account usage there. Keep the terminal open; Ctrl-C stops the server. This is a separate native session surface."
+    },
+    "openAction": "Open terminal for {action}",
+    "openTerminal": "Open terminal",
+    "opened": "Native Kimi terminal opened",
+    "ownership": "The Kimi installation and native data are owned by your system. Removing this Cognia agent does not uninstall Kimi or erase its history.",
+    "quota": "ACP provides context and session token usage, not subscription quota. The official native /usage UI and Server API GET /api/v1/oauth/usage provide account quota windows and resets. Cognia does not read OAuth secrets to fetch them.",
+    "serverDocs": "Official Server API documentation",
+    "sessionPlaceholder": "Native Kimi session ID",
+    "terminalPolicy": "Native tools run in a visible terminal under your terminal settings. They are separate from the Cognia ACP agent session. Recipes use POSIX shell syntax; only KIMI_CODE_HOME is carried over, never model keys or ACP launch arguments.",
+    "title": "Kimi native management"
+  },
   "larkEntry": {
     "errors": {
       "adapter_missing": "This page is missing its bot context — open it from the Feishu shortcut again.",
@@ -19102,6 +19243,7 @@
   },
   "loading": {
     "cancel": "Cancel",
+    "languageLoadFailed": "Unable to load the language pack.",
     "loading": "Loading…",
     "offline": "You're offline — this will retry once the connection returns",
     "page": {
@@ -19152,6 +19294,7 @@
       "version": "Version {version}"
     },
     "pageLoading": "Loading…",
+    "retryLanguage": "Retry",
     "stillWorking": "Still working… ({seconds}s)",
     "thinking": "Claude is thinking…"
   },
@@ -21729,6 +21872,8 @@
           "outboundQueue": "Outbound delivery status",
           "plans": "Plans",
           "platformIdentities": "Contacts",
+          "pluginCogsetState": "Cogset state",
+          "pluginCogsets": "Cogsets",
           "plugins": "Plugins",
           "projects": "Projects",
           "sessionFolders": "Conversation folders",
@@ -22765,6 +22910,7 @@
         "soundHelp": "Play a sound for new notifications.",
         "source": {
           "agent-team": "Agent teams",
+          "collab": "Collaboration",
           "connector": "Connectors",
           "issue": "Issues",
           "plugin": "Plugins",
@@ -23957,6 +24103,17 @@
       "unreadCount": "{count} unread",
       "unsnooze": "Unsnooze"
     },
+    "collab": {
+      "approvalRequestedFallback": "A run in a shared conversation is waiting for you.",
+      "approvalRequestedTitle": "{actor} needs your approval",
+      "genericTitle": "{actor} sent you a notification",
+      "invitedBody": "Open it to accept or decline the invitation.",
+      "invitedTitle": "{actor} invited you to a shared conversation",
+      "issueAssignedTitle": "{actor} assigned you an issue",
+      "issueFallback": "Open the shared issue board to see it.",
+      "issueMentionedTitle": "{actor} mentioned you in an issue",
+      "someone": "A teammate"
+    },
     "delivery": {
       "short": {
         "accepted": "Sent · {count}",
@@ -23997,6 +24154,7 @@
     },
     "sources": {
       "agent-team": "Agent team",
+      "collab": "Collaboration",
       "connector": "Messages",
       "issue": "Issues",
       "plugin": "Plugins",
@@ -26842,6 +27000,276 @@
       "reveal": "Reveal",
       "title": "cognia CLI"
     },
+    "cogpacks": {
+      "export": {
+        "alwaysOnExcluded": "Always-on plugins stay on this device: {names}",
+        "cancel": "Cancel",
+        "description": "Description",
+        "embedded": "Copied into the file",
+        "empty": "Nothing in this cogset can be exported.",
+        "failed": "Could not export the cogpack",
+        "fileFilter": "Cogpack",
+        "id": "Cogpack id",
+        "idHint": "Letters, digits, dots, dashes and underscores",
+        "includeSettings": "Include these settings",
+        "invalidId": "Enter a valid id",
+        "invalidVersion": "Enter a SemVer version, for example 1.0.0",
+        "license": "Its licence is copied with it",
+        "loadFailed": "This cogset could not be prepared for export.",
+        "loading": "Preparing…",
+        "members": "Plugins",
+        "missing": "Not installed here, so not exported: {names}",
+        "name": "Name",
+        "nameRequired": "Enter a name",
+        "needsDesktop": "Copying plugin files into a cogpack needs the desktop app.",
+        "saved": "Saved {file}",
+        "secretsLeftOut": "Left out: {fields}",
+        "sign": "Sign with your publisher key",
+        "signCreate": "Create a publisher key and sign",
+        "signHint": "Recipients see who made it and can choose to trust your key.",
+        "source": {
+          "builtin": "Ships with Cognia",
+          "git": "Git commit {commit}",
+          "github": "GitHub commit {commit}",
+          "openvsx": "Open VSX {version}",
+          "registry": "Registry version {version}",
+          "url": "Signed bundle"
+        },
+        "submit": "Export",
+        "title": "Export {name} as a cogpack",
+        "unportable": "Installed from a VS Code file, so it cannot be carried: {names}",
+        "version": "Version"
+      },
+      "import": {
+        "cancel": "Cancel",
+        "change": {
+          "added": "Added",
+          "config-changed": "Settings changed",
+          "local-only": "Only in your cogset",
+          "removed": "Removed",
+          "repinned": "{from} → {to}",
+          "unchanged": "Unchanged"
+        },
+        "close": "Close",
+        "compatibility": "Made with Cognia {required}. This app is {current}, so plugins that ship with the app may be missing.",
+        "conflicts": "Conflicts with installed plugins",
+        "dependency": "{plugin} needs {dependency} {constraint}",
+        "dependencyVersion": "{plugin} needs {dependency} {constraint}, but {installed} is installed",
+        "disabledOnActivation": "Switching to it turns off: {names}",
+        "done": "Imported {name}",
+        "doneWithMissing": "{name} was imported without {count, plural, =1 {1 plugin} other {# plugins}}",
+        "failed": "Could not import the cogpack",
+        "importNew": "Import as a new cogset",
+        "installPinned": "Install {version}",
+        "installing": "Installing {done} of {total}…",
+        "invalid": {
+          "checksum-mismatch": "A file in it does not match its recorded checksum. It may have been modified.",
+          "duplicate-path": "It lists the same file twice.",
+          "file-missing": "A file it lists is missing.",
+          "manifest-invalid": "Its manifest is malformed or uses a format this version does not support.",
+          "manifest-missing": "It has no manifest, so it is not a cogpack.",
+          "manifest-not-json": "Its manifest is not valid JSON.",
+          "record-invalid": "Its list of files is malformed.",
+          "signature-invalid": "Its signature does not match its contents. It may have been modified after it was signed.",
+          "too-large": "It is larger than a cogpack may be.",
+          "too-many-files": "It contains more files than a cogpack may carry.",
+          "undeclared-path": "It contains a file its manifest does not list.",
+          "unknown": "The file could not be opened.",
+          "unreadable": "It is not a readable zip file.",
+          "unsafe-expansion": "A file in it expands to an unsafe size.",
+          "unsafe-path": "It contains a file path that could write outside the cogpack."
+        },
+        "localEdited": "You changed this",
+        "members": "Plugins",
+        "missingBinaries": "Needs on this computer: {names}",
+        "missingDependencies": "Needs plugins the cogpack does not include",
+        "openFailed": "Could not read {file}",
+        "optional": "Optional",
+        "permissions": "Permissions {name} asks for",
+        "reading": "Checking the cogpack…",
+        "reason": {
+          "builtin-missing": "This app does not ship it",
+          "desktop-only": "Needs the desktop app",
+          "install-failed": "Installation failed",
+          "invalid-embedded": "Invalid copied files",
+          "preview-failed": "Could not be fetched",
+          "registry-mismatch": "From another registry",
+          "skipped": "Skipped",
+          "unavailable": "Not available"
+        },
+        "refused": {
+          "signature-required": "Your plugin policy only allows signed cogpacks.",
+          "trusted-publishers-only": "Your plugin policy only allows cogpacks from trusted publishers."
+        },
+        "resultMissing": "Not installed",
+        "resultTitle": "{name} is imported",
+        "reviewAfterInstall": "Its permissions are reviewed once it is installed.",
+        "secretPlaceholder": "Saved with the plugin, not in the cogset",
+        "secrets": "Secrets for {name}",
+        "signer": "Signed by {name} · {fingerprint}",
+        "status": {
+          "different-version": "You have {installed}; the cogpack has {version}",
+          "new": "Will be installed",
+          "same": "Installed",
+          "unavailable": "Not available"
+        },
+        "submit": "Import",
+        "switchNow": "Switch to it now",
+        "title": "Import cogpack",
+        "trust": {
+          "signed-unknown": "Signed by a publisher you have not trusted yet",
+          "trusted": "Signed by a trusted publisher",
+          "unsigned": "Not signed"
+        },
+        "trustSigner": "Trust this publisher from now on",
+        "unavailable": {
+          "builtin-missing": "This app does not ship it",
+          "desktop-only": "It needs the desktop app",
+          "invalid-embedded": "Its copied files are invalid",
+          "preview-failed": "It could not be fetched",
+          "registry-mismatch": "It comes from a registry this app does not use"
+        },
+        "updateExisting": "Update {cogset}",
+        "updateTitle": "You imported {name} before",
+        "useNext": "Use the new version"
+      }
+    },
+    "cogsets": {
+      "action": {
+        "config": "Apply settings",
+        "disable": "Turn off",
+        "enable": "Turn on",
+        "keep": "Keep on"
+      },
+      "activation": {
+        "close": "Close",
+        "optional": "Optional",
+        "partialDescription": "These plugins did not end up the way the cogset asks. Everything else switched.",
+        "partialTitle": "{name} was applied partly",
+        "progress": "{done} of {total} changes",
+        "retry": "Retry",
+        "title": "Switching to {name}"
+      },
+      "alwaysOn": {
+        "add": "Keep always on",
+        "detail": "Stays on in every cogset",
+        "failed": "Could not change always on for {name}",
+        "mirrored": "Change this on your desktop",
+        "remove": "Remove from always on"
+      },
+      "confirmRuns": {
+        "cancel": "Cancel",
+        "confirm": "Switch now",
+        "description": "Switching to {name} turns off plugins that running agent turns may be using, and their tools stop working mid-turn.",
+        "title": "Switch while agents are running?"
+      },
+      "defaultName": "Default",
+      "delete": {
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "deleted": "Deleted {name}",
+        "description": "The cogset is deleted. Its plugins stay installed.",
+        "failed": "Could not delete {name}",
+        "inUseApplied": "Switch to another cogset first.",
+        "inUseGlobal": "Make another cogset the default first.",
+        "orphans": "Only this cogset uses these plugins. Uninstall them as well?",
+        "title": "Delete {name}?"
+      },
+      "editor": {
+        "alwaysOnBadge": "Always on",
+        "alwaysOnHint": "Already on in every cogset",
+        "cancel": "Cancel",
+        "createTitle": "New cogset",
+        "description": "Description",
+        "descriptionPlaceholder": "What this set of plugins is for",
+        "editTitle": "Edit {name}",
+        "name": "Name",
+        "namePlaceholder": "For example: Writing",
+        "nameRequired": "Enter a name",
+        "noResults": "No plugins match.",
+        "optional": "Optional",
+        "optionalHint": "Fine if it is missing",
+        "pin": "Pin {version}",
+        "pinHint": "Warn when a different version is installed",
+        "plugins": "Plugins",
+        "save": "Save",
+        "saveCurrentTitle": "Save current plugins",
+        "saveFailed": "Could not save the cogset",
+        "saved": "Saved {name}",
+        "search": "Search plugins",
+        "selectedCount": "{count, plural, =0 {No plugins selected} =1 {1 plugin selected} other {# plugins selected}}"
+      },
+      "manager": {
+        "actionFailed": "Something went wrong",
+        "alwaysOnDescription": "These plugins stay on whichever cogset runs.",
+        "alwaysOnEmpty": "None yet. Use a plugin's menu to keep it always on.",
+        "alwaysOnRemove": "Remove {name} from always on",
+        "alwaysOnTitle": "Always on",
+        "applied": "Running",
+        "delete": "Delete",
+        "description": "A cogset is a set of plugins that run together. Switching turns its plugins on and the rest off, except always-on plugins. Nothing is uninstalled.",
+        "duplicate": "Duplicate",
+        "duplicateName": "{name} (copy)",
+        "edit": "Edit",
+        "empty": "No cogsets yet.",
+        "export": "Export as cogpack",
+        "global": "Default choice",
+        "lastApplied": "Last switched {time}",
+        "lastPartial": "The last switch was partial",
+        "listAria": "Cogsets",
+        "madeDefault": "{name} is now the default cogset",
+        "makeDefault": "Make default",
+        "memberMissing": "Not installed",
+        "memberOptional": "Optional",
+        "memberPinned": "Pinned to {version}",
+        "members": "Plugins",
+        "mirroredHint": "You are viewing your desktop's cogsets. Switch here; edit them on the desktop.",
+        "new": "New cogset",
+        "noMembers": "No plugins. Switching to it turns off everything except always-on plugins.",
+        "retry": "Retry",
+        "source": {
+          "cogpack": "From cogpack {name} {version}",
+          "default": "Created from your plugins",
+          "manual": "Made by you",
+          "preset": "From preset {name}"
+        },
+        "switch": "Switch",
+        "title": "Cogsets",
+        "workspace": "This workspace"
+      },
+      "reason": {
+        "blocked": "Cannot run on this device",
+        "config-failed": "Settings could not be applied",
+        "dependency-cycle": "Its dependencies form a loop: {cycle}",
+        "dependency-disabled": "Needs {dependency}, which cannot run on this device",
+        "dependency-missing": "Needs {dependency}{constraint, select, any {} other { {constraint}}}, which is not installed",
+        "dependency-version": "Needs {dependency}{constraint, select, any {} other { {constraint}}}, but {found} is installed",
+        "disable-failed": "Could not be turned off",
+        "enable-failed": "Could not be turned on",
+        "not-installed": "Not installed",
+        "version-mismatch": "Version {installed} is installed; the cogset expects {expected}"
+      },
+      "switcher": {
+        "aria": "Cogset: {name}. Switch cogset",
+        "exportCogpack": "Export {name} as a cogpack…",
+        "importCogpack": "Import cogpack…",
+        "manage": "Manage cogsets…",
+        "memberCount": "{count, plural, =0 {No plugins} =1 {1 plugin} other {# plugins}}",
+        "mirroredHint": "Switching is sent to your desktop, which applies it. Cogsets are edited on the desktop.",
+        "new": "New cogset…",
+        "none": "No cogset",
+        "partial": "Partial",
+        "pending": "Waiting for {name}",
+        "pendingDetail": "Agent runs are in progress. {name} applies when they finish.",
+        "queued": "Sent to your desktop. It switches to {name} when it is online.",
+        "saveCurrent": "Save current plugins as a cogset…",
+        "scopeSession": "This session",
+        "scopeWorkspace": "Workspace",
+        "switchFailed": "Could not switch to {name}",
+        "switchTo": "Switch to",
+        "switched": "Switched to {name}"
+      }
+    },
     "comparison": {
       "author": "Author",
       "capabilities": "Capabilities",
@@ -27676,7 +28104,10 @@
         "resultCancelled": "Bundle install cancelled — {installed} of {total} installed.",
         "resultFailed": "Bundle install failed: {message}",
         "resultInstalled": "Bundle installed — {installed} of {total} plugins.",
-        "resultPartial": "{installed} of {total} installed; {failed} failed: {message}"
+        "resultPartial": "{installed} of {total} installed; {failed} failed: {message}",
+        "saveAsCogset": "Save as cogset",
+        "saveAsCogsetFailed": "Could not save the cogset",
+        "savedAsCogset": "Saved {name} as a cogset"
       },
       "retry": "Retry",
       "searchPlaceholder": "Search the marketplace…"
@@ -28127,6 +28558,7 @@
       "convertPlugin": "Convert plugin…",
       "desktopOnlyGroupHint": "These install from disk or a git checkout, which runs in the desktop backend.",
       "desktopOnlyHint": "Needs the Cognia desktop app",
+      "fromCogpack": "Cogpack…",
       "fromFile": "From file…",
       "fromFileSourceLabel": "Local files ({count})",
       "fromGithub": "From GitHub…",
@@ -28147,6 +28579,7 @@
       "fromUrlSigned": "From signed URL…",
       "fromVsix": "From .vsix…",
       "fromWasmGit": "From Git (WASM)…",
+      "groupCogpack": "Cogpacks",
       "groupGit": "Git",
       "groupLocal": "Local plugin",
       "groupManifest": "Manifest",
@@ -28209,6 +28642,7 @@
       "upToDate": "All plugins are up to date.",
       "updatesAvailable": {
         "description": "Auto-update is set to notify only, so nothing was installed.",
+        "descriptionPinned": "{count, plural, =1 {1 of them is pinned by the active cogset, so it was not installed.} other {# of them are pinned by the active cogset, so they were not installed.}}",
         "review": "Review",
         "title": "{count, plural, =1 {1 plugin update available} other {# plugin updates available}}"
       }
@@ -29176,6 +29610,152 @@
     "addAction": "Add action",
     "addSecret": "Add keyring reference",
     "addVariable": "Add variable",
+    "bootstrap": {
+      "addCheck": "Add readiness check",
+      "advanced": "Advanced customization",
+      "advancedHint": "Customize every model request, context policy, tool and reuse option. Credential headers must use headersEnv with variable names bound to keyring references below. No secret values belong in JSON.",
+      "advancedJson": "Advanced configuration JSON",
+      "advancedSchema": "Sections: modelOptions (auth, apiKeyHeader, endpointPath, requestTimeoutSecs, maxTokens, temperature, topP, seed, reasoningEffort, thinking, extraBody, headers, headersEnv, stream, showThinking), context (contextWindowTokens, autoCompact, compactThresholdTokens, compactRetainTokens, compactMaxTokens, compactRetries, maxOverflowRetries, pruneToolResults, pruneThresholdBytes, pruneHeadBytes, pruneTailBytes), tools (shell, editor, profile, shellExecutable, shellArgs, environment, maxFileBytes), reuse (inputs, outputs), maxOutputBytes, maxContextBytes, maxResponseBytes.",
+      "apiKeyEnv": "API key variable",
+      "apiKeyHeader": "API key header name",
+      "auth": "Authentication",
+      "authBearer": "Bearer API key",
+      "authHeader": "Custom API key header",
+      "authNone": "No authentication (local provider)",
+      "autoCompact": "Automatically compact context",
+      "baseUrl": "Model API endpoint",
+      "binary": "Bootstrap executable",
+      "checkCommand": "Readiness check command",
+      "checkName": "Readiness check name",
+      "checks": "Readiness checks",
+      "checksHint": "At least one check is required. Commands must exit with code 0; an Agent's claim of success cannot replace these checks.",
+      "commandTimeoutSecs": "Command timeout (seconds)",
+      "contextWindowTokens": "Context window (tokens)",
+      "credentialHint": "For bearer or custom-header authentication, bind the API key variable to an OS keyring reference below. No authentication allows a local provider without a key. Header credentials also use keyring variable references. The executable must be installed on the execution host.",
+      "description": "Run the setup script first, then let a small standalone Agent repair failures. The full Agent starts only after every readiness check passes.",
+      "enabled": "Use a bootstrap Agent for initialization",
+      "endpointPath": "Chat completion path",
+      "maxContextBytes": "Context message limit (bytes)",
+      "maxOutputBytes": "Tool output limit (bytes)",
+      "maxResponseBytes": "Model response limit (bytes)",
+      "maxSteps": "Maximum steps",
+      "maxTokens": "Maximum response tokens",
+      "model": "Bootstrap model",
+      "presets": {
+        "applyProvider": "Apply provider",
+        "applyRecipe": "Apply recipe",
+        "applyTask": "Apply task",
+        "hint": "Choose an option, then apply it. Applied fields remain editable; nothing runs automatically.",
+        "localModelHint": "Replace local-model with an installed model ID. Use the standalone models command to list models from your local provider.",
+        "provider": "Provider preset",
+        "providerOptions": {
+          "deepseek": {
+            "description": "DeepSeek's compatible endpoint. Uses DEEPSEEK_API_KEY. Applying a provider resets authentication, headers and model options.",
+            "label": "DeepSeek"
+          },
+          "lmstudio": {
+            "description": "Local LM Studio on port 1234 without authentication. Select a loaded model after applying.",
+            "label": "LM Studio"
+          },
+          "ollama": {
+            "description": "Local Ollama on port 11434 without authentication. Select an installed model after applying.",
+            "label": "Ollama"
+          },
+          "openai": {
+            "description": "OpenAI Chat Completions. Uses OPENAI_API_KEY. Applying a provider resets authentication, headers and model options.",
+            "label": "OpenAI"
+          },
+          "openrouter": {
+            "description": "OpenRouter's compatible endpoint. Uses OPENROUTER_API_KEY. Applying a provider resets authentication, headers and model options.",
+            "label": "OpenRouter"
+          }
+        },
+        "recipe": "Initialization recipe",
+        "recipeHint": "Applying a recipe replaces the setup script (including OS overrides), task, readiness checks and reuse paths. Commands use the selected Agent shell; reapply after changing that shell. Applying any preset clears unfinished advanced JSON edits.",
+        "recipeOptions": {
+          "go": {
+            "description": "Download and verify module dependencies. Tracks go.mod and go.sum.",
+            "label": "Go modules"
+          },
+          "node-pnpm": {
+            "description": "Install locked dependencies and check node_modules. Tracks package.json and pnpm-lock.yaml.",
+            "label": "Node.js / pnpm"
+          },
+          "python-uv": {
+            "description": "Sync the locked project and verify its virtual environment. Tracks pyproject.toml and uv.lock.",
+            "label": "Python / uv"
+          },
+          "rust": {
+            "description": "Fetch locked dependencies and check compilation offline. Tracks Cargo.toml and Cargo.lock.",
+            "label": "Rust / Cargo"
+          }
+        },
+        "task": "Task preset",
+        "taskOptions": {
+          "chat": {
+            "description": "Question answering with workspace tools disabled, 8 steps and 4096 response tokens.",
+            "label": "Chat"
+          },
+          "coding": {
+            "description": "Workspace tools, 48 steps and 8192 response tokens for implementing and verifying changes.",
+            "label": "Coding"
+          },
+          "debug": {
+            "description": "Workspace tools, 64 steps and 8192 response tokens for reproducing and fixing an issue.",
+            "label": "Debugging"
+          },
+          "explain": {
+            "description": "Explain supplied material with workspace tools disabled, 8 steps and 8192 response tokens.",
+            "label": "Explanation"
+          },
+          "quick": {
+            "description": "Workspace tools, 12 steps, a 180-second budget and 2048 response tokens.",
+            "label": "Quick task"
+          }
+        },
+        "title": "Starting configuration"
+      },
+      "profile": "Tool schema profile",
+      "profileDsh": "d.sh compatible tools",
+      "profileNative": "Cognia native tools",
+      "pruneToolResults": "Prune older tool results",
+      "removeCheck": "Remove readiness check",
+      "requestTimeoutSecs": "Model request timeout (seconds)",
+      "reuseInputs": "Bootstrap reuse inputs (one per line)",
+      "reuseOutputs": "Bootstrap required outputs (one per line)",
+      "runtime": "Agent runtime",
+      "runtimeBash": "Standalone Bash script",
+      "runtimeHint": "Install the selected script on the execution host and enter its path below. Bash needs curl and jq; PowerShell needs PowerShell 7.4+. Setup and readiness commands must use the selected shell's syntax.",
+      "runtimeNative": "Native executable",
+      "runtimePowershell": "Standalone PowerShell script",
+      "shellExecutable": "Shell executable",
+      "showThinking": "Show model reasoning",
+      "stream": "Stream model responses",
+      "systemPrompt": "Custom system prompt (optional)",
+      "task": "Initialization task",
+      "temperature": "Temperature",
+      "toolEditor": "Enable editor tool",
+      "toolShell": "Enable shell tool",
+      "topP": "Top P",
+      "totalTimeoutSecs": "Total timeout (seconds)",
+      "validation": {
+        "binary": "Enter a valid executable path without control characters.",
+        "checks": "Add 1–32 checks with unique names (letters, digits, dots, underscores or hyphens) and non-empty commands.",
+        "context": "Use valid context thresholds, retry counts and pruning sizes. Retained tokens must be below the compaction threshold; retained output must be smaller than the pruning threshold.",
+        "credential": "Use a valid environment variable name for the API key.",
+        "endpoint": "Use an HTTPS API endpoint or an HTTP loopback endpoint, without credentials, query or fragment.",
+        "keyring": "Bind every required API key or credential header variable to a keyring reference; it cannot be a plain variable.",
+        "limits": "Use whole numbers: 1–256 steps, 1–3600 seconds total and 1–600 seconds per command. A command timeout cannot exceed the total.",
+        "model": "Enter a model name (at most 256 characters, without control characters).",
+        "options": "Correct the advanced JSON and model options. Unknown fields, secret header literals and reserved request fields are rejected.",
+        "reservedVariable": "COGNIA_BOOTSTRAP_BINARY and variables starting with COGNIA_BOOTSTRAP_CONFIG are reserved for initialization.",
+        "reuse": "Use unique root-relative input/output paths without traversal.",
+        "runtime": "Select the native, Bash or PowerShell runtime.",
+        "size": "The full configuration across all operating-system variants is too large (maximum 48000 UTF-8 bytes).",
+        "task": "Enter an initialization task (at most 32000 characters).",
+        "tools": "Use valid tool settings, a supported profile and non-sensitive environment variables. Startup hooks and credential overrides are forbidden."
+      }
+    },
     "bypass": "Bypass once",
     "create": "New environment",
     "default": "Use as project default",
@@ -35625,7 +36205,14 @@
           "label": "Trigger",
           "schedule": "Time schedule",
           "sunset": "Sunrise & sunset",
-          "system": "Follow system"
+          "system": "Follow system",
+          "wallpaper": "Follow wallpaper"
+        },
+        "wallpaper": {
+          "measuring": "Measuring the current wallpaper — following the system until it is done.",
+          "noWallpaper": "No wallpaper is on, so this follows the system.",
+          "suitsDark": "The current wallpaper suits a dark theme.",
+          "suitsLight": "The current wallpaper suits a light theme."
         }
       },
       "colorPresetLabel": "Color preset",
@@ -35925,6 +36512,7 @@
         "importSuccess": "Applied {count, plural, one {# appearance setting} other {# appearance settings}}."
       },
       "languageLabel": "Language",
+      "languageSystem": "Follow system",
       "layoutType": {
         "agentFlow": {
           "sectionLabel": "Agent flow"
@@ -36166,7 +36754,7 @@
             "label": "Custom CSS"
           },
           "auto": {
-            "description": "Switch on a schedule or with the system",
+            "description": "Switch on a schedule, with the system or with the wallpaper",
             "label": "Auto light/dark"
           },
           "components": {
@@ -36544,6 +37132,11 @@
           "title": "Build a gradient"
         },
         "invalidType": "Unsupported file type. Use PNG, JPEG, WebP, GIF or AVIF.",
+        "legibility": {
+          "capped": "Wallpaper faded to {percent}% so text stays readable over this wallpaper.",
+          "hint": "Measures the wallpaper's darkest and brightest areas and holds its opacity where text keeps WCAG contrast. Re-checked when you change the theme.",
+          "label": "Automatic readability protection"
+        },
         "noActive": "No wallpaper selected.",
         "opacity": {
           "autoFix": "Auto-fix",
@@ -36659,6 +37252,13 @@
         "scopeGlobal": "Global",
         "scopeLabel": "Apply to",
         "scopeSidebar": "Sidebar",
+        "themeFit": {
+          "follow": "Follow the wallpaper automatically",
+          "suitsDark": "This wallpaper suits a dark theme: text stays readable with {recommended}% of the image showing, versus {current}% now.",
+          "suitsLight": "This wallpaper suits a light theme: text stays readable with {recommended}% of the image showing, versus {current}% now.",
+          "switchDark": "Switch to dark",
+          "switchLight": "Switch to light"
+        },
         "tiles": {
           "dropHint": "Drop an image anywhere here",
           "gradient": "Gradient",
@@ -38555,15 +39155,104 @@
         "authorizeNeedsSavedAdapter": "Save the adapter first; authorizing needs the saved credentials.",
         "authorizeOpened": "Authorization opened in your browser. Approve there, then return.",
         "cancel": "Cancel",
+        "cardPresentation": {
+          "density": "Spacing",
+          "description": "Customize progress cards and final replies.",
+          "desktopTextSize": "Desktop answer text size",
+          "headerIconKey": "Header image key",
+          "headerIconKeyPlaceholder": "Uploaded Feishu image key (img_…)",
+          "headerTags": "Header tags",
+          "headerTagsPlaceholder": "Up to 3 tags, separated by commas",
+          "help": "Warning and error colors remain visible. Process display changes apply to new runs; existing timelines finish in their original mode. Saving restarts this connection.",
+          "history": "Process panel",
+          "invalidColor": "Enter both light and dark process panel colors as six-digit hex values, or leave both empty.",
+          "invalidIcon": "Enter a valid uploaded Feishu image key starting with img_.",
+          "invalidTags": "Use at most 3 comma-separated tags, each no longer than 20 characters.",
+          "invalidTemplate": "Enter a template ID and fixed published version using letters, numbers, dots, underscores or hyphens.",
+          "mobileTextSize": "Mobile answer text size",
+          "options": {
+            "density": {
+              "comfortable": "Comfortable",
+              "compact": "Compact"
+            },
+            "desktopTextSize": {
+              "heading-2": "Extra large (20 px)",
+              "heading-3": "Larger (17–18 px)",
+              "heading-4": "Large (16 px)",
+              "normal": "Normal (14 px)",
+              "notation": "Small (12 px)"
+            },
+            "history": {
+              "auto": "Automatic",
+              "collapsed": "Initially collapsed",
+              "expanded": "Always expanded"
+            },
+            "mobileTextSize": {
+              "heading-2": "Extra large (20 px)",
+              "heading-3": "Larger (17–18 px)",
+              "heading-4": "Large (16 px)",
+              "normal": "Normal (14 px)",
+              "notation": "Small (12 px)"
+            },
+            "processMode": {
+              "auto": "Native timeline when available",
+              "card": "Process inside card"
+            },
+            "theme": {
+              "blue": "Blue",
+              "carmine": "Carmine",
+              "green": "Green",
+              "grey": "Grey",
+              "indigo": "Indigo",
+              "orange": "Orange",
+              "purple": "Purple",
+              "red": "Red",
+              "status": "Follow status",
+              "turquoise": "Turquoise",
+              "violet": "Violet",
+              "wathet": "Light blue",
+              "yellow": "Yellow"
+            },
+            "width": {
+              "compact": "Narrow",
+              "default": "Default",
+              "fill": "Fill available width"
+            }
+          },
+          "panelColorDark": "Process panel color in dark mode",
+          "panelColorDarkPlaceholder": "#99CCFF",
+          "panelColorLight": "Process panel color in light mode",
+          "panelColorLightPlaceholder": "#336699",
+          "processMode": "Process display",
+          "reset": "Reset card appearance",
+          "resultTemplateEnabled": "Use a template for successful replies",
+          "resultTemplateHelp": "Use a published new-version Feishu card template with a fixed version. Running, stopped and failed cards keep the built-in layout. Definite template rejections fall back to the built-in result card.",
+          "resultTemplateId": "Template ID",
+          "resultTemplateVariables": "Create these template variables: answer, status, title, quote, details_url (text), elapsed_ms (number). The answer variable must be used to show the reply. Built-in card appearance settings do not change your template layout.",
+          "resultTemplateVersion": "Published template version",
+          "section": "Card appearance",
+          "showArtifacts": "Show artifacts",
+          "showElapsed": "Show elapsed time",
+          "showFooter": "Show final reply footer",
+          "showProgress": "Show progress summary",
+          "showQuote": "Quote in final replies",
+          "subtitle": "Subtitle",
+          "subtitlePlaceholder": "Optional secondary heading",
+          "theme": "Header color",
+          "title": "Custom card title",
+          "titlePlaceholder": "Use the task title",
+          "width": "Card width"
+        },
         "connectedAccountLabel": "Connected account",
         "connectedAccountNone": "No account connected — the bot sends as itself.",
         "connectedAccountValue": "Connected as {name}",
-        "connectedAs": "Connected: {appId}",
-        "connectedToast": "Connected: {appId}",
-        "connectionFailedLabel": "Connection failed",
-        "connectionFailedToast": "Connection failed",
-        "connectionSucceededLabel": "Connection successful",
+        "connectedAs": "Credentials verified: {appId}",
+        "connectedToast": "Credentials verified: {appId}",
+        "connectionFailedLabel": "Credential validation failed",
+        "connectionFailedToast": "Could not validate app credentials.",
+        "connectionSucceededLabel": "Credentials verified",
         "create": "Create",
+        "credentialTestHelp": "Validates App ID and App Secret only. Permissions, event delivery and card callbacks must be configured separately. Save to start the connection, then check its health and send a message from Feishu.",
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "My Lark Bot",
         "displayNameRequired": "Display name is required.",
@@ -38676,7 +39365,7 @@
         "redirectUriCopyAria": "Copy OAuth redirect URL",
         "redirectUriLabel": "OAuth redirect URL",
         "redirectUriPlaceholder": "https://…/oauth/lark/callback",
-        "redirectUriRegisterHelp": "Register this exact URL in Lark Open Platform → Security Settings → Redirect URL, and grant the offline_access + im:message scopes. Leave blank to use the Companion tunnel's URL.",
+        "redirectUriRegisterHelp": "Register this exact URL in Feishu Open Platform → Security Settings → Redirect URL. Grant user-identity scopes offline_access, im:message and im:message.send_as_user, publish, then connect your account. Leave blank to use this host’s public callback URL.",
         "redirectUriTunnelOffHelp": "No redirect URL yet — enter one above, or start the Companion tunnel to derive one automatically.",
         "save": "Save",
         "saving": "Saving…",
@@ -38701,8 +39390,97 @@
         "selfBotOpenIdUnknown": "Not resolved yet",
         "sendAsUserHelp": "When on and an account is connected, replies are sent as you (user access token) instead of the bot. Falls back to the bot if the authorization expires.",
         "sendAsUserLabel": "Send replies as me",
-        "testButtonLabel": "Test",
-        "testConnectionAria": "Test connection",
+        "setupGuide": {
+          "app": {
+            "create": "Use an enterprise custom app in the Feishu developer console. You need app-management access and permission to request approval. Under Add app capability, enable Bot. A group custom-bot webhook is not an App ID / App Secret app.",
+            "credentials": "Copy App ID and App Secret from Credentials & Basic Info into this form. For both transports, also enter the Verification Token from Events & callbacks; enter Encrypt Key only if encryption is enabled there. Test credentials, then create or save the connection. Keep secrets private; never paste them into messages or permission lists.",
+            "host": "Run Cognia on a desktop, server deployment or paired host that stays online and can reach Feishu. Browser-only configuration needs a connected host to receive messages.",
+            "title": "1. Create the app and enable its bot"
+          },
+          "copied": "Permission names copied.",
+          "copyFailed": "Could not copy. Select and copy the permission names above.",
+          "copyScopes": "Copy selected permissions",
+          "credentialsUnverified": "Credentials not verified this session",
+          "credentialsVerified": "Credentials verified this session",
+          "delivery": {
+            "callback": "In Callback configuration separately subscribe to Card action trigger (for card buttons):",
+            "docs": "Card callback reference",
+            "event": "In Event configuration subscribe to Receive message:",
+            "longConsole": "While this app has a live connection, open Events & callbacks in Feishu. In both Event configuration and Callback configuration, select long connection and save. Feishu requires an online client to save this method; no public callback URL is needed.",
+            "longKeepRunning": "The long connection needs an online host after setup too. Other clients running the same app may receive its events instead; check for competing connections if delivery is intermittent.",
+            "longStart": "In Cognia select Long connection, create or save, and enable the connection. Keep the host running; check connection Health for startup errors.",
+            "menus": "For bot quick commands, create event-pushing menu entries in the Feishu Bot menu, subscribe to application.bot.menu_v6 in Event configuration, and map the same event_key under Quick commands in Cognia.",
+            "title": "3. Connect events and card callbacks",
+            "webhookConsole": "Reopen this saved connection and copy its generated webhook URL. In Feishu select delivery to a developer server and use that URL in both Event configuration and Callback configuration; complete URL verification.",
+            "webhookSecurity": "The URL must be reachable from Feishu. Keep Verification Token and Encrypt Key consistent with the console. If the public hostname changes, update and verify both request URLs.",
+            "webhookStart": "Select Webhook, copy Verification Token and any enabled Encrypt Key from Feishu into this form, then create or save and enable the connection. Keep the host and a public HTTPS endpoint running."
+          },
+          "description": "Configure the app, permissions, delivery and release, then verify the real conversation flow.",
+          "evidenceBoundary": "These checks do not confirm current runtime health, published permissions, event delivery or successful replies. Complete the steps below and verify in Feishu.",
+          "features": {
+            "allMessages": {
+              "help": "Adds im:message.group_msg, a sensitive permission. Admission rules still decide which received messages may run the Agent.",
+              "title": "Group follow-ups without @"
+            },
+            "attachments": {
+              "help": "Adds im:resource for message attachments. Document, Drive and HR permissions are separate and are not needed just for chat files.",
+              "title": "Images and files"
+            },
+            "botMentions": {
+              "help": "Adds im:message.group_at_msg.include_bot:readonly. Also configure Cognia’s bot-sender admission rules.",
+              "title": "@mentions from other bots"
+            },
+            "botMessages": {
+              "help": "Adds im:message.group_msg.include_bot:read. Limit allowed bots and configure admission to avoid reply loops.",
+              "title": "Other bots’ group follow-ups without @"
+            },
+            "cards": {
+              "help": "Adds cardkit:card:write. Interactive buttons also need the card.action.trigger callback below.",
+              "title": "Streaming cards and run controls"
+            },
+            "history": {
+              "help": "Adds im:message:readonly and im:message.group_msg. Group history also requires access to all user group messages.",
+              "title": "Private and group history"
+            },
+            "menus": {
+              "help": "Adds chat read, chat-tab write and group-menu write permissions. Configure Entry surfaces, a reachable web entry and identity authorization. Bot quick-command menus use the separate event described in step 3.",
+              "title": "Managed group menus and chat tabs"
+            }
+          },
+          "identityKnown": "Bot identity recorded",
+          "identityUnknown": "Bot identity not recorded",
+          "openConfiguration": "Configuration and setup guide",
+          "openConsole": "Open Feishu developer console",
+          "openFailed": "Could not open the Feishu page. Open the developer console in your browser.",
+          "permissions": {
+            "apply": "Search for each copied permission in the console, add it, and complete any administrator approval. This is a plain-text list of permission names, not a JSON import. Publish a new app version after changes.",
+            "base": "Under Permission management, add these application-identity permissions for private messages, group @mentions and bot replies:",
+            "docs": "Message permission reference",
+            "oauth": "Send as me is separate: grant the user-identity scopes offline_access (refresh), im:message and im:message.send_as_user (sending), publish, and register the exact OAuth redirect URL shown in that section. Then connect or reauthorize your account. App permissions alone do not authorize a user account.",
+            "optional": "Optional features",
+            "selected": "Selected application permission names",
+            "selectionHelp": "Selections only prepare the permission list; they do not grant access or change your connection settings. Cards and attachments are preselected for everyday use.",
+            "title": "2. Grant permissions for the features you use"
+          },
+          "publish": {
+            "availability": "Set the app’s availability range to include the intended users. After approval, find and open the published bot in Feishu; a valid access token does not confirm this availability.",
+            "group": "Add the published bot to each intended group and allow it to speak. Re-publish after later permission, subscription or menu changes.",
+            "title": "4. Publish and make the bot available",
+            "version": "In Version management & release, create and publish a version containing the bot capability, permissions, events and callbacks. Complete administrator review if required; saving the console configuration alone is not publication."
+          },
+          "title": "Feishu setup guide",
+          "verify": {
+            "card": "Trigger a run with an interactive card and click a permitted control as the requester or an authorized operator. Confirm the action runs; seeing a card alone does not verify callbacks.",
+            "configure": "In Cognia bind the intended Agent and a usable model/provider, choose automatic replies if desired, and review Admission, allowlists, operators and quiet hours. Save changes and check connection Health.",
+            "mention": "Add the bot to a group and @mention it. Confirm one reply in the correct group or topic, with the correct bot identity.",
+            "optional": "Verify the optional features you selected: send an attachment or use a menu. Before enabling no-@ topic follow-ups, start Admission’s delivery probe and send an unmentioned message within 10 minutes. That first message is stored as history only, with no reply; use a subsequent message to verify replies. Test bot-to-bot traffic only when its permissions and admission rules are configured.",
+            "private": "Send a real private message from a user in the availability range. Confirm it appears in Cognia and the reply reaches that same Feishu conversation.",
+            "title": "5. Configure replies and verify in Feishu",
+            "troubleshoot": "No inbound message: inspect publication, subscriptions, availability, group membership and host health. Inbound but no reply: inspect Agent binding, admission and model errors. Card click fails: inspect callback subscription and actor authorization."
+          }
+        },
+        "testButtonLabel": "Validate",
+        "testConnectionAria": "Test credentials",
         "titleEdit": "Configure Lark Bot",
         "titleNew": "Add Lark Bot",
         "tokenRequiredForTest": "Enter App ID and App Secret first.",
@@ -38827,7 +39605,7 @@
         "adapterUpdated": "Adapter updated.",
         "allowUnauthHelp": "When no access token is set, inbound connections are rejected by default. Enable only for a trusted local client (e.g. NapCat on this machine) that runs without a token. Setting an access token above always takes precedence.",
         "allowUnauthLabel": "Allow unauthenticated connections",
-        "bearerTokenHelpPrefix": "If NapCat / Lagrange has",
+        "bearerTokenHelpPrefix": "If your NapCat network entry has",
         "bearerTokenHelpSuffix": "configured, paste the same value here. Stored encrypted in the OS keyring.",
         "bearerTokenLabel": "Bearer Token (optional)",
         "bearerTokenPlaceholder": "Optional secret token",
@@ -38844,7 +39622,7 @@
         "endpointCopied": "Endpoint URL copied.",
         "endpointCopy": "Copy URL",
         "endpointCopyAria": "Copy reverse-WS endpoint URL",
-        "endpointHelpPrefix": "Paste this URL into your NapCat / Lagrange",
+        "endpointHelpPrefix": "Paste this URL into your NapCat",
         "endpointHelpSuffix": "config.",
         "endpointLabel": "Reverse-WS Endpoint URL",
         "endpointNewAdapterHint": "Save the adapter first; the reverse-WS URL is derived from the new adapter ID.",
@@ -39037,11 +39815,12 @@
         "testFailedToast": "QQ credential test failed: {error}",
         "testGatewayUrl": "Gateway: {gatewayUrl}",
         "testSucceededLabel": "Credentials valid",
-        "testSucceededToast": "Connected to gateway {gatewayUrl}.",
+        "testSucceededToast": "Gateway URL resolved: {gatewayUrl}. Event delivery is not verified.",
+        "testWebhookCredentialsSucceeded": "Credentials verified. Webhook delivery still needs validation in the QQ console.",
         "titleEdit": "Edit QQ Official Bot",
         "titleNew": "Add QQ Official Bot",
         "transportGateway": "Gateway WebSocket",
-        "transportGatewayHelp": "Connect outbound to QQ's gateway and receive events over WebSocket.",
+        "transportGatewayHelp": "Compatibility mode for apps with gateway access. Prefer HTTPS webhook for new configurations.",
         "transportLabel": "Inbound transport",
         "transportWebhook": "HTTPS webhook",
         "transportWebhookHelp": "Receive events at this adapter's registered callback URL.",
@@ -39647,6 +40426,165 @@
     },
     "connectivity": {
       "description": "How this device and a Host reach each other: the local server, the relay and tunnel, pairing, remote hosts, push, and sync.",
+      "githubRunner": {
+        "closePairing": "Close pairing",
+        "connect": "Connect",
+        "create": "Create environment",
+        "creating": "Requesting runner…",
+        "description": "Create a temporary Linux host, then use Cognia’s existing remote workspace and Agent tools.",
+        "desktopRequired": "Create and manage runners from the desktop app.",
+        "empty": "No runner environments yet.",
+        "expires": "Expires: {time}",
+        "fields": {
+          "agentBundleImage": "Agent bundle image (@sha256 digest)",
+          "developmentImage": "Development image (@sha256 digest)",
+          "hostImage": "Cognia host image (@sha256 digest)",
+          "label": "Environment name",
+          "lifetimeMinutes": "Maximum lifetime (10–330 minutes)",
+          "repository": "GitHub repository (owner/repo)",
+          "signalingUrl": "Signaling server (wss://)",
+          "workflowRef": "Workflow branch"
+        },
+        "guideOpenFailed": "Could not open the setup guide. Try again.",
+        "hints": {
+          "agentBundleImage": "Published Agent bundle image containing the pinned Agent runtimes and sandbox helper.",
+          "developmentImage": "Published development image with your project tools and a libc compatible with the Agent bundle.",
+          "hostImage": "Published Cognia Host image. Use runtime-full if you need preinstalled Agent CLIs on the Host.",
+          "label": "A name for this environment in Cognia; defaults to the repository name.",
+          "lifetimeMinutes": "Choose 60, 120 or 240 minutes, or enter a whole number from 10 to 330. Export your work before the lease ends.",
+          "repository": "Enter owner/repo or paste its https://github.com/owner/repo URL. Use a repository where you can run Actions.",
+          "signalingUrl": "Reachable Cognia signaling relay using wss://. Do not include credentials, query parameters or a fragment.",
+          "workflowRef": "The branch containing the five matching template files, for example main. Use a branch, not a tag."
+        },
+        "invalid": "Check these fields: {fields}. Images must include a sha256 digest.",
+        "invalidInvitation": "The runner invitation is invalid.",
+        "leaseError": "The runner reported an error. Inspect its GitHub run and refresh before retrying.",
+        "loadFailed": "Could not load runner leases. Refresh to retry.",
+        "loading": "Loading saved runner leases…",
+        "operationFailed": "The runner operation failed. Refresh its status and inspect the GitHub run before retrying.",
+        "pairingCancelled": "Runner pairing was cancelled.",
+        "pairingInactive": "Runner pairing is no longer active.",
+        "persistence": "Copy or commit workspace changes and export artifacts before stopping. Runner storage disappears when the job ends. Connecting switches this desktop’s active execution host.",
+        "placeholders": {
+          "agentBundleImage": "ghcr.io/your-owner/cognia-agent-bundle@sha256:…",
+          "developmentImage": "ghcr.io/your-owner/cognia-development@sha256:…",
+          "hostImage": "ghcr.io/your-owner/cognia-host@sha256:…",
+          "label": "My development environment",
+          "lifetimeMinutes": "60",
+          "repository": "owner/repo or https://github.com/owner/repo",
+          "signalingUrl": "wss://relay.example.com",
+          "workflowRef": "main"
+        },
+        "preflight": {
+          "codes": {
+            "account_unavailable": "Could not verify your GitHub account. Check connectivity and run gh auth status; use gh auth login if needed.",
+            "branch_unavailable": "Could not resolve this branch. Check that it exists in the selected repository and retry.",
+            "cli_unavailable": "GitHub CLI could not run. Install gh or fix its local installation, then try again.",
+            "invalid_ref": "Enter a valid branch name, then check again.",
+            "invalid_repository": "Enter a valid owner/repo or GitHub repository URL.",
+            "not_checked": "Resolve the earlier failed check, then try again.",
+            "ok": "Check passed.",
+            "repository_inactive": "This repository is archived or disabled. Use an active repository.",
+            "repository_not_writable": "This account needs write access to the provisioner repository. Use an authorized account or repository.",
+            "repository_unavailable": "Could not read this repository. Check its name, your account access and GitHub connectivity.",
+            "templates_mismatch": "A template file differs from this Cognia version. Replace all five files from the matching setup guide and commit them. File:",
+            "templates_unavailable": "Could not read a required template file. Copy all five files to this branch and check repository access. File:",
+            "timeout": "The checks timed out. Check GitHub connectivity and try again.",
+            "workflow_inactive": "The runner workflow is disabled. Enable it in GitHub Actions, then check again.",
+            "workflow_unavailable": "Could not read the runner workflow. Install the template on the default branch, enable Actions and check repository access."
+          },
+          "status": {
+            "failed": "Needs attention",
+            "passed": "Passed",
+            "skipped": "Not checked"
+          },
+          "steps": {
+            "account": "GitHub account",
+            "branch": "Workflow branch",
+            "cli": "GitHub CLI",
+            "repository": "Repository access",
+            "templates": "Template files",
+            "workflow": "Actions workflow"
+          }
+        },
+        "prerequisites": "Install .github/workflows/cognia-runner.yml in your repository first. Sign in with gh on this device. Use immutable image digests and a reachable signaling server. GitHub queue time varies.",
+        "reconnect": "Reconnect",
+        "refresh": "Refresh status",
+        "refreshAll": "Refresh all environments",
+        "runnerNotReady": "The runner is no longer ready.",
+        "savedConfiguration": "The last valid configuration you submit is saved on this desktop and restored next time. Use only public, credential-free signaling URLs.",
+        "setupGuide": "Read the runner setup guide",
+        "state": {
+          "dispatching": "Submitting workflow",
+          "failed": "Failed",
+          "queued": "Waiting for GitHub runner",
+          "ready": "Ready to connect",
+          "starting": "Preparing environment",
+          "stopped": "Stopped",
+          "stopping": "Waiting for cancellation",
+          "unknown": "Status needs verification"
+        },
+        "stateHelp": {
+          "dispatching": "The request is being submitted or its outcome is being recovered. Refresh before creating another runner.",
+          "failed": "Inspect the GitHub run, resolve the failure and refresh before creating another environment.",
+          "queued": "GitHub is waiting for an available runner. Queue time varies; you can inspect the Actions run.",
+          "ready": "Select Connect to verify and pair with this temporary Host.",
+          "starting": "The runner is pulling images and preparing the Host. Inspect the Actions run for progress.",
+          "stopped": "This runner has ended. Create a new environment to continue working.",
+          "stopping": "Waiting for GitHub to confirm the workflow has ended.",
+          "unknown": "The current status could not be confirmed. Refresh and inspect the GitHub run before retrying."
+        },
+        "stop": "Stop runner",
+        "stopPending": "Cancellation requested. The runner is not confirmed stopped; refresh until GitHub reports completion.",
+        "title": "GitHub runner development environments",
+        "validation": {
+          "agentBundleImage": "Enter an image reference ending in @sha256: and exactly 64 lowercase hexadecimal digits.",
+          "developmentImage": "Enter an image reference ending in @sha256: and exactly 64 lowercase hexadecimal digits.",
+          "hostImage": "Enter an image reference ending in @sha256: and exactly 64 lowercase hexadecimal digits.",
+          "label": "Enter a name without control characters, up to 120 UTF-8 bytes.",
+          "lifetimeMinutes": "Enter a whole number from 10 to 330 minutes.",
+          "repository": "Enter owner/repo or a GitHub repository URL without subpages, credentials, query parameters or a fragment.",
+          "signalingUrl": "Enter a wss:// URL without credentials, query parameters or a fragment.",
+          "workflowRef": "Enter a branch name up to 200 characters using letters, numbers, dots, slashes, underscores or hyphens; do not use two consecutive dots."
+        },
+        "viewRun": "View GitHub run",
+        "wizard": {
+          "account": "GitHub account: {login}",
+          "back": "Back",
+          "checkBlocked": "Resolve these prerequisites to continue",
+          "checkContinue": "Check and continue",
+          "checkFailed": "Could not complete the checks. Check GitHub connectivity and your gh login, then try again.",
+          "checkPassed": "Repository checks passed",
+          "checking": "Checking prerequisites…",
+          "checkingHint": "Checking GitHub may take a moment. The check stops after 90 seconds and does not submit a workflow.",
+          "createAnother": "Create another environment",
+          "created": "Runner request recorded",
+          "createdHint": "Follow the environment status below. When it is ready, select Connect to pair with the Host. Recording the request does not mean the Host is ready.",
+          "environment": {
+            "description": "Choose a name, lifetime, three published images and your signaling relay.",
+            "title": "Environment"
+          },
+          "images": "Published images",
+          "imagesHint": "Build and publish all three Linux amd64 images first, then paste their immutable digests. This wizard does not build or publish images.",
+          "intro": "Check your repository, configure the environment, then review before creating.",
+          "lifetimePresets": "Lifetime presets",
+          "minutes": "{minutes} minutes",
+          "reset": "Reset form",
+          "restored": "Your last submitted configuration has been restored. Check it before creating another environment.",
+          "review": {
+            "description": "Confirm the configuration before submitting a GitHub Actions workflow.",
+            "title": "Review"
+          },
+          "reviewContinue": "Review configuration",
+          "reviewHint": "These checks do not verify COGNIA_RUNNER_ACTORS, organization policies, image availability or relay connectivity. Confirm those using the setup guide.",
+          "setup": {
+            "description": "Choose the repository and branch containing the runner template.",
+            "title": "Repository"
+          },
+          "setupHelp": "Install GitHub CLI and run gh auth login on this computer. Copy all five template files into your repository and configure COGNIA_RUNNER_ACTORS as described in the setup guide.",
+          "steps": "Environment creation steps"
+        }
+      },
       "mesh": {
         "addresses": "{count, plural, =1 {One address} other {# addresses}} on {interfaces}",
         "advertiseCleared": "Invitations advertise the auto-detected LAN address again.",
@@ -57415,6 +58353,7 @@
                 "label": "Only this source",
                 "options": {
                   "agent-team": "Agent team",
+                  "collab": "Collaboration",
                   "connector": "Connector",
                   "issue": "Issue",
                   "plugin": "Plugin",
@@ -58993,6 +59932,18 @@
       "title": "Agent branches"
     },
     "capabilities": {
+      "cogset": {
+        "cleared": "This workspace follows the default cogset",
+        "description": "Opening this workspace switches to its cogset. Plugins outside it are turned off, except always-on ones.",
+        "failed": "Could not change this workspace's cogset",
+        "followGlobal": "Follow the default ({name})",
+        "followGlobalNone": "Follow the default",
+        "label": "Cogset for this workspace",
+        "mirrored": "Choose the workspace's cogset on your desktop.",
+        "noWorkspace": "Open a workspace to choose its cogset.",
+        "saved": "This workspace now uses {name}",
+        "title": "Cogset"
+      },
       "description": "Skills and MCP servers are defined once for the machine. This is where a workspace says which of them it actually uses — anything left on Inherit follows the library, including later changes to it.",
       "effectiveOff": "Not loaded here",
       "effectiveOn": "Loaded here",
@@ -59004,7 +59955,7 @@
       "noSkills": "No skills are defined yet. Add them in <link>Settings → Skills</link>.",
       "noTemplates": "No shared templates yet.",
       "overrideCount": "{count, plural, =0 {no overrides} one {# override} other {# overrides}}",
-      "pluginsAreGlobal": "Plugins stay machine-wide: their enabled flag is the record of what is actually running, not a preference, so it is not something a workspace can hold a second opinion about. Manage them in <link>Settings → Plugins</link>.",
+      "pluginsAreGlobal": "Plugins are not switched one by one per workspace: their enabled flag records what is actually running. A workspace chooses a whole cogset instead (above). Manage plugins in <link>Settings → Plugins</link>.",
       "skills": "Skills",
       "state": {
         "inherit": "Inherit",

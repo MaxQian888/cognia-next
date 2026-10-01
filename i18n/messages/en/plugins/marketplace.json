@@ -32,7 +32,10 @@
     "resultCancelled": "Bundle install cancelled — {installed} of {total} installed.",
     "resultFailed": "Bundle install failed: {message}",
     "resultInstalled": "Bundle installed — {installed} of {total} plugins.",
-    "resultPartial": "{installed} of {total} installed; {failed} failed: {message}"
+    "resultPartial": "{installed} of {total} installed; {failed} failed: {message}",
+    "saveAsCogset": "Save as cogset",
+    "savedAsCogset": "Saved {name} as a cogset",
+    "saveAsCogsetFailed": "Could not save the cogset"
   },
   "retry": "Retry",
   "searchPlaceholder": "Search the marketplace…"

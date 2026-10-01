@@ -51,5 +51,7 @@
   },
   "pageLoading": "加载中…",
   "stillWorking": "仍在进行…（{seconds} 秒）",
-  "thinking": "Claude 正在思考…"
+  "thinking": "Claude 正在思考…",
+  "languageLoadFailed": "语言包加载失败。",
+  "retryLanguage": "重试"
 }

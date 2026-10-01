@@ -263,5 +263,164 @@
     "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是本监听器。在这里关掉再打开即可指向伴侣服务器，或留给正在使用它的功能。",
     "busyStopBody": "本应用只运行一个 cloudflared 进程，它正为另一功能把 {localUrl} 暴露在 {publicUrl}。在这里停止，那个公网地址也会一并失效。",
     "busyStopConfirm": "仍然停止"
+  },
+  "githubRunner": {
+    "title": "GitHub runner 开发环境",
+    "description": "创建临时 Linux 主机，复用 Cognia 的远程工作区与 Agent 工具。",
+    "desktopRequired": "请在桌面应用中创建和管理 runner。",
+    "prerequisites": "请先在仓库安装 .github/workflows/cognia-runner.yml，并在本机通过 gh 登录。镜像必须使用不可变 digest，信令服务器须可访问。GitHub 排队时间无法固定。",
+    "fields": {
+      "label": "环境名称",
+      "repository": "GitHub 仓库（owner/repo）",
+      "workflowRef": "Workflow 分支",
+      "hostImage": "Cognia 主机镜像（@sha256 digest）",
+      "agentBundleImage": "Agent bundle 镜像（@sha256 digest）",
+      "developmentImage": "开发镜像（@sha256 digest）",
+      "signalingUrl": "信令服务器（wss://）",
+      "lifetimeMinutes": "最长使用时间（10–330 分钟）"
+    },
+    "create": "创建环境",
+    "creating": "正在申请 runner…",
+    "loading": "正在加载已保存的 runner 租期…",
+    "empty": "尚未创建 runner 环境。",
+    "loadFailed": "无法加载 runner 租期，请刷新重试。",
+    "operationFailed": "Runner 操作失败。请刷新状态并查看 GitHub 运行记录后重试。",
+    "invalid": "请检查以下字段：{fields}。镜像必须包含 sha256 digest。",
+    "refreshAll": "刷新所有环境",
+    "refresh": "刷新状态",
+    "connect": "连接",
+    "reconnect": "重新连接",
+    "stop": "停止 runner",
+    "viewRun": "查看 GitHub 运行记录",
+    "expires": "到期时间：{time}",
+    "stopPending": "已请求取消，尚未确认 runner 停止；请刷新直到 GitHub 确认运行结束。",
+    "leaseError": "Runner 返回错误。请查看 GitHub 运行记录并刷新后重试。",
+    "persistence": "停止前请复制或提交工作区修改，并导出产物。任务结束后 runner 存储将销毁。连接会切换此桌面应用的当前执行主机。",
+    "closePairing": "关闭配对",
+    "state": {
+      "dispatching": "正在提交 workflow",
+      "queued": "等待 GitHub runner",
+      "starting": "正在准备环境",
+      "ready": "可以连接",
+      "stopping": "等待取消完成",
+      "stopped": "已停止",
+      "failed": "失败",
+      "unknown": "需要确认状态"
+    },
+    "invalidInvitation": "Runner 配对邀请无效。",
+    "pairingInactive": "Runner 配对已失效。",
+    "pairingCancelled": "Runner 配对已取消。",
+    "runnerNotReady": "Runner 已不处于就绪状态。",
+    "setupGuide": "阅读 runner 部署指南",
+    "guideOpenFailed": "无法打开部署指南，请重试。",
+    "savedConfiguration": "最近一次提交的有效配置会保存在本机桌面端，下次打开时恢复。信令地址只能填写不含凭据的公开 URL。",
+    "wizard": {
+      "intro": "先检查仓库，再配置环境，最后确认并创建。",
+      "steps": "环境创建步骤",
+      "setup": {
+        "title": "仓库",
+        "description": "选择已安装 runner 模板的仓库和分支。"
+      },
+      "environment": {
+        "title": "环境",
+        "description": "填写环境名称、使用时长、三个已发布镜像和信令服务器。"
+      },
+      "review": {
+        "title": "确认",
+        "description": "确认配置后，再提交 GitHub Actions workflow。"
+      },
+      "setupHelp": "请在本机安装 GitHub CLI，并运行 gh auth login 登录。按部署指南将全部五个模板文件复制到仓库，并配置 COGNIA_RUNNER_ACTORS。",
+      "checking": "正在检查前置条件…",
+      "checkingHint": "检查 GitHub 可能需要一些时间，最长 90 秒；此操作不会提交 workflow。",
+      "checkContinue": "检查并继续",
+      "reviewContinue": "确认配置",
+      "checkPassed": "仓库检查已通过",
+      "checkBlocked": "请先解决以下问题",
+      "checkFailed": "无法完成检查。请检查 GitHub 网络连接和 gh 登录状态后重试。",
+      "reviewHint": "这些检查不验证 COGNIA_RUNNER_ACTORS、组织策略、镜像是否可拉取或信令服务器是否可达。请按部署指南另行确认。",
+      "account": "GitHub 账号：{login}",
+      "restored": "已恢复上次提交的配置。创建新环境前请检查是否仍适用。",
+      "reset": "重置表单",
+      "back": "上一步",
+      "lifetimePresets": "使用时长预设",
+      "minutes": "{minutes} 分钟",
+      "images": "已发布镜像",
+      "imagesHint": "请先构建并发布三个 Linux amd64 镜像，再粘贴各自的不可变 digest。此向导不会构建或发布镜像。",
+      "created": "已记录 runner 创建请求",
+      "createdHint": "请关注下方环境状态，待就绪后点击“连接”与 Host 配对。请求已记录并不代表 Host 已就绪。",
+      "createAnother": "再创建一个环境"
+    },
+    "hints": {
+      "label": "用于在 Cognia 中识别此环境，默认使用仓库名称。",
+      "repository": "填写 owner/repo 或粘贴 https://github.com/owner/repo 仓库地址。当前账号须有权运行该仓库的 Actions。",
+      "workflowRef": "包含五个匹配模板文件的分支，例如 main。请使用分支而非 tag。",
+      "hostImage": "已发布的 Cognia Host 镜像。需要在 Host 上使用预装 Agent CLI 时，请选择 runtime-full。",
+      "agentBundleImage": "已发布的 Agent bundle 镜像，包含固定版本的 Agent 运行时和 sandbox helper。",
+      "developmentImage": "已发布的开发镜像，包含项目工具链，且 libc 与 Agent bundle 兼容。",
+      "signalingUrl": "可访问的 Cognia 信令服务器，使用 wss://。不能包含凭据、查询参数或 fragment。",
+      "lifetimeMinutes": "可选择 60、120、240 分钟，或填写 10 至 330 的整数。租期结束前请导出工作成果。"
+    },
+    "placeholders": {
+      "label": "我的开发环境",
+      "repository": "owner/repo 或 https://github.com/owner/repo",
+      "workflowRef": "main",
+      "hostImage": "ghcr.io/your-owner/cognia-host@sha256:…",
+      "agentBundleImage": "ghcr.io/your-owner/cognia-agent-bundle@sha256:…",
+      "developmentImage": "ghcr.io/your-owner/cognia-development@sha256:…",
+      "signalingUrl": "wss://relay.example.com",
+      "lifetimeMinutes": "60"
+    },
+    "validation": {
+      "label": "请填写不含控制字符的名称，UTF-8 编码长度不超过 120 字节。",
+      "repository": "请填写 owner/repo 或 GitHub 仓库地址，不能包含子页面路径、凭据、查询参数或 fragment。",
+      "workflowRef": "请填写不超过 200 个字符的分支名，仅使用字母、数字、点、斜杠、下划线或连字符，不能包含连续两个点。",
+      "hostImage": "请填写以 @sha256: 加 64 位小写十六进制摘要结尾的镜像引用。",
+      "agentBundleImage": "请填写以 @sha256: 加 64 位小写十六进制摘要结尾的镜像引用。",
+      "developmentImage": "请填写以 @sha256: 加 64 位小写十六进制摘要结尾的镜像引用。",
+      "signalingUrl": "请填写 wss:// 地址，不能包含凭据、查询参数或 fragment。",
+      "lifetimeMinutes": "请填写 10 至 330 之间的整数分钟数。"
+    },
+    "preflight": {
+      "steps": {
+        "cli": "GitHub CLI",
+        "account": "GitHub 账号",
+        "repository": "仓库访问权限",
+        "branch": "Workflow 分支",
+        "workflow": "Actions workflow",
+        "templates": "模板文件"
+      },
+      "status": {
+        "passed": "已通过",
+        "failed": "需要处理",
+        "skipped": "未检查"
+      },
+      "codes": {
+        "ok": "检查已通过。",
+        "not_checked": "请先解决前面的检查失败项，再重试。",
+        "invalid_repository": "请填写有效的 owner/repo 或 GitHub 仓库地址。",
+        "invalid_ref": "请填写有效的分支名后重新检查。",
+        "cli_unavailable": "无法运行 GitHub CLI。请安装 gh 或修复本机安装后重试。",
+        "account_unavailable": "无法验证 GitHub 账号。请检查网络并运行 gh auth status；需要时使用 gh auth login 登录。",
+        "repository_unavailable": "无法读取此仓库。请检查仓库名称、账号访问权限和 GitHub 网络连接。",
+        "repository_not_writable": "当前账号需要此环境创建仓库的写入权限。请使用有权限的账号或仓库。",
+        "repository_inactive": "此仓库已归档或被禁用。请选择可用仓库。",
+        "branch_unavailable": "无法解析此分支。请确认分支存在于所选仓库中，然后重试。",
+        "workflow_unavailable": "无法读取 runner workflow。请将模板安装到默认分支，启用 Actions，并检查仓库权限。",
+        "workflow_inactive": "Runner workflow 已停用。请在 GitHub Actions 中启用后重新检查。",
+        "templates_unavailable": "无法读取必要的模板文件。请将全部五个文件复制到此分支，并检查仓库访问权限。文件：",
+        "templates_mismatch": "模板文件与当前 Cognia 版本不一致。请按对应版本的部署指南替换全部五个文件并提交。文件：",
+        "timeout": "检查超时。请检查 GitHub 网络连接后重试。"
+      }
+    },
+    "stateHelp": {
+      "dispatching": "正在提交请求或恢复提交结果。请先刷新状态，再决定是否创建另一个 runner。",
+      "queued": "GitHub 正在等待可用 runner，排队时间不固定；可查看 Actions 运行记录。",
+      "starting": "Runner 正在拉取镜像并准备 Host。可查看 Actions 运行记录了解进度。",
+      "ready": "点击“连接”，验证并配对此临时 Host。",
+      "stopping": "正在等待 GitHub 确认 workflow 已结束。",
+      "stopped": "此 runner 已结束。需要继续工作时，请创建新环境。",
+      "failed": "请查看 GitHub 运行记录，解决问题并刷新状态后，再创建新环境。",
+      "unknown": "暂时无法确认当前状态。请刷新并查看 GitHub 运行记录后再重试。"
+    }
   }
 }

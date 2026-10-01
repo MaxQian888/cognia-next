@@ -51,5 +51,7 @@
   },
   "pageLoading": "Loading…",
   "stillWorking": "Still working… ({seconds}s)",
-  "thinking": "Claude is thinking…"
+  "thinking": "Claude is thinking…",
+  "languageLoadFailed": "Unable to load the language pack.",
+  "retryLanguage": "Retry"
 }

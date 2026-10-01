@@ -40,6 +40,17 @@
     "unreadCount": "{count} 条未读",
     "unsnooze": "取消暂停"
   },
+  "collab": {
+    "approvalRequestedFallback": "共享会话中有一个运行正在等待你处理。",
+    "approvalRequestedTitle": "{actor} 请求你审批",
+    "genericTitle": "{actor} 给你发来一条通知",
+    "invitedBody": "打开后可接受或拒绝邀请。",
+    "invitedTitle": "{actor} 邀请你加入共享会话",
+    "issueAssignedTitle": "{actor} 给你分配了一个议题",
+    "issueFallback": "打开共享议题看板查看。",
+    "issueMentionedTitle": "{actor} 在议题中提到了你",
+    "someone": "一位队友"
+  },
   "delivery": {
     "short": {
       "accepted": "已送达 · {count}",
@@ -80,6 +91,7 @@
   },
   "sources": {
     "agent-team": "智能体团队",
+    "collab": "协作",
     "connector": "消息",
     "issue": "议题",
     "plugin": "插件",

@@ -288,7 +288,7 @@
     "noSkills": "尚未定义任何技能。可在<link>「设置 → 技能」</link>中添加。",
     "noTemplates": "暂无共享模板。",
     "overrideCount": "{count, plural, =0 {没有覆盖} other {# 项覆盖}}",
-    "pluginsAreGlobal": "插件保持全机范围：它的启用标记记录的是「当前实际在运行什么」，而不是一项偏好，因此工作区无法对它另持一份意见。请在<link>「设置 → 插件」</link>中管理。",
+    "pluginsAreGlobal": "插件不会按工作区逐个开关：它的启用标记记录的是当前实际在运行什么。工作区改为选择一整个齿轮组（见上方）。请在<link>「设置 → 插件」</link>中管理插件。",
     "skills": "技能",
     "state": {
       "inherit": "继承",
@@ -299,7 +299,19 @@
     "tab": "能力",
     "templates": "模板",
     "title": "本工作区启用的能力",
-    "unavailable": "不可用 — 请先在「设置 → MCP」中信任它"
+    "unavailable": "不可用 — 请先在「设置 → MCP」中信任它",
+    "cogset": {
+      "title": "齿轮组",
+      "description": "打开这个工作区时会切换到它的齿轮组，不在其中的插件会被关闭（常驻插件除外）。",
+      "label": "此工作区使用的齿轮组",
+      "followGlobal": "跟随默认（{name}）",
+      "followGlobalNone": "跟随默认",
+      "saved": "此工作区现在使用{name}",
+      "cleared": "此工作区跟随默认齿轮组",
+      "failed": "无法更改此工作区的齿轮组",
+      "mirrored": "请在桌面端为工作区选择齿轮组。",
+      "noWorkspace": "打开一个工作区后才能为它选择齿轮组。"
+    }
   },
   "adopt": {
     "title": "正在使用的目录",

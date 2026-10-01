@@ -855,11 +855,11 @@
     "connectedAccountLabel": "已连接账号",
     "connectedAccountNone": "尚未连接账号 —— 机器人以自身身份发送。",
     "connectedAccountValue": "已连接为 {name}",
-    "connectedAs": "已连接：{appId}",
-    "connectedToast": "已连接：{appId}",
-    "connectionFailedLabel": "连接失败",
-    "connectionFailedToast": "连接失败",
-    "connectionSucceededLabel": "连接成功",
+    "connectedAs": "应用凭据已验证：{appId}",
+    "connectedToast": "应用凭据已验证：{appId}",
+    "connectionFailedLabel": "应用凭据验证失败",
+    "connectionFailedToast": "无法验证应用凭据。",
+    "connectionSucceededLabel": "应用凭据已验证",
     "create": "创建",
     "displayNameLabel": "显示名称",
     "displayNamePlaceholder": "我的飞书机器人",
@@ -973,7 +973,7 @@
     "redirectUriCopyAria": "复制 OAuth 回调地址",
     "redirectUriLabel": "OAuth 回调地址",
     "redirectUriPlaceholder": "https://…/oauth/lark/callback",
-    "redirectUriRegisterHelp": "把此完整地址登记到 飞书开放平台 → 安全设置 → 重定向 URL，并授予 offline_access 与 im:message 权限。留空则使用 Companion 隧道地址。",
+    "redirectUriRegisterHelp": "把此完整地址登记到飞书开放平台 → 安全设置 → 重定向 URL。开通用户身份权限 offline_access、im:message 和 im:message.send_as_user，发布后连接账号。留空则使用当前主机的公网回调地址。",
     "redirectUriTunnelOffHelp": "尚无回调地址 —— 在上方填写，或启动 Companion 隧道以自动生成。",
     "save": "保存",
     "saving": "保存中…",
@@ -998,8 +998,8 @@
     "selfBotOpenIdUnknown": "尚未解析",
     "sendAsUserHelp": "开启且已连接账号后，回复将以你的身份（用户 access token）发送，而非机器人。授权过期时自动回退为机器人身份。",
     "sendAsUserLabel": "以我的身份发送回复",
-    "testButtonLabel": "测试",
-    "testConnectionAria": "测试连接",
+    "testButtonLabel": "验证凭据",
+    "testConnectionAria": "验证应用凭据",
     "titleEdit": "配置飞书机器人",
     "titleNew": "添加飞书机器人",
     "tokenRequiredForTest": "请先输入 App ID 和 App Secret。",
@@ -1074,6 +1074,184 @@
       "wechatOaNoProbe": "微信公众号适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
       "wechatPersonalNoProbe": "个人微信适配器没有主动探测身份的接口。",
       "wecomNoProbe": "企业微信适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。"
+    },
+    "cardPresentation": {
+      "section": "卡片外观",
+      "description": "自定义运行过程卡片与最终回复。",
+      "help": "警告和错误仍保留醒目颜色。过程显示方式对新运行生效，已有时间线按原方式结束。保存后会重启此连接。",
+      "theme": "标题配色",
+      "density": "内容间距",
+      "width": "卡片宽度",
+      "processMode": "过程显示方式",
+      "history": "过程面板",
+      "title": "自定义卡片标题",
+      "titlePlaceholder": "使用任务标题",
+      "showElapsed": "显示耗时",
+      "showProgress": "显示进度摘要",
+      "showArtifacts": "显示产物",
+      "showQuote": "最终回复显示引用",
+      "showFooter": "显示最终回复页脚",
+      "reset": "恢复默认卡片外观",
+      "options": {
+        "theme": {
+          "status": "跟随状态",
+          "blue": "蓝色",
+          "wathet": "浅蓝色",
+          "turquoise": "青绿色",
+          "green": "绿色",
+          "yellow": "黄色",
+          "orange": "橙色",
+          "red": "红色",
+          "carmine": "洋红色",
+          "violet": "紫罗兰色",
+          "purple": "紫色",
+          "indigo": "靛蓝色",
+          "grey": "灰色"
+        },
+        "density": {
+          "comfortable": "舒适",
+          "compact": "紧凑"
+        },
+        "width": {
+          "default": "默认",
+          "compact": "窄版",
+          "fill": "适应窗口宽度"
+        },
+        "processMode": {
+          "auto": "优先使用原生时间线",
+          "card": "在卡片内显示过程"
+        },
+        "history": {
+          "auto": "自动",
+          "expanded": "始终展开",
+          "collapsed": "默认折叠"
+        },
+        "desktopTextSize": {
+          "normal": "标准（14 px）",
+          "notation": "小号（12 px）",
+          "heading-4": "大号（16 px）",
+          "heading-3": "较大（17–18 px）",
+          "heading-2": "特大（20 px）"
+        },
+        "mobileTextSize": {
+          "normal": "标准（14 px）",
+          "notation": "小号（12 px）",
+          "heading-4": "大号（16 px）",
+          "heading-3": "较大（17–18 px）",
+          "heading-2": "特大（20 px）"
+        }
+      },
+      "subtitle": "副标题",
+      "subtitlePlaceholder": "可选的辅助标题",
+      "headerIconKey": "标题图片 Key",
+      "headerIconKeyPlaceholder": "已上传的飞书图片 Key（img_…）",
+      "headerTags": "标题标签",
+      "headerTagsPlaceholder": "最多 3 个标签，使用英文逗号分隔",
+      "desktopTextSize": "桌面端回复字号",
+      "mobileTextSize": "移动端回复字号",
+      "resultTemplateEnabled": "成功回复使用卡片模板",
+      "resultTemplateHelp": "使用已发布的飞书新版卡片模板并指定固定版本。运行中、已停止和失败卡片保留内置布局；模板被明确拒绝时回退到内置结果卡片。",
+      "resultTemplateId": "模板 ID",
+      "resultTemplateVersion": "已发布的模板版本",
+      "resultTemplateVariables": "在模板中创建以下变量：answer、status、title、quote、details_url（文本），elapsed_ms（数字）。必须使用 answer 变量展示回复正文。内置卡片的外观设置不会修改模板布局。",
+      "invalidIcon": "请输入以 img_ 开头的有效飞书图片 Key。",
+      "invalidColor": "请同时填写浅色和深色过程面板颜色（六位十六进制值），或同时留空。",
+      "invalidTags": "最多填写 3 个英文逗号分隔的标签，每个不超过 20 个字符。",
+      "invalidTemplate": "请填写模板 ID 和固定的已发布版本，仅支持字母、数字、点、下划线和连字符。",
+      "panelColorLight": "浅色模式过程面板颜色",
+      "panelColorDark": "深色模式过程面板颜色",
+      "panelColorLightPlaceholder": "#336699",
+      "panelColorDarkPlaceholder": "#99CCFF"
+    },
+    "credentialTestHelp": "仅验证 App ID 和 App Secret。权限、消息事件和卡片回调仍需单独配置。保存后启动连接，再检查连接健康状态，并从飞书发送消息确认收发。",
+    "setupGuide": {
+      "title": "飞书接入引导",
+      "description": "完成应用、权限、消息接收和发布配置，再验证真实会话流程。",
+      "openConfiguration": "配置与接入引导",
+      "credentialsVerified": "本次已验证凭证",
+      "credentialsUnverified": "本次尚未验证凭证",
+      "identityKnown": "已记录机器人身份",
+      "identityUnknown": "尚未记录机器人身份",
+      "evidenceBoundary": "这些检查不代表当前运行正常、权限已发布、事件已送达或回复成功。请完成下列配置并在飞书中验证。",
+      "openConsole": "打开飞书开发者后台",
+      "openFailed": "无法打开飞书页面，请在浏览器中打开开发者后台。",
+      "copyScopes": "复制所选权限",
+      "copied": "已复制权限名称。",
+      "copyFailed": "复制失败，请选中上方权限名称并手动复制。",
+      "app": {
+        "title": "1. 创建应用并启用机器人",
+        "create": "在飞书开发者后台使用企业自建应用。你需要应用管理及申请审批权限。在「添加应用能力」中启用「机器人」。群自定义机器人的 Webhook 不是使用 App ID / App Secret 的应用。",
+        "credentials": "从「凭证与基础信息」复制 App ID 和 App Secret，填入本表单。两种传输方式均需填写「事件与回调」中的 Verification Token；仅在后台启用加密时填写 Encrypt Key。验证凭证后创建或保存连接。妥善保管密钥，不要粘贴到消息或权限列表中。",
+        "host": "在可持续在线并能访问飞书的桌面端、服务器部署或已配对主机上运行 Cognia。仅使用浏览器配置时，需要连接主机才能接收消息。"
+      },
+      "permissions": {
+        "title": "2. 按所需功能开通权限",
+        "base": "在「权限管理」中添加以下应用身份权限，用于私聊、群聊 @ 机器人及机器人回复：",
+        "optional": "可选功能",
+        "selectionHelp": "勾选仅用于整理权限清单，不会授权或修改连接设置。已默认勾选日常使用的卡片和附件。",
+        "selected": "所选应用身份权限名称",
+        "docs": "消息权限文档",
+        "apply": "在后台逐项搜索并添加复制的权限，完成所需的管理员审批。这是权限名称纯文本清单，不是可导入的 JSON。变更后需发布新的应用版本。",
+        "oauth": "「以我的身份发送」需单独配置：开通用户身份权限 offline_access（刷新）、im:message 和 im:message.send_as_user（发送），发布并登记该区域显示的完整 OAuth 回调地址，再连接账号或重新授权。应用权限不会自动授权个人账号。"
+      },
+      "features": {
+        "cards": {
+          "title": "流式卡片与运行控制",
+          "help": "添加 cardkit:card:write。交互按钮还需配置下方的 card.action.trigger 回调。"
+        },
+        "attachments": {
+          "title": "图片与文件",
+          "help": "添加 im:resource，用于消息附件。聊天附件不需要额外开通文档、云盘或人事文件权限。"
+        },
+        "history": {
+          "title": "私聊与群聊历史",
+          "help": "添加 im:message:readonly 和 im:message.group_msg。读取群历史还需要接收全部用户群消息的权限。"
+        },
+        "allMessages": {
+          "title": "群聊免 @ 续聊",
+          "help": "添加敏感权限 im:message.group_msg。接收到的消息能否运行 Agent，仍由准入规则决定。"
+        },
+        "botMentions": {
+          "title": "接收其他机器人的 @ 消息",
+          "help": "添加 im:message.group_at_msg.include_bot:readonly，并在 Cognia 配置机器人发送者准入规则。"
+        },
+        "botMessages": {
+          "title": "接收其他机器人免 @ 群聊续聊",
+          "help": "添加 im:message.group_msg.include_bot:read。限制允许的机器人并配置准入，避免相互回复循环。"
+        },
+        "menus": {
+          "title": "托管群菜单与会话标签页",
+          "help": "添加群信息读取、会话标签页写入和群菜单写入权限。配置入口界面、可访问的网页入口及身份授权。机器人快捷指令菜单使用第 3 步说明的独立事件。"
+        }
+      },
+      "delivery": {
+        "title": "3. 接通消息事件与卡片回调",
+        "longStart": "在 Cognia 选择「长连接」，创建或保存后启用连接。保持主机运行，并在连接「健康」中检查启动错误。",
+        "longConsole": "该应用建立在线连接后，在飞书「事件与回调」的「事件配置」和「回调配置」中分别选择长连接并保存。飞书要求有在线客户端才能保存该方式，无需公网回调地址。",
+        "webhookStart": "选择 Webhook，将飞书的 Verification Token 和已启用的 Encrypt Key 复制到本表单，创建或保存后启用连接。保持主机及公网 HTTPS 入口运行。",
+        "webhookConsole": "重新打开已保存的连接，复制生成的 Webhook 地址。在飞书选择将事件发送至开发者服务器，在「事件配置」和「回调配置」中分别填入此地址并完成验证。",
+        "event": "在「事件配置」订阅接收消息事件：",
+        "callback": "在「回调配置」单独订阅卡片回传交互（用于卡片按钮）：",
+        "longKeepRunning": "完成配置后仍需保持主机在线。同一应用的其他客户端可能接走事件；若消息时有时无，请检查是否存在并行连接。",
+        "webhookSecurity": "飞书必须能访问此地址。Verification Token 和 Encrypt Key 必须与后台一致。公网域名变更后，需要更新并验证两处请求地址。",
+        "menus": "如需机器人快捷指令，在飞书机器人菜单创建推送事件的菜单项，在「事件配置」订阅 application.bot.menu_v6，并在 Cognia「快捷指令」映射相同的 event_key。",
+        "docs": "卡片回调文档"
+      },
+      "publish": {
+        "title": "4. 发布应用并开放使用",
+        "version": "在「版本管理与发布」创建并发布包含机器人能力、权限、事件与回调的新版本。如需管理员审核，请完成审批；仅保存后台配置不代表已发布。",
+        "availability": "应用可用范围必须包含目标用户。审批通过后，在飞书查找并打开已发布的机器人；获取访问令牌成功不代表用户已在可用范围内。",
+        "group": "将已发布的机器人加入目标群，并允许其发言。后续修改权限、订阅或菜单后需重新发布。"
+      },
+      "verify": {
+        "title": "5. 配置回复并在飞书验证",
+        "configure": "在 Cognia 绑定目标 Agent 和可用模型/提供商，按需选择自动回复，检查准入、白名单、操作员及静默时段。保存后检查连接「健康」。",
+        "private": "由可用范围内的用户发送真实私聊消息，确认 Cognia 收到消息，且回复送达同一飞书会话。",
+        "mention": "将机器人加入群并 @ 它，确认正确群聊或话题中收到一次回复，机器人身份正确。",
+        "card": "触发带交互卡片的运行，以请求者或获授权操作员身份点击允许的控件，确认动作执行。仅看到卡片不能证明回调正常。",
+        "optional": "验证所选功能：发送附件或点击菜单。启用话题免 @ 续聊前，先运行「准入」中的投递探测，在 10 分钟内发送不带 @ 的消息。首条消息仅存入历史，不会回复；请再发送后续消息验证回复。机器人互聊需先完成对应权限和准入配置。",
+        "troubleshoot": "未收到消息：检查发布、订阅、可用范围、群成员及主机健康。收到但未回复：检查 Agent 绑定、准入及模型错误。卡片点击失败：检查回调订阅和操作人授权。"
+      }
     }
   },
   "matrix": {
@@ -1124,7 +1302,7 @@
     "adapterUpdated": "适配器已更新。",
     "allowUnauthHelp": "未设置访问令牌时，入站连接默认会被拒绝。仅当本机运行着无令牌的可信本地客户端（例如本机上的 NapCat）时才开启。上方填写了访问令牌时，令牌始终优先。",
     "allowUnauthLabel": "允许未认证的连接",
-    "bearerTokenHelpPrefix": "若 NapCat / Lagrange 配置了",
+    "bearerTokenHelpPrefix": "若 NapCat 网络连接项配置了",
     "bearerTokenHelpSuffix": "，请将相同值粘贴到这里。加密存放在系统钥匙串中。",
     "bearerTokenLabel": "Bearer Token（可选）",
     "bearerTokenPlaceholder": "可选的密钥",
@@ -1141,7 +1319,7 @@
     "endpointCopied": "端点 URL 已复制。",
     "endpointCopy": "复制 URL",
     "endpointCopyAria": "复制反向 WS 端点 URL",
-    "endpointHelpPrefix": "把该地址粘贴到 NapCat / Lagrange 的",
+    "endpointHelpPrefix": "把该地址粘贴到 NapCat 的",
     "endpointHelpSuffix": "配置中。",
     "endpointLabel": "反向 WebSocket 地址",
     "endpointNewAdapterHint": "请先保存适配器；反向 WS 端点 URL 由新适配器 ID 派生。",
@@ -1322,11 +1500,11 @@
     "testFailedToast": "QQ 凭据测试失败：{error}",
     "testGatewayUrl": "网关：{gatewayUrl}",
     "testSucceededLabel": "凭据有效",
-    "testSucceededToast": "已连接到网关 {gatewayUrl}。",
+    "testSucceededToast": "已获取网关地址：{gatewayUrl}。尚未验证事件投递。",
     "titleEdit": "编辑 QQ 官方机器人",
     "titleNew": "添加 QQ 官方机器人",
     "transportGateway": "网关 WebSocket",
-    "transportGatewayHelp": "主动连接 QQ 网关，并通过 WebSocket 接收事件。",
+    "transportGatewayHelp": "供仍有网关权限的应用兼容使用。新配置优先使用 HTTPS Webhook。",
     "transportLabel": "入站传输方式",
     "transportWebhook": "HTTPS Webhook",
     "transportWebhookHelp": "通过此适配器注册的回调地址接收事件。",
@@ -1339,7 +1517,8 @@
     "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成回调地址。请让应用与伴生服务共用同一个前置入口，然后重新打开此对话框。",
     "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
     "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
-    "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站请求。请打开桌面应用，或先将此浏览器与宿主配对。"
+    "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站请求。请打开桌面应用，或先将此浏览器与宿主配对。",
+    "testWebhookCredentialsSucceeded": "凭据验证成功。Webhook 消息投递仍需在 QQ 开放平台验证。"
   },
   "quickCommands": {
     "actionTypeLabel": "动作类型",

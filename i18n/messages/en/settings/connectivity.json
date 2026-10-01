@@ -263,5 +263,164 @@
     "exposingOther": "This tunnel currently exposes {localUrl}, not this listener. Turn it off and on again here to point it at the companion server, or leave it for the feature using it.",
     "busyStopBody": "This app runs one cloudflared process, and it is exposing {localUrl} at {publicUrl} for another feature. Stopping it here takes that public URL down too.",
     "busyStopConfirm": "Stop it anyway"
+  },
+  "githubRunner": {
+    "title": "GitHub runner development environments",
+    "description": "Create a temporary Linux host, then use Cognia’s existing remote workspace and Agent tools.",
+    "desktopRequired": "Create and manage runners from the desktop app.",
+    "prerequisites": "Install .github/workflows/cognia-runner.yml in your repository first. Sign in with gh on this device. Use immutable image digests and a reachable signaling server. GitHub queue time varies.",
+    "fields": {
+      "label": "Environment name",
+      "repository": "GitHub repository (owner/repo)",
+      "workflowRef": "Workflow branch",
+      "hostImage": "Cognia host image (@sha256 digest)",
+      "agentBundleImage": "Agent bundle image (@sha256 digest)",
+      "developmentImage": "Development image (@sha256 digest)",
+      "signalingUrl": "Signaling server (wss://)",
+      "lifetimeMinutes": "Maximum lifetime (10–330 minutes)"
+    },
+    "create": "Create environment",
+    "creating": "Requesting runner…",
+    "loading": "Loading saved runner leases…",
+    "empty": "No runner environments yet.",
+    "loadFailed": "Could not load runner leases. Refresh to retry.",
+    "operationFailed": "The runner operation failed. Refresh its status and inspect the GitHub run before retrying.",
+    "invalid": "Check these fields: {fields}. Images must include a sha256 digest.",
+    "refreshAll": "Refresh all environments",
+    "refresh": "Refresh status",
+    "connect": "Connect",
+    "reconnect": "Reconnect",
+    "stop": "Stop runner",
+    "viewRun": "View GitHub run",
+    "expires": "Expires: {time}",
+    "stopPending": "Cancellation requested. The runner is not confirmed stopped; refresh until GitHub reports completion.",
+    "leaseError": "The runner reported an error. Inspect its GitHub run and refresh before retrying.",
+    "persistence": "Copy or commit workspace changes and export artifacts before stopping. Runner storage disappears when the job ends. Connecting switches this desktop’s active execution host.",
+    "closePairing": "Close pairing",
+    "state": {
+      "dispatching": "Submitting workflow",
+      "queued": "Waiting for GitHub runner",
+      "starting": "Preparing environment",
+      "ready": "Ready to connect",
+      "stopping": "Waiting for cancellation",
+      "stopped": "Stopped",
+      "failed": "Failed",
+      "unknown": "Status needs verification"
+    },
+    "invalidInvitation": "The runner invitation is invalid.",
+    "pairingInactive": "Runner pairing is no longer active.",
+    "pairingCancelled": "Runner pairing was cancelled.",
+    "runnerNotReady": "The runner is no longer ready.",
+    "setupGuide": "Read the runner setup guide",
+    "guideOpenFailed": "Could not open the setup guide. Try again.",
+    "savedConfiguration": "The last valid configuration you submit is saved on this desktop and restored next time. Use only public, credential-free signaling URLs.",
+    "wizard": {
+      "intro": "Check your repository, configure the environment, then review before creating.",
+      "steps": "Environment creation steps",
+      "setup": {
+        "title": "Repository",
+        "description": "Choose the repository and branch containing the runner template."
+      },
+      "environment": {
+        "title": "Environment",
+        "description": "Choose a name, lifetime, three published images and your signaling relay."
+      },
+      "review": {
+        "title": "Review",
+        "description": "Confirm the configuration before submitting a GitHub Actions workflow."
+      },
+      "setupHelp": "Install GitHub CLI and run gh auth login on this computer. Copy all five template files into your repository and configure COGNIA_RUNNER_ACTORS as described in the setup guide.",
+      "checking": "Checking prerequisites…",
+      "checkingHint": "Checking GitHub may take a moment. The check stops after 90 seconds and does not submit a workflow.",
+      "checkContinue": "Check and continue",
+      "reviewContinue": "Review configuration",
+      "checkPassed": "Repository checks passed",
+      "checkBlocked": "Resolve these prerequisites to continue",
+      "checkFailed": "Could not complete the checks. Check GitHub connectivity and your gh login, then try again.",
+      "reviewHint": "These checks do not verify COGNIA_RUNNER_ACTORS, organization policies, image availability or relay connectivity. Confirm those using the setup guide.",
+      "account": "GitHub account: {login}",
+      "restored": "Your last submitted configuration has been restored. Check it before creating another environment.",
+      "reset": "Reset form",
+      "back": "Back",
+      "lifetimePresets": "Lifetime presets",
+      "minutes": "{minutes} minutes",
+      "images": "Published images",
+      "imagesHint": "Build and publish all three Linux amd64 images first, then paste their immutable digests. This wizard does not build or publish images.",
+      "created": "Runner request recorded",
+      "createdHint": "Follow the environment status below. When it is ready, select Connect to pair with the Host. Recording the request does not mean the Host is ready.",
+      "createAnother": "Create another environment"
+    },
+    "hints": {
+      "label": "A name for this environment in Cognia; defaults to the repository name.",
+      "repository": "Enter owner/repo or paste its https://github.com/owner/repo URL. Use a repository where you can run Actions.",
+      "workflowRef": "The branch containing the five matching template files, for example main. Use a branch, not a tag.",
+      "hostImage": "Published Cognia Host image. Use runtime-full if you need preinstalled Agent CLIs on the Host.",
+      "agentBundleImage": "Published Agent bundle image containing the pinned Agent runtimes and sandbox helper.",
+      "developmentImage": "Published development image with your project tools and a libc compatible with the Agent bundle.",
+      "signalingUrl": "Reachable Cognia signaling relay using wss://. Do not include credentials, query parameters or a fragment.",
+      "lifetimeMinutes": "Choose 60, 120 or 240 minutes, or enter a whole number from 10 to 330. Export your work before the lease ends."
+    },
+    "placeholders": {
+      "label": "My development environment",
+      "repository": "owner/repo or https://github.com/owner/repo",
+      "workflowRef": "main",
+      "hostImage": "ghcr.io/your-owner/cognia-host@sha256:…",
+      "agentBundleImage": "ghcr.io/your-owner/cognia-agent-bundle@sha256:…",
+      "developmentImage": "ghcr.io/your-owner/cognia-development@sha256:…",
+      "signalingUrl": "wss://relay.example.com",
+      "lifetimeMinutes": "60"
+    },
+    "validation": {
+      "label": "Enter a name without control characters, up to 120 UTF-8 bytes.",
+      "repository": "Enter owner/repo or a GitHub repository URL without subpages, credentials, query parameters or a fragment.",
+      "workflowRef": "Enter a branch name up to 200 characters using letters, numbers, dots, slashes, underscores or hyphens; do not use two consecutive dots.",
+      "hostImage": "Enter an image reference ending in @sha256: and exactly 64 lowercase hexadecimal digits.",
+      "agentBundleImage": "Enter an image reference ending in @sha256: and exactly 64 lowercase hexadecimal digits.",
+      "developmentImage": "Enter an image reference ending in @sha256: and exactly 64 lowercase hexadecimal digits.",
+      "signalingUrl": "Enter a wss:// URL without credentials, query parameters or a fragment.",
+      "lifetimeMinutes": "Enter a whole number from 10 to 330 minutes."
+    },
+    "preflight": {
+      "steps": {
+        "cli": "GitHub CLI",
+        "account": "GitHub account",
+        "repository": "Repository access",
+        "branch": "Workflow branch",
+        "workflow": "Actions workflow",
+        "templates": "Template files"
+      },
+      "status": {
+        "passed": "Passed",
+        "failed": "Needs attention",
+        "skipped": "Not checked"
+      },
+      "codes": {
+        "ok": "Check passed.",
+        "not_checked": "Resolve the earlier failed check, then try again.",
+        "invalid_repository": "Enter a valid owner/repo or GitHub repository URL.",
+        "invalid_ref": "Enter a valid branch name, then check again.",
+        "cli_unavailable": "GitHub CLI could not run. Install gh or fix its local installation, then try again.",
+        "account_unavailable": "Could not verify your GitHub account. Check connectivity and run gh auth status; use gh auth login if needed.",
+        "repository_unavailable": "Could not read this repository. Check its name, your account access and GitHub connectivity.",
+        "repository_not_writable": "This account needs write access to the provisioner repository. Use an authorized account or repository.",
+        "repository_inactive": "This repository is archived or disabled. Use an active repository.",
+        "branch_unavailable": "Could not resolve this branch. Check that it exists in the selected repository and retry.",
+        "workflow_unavailable": "Could not read the runner workflow. Install the template on the default branch, enable Actions and check repository access.",
+        "workflow_inactive": "The runner workflow is disabled. Enable it in GitHub Actions, then check again.",
+        "templates_unavailable": "Could not read a required template file. Copy all five files to this branch and check repository access. File:",
+        "templates_mismatch": "A template file differs from this Cognia version. Replace all five files from the matching setup guide and commit them. File:",
+        "timeout": "The checks timed out. Check GitHub connectivity and try again."
+      }
+    },
+    "stateHelp": {
+      "dispatching": "The request is being submitted or its outcome is being recovered. Refresh before creating another runner.",
+      "queued": "GitHub is waiting for an available runner. Queue time varies; you can inspect the Actions run.",
+      "starting": "The runner is pulling images and preparing the Host. Inspect the Actions run for progress.",
+      "ready": "Select Connect to verify and pair with this temporary Host.",
+      "stopping": "Waiting for GitHub to confirm the workflow has ended.",
+      "stopped": "This runner has ended. Create a new environment to continue working.",
+      "failed": "Inspect the GitHub run, resolve the failure and refresh before creating another environment.",
+      "unknown": "The current status could not be confirmed. Refresh and inspect the GitHub run before retrying."
+    }
   }
 }

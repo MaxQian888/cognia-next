@@ -126,7 +126,14 @@
       "label": "Trigger",
       "schedule": "Time schedule",
       "sunset": "Sunrise & sunset",
-      "system": "Follow system"
+      "system": "Follow system",
+      "wallpaper": "Follow wallpaper"
+    },
+    "wallpaper": {
+      "measuring": "Measuring the current wallpaper — following the system until it is done.",
+      "noWallpaper": "No wallpaper is on, so this follows the system.",
+      "suitsDark": "The current wallpaper suits a dark theme.",
+      "suitsLight": "The current wallpaper suits a light theme."
     }
   },
   "colorPresetLabel": "Color preset",
@@ -426,6 +433,7 @@
     "importSuccess": "Applied {count, plural, one {# appearance setting} other {# appearance settings}}."
   },
   "languageLabel": "Language",
+  "languageSystem": "Follow system",
   "layoutType": {
     "agentFlow": {
       "sectionLabel": "Agent flow"
@@ -619,7 +627,7 @@
         "label": "Custom CSS"
       },
       "auto": {
-        "description": "Switch on a schedule or with the system",
+        "description": "Switch on a schedule, with the system or with the wallpaper",
         "label": "Auto light/dark"
       },
       "components": {
@@ -997,6 +1005,11 @@
       "title": "Build a gradient"
     },
     "invalidType": "Unsupported file type. Use PNG, JPEG, WebP, GIF or AVIF.",
+    "legibility": {
+      "capped": "Wallpaper faded to {percent}% so text stays readable over this wallpaper.",
+      "hint": "Measures the wallpaper's darkest and brightest areas and holds its opacity where text keeps WCAG contrast. Re-checked when you change the theme.",
+      "label": "Automatic readability protection"
+    },
     "noActive": "No wallpaper selected.",
     "opacity": {
       "autoFix": "Auto-fix",
@@ -1112,6 +1125,13 @@
     "scopeGlobal": "Global",
     "scopeLabel": "Apply to",
     "scopeSidebar": "Sidebar",
+    "themeFit": {
+      "follow": "Follow the wallpaper automatically",
+      "suitsDark": "This wallpaper suits a dark theme: text stays readable with {recommended}% of the image showing, versus {current}% now.",
+      "suitsLight": "This wallpaper suits a light theme: text stays readable with {recommended}% of the image showing, versus {current}% now.",
+      "switchDark": "Switch to dark",
+      "switchLight": "Switch to light"
+    },
     "tiles": {
       "dropHint": "Drop an image anywhere here",
       "gradient": "Gradient",

@@ -35,6 +35,15 @@
   "historyWarningTitle": "之后受邀的成员也能读取完整历史",
   "invite": "邀请成员",
   "inviteAcceptFailed": "无法接受邀请。",
+  "targetedInvite": {
+    "title": "加入共享会话？",
+    "description": "你被邀请加入一个共享会话。加入后你将成为成员并在此处打开它，可以看到它的完整历史。",
+    "accept": "接受",
+    "accepting": "正在加入…",
+    "dismiss": "暂不",
+    "offline": "请重新联网后再加入此会话，邀请仍然有效。",
+    "wrongOrg": "此邀请属于另一个组织，与当前应用登录的组织不同。"
+  },
   "inviteAccepted": "已加入共享会话。",
   "inviteCopied": "邀请令牌已复制。",
   "inviteFailed": "无法创建邀请。",

@@ -49,13 +49,18 @@
     "cursorCli": "Cursor",
     "droid": "Droid",
     "geminiCli": "Gemini",
+    "goose": "Goose",
     "kiro": "Kiro",
     "opencodeAcp": "OpenCode（ACP）",
     "opencodeRemote": "OpenCode（远程）",
     "opencodeServer": "OpenCode",
     "pi": "Pi",
     "piRpc": "Pi（原生 RPC）",
-    "qwenCode": "Qwen Code"
+    "qwenCode": "Qwen Code",
+    "aider": "Aider",
+    "cline": "Cline",
+    "qoder": "Qoder",
+    "kimi": "Kimi Code"
   },
   "runtimeStatus": {
     "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",

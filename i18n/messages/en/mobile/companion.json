@@ -323,7 +323,9 @@
       "twins": "Digital twins",
       "workflowDeployments": "Workflow deployments",
       "workflowRuns": "Workflow runs",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "pluginCogsets": "Cogsets",
+      "pluginCogsetState": "Cogset state"
     },
     "title": "Sync status",
     "toastSyncAllOk": "{count} tables synced.",

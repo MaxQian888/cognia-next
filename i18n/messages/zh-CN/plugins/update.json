@@ -11,6 +11,7 @@
   "updatesAvailable": {
     "description": "自动更新设置为仅通知，未安装任何内容。",
     "review": "去查看",
-    "title": "{count, plural, other {有 # 个插件可更新}}"
+    "title": "{count, plural, other {有 # 个插件可更新}}",
+    "descriptionPinned": "{count, plural, other {其中 # 个的版本被当前齿轮组锁定，未安装。}}"
   }
 }

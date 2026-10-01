@@ -855,11 +855,11 @@
     "connectedAccountLabel": "Connected account",
     "connectedAccountNone": "No account connected — the bot sends as itself.",
     "connectedAccountValue": "Connected as {name}",
-    "connectedAs": "Connected: {appId}",
-    "connectedToast": "Connected: {appId}",
-    "connectionFailedLabel": "Connection failed",
-    "connectionFailedToast": "Connection failed",
-    "connectionSucceededLabel": "Connection successful",
+    "connectedAs": "Credentials verified: {appId}",
+    "connectedToast": "Credentials verified: {appId}",
+    "connectionFailedLabel": "Credential validation failed",
+    "connectionFailedToast": "Could not validate app credentials.",
+    "connectionSucceededLabel": "Credentials verified",
     "create": "Create",
     "displayNameLabel": "Display name",
     "displayNamePlaceholder": "My Lark Bot",
@@ -973,7 +973,7 @@
     "redirectUriCopyAria": "Copy OAuth redirect URL",
     "redirectUriLabel": "OAuth redirect URL",
     "redirectUriPlaceholder": "https://…/oauth/lark/callback",
-    "redirectUriRegisterHelp": "Register this exact URL in Lark Open Platform → Security Settings → Redirect URL, and grant the offline_access + im:message scopes. Leave blank to use the Companion tunnel's URL.",
+    "redirectUriRegisterHelp": "Register this exact URL in Feishu Open Platform → Security Settings → Redirect URL. Grant user-identity scopes offline_access, im:message and im:message.send_as_user, publish, then connect your account. Leave blank to use this host’s public callback URL.",
     "redirectUriTunnelOffHelp": "No redirect URL yet — enter one above, or start the Companion tunnel to derive one automatically.",
     "save": "Save",
     "saving": "Saving…",
@@ -998,8 +998,8 @@
     "selfBotOpenIdUnknown": "Not resolved yet",
     "sendAsUserHelp": "When on and an account is connected, replies are sent as you (user access token) instead of the bot. Falls back to the bot if the authorization expires.",
     "sendAsUserLabel": "Send replies as me",
-    "testButtonLabel": "Test",
-    "testConnectionAria": "Test connection",
+    "testButtonLabel": "Validate",
+    "testConnectionAria": "Test credentials",
     "titleEdit": "Configure Lark Bot",
     "titleNew": "Add Lark Bot",
     "tokenRequiredForTest": "Enter App ID and App Secret first.",
@@ -1074,6 +1074,184 @@
       "wechatOaNoProbe": "WeChat Official Account adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
       "wechatPersonalNoProbe": "Personal WeChat adapters don't expose an active identity probe.",
       "wecomNoProbe": "WeCom adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured."
+    },
+    "cardPresentation": {
+      "section": "Card appearance",
+      "description": "Customize progress cards and final replies.",
+      "help": "Warning and error colors remain visible. Process display changes apply to new runs; existing timelines finish in their original mode. Saving restarts this connection.",
+      "theme": "Header color",
+      "density": "Spacing",
+      "width": "Card width",
+      "processMode": "Process display",
+      "history": "Process panel",
+      "title": "Custom card title",
+      "titlePlaceholder": "Use the task title",
+      "showElapsed": "Show elapsed time",
+      "showProgress": "Show progress summary",
+      "showArtifacts": "Show artifacts",
+      "showQuote": "Quote in final replies",
+      "showFooter": "Show final reply footer",
+      "reset": "Reset card appearance",
+      "options": {
+        "theme": {
+          "status": "Follow status",
+          "blue": "Blue",
+          "wathet": "Light blue",
+          "turquoise": "Turquoise",
+          "green": "Green",
+          "yellow": "Yellow",
+          "orange": "Orange",
+          "red": "Red",
+          "carmine": "Carmine",
+          "violet": "Violet",
+          "purple": "Purple",
+          "indigo": "Indigo",
+          "grey": "Grey"
+        },
+        "density": {
+          "comfortable": "Comfortable",
+          "compact": "Compact"
+        },
+        "width": {
+          "default": "Default",
+          "compact": "Narrow",
+          "fill": "Fill available width"
+        },
+        "processMode": {
+          "auto": "Native timeline when available",
+          "card": "Process inside card"
+        },
+        "history": {
+          "auto": "Automatic",
+          "expanded": "Always expanded",
+          "collapsed": "Initially collapsed"
+        },
+        "desktopTextSize": {
+          "normal": "Normal (14 px)",
+          "notation": "Small (12 px)",
+          "heading-4": "Large (16 px)",
+          "heading-3": "Larger (17–18 px)",
+          "heading-2": "Extra large (20 px)"
+        },
+        "mobileTextSize": {
+          "normal": "Normal (14 px)",
+          "notation": "Small (12 px)",
+          "heading-4": "Large (16 px)",
+          "heading-3": "Larger (17–18 px)",
+          "heading-2": "Extra large (20 px)"
+        }
+      },
+      "subtitle": "Subtitle",
+      "subtitlePlaceholder": "Optional secondary heading",
+      "headerIconKey": "Header image key",
+      "headerIconKeyPlaceholder": "Uploaded Feishu image key (img_…)",
+      "headerTags": "Header tags",
+      "headerTagsPlaceholder": "Up to 3 tags, separated by commas",
+      "desktopTextSize": "Desktop answer text size",
+      "mobileTextSize": "Mobile answer text size",
+      "resultTemplateEnabled": "Use a template for successful replies",
+      "resultTemplateHelp": "Use a published new-version Feishu card template with a fixed version. Running, stopped and failed cards keep the built-in layout. Definite template rejections fall back to the built-in result card.",
+      "resultTemplateId": "Template ID",
+      "resultTemplateVersion": "Published template version",
+      "resultTemplateVariables": "Create these template variables: answer, status, title, quote, details_url (text), elapsed_ms (number). The answer variable must be used to show the reply. Built-in card appearance settings do not change your template layout.",
+      "invalidIcon": "Enter a valid uploaded Feishu image key starting with img_.",
+      "invalidColor": "Enter both light and dark process panel colors as six-digit hex values, or leave both empty.",
+      "invalidTags": "Use at most 3 comma-separated tags, each no longer than 20 characters.",
+      "invalidTemplate": "Enter a template ID and fixed published version using letters, numbers, dots, underscores or hyphens.",
+      "panelColorLight": "Process panel color in light mode",
+      "panelColorDark": "Process panel color in dark mode",
+      "panelColorLightPlaceholder": "#336699",
+      "panelColorDarkPlaceholder": "#99CCFF"
+    },
+    "credentialTestHelp": "Validates App ID and App Secret only. Permissions, event delivery and card callbacks must be configured separately. Save to start the connection, then check its health and send a message from Feishu.",
+    "setupGuide": {
+      "title": "Feishu setup guide",
+      "description": "Configure the app, permissions, delivery and release, then verify the real conversation flow.",
+      "openConfiguration": "Configuration and setup guide",
+      "credentialsVerified": "Credentials verified this session",
+      "credentialsUnverified": "Credentials not verified this session",
+      "identityKnown": "Bot identity recorded",
+      "identityUnknown": "Bot identity not recorded",
+      "evidenceBoundary": "These checks do not confirm current runtime health, published permissions, event delivery or successful replies. Complete the steps below and verify in Feishu.",
+      "openConsole": "Open Feishu developer console",
+      "openFailed": "Could not open the Feishu page. Open the developer console in your browser.",
+      "copyScopes": "Copy selected permissions",
+      "copied": "Permission names copied.",
+      "copyFailed": "Could not copy. Select and copy the permission names above.",
+      "app": {
+        "title": "1. Create the app and enable its bot",
+        "create": "Use an enterprise custom app in the Feishu developer console. You need app-management access and permission to request approval. Under Add app capability, enable Bot. A group custom-bot webhook is not an App ID / App Secret app.",
+        "credentials": "Copy App ID and App Secret from Credentials & Basic Info into this form. For both transports, also enter the Verification Token from Events & callbacks; enter Encrypt Key only if encryption is enabled there. Test credentials, then create or save the connection. Keep secrets private; never paste them into messages or permission lists.",
+        "host": "Run Cognia on a desktop, server deployment or paired host that stays online and can reach Feishu. Browser-only configuration needs a connected host to receive messages."
+      },
+      "permissions": {
+        "title": "2. Grant permissions for the features you use",
+        "base": "Under Permission management, add these application-identity permissions for private messages, group @mentions and bot replies:",
+        "optional": "Optional features",
+        "selectionHelp": "Selections only prepare the permission list; they do not grant access or change your connection settings. Cards and attachments are preselected for everyday use.",
+        "selected": "Selected application permission names",
+        "docs": "Message permission reference",
+        "apply": "Search for each copied permission in the console, add it, and complete any administrator approval. This is a plain-text list of permission names, not a JSON import. Publish a new app version after changes.",
+        "oauth": "Send as me is separate: grant the user-identity scopes offline_access (refresh), im:message and im:message.send_as_user (sending), publish, and register the exact OAuth redirect URL shown in that section. Then connect or reauthorize your account. App permissions alone do not authorize a user account."
+      },
+      "features": {
+        "cards": {
+          "title": "Streaming cards and run controls",
+          "help": "Adds cardkit:card:write. Interactive buttons also need the card.action.trigger callback below."
+        },
+        "attachments": {
+          "title": "Images and files",
+          "help": "Adds im:resource for message attachments. Document, Drive and HR permissions are separate and are not needed just for chat files."
+        },
+        "history": {
+          "title": "Private and group history",
+          "help": "Adds im:message:readonly and im:message.group_msg. Group history also requires access to all user group messages."
+        },
+        "allMessages": {
+          "title": "Group follow-ups without @",
+          "help": "Adds im:message.group_msg, a sensitive permission. Admission rules still decide which received messages may run the Agent."
+        },
+        "botMentions": {
+          "title": "@mentions from other bots",
+          "help": "Adds im:message.group_at_msg.include_bot:readonly. Also configure Cognia’s bot-sender admission rules."
+        },
+        "botMessages": {
+          "title": "Other bots’ group follow-ups without @",
+          "help": "Adds im:message.group_msg.include_bot:read. Limit allowed bots and configure admission to avoid reply loops."
+        },
+        "menus": {
+          "title": "Managed group menus and chat tabs",
+          "help": "Adds chat read, chat-tab write and group-menu write permissions. Configure Entry surfaces, a reachable web entry and identity authorization. Bot quick-command menus use the separate event described in step 3."
+        }
+      },
+      "delivery": {
+        "title": "3. Connect events and card callbacks",
+        "longStart": "In Cognia select Long connection, create or save, and enable the connection. Keep the host running; check connection Health for startup errors.",
+        "longConsole": "While this app has a live connection, open Events & callbacks in Feishu. In both Event configuration and Callback configuration, select long connection and save. Feishu requires an online client to save this method; no public callback URL is needed.",
+        "webhookStart": "Select Webhook, copy Verification Token and any enabled Encrypt Key from Feishu into this form, then create or save and enable the connection. Keep the host and a public HTTPS endpoint running.",
+        "webhookConsole": "Reopen this saved connection and copy its generated webhook URL. In Feishu select delivery to a developer server and use that URL in both Event configuration and Callback configuration; complete URL verification.",
+        "event": "In Event configuration subscribe to Receive message:",
+        "callback": "In Callback configuration separately subscribe to Card action trigger (for card buttons):",
+        "longKeepRunning": "The long connection needs an online host after setup too. Other clients running the same app may receive its events instead; check for competing connections if delivery is intermittent.",
+        "webhookSecurity": "The URL must be reachable from Feishu. Keep Verification Token and Encrypt Key consistent with the console. If the public hostname changes, update and verify both request URLs.",
+        "menus": "For bot quick commands, create event-pushing menu entries in the Feishu Bot menu, subscribe to application.bot.menu_v6 in Event configuration, and map the same event_key under Quick commands in Cognia.",
+        "docs": "Card callback reference"
+      },
+      "publish": {
+        "title": "4. Publish and make the bot available",
+        "version": "In Version management & release, create and publish a version containing the bot capability, permissions, events and callbacks. Complete administrator review if required; saving the console configuration alone is not publication.",
+        "availability": "Set the app’s availability range to include the intended users. After approval, find and open the published bot in Feishu; a valid access token does not confirm this availability.",
+        "group": "Add the published bot to each intended group and allow it to speak. Re-publish after later permission, subscription or menu changes."
+      },
+      "verify": {
+        "title": "5. Configure replies and verify in Feishu",
+        "configure": "In Cognia bind the intended Agent and a usable model/provider, choose automatic replies if desired, and review Admission, allowlists, operators and quiet hours. Save changes and check connection Health.",
+        "private": "Send a real private message from a user in the availability range. Confirm it appears in Cognia and the reply reaches that same Feishu conversation.",
+        "mention": "Add the bot to a group and @mention it. Confirm one reply in the correct group or topic, with the correct bot identity.",
+        "card": "Trigger a run with an interactive card and click a permitted control as the requester or an authorized operator. Confirm the action runs; seeing a card alone does not verify callbacks.",
+        "optional": "Verify the optional features you selected: send an attachment or use a menu. Before enabling no-@ topic follow-ups, start Admission’s delivery probe and send an unmentioned message within 10 minutes. That first message is stored as history only, with no reply; use a subsequent message to verify replies. Test bot-to-bot traffic only when its permissions and admission rules are configured.",
+        "troubleshoot": "No inbound message: inspect publication, subscriptions, availability, group membership and host health. Inbound but no reply: inspect Agent binding, admission and model errors. Card click fails: inspect callback subscription and actor authorization."
+      }
     }
   },
   "matrix": {
@@ -1124,7 +1302,7 @@
     "adapterUpdated": "Adapter updated.",
     "allowUnauthHelp": "When no access token is set, inbound connections are rejected by default. Enable only for a trusted local client (e.g. NapCat on this machine) that runs without a token. Setting an access token above always takes precedence.",
     "allowUnauthLabel": "Allow unauthenticated connections",
-    "bearerTokenHelpPrefix": "If NapCat / Lagrange has",
+    "bearerTokenHelpPrefix": "If your NapCat network entry has",
     "bearerTokenHelpSuffix": "configured, paste the same value here. Stored encrypted in the OS keyring.",
     "bearerTokenLabel": "Bearer Token (optional)",
     "bearerTokenPlaceholder": "Optional secret token",
@@ -1141,7 +1319,7 @@
     "endpointCopied": "Endpoint URL copied.",
     "endpointCopy": "Copy URL",
     "endpointCopyAria": "Copy reverse-WS endpoint URL",
-    "endpointHelpPrefix": "Paste this URL into your NapCat / Lagrange",
+    "endpointHelpPrefix": "Paste this URL into your NapCat",
     "endpointHelpSuffix": "config.",
     "endpointLabel": "Reverse-WS Endpoint URL",
     "endpointNewAdapterHint": "Save the adapter first; the reverse-WS URL is derived from the new adapter ID.",
@@ -1322,11 +1500,11 @@
     "testFailedToast": "QQ credential test failed: {error}",
     "testGatewayUrl": "Gateway: {gatewayUrl}",
     "testSucceededLabel": "Credentials valid",
-    "testSucceededToast": "Connected to gateway {gatewayUrl}.",
+    "testSucceededToast": "Gateway URL resolved: {gatewayUrl}. Event delivery is not verified.",
     "titleEdit": "Edit QQ Official Bot",
     "titleNew": "Add QQ Official Bot",
     "transportGateway": "Gateway WebSocket",
-    "transportGatewayHelp": "Connect outbound to QQ's gateway and receive events over WebSocket.",
+    "transportGatewayHelp": "Compatibility mode for apps with gateway access. Prefer HTTPS webhook for new configurations.",
     "transportLabel": "Inbound transport",
     "transportWebhook": "HTTPS webhook",
     "transportWebhookHelp": "Receive events at this adapter's registered callback URL.",
@@ -1339,7 +1517,8 @@
     "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the callback URL cannot be built. Serve the app behind the same front door as the companion, then reopen this dialog.",
     "webhookUrlTunnelLoading": "Checking tunnel status…",
     "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
-    "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound request. Open the desktop app, or pair this browser with a host first."
+    "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound request. Open the desktop app, or pair this browser with a host first.",
+    "testWebhookCredentialsSucceeded": "Credentials verified. Webhook delivery still needs validation in the QQ console."
   },
   "quickCommands": {
     "actionTypeLabel": "Action type",

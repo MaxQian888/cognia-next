@@ -424,5 +424,9 @@
     "transfers": "Transfers",
     "unknownProfile": "This row does not name a saved SSH host, so there is nothing to browse."
   },
-  "justNow": "just now"
+  "justNow": "just now",
+  "pairingAlert": {
+    "title": "New device paired",
+    "body": "{label} ({platform}) was paired with this host. If this wasn't you, revoke it in Devices."
+  }
 }

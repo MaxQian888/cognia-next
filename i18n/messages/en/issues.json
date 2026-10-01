@@ -106,6 +106,13 @@
     "comment": "Comment",
     "repeats": "×{count}",
     "commentPlaceholder": "Leave a comment…",
+    "mention": {
+      "trigger": "Mention someone",
+      "search": "Search people…",
+      "empty": "No one matches",
+      "heading": "Workspace members",
+      "willNotify": "Notifies {names}"
+    },
     "created": "Created",
     "description": "Description",
     "descriptionPlaceholder": "Add description…",
@@ -245,7 +252,22 @@
     "pendingPatch": "Your pending patch",
     "discard": "Discard",
     "resubmit": "Resubmit on latest",
-    "failed": "Could not resolve conflict: {reason}"
+    "failed": "Could not resolve conflict: {reason}",
+    "fieldsHeading": "Changed by someone else since your edit",
+    "fieldYours": "Yours",
+    "fieldTheirs": "Theirs",
+    "changedBy": "Changed by {name} at revision {revision}",
+    "changedByUnknown": "Changed at revision {revision}",
+    "emptyValue": "(empty)",
+    "field": {
+      "title": "Title",
+      "body": "Description",
+      "description": "Description",
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "step": "Step {id}"
+    }
   },
   "freshness": {
     "stale": "Shared data is stale"

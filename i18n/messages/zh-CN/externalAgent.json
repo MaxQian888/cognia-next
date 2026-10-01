@@ -63,7 +63,8 @@
       "noAdvertisedCompactCommand": "Agent 未提供 /compact 命令",
       "userDeclared": "这是你为该 agent 声明的",
       "cogniaExtensionBridge": "由随附的 Cognia 扩展提供",
-      "isolatedLocalService": "由此对话专用的本地服务提供"
+      "isolatedLocalService": "由此对话专用的本地服务提供",
+      "aiderCliBridge": "由 Cognia 的官方 Aider CLI 适配器和独立会话历史提供"
     },
     "adapterMethod": {
       "steerTurn": "Cognia 适配器已实现 steerTurn",
@@ -159,6 +160,10 @@
   "manage": "管理",
   "manageAgents": "管理代理",
   "manager": {
+    "clineSetupHint": "安装 npm install -g cline@3.0.67，运行 cline auth 登录 Cline/ClinePass/ChatGPT，或在本地设置 CLINE_PROVIDER、CLINE_MODEL 和 CLINE_API_KEY。独立 ACP 状态请用 --config 或 CLINE_DIR；ACP 不支持 --data-dir。托管运行关闭自动更新。删除配置会保留系统安装与 Cline 数据。Cline 3.0.67 ACP 未转发图片和会话 MCP；原生 MCP 使用 cline mcp 配置。",
+    "clineEnvVarHint": "使用已有 OAuth 登录，或配合 CLINE_PROVIDER、CLINE_MODEL 设置 CLINE_API_KEY。CLINE_DIR 可指定状态目录。固定 CLINE_PROVIDER 后不能在会话中切换服务商。",
+    "gooseSetupHint": "macOS 使用 `brew install block-goose-cli`，Linux 使用官方 CLI 安装脚本。运行 `goose configure` 选择 provider 和 model，或在 Agent 环境变量中设置 GOOSE_PROVIDER、GOOSE_MODEL 和 provider API key。Cognia 调用 `goose acp --with-builtin developer`，工具审批由 Cognia 处理。Homebrew 安装通过 `brew upgrade block-goose-cli` 更新，脚本安装通过 `goose update` 更新。删除 Agent 配置会保留系统安装及 Goose 会话。",
+    "gooseEnvVarHint": "可以使用已有 Goose 配置，或设置 GOOSE_PROVIDER、GOOSE_MODEL 和 provider API key。DeepSeek 使用 OpenAI 兼容 provider：GOOSE_PROVIDER=openai、OPENAI_BASE_URL=https://api.deepseek.com/v1，并将 DeepSeek key 设置为 OPENAI_API_KEY。",
     "a2aProtocol": "A2A",
     "addAgentFailed": "添加外部代理失败。",
     "addExternalAgent": "添加外部代理",
@@ -279,7 +284,17 @@
     "unsupportedProtocol": "目前可执行代理仅支持 ACP。",
     "websocketProtocolComingSoon": "WebSocket（即将支持）",
     "connectingHint": "正在连接 Agent… 启动期间你可以继续使用 Cognia。",
-    "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。"
+    "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。",
+    "aiderSetupHint": "使用 uv tool install --force --python python3.12 --with pip aider-chat==0.86.2 安装。在此配置 --model 和模型服务的 API key。Cognia 隔离原生 .aider.conf.yml、dotenv 和 OAuth key 自动发现，并保存独立的会话历史。仅支持沙箱内自动确认与只读 Plan。更新使用同一 uv 命令；删除 Agent 不会卸载系统安装。",
+    "aiderEnvVarHint": "DeepSeek 示例：参数 --model deepseek/deepseek-flash，环境变量 DEEPSEEK_API_KEY。其他服务请使用对应的 Aider model ID 和 key。",
+    "qoderSetupHint": "使用 curl -fsSL https://qoder.com/install | bash 安装，再运行 qoder login，或在此配置 QODER_PERSONAL_ACCESS_TOKEN。Cognia 通过原生 ACP 调用，显式启用默认权限，并为每个会话配置 MCP。此进程禁用后台自动更新；请单独使用 qoder update 更新。删除 Agent 会保留系统安装及 Qoder 数据。Cognia 支持在 macOS 和 Linux 上本地运行 Qoder。",
+    "qoderEnvVarHint": "可复用已有 Qoder CLI 登录，或配置 QODER_PERSONAL_ACCESS_TOKEN。QODER_CONFIG_DIR 可指定独立配置目录。模型服务的 API key 不能替代 Qoder 认证；BYOK 模型是否可用取决于你的账号。",
+    "kimiSetupHint": "使用 Node.js 22.19 或更高版本执行 npm install -g @moonshot-ai/kimi-code@2.1.1，再执行 kimi login 登录 Kimi Code 订阅。Cognia 启动 kimi acp 并复用 CLI 登录。KIMI_CODE_HOME 可选择独立状态目录（默认 ~/.kimi-code）。请在托管会话之外执行 kimi upgrade 更新。删除此配置会保留系统安装和 Kimi 数据。请使用当前 Node CLI，不要使用已归档的 Python kimi-cli。",
+    "kimiEnvVarHint": "订阅登录不需要 API key。可选 KIMI_CODE_HOME 指定状态目录。自定义服务可设置 KIMI_MODEL_NAME、KIMI_MODEL_PROVIDER_TYPE、KIMI_MODEL_BASE_URL 和 KIMI_MODEL_API_KEY；这些设置会替代订阅模型选择。",
+    "deleteNativeSession": "删除原生记录",
+    "deleteNativeSessionConfirm": "永久删除 Agent 保存的此会话记录？此操作无法撤销，项目文件会保留。",
+    "deleteNativeSessionFailed": "删除原生记录失败",
+    "deleteNativeSessionSuccess": "原生记录已删除"
   },
   "placement": {
     "fallback": "未使用沙箱",
@@ -343,6 +358,10 @@
   "selectorPluginUnavailable": "插件未启用",
   "setConfigOptionFailed": "更新配置项失败",
   "settings": {
+    "clinePresetDescription": "官方 Cline CLI，支持流式回复、Plan/Act、工具审批和会话恢复。",
+    "clineSetupHint": "安装 npm install -g cline@3.0.67，运行 cline auth 登录 Cline/ClinePass/ChatGPT，或在本地设置 CLINE_PROVIDER、CLINE_MODEL 和 CLINE_API_KEY。独立 ACP 状态请用 --config 或 CLINE_DIR；ACP 不支持 --data-dir。托管运行关闭自动更新。删除配置会保留系统安装与 Cline 数据。Cline 3.0.67 ACP 未转发图片和会话 MCP；原生 MCP 使用 cline mcp 配置。",
+    "clineEnvironment": "Cline 认证与配置",
+    "goosePresetDescription": "通过原生 ACP 调用 Goose，使用其 developer 扩展及 Cognia 工具，支持流式回复和 Cognia 工具审批。运行 `goose configure` 配置所需 provider 和 model。",
     "addAgent": "添加代理",
     "addAgentToStart": "添加一个代理以开始使用",
     "agentAdded": "代理添加成功",
@@ -670,7 +689,20 @@
     "inspectorTabOverview": "概览",
     "inspectorTabConnection": "连接",
     "inspectorTabAdvanced": "高级",
-    "inspectorUnsaved": "有未保存的更改"
+    "inspectorUnsaved": "有未保存的更改",
+    "aiderPresetDescription": "通过官方 Aider CLI 使用流式回复、文件编辑、取消任务和独立的 Cognia 会话历史。自动确认在主机沙箱内执行；Plan 为只读。没有原生 ACP 审批和 MCP 支持。",
+    "aiderEnvironment": "模型服务环境变量",
+    "aiderEnvironmentKey": "变量名",
+    "aiderEnvironmentValue": "变量值",
+    "qoderPresetDescription": "通过 Qoder 官方 ACP 服务接入流式回复、工具审批及会话级 MCP。需要 Qoder CLI 登录或 Qoder Personal Access Token。",
+    "qoderEnvironment": "Qoder 认证与配置",
+    "argumentsInvalid": "请闭合参数中的引号后再保存。",
+    "argumentsHint": "包含空格的参数请使用引号。参数会直接传入进程，不执行 Shell 展开。",
+    "processEnvironment": "进程环境变量",
+    "processEnvironmentHint": "配置当前执行 Host 的进程。密钥使用现有凭据存储；任务级 Cognia 模型路由独立管理提供商凭据。",
+    "environmentInvalid": "变量名必须唯一，且不能包含等号或空字符；变量值不能包含空字符。",
+    "kimiPresetDescription": "通过原生 ACP 运行 Kimi Code，复用 Kimi 订阅登录，支持图片、MCP、工具审批和持久化会话。",
+    "kimiEnvironment": "Kimi Code 认证与配置"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -790,5 +822,27 @@
     "problemMissing": "固定的配置已不存在。在你选择其他配置或改为“任意”之前，运行都会失败。",
     "problemDisabled": "固定的配置已停用。在你启用它、选择其他配置或改为“任意”之前，运行都会失败。",
     "problemPresetMismatch": "固定的配置已不再使用该预设。在你选择其他配置或改为“任意”之前，运行都会失败。"
+  },
+  "authentication": {
+    "title": "Agent 账号",
+    "unknown": "账号状态由 Agent 登录流程报告；进程已连接不代表账号已登录。",
+    "signedOut": "已退出登录",
+    "login": "通过 {method} 登录",
+    "cancelLogin": "取消登录",
+    "logout": "退出登录",
+    "terminalOutput": "登录终端输出",
+    "logoutTitle": "退出此 Agent 的登录？",
+    "logoutDescription": "将退出原生 CLI 账号，结束当前会话并重新连接 Agent。其他使用同一 CLI 账号的应用也可能受到影响。",
+    "keepAccount": "保持登录",
+    "status": {
+      "starting": "正在启动登录…",
+      "running": "请按下方说明完成登录。",
+      "reconnecting": "登录成功，正在重新连接…",
+      "completed": "登录已完成",
+      "failed": "登录失败",
+      "cancelled": "登录已取消"
+    },
+    "outputUnavailable": "无法读取登录输出。请重试或检查原生登录进程。",
+    "openLoginPage": "打开 {url}"
   }
 }

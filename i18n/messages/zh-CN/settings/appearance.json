@@ -126,7 +126,14 @@
       "label": "触发方式",
       "schedule": "时间计划",
       "sunset": "日出与日落",
-      "system": "跟随系统"
+      "system": "跟随系统",
+      "wallpaper": "跟随壁纸"
+    },
+    "wallpaper": {
+      "measuring": "正在分析当前壁纸，完成前先跟随系统。",
+      "noWallpaper": "当前没有启用壁纸，暂时跟随系统。",
+      "suitsDark": "当前壁纸适合深色主题。",
+      "suitsLight": "当前壁纸适合浅色主题。"
     }
   },
   "colorPresetLabel": "配色预设",
@@ -426,6 +433,7 @@
     "importSuccess": "已应用 {count, plural, other {# 项外观设置}}。"
   },
   "languageLabel": "语言",
+  "languageSystem": "跟随系统",
   "layoutType": {
     "agentFlow": {
       "sectionLabel": "Agent 流程"
@@ -619,7 +627,7 @@
         "label": "自定义 CSS"
       },
       "auto": {
-        "description": "按计划或跟随系统切换",
+        "description": "按计划、跟随系统或跟随壁纸切换",
         "label": "自动明暗"
       },
       "components": {
@@ -997,6 +1005,11 @@
       "title": "构建渐变"
     },
     "invalidType": "不支持的文件类型，请使用 PNG / JPEG / WebP / GIF / AVIF。",
+    "legibility": {
+      "capped": "已自动将壁纸调淡至 {percent}%，保证文字在这张壁纸上清晰可读。",
+      "hint": "测量壁纸最暗和最亮的区域，把不透明度控制在文字仍满足 WCAG 对比度的范围内。切换主题时会重新计算。",
+      "label": "自动可读性保护"
+    },
     "noActive": "未选择壁纸。",
     "opacity": {
       "autoFix": "一键修复",
@@ -1112,6 +1125,13 @@
     "scopeGlobal": "全局",
     "scopeLabel": "作用范围",
     "scopeSidebar": "侧栏",
+    "themeFit": {
+      "follow": "跟随壁纸自动切换",
+      "suitsDark": "这张壁纸更适合深色主题：保证文字清晰的前提下可显示 {recommended}% 的图片，当前只有 {current}%。",
+      "suitsLight": "这张壁纸更适合浅色主题：保证文字清晰的前提下可显示 {recommended}% 的图片，当前只有 {current}%。",
+      "switchDark": "切换到深色",
+      "switchLight": "切换到浅色"
+    },
     "tiles": {
       "dropHint": "把图片拖到这里任意位置",
       "gradient": "渐变",

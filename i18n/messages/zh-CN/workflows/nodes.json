@@ -983,7 +983,8 @@
               "session": "会话",
               "workflow": "工作流",
               "system": "系统",
-              "issue": "事项"
+              "issue": "事项",
+              "collab": "协作"
             }
           },
           "readStates": {

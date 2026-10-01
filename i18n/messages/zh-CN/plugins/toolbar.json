@@ -33,5 +33,7 @@
   "syncFailed": "注册表同步失败：{message}",
   "syncRegistry": "同步注册表",
   "syncRegistryAria": "刷新市场注册表并检查已安装插件的更新",
-  "convertPlugin": "转换插件…"
+  "convertPlugin": "转换插件…",
+  "fromCogpack": "齿轮包…",
+  "groupCogpack": "齿轮包"
 }

@@ -61,6 +61,7 @@
     "soundHelp": "Play a sound for new notifications.",
     "source": {
       "agent-team": "Agent teams",
+      "collab": "Collaboration",
       "connector": "Connectors",
       "issue": "Issues",
       "plugin": "Plugins",

@@ -106,6 +106,13 @@
     "comment": "评论",
     "repeats": "×{count}",
     "commentPlaceholder": "写下评论…",
+    "mention": {
+      "trigger": "提及成员",
+      "search": "搜索成员…",
+      "empty": "没有匹配的成员",
+      "heading": "工作区成员",
+      "willNotify": "将通知 {names}"
+    },
     "created": "创建于",
     "description": "描述",
     "descriptionPlaceholder": "添加描述…",
@@ -245,7 +252,22 @@
     "pendingPatch": "待提交修改",
     "discard": "丢弃",
     "resubmit": "基于最新版重交",
-    "failed": "无法处理冲突：{reason}"
+    "failed": "无法处理冲突：{reason}",
+    "fieldsHeading": "在你编辑之后被他人改动的字段",
+    "fieldYours": "你的",
+    "fieldTheirs": "对方的",
+    "changedBy": "{name} 在修订 {revision} 修改",
+    "changedByUnknown": "在修订 {revision} 修改",
+    "emptyValue": "（空）",
+    "field": {
+      "title": "标题",
+      "body": "描述",
+      "description": "描述",
+      "status": "状态",
+      "priority": "优先级",
+      "assignee": "负责人",
+      "step": "步骤 {id}"
+    }
   },
   "freshness": {
     "stale": "共享数据已过期"

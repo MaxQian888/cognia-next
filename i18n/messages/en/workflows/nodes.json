@@ -983,7 +983,8 @@
               "session": "Conversation",
               "workflow": "Workflow",
               "system": "System",
-              "issue": "Issue"
+              "issue": "Issue",
+              "collab": "Collaboration"
             }
           },
           "readStates": {

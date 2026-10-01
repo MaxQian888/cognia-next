@@ -33,5 +33,7 @@
   "syncFailed": "Registry sync failed: {message}",
   "syncRegistry": "Sync registry",
   "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates",
-  "convertPlugin": "Convert plugin…"
+  "convertPlugin": "Convert plugin…",
+  "fromCogpack": "Cogpack…",
+  "groupCogpack": "Cogpacks"
 }

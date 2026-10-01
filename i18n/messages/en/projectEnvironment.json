@@ -286,5 +286,151 @@
   "variableName": "Variable name",
   "variableValue": "Plain value",
   "variables": "Non-sensitive variables",
-  "windows": "Windows script"
+  "windows": "Windows script",
+  "bootstrap": {
+    "presets": {
+      "title": "Starting configuration",
+      "hint": "Choose an option, then apply it. Applied fields remain editable; nothing runs automatically.",
+      "provider": "Provider preset",
+      "task": "Task preset",
+      "recipe": "Initialization recipe",
+      "applyProvider": "Apply provider",
+      "applyTask": "Apply task",
+      "applyRecipe": "Apply recipe",
+      "recipeHint": "Applying a recipe replaces the setup script (including OS overrides), task, readiness checks and reuse paths. Commands use the selected Agent shell; reapply after changing that shell. Applying any preset clears unfinished advanced JSON edits.",
+      "localModelHint": "Replace local-model with an installed model ID. Use the standalone models command to list models from your local provider.",
+      "providerOptions": {
+        "deepseek": {
+          "label": "DeepSeek",
+          "description": "DeepSeek's compatible endpoint. Uses DEEPSEEK_API_KEY. Applying a provider resets authentication, headers and model options."
+        },
+        "openai": {
+          "label": "OpenAI",
+          "description": "OpenAI Chat Completions. Uses OPENAI_API_KEY. Applying a provider resets authentication, headers and model options."
+        },
+        "openrouter": {
+          "label": "OpenRouter",
+          "description": "OpenRouter's compatible endpoint. Uses OPENROUTER_API_KEY. Applying a provider resets authentication, headers and model options."
+        },
+        "ollama": {
+          "label": "Ollama",
+          "description": "Local Ollama on port 11434 without authentication. Select an installed model after applying."
+        },
+        "lmstudio": {
+          "label": "LM Studio",
+          "description": "Local LM Studio on port 1234 without authentication. Select a loaded model after applying."
+        }
+      },
+      "taskOptions": {
+        "coding": {
+          "label": "Coding",
+          "description": "Workspace tools, 48 steps and 8192 response tokens for implementing and verifying changes."
+        },
+        "debug": {
+          "label": "Debugging",
+          "description": "Workspace tools, 64 steps and 8192 response tokens for reproducing and fixing an issue."
+        },
+        "chat": {
+          "label": "Chat",
+          "description": "Question answering with workspace tools disabled, 8 steps and 4096 response tokens."
+        },
+        "quick": {
+          "label": "Quick task",
+          "description": "Workspace tools, 12 steps, a 180-second budget and 2048 response tokens."
+        },
+        "explain": {
+          "label": "Explanation",
+          "description": "Explain supplied material with workspace tools disabled, 8 steps and 8192 response tokens."
+        }
+      },
+      "recipeOptions": {
+        "node-pnpm": {
+          "label": "Node.js / pnpm",
+          "description": "Install locked dependencies and check node_modules. Tracks package.json and pnpm-lock.yaml."
+        },
+        "python-uv": {
+          "label": "Python / uv",
+          "description": "Sync the locked project and verify its virtual environment. Tracks pyproject.toml and uv.lock."
+        },
+        "rust": {
+          "label": "Rust / Cargo",
+          "description": "Fetch locked dependencies and check compilation offline. Tracks Cargo.toml and Cargo.lock."
+        },
+        "go": {
+          "label": "Go modules",
+          "description": "Download and verify module dependencies. Tracks go.mod and go.sum."
+        }
+      }
+    },
+    "enabled": "Use a bootstrap Agent for initialization",
+    "description": "Run the setup script first, then let a small standalone Agent repair failures. The full Agent starts only after every readiness check passes.",
+    "task": "Initialization task",
+    "baseUrl": "Model API endpoint",
+    "model": "Bootstrap model",
+    "apiKeyEnv": "API key variable",
+    "binary": "Bootstrap executable",
+    "runtime": "Agent runtime",
+    "runtimeNative": "Native executable",
+    "runtimeBash": "Standalone Bash script",
+    "runtimePowershell": "Standalone PowerShell script",
+    "runtimeHint": "Install the selected script on the execution host and enter its path below. Bash needs curl and jq; PowerShell needs PowerShell 7.4+. Setup and readiness commands must use the selected shell's syntax.",
+    "credentialHint": "For bearer or custom-header authentication, bind the API key variable to an OS keyring reference below. No authentication allows a local provider without a key. Header credentials also use keyring variable references. The executable must be installed on the execution host.",
+    "checks": "Readiness checks",
+    "checkName": "Readiness check name",
+    "checkCommand": "Readiness check command",
+    "removeCheck": "Remove readiness check",
+    "addCheck": "Add readiness check",
+    "checksHint": "At least one check is required. Commands must exit with code 0; an Agent's claim of success cannot replace these checks.",
+    "maxSteps": "Maximum steps",
+    "totalTimeoutSecs": "Total timeout (seconds)",
+    "commandTimeoutSecs": "Command timeout (seconds)",
+    "validation": {
+      "runtime": "Select the native, Bash or PowerShell runtime.",
+      "task": "Enter an initialization task (at most 32000 characters).",
+      "endpoint": "Use an HTTPS API endpoint or an HTTP loopback endpoint, without credentials, query or fragment.",
+      "model": "Enter a model name (at most 256 characters, without control characters).",
+      "binary": "Enter a valid executable path without control characters.",
+      "credential": "Use a valid environment variable name for the API key.",
+      "checks": "Add 1–32 checks with unique names (letters, digits, dots, underscores or hyphens) and non-empty commands.",
+      "limits": "Use whole numbers: 1–256 steps, 1–3600 seconds total and 1–600 seconds per command. A command timeout cannot exceed the total.",
+      "keyring": "Bind every required API key or credential header variable to a keyring reference; it cannot be a plain variable.",
+      "reservedVariable": "COGNIA_BOOTSTRAP_BINARY and variables starting with COGNIA_BOOTSTRAP_CONFIG are reserved for initialization.",
+      "size": "The full configuration across all operating-system variants is too large (maximum 48000 UTF-8 bytes).",
+      "options": "Correct the advanced JSON and model options. Unknown fields, secret header literals and reserved request fields are rejected.",
+      "context": "Use valid context thresholds, retry counts and pruning sizes. Retained tokens must be below the compaction threshold; retained output must be smaller than the pruning threshold.",
+      "tools": "Use valid tool settings, a supported profile and non-sensitive environment variables. Startup hooks and credential overrides are forbidden.",
+      "reuse": "Use unique root-relative input/output paths without traversal."
+    },
+    "auth": "Authentication",
+    "authBearer": "Bearer API key",
+    "authHeader": "Custom API key header",
+    "authNone": "No authentication (local provider)",
+    "apiKeyHeader": "API key header name",
+    "endpointPath": "Chat completion path",
+    "requestTimeoutSecs": "Model request timeout (seconds)",
+    "maxTokens": "Maximum response tokens",
+    "temperature": "Temperature",
+    "topP": "Top P",
+    "systemPrompt": "Custom system prompt (optional)",
+    "stream": "Stream model responses",
+    "showThinking": "Show model reasoning",
+    "advanced": "Advanced customization",
+    "advancedJson": "Advanced configuration JSON",
+    "advancedHint": "Customize every model request, context policy, tool and reuse option. Credential headers must use headersEnv with variable names bound to keyring references below. No secret values belong in JSON.",
+    "advancedSchema": "Sections: modelOptions (auth, apiKeyHeader, endpointPath, requestTimeoutSecs, maxTokens, temperature, topP, seed, reasoningEffort, thinking, extraBody, headers, headersEnv, stream, showThinking), context (contextWindowTokens, autoCompact, compactThresholdTokens, compactRetainTokens, compactMaxTokens, compactRetries, maxOverflowRetries, pruneToolResults, pruneThresholdBytes, pruneHeadBytes, pruneTailBytes), tools (shell, editor, profile, shellExecutable, shellArgs, environment, maxFileBytes), reuse (inputs, outputs), maxOutputBytes, maxContextBytes, maxResponseBytes.",
+    "profile": "Tool schema profile",
+    "profileNative": "Cognia native tools",
+    "profileDsh": "d.sh compatible tools",
+    "shellExecutable": "Shell executable",
+    "contextWindowTokens": "Context window (tokens)",
+    "maxOutputBytes": "Tool output limit (bytes)",
+    "maxContextBytes": "Context message limit (bytes)",
+    "maxResponseBytes": "Model response limit (bytes)",
+    "toolShell": "Enable shell tool",
+    "toolEditor": "Enable editor tool",
+    "autoCompact": "Automatically compact context",
+    "pruneToolResults": "Prune older tool results",
+    "reuseInputs": "Bootstrap reuse inputs (one per line)",
+    "reuseOutputs": "Bootstrap required outputs (one per line)"
+  }
 }

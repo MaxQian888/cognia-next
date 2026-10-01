@@ -288,7 +288,7 @@
     "noSkills": "No skills are defined yet. Add them in <link>Settings → Skills</link>.",
     "noTemplates": "No shared templates yet.",
     "overrideCount": "{count, plural, =0 {no overrides} one {# override} other {# overrides}}",
-    "pluginsAreGlobal": "Plugins stay machine-wide: their enabled flag is the record of what is actually running, not a preference, so it is not something a workspace can hold a second opinion about. Manage them in <link>Settings → Plugins</link>.",
+    "pluginsAreGlobal": "Plugins are not switched one by one per workspace: their enabled flag records what is actually running. A workspace chooses a whole cogset instead (above). Manage plugins in <link>Settings → Plugins</link>.",
     "skills": "Skills",
     "state": {
       "inherit": "Inherit",
@@ -299,7 +299,19 @@
     "tab": "Capabilities",
     "templates": "Templates",
     "title": "Capabilities in this workspace",
-    "unavailable": "not available — trust it in Settings → MCP first"
+    "unavailable": "not available — trust it in Settings → MCP first",
+    "cogset": {
+      "title": "Cogset",
+      "description": "Opening this workspace switches to its cogset. Plugins outside it are turned off, except always-on ones.",
+      "label": "Cogset for this workspace",
+      "followGlobal": "Follow the default ({name})",
+      "followGlobalNone": "Follow the default",
+      "saved": "This workspace now uses {name}",
+      "cleared": "This workspace follows the default cogset",
+      "failed": "Could not change this workspace's cogset",
+      "mirrored": "Choose the workspace's cogset on your desktop.",
+      "noWorkspace": "Open a workspace to choose its cogset."
+    }
   },
   "adopt": {
     "title": "Folders in use",

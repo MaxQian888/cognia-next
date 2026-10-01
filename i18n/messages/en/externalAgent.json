@@ -63,7 +63,8 @@
       "noAdvertisedCompactCommand": "the agent advertises no /compact command",
       "userDeclared": "you declared this for this agent",
       "cogniaExtensionBridge": "provided by the bundled Cognia extension",
-      "isolatedLocalService": "provided by a private local service for this conversation"
+      "isolatedLocalService": "provided by a private local service for this conversation",
+      "aiderCliBridge": "provided by Cognia’s official Aider CLI adapter and per-session history"
     },
     "adapterMethod": {
       "steerTurn": "Cognia's adapter implements steerTurn",
@@ -159,6 +160,10 @@
   "manage": "Manage",
   "manageAgents": "Manage Agents",
   "manager": {
+    "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
+    "clineEnvVarHint": "Saved OAuth login, or CLINE_API_KEY with CLINE_PROVIDER and CLINE_MODEL. Optional CLINE_DIR selects state. Pinning CLINE_PROVIDER disables provider switching.",
+    "gooseSetupHint": "Install Goose with `brew install block-goose-cli` on macOS, or the official CLI installer on Linux. Run `goose configure` to choose a provider and model, or set GOOSE_PROVIDER, GOOSE_MODEL, and the provider API key in the agent environment. Cognia launches `goose acp --with-builtin developer`; approval stays in Cognia. Update with `brew upgrade block-goose-cli` for Homebrew installs, or `goose update` for script installs. Removing a saved agent keeps your system installation and Goose sessions.",
+    "gooseEnvVarHint": "Use your existing Goose configuration, or GOOSE_PROVIDER, GOOSE_MODEL, and your provider API key. For DeepSeek use the OpenAI-compatible provider: GOOSE_PROVIDER=openai, OPENAI_BASE_URL=https://api.deepseek.com/v1, and your DeepSeek key as OPENAI_API_KEY.",
     "a2aProtocol": "A2A",
     "addAgentFailed": "Failed to add external agent.",
     "addExternalAgent": "Add External Agent",
@@ -279,7 +284,17 @@
     "unsupportedProtocol": "Only ACP is currently supported for executable agents.",
     "websocketProtocolComingSoon": "WebSocket (coming soon)",
     "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts.",
-    "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools."
+    "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
+    "aiderSetupHint": "Install with uv tool install --force --python python3.12 --with pip aider-chat==0.86.2. Set --model and the provider API key here. Cognia isolates native .aider.conf.yml, dotenv and OAuth key discovery, and owns per-session history. Only sandboxed automatic confirmations and read-only Plan are supported. Update with the same uv command; deleting an agent keeps the system installation.",
+    "aiderEnvVarHint": "DeepSeek example: args --model deepseek/deepseek-flash and environment variable DEEPSEEK_API_KEY. Use your provider’s Aider model ID and key for other services.",
+    "qoderSetupHint": "Install with curl -fsSL https://qoder.com/install | bash, then run qoder login or supply QODER_PERSONAL_ACCESS_TOKEN here. Cognia launches native ACP with explicit default permissions and per-session MCP. Background auto-update is disabled for this process; update separately with qoder update. Removing an agent keeps your system installation and Qoder data. Cognia supports local Qoder hosting on macOS and Linux.",
+    "qoderEnvVarHint": "Use an existing Qoder CLI login or QODER_PERSONAL_ACCESS_TOKEN. QODER_CONFIG_DIR selects a separate configuration directory. A provider API key alone does not replace Qoder authentication; BYOK models depend on your account.",
+    "kimiSetupHint": "Install npm install -g @moonshot-ai/kimi-code@2.1.1 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp and reuses the CLI login. KIMI_CODE_HOME selects separate state (default ~/.kimi-code). Update separately with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. Use the current Node CLI, not the archived Python kimi-cli.",
+    "kimiEnvVarHint": "Subscription login needs no API key. Optional KIMI_CODE_HOME selects state. For a custom provider use KIMI_MODEL_NAME, KIMI_MODEL_PROVIDER_TYPE, KIMI_MODEL_BASE_URL and KIMI_MODEL_API_KEY; these replace subscription model selection.",
+    "deleteNativeSession": "Delete native history",
+    "deleteNativeSessionConfirm": "Permanently delete this session from the agent’s stored history? This cannot be undone. Project files are kept.",
+    "deleteNativeSessionFailed": "Failed to delete native history",
+    "deleteNativeSessionSuccess": "Native history deleted"
   },
   "placement": {
     "fallback": "Not sandboxed",
@@ -343,6 +358,10 @@
   "selectorPluginUnavailable": "Plugin off",
   "setConfigOptionFailed": "Failed to update config option",
   "settings": {
+    "clinePresetDescription": "Official Cline CLI with streaming, Plan/Act, tool approvals and session resume.",
+    "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
+    "clineEnvironment": "Cline authentication and configuration",
+    "goosePresetDescription": "Run Goose over native ACP with its developer extension, Cognia tools, streamed replies, and tool approval in Cognia. Configure your preferred provider and model with `goose configure`.",
     "addAgent": "Add Agent",
     "addAgentToStart": "Add an agent to get started",
     "agentAdded": "Agent added successfully",
@@ -670,7 +689,20 @@
     "inspectorTabOverview": "Overview",
     "inspectorTabConnection": "Connection",
     "inspectorTabAdvanced": "Advanced",
-    "inspectorUnsaved": "You have unsaved changes"
+    "inspectorUnsaved": "You have unsaved changes",
+    "aiderPresetDescription": "Run the official Aider CLI with streamed replies, file edits, cancellation and separate Cognia session histories. Automatic confirmations run inside the host sandbox; Plan is read-only. Native ACP approvals and MCP are unavailable.",
+    "aiderEnvironment": "Provider environment variables",
+    "aiderEnvironmentKey": "Variable name",
+    "aiderEnvironmentValue": "Variable value",
+    "qoderPresetDescription": "Run Qoder over its official ACP server with streamed replies, tool approval and per-session MCP. Requires Qoder CLI login or a Qoder Personal Access Token.",
+    "qoderEnvironment": "Qoder authentication and configuration",
+    "argumentsInvalid": "Close all quotes in the arguments before saving.",
+    "argumentsHint": "Use quotes around arguments containing spaces. Arguments are passed directly; shell expansion is not performed.",
+    "processEnvironment": "Process environment variables",
+    "processEnvironmentHint": "Configure the selected execution Host. Secret values use the existing credential store; task-scoped Cognia model routes control their own provider credentials.",
+    "environmentInvalid": "Use unique variable names without = or null characters; values cannot contain null characters.",
+    "kimiPresetDescription": "Run Kimi Code over native ACP with your Kimi subscription login, images, MCP, tool approvals and persisted sessions.",
+    "kimiEnvironment": "Kimi Code authentication and configuration"
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",
@@ -790,5 +822,27 @@
     "problemMissing": "The pinned config no longer exists. Runs fail until you pick another config or choose Any.",
     "problemDisabled": "The pinned config is disabled. Runs fail until you enable it, pick another config, or choose Any.",
     "problemPresetMismatch": "The pinned config no longer uses this preset. Runs fail until you pick another config or choose Any."
+  },
+  "authentication": {
+    "title": "Agent account",
+    "unknown": "Account status is reported by the agent during login; a connected process alone does not confirm authentication.",
+    "signedOut": "Signed out",
+    "login": "Sign in with {method}",
+    "cancelLogin": "Cancel login",
+    "logout": "Sign out",
+    "terminalOutput": "Login terminal output",
+    "logoutTitle": "Sign out of this agent?",
+    "logoutDescription": "This signs out the native CLI account, ends the active session, and reconnects the agent. Other applications using this CLI account may also be affected.",
+    "keepAccount": "Keep signed in",
+    "status": {
+      "starting": "Starting login…",
+      "running": "Complete the login instructions below.",
+      "reconnecting": "Login succeeded; reconnecting…",
+      "completed": "Login completed",
+      "failed": "Login failed",
+      "cancelled": "Login cancelled"
+    },
+    "outputUnavailable": "Could not read login output. Retry, or check the native login process.",
+    "openLoginPage": "Open {url}"
   }
 }

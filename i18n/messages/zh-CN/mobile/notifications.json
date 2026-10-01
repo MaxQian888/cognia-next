@@ -61,6 +61,7 @@
     "soundHelp": "新通知时播放提示音。",
     "source": {
       "agent-team": "智能体团队",
+      "collab": "协作",
       "connector": "连接器",
       "issue": "议题",
       "plugin": "插件",

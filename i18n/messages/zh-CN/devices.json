@@ -424,5 +424,9 @@
     "transfers": "传输",
     "unknownProfile": "这一行没有指向已保存的 SSH 主机，因此没有可浏览的内容。"
   },
-  "justNow": "刚刚"
+  "justNow": "刚刚",
+  "pairingAlert": {
+    "title": "有新设备完成配对",
+    "body": "{label}（{platform}）已与此主机配对。如果不是你本人操作，请在「设备」中撤销它。"
+  }
 }
