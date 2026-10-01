@@ -113,6 +113,17 @@ describe("deleteSkill", () => {
     await seedBuiltInSkills()
     const builtIn = (await listSkills()).find((s) => s.isBuiltIn)!
     await expect(deleteSkill(builtIn.id)).rejects.toThrow(/Built-in/)
+    // The rejected delete rolls back: no sync tombstone reaches paired phones.
+    expect(await getDb().syncTombstones.where("table").equals("skills").toArray()).toEqual([])
+  })
+
+  it("records a `skills` sync tombstone so paired clients drop the row", async () => {
+    const s = await createSkill({ name: "Gone", content: "x" })
+    await deleteSkill(s.id)
+    const tombstones = await getDb().syncTombstones.where("table").equals("skills").toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({ table: "skills", id: s.id, deletedAt: expect.any(Number) }),
+    ])
   })
 
   it("cascades to skillResources", async () => {

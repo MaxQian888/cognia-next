@@ -337,6 +337,30 @@ describe("deleteTwin cascade", () => {
     expect(detached?.twinSettings).toBeUndefined()
   })
 
+  it("tombstones the twin's profile under the profile id so paired clients drop it", async () => {
+    const twin = await createTwin({ id: "twin-profiled", name: "P" })
+    const profile = await ensureTwinProfile(twin.id)
+
+    const result = await deleteTwin(twin.id)
+
+    expect(result.profileDeleted).toBe(true)
+    expect(await getTwinProfile(twin.id)).toBeUndefined()
+    const tombstones = await getDb().syncTombstones.where("table").equals("twinProfile").toArray()
+    expect(tombstones).toEqual([expect.objectContaining({ table: "twinProfile", id: profile.id })])
+    // The profile tombstone shares the cascade's single watermark with the twin's.
+    const twinTombstone = await getDb().syncTombstones.get(["twins", twin.id])
+    expect(twinTombstone?.deletedAt).toBe(tombstones[0]?.deletedAt)
+  })
+
+  it("writes no profile tombstone when the twin never had a profile", async () => {
+    const twin = await createTwin({ id: "twin-profileless", name: "N" })
+
+    await deleteTwin(twin.id)
+
+    expect(await getDb().syncTombstones.where("table").equals("twinProfile").count()).toBe(0)
+    expect(await getDb().syncTombstones.get(["twins", twin.id])).toBeDefined()
+  })
+
   it("returns zero counts when there's nothing to cascade", async () => {
     const twin = await createTwin({ name: "Empty" })
     const result = await deleteTwin(twin.id)

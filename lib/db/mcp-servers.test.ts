@@ -599,10 +599,32 @@ describe("deleteMcpServer", () => {
     })
   })
 
+  it("records an `mcpServers` sync tombstone for the mirrored summary row", async () => {
+    const server = await createReviewed({
+      name: "mirrored",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    await flushDynamicImport()
+    expect(await getDb().mcpServerSummaries.get(server.id)).toBeDefined()
+
+    await deleteMcpServer(server.id)
+    await flushDynamicImport()
+    const tombstones = await getDb().syncTombstones.where("table").equals("mcpServers").toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        table: "mcpServers",
+        id: server.id,
+        deletedAt: expect.any(Number),
+      }),
+    ])
+  })
+
   it("is a no-op when the id is missing", async () => {
     await deleteMcpServer("nope")
     await flushDynamicImport()
     expect(await getDb().mcpSyncJobs.count()).toBe(0)
+    expect(await getDb().syncTombstones.where("table").equals("mcpServers").count()).toBe(0)
   })
 })
 

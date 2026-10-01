@@ -1310,6 +1310,36 @@ describe("deleteSession — /loop + goal cascade (v79)", () => {
     expect(await listGoalsBySession(s.id)).toHaveLength(0)
   })
 
+  it("tombstones the cascaded goals so paired clients drop them too", async () => {
+    const s = await createSession({ title: "goal tombstones" })
+    const other = await createSession({ title: "keeps its goal" })
+    const goal = (id: string, sessionId: string) => ({
+      id,
+      sessionId,
+      rawObjective: "o",
+      safeObjective: "o",
+      redactionMapEnc: "",
+      status: "stopped" as const,
+      turnsUsed: 1,
+      tokensUsed: 0,
+      judgeFailureCount: 0,
+      config: { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1_800_000 },
+      generationId: "gen",
+    })
+    await createGoal(goal("g_tomb_1", s.id))
+    await createGoal(goal("g_tomb_2", s.id))
+    await createGoal(goal("g_tomb_keep", other.id))
+
+    await deleteSession(s.id)
+
+    const goalTombs = (await getDb().syncTombstones.where("table").equals("goals").toArray())
+      .map((t) => t.id)
+      .filter((id) => id.startsWith("g_tomb_"))
+      .sort()
+    expect(goalTombs).toEqual(["g_tomb_1", "g_tomb_2"])
+    expect(await listGoalsBySession(other.id)).toHaveLength(1)
+  })
+
   it("deletes the video jobs a conversation started and keeps everyone else's", async () => {
     const s = await createSession({ title: "video" })
     const job = (id: string, sessionId?: string) => ({

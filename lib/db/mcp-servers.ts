@@ -27,6 +27,7 @@ import {
 } from "@/lib/mcp/tool-rules"
 import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import {
   loadWorkspaceCapabilityOverlay,
   type WorkspaceCapabilityScope,
@@ -298,9 +299,12 @@ export async function deleteMcpServer(id: string): Promise<void> {
     db.mcpServerSummaries,
     db.mcpSyncJobs,
     db.mcpCapabilityCache,
+    db.syncTombstones,
     async () => {
       await db.mcpServers.delete(id)
       await db.mcpServerSummaries.delete(id)
+      // The summary is what paired clients mirror as `mcpServers`.
+      await recordTombstones("mcpServers", [id])
       await db.mcpCapabilityCache.where("serverId").equals(id).delete()
       await enqueueSyncJobs(prev.appsEnabled, prev.revision ?? 1, [prev.name])
     }

@@ -119,6 +119,7 @@ export const CORE_TABLE_NAMES = [
   "chatTranscriptIndexState",
   "chatTurnSummaries",
   "codeAdoptionTurns",
+  "cogpackInstalls",
   "collabIssues",
   "collabChatApprovals",
   "collabChatAttachments",
@@ -273,7 +274,10 @@ export const CORE_TABLE_NAMES = [
   "petSpritePacks",
   "platformIdentities",
   "pluginAnalytics",
+  "pluginCogsetState",
+  "pluginCogsets",
   "pluginDexieMeta",
+  "pluginInstallOrigins",
   "pluginMarketplaceSources",
   "pluginPermissions",
   "pluginReviews",
@@ -462,6 +466,13 @@ export const PORTABLE_BACKUP_BINDINGS = {
   pluginPermissions: "pluginPermissions",
   pluginReviews: "pluginReviews",
   pluginAnalytics: "pluginAnalytics",
+  // Cogsets and cogpacks (ADR-0209): which plugins the user runs together, the
+  // config each set carries, and where each plugin came from. Hand-made
+  // configuration, and the origins are what make an export reproducible.
+  pluginInstallOrigins: "pluginInstallOrigins",
+  pluginCogsets: "pluginCogsets",
+  pluginCogsetState: "pluginCogsetState",
+  cogpackInstalls: "cogpackInstalls",
   // Saved chat templates. Authored prose with `{{parameter}}` declarations and
   // a launch spec: the same class of thing as `promptPresets`, and portable
   // for the same reason. A phrase you wrote is yours, not this machine's.
@@ -516,6 +527,10 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "workflows",
   "twinProfile",
   "plugins",
+  // Host-authoritative cogsets (ADR-0209): a paired client shows and switches
+  // them; switching is queued to the host as `plugin_cogset_activate`.
+  "pluginCogsets",
+  "pluginCogsetState",
   "adapterInstances",
   "settings",
   "conversationOverrides",
@@ -625,6 +640,8 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "workflows",
   "twinProfile",
   "plugins",
+  "pluginCogsets",
+  "pluginCogsetState",
   "adapterInstances",
   "settings",
   "conversationOverrides",
@@ -669,6 +686,82 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]
+
+/**
+ * How a Host deletion reaches a paired client, per synced table.
+ *
+ * A pull only ever carries rows that still exist, so a table whose rows can be
+ * deleted on the Host must say how the client learns about it. Otherwise the
+ * deleted row stays on every paired device. `scripts/gates/check-data-governance.mjs`
+ * holds this map equal to `has_tombstones` in the Rust registry
+ * (`crates/cognia-companion-bus/src/sync_registry.rs`).
+ *
+ * - `tombstoned`: every delete path records a `syncTombstones` row
+ *   (`lib/sync/tombstones.ts`) that the pull folds into `deleted_ids`.
+ * - `retention-pruned`: the Host prunes by age and the client ages rows out on
+ *   the same window, so no delete needs to cross the wire.
+ * - `never-deleted`: rows only change status; nothing deletes them.
+ * - `singleton`: one row that is overwritten, never removed.
+ */
+export type CompanionSyncDeleteStrategy =
+  "tombstoned" | "retention-pruned" | "never-deleted" | "singleton"
+
+export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
+  Record<CompanionSyncProtocolTableName, CompanionSyncDeleteStrategy>
+> = {
+  characters: "tombstoned",
+  skills: "tombstoned",
+  sessions: "tombstoned",
+  messages: "tombstoned",
+  workflows: "tombstoned",
+  twinProfile: "tombstoned",
+  plugins: "tombstoned",
+  // Cogsets are edited on the host only; a deleted one is tombstoned so a
+  // paired client drops it (ADR-0209). The state row is never deleted.
+  pluginCogsets: "tombstoned",
+  pluginCogsetState: "tombstoned",
+  adapterInstances: "tombstoned",
+  settings: "singleton",
+  conversationOverrides: "tombstoned",
+  goals: "tombstoned",
+  plans: "tombstoned",
+  memories: "tombstoned",
+  executionRuns: "never-deleted",
+  workflowRuns: "tombstoned",
+  mcpServers: "tombstoned",
+  terminalHistory: "retention-pruned",
+  agentTeamBoard: "tombstoned",
+  agentTasks: "never-deleted",
+  agentTaskAttempts: "never-deleted",
+  chatTemplates: "tombstoned",
+  templateDefinitions: "tombstoned",
+  templatePackages: "tombstoned",
+  templateInstances: "never-deleted",
+  agentTeams: "tombstoned",
+  agentTeammates: "tombstoned",
+  agentTeamTasks: "tombstoned",
+  connectorDrafts: "never-deleted",
+  outboundQueue: "tombstoned",
+  sessionState: "tombstoned",
+  twins: "tombstoned",
+  twinDrafts: "tombstoned",
+  projects: "tombstoned",
+  issues: "tombstoned",
+  issueProjects: "tombstoned",
+  labels: "tombstoned",
+  issueEvents: "tombstoned",
+  issueRuns: "tombstoned",
+  issueCycles: "tombstoned",
+  botDefinitions: "tombstoned",
+  botInstallations: "tombstoned",
+  botEventDeliveries: "tombstoned",
+  connectorHeartbeats: "retention-pruned",
+  platformIdentities: "tombstoned",
+  connectorCallbackBindings: "retention-pruned",
+  workflowDeployments: "never-deleted",
+  executionRunBindings: "never-deleted",
+  sessionFolders: "tombstoned",
+}
 
 const CACHE_TABLES = new Set<CoreTableName>([
   "a2uiSurfaces",

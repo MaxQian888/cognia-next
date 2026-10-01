@@ -34,6 +34,7 @@ import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { DEFAULT_PROVIDER_DIAGNOSTICS_PREFERENCES } from "@cognia/provider-types"
 import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
 import { getDb, withDbReopenRetry } from "./schema"
+import { resolveLocalePreference } from "@/lib/i18n/locale-preference"
 
 const SINGLETON_ID = "singleton" as const
 
@@ -96,6 +97,7 @@ export const DEFAULTS: AppSettings = {
   theme: "system",
   fontScale: "md",
   language: "en",
+  languageMode: "system",
   reduceMotion: false,
   workflowEditorPerformanceTier: undefined,
   evalSettings: { ...DEFAULT_EVAL_SETTINGS },
@@ -303,7 +305,7 @@ export async function getSettings(): Promise<AppSettings> {
   const row = await withDbReopenRetry(() => getDb().settings.get(SINGLETON_ID))
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
-  if (!row) return DEFAULTS
+  if (!row) return { ...DEFAULTS, ...resolveLocalePreference() }
   const autoRouting = mergeAutoRouting(row.autoRouting, row.difficultyRouting)
   const routingConfig = {
     ...DEFAULT_ROUTING_CONFIG,
@@ -326,6 +328,7 @@ export async function getSettings(): Promise<AppSettings> {
   return {
     ...DEFAULTS,
     ...row,
+    ...resolveLocalePreference(row),
     customSearchSources: customSearchSources as AppSettings["customSearchSources"],
     defaultSearchSources: (row.defaultSearchSources ?? []).filter((id) =>
       validSearchSourceIds.has(id)
@@ -545,6 +548,14 @@ export async function saveSettings(
       const merged: AppSettings = {
         ...migratedCurrent,
         ...patch,
+        ...resolveLocalePreference({
+          ...migratedCurrent,
+          ...patch,
+          // All existing language-only setters express a manual selection.
+          ...(patch.language !== undefined && patch.languageMode === undefined
+            ? { languageMode: "manual" }
+            : {}),
+        }),
         id: SINGLETON_ID,
         updatedAt: Date.now(),
       }

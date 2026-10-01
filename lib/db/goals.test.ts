@@ -234,6 +234,29 @@ describe("chatGoals CRUD", () => {
     expect(await countGoalEvents("g_a1")).toBe(0)
     expect(await countGoalEvents("g_b1")).toBe(1)
   })
+
+  it("deleteGoal records a `goals` sync tombstone for paired clients", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    await deleteGoal("g1")
+    const tombstones = await getDb().syncTombstones.where("table").equals("goals").toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({ table: "goals", id: "g1", deletedAt: expect.any(Number) }),
+    ])
+  })
+
+  it("deleteGoalsForSession tombstones only the session's goals", async () => {
+    await createGoal(buildGoal({ id: "g_a1", sessionId: "ses_a" }))
+    await createGoal(buildGoal({ id: "g_a2", sessionId: "ses_a", status: "paused" }))
+    await createGoal(buildGoal({ id: "g_b1", sessionId: "ses_b" }))
+    await deleteGoalsForSession("ses_a")
+    const tombstones = await getDb().syncTombstones.where("table").equals("goals").toArray()
+    expect(tombstones.map((row) => row.id).sort()).toEqual(["g_a1", "g_a2"])
+  })
+
+  it("deleteGoalsForSession writes no tombstone when nothing matches", async () => {
+    await deleteGoalsForSession("ses_missing")
+    expect(await getDb().syncTombstones.where("table").equals("goals").count()).toBe(0)
+  })
 })
 
 describe("chatGoalEvents", () => {

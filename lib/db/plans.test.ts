@@ -174,6 +174,25 @@ describe("cascade delete", () => {
 
   it("deletePlansForSession is a no-op for an empty session", async () => {
     await expect(deletePlansForSession("ghost")).resolves.toBeUndefined()
+    expect(await getDb().syncTombstones.where("table").equals("plans").count()).toBe(0)
+  })
+
+  it("deletePlan records a `plans` sync tombstone for paired clients", async () => {
+    await createPlan(buildPlan({ id: "p1" }))
+    await deletePlan("p1")
+    const tombstones = await getDb().syncTombstones.where("table").equals("plans").toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({ table: "plans", id: "p1", deletedAt: expect.any(Number) }),
+    ])
+  })
+
+  it("deletePlansForSession tombstones only the session's plans", async () => {
+    await createPlan(buildPlan({ id: "p1", sessionId: "ses_a" }))
+    await createPlan(buildPlan({ id: "p2", sessionId: "ses_a" }))
+    await createPlan(buildPlan({ id: "p3", sessionId: "ses_b" }))
+    await deletePlansForSession("ses_a")
+    const tombstones = await getDb().syncTombstones.where("table").equals("plans").toArray()
+    expect(tombstones.map((row) => row.id).sort()).toEqual(["p1", "p2"])
   })
 })
 

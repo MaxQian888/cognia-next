@@ -173,7 +173,38 @@ describe("clearTables", () => {
     expect(await db.sessions.count()).toBe(2)
     expect(await db.messageMediaRefs.count()).toBe(2)
     expect(await db.messageMedia.get("shared")).toBeDefined()
-    expect(await db.syncTombstones.count()).toBe(0)
+    // Sessions were not selected, so none of theirs; the cleared user-authored
+    // character and skill are tombstoned so paired clients drop them too.
+    const tombstones = (await db.syncTombstones.toArray()).map((row) => `${row.table}:${row.id}`)
+    expect(tombstones.sort()).toEqual(["characters:configured", "skills:configured"])
+  })
+
+  it("tombstones only user-authored characters and skills, never built-ins", async () => {
+    const db = getDb()
+    await db.characters.bulkPut([
+      { id: "mine", isBuiltIn: false },
+      { id: "seeded", isBuiltIn: true },
+    ] as never)
+    await db.skills.bulkPut([
+      { id: "my-skill", isBuiltIn: false },
+      { id: "builtin-skill", isBuiltIn: true },
+    ] as never)
+    await clearTables(["characters", "skills"])
+    const tombstones = (await db.syncTombstones.toArray()).map((row) => `${row.table}:${row.id}`)
+    expect(tombstones.sort()).toEqual(["characters:mine", "skills:my-skill"])
+  })
+
+  it("clears the mirrored MCP summaries with the servers and tombstones them", async () => {
+    const db = getDb()
+    await db.mcpServers.put({ id: "srv" } as never)
+    await db.mcpServerSummaries.put({ id: "srv", updatedAt: 1 } as never)
+    await db.mcpCapabilityCache.put({ id: "cap", serverId: "srv" } as never)
+    await clearTables(["mcpServers"])
+    expect(await db.mcpServerSummaries.count()).toBe(0)
+    expect(await db.mcpCapabilityCache.count()).toBe(0)
+    expect(
+      (await db.syncTombstones.where("table").equals("mcpServers").toArray()).map((row) => row.id)
+    ).toEqual(["srv"])
   })
 
   it("rolls back session cleanup and tombstones when another selected table fails", async () => {

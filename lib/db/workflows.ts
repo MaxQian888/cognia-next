@@ -461,9 +461,12 @@ export async function markReplayed(runId: string, replayRunId: string): Promise<
 export async function deleteWorkflowRun(runId: string): Promise<void> {
   if (!runId) return
   const db = getDb()
-  await db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+  await db.transaction("rw", db.workflowRuns, db.workflowRunEvents, db.syncTombstones, async () => {
     await db.workflowRunEvents.where("runId").equals(runId).delete()
     await db.workflowRuns.delete(runId)
+    // Paired clients mirror `workflowRuns` for the runs feed and hear about a
+    // deleted run only through this tombstone.
+    await recordTombstones("workflowRuns", [runId])
   })
 }
 
@@ -485,16 +488,23 @@ export async function deleteWorkflowRuns(runIds: string[]): Promise<void> {
 export async function deleteAllRunsForWorkflow(workflowId: string): Promise<number> {
   if (!workflowId) return 0
   const db = getDb()
-  return db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
-    const runIds = (await db.workflowRuns
-      .where("workflowId")
-      .equals(workflowId)
-      .primaryKeys()) as string[]
-    if (runIds.length === 0) return 0
-    await db.workflowRunEvents.where("runId").anyOf(runIds).delete()
-    await db.workflowRuns.bulkDelete(runIds)
-    return runIds.length
-  })
+  return db.transaction(
+    "rw",
+    db.workflowRuns,
+    db.workflowRunEvents,
+    db.syncTombstones,
+    async () => {
+      const runIds = (await db.workflowRuns
+        .where("workflowId")
+        .equals(workflowId)
+        .primaryKeys()) as string[]
+      if (runIds.length === 0) return 0
+      await db.workflowRunEvents.where("runId").anyOf(runIds).delete()
+      await db.workflowRuns.bulkDelete(runIds)
+      await recordTombstones("workflowRuns", runIds)
+      return runIds.length
+    }
+  )
 }
 
 /**

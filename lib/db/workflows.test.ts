@@ -709,6 +709,16 @@ describe("schemaVersion 2 funnel", () => {
       expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
     })
 
+    it("deleteWorkflowRun records a workflowRuns sync tombstone for the run", async () => {
+      await getDb().syncTombstones.clear()
+      await seedRun("r1")
+      await seedRun("r2")
+      await deleteWorkflowRun("r1")
+      const tombs = await getDb().syncTombstones.where("table").equals("workflowRuns").toArray()
+      expect(tombs.map((t) => t.id)).toEqual(["r1"])
+      expect(tombs[0]?.deletedAt).toEqual(expect.any(Number))
+    })
+
     it("deleteWorkflowRun is a no-op for empty/unknown ids", async () => {
       await seedRun("r1")
       await expect(deleteWorkflowRun("")).resolves.toBeUndefined()
@@ -744,6 +754,25 @@ describe("schemaVersion 2 funnel", () => {
       expect((await getDb().workflowRuns.toArray()).map((r) => r.id)).toEqual(["r3"])
       expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
       expect(await getDb().workflowRunEvents.where("runId").equals("r3").count()).toBe(1)
+    })
+
+    it("deleteAllRunsForWorkflow tombstones every removed run and none of the kept ones", async () => {
+      await getDb().syncTombstones.clear()
+      await seedRun("r1", "wf_a")
+      await seedRun("r2", "wf_a")
+      await seedRun("r3", "wf_b")
+      await deleteAllRunsForWorkflow("wf_a")
+      const ids = (await getDb().syncTombstones.where("table").equals("workflowRuns").toArray())
+        .map((t) => t.id)
+        .sort()
+      expect(ids).toEqual(["r1", "r2"])
+    })
+
+    it("deleteAllRunsForWorkflow records no tombstones when nothing matched", async () => {
+      await getDb().syncTombstones.clear()
+      await seedRun("r3", "wf_b")
+      expect(await deleteAllRunsForWorkflow("wf_a")).toBe(0)
+      expect(await getDb().syncTombstones.where("table").equals("workflowRuns").count()).toBe(0)
     })
 
     it("deleteAllRunsForWorkflow returns 0 for empty/unknown workflow ids", async () => {

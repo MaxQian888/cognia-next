@@ -1,5 +1,7 @@
 import { PROFILE_STORE_SCHEMA_VERSION } from "@cognia/provider-types"
 import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
+import { COGSET_STATE_ID } from "@/types/plugin/plugin-cogset"
+import { portableCogset, portableCogsetState } from "./apply-cogsets"
 import { isSessionExposed } from "@/lib/chat/session-exposure"
 import { getDb } from "@/lib/db/schema"
 import { getSettings } from "@/lib/db/settings"
@@ -256,6 +258,23 @@ export async function* buildBackupSections(
     yield* tableSections("pluginAnalytics", db.pluginAnalytics, iterate, (row) =>
       pluginPortable(row.pluginId)
     )
+    yield* tableSections("pluginInstallOrigins", db.pluginInstallOrigins, iterate, (row) =>
+      pluginPortable(row.pluginId)
+    )
+    // Cogsets name built-ins too, so they travel whole, minus this host's
+    // last activation result (ADR-0209).
+    let emittedCogsets = false
+    for await (const page of iterate(db.pluginCogsets)) {
+      if (page.length === 0) continue
+      emittedCogsets = true
+      yield { section: "pluginCogsets", rows: page.map(portableCogset) }
+    }
+    if (!emittedCogsets) yield { section: "pluginCogsets", rows: [] }
+    yield {
+      section: "pluginCogsetState",
+      rows: portableCogsetState(await db.pluginCogsetState.get(COGSET_STATE_ID)),
+    }
+    yield* tableSections("cogpackInstalls", db.cogpackInstalls, iterate)
   }
 
   if (includeSettings) {

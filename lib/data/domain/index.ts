@@ -13,6 +13,14 @@ import type {
 } from "@cognia/agent-config-types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
+import {
+  COGSET_STATE_ID,
+  type CogpackInstallRow,
+  type CogsetRow,
+  type CogsetStateRow,
+  type PluginInstallOriginRecord,
+} from "@/types/plugin/plugin-cogset"
+import { portableCogset, portableCogsetState } from "@/lib/data/apply-cogsets"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
@@ -181,11 +189,31 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
   }),
   makeSpec("plugins", "plugins", async () => {
     const db = getDb()
-    const [plugins, pluginPermissions, pluginAnalytics] = (await Promise.all([
+    const [
+      plugins,
+      pluginPermissions,
+      pluginAnalytics,
+      pluginInstallOrigins,
+      pluginCogsets,
+      pluginCogsetState,
+      cogpackInstalls,
+    ] = (await Promise.all([
       db.plugins.toArray(),
       db.pluginPermissions.toArray(),
       db.pluginAnalytics.toArray(),
-    ])) as [PluginRow[], PluginPermissionRow[], PluginAnalyticsRow[]]
+      db.pluginInstallOrigins.toArray(),
+      db.pluginCogsets.toArray(),
+      db.pluginCogsetState.get(COGSET_STATE_ID),
+      db.cogpackInstalls.toArray(),
+    ])) as [
+      PluginRow[],
+      PluginPermissionRow[],
+      PluginAnalyticsRow[],
+      PluginInstallOriginRecord[],
+      CogsetRow[],
+      CogsetStateRow | undefined,
+      CogpackInstallRow[],
+    ]
     // Don't carry built-in plugins (re-seeded locally) or marketplace
     // review caches (remote-derived). Keep permissions/jobs/analytics only
     // for user-installed plugins so the export stays self-contained.
@@ -195,6 +223,11 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
       plugins: userPlugins,
       pluginPermissions: pluginPermissions.filter((r) => userIds.has(r.pluginId)),
       pluginAnalytics: pluginAnalytics.filter((r) => userIds.has(r.pluginId)),
+      pluginInstallOrigins: pluginInstallOrigins.filter((r) => userIds.has(r.pluginId)),
+      // Cogsets name built-ins too (ADR-0209), so they travel whole.
+      pluginCogsets: pluginCogsets.map(portableCogset),
+      pluginCogsetState: portableCogsetState(pluginCogsetState),
+      cogpackInstalls,
     }
   }),
   makeSpec("artifacts", "artifacts", async () => {

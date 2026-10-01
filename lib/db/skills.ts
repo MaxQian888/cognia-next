@@ -7,6 +7,7 @@ import {
 import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { getDb } from "./schema"
 import {
   loadWorkspaceCapabilityOverlay,
@@ -181,13 +182,16 @@ export async function updateSkill(
 
 export async function deleteSkill(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.skills, db.skillResources, async () => {
+  await db.transaction("rw", db.skills, db.skillResources, db.syncTombstones, async () => {
     const existing = await db.skills.get(id)
     if (existing?.isBuiltIn) {
       throw new Error("Built-in skills cannot be deleted. Duplicate first.")
     }
     await deleteResourcesForSkill(id)
     await db.skills.delete(id)
+    // Paired clients mirror `skills` and learn about a delete only from this
+    // tombstone, so without it the skill stays listed on every paired phone.
+    await recordTombstones("skills", [id])
   })
 }
 

@@ -75,6 +75,47 @@ export function handlerTableNames(source) {
   throw new Error("Unterminated DEFAULT_HANDLERS array")
 }
 
+/**
+ * The `table: "strategy"` pairs of `COMPANION_SYNC_DELETE_STRATEGY`, cut at the
+ * object literal's own closing brace.
+ */
+export function deleteStrategies(source) {
+  const declaration = source.indexOf("export const COMPANION_SYNC_DELETE_STRATEGY")
+  if (declaration < 0) throw new Error("Missing declaration: COMPANION_SYNC_DELETE_STRATEGY")
+  const open = source.indexOf("= {", declaration)
+  const close = source.indexOf("\n}", open)
+  if (open < 0 || close < 0) throw new Error("Unterminated COMPANION_SYNC_DELETE_STRATEGY")
+  const entries = [...source.slice(open, close).matchAll(/^\s*([A-Za-z0-9_]+):\s*"([a-z-]+)",?$/gm)]
+  return new Map(entries.map((match) => [match[1], match[2]]))
+}
+
+/** `name` → `has_tombstones` for every descriptor in the Rust `default_tables()` block. */
+export function rustTombstoneFlags(rustBlock) {
+  const flags = new Map()
+  const pattern = /name:\s*"([A-Za-z0-9_]+)"\.to_string\(\),[\s\S]*?has_tombstones:\s*(true|false)/g
+  for (const match of rustBlock.matchAll(pattern)) flags.set(match[1], match[2] === "true")
+  return flags
+}
+
+/**
+ * A pull only carries rows that still exist, so every synced table must say
+ * how a Host delete reaches the client, and the tables that say `tombstoned`
+ * must be exactly the ones the Rust registry advertises as tombstoned.
+ */
+export function assertDeleteStrategies(protocolTables, strategies, rustFlags) {
+  const allowed = new Set(["tombstoned", "retention-pruned", "never-deleted", "singleton"])
+  assertSame([...strategies.keys()].sort(), protocolTables, "Catalog/delete strategy")
+  for (const [table, strategy] of strategies) {
+    if (!allowed.has(strategy)) throw new Error(`Unknown delete strategy for ${table}: ${strategy}`)
+    const tombstoned = strategy === "tombstoned"
+    if (rustFlags.get(table) !== tombstoned) {
+      throw new Error(
+        `Delete strategy drifted for ${table}: catalog says ${strategy}, Rust has_tombstones is ${rustFlags.get(table)}`
+      )
+    }
+  }
+}
+
 function sortedUnique(values, label) {
   const unique = [...new Set(values)].sort()
   if (unique.length !== values.length) throw new Error(`${label} contains duplicate entries`)
@@ -116,6 +157,7 @@ export async function collectGovernanceSummary(base = root) {
   )
   assertSame(protocolTables, handlerTables, "Catalog/TypeScript sync")
   assertSame(protocolTables, rustTables, "Catalog/Rust sync")
+  assertDeleteStrategies(protocolTables, deleteStrategies(catalog), rustTombstoneFlags(rustBlock))
 
   return {
     ...schemaSummary(schema),

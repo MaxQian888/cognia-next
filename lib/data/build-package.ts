@@ -6,6 +6,8 @@
 
 import { getDb } from "@/lib/db/schema"
 import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
+import { COGSET_STATE_ID } from "@/types/plugin/plugin-cogset"
+import { portableCogset, portableCogsetState } from "./apply-cogsets"
 import { getSettings } from "@/lib/db/settings"
 import { getDeviceMetadata } from "@/lib/device/device-identity"
 import { isTauri } from "@/lib/tauri"
@@ -113,6 +115,10 @@ export async function buildBackupPackage(
     pluginPermissions,
     pluginReviews,
     pluginAnalytics,
+    pluginInstallOrigins,
+    pluginCogsets,
+    pluginCogsetState,
+    cogpackInstalls,
     chatTemplates,
     scheduledTasks,
     petProfile,
@@ -172,6 +178,10 @@ export async function buildBackupPackage(
     readTable(db.pluginPermissions),
     readTable(db.pluginReviews),
     readTable(db.pluginAnalytics),
+    readTable(db.pluginInstallOrigins),
+    readTable(db.pluginCogsets),
+    db.pluginCogsetState.get(COGSET_STATE_ID),
+    readTable(db.cogpackInstalls),
     readTable(db.chatTemplates),
     readTable(db.scheduledTasks),
     db.petProfile.get("global"),
@@ -283,6 +293,13 @@ export async function buildBackupPackage(
     pluginPermissions: pluginPermissions.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginReviews: pluginReviews.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginAnalytics: pluginAnalytics.filter((row) => keptPluginIds.has(row.pluginId)),
+    // An origin describes an exported plugin; a built-in's is derived from its
+    // path, so it follows the plugin filter like the child rows above.
+    pluginInstallOrigins: pluginInstallOrigins.filter((row) => keptPluginIds.has(row.pluginId)),
+    // Cogsets name built-ins too, so they travel whole.
+    pluginCogsets: pluginCogsets.map(portableCogset),
+    pluginCogsetState: portableCogsetState(pluginCogsetState),
+    cogpackInstalls,
     // No built-in concept, so `includeBuiltIns` is a no-op here: every row is
     // something the user typed.
     chatTemplates,
@@ -401,6 +418,10 @@ export async function buildBackupPackage(
     delete payload.pluginPermissions
     delete payload.pluginReviews
     delete payload.pluginAnalytics
+    delete payload.pluginInstallOrigins
+    delete payload.pluginCogsets
+    delete payload.pluginCogsetState
+    delete payload.cogpackInstalls
   }
 
   // localStorage-backed Zustand persist faces (external agents, custom

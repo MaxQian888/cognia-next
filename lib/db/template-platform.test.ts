@@ -111,6 +111,90 @@ describe("DexieTemplateRepository", () => {
     )
   })
 
+  it("tombstones the draft's storage key when a draft is deleted", async () => {
+    const repository = new DexieTemplateRepository()
+    const draft = await makeDraft("skill.doomed")
+    await repository.saveDraft(draft, 0)
+
+    await repository.deleteDraft(draft.id)
+
+    expect(await repository.getDraft(draft.id)).toBeUndefined()
+    const tombstones = await getDb()
+      .syncTombstones.where("table")
+      .equals("templateDefinitions")
+      .toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        table: "templateDefinitions",
+        id: "draft:skill.doomed",
+        deletedAt: expect.any(Number),
+      }),
+    ])
+  })
+
+  it("tombstones the package key and every release it actually removed", async () => {
+    const repository = new DexieTemplateRepository()
+    const draft = await makeDraft("skill.packaged")
+    const release = await createTemplateDefinition({
+      ...draft,
+      status: "published",
+      version: "2.0.0",
+      revision: 1,
+      provenance: { source: "marketplace", packageId: "com.example.packaged" },
+      contentHash: undefined,
+    })
+    await repository.importPackage(
+      {
+        key: "com.example.packaged@2.0.0",
+        manifest: {
+          schemaVersion: 1,
+          apiVersion: "cognia.ai/templates/v1",
+          id: "com.example.packaged",
+          version: "2.0.0",
+          name: "Packaged",
+          entrypoints: ["skill.packaged@2.0.0"],
+          definitions: [
+            {
+              id: release.id,
+              version: release.version!,
+              path: "definitions/skill.packaged@2.0.0.json",
+              sha256: release.contentHash,
+            },
+            // Listed in the manifest but never stored: removePackage skips it,
+            // so no tombstone may be written for it either.
+            {
+              id: "skill.missing",
+              version: "2.0.0",
+              path: "definitions/skill.missing@2.0.0.json",
+              sha256: release.contentHash,
+            },
+          ],
+          assets: [],
+        },
+        fingerprint: "packaged-fingerprint",
+        trust: "verified-publisher",
+        importedAt: 1,
+        source: "marketplace",
+      },
+      [release]
+    )
+
+    expect(await repository.removePackage("com.example.packaged@2.0.0")).toBe(1)
+
+    const db = getDb()
+    expect(await db.templatePackages.get("com.example.packaged@2.0.0")).toBeUndefined()
+    const packageTombstones = await db.syncTombstones
+      .where("table")
+      .equals("templatePackages")
+      .toArray()
+    expect(packageTombstones.map((row) => row.id)).toEqual(["com.example.packaged@2.0.0"])
+    const definitionTombstones = await db.syncTombstones
+      .where("table")
+      .equals("templateDefinitions")
+      .toArray()
+    expect(definitionTombstones.map((row) => row.id)).toEqual(["release:skill.packaged@2.0.0"])
+  })
+
   it("opens all five template platform stores with their query indexes", async () => {
     const db = getDb()
     await db.open()

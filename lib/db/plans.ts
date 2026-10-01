@@ -22,6 +22,7 @@ import type {
 import { OPEN_PLAN_STATUSES, isTerminalPlanStatus } from "@/types/agent/plan"
 import Dexie from "dexie"
 import { getDb, withDbReopenRetry } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId, resolveSessionProjectId } from "./project-scope"
 
 const EVENTS_PER_PLAN_CAP = 2000
@@ -144,10 +145,13 @@ export async function updatePlan(id: string, patch: PlanUpdatePatch): Promise<vo
 export async function deletePlan(id: string): Promise<void> {
   await withDbReopenRetry(() => {
     const db = getDb()
-    return db.transaction("rw", db.agentPlans, db.agentPlanEvents, () =>
+    return db.transaction("rw", db.agentPlans, db.agentPlanEvents, db.syncTombstones, () =>
       Promise.all([
         db.agentPlanEvents.where("planId").equals(id).delete(),
         db.agentPlans.delete(id),
+        // Paired clients mirror plans as `plans` and hear about a delete only
+        // through this tombstone.
+        recordTombstones("plans", [id]),
       ]).then(() => undefined)
     )
   })
@@ -157,7 +161,7 @@ export async function deletePlan(id: string): Promise<void> {
 export async function deletePlansForSession(sessionId: string): Promise<void> {
   await withDbReopenRetry(() => {
     const db = getDb()
-    return db.transaction("rw", db.agentPlans, db.agentPlanEvents, () =>
+    return db.transaction("rw", db.agentPlans, db.agentPlanEvents, db.syncTombstones, () =>
       db.agentPlans
         .where("sessionId")
         .equals(sessionId)
@@ -170,6 +174,7 @@ export async function deletePlansForSession(sessionId: string): Promise<void> {
               .anyOf(ids as string[])
               .delete(),
             db.agentPlans.bulkDelete(ids as string[]),
+            recordTombstones("plans", ids as string[]),
           ]).then(() => undefined)
         })
     )

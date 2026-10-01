@@ -769,6 +769,36 @@ describe("applyBackupPackage — plugins domain", () => {
     expect(summary.added.pluginAnalytics).toBe(1)
   })
 
+  it("restores install origins for imported plugins and drops records a later export must not pin", async () => {
+    const db = getDb()
+    const commit = "0123456789abcdef0123456789abcdef01234567"
+    const good = {
+      pluginId: "plg-origin",
+      version: "1.0.0",
+      origin: { kind: "github", owner: "acme", repo: "tools", commit },
+      recordedAt: 1,
+    }
+    const summary = await applyBackupPackage(
+      pkg({
+        plugins: [pluginRow({ id: "plg-origin" }), pluginRow({ id: "plg-http" })],
+        pluginInstallOrigins: [
+          good,
+          {
+            ...good,
+            pluginId: "plg-http",
+            origin: { kind: "git", url: "http://example.com/x.git", commit },
+          },
+          { ...good, pluginId: "plg-orphan" },
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(await db.pluginInstallOrigins.toArray()).toEqual([good])
+    expect(summary.added.pluginInstallOrigins).toBe(1)
+    expect(summary.skipped.pluginInstallOrigins).toBe(1)
+  })
+
   it("imports permissions, reviews, and analytics only for imported plugin ids", async () => {
     const db = getDb()
     const summary = await applyBackupPackage(
@@ -1787,6 +1817,24 @@ describe("applyBackupPackage — retrieval tombstones", () => {
     expect(await db.memoryEvidence.where("memoryId").equals("mem_1").count()).toBe(0)
     expect(await db.retrievalEncryptedContent.get("memory:mem_1:canonical")).toBeUndefined()
     expect(await db.retrievalTombstones.get("tomb-mem_1")).toBeDefined()
+  })
+
+  it("records a memories sync tombstone so paired clients drop the purged memory", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg({
+        retrievalTombstones: [
+          tombstone(),
+          // Only `memory` entities map onto the mirrored `memories` table.
+          tombstone({ id: "tomb-doc_1", entityType: "document", entityId: "doc_1" }),
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+
+    const tombs = await db.syncTombstones.where("table").equals("memories").toArray()
+    expect(tombs.map((t) => t.id)).toEqual(["mem_1"])
+    expect(tombs[0]?.deletedAt).toEqual(expect.any(Number))
   })
 
   it("merges monotonically — acks union, pending drops acked, purge defers", async () => {

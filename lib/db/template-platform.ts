@@ -10,6 +10,7 @@ import type {
   TemplateMigrationJournalRecord,
   TemplateRepository,
 } from "@/lib/templates/repository"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { getDb } from "./schema"
 
 /**
@@ -105,7 +106,14 @@ export class DexieTemplateRepository implements TemplateRepository {
   }
 
   async deleteDraft(id: string): Promise<void> {
-    await getDb().templateDefinitions.delete(draftKey(id))
+    const db = getDb()
+    const key = draftKey(id)
+    await db.transaction("rw", db.templateDefinitions, db.syncTombstones, async () => {
+      await db.templateDefinitions.delete(key)
+      // Paired clients mirror `templateDefinitions` keyed by `storageKey` and
+      // hear about a delete only through this tombstone.
+      await recordTombstones("templateDefinitions", [key])
+    })
   }
 
   async getRelease(id: string, version: string): Promise<TemplateDefinitionEnvelope | undefined> {
@@ -232,19 +240,28 @@ export class DexieTemplateRepository implements TemplateRepository {
 
   async removePackage(key: string): Promise<number> {
     const db = getDb()
-    return db.transaction("rw", db.templatePackages, db.templateDefinitions, async () => {
-      const storedPackage = await db.templatePackages.get(key)
-      if (!storedPackage) throw new Error(`Template package ${key} not found`)
-      let removed = 0
-      for (const identity of storedPackage.manifest.definitions) {
-        const storageKey = releaseKey(identity.id, identity.version)
-        if (!(await db.templateDefinitions.get(storageKey))) continue
-        await db.templateDefinitions.delete(storageKey)
-        removed += 1
+    return db.transaction(
+      "rw",
+      db.templatePackages,
+      db.templateDefinitions,
+      db.syncTombstones,
+      async () => {
+        const storedPackage = await db.templatePackages.get(key)
+        if (!storedPackage) throw new Error(`Template package ${key} not found`)
+        const removedKeys: string[] = []
+        for (const identity of storedPackage.manifest.definitions) {
+          const storageKey = releaseKey(identity.id, identity.version)
+          if (!(await db.templateDefinitions.get(storageKey))) continue
+          await db.templateDefinitions.delete(storageKey)
+          removedKeys.push(storageKey)
+        }
+        await db.templatePackages.delete(key)
+        // Both tables are mirrored to paired clients by their own primary keys.
+        await recordTombstones("templateDefinitions", removedKeys)
+        await recordTombstones("templatePackages", [key])
+        return removedKeys.length
       }
-      await db.templatePackages.delete(key)
-      return removed
-    })
+    )
   }
 
   async putInstance(value: TemplateInstanceRecord): Promise<void> {

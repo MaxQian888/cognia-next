@@ -1076,6 +1076,10 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       await recordTombstones("sessions", deletedIds, at)
       await recordTombstones("messages", allMessageIds, at)
       await recordTombstones("sessionState", deletedIds, at)
+      // Goals are mirrored on their own (`goals`), so the ones this cascade
+      // dropped need their own tombstones or they outlive their session on
+      // every paired client.
+      await recordTombstones("goals", goalIds, at)
     }
   )
   if (orphanCandidates.size > 0) {

@@ -17,6 +17,7 @@ import Dexie from "dexie"
 import type { Goal, GoalEvent, GoalEventKind, GoalEventPayload, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { getDb, withDbReopenRetry } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { DEFAULT_PROJECT_ID, resolveSessionProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 
@@ -154,10 +155,13 @@ export async function deleteGoal(id: string): Promise<void> {
   try {
     await withDbReopenRetry(async () => {
       const db = getDb()
-      await db.transaction("rw", db.chatGoals, db.chatGoalEvents, async () => {
+      await db.transaction("rw", db.chatGoals, db.chatGoalEvents, db.syncTombstones, async () => {
         await Promise.all([
           db.chatGoalEvents.where("goalId").equals(id).delete(),
           db.chatGoals.delete(id),
+          // Paired clients mirror goals as `goals` and hear about a delete
+          // only through this tombstone.
+          recordTombstones("goals", [id]),
         ])
       })
     })
@@ -180,7 +184,7 @@ export async function deleteGoal(id: string): Promise<void> {
  */
 export async function deleteGoalsForSession(sessionId: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.chatGoals, db.chatGoalEvents, async () => {
+  await db.transaction("rw", db.chatGoals, db.chatGoalEvents, db.syncTombstones, async () => {
     const goalIds = await db.chatGoals.where("sessionId").equals(sessionId).primaryKeys()
     if (goalIds.length === 0) return
     await db.chatGoalEvents
@@ -188,6 +192,7 @@ export async function deleteGoalsForSession(sessionId: string): Promise<void> {
       .anyOf(goalIds as string[])
       .delete()
     await db.chatGoals.bulkDelete(goalIds as string[])
+    await recordTombstones("goals", goalIds as string[])
   })
 }
 

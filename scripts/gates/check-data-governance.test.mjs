@@ -1,7 +1,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { handlerTableNames, quotedValues, schemaSummary } from "./check-data-governance.mjs"
+import {
+  assertDeleteStrategies,
+  deleteStrategies,
+  handlerTableNames,
+  quotedValues,
+  rustTombstoneFlags,
+  schemaSummary,
+} from "./check-data-governance.mjs"
 
 const SCHEMA = [
   "export const CURRENT_SCHEMA_VERSION = 213",
@@ -65,4 +72,82 @@ test("handlerTableNames reads past nested arrays inside a handler entry", () => 
 
 test("handlerTableNames refuses a file with no handler array", () => {
   assert.throws(() => handlerTableNames("const x = 1\n"), /DEFAULT_HANDLERS/)
+})
+
+const CATALOG = [
+  "export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<",
+  "  Record<CompanionSyncProtocolTableName, CompanionSyncDeleteStrategy>",
+  "> = {",
+  '  skills: "tombstoned",',
+  '  settings: "singleton",',
+  "}",
+].join("\n")
+
+const RUST = [
+  "fn default_tables() -> Vec<SyncTableDescriptor> {",
+  '    SyncTableDescriptor { name: "skills".to_string(), description: "x".to_string(), has_tombstones: true },',
+  "    SyncTableDescriptor {",
+  '        name: "settings".to_string(),',
+  "        // a comment between the name and the flag",
+  '        description: "y".to_string(),',
+  "        has_tombstones: false,",
+  "    },",
+].join("\n")
+
+test("deleteStrategies reads every table of the strategy map", () => {
+  assert.deepEqual(
+    [...deleteStrategies(CATALOG)],
+    [
+      ["skills", "tombstoned"],
+      ["settings", "singleton"],
+    ]
+  )
+})
+
+test("rustTombstoneFlags pairs each name with its own flag across comments", () => {
+  assert.deepEqual(
+    [...rustTombstoneFlags(RUST)],
+    [
+      ["skills", true],
+      ["settings", false],
+    ]
+  )
+})
+
+test("assertDeleteStrategies accepts a catalog that matches the registry", () => {
+  assertDeleteStrategies(
+    ["settings", "skills"],
+    deleteStrategies(CATALOG),
+    rustTombstoneFlags(RUST)
+  )
+})
+
+test("assertDeleteStrategies refuses a synced table with no strategy", () => {
+  assert.throws(
+    () =>
+      assertDeleteStrategies(
+        ["plugins", "settings", "skills"],
+        deleteStrategies(CATALOG),
+        rustTombstoneFlags(RUST)
+      ),
+    /Catalog\/delete strategy drifted/
+  )
+})
+
+test("assertDeleteStrategies refuses a tombstoned table the registry does not tombstone", () => {
+  const flags = rustTombstoneFlags(RUST)
+  flags.set("skills", false)
+  assert.throws(
+    () => assertDeleteStrategies(["settings", "skills"], deleteStrategies(CATALOG), flags),
+    /Delete strategy drifted for skills/
+  )
+})
+
+test("assertDeleteStrategies refuses an unknown strategy", () => {
+  const strategies = deleteStrategies(CATALOG)
+  strategies.set("skills", "forgotten")
+  assert.throws(
+    () => assertDeleteStrategies(["settings", "skills"], strategies, rustTombstoneFlags(RUST)),
+    /Unknown delete strategy for skills/
+  )
 })

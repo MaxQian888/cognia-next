@@ -7,6 +7,7 @@
 // Built-in rows (characters/skills/teams with `isBuiltIn === true`) are NEVER
 // overwritten regardless of strategy — they're managed by the seed.
 
+import { recordTombstones } from "@/lib/sync/tombstones"
 import type {
   AppSettings,
   Character,
@@ -23,6 +24,8 @@ import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import { remapVideoJobSession } from "@/lib/db/media-generation-jobs"
+import { applyCogsetBackup } from "./apply-cogsets"
+import { parseInstallOriginRecord } from "@/lib/plugin/origin/install-origin"
 import { reconcileLibraryPins } from "@/lib/db/files-library-items"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
 import type { PetAchievementRecord, PetCharacterBinding, PetInventoryRow } from "@/types/pet"
@@ -253,6 +256,10 @@ export async function applyBackupPackage(
       db.pluginPermissions,
       db.pluginReviews,
       db.pluginAnalytics,
+      db.pluginInstallOrigins,
+      db.pluginCogsets,
+      db.pluginCogsetState,
+      db.cogpackInstalls,
       db.twinSources,
       db.twinChunks,
       db.twinProfile,
@@ -283,6 +290,7 @@ export async function applyBackupPackage(
       db.deploymentProfiles,
       db.transportProfiles,
       db.profileStoreMeta,
+      db.syncTombstones,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
@@ -686,9 +694,11 @@ export async function applyBackupPackage(
       // Permissions/reviews/analytics follow the parent plugin via
       // `bulkPut` keyed on their composite primary keys — overwrite is the
       // only sensible strategy for derived per-plugin data.
+      // Old plugin id → the id it was imported under. Cogsets below read it
+      // even when the package carried no plugin rows.
+      const importedPluginIds = new Map<string, string>()
       if (env.plugins && env.plugins.length > 0) {
         const incomingPlugins = env.plugins as PluginRow[]
-        const importedPluginIds = new Map<string, string>()
         for (const row of incomingPlugins) {
           if (row.source === "builtin") {
             incrementCounter(summary.builtInsSkipped, "plugins")
@@ -754,7 +764,38 @@ export async function applyBackupPackage(
             incrementCounterBy(summary.added, "pluginReviews", rows.length)
           }
         }
+        if (env.pluginInstallOrigins && env.pluginInstallOrigins.length > 0) {
+          // A backup can be shared, and a cogpack export later pins what an
+          // origin says, so each record gets the same checks as one a paired
+          // client forwards. A refused record only means that plugin exports
+          // embedded.
+          const valid = env.pluginInstallOrigins.flatMap((raw) => {
+            try {
+              return [parseInstallOriginRecord(raw)]
+            } catch {
+              incrementCounter(summary.skipped, "pluginInstallOrigins")
+              return []
+            }
+          })
+          const rows = remapChildRows(valid)
+          if (rows.length > 0) {
+            await db.pluginInstallOrigins.bulkPut(rows)
+            incrementCounterBy(summary.added, "pluginInstallOrigins", rows.length)
+          }
+        }
       }
+
+      // --- cogsets, cogpack imports and cogset state (schema v235) --------
+      await applyCogsetBackup({
+        db,
+        cogsets: env.pluginCogsets,
+        cogpackInstalls: env.cogpackInstalls,
+        cogsetState: env.pluginCogsetState,
+        pluginIdMap: importedPluginIds,
+        opts,
+        summary,
+        newId,
+      })
 
       // --- twin tables (schema v14) --------------------------------------
       // Sources / chunks / drafts / jobs use the standard applyCollection
@@ -1194,6 +1235,9 @@ async function applyRetrievalTombstones(args: {
     if (row.entityType === "memory") {
       await db.memories.delete(row.entityId)
       await db.memoryEvidence.where("memoryId").equals(row.entityId).delete()
+      // This Host's paired clients mirror `memories` too, and hear about the
+      // purge only through a sync tombstone.
+      await recordTombstones("memories", [row.entityId])
     }
   }
 }

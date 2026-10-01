@@ -28,6 +28,7 @@ import {
 } from "@cognia/memory/lifecycle/retrieval-feedback"
 import { buildRevisionSnapshot, isRevisionSnapshot } from "@cognia/memory/lifecycle/revision"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 export function newMemoryId(): string {
   return `mem_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
@@ -586,6 +587,7 @@ export async function hardDeleteMemories(ids: string[]): Promise<number> {
       db.memoryAuditEvents,
       db.retrievalEncryptedContent,
       db.retrievalTombstones,
+      db.syncTombstones,
     ],
     async () => {
       const owners = (await db.memories.bulkGet(uniqueIds)).filter(
@@ -630,6 +632,15 @@ export async function hardDeleteMemories(ids: string[]): Promise<number> {
         }
       }
       await db.memories.bulkDelete(rows.map((row) => row.id))
+      // `retrievalTombstones` drives the retrieval-content purge; paired
+      // clients mirror `memories` through sync and learn about a delete only
+      // from a sync tombstone, so a deleted fact would otherwise stay readable
+      // in the phone's memory viewer.
+      await recordTombstones(
+        "memories",
+        rows.map((row) => row.id),
+        now
+      )
       return owners.length
     }
   )

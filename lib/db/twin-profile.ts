@@ -16,6 +16,7 @@ import type {
   TwinProfile,
 } from "@/types/twin"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { recordTwinDecisionsGovernance } from "@/lib/governance/producers/twin"
 
 function emptyProfile(twinId: string): TwinProfile {
@@ -316,7 +317,13 @@ export async function upsertDecisions(
 }
 
 export async function deleteTwinProfile(twinId: string): Promise<void> {
-  await getDb().twinProfile.delete(twinId)
+  const db = getDb()
+  await db.transaction("rw", db.twinProfile, db.syncTombstones, async () => {
+    await db.twinProfile.delete(twinId)
+    // Paired clients mirror `twinProfile` for the twin switcher and hear
+    // about a delete only through this tombstone.
+    await recordTombstones("twinProfile", [twinId])
+  })
 }
 
 /** Wipe the profile back to its empty shape — used by manual "re-distill". */

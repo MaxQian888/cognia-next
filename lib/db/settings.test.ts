@@ -17,6 +17,46 @@ beforeEach(async () => {
 })
 
 describe("getSettings", () => {
+  it("follows the current system on a fresh install and on subsequent reads", async () => {
+    const languages = jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-Hans-CN"])
+    try {
+      expect(await getSettings()).toMatchObject({ language: "zh-CN", languageMode: "system" })
+      await saveSettings({ theme: "dark" })
+      languages.mockReturnValue(["en-GB"])
+      expect(await getSettings()).toMatchObject({
+        language: "en",
+        languageMode: "system",
+        theme: "dark",
+      })
+    } finally {
+      languages.mockRestore()
+    }
+  })
+
+  it("preserves a legacy explicit locale and allows returning to system mode", async () => {
+    const languages = jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-CN"])
+    try {
+      await getDb().settings.put({
+        id: "singleton",
+        permissionMode: "default",
+        alwaysAllowTools: [],
+        language: "en",
+      })
+      expect(await getSettings()).toMatchObject({ language: "en", languageMode: "manual" })
+      expect(await saveSettings({ languageMode: "system" })).toMatchObject({
+        language: "zh-CN",
+        languageMode: "system",
+      })
+      expect(await saveSettings({ language: "en" })).toMatchObject({
+        language: "en",
+        languageMode: "manual",
+      })
+      expect(await getSettings()).toMatchObject({ language: "en", languageMode: "manual" })
+    } finally {
+      languages.mockRestore()
+    }
+  })
+
   it("returns the canonical defaults when nothing has been written", async () => {
     const s = await getSettings()
     expect(s.id).toBe("singleton")

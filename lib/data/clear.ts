@@ -54,6 +54,8 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
       db.teams,
       db.promptPresets,
       db.mcpServers,
+      db.mcpServerSummaries,
+      db.mcpCapabilityCache,
       db.settings,
     ],
     async () => {
@@ -105,11 +107,32 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
         await recordTombstones("messages", messageIds, at)
         await recordTombstones("sessionState", stateIds, at)
       }
-      if (names.includes("characters")) await db.characters.clear()
-      if (names.includes("skills")) await db.skills.clear()
+      // Paired clients learn about a clear only through tombstones. Built-ins
+      // are re-seeded on the Host and a paired client keeps its own, so only
+      // user-authored rows are tombstoned: a built-in id in `deleted_ids`
+      // would delete the client's seeded copy.
+      const clearedAt = Date.now()
+      if (names.includes("characters")) {
+        const ids = await db.characters.filter((row) => !row.isBuiltIn).primaryKeys()
+        await db.characters.clear()
+        await recordTombstones("characters", ids as string[], clearedAt)
+      }
+      if (names.includes("skills")) {
+        const ids = await db.skills.filter((row) => !row.isBuiltIn).primaryKeys()
+        await db.skills.clear()
+        await recordTombstones("skills", ids as string[], clearedAt)
+      }
       if (names.includes("teams")) await db.teams.clear()
       if (names.includes("promptPresets")) await db.promptPresets.clear()
-      if (names.includes("mcpServers")) await db.mcpServers.clear()
+      if (names.includes("mcpServers")) {
+        // The summaries are what a paired client mirrors (`mcpServers` on the
+        // wire), so they go with the servers rather than outliving them.
+        const ids = await db.mcpServerSummaries.toCollection().primaryKeys()
+        await db.mcpServers.clear()
+        await db.mcpServerSummaries.clear()
+        await db.mcpCapabilityCache.clear()
+        await recordTombstones("mcpServers", ids as string[], clearedAt)
+      }
       if (names.includes("settings")) await db.settings.clear()
     }
   )

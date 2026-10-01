@@ -15,6 +15,7 @@ import {
   loadAgentTeamDefinitions,
   writeAgentTeamDefinitions,
 } from "./agent-team-definitions"
+import { getDb } from "./schema"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
 function team(over: Partial<AgentTeam> = {}): AgentTeam {
@@ -167,5 +168,79 @@ describe("stored definitions", () => {
     expect(stored.teams).toEqual([])
     expect(stored.teammates).toEqual([])
     expect(stored.tasks).toEqual([])
+  })
+
+  /**
+   * Each of the three tables is mirrored to paired clients on its own, so an
+   * explicit delete must leave a tombstone in the matching sync table.
+   */
+  it("tombstones explicit deletes per table at the write stamp", async () => {
+    await writeAgentTeamDefinitions({
+      teams: [team(), team({ id: "team_b" })],
+      teammates: [teammate(), teammate({ id: "mate_b" })],
+      tasks: [task(), task({ id: "task_b" })],
+      now: 5,
+    })
+    await getDb().syncTombstones.clear()
+
+    await writeAgentTeamDefinitions({
+      teams: [],
+      teammates: [],
+      tasks: [],
+      deleteTeamIds: ["team_b"],
+      deleteTeammateIds: ["mate_b"],
+      deleteTaskIds: ["task_b"],
+      now: 77,
+    })
+
+    const tombstones = getDb().syncTombstones
+    expect(await tombstones.where("table").equals("agentTeams").toArray()).toEqual([
+      expect.objectContaining({ table: "agentTeams", id: "team_b", deletedAt: 77 }),
+    ])
+    expect(await tombstones.where("table").equals("agentTeammates").toArray()).toEqual([
+      expect.objectContaining({ table: "agentTeammates", id: "mate_b", deletedAt: 77 }),
+    ])
+    expect(await tombstones.where("table").equals("agentTeamTasks").toArray()).toEqual([
+      expect.objectContaining({ table: "agentTeamTasks", id: "task_b", deletedAt: 77 }),
+    ])
+  })
+
+  it("writes no tombstones when nothing is deleted", async () => {
+    await getDb().syncTombstones.clear()
+    await writeAgentTeamDefinitions({
+      teams: [team()],
+      teammates: [teammate()],
+      tasks: [task()],
+      now: 5,
+    })
+    expect(await getDb().syncTombstones.count()).toBe(0)
+  })
+
+  it("tombstones a workspace's squads together with their roster and tasks", async () => {
+    await writeAgentTeamDefinitions({
+      teams: [team(), team({ id: "team_b", projectId: "ws_2" })],
+      teammates: [
+        teammate(),
+        teammate({ id: "mate_a2" }),
+        teammate({ id: "mate_b", teamId: "team_b" }),
+      ],
+      tasks: [task(), task({ id: "task_b", teamId: "team_b" })],
+      now: 5,
+    })
+    await getDb().syncTombstones.clear()
+
+    expect(await deleteAgentTeamsForWorkspace("ws_1")).toBe(1)
+
+    const tombstones = getDb().syncTombstones
+    const idsFor = async (table: string) =>
+      (await tombstones.where("table").equals(table).toArray()).map((row) => row.id).sort()
+    expect(await idsFor("agentTeams")).toEqual(["team_a"])
+    expect(await idsFor("agentTeammates")).toEqual(["mate_a", "mate_a2"])
+    expect(await idsFor("agentTeamTasks")).toEqual(["task_a"])
+    // The other workspace's squad is untouched and leaves no tombstone.
+    const stored = await loadAgentTeamDefinitions()
+    expect(stored.teams.map((t) => t.id)).toEqual(["team_b"])
+    expect(stored.teammates.map((t) => t.id)).toEqual(["mate_b"])
+    expect(stored.tasks.map((t) => t.id)).toEqual(["task_b"])
   })
 })

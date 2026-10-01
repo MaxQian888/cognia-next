@@ -253,6 +253,7 @@ export async function deleteTwin(
         await db.twinProfile.delete(profile.id)
         result.profileDeleted = true
       }
+      const profileIds = profile ? [profile.id] : []
       // Detach any character that still references this id so it doesn't
       // dangle with a stale twinId pointing at a now-missing row. We scan
       // in memory because `characters.twinId` is not indexed (the field
@@ -271,6 +272,7 @@ export async function deleteTwin(
       const at = Date.now()
       await recordTombstones("twins", [id], at)
       await recordTombstones("twinDrafts", draftIds, at)
+      await recordTombstones("twinProfile", profileIds, at)
     }
   )
 

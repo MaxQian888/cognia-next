@@ -1,8 +1,8 @@
 {
-  "latestVersion": 234,
-  "schemaSha256": "41820f38eb3b948fc852417add3f9fa235a6cc2c3311461ecef9f8ffba55e78b",
-  "staticTableCount": 373,
-  "companionSyncTableCount": 48,
+  "latestVersion": 235,
+  "schemaSha256": "1bdc52e630666aa3540b88f28099601c5e73a09389f04847d16f97cf9dffcecd",
+  "staticTableCount": 377,
+  "companionSyncTableCount": 50,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -35,6 +35,8 @@
     "outboundQueue",
     "plans",
     "platformIdentities",
+    "pluginCogsetState",
+    "pluginCogsets",
     "plugins",
     "projects",
     "sessionFolders",

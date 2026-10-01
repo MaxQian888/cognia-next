@@ -241,6 +241,17 @@ export interface BackupPayloadV3 {
   pluginReviews?: unknown[]
   pluginAnalytics?: unknown[]
   /**
+   * Cogsets, cogpack imports and plugin install origins (schema v235,
+   * ADR-0209). Origins follow their plugin like the child rows above.
+   * `pluginCogsetState` is the host singleton as a one-row array, carrying the
+   * user's choices (always-on set, global cogset) but not what this host last
+   * applied.
+   */
+  pluginInstallOrigins?: unknown[]
+  pluginCogsets?: unknown[]
+  pluginCogsetState?: unknown[]
+  cogpackInstalls?: unknown[]
+  /**
    * Digital-twin tables (schema v14). Always-additive: legacy v3 envelopes
    * that pre-date the twin subsystem omit these fields, and the importer
    * treats `undefined` as "no rows to apply".

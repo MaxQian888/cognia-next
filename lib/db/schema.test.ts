@@ -1561,6 +1561,26 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v235 adds cogsets, cogpack installs and plugin install origins", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(235)
+    expect(db.pluginInstallOrigins.schema.primKey.name).toBe("pluginId")
+    expect(db.pluginInstallOrigins.schema.indexes.map((index) => index.name)).toEqual([
+      "recordedAt",
+    ])
+    expect(db.pluginCogsets.schema.primKey.name).toBe("id")
+    expect(db.pluginCogsets.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["name", "updatedAt"])
+    )
+    expect(db.pluginCogsetState.schema.primKey.name).toBe("id")
+    expect(db.cogpackInstalls.schema.primKey.name).toBe("id")
+    expect(db.cogpackInstalls.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["cogpackId", "cogsetId", "installedAt"])
+    )
+  })
+
   it("v234 adds durable video-generation jobs", async () => {
     const db = getDb()
     await db.open()

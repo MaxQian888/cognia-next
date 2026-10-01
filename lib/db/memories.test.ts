@@ -743,6 +743,24 @@ describe("revision-aware delete & clear", () => {
     expect(await getMemory(m2Revisions[0].id)).toBeDefined()
   })
 
+  it("hardDeleteMemories records `memories` sync tombstones for owners and their snapshots", async () => {
+    const { m1Revisions, m2Revisions } = await seedWithHistory()
+    const db = getDb()
+
+    await hardDeleteMemories(["m1"])
+
+    const tombstones = await db.syncTombstones.where("table").equals("memories").toArray()
+    expect(tombstones.map((row) => row.id).sort()).toEqual(
+      ["m1", ...m1Revisions.map((revision) => revision.id)].sort()
+    )
+    // Owner and snapshots share one watermark.
+    expect(new Set(tombstones.map((row) => row.deletedAt)).size).toBe(1)
+    // The untouched memory and its history are not tombstoned.
+    const tombstoned = new Set(tombstones.map((row) => row.id))
+    expect(tombstoned.has("m2")).toBe(false)
+    expect(tombstoned.has(m2Revisions[0].id)).toBe(false)
+  })
+
   it("hardDeleteMemories does not double-delete a snapshot listed alongside its owner", async () => {
     const { m1Revisions } = await seedWithHistory()
     const db = getDb()

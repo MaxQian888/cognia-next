@@ -2,6 +2,7 @@ import "fake-indexeddb/auto"
 
 import { CogniaDB } from "@/lib/db/schema"
 import {
+  COMPANION_SYNC_DELETE_STRATEGY,
   COMPANION_SYNC_PROTOCOL_TABLE_NAMES,
   COMPANION_SYNC_TABLES,
   CORE_TABLE_NAMES,
@@ -55,7 +56,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(373)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(377)
     db.close()
   })
 
@@ -91,8 +92,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 48 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(48)
+  it("maps all 50 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(50)
     // Conversation folders, so a paired device files its list into the Host's
     // sections. Writes travel back as `folder.*` HostState intents.
     expect(policyForTable("sessionFolders")?.syncPolicy.mode).toBe("companion-readonly")
@@ -347,6 +348,41 @@ describe("the sync_pull request contract mirrors this catalogue", () => {
     }
     const declared = catalog.commands.sync_pull.properties.table.enum
     expect([...declared].sort()).toEqual([...COMPANION_SYNC_PROTOCOL_TABLE_NAMES].sort())
+  })
+})
+
+describe("COMPANION_SYNC_DELETE_STRATEGY", () => {
+  const ALLOWED = new Set(["tombstoned", "retention-pruned", "never-deleted", "singleton"])
+
+  it("declares a delete strategy for exactly the companion protocol tables", () => {
+    expect(Object.keys(COMPANION_SYNC_DELETE_STRATEGY).sort()).toEqual(
+      [...COMPANION_SYNC_PROTOCOL_TABLE_NAMES].sort()
+    )
+  })
+
+  it("uses only the four declared strategies", () => {
+    for (const [table, strategy] of Object.entries(COMPANION_SYNC_DELETE_STRATEGY)) {
+      expect({ table, allowed: ALLOWED.has(strategy) }).toEqual({ table, allowed: true })
+    }
+  })
+
+  it("keeps settings the only singleton and tombstones the user-deletable tables", () => {
+    expect(
+      Object.entries(COMPANION_SYNC_DELETE_STRATEGY)
+        .filter(([, strategy]) => strategy === "singleton")
+        .map(([table]) => table)
+    ).toEqual(["settings"])
+    for (const table of [
+      "skills",
+      "plugins",
+      "conversationOverrides",
+      "templateDefinitions",
+      "templatePackages",
+      "sessions",
+      "messages",
+    ] as const) {
+      expect(COMPANION_SYNC_DELETE_STRATEGY[table]).toBe("tombstoned")
+    }
   })
 })
 

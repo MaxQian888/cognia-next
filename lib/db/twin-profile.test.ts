@@ -15,6 +15,7 @@ import {
   appendDecisions,
   appendPlaybooks,
   appendStyleSamples,
+  deleteTwinProfile,
   ensureTwinProfile,
   getTwinProfile,
   removeEntity,
@@ -36,6 +37,7 @@ import {
 } from "./twin-profile"
 import type { DecisionRecord, Playbook, ProfileEntity, StyleSample } from "@/types/twin"
 import { getDecisionContext } from "./governance-ledger"
+import { getDb } from "./schema"
 
 const TWIN_ID = "twin-test"
 
@@ -348,5 +350,26 @@ describe("DecisionRecord lifecycle", () => {
     const profile = await getTwinProfile(TWIN_ID)
     expect(profile?.decisions).toHaveLength(1)
     expect(profile?.entities).toHaveLength(1)
+  })
+})
+
+describe("deleteTwinProfile", () => {
+  it("removes the profile row and tombstones it under its id for paired clients", async () => {
+    const profile = await ensureTwinProfile(TWIN_ID)
+    await getDb().syncTombstones.where("table").equals("twinProfile").delete()
+
+    await deleteTwinProfile(TWIN_ID)
+
+    expect(await getTwinProfile(TWIN_ID)).toBeUndefined()
+    const tombstones = await getDb().syncTombstones.where("table").equals("twinProfile").toArray()
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        table: "twinProfile",
+        id: profile.id,
+        deletedAt: expect.any(Number),
+      }),
+    ])
+    // The profile's primary key is the twin id, so the tombstone names it.
+    expect(tombstones[0]?.id).toBe(TWIN_ID)
   })
 })

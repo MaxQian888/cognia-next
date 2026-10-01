@@ -105,6 +105,12 @@ import type {
   PluginDexieMeta,
 } from "./plugin-types"
 import type {
+  CogpackInstallRow,
+  CogsetRow,
+  CogsetStateRow,
+  PluginInstallOriginRecord,
+} from "@/types/plugin/plugin-cogset"
+import type {
   WikiArticle,
   WikiSection,
   WikiManifest,
@@ -420,7 +426,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 234
+export const CURRENT_SCHEMA_VERSION = 235
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -616,6 +622,13 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   // `lib/ai/media/video-jobs/types.ts` and `lib/db/media-generation-jobs.ts`.
   mediaGenerationJobs:
     "&id, status, [status+nextPollAt], sessionId, [sessionId+createdAt], projectId, settledAt",
+  // v235 — cogsets, cogpacks and plugin install origins (ADR-0209). See
+  // `lib/db/plugin-install-origins.ts`, `lib/db/plugin-cogsets.ts` and
+  // `lib/db/cogpack-installs.ts`.
+  pluginInstallOrigins: "&pluginId, recordedAt",
+  pluginCogsets: "&id, name, updatedAt",
+  pluginCogsetState: "&id",
+  cogpackInstalls: "&id, cogpackId, cogsetId, installedAt",
   agentTeamBoard: "&id, teamId, [teamId+updatedAt], updatedAt, kind, status",
   fleetSessions: "&id, [agent+sessionId], startedAt, endedAt, agent, outcome",
   codeAdoptionTurns: "&id, runId, sessionId, workspaceRoot, ts, [sessionId+ts]",
@@ -1740,6 +1753,11 @@ export class CogniaDB extends Dexie {
   sandboxConnections!: Table<SandboxConnectionRow, string>
   // v59 — GitHub marketplace-repo sources. See `lib/db/plugin-marketplace-sources.ts`.
   pluginMarketplaceSources!: Table<PluginMarketplaceSourceRow, string>
+  // v235 — cogsets, cogpacks and install origins (ADR-0209).
+  pluginInstallOrigins!: Table<PluginInstallOriginRecord, string>
+  pluginCogsets!: Table<CogsetRow, string>
+  pluginCogsetState!: Table<CogsetStateRow, string>
+  cogpackInstalls!: Table<CogpackInstallRow, string>
   // v60 — models.dev catalog cache (singleton). See `lib/db/models-dev-catalog.ts`.
   modelsDevCatalog!: Table<ModelsDevCatalogRow, string>
   // v93 — OpenRouter live-models catalog cache (singleton). See `lib/db/openrouter-catalog.ts`.

@@ -22,6 +22,7 @@
  */
 
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import { getDb } from "./schema"
 
 /**
@@ -167,36 +168,68 @@ export async function writeAgentTeamDefinitions(input: {
 }): Promise<void> {
   const db = getDb()
   const stamp = input.now ?? Date.now()
-  await db.transaction("rw", db.agentTeams, db.agentTeammates, db.agentTeamTasks, async () => {
-    if (input.deleteTeamIds?.length) await db.agentTeams.bulkDelete(input.deleteTeamIds)
-    if (input.deleteTeammateIds?.length) {
-      await db.agentTeammates.bulkDelete(input.deleteTeammateIds)
+  await db.transaction(
+    "rw",
+    db.agentTeams,
+    db.agentTeammates,
+    db.agentTeamTasks,
+    db.syncTombstones,
+    async () => {
+      // Each of the three tables is mirrored to paired clients on its own, and a
+      // client hears about a removal only through that table's tombstone.
+      if (input.deleteTeamIds?.length) {
+        await db.agentTeams.bulkDelete(input.deleteTeamIds)
+        await recordTombstones("agentTeams", input.deleteTeamIds, stamp)
+      }
+      if (input.deleteTeammateIds?.length) {
+        await db.agentTeammates.bulkDelete(input.deleteTeammateIds)
+        await recordTombstones("agentTeammates", input.deleteTeammateIds, stamp)
+      }
+      if (input.deleteTaskIds?.length) {
+        await db.agentTeamTasks.bulkDelete(input.deleteTaskIds)
+        await recordTombstones("agentTeamTasks", input.deleteTaskIds, stamp)
+      }
+      if (input.teams.length) {
+        await db.agentTeams.bulkPut(input.teams.map((team) => agentTeamToRow(team, stamp)))
+      }
+      if (input.teammates.length) {
+        await db.agentTeammates.bulkPut(
+          input.teammates.map((teammate) => agentTeammateToRow(teammate, stamp))
+        )
+      }
+      if (input.tasks.length) {
+        await db.agentTeamTasks.bulkPut(input.tasks.map((task) => agentTeamTaskToRow(task, stamp)))
+      }
     }
-    if (input.deleteTaskIds?.length) await db.agentTeamTasks.bulkDelete(input.deleteTaskIds)
-    if (input.teams.length) {
-      await db.agentTeams.bulkPut(input.teams.map((team) => agentTeamToRow(team, stamp)))
-    }
-    if (input.teammates.length) {
-      await db.agentTeammates.bulkPut(
-        input.teammates.map((teammate) => agentTeammateToRow(teammate, stamp))
-      )
-    }
-    if (input.tasks.length) {
-      await db.agentTeamTasks.bulkPut(input.tasks.map((task) => agentTeamTaskToRow(task, stamp)))
-    }
-  })
+  )
 }
 
 /** Drop one workspace's squads and everything hanging off them. */
 export async function deleteAgentTeamsForWorkspace(projectId: string): Promise<number> {
   const db = getDb()
-  return db.transaction("rw", db.agentTeams, db.agentTeammates, db.agentTeamTasks, async () => {
-    const teams = (await db.agentTeams.toArray()).filter((row) => row.projectId === projectId)
-    const ids = teams.map((row) => row.id)
-    if (ids.length === 0) return 0
-    await db.agentTeams.bulkDelete(ids)
-    await db.agentTeammates.where("teamId").anyOf(ids).delete()
-    await db.agentTeamTasks.where("teamId").anyOf(ids).delete()
-    return ids.length
-  })
+  return db.transaction(
+    "rw",
+    db.agentTeams,
+    db.agentTeammates,
+    db.agentTeamTasks,
+    db.syncTombstones,
+    async () => {
+      const teams = (await db.agentTeams.toArray()).filter((row) => row.projectId === projectId)
+      const ids = teams.map((row) => row.id)
+      if (ids.length === 0) return 0
+      const teammateIds = (await db.agentTeammates
+        .where("teamId")
+        .anyOf(ids)
+        .primaryKeys()) as string[]
+      const taskIds = (await db.agentTeamTasks.where("teamId").anyOf(ids).primaryKeys()) as string[]
+      await db.agentTeams.bulkDelete(ids)
+      await db.agentTeammates.bulkDelete(teammateIds)
+      await db.agentTeamTasks.bulkDelete(taskIds)
+      const at = Date.now()
+      await recordTombstones("agentTeams", ids, at)
+      await recordTombstones("agentTeammates", teammateIds, at)
+      await recordTombstones("agentTeamTasks", taskIds, at)
+      return ids.length
+    }
+  )
 }
