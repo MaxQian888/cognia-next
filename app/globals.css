@@ -805,6 +805,34 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
   --app-bg-transform-a: none;
   --app-bg-transform-b: none;
   --app-bg-ken-burns-duration: 40s;
+  /* Layer visibility for the one-layer `fade` transition (0 → 1), kept apart
+     from the wallpaper's weight: every layer is opaque (see below), so a fade
+     is the layer itself appearing, not the image getting more see-through. */
+  --app-bg-fade: 1;
+}
+
+/* The weight the image actually shows at: the user's opacity slider, capped
+   by the legibility guard (`use-wallpaper-legibility.ts` writes
+   `--wp-max-weight` on <body>; absent means uncapped). One `min()` here rather
+   than at each layer, and declared on <body> — a custom property is
+   substituted where it is declared, and <body> is where both inputs are
+   written, so every layer below inherits the finished number. Because the cap
+   lives in CSS, transitions and live slider previews all honour it without the
+   guard re-solving for any of them. */
+body {
+  --app-bg-painted-opacity: min(var(--app-bg-opacity), var(--wp-max-weight, 1));
+  /* The theme ground laid over the image at `1 − weight`. Every wallpaper
+     layer paints ground + image + this veil as one OPAQUE composite. That is
+     what stops nested layers compounding: with scope all/global the body, #app
+     and every shell target each repaint the wallpaper, and as translucent
+     layers they stacked — at a 21% cap four of them showed the image at ~60%.
+     Opaque, a nested layer repaints exactly the pixels beneath it. It is also
+     the composite the legibility solver models (image over --background). */
+  --app-bg-veil: color-mix(
+    in srgb,
+    var(--background) calc((1 - var(--app-bg-painted-opacity)) * 100%),
+    transparent
+  );
 }
 
 /* ---------------------------------------------------------------------------
@@ -826,12 +854,17 @@ body[data-bg-enabled="true"]::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background-image: var(--app-bg-image);
-  background-position: var(--app-bg-position);
-  background-size: var(--app-bg-size);
-  background-repeat: var(--app-bg-repeat);
+  background-color: var(--background);
+  background-image: linear-gradient(var(--app-bg-veil), var(--app-bg-veil)), var(--app-bg-image);
+  background-position:
+    0 0,
+    var(--app-bg-position);
+  background-size:
+    100% 100%,
+    var(--app-bg-size);
+  background-repeat: no-repeat, var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
-  opacity: var(--app-bg-opacity);
+  opacity: var(--app-bg-fade);
   transform: none;
   will-change: opacity;
   transition:
@@ -846,10 +879,15 @@ body[data-bg-enabled="true"][data-bg-two-layer="true"]::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background-image: var(--app-bg-image-b);
-  background-position: var(--app-bg-position);
-  background-size: var(--app-bg-size);
-  background-repeat: var(--app-bg-repeat);
+  background-color: var(--background);
+  background-image: linear-gradient(var(--app-bg-veil), var(--app-bg-veil)), var(--app-bg-image-b);
+  background-position:
+    0 0,
+    var(--app-bg-position);
+  background-size:
+    100% 100%,
+    var(--app-bg-size);
+  background-repeat: no-repeat, var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
   will-change: opacity;
   transition:
@@ -865,7 +903,7 @@ body[data-bg-two-layer="true"][data-bg-phase="a"]::before,
 body[data-bg-two-layer="true"][data-bg-phase="b"]::after,
 body[data-bg-two-layer="true"][data-bg-phase="a"] [data-bg-target]::before,
 body[data-bg-two-layer="true"][data-bg-phase="b"] [data-bg-target]::after {
-  opacity: var(--app-bg-opacity);
+  opacity: var(--app-bg-fade);
   transform: none;
 }
 
@@ -983,7 +1021,8 @@ body[data-bg-enabled="true"][data-bg-scope="sidebar"] [data-bg-target="sidebar"]
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target]::before,
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
   display: block;
-  background-image: var(--app-bg-image);
+  background-color: var(--background);
+  background-image: linear-gradient(var(--app-bg-veil), var(--app-bg-veil)), var(--app-bg-image);
   /* `attachment: fixed` anchors the image to the viewport rather than each
      target's box. Without this, every [data-bg-target] paints its own
      `cover`-sized copy of the image — narrow panels (channel list, sidebar
@@ -992,12 +1031,16 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
      `cover` sizes the image to the viewport once and each panel only
      renders the slice that falls within its box, producing a continuous
      image across panels. */
-  background-attachment: fixed;
-  background-position: var(--app-bg-position);
-  background-size: var(--app-bg-size);
-  background-repeat: var(--app-bg-repeat);
+  background-attachment: fixed, fixed;
+  background-position:
+    0 0,
+    var(--app-bg-position);
+  background-size:
+    100% 100%,
+    var(--app-bg-size);
+  background-repeat: no-repeat, var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
-  opacity: var(--app-bg-opacity);
+  opacity: var(--app-bg-fade);
   transition:
     opacity var(--app-bg-transition-duration) var(--app-bg-transition-easing),
     transform var(--app-bg-transition-duration) var(--app-bg-transition-easing);
@@ -1023,11 +1066,16 @@ body[data-bg-enabled="true"][data-bg-two-layer="true"][data-bg-scope="global"]
   z-index: -1;
   pointer-events: none;
   display: block;
-  background-image: var(--app-bg-image-b);
-  background-attachment: fixed;
-  background-position: var(--app-bg-position);
-  background-size: var(--app-bg-size);
-  background-repeat: var(--app-bg-repeat);
+  background-color: var(--background);
+  background-image: linear-gradient(var(--app-bg-veil), var(--app-bg-veil)), var(--app-bg-image-b);
+  background-attachment: fixed, fixed;
+  background-position:
+    0 0,
+    var(--app-bg-position);
+  background-size:
+    100% 100%,
+    var(--app-bg-size);
+  background-repeat: no-repeat, var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
   transition:
     opacity var(--app-bg-transition-duration) var(--app-bg-transition-easing),
@@ -1051,8 +1099,12 @@ body[data-bg-enabled="true"][data-bg-scope="sidebar"]
   [data-slot="sidebar-inner"],
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="sidebar-inner"],
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="sidebar-inner"] {
-  background-color: color-mix(in oklch, var(--sidebar) 55%, transparent);
-  backdrop-filter: blur(8px);
+  /* Tokens, not literals: the old `55%` / `blur(8px)` skipped the dark-mode
+     bump, the no-backdrop-filter fallback and prefers-reduced-transparency,
+     so the sidebar stayed see-through for users who asked for solid UI. */
+  background-color: color-mix(in oklch, var(--sidebar) var(--surface-tonality-glass), transparent);
+  backdrop-filter: blur(var(--surface-blur-regular));
+  -webkit-backdrop-filter: blur(var(--surface-blur-regular));
 }
 
 /* ----------------------------------------------------------------------
@@ -1246,6 +1298,12 @@ html[data-bg-preview="all"] [data-bg-target] {
      tint while leaving whatever sits behind illegible without any blur. */
   --surface-tonality-overlay: 94%;
   --surface-tonality-modal: 96%;
+  /* Interactive fills — inputs, selects, outline buttons, sidebar search. A
+     control carries text the user is typing or choosing, so it sits a step
+     more solid than chrome (glass) without going opaque; it used to be a
+     literal 50% that skipped the dark, no-blur and reduced-transparency
+     adjustments below. */
+  --surface-tonality-control: 60%;
   --surface-blur-subtle: 6px;
   --surface-blur-regular: 10px;
   --surface-blur-strong: 14px;
@@ -1267,6 +1325,7 @@ html[data-bg-preview="all"] [data-bg-target] {
   --surface-tonality-frosted: 45%;
   --surface-tonality-overlay: 95%;
   --surface-tonality-modal: 97%;
+  --surface-tonality-control: 65%;
 }
 
 /* Fallback: when backdrop-filter isn't supported, push opacity up since we
@@ -1279,6 +1338,7 @@ html[data-bg-preview="all"] [data-bg-target] {
     --surface-tonality-frosted: 70%;
     --surface-tonality-overlay: 98%;
     --surface-tonality-modal: 98%;
+    --surface-tonality-control: 85%;
   }
   .dark {
     --surface-tonality-translucent: 88%;
@@ -1286,6 +1346,7 @@ html[data-bg-preview="all"] [data-bg-target] {
     --surface-tonality-frosted: 73%;
     --surface-tonality-overlay: 98%;
     --surface-tonality-modal: 98%;
+    --surface-tonality-control: 88%;
   }
 }
 
@@ -1300,6 +1361,7 @@ html[data-bg-preview="all"] [data-bg-target] {
     --surface-tonality-frosted: 100%;
     --surface-tonality-overlay: 100%;
     --surface-tonality-modal: 100%;
+    --surface-tonality-control: 100%;
     --surface-blur-subtle: 0px;
     --surface-blur-regular: 0px;
     --surface-blur-strong: 0px;
@@ -1320,14 +1382,22 @@ html[data-bg-preview="all"] [data-bg-target] {
  * override and no `!important` — which is exactly why a migrated surface stops
  * needing a bespoke entry in the wallpaper stack. */
 
-[data-surface-layer="base"] {
-  --surface-bg: var(--surface-bg-base);
-}
-[data-surface-layer="raised"] {
-  --surface-bg: var(--surface-bg-raised);
-}
-[data-surface-layer="overlay"] {
-  --surface-bg: var(--surface-bg-overlay);
+/* In `@layer base`, not unlayered. Unlayered, these beat every utility, so a
+   caller asking for a different fill through a class (`[--surface-bg:…]`) was
+   silently ignored — Card's settings-panel clear only took because it is
+   restated unlayered below. In the base layer a utility wins, the way every
+   other Tailwind default behaves. The scope retune further down still works:
+   it sets `--surface-bg-*`, a different property, on an ancestor. */
+@layer base {
+  [data-surface-layer="base"] {
+    --surface-bg: var(--surface-bg-base);
+  }
+  [data-surface-layer="raised"] {
+    --surface-bg: var(--surface-bg-raised);
+  }
+  [data-surface-layer="overlay"] {
+    --surface-bg: var(--surface-bg-overlay);
+  }
 }
 
 /* The settings panel is flat: `Card` already drops its radius and its top/side
@@ -1374,6 +1444,134 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] {
     transparent
   );
   --surface-blur: var(--surface-blur-subtle);
+  /* Fill for controls that paint `bg-background` as a button face or field —
+     outline buttons, sidebar search, navigation-menu triggers. They read it as
+     `bg-[var(--control-bg,var(--background))]`, so outside a wallpaper they
+     are unchanged and inside one their own `hover:` / `dark:` utilities still
+     win: a custom property never competes with a utility the way an
+     unlayered `background-color` override does. */
+  --control-bg: color-mix(in oklch, var(--background) var(--surface-tonality-control), transparent);
+  /* A feature's own list rail tinted like the app sidebar (the scheduler's
+     task list). Read as `bg-[var(--sidebar-pane-bg,var(--sidebar))]` with
+     `[backdrop-filter:var(--sidebar-pane-filter,none)]`: the sidebar glass —
+     the tier the legibility guard already solves `--sidebar` at — inside a
+     wallpaper, the plain solid tint outside one. */
+  --sidebar-pane-bg: color-mix(in oklch, var(--sidebar) var(--surface-tonality-glass), transparent);
+  --sidebar-pane-filter: blur(var(--surface-blur-regular));
+}
+
+/* Selection ink. The ui primitives fill a highlighted item with `bg-accent`
+   and set `text-accent-foreground` on the item — but a description, count or
+   shortcut inside it that asked for `text-muted-foreground` keeps that ink on
+   the accent fill. Under a saturated or pale accent (a colour preset,
+   high-contrast dark) that pair drops toward 1:1: the command palette's
+   highlighted row, a hovered menu item's shortcut. While an item is
+   highlighted, muted ink inside it — or on it — takes the accent's own
+   foreground. Unlayered, so it outranks the utility it corrects. */
+:is(
+    [data-slot="command-item"][data-selected="true"],
+    :is(
+      [data-slot$="menu-item"],
+      [data-slot$="menu-checkbox-item"],
+      [data-slot$="menu-radio-item"],
+      [data-slot$="menu-sub-trigger"],
+      [data-slot="select-item"],
+      [data-slot="combobox-item"]
+    ):is(:focus, [data-highlighted]),
+    [data-slot$="menu-sub-trigger"][data-state="open"],
+    [data-slot="menubar-trigger"]:is(:focus, [data-state="open"])
+  )
+  :is(.text-muted-foreground, [data-slot$="-shortcut"]),
+:is(
+  [data-slot="command-item"][data-selected="true"],
+  :is(
+    [data-slot$="menu-item"],
+    [data-slot$="menu-checkbox-item"],
+    [data-slot$="menu-radio-item"],
+    [data-slot$="menu-sub-trigger"],
+    [data-slot="select-item"],
+    [data-slot="combobox-item"]
+  ):is(:focus, [data-highlighted])
+).text-muted-foreground {
+  color: var(--accent-foreground);
+}
+
+/* Ambient glows — a blurred `bg-primary/…` bloom behind a hero (home welcome,
+   About). On a plain ground they are the page's only texture. Over a wallpaper
+   the wallpaper is the texture, and a primary-tinted bloom darkens a light
+   theme's backdrop (and lightens a dark one's) right where the hero text sits,
+   by an amount the legibility guard cannot see — it solves for the wallpaper
+   layer alone. So inside an active scope they step aside. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-ambient-glow],
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] [data-ambient-glow],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-ambient-glow],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-ambient-glow],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-ambient-glow] {
+  display: none;
+}
+
+/* Hairline grids: a `bg-border` ground showing through the 1px gaps between
+   cells that paint `bg-card` back over it (stat strips, server fact lists).
+   The trick needs opaque cells, so over a wallpaper every cell was a solid
+   tile. Inside a scope the grid becomes one translucent plate instead, the
+   cells go clear, and each cell draws its divider into the gap above and to
+   its left — the grid's `overflow-hidden` clips the outer ones. Unlayered, so
+   it outranks the cells' own `bg-card`; a hover fill is restated for the
+   interactive cells it would otherwise erase. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-hairline-grid],
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] [data-hairline-grid],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-hairline-grid],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-hairline-grid],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-hairline-grid] {
+  background-color: color-mix(
+    in oklch,
+    var(--card) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-hairline-grid] > *,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-hairline-grid]
+  > *,
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-hairline-grid]
+  > *,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-hairline-grid] > *,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-hairline-grid] > * {
+  background-color: transparent;
+  box-shadow:
+    -1px 0 0 var(--border),
+    0 -1px 0 var(--border);
+}
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-hairline-grid]
+  > :is(button, a):is(:hover, :focus-visible),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-hairline-grid]
+  > :is(button, a):is(:hover, :focus-visible),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-hairline-grid]
+  > :is(button, a):is(:hover, :focus-visible),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  [data-hairline-grid]
+  > :is(button, a):is(:hover, :focus-visible),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  [data-hairline-grid]
+  > :is(button, a):is(:hover, :focus-visible) {
+  background-color: color-mix(in oklch, var(--muted) 50%, transparent);
 }
 
 /* Overlays are portaled to <body>, outside every [data-bg-target] subtree, so
@@ -1460,11 +1658,10 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot
   -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
 }
 
-/* kbd + table-footer — translucent --muted, no blur (small chrome accents,
- * blur would be visually noisy). NB: button-group's ButtonGroupText
- * (button-group.tsx:40) has bg-muted but no data-slot attribute, so it
- * is intentionally not covered here — consumers can wrap it in
- * [data-tonality="translucent"] when they want wallpaper-aware behaviour. */
+/* kbd + table-footer + button-group text — translucent --muted, no blur
+ * (small chrome accents, blur would be visually noisy). ButtonGroupText
+ * carries `data-slot="button-group-text"` so it no longer sits as the one
+ * opaque segment in an otherwise translucent group. */
 body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="kbd"],
 body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] [data-slot="kbd"],
 body[data-bg-enabled="true"][data-bg-scope="sidebar"] [data-bg-target="sidebar"] [data-slot="kbd"],
@@ -1480,7 +1677,20 @@ body[data-bg-enabled="true"][data-bg-scope="sidebar"]
   [data-bg-target="sidebar"]
   [data-slot="table-footer"],
 body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="table-footer"],
-body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="table-footer"] {
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="table-footer"],
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="button-group-text"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="button-group-text"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="button-group-text"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="button-group-text"],
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  [data-slot="button-group-text"] {
   background-color: color-mix(
     in oklch,
     var(--muted) var(--surface-tonality-translucent),
@@ -1660,7 +1870,9 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-sonner-toast] {
  *
  * Inputs default to bg-transparent which destroys their affordance over a
  * busy wallpaper. Add a faint translucent backdrop and strengthen the
- * border so they remain readable. Same scope-aware compound as Section 2. */
+ * border so they remain readable. Same scope-aware compound as Section 2.
+ * The fill is `--control-bg` (Section 1b), the one value outline buttons and
+ * the sidebar search read too, so every control over a wallpaper matches. */
 
 /* Text fields + trigger surfaces. input-group wraps Input/Textarea with
  * bg-transparent so the wrapper is the visible surface (dark mode has
@@ -1720,9 +1932,9 @@ body[data-bg-enabled="true"][data-bg-scope="global"]
     [data-slot="combobox-trigger"],
     [data-slot="input-group"]
   ) {
-  background-color: color-mix(in oklch, var(--background) 50%, transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background-color: var(--control-bg);
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
   border-color: color-mix(in oklch, var(--border) 40%, var(--foreground));
 }
 
@@ -1768,7 +1980,7 @@ body[data-bg-enabled="true"][data-bg-scope="global"]
     [data-slot="switch"][data-state="unchecked"],
     [data-slot="toggle"][data-state="off"]
   ) {
-  background-color: color-mix(in oklch, var(--background) 50%, transparent);
+  background-color: var(--control-bg);
   border-color: color-mix(in oklch, var(--border) 40%, var(--foreground));
 }
 
@@ -1788,9 +2000,9 @@ body[data-bg-enabled="true"][data-bg-scope="all"]
 body[data-bg-enabled="true"][data-bg-scope="global"]
   [data-bg-target]
   :is([data-slot="slider-track"], [data-slot="progress"]) {
-  background-color: color-mix(in oklch, var(--muted) 65%, transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background-color: color-mix(in oklch, var(--muted) var(--surface-tonality-glass), transparent);
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
 }
 
 /* Section 4b — Additional neutral surfaces.
@@ -1889,26 +2101,120 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot
  * sheet, which is appended after this block and wins on source order.
  * ──────────────────────────────────────────────────────────────────────────*/
 
-/* --background surfaces (artifact, code block, scroll-to-bottom button) —
- * translucent, subtle blur. */
+/* --background surfaces — translucent, subtle blur. The artifact, code block
+ * and conversation scroll button, plus the panel roots that used to paint an
+ * opaque `bg-background` block over the wallpaper: commit, environment
+ * variables, package info, schema display, stack trace, test results, queue,
+ * file tree and the canvas node toolbar. */
 body[data-bg-enabled="true"][data-bg-scope="chat"]
   [data-bg-target="chat"]
-  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+  :is(
+    [data-slot="ai-artifact"],
+    [data-slot="ai-code-block"],
+    [data-slot="ai-conversation"],
+    [data-slot="ai-commit"],
+    [data-slot="ai-environment-variables"],
+    [data-slot="ai-package-info"],
+    [data-slot="ai-schema-display"],
+    [data-slot="ai-stack-trace"],
+    [data-slot="ai-test-results"],
+    [data-slot="ai-queue"],
+    [data-slot="ai-file-tree"],
+    [data-slot="ai-toolbar"]
+  ),
 body[data-bg-enabled="true"][data-bg-scope="canvas"]
   [data-bg-target="canvas"]
-  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+  :is(
+    [data-slot="ai-artifact"],
+    [data-slot="ai-code-block"],
+    [data-slot="ai-conversation"],
+    [data-slot="ai-commit"],
+    [data-slot="ai-environment-variables"],
+    [data-slot="ai-package-info"],
+    [data-slot="ai-schema-display"],
+    [data-slot="ai-stack-trace"],
+    [data-slot="ai-test-results"],
+    [data-slot="ai-queue"],
+    [data-slot="ai-file-tree"],
+    [data-slot="ai-toolbar"]
+  ),
 body[data-bg-enabled="true"][data-bg-scope="sidebar"]
   [data-bg-target="sidebar"]
-  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+  :is(
+    [data-slot="ai-artifact"],
+    [data-slot="ai-code-block"],
+    [data-slot="ai-conversation"],
+    [data-slot="ai-commit"],
+    [data-slot="ai-environment-variables"],
+    [data-slot="ai-package-info"],
+    [data-slot="ai-schema-display"],
+    [data-slot="ai-stack-trace"],
+    [data-slot="ai-test-results"],
+    [data-slot="ai-queue"],
+    [data-slot="ai-file-tree"],
+    [data-slot="ai-toolbar"]
+  ),
 body[data-bg-enabled="true"][data-bg-scope="all"]
   [data-bg-target]
-  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+  :is(
+    [data-slot="ai-artifact"],
+    [data-slot="ai-code-block"],
+    [data-slot="ai-conversation"],
+    [data-slot="ai-commit"],
+    [data-slot="ai-environment-variables"],
+    [data-slot="ai-package-info"],
+    [data-slot="ai-schema-display"],
+    [data-slot="ai-stack-trace"],
+    [data-slot="ai-test-results"],
+    [data-slot="ai-queue"],
+    [data-slot="ai-file-tree"],
+    [data-slot="ai-toolbar"]
+  ),
 body[data-bg-enabled="true"][data-bg-scope="global"]
   [data-bg-target]
-  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]) {
+  :is(
+    [data-slot="ai-artifact"],
+    [data-slot="ai-code-block"],
+    [data-slot="ai-conversation"],
+    [data-slot="ai-commit"],
+    [data-slot="ai-environment-variables"],
+    [data-slot="ai-package-info"],
+    [data-slot="ai-schema-display"],
+    [data-slot="ai-stack-trace"],
+    [data-slot="ai-test-results"],
+    [data-slot="ai-queue"],
+    [data-slot="ai-file-tree"],
+    [data-slot="ai-toolbar"]
+  ) {
   background-color: color-mix(
     in oklch,
     var(--background) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* --card surfaces — the canvas panel and controls, and the web preview frame.
+ * Translucent like cards, subtle blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  :is([data-slot="ai-panel"], [data-slot="ai-controls"], [data-slot="ai-web-preview"]),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  :is([data-slot="ai-panel"], [data-slot="ai-controls"], [data-slot="ai-web-preview"]),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  :is([data-slot="ai-panel"], [data-slot="ai-controls"], [data-slot="ai-web-preview"]),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  :is([data-slot="ai-panel"], [data-slot="ai-controls"], [data-slot="ai-web-preview"]),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  :is([data-slot="ai-panel"], [data-slot="ai-controls"], [data-slot="ai-web-preview"]) {
+  background-color: color-mix(
+    in oklch,
+    var(--card) var(--surface-tonality-translucent),
     transparent
   );
   backdrop-filter: blur(var(--surface-blur-subtle));
@@ -2775,7 +3081,7 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
   background: #01061e;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
-  transition: opacity calc(450ms * var(--motion-duration-scale, 1)) ease;
+  transition: opacity calc(180ms * var(--motion-duration-scale, 1)) ease;
 }
 
 /* Exit: the canvas fades while the stage pushes gently forward. */
@@ -2786,7 +3092,7 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
 
 .mboot__stage {
   position: relative;
-  transition: transform calc(450ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out);
+  transition: transform calc(180ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out);
 }
 
 .mboot--leaving .mboot__stage {

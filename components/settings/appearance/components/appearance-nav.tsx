@@ -157,7 +157,7 @@ function AppearanceNavItem({
         onClick={() => onSelect(id)}
         onKeyDown={(event) => onKeyDown(event, id)}
         className={cn(
-          "h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
+          "group/nav-row h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
           "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         )}
@@ -167,7 +167,13 @@ function AppearanceNavItem({
           <span className="block truncate text-sm font-medium" data-nav-label>
             {label}
           </span>
-          <span className="block truncate text-[11px] text-muted-foreground" data-nav-desc>
+          {/* On the selected row's solid accent fill, muted ink is the wrong pair
+              (a saturated or pale accent leaves it near 1:1); the description
+              takes the fill's own foreground there. */}
+          <span
+            className="block truncate text-[11px] text-muted-foreground group-data-[active=true]/nav-row:text-accent-foreground"
+            data-nav-desc
+          >
             {description}
           </span>
         </span>

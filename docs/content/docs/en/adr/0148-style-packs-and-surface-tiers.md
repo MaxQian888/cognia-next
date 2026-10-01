@@ -156,6 +156,113 @@ through `@/components/plugins` is not mistaken for unmarked. Both sweeps assert
 they scanned a non-trivial number of files, because a sweep that silently
 matches nothing passes just as green as one that finds nothing.
 
+### 9. The wallpaper guards legibility; surfaces do not have to
+
+*Amended 2026-09-30.* Translucent tiers alone left two failure modes. Text that
+sits on the page ground — settings content (the settings panel deliberately
+flattens its cards), greetings, assistant messages, empty states — had nothing
+behind it but the raw image. And primitives that paint a literal
+`bg-background` / `bg-card` without a slot rule (outline buttons, sidebar
+search, the page inset, a dozen ai-elements panel roots) stayed opaque blocks.
+
+**The guard.** `lib/appearance/wallpaper-legibility.ts` solves, per wallpaper ×
+theme, the largest image weight at which `--foreground` keeps 4.5:1 and
+`--muted-foreground` keeps 3:1 over the image's darkest and brightest patches —
+both targets capped at 95% of what the bare theme achieves, so a low-contrast
+theme is not pinned to weight 0. The model follows what the browser does:
+extremes are the 3rd/97th-percentile samples of WCAG (linear) luminance, the
+composite is taken in gamma-encoded sRGB (how `opacity` blends), and blur earns
+credit only beyond the ~30 px the analysis raster already averages. Surface
+`backdrop-filter` earns none, because several surfaces paint without it and
+Android WebViews paint many blurred overlays unblurred. This is the same move as
+Windows Mica/Acrylic's luminosity layer: normalise the backdrop first, then let
+materials be decoration.
+
+**Wiring — three points, no fourth.** `use-wallpaper-legibility` (called from
+`BackgroundApplier`, the subsystem's one mount) writes `--wp-max-weight` on
+`<body>`; `globals.css` folds it into `--app-bg-painted-opacity: min(slider,
+cap)`, which every wallpaper layer paints at (see *Layers* below) — so fades,
+crossfades and live slider previews honour the cap without re-solving. The wallpaper panel's
+contrast chip and "Auto-fix" run the same solver, so they cannot disagree with
+what is painted. Analyses are mirrored in `localStorage` keyed by id + bytes so a
+relaunch never paints uncapped first. `BackgroundSettings.legibilityGuard`
+(absent = on) turns it off; theme colours are resolved through a probe element
+and re-checked on any `<html>` / `<head>` mutation that changes them.
+
+**Surfaces.** Controls now share one fill, `--control-bg` (defined only inside an
+active scope; read as `bg-[var(--control-bg,var(--background))]` so `hover:` and
+`dark:` utilities still win), and a `--surface-tonality-control` token that
+honours the dark bump, the no-blur fallback and reduced transparency — as the
+sidebar now does, instead of its literal `55%`. Tier rules moved into
+`@layer base`, so a utility override of `--surface-bg` finally applies. Selection
+indicators, switch/slider thumbs and primary buttons stay solid on purpose: on
+glass, solid is the affordance.
+
+**Layers are opaque composites.** Under scope `all` the wallpaper is painted on
+`<body>`, `#app` and every shell target, each over the one below. Painted as
+translucent images, four layers at the solved 21% compounded to ~60% image on
+screen, so the cap meant nothing. Each layer is instead an opaque composite —
+`background-color: var(--background)`, the image, then a veil of ground at
+`1 − painted weight` (`--app-bg-veil`) — so a layer shows exactly the solved
+weight no matter how many sit beneath it. Layer `opacity` now carries only the
+fade (`--app-bg-fade`). Solid-colour wallpapers go through
+`toBackgroundImage` (`linear-gradient(c, c)`), because a bare colour is not a
+valid `background-image` and used to paint nothing.
+
+**Surfaces bind too.** Text also sits on translucent cards (translucent tier)
+and the sidebar (glass tier). The solver stacks each surface — its colour at its
+live tonality, which already reflects the dark bump, the no-blur fallback and
+reduced transparency — over the capped ground, and the cap is the lowest weight
+any of them allows. A surface's target is measured against itself over the
+theme ground, so a surface that is lower-contrast by design is not held to a
+ratio it never had.
+
+**Light/dark fit.** The same solver answers which variant a wallpaper suits:
+`recommendThemeVariant` solves the cap under neutral light and dark ink and
+picks the one that keeps more of the image (ties broken by mean luminance).
+The wallpaper panel shows a hint only when the other variant keeps at least
+0.2 more weight (`THEME_MISMATCH_GAIN`), with a one-click switch and "follow the
+wallpaper", a new auto light/dark trigger (`AutoModeTrigger = "wallpaper"`) that
+re-resolves when the active wallpaper changes or its analysis lands in the
+cache. `AutoModeInitializer` mounts with the always-on boot group, not the
+workflow-automation capability it used to ride (which the development `main`
+profile never requests on `/` or `/settings`).
+
+**Coverage past the primitives.** Measuring real routes, not the slot list,
+found the remaining defects in feature code. Each is fixed with a reusable
+hook, not a one-off override:
+
+- *Hairline grids*: a `bg-border` ground showing through 1px gaps between
+  `bg-card` cells (stat strips, server fact lists). The trick needs opaque
+  cells, so every cell was a solid tile over the image. They carry
+  `data-hairline-grid`; inside a scope the grid becomes one translucent plate,
+  the cells go clear, and each cell draws its divider into the gap with a 1px
+  shadow.
+- *Feature rails* tinted like the sidebar read
+  `bg-[var(--sidebar-pane-bg,var(--sidebar))]`, the glass tier the guard
+  already solves `--sidebar` at, defined only inside a scope.
+- *Ambient glows* (`data-ambient-glow`): a blurred `bg-primary/…` bloom
+  behind a hero darkens a light theme's backdrop, or lightens a dark one's,
+  by an amount the guard cannot see. Over a wallpaper the wallpaper is the
+  texture, so they step aside.
+- *Selection ink.* A row filled with `bg-accent` must pair its secondary text
+  with `--accent-foreground`. Muted ink on a saturated or pale accent (a colour
+  preset, high-contrast dark) reads near 1:1, wallpaper or not. A global rule
+  covers highlighted command, menu, select and combobox items; the
+  hand-rolled selected rows (settings, memory and subagent navs, the skill
+  list) now set it themselves.
+
+**Verified on real pixels.** `tests/e2e/settings/wallpaper-legibility.spec.ts`
+hides every glyph, screenshots the wallpaper panel, and measures the backdrop
+behind each `--foreground` / `--muted-foreground` text box against its colour,
+for night, paper and black-and-white wallpapers × light, dark,
+high-contrast-dark and a colour preset; it also pins the fit hint and the
+follow switch. `wallpaper-routes.spec.ts` sweeps 18 routes and two overlays
+(the command palette, a dropdown menu) under the black-and-white wallpaper
+in all four theme cases. It fails on illegible theme text and on any large
+solid theme fill painted straight over the image. Selection indicators,
+open overlays and shells that hold a wallpaper target are exempt, by design.
+
 ## Consequences
 
 - Picking Sharp squares the app, removes shadows, tightens density and sets

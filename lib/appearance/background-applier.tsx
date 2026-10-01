@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { applyUserCss } from "@/lib/appearance/custom-css/apply"
 import {
@@ -8,7 +8,7 @@ import {
   resolveSourceToCss,
   sameWallpaperSource,
 } from "@/lib/appearance/wallpaper-storage"
-import { BG_VARS, resolveBackgroundFit } from "@/lib/appearance/background-fit"
+import { BG_VARS, resolveBackgroundFit, toBackgroundImage } from "@/lib/appearance/background-fit"
 import {
   crossfadeToLayer,
   fadeToImage,
@@ -19,12 +19,14 @@ import {
 import { planTransition } from "@/lib/appearance/wallpaper-transition"
 import { prefersReducedMotion } from "@/lib/appearance/reduced-motion"
 import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotation"
-import { withBuiltinPresets } from "@/lib/appearance/presets"
+import { findActiveWallpaper, withBuiltinPresets } from "@/lib/appearance/presets"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { useWallpaperRotation } from "@/hooks/appearance/use-wallpaper-rotation"
 import { writeLockScreenPreferences } from "@/lib/appearance/lock-screen-preferences"
 import { DEFAULT_LOCK_SCREEN } from "@/types/appearance/lock-screen"
 import { useDailyWallpaper } from "@/hooks/appearance/use-daily-wallpaper"
+import { useWallpaperLegibility } from "@/hooks/appearance/use-wallpaper-legibility"
+import { isLegibilityGuardOn } from "@/lib/appearance/wallpaper-legibility"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
 /** Body data attributes the appearance module owns. globals.css selectors key off these. */
@@ -71,6 +73,26 @@ export function BackgroundApplier(): null {
   useWallpaperRotation()
   useDailyWallpaper()
 
+  // The CSS value on the wallpaper layer right now. State rather than only the
+  // ref below because the legibility guard analyses these exact bytes, and has
+  // to re-run when they change.
+  const [paintedCss, setPaintedCss] = useState<string | null>(null)
+  // Only the two fields that pick the wallpaper: depending on `background` as a
+  // whole would re-resolve it on every blur or opacity drag.
+  const { enabled: bgEnabled, activeId } = background
+  const activeWallpaper = useMemo(
+    () => findActiveWallpaper({ enabled: bgEnabled, activeId }, wallpapers),
+    [bgEnabled, activeId, wallpapers]
+  )
+  // Automatic readability protection: caps the layer's opacity at the highest
+  // image weight that keeps theme text legible over this wallpaper.
+  useWallpaperLegibility({
+    wallpaper: activeWallpaper,
+    blurPx: background.blurPx,
+    guard: isLegibilityGuardOn(background),
+    paintedCss,
+  })
+
   const lastUrlRef = useRef<string | null>(null)
   // Which wallpaper is currently painted. A change in this value between two
   // runs of the effect is what distinguishes "the user swapped wallpaper" from
@@ -113,6 +135,7 @@ export function BackgroundApplier(): null {
         lastUrlRef.current = cssValue
         paintedIdRef.current = paintedId
         paintedSourceRef.current = source
+        setPaintedCss(cssValue)
       },
       isCancelled: () => cancelled,
     }).catch((err) => {
@@ -260,6 +283,13 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
 
   body.style.setProperty(VAR_BLUR, `${background.blurPx}px`)
   body.style.setProperty(VAR_OPACITY, `${background.opacity}`)
+  // A fade cancelled mid-dip (the user picked again) would otherwise leave the
+  // layer hidden; a new fade below sets it back to 0 in this same frame.
+  body.style.setProperty(BG_VARS.fade, "1")
+  // What the layer paints. `cssValue` stays the resolved value (it is what
+  // `disposeUrl` revokes and what the guard analyses); a solid colour needs
+  // wrapping to be a valid `background-image` layer.
+  const paint = toBackgroundImage(cssValue)
   // Image kinds need explicit sizing/positioning; gradients and colors
   // take the same vars but ignore them — we still write the resolved fit
   // for predictability. `background-fit.ts` owns the mapping so the gallery
@@ -280,14 +310,14 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
     // first, otherwise writing the image to layer A while phase says "b"
     // leaves the new wallpaper staged on a layer nobody is looking at.
     normalizeToSingleLayer(body)
-    body.style.setProperty(VAR_IMAGE, cssValue)
+    body.style.setProperty(VAR_IMAGE, paint)
   } else if (plan.twoLayer) {
     if (plan.effective === "dissolve") {
       registerPending(rampDissolveBlur({ body, plan, restoreBlurPx: background.blurPx }))
     }
-    crossfadeToLayer({ body, cssValue, plan })
+    crossfadeToLayer({ body, cssValue: paint, plan })
   } else {
-    registerPending(fadeToImage({ body, cssValue, plan, opacity: background.opacity }))
+    registerPending(fadeToImage({ body, cssValue: paint, plan }))
   }
 
   if (!animate) writeTransitionTiming({ body, plan: { ...plan, durationMs: 0 } })

@@ -1,6 +1,13 @@
 /** @jest-environment jsdom */
-import { renderHook } from "@testing-library/react"
-import { useAutoMode } from "./use-auto-mode"
+import { act, renderHook } from "@testing-library/react"
+import { useAutoMode, wallpaperPhase } from "./use-auto-mode"
+import {
+  __INTERNALS__ as CACHE,
+  analysisCacheKey,
+  writeCachedAnalysis,
+} from "./wallpaper-analysis-cache"
+import type { WallpaperThemeAnalysis } from "./wallpaper-theme-generator"
+import { DEFAULT_BACKGROUND_SETTINGS, type Wallpaper } from "@/types/appearance"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_AUTOMODE } from "@/types/appearance"
 import type { AutoModeSettings } from "@/types/appearance"
@@ -126,5 +133,106 @@ describe("useAutoMode", () => {
     setupStore(automode({ enabled: true, trigger: "system" }))
     const { unmount } = renderHook(() => useAutoMode())
     expect(() => unmount()).not.toThrow()
+  })
+})
+
+describe("useAutoMode — wallpaper trigger", () => {
+  const night: Wallpaper = {
+    id: "wp_night",
+    name: "night",
+    kind: "color",
+    source: { kind: "color", value: "#0b1020" },
+    builtin: false,
+    createdAt: 1,
+  }
+  const paper: Wallpaper = {
+    id: "wp_paper",
+    name: "paper",
+    kind: "color",
+    source: { kind: "color", value: "#fafaf9" },
+    builtin: false,
+    createdAt: 1,
+  }
+  const analysisOf = (hex: string): WallpaperThemeAnalysis => ({
+    accent: hex,
+    secondary: hex,
+    dominant: hex,
+    averageLuminance: 0.5,
+    luminanceSpread: 0,
+    darkExtreme: hex,
+    brightExtreme: hex,
+    baseVariant: "dark",
+  })
+
+  function showWallpaper(activeId: string | null): void {
+    useSettingsStore.setState({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, enabled: activeId !== null, activeId },
+      wallpapers: [night, paper],
+    } as never)
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    CACHE.resetMemory()
+  })
+
+  it("picks the variant the active wallpaper suits", () => {
+    writeCachedAnalysis(analysisCacheKey(night), analysisOf("#0b1020"))
+    setupStore(automode({ enabled: true, trigger: "wallpaper" }), "light")
+    showWallpaper("wp_night")
+    renderHook(() => useAutoMode())
+    expect(mockSetTheme).toHaveBeenCalledWith("dark")
+  })
+
+  it("follows the system until the wallpaper is measured, then switches", () => {
+    prefersDark = false
+    setupStore(automode({ enabled: true, trigger: "wallpaper" }), "system")
+    showWallpaper("wp_night")
+    renderHook(() => useAutoMode())
+    expect(mockSetTheme).toHaveBeenLastCalledWith("light")
+    act(() => writeCachedAnalysis(analysisCacheKey(night), analysisOf("#0b1020")))
+    expect(mockSetTheme).toHaveBeenLastCalledWith("dark")
+  })
+
+  it("re-evaluates straight away when the wallpaper changes", () => {
+    writeCachedAnalysis(analysisCacheKey(night), analysisOf("#0b1020"))
+    writeCachedAnalysis(analysisCacheKey(paper), analysisOf("#fafaf9"))
+    setupStore(automode({ enabled: true, trigger: "wallpaper" }), "system")
+    showWallpaper("wp_night")
+    renderHook(() => useAutoMode())
+    expect(mockSetTheme).toHaveBeenLastCalledWith("dark")
+    act(() => showWallpaper("wp_paper"))
+    expect(mockSetTheme).toHaveBeenLastCalledWith("light")
+  })
+
+  it("follows the system with no wallpaper up", () => {
+    prefersDark = true
+    setupStore(automode({ enabled: true, trigger: "wallpaper" }), "light")
+    showWallpaper(null)
+    renderHook(() => useAutoMode())
+    expect(mockSetTheme).toHaveBeenCalledWith("dark")
+  })
+
+  it("ignores wallpaper analyses under the other triggers", () => {
+    prefersDark = false
+    writeCachedAnalysis(analysisCacheKey(night), analysisOf("#0b1020"))
+    setupStore(automode({ enabled: true, trigger: "system" }), "system")
+    showWallpaper("wp_night")
+    renderHook(() => useAutoMode())
+    expect(mockSetTheme).toHaveBeenLastCalledWith("light")
+  })
+})
+
+describe("wallpaperPhase", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    CACHE.resetMemory()
+  })
+
+  it("is null without a painted, measured wallpaper", () => {
+    expect(wallpaperPhase({ ...DEFAULT_BACKGROUND_SETTINGS }, [])).toBeNull()
+    expect(
+      wallpaperPhase({ ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "missing" }, [])
+    ).toBeNull()
   })
 })

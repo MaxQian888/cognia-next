@@ -3,6 +3,7 @@
 import { converter, formatHex, parse } from "culori"
 import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 import type { WallpaperPosition, WallpaperSource } from "@/types/appearance"
+import { rgbRelativeLuminance } from "./contrast"
 import { ensureForegroundContrast } from "./ensure-contrast"
 import { DEFAULT_FALLBACKS } from "./vscode-theme/token-mapping"
 import { disposeUrl, resolveSourceToCss } from "./wallpaper-storage"
@@ -36,6 +37,13 @@ const SECONDARY_FALLBACK_ROTATION = 150
  */
 const ACCENT_MIN_LIGHTNESS = 0.45
 const ACCENT_MAX_LIGHTNESS = 0.78
+/**
+ * Percentiles of WCAG luminance reported as the image's dark / bright extremes.
+ * Not 0 / 100: a single stray pixel (a star, a JPEG ringing artefact) is not
+ * somewhere text actually lands. The 48-px raster already averages ~30 CSS px
+ * per sample, so a few percent in from each end is a real patch of the image.
+ */
+const EXTREME_PERCENTILE = 0.03
 
 const toOklch = converter("oklch")
 const toRgb = converter("rgb")
@@ -58,6 +66,15 @@ export interface WallpaperThemeAnalysis {
    * estimate and the recommended opacity/blur.
    */
   luminanceSpread: number
+  /**
+   * sRGB hex of the sample at the {@link EXTREME_PERCENTILE} of WCAG (linear)
+   * luminance — the darkest patch text may have to sit on. Paired with
+   * {@link brightExtreme}, this is what the legibility guard solves against:
+   * a mean says nothing about the one patch that defeats the text.
+   */
+  darkExtreme: string
+  /** The bright counterpart of {@link darkExtreme}. */
+  brightExtreme: string
   baseVariant: "light" | "dark"
 }
 
@@ -89,6 +106,9 @@ export function analyzeWallpaperPixels(
   let totalLuminanceSquared = 0
   const bins: HueBin[] = Array.from({ length: HUE_BINS }, () => ({ r: 0, g: 0, b: 0, weight: 0 }))
   let totalAccentWeight = 0
+  // Visible samples in scan order, for the percentile extremes below. Bounded
+  // by the raster (at most 48×96), so keeping them costs a few kilobytes.
+  const samples: Array<{ lum: number; r: number; g: number; b: number }> = []
 
   const pixelCount = width * height * 4
   for (let offset = 0; offset < pixelCount; offset += 4) {
@@ -107,6 +127,12 @@ export function analyzeWallpaperPixels(
     totalLuminance += luminance
     totalLuminanceSquared += luminance * luminance
     count += 1
+    samples.push({
+      lum: rgbRelativeLuminance(red / 255, green / 255, blue / 255),
+      r: red,
+      g: green,
+      b: blue,
+    })
 
     const weight = accentWeightOf(red, green, blue, luminance)
     const bin = bins[Math.min(HUE_BINS - 1, Math.floor(hueOf([red, green, blue]) / HUE_BIN_SIZE))]!
@@ -152,12 +178,20 @@ export function analyzeWallpaperPixels(
   // E[l²] - E[l]² a hair below zero for a perfectly uniform field.
   const variance = Math.max(0, totalLuminanceSquared / count - averageLuminance ** 2)
 
+  samples.sort((a, b) => a.lum - b.lum)
+  const at = (fraction: number) => {
+    const sample = samples[Math.round(fraction * (samples.length - 1))]!
+    return rgbToHex([sample.r, sample.g, sample.b])
+  }
+
   return {
     accent,
     secondary,
     dominant: rgbToHex(average),
     averageLuminance,
     luminanceSpread: Math.sqrt(variance),
+    darkExtreme: at(EXTREME_PERCENTILE),
+    brightExtreme: at(1 - EXTREME_PERCENTILE),
     baseVariant: averageLuminance >= LIGHT_VARIANT_THRESHOLD ? "light" : "dark",
   }
 }
@@ -254,12 +288,21 @@ function rotateHue(hex: string, degrees: number = SECONDARY_FALLBACK_ROTATION): 
  * and used to be excluded outright.
  */
 export async function analyzeWallpaperSource(
-  source: WallpaperSource
+  source: WallpaperSource,
+  options: {
+    /**
+     * The `url(...)` value already painted on the wallpaper layer. Reusing it
+     * skips a second resolve — for a disk wallpaper that is a full-image read
+     * over IPC — and the caller keeps ownership, so it is never revoked here.
+     */
+    paintedCss?: string
+  } = {}
 ): Promise<WallpaperThemeAnalysis> {
   if (source.kind === "color") return analyzeCssColors([source.value])
   if (source.kind === "gradient") return analyzeCssColors(extractCssColorStops(source.css))
 
-  const css = await resolveSourceToCss(source)
+  const owned = options.paintedCss === undefined
+  const css = options.paintedCss ?? (await resolveSourceToCss(source))
   try {
     const imageUrl = extractCssUrl(css)
     const image = await loadImage(imageUrl)
@@ -282,7 +325,7 @@ export async function analyzeWallpaperSource(
       height
     )
   } finally {
-    disposeUrl(css)
+    if (owned) disposeUrl(css)
   }
 }
 

@@ -1,10 +1,11 @@
 "use client"
 
 // Settings → Appearance → Auto. Configures the automatic light/dark switcher
-// driven by `lib/appearance/use-auto-mode.ts`. Three triggers:
-//   - system   → follow the OS preference,
-//   - schedule → switch at local HH:mm thresholds,
-//   - sunset   → switch at sunrise / sunset for a captured location.
+// driven by `lib/appearance/use-auto-mode.ts`. Four triggers:
+//   - system    → follow the OS preference,
+//   - schedule  → switch at local HH:mm thresholds,
+//   - sunset    → switch at sunrise / sunset for a captured location,
+//   - wallpaper → whichever variant lets more of the active wallpaper show.
 // Persists through the generic `save({ autoMode })` setter; the runner reads
 // the same store slice live, so edits take effect within a minute.
 //
@@ -30,10 +31,12 @@ import { Switch } from "@/components/ui/switch"
 import { responsiveSelectClass } from "@/lib/utils"
 import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { parseHmToMinutes } from "@/lib/appearance/auto-mode"
+import { findActiveWallpaper } from "@/lib/appearance/presets"
+import { useWallpaperThemeFit } from "@/hooks/appearance/use-wallpaper-theme-fit"
 import { useSettingsStore } from "@/stores/settings"
 import type { AutoModeSettings, AutoModeTrigger } from "@/types/appearance"
 
-const TRIGGERS: AutoModeTrigger[] = ["system", "schedule", "sunset"]
+const TRIGGERS: AutoModeTrigger[] = ["system", "schedule", "sunset", "wallpaper"]
 
 /** A complete "HH:MM", else `null`: a cleared or half-entered time field. */
 const validTimeOfDay = (value: string): string | null =>
@@ -53,6 +56,10 @@ export function AutoModeTab() {
   const t = useTranslations("settings.appearance.auto")
   const autoMode = useSettingsStore((s) => s.autoMode)
   const save = useSettingsStore((s) => s.save)
+  const background = useSettingsStore((s) => s.background)
+  const wallpapers = useSettingsStore((s) => s.wallpapers)
+  const activeWallpaper = findActiveWallpaper(background, wallpapers)
+  const wallpaperFit = useWallpaperThemeFit(activeWallpaper, background.blurPx)
 
   const write = (p: Partial<AutoModeSettings>) => save({ autoMode: { ...autoMode, ...p } })
   const patch = (p: Partial<AutoModeSettings>) => void write(p)
@@ -228,6 +235,18 @@ export function AutoModeTab() {
           </div>
           <p className="text-[11px] text-muted-foreground">{t("sunset.hint")}</p>
         </div>
+      )}
+
+      {autoMode.trigger === "wallpaper" && (
+        <p className="text-[11px] text-muted-foreground" data-testid="auto-wallpaper-status">
+          {!activeWallpaper
+            ? t("wallpaper.noWallpaper")
+            : !wallpaperFit.fit
+              ? t("wallpaper.measuring")
+              : wallpaperFit.fit.recommended === "dark"
+                ? t("wallpaper.suitsDark")
+                : t("wallpaper.suitsLight")}
+        </p>
       )}
 
       <p className="text-[11px] text-muted-foreground">{t("snoozeNote")}</p>

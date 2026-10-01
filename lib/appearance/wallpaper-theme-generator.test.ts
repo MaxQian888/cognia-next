@@ -23,6 +23,8 @@ function analysis(patch: Partial<WallpaperThemeAnalysis> = {}): WallpaperThemeAn
     dominant: "#8c8c8c",
     averageLuminance: 0.76,
     luminanceSpread: 0.1,
+    darkExtreme: "#6c6c6c",
+    brightExtreme: "#acacac",
     baseVariant: "light",
     ...patch,
   }
@@ -42,6 +44,37 @@ describe("analyzeWallpaperPixels", () => {
     expect(usableAccent("#ffdc00")).toBe(result.accent)
     // A uniform field has no variance at all.
     expect(result.luminanceSpread).toBeCloseTo(0, 6)
+  })
+
+  it("reports the dark and bright extremes of a two-tone field", () => {
+    const result = analyzeWallpaperPixels(
+      pixels([0, 0, 0, 255], [255, 255, 255, 255], [0, 0, 0, 255], [255, 255, 255, 255]),
+      4,
+      1
+    )
+
+    // The mean is a grey that appears nowhere; the extremes are what text meets.
+    expect(result.dominant).toBe("#808080")
+    expect(result.darkExtreme).toBe("#000000")
+    expect(result.brightExtreme).toBe("#ffffff")
+  })
+
+  it("ranks extremes by WCAG luminance, not by raw channel sum", () => {
+    // Pure blue (#0000ff, WCAG L≈0.07) out-sums dark green (#006400, L≈0.12)
+    // in raw channels but is the darker of the two to the eye — and to WCAG.
+    const result = analyzeWallpaperPixels(pixels([0, 0, 255, 255], [0, 100, 0, 255]), 2, 1)
+
+    expect(result.darkExtreme).toBe("#0000ff")
+    expect(result.brightExtreme).toBe("#006400")
+  })
+
+  it("skips a few stray pixels when picking the extremes", () => {
+    // One black speck in a hundred mid-grey samples is not somewhere text lands.
+    const field = Array.from({ length: 100 }, () => [128, 128, 128, 255])
+    field[0] = [0, 0, 0, 255]
+    const result = analyzeWallpaperPixels(pixels(...field), 100, 1)
+
+    expect(result.darkExtreme).toBe("#808080")
   })
 
   it("falls back to the average color for a dark neutral image", () => {

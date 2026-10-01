@@ -1,9 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
-import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import type { AutoModeSettings, BackgroundSettings, Wallpaper } from "@/types/appearance"
+import { DEFAULT_AUTOMODE, DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 
 if (typeof Blob.prototype.arrayBuffer !== "function") {
   Object.defineProperty(Blob.prototype, "arrayBuffer", {
@@ -76,6 +76,11 @@ function pngFile(name: string): File {
 }
 
 const setBackground = jest.fn()
+const save = jest.fn()
+const persistTheme = jest.fn()
+const applyTheme = jest.fn()
+let resolvedTheme: string | undefined = "light"
+let autoModeState: AutoModeSettings = { ...DEFAULT_AUTOMODE }
 const addWallpaper = jest.fn()
 const deleteWallpaper = jest.fn()
 const setActiveWallpaper = jest.fn()
@@ -96,8 +101,15 @@ jest.mock("@/stores/settings", () => ({
       addWallpaper,
       deleteWallpaper,
       setActiveWallpaper,
+      autoMode: autoModeState,
+      save,
+      setTheme: persistTheme,
     })
   ),
+}))
+
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ setTheme: applyTheme, resolvedTheme }),
 }))
 
 // resolveSourceToCss is invoked by the WallpaperCard child; stub it.
@@ -123,8 +135,25 @@ const FLAT_ANALYSIS = {
   dominant: "#ffffff",
   averageLuminance: 0.95,
   luminanceSpread: 0,
+  darkExtreme: "#ffffff",
+  brightExtreme: "#ffffff",
   baseVariant: "light" as const,
 }
+
+/** The theme the verdict reads off <html>: black text, grey muted, white ground. */
+function setTheme(): void {
+  const root = document.documentElement.style
+  root.setProperty("--foreground", "#000000")
+  root.setProperty("--muted-foreground", "#737373")
+  root.setProperty("--background", "#ffffff")
+}
+
+afterEach(() => {
+  const root = document.documentElement.style
+  root.removeProperty("--foreground")
+  root.removeProperty("--muted-foreground")
+  root.removeProperty("--background")
+})
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -149,6 +178,9 @@ beforeEach(() => {
   themeGenerator.analyzeWallpaperSource.mockRejectedValue(new Error("unsampled"))
   themeGenerator.recommendBackgroundTuning.mockReturnValue({ opacity: 0.5, blurPx: 4 })
   setBackground.mockResolvedValue(undefined)
+  setTheme()
+  resolvedTheme = "light"
+  autoModeState = { ...DEFAULT_AUTOMODE }
 })
 
 /** Every `role="radio"` inside the scope picker specifically. */
@@ -222,8 +254,15 @@ describe("WallpaperTab", () => {
   })
 
   describe("readability verdict", () => {
-    /** Swap the gallery for a single image wallpaper and render at `opacity`. */
-    async function renderWithImage(opacity: number) {
+    /**
+     * Swap the gallery for a single image wallpaper and render at `opacity`.
+     * The guard is off unless a test turns it on: most of these pin what the
+     * chip and the manual auto-fix do when nothing caps the layer.
+     */
+    async function renderWithImage(
+      opacity: number,
+      patch: Partial<BackgroundSettings> = { legibilityGuard: false }
+    ) {
       appearance.withBuiltinPresets.mockImplementation((arr: Wallpaper[] | undefined) => [
         {
           id: "img-mock",
@@ -242,7 +281,12 @@ describe("WallpaperTab", () => {
         },
         ...(arr ?? []),
       ])
-      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "img-mock", opacity }
+      storeState.background = {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        activeId: "img-mock",
+        opacity,
+        ...patch,
+      }
       await act(async () => {
         render(<WallpaperTab />)
       })
@@ -262,7 +306,8 @@ describe("WallpaperTab", () => {
     // Between AA-large (3:1) and AA-normal (4.5:1): readable at heading size,
     // not at body size.
     it("warns in the band between the two AA thresholds", async () => {
-      await renderWithImage(0.87)
+      // Worst patch of an unsampled image at 60%: ~3.7:1 for black text.
+      await renderWithImage(0.6)
 
       const chip = screen.getByTestId("wallpaper-contrast-chip")
       expect(chip.textContent).toMatch(/^WARN\s/)
@@ -272,15 +317,16 @@ describe("WallpaperTab", () => {
     })
 
     // The old auto-fix hardcoded 0.4 no matter how bad (or fine) the wallpaper
-    // was; now it solves for the most opacity that still clears AA.
-    it("auto-fix applies the highest opacity that still clears AA", async () => {
+    // was; now it applies the same cap the legibility guard would.
+    it("auto-fix applies the highest opacity that keeps text legible", async () => {
       await renderWithImage(0.95)
 
       fireEvent.click(screen.getByText("opacity.autoFix"))
 
       const applied = setBackground.mock.calls.at(-1)?.[0].opacity as number
-      // Black-on-white theme (jsdom default) against the blind 1.5:1 floor.
-      expect(applied).toBeCloseTo(0.84, 2)
+      // Black-on-white theme against a blind (black-and-white) field: muted
+      // text at 3:1 is the binding constraint.
+      expect(applied).toBeCloseTo(0.19, 2)
       expect(document.body.style.getPropertyValue("--app-bg-opacity")).toBe(String(applied))
     })
 
@@ -766,5 +812,178 @@ describe("WallpaperTab", () => {
       expect(await screen.findByText("invalidType")).toBeInTheDocument()
       expect(appearance.saveImage).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe("WallpaperTab legibility guard", () => {
+  function imageGallery(): void {
+    appearance.withBuiltinPresets.mockImplementation((arr: Wallpaper[] | undefined) => [
+      {
+        id: "img-mock",
+        name: "Image Mock",
+        kind: "image",
+        builtin: true,
+        createdAt: 0,
+        source: {
+          kind: "image",
+          storage: "data-url",
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+          mime: "image/png",
+          width: 1,
+          height: 1,
+        },
+      },
+      ...(arr ?? []),
+    ])
+  }
+
+  it("is on by default and reports the capped opacity instead of offering a fix", async () => {
+    imageGallery()
+    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "img-mock", opacity: 0.95 }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+
+    expect(screen.getByTestId("wallpaper-legibility-guard")).toHaveAttribute(
+      "data-state",
+      "checked"
+    )
+    // What is painted is the guard's cap, which is legible by construction.
+    expect(screen.getByTestId("wallpaper-contrast-chip").textContent).toMatch(/^OK\s/)
+    expect(screen.getByTestId("wallpaper-legibility-capped")).toBeInTheDocument()
+    expect(screen.queryByText("opacity.autoFix")).not.toBeInTheDocument()
+  })
+
+  it("says nothing about capping when the slider is already below the cap", async () => {
+    imageGallery()
+    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "img-mock", opacity: 0.1 }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    expect(screen.queryByTestId("wallpaper-legibility-capped")).not.toBeInTheDocument()
+  })
+
+  it("persists turning the guard off", async () => {
+    imageGallery()
+    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "img-mock" }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    fireEvent.click(screen.getByTestId("wallpaper-legibility-guard"))
+    expect(setBackground).toHaveBeenCalledWith({ legibilityGuard: false })
+  })
+
+  it("treats a settings row written before the guard existed as ON", async () => {
+    imageGallery()
+    const { legibilityGuard: _omitted, ...legacy } = DEFAULT_BACKGROUND_SETTINGS
+    storeState.background = { ...legacy, activeId: "img-mock" }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    expect(screen.getByTestId("wallpaper-legibility-guard")).toHaveAttribute(
+      "data-state",
+      "checked"
+    )
+  })
+
+  it("is inert until a wallpaper is selected", async () => {
+    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: null }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    expect(screen.getByTestId("wallpaper-legibility-guard")).toBeDisabled()
+  })
+})
+
+describe("WallpaperTab theme fit", () => {
+  /** A dark gradient the tab's sampler measures as a night field. */
+  const NIGHT_ANALYSIS = {
+    accent: "#1e3a8a",
+    secondary: "#3b1d4a",
+    dominant: "#0b1020",
+    averageLuminance: 0.05,
+    luminanceSpread: 0.02,
+    darkExtreme: "#05060a",
+    brightExtreme: "#141a2e",
+    baseVariant: "dark" as const,
+  }
+
+  async function renderNight(theme: string | undefined) {
+    resolvedTheme = theme
+    themeGenerator.analyzeWallpaperSource.mockResolvedValue(NIGHT_ANALYSIS)
+    storeState.wallpapers = [
+      {
+        id: "user-night",
+        name: "Night",
+        kind: "gradient",
+        builtin: false,
+        createdAt: 2,
+        source: { kind: "gradient", css: "linear-gradient(#05060a,#141a2e)" },
+      },
+    ]
+    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "user-night" }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+  }
+
+  it("suggests dark for a night wallpaper under a light theme", async () => {
+    await renderNight("light")
+    const hint = await screen.findByTestId("wallpaper-theme-fit")
+    expect(hint).toHaveTextContent("themeFit.suitsDark")
+    fireEvent.click(within(hint).getByText("themeFit.switchDark"))
+    expect(applyTheme).toHaveBeenCalledWith("dark")
+    expect(persistTheme).toHaveBeenCalledWith("dark")
+  })
+
+  it("suggests light for a paper wallpaper under a dark theme", async () => {
+    await renderNight("dark")
+    // Same wallpaper slot, re-measured as a pale field.
+    cleanup()
+    themeGenerator.analyzeWallpaperSource.mockResolvedValue({
+      ...NIGHT_ANALYSIS,
+      dominant: "#f5f1e8",
+      averageLuminance: 0.88,
+      darkExtreme: "#e3dccb",
+      brightExtreme: "#fbf8f1",
+      baseVariant: "light" as const,
+    })
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const hint = await screen.findByTestId("wallpaper-theme-fit")
+    expect(hint).toHaveTextContent("themeFit.suitsLight")
+    fireEvent.click(within(hint).getByText("themeFit.switchLight"))
+    expect(applyTheme).toHaveBeenCalledWith("light")
+    expect(persistTheme).toHaveBeenCalledWith("light")
+  })
+
+  it("offers to follow the wallpaper automatically", async () => {
+    await renderNight("light")
+    fireEvent.click(
+      within(await screen.findByTestId("wallpaper-theme-fit")).getByText("themeFit.follow")
+    )
+    expect(save).toHaveBeenCalledWith({
+      autoMode: expect.objectContaining({ enabled: true, trigger: "wallpaper" }),
+    })
+  })
+
+  it("does not offer to follow when auto light/dark already follows the wallpaper", async () => {
+    autoModeState = { ...DEFAULT_AUTOMODE, enabled: true, trigger: "wallpaper" }
+    await renderNight("light")
+    const hint = await screen.findByTestId("wallpaper-theme-fit")
+    expect(within(hint).queryByText("themeFit.follow")).not.toBeInTheDocument()
+  })
+
+  it("stays quiet when the theme already suits the wallpaper", async () => {
+    await renderNight("dark")
+    await waitFor(() => expect(themeGenerator.analyzeWallpaperSource).toHaveBeenCalled())
+    expect(screen.queryByTestId("wallpaper-theme-fit")).not.toBeInTheDocument()
+  })
+
+  it("says nothing while the theme is still resolving", async () => {
+    await renderNight(undefined)
+    await waitFor(() => expect(themeGenerator.analyzeWallpaperSource).toHaveBeenCalled())
+    expect(screen.queryByTestId("wallpaper-theme-fit")).not.toBeInTheDocument()
   })
 })

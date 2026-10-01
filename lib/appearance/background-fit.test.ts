@@ -1,5 +1,6 @@
 import {
   BG_VARS,
+  toBackgroundImage,
   FOCAL_PRESETS,
   WALLPAPER_POSITIONS,
   backgroundFitStyle,
@@ -105,6 +106,31 @@ describe("BG_VARS", () => {
       position: "--app-bg-position",
       size: "--app-bg-size",
       repeat: "--app-bg-repeat",
+      fade: "--app-bg-fade",
     })
+  })
+})
+
+describe("toBackgroundImage", () => {
+  it("passes images and gradients through untouched", () => {
+    for (const css of [
+      "url('blob:abc')",
+      "linear-gradient(135deg, #ff7e5f, #feb47b)",
+      "repeating-linear-gradient(90deg, #000 0 8px, #fff 8px 16px)",
+      "radial-gradient(circle, red, blue)",
+      "conic-gradient(red, blue)",
+      "none",
+    ]) {
+      expect(toBackgroundImage(css)).toBe(css)
+    }
+  })
+
+  // `background-image: #0f172a` is invalid and dropped the whole declaration:
+  // the solid-colour presets painted nothing.
+  it("turns a solid colour into a one-colour gradient layer", () => {
+    expect(toBackgroundImage("#0f172a")).toBe("linear-gradient(#0f172a, #0f172a)")
+    expect(toBackgroundImage(" oklch(0.5 0.1 30) ")).toBe(
+      "linear-gradient(oklch(0.5 0.1 30), oklch(0.5 0.1 30))"
+    )
   })
 })

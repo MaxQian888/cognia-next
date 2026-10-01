@@ -2,6 +2,7 @@ import {
   BUILTIN_COLOR_PRESETS,
   BUILTIN_GRADIENT_PRESETS,
   BUILTIN_WALLPAPERS,
+  findActiveWallpaper,
   isBuiltinPresetId,
   withBuiltinPresets,
 } from "./presets"
@@ -74,5 +75,28 @@ describe("withBuiltinPresets", () => {
     expect(merged.length).toBe(BUILTIN_WALLPAPERS.length)
     expect(merged[0]).toEqual(BUILTIN_WALLPAPERS[0])
     expect(merged[0].name).not.toBe("Hijacked")
+  })
+})
+
+describe("findActiveWallpaper", () => {
+  const user = {
+    id: "wp_user",
+    name: "Mine",
+    kind: "color" as const,
+    source: { kind: "color" as const, value: "#123456" },
+    builtin: false,
+    createdAt: 1,
+  }
+
+  it("finds a user wallpaper or a built-in by id", () => {
+    expect(findActiveWallpaper({ enabled: true, activeId: "wp_user" }, [user])).toBe(user)
+    const builtin = BUILTIN_WALLPAPERS[0]!
+    expect(findActiveWallpaper({ enabled: true, activeId: builtin.id }, [])).toBe(builtin)
+  })
+
+  it("is null when the layer is off, nothing is selected, or the row is gone", () => {
+    expect(findActiveWallpaper({ enabled: false, activeId: "wp_user" }, [user])).toBeNull()
+    expect(findActiveWallpaper({ enabled: true, activeId: null }, [user])).toBeNull()
+    expect(findActiveWallpaper({ enabled: true, activeId: "wp_deleted" }, [user])).toBeNull()
   })
 })

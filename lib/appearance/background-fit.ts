@@ -22,7 +22,23 @@ export const BG_VARS = {
   position: "--app-bg-position",
   size: "--app-bg-size",
   repeat: "--app-bg-repeat",
+  /** Layer visibility for the one-layer fade (0 → 1). See globals.css. */
+  fade: "--app-bg-fade",
 } as const
+
+/**
+ * A resolved wallpaper source as a `background-image` layer. Images and
+ * gradients already are one; a solid colour is not — `background-image:
+ * #0f172a` is invalid, and an invalid layer list drops the whole declaration,
+ * which is why the colour presets used to paint nothing at all.
+ */
+export function toBackgroundImage(css: string): string {
+  const value = css.trim()
+  if (/^(url|(repeating-)?(linear|radial|conic)-gradient|image-set|none)\s*\(?/i.test(value)) {
+    return value
+  }
+  return `linear-gradient(${value}, ${value})`
+}
 
 /** The wallpaper fits the user can pick, in the order the UI lists them. */
 export const WALLPAPER_POSITIONS: readonly WallpaperPosition[] = [

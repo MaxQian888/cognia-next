@@ -67,6 +67,16 @@ export interface BackgroundSettings {
    * `./daily-wallpaper.ts` for why the shape is written the way it is.
    */
   daily?: DailyWallpaperSettings
+  /**
+   * Automatic readability protection. When on, the wallpaper layer's opacity is
+   * capped at the highest image weight that keeps theme text legible over the
+   * image's darkest and brightest patches (`lib/appearance/wallpaper-legibility.ts`),
+   * re-solved whenever the wallpaper, its blur or the theme changes. `opacity`
+   * stays the user's ceiling; the guard only ever lowers what is painted.
+   * Optional so settings rows written before the guard existed keep loading —
+   * every reader treats a missing value as ON, the default.
+   */
+  legibilityGuard?: boolean
 }
 
 export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
@@ -80,6 +90,7 @@ export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
   focalY: 50,
   rotation: DEFAULT_WALLPAPER_ROTATION,
   daily: DEFAULT_DAILY_WALLPAPER,
+  legibilityGuard: true,
 }
 
 /** Discriminated union — exactly one of these shapes per wallpaper. */
@@ -354,7 +365,13 @@ export const DEFAULT_A11Y: A11ySettings = {
   colorblindMode: "off",
 }
 
-export type AutoModeTrigger = "system" | "schedule" | "sunset"
+/**
+ * What decides the light/dark phase. `wallpaper` picks whichever variant lets
+ * more of the active wallpaper show with text legible
+ * (`recommendThemeVariant`); it falls back to `system` with no wallpaper, and
+ * an older client that does not know it falls back to `system` too.
+ */
+export type AutoModeTrigger = "system" | "schedule" | "sunset" | "wallpaper"
 
 export interface AutoModeLocation {
   latitude: number

@@ -2,8 +2,27 @@ import {
   adjustForegroundLightnessToTarget,
   evaluateReadability,
   isColorParsable,
+  rgbRelativeLuminance,
   wcagContrast,
 } from "./contrast"
+
+describe("rgbRelativeLuminance", () => {
+  it("spans 0 for black to 1 for white", () => {
+    expect(rgbRelativeLuminance(0, 0, 0)).toBe(0)
+    expect(rgbRelativeLuminance(1, 1, 1)).toBeCloseTo(1, 6)
+  })
+
+  it("linearises before weighting, so mid-grey is far below 0.5", () => {
+    // sRGB 0.5 decodes to ~0.214 linear light — the whole reason compositing in
+    // encoded space and measuring in linear space give different answers.
+    expect(rgbRelativeLuminance(0.5, 0.5, 0.5)).toBeCloseTo(0.214, 3)
+  })
+
+  it("agrees with the string-based contrast helper", () => {
+    const l = rgbRelativeLuminance(1, 0, 0)
+    expect((1 + 0.05) / (l + 0.05)).toBeCloseTo(wcagContrast("#ffffff", "#ff0000"), 6)
+  })
+})
 
 describe("wcagContrast", () => {
   it("returns ~21 for black on white", () => {

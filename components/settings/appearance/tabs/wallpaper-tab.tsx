@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useLocale, useTranslations } from "next-intl"
+import { useTheme } from "next-themes"
 import { ImagePlusIcon, PaletteIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -47,6 +48,12 @@ import {
   supportsFocalPoint,
 } from "@/lib/appearance/background-fit"
 import { computeOpacityVerdict } from "@/lib/appearance/wallpaper-readability"
+import {
+  isLegibilityGuardOn,
+  themeMismatch,
+  type ThemeVariant,
+} from "@/lib/appearance/wallpaper-legibility"
+import { useWallpaperThemeFit } from "@/hooks/appearance/use-wallpaper-theme-fit"
 import type { WallpaperThemeAnalysis } from "@/lib/appearance/wallpaper-theme-generator"
 import type {
   BackgroundScope,
@@ -214,6 +221,10 @@ export function WallpaperTab() {
   const addWallpaper = useSettingsStore((s) => s.addWallpaper)
   const deleteWallpaperRow = useSettingsStore((s) => s.deleteWallpaper)
   const setActiveWallpaper = useSettingsStore((s) => s.setActiveWallpaper)
+  const autoMode = useSettingsStore((s) => s.autoMode)
+  const save = useSettingsStore((s) => s.save)
+  const persistTheme = useSettingsStore((s) => s.setTheme)
+  const { setTheme: applyTheme, resolvedTheme } = useTheme()
   const [busyError, setBusyError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   // Tagged with the wallpaper it came from: switching wallpapers must not let
@@ -291,10 +302,27 @@ export function WallpaperTab() {
     })
 
   const activeAnalysis = analysis?.id === activeWallpaper?.id ? (analysis?.value ?? null) : null
+  const legibilityGuard = isLegibilityGuardOn(background)
+  // Light or dark: which suits this wallpaper, and whether the live theme is
+  // the wrong one by a margin worth saying so. An unresolved theme (next-themes
+  // still hydrating) says nothing rather than guess.
+  const { fit: themeFit } = useWallpaperThemeFit(activeWallpaper, blurPx, activeAnalysis)
+  const currentVariant: ThemeVariant | null =
+    resolvedTheme === "dark" ? "dark" : resolvedTheme === "light" ? "light" : null
+  const betterVariant = themeFit && currentVariant ? themeMismatch(themeFit, currentVariant) : null
+  const followsWallpaper = autoMode.enabled && autoMode.trigger === "wallpaper"
+  const switchVariant = (next: ThemeVariant) => {
+    applyTheme(next)
+    void persistTheme(next)
+  }
+  // Same model the runtime guard solves with, so the chip reports the opacity
+  // actually painted — capped when the guard is holding it down.
   const verdict = computeOpacityVerdict({
     kind: activeWallpaper?.kind ?? null,
     opacity,
+    blurPx,
     analysis: activeAnalysis,
+    guard: legibilityGuard,
   })
   const suggestedOpacity = verdict?.suggestedOpacity ?? null
 
@@ -667,6 +695,24 @@ export function WallpaperTab() {
             <p className="text-[11px] text-muted-foreground">{t("readabilityHint")}</p>
           </div>
 
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="wallpaper-legibility-guard" className="text-xs">
+                {t("legibility.label")}
+              </Label>
+              <p className="text-[11px] text-muted-foreground">{t("legibility.hint")}</p>
+            </div>
+            <Switch
+              id="wallpaper-legibility-guard"
+              checked={legibilityGuard}
+              disabled={!hasActive}
+              onCheckedChange={(checked) => {
+                void setBackground({ legibilityGuard: checked })
+              }}
+              data-testid="wallpaper-legibility-guard"
+            />
+          </div>
+
           <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground">
@@ -733,6 +779,16 @@ export function WallpaperTab() {
                   {verdict.level === "warn" ? t("opacity.warn") : t("opacity.fail")}
                 </span>
               )}
+              {verdict.capped && (
+                <span
+                  className="text-xs text-muted-foreground"
+                  data-testid="wallpaper-legibility-capped"
+                >
+                  {t("legibility.capped", {
+                    percent: Math.round(verdict.effectiveOpacity * 100),
+                  })}
+                </span>
+              )}
               {/* Solve for the highest opacity that still clears AA rather than
                   dropping to a hardcoded 0.4 — on a flat wallpaper that used to
                   throw away most of the image for no readability gain. */}
@@ -748,6 +804,39 @@ export function WallpaperTab() {
                   {t("opacity.autoFix")}
                 </Button>
               )}
+            </div>
+          )}
+
+          {/* Light vs dark. The guard keeps text legible under either, but a
+              wallpaper that fights the theme is mostly dimmed away; say which
+              variant would show it, and offer the switch. */}
+          {betterVariant && themeFit && currentVariant && (
+            <div
+              className="space-y-2 rounded-md border border-dashed p-2.5"
+              data-testid="wallpaper-theme-fit"
+            >
+              <p className="text-xs">
+                {t(betterVariant === "dark" ? "themeFit.suitsDark" : "themeFit.suitsLight", {
+                  recommended: Math.round(themeFit.weights[betterVariant] * 100),
+                  current: Math.round(themeFit.weights[currentVariant] * 100),
+                })}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => switchVariant(betterVariant)}>
+                  {t(betterVariant === "dark" ? "themeFit.switchDark" : "themeFit.switchLight")}
+                </Button>
+                {!followsWallpaper && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      void save({ autoMode: { ...autoMode, enabled: true, trigger: "wallpaper" } })
+                    }
+                  >
+                    {t("themeFit.follow")}
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </section>

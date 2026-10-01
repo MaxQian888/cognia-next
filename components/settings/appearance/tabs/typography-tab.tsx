@@ -41,7 +41,8 @@ export function TypographyTab() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const fontScale: AppFontScale = settings?.fontScale ?? "md"
-  const language: AppLanguage = settings?.language ?? "en"
+  const language =
+    settings?.languageMode === "system" || !settings?.language ? "system" : settings.language
   const typographyExt: TypographyExtSettings = {
     ...DEFAULT_TYPOGRAPHY_EXT,
     ...(settings?.typographyExt ?? {}),
@@ -76,13 +77,14 @@ export function TypographyTab() {
         <Select
           value={language}
           onValueChange={(v) => {
-            void save({ language: v as AppLanguage })
+            void save(v === "system" ? { languageMode: "system" } : { language: v as AppLanguage })
           }}
         >
           <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="system">{t("languageSystem")}</SelectItem>
             {LANGUAGES.map((l) => (
               <SelectItem key={l.value} value={l.value}>
                 {l.label}

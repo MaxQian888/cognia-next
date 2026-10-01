@@ -9,6 +9,8 @@
 //   - sunset   → switch at local sunrise / sunset for a configured location
 //                (NOAA "sunrise equation"); falls back to `system` when no
 //                location is set or the sun never rises/sets that day.
+//   - wallpaper → follow the active wallpaper: the caller resolves which
+//                variant suits it and passes it in; `system` without one.
 
 import { DEFAULT_AUTOMODE } from "@/types/appearance"
 import type { AutoModeLocation, AutoModeSettings } from "@/types/appearance"
@@ -78,6 +80,12 @@ export function computeSunTimesMinutes(
 export interface ResolveContext {
   now: Date
   systemPrefersDark: boolean
+  /**
+   * The variant the active wallpaper suits, or null when no wallpaper is up
+   * or it has not been measured yet. Resolved by the caller because it needs
+   * the analysis cache; this module stays pure.
+   */
+  wallpaperPhase?: AutoPhase | null
 }
 
 /** The phase auto-mode should currently enforce for the given settings. */
@@ -102,6 +110,8 @@ export function resolveAutoPhase(autoMode: AutoModeSettings, ctx: ResolveContext
       const m = minutesOfDay(ctx.now)
       return m >= sun.sunriseMin && m < sun.sunsetMin ? "light" : "dark"
     }
+    case "wallpaper":
+      return ctx.wallpaperPhase ?? systemPhase
     default:
       return systemPhase
   }

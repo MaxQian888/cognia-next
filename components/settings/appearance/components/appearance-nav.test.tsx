@@ -49,6 +49,16 @@ describe("AppearanceNav", () => {
     expect(screen.getByTestId("appearance-nav-item-theme")).not.toHaveAttribute("aria-current")
   })
 
+  it("pairs the selected row's description with the accent fill's own ink", () => {
+    renderNav({ activeId: "wallpaper" })
+    const row = screen.getByTestId("appearance-nav-item-wallpaper")
+    expect(row).toHaveClass("group/nav-row")
+    // Muted ink on a saturated or pale accent fill drops to ~1:1.
+    expect(row.querySelector("[data-nav-desc]")).toHaveClass(
+      "group-data-[active=true]/nav-row:text-accent-foreground"
+    )
+  })
+
   it("reports the clicked panel", () => {
     const { onSelect } = renderNav()
     fireEvent.click(screen.getByTestId("appearance-nav-item-a11y"))

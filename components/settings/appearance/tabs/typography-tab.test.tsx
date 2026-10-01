@@ -24,6 +24,23 @@ beforeEach(() => {
 })
 
 describe("TypographyTab", () => {
+  it("offers system language and keeps explicit choices selectable", async () => {
+    storeState.settings = { language: "zh-CN", languageMode: "system" }
+    render(<TypographyTab />)
+    const language = screen.getAllByRole("combobox")[1]
+    expect(language).toHaveTextContent("languageSystem")
+    fireEvent.keyDown(language, { key: "ArrowDown" })
+    fireEvent.click(await screen.findByRole("option", { name: "English" }))
+    expect(save).toHaveBeenCalledWith({ language: "en" })
+  })
+
+  it("saves system mode rather than a snapshot of the current system language", async () => {
+    render(<TypographyTab />)
+    fireEvent.keyDown(screen.getAllByRole("combobox")[1], { key: "ArrowDown" })
+    fireEvent.click(await screen.findByRole("option", { name: "languageSystem" }))
+    expect(save).toHaveBeenCalledWith({ languageMode: "system" })
+  })
+
   it("renders type controls only: font scale, language, families, fine-tuning", () => {
     render(<TypographyTab />)
     expect(screen.getByText("fontScaleLabel")).toBeInTheDocument()

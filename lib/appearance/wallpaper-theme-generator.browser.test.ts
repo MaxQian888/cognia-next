@@ -76,6 +76,23 @@ describe("analyzeWallpaperSource", () => {
     restoreImage()
   })
 
+  // The applier already holds the painted `url(...)`. Re-resolving a disk
+  // wallpaper would read the whole image over IPC a second time, and revoking
+  // the caller's URL would blank the layer that is still showing it.
+  it("analyzes a painted URL without resolving or revoking it", async () => {
+    const restoreImage = installImageMock()
+    const restoreCanvas = installCanvasMock([220, 60, 80, 255])
+
+    await expect(
+      analyzeWallpaperSource(source, { paintedCss: "url('blob:painted')" })
+    ).resolves.toMatchObject({ darkExtreme: "#dc3c50", brightExtreme: "#dc3c50" })
+    expect(storage.resolveSourceToCss).not.toHaveBeenCalled()
+    expect(storage.disposeUrl).not.toHaveBeenCalled()
+
+    restoreCanvas()
+    restoreImage()
+  })
+
   it("releases an object URL when image decoding fails", async () => {
     const restoreImage = installImageMock({ fail: true })
 

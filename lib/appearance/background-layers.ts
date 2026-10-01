@@ -150,8 +150,6 @@ export function transformVarFor(phase: BackgroundPhase): string {
 }
 
 export interface FadeArgs extends StageArgs {
-  /** Target opacity to return to, which is the user's configured value. */
-  opacity: number
   /** Injectable for tests. Defaults to `setTimeout`. */
   schedule?: (fn: () => void, ms: number) => number
 }
@@ -161,23 +159,26 @@ export interface FadeArgs extends StageArgs {
  * bring it back.
  *
  * This is the transition used wherever the second layer is unavailable, so it
- * deliberately touches only layer A and the opacity variable. Returns a
- * canceller, because a rotation that advances again mid-fade must not have the
- * old timer restore an opacity that belongs to a wallpaper two swaps ago.
+ * deliberately touches only layer A and the fade variable. It drives
+ * `--app-bg-fade`, not the opacity slider: the layers are opaque composites
+ * whose image weight lives in their veil, so fading the layer is what hides
+ * it. Returns a canceller, because a rotation that advances again mid-fade
+ * must not have the old timer restore a layer that belongs to a wallpaper two
+ * swaps ago — the applier resets the fade itself on its next paint.
  */
 export function fadeToImage(args: FadeArgs): () => void {
-  const { body, cssValue, plan, opacity } = args
+  const { body, cssValue, plan } = args
   const schedule = args.schedule ?? ((fn, ms) => window.setTimeout(fn, ms))
 
   normalizeToSingleLayer(body)
   writeTransitionTiming({ body, plan })
-  body.style.setProperty(BG_VARS.opacity, "0")
+  body.style.setProperty(BG_VARS.fade, "0")
 
   let cancelled = false
   const timer = schedule(() => {
     if (cancelled) return
     body.style.setProperty(TRANSITION_VARS.imageA, cssValue)
-    body.style.setProperty(BG_VARS.opacity, `${opacity}`)
+    body.style.setProperty(BG_VARS.fade, "1")
   }, plan.durationMs)
 
   return () => {

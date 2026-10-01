@@ -684,3 +684,95 @@ describe("BackgroundApplier rotation transitions", () => {
     expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(one.png)")
   })
 })
+
+// `background-image: #0f172a` is invalid CSS: the colour presets painted
+// nothing until the applier wrapped them into a one-colour gradient layer.
+describe("BackgroundApplier colour wallpapers", () => {
+  it("paints a solid colour as a valid background-image layer", async () => {
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("#0f172a")
+    settingsModule.__setStoreState({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "slate" },
+      wallpapers: [wallpaper("slate", { kind: "color", value: "#0f172a" })],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.style.getPropertyValue(__INTERNALS__.VAR_IMAGE)).toBe(
+      "linear-gradient(#0f172a, #0f172a)"
+    )
+  })
+
+  it("resets a fade that a new pick interrupted", async () => {
+    document.body.style.setProperty("--app-bg-fade", "0")
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("#0f172a")
+    settingsModule.__setStoreState({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "slate" },
+      wallpapers: [wallpaper("slate", { kind: "color", value: "#0f172a" })],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.style.getPropertyValue("--app-bg-fade")).toBe("1")
+  })
+})
+
+// The legibility guard is driven from this applier (no second mount point), so
+// the wiring is pinned here: an enabled wallpaper under a readable theme gets
+// a cap, and turning the guard off takes it away.
+describe("BackgroundApplier legibility guard", () => {
+  const night = () =>
+    wallpaper("night", { kind: "gradient", css: "linear-gradient(0deg, #05060a, #10121a)" })
+
+  function setLightTheme(): void {
+    const s = document.documentElement.style
+    s.setProperty("--foreground", "#0a0a0a")
+    s.setProperty("--muted-foreground", "#737373")
+    s.setProperty("--background", "#ffffff")
+  }
+
+  afterEach(() => {
+    const s = document.documentElement.style
+    s.removeProperty("--foreground")
+    s.removeProperty("--muted-foreground")
+    s.removeProperty("--background")
+  })
+
+  it("caps a wallpaper that fights the theme", async () => {
+    setLightTheme()
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("linear-gradient(0deg, #05060a, #10121a)")
+    settingsModule.__setStoreState({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "night" },
+      wallpapers: [night()],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const cap = Number(document.body.style.getPropertyValue("--wp-max-weight"))
+    expect(cap).toBeGreaterThan(0)
+    expect(cap).toBeLessThan(0.5)
+  })
+
+  it("leaves the layer uncapped when the user turned the guard off", async () => {
+    setLightTheme()
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("linear-gradient(0deg, #05060a, #10121a)")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "night",
+        legibilityGuard: false,
+      },
+      wallpapers: [night()],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(document.body.style.getPropertyValue("--wp-max-weight")).toBe("")
+  })
+})

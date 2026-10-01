@@ -10,7 +10,7 @@
 // with `preset-` so we can detect "is this a preset" without consulting the
 // builtin flag from the saved row.
 
-import type { Wallpaper } from "@/types/appearance"
+import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
 const PRESET_PREFIX = "preset-"
 
@@ -114,4 +114,18 @@ export function withBuiltinPresets(userWallpapers: Wallpaper[] | undefined): Wal
   const userList = userWallpapers ?? []
   const builtinIds = new Set(BUILTIN_WALLPAPERS.map((w) => w.id))
   return [...BUILTIN_WALLPAPERS, ...userList.filter((w) => !builtinIds.has(w.id))]
+}
+
+/**
+ * The wallpaper actually being painted, or null when the layer is off, nothing
+ * is selected, or the selection points at a deleted row. The one lookup the
+ * applier, the legibility guard and wallpaper-driven auto light/dark share, so
+ * they cannot disagree about which image is up.
+ */
+export function findActiveWallpaper(
+  background: Pick<BackgroundSettings, "enabled" | "activeId">,
+  userWallpapers: Wallpaper[] | undefined
+): Wallpaper | null {
+  if (!background.enabled || !background.activeId) return null
+  return withBuiltinPresets(userWallpapers).find((w) => w.id === background.activeId) ?? null
 }

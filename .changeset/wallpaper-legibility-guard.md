@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Image wallpapers no longer make text unreadable or leave opaque blocks over the image: a new automatic readability protection (on by default, in Appearance → Wallpaper) measures each wallpaper's darkest and brightest areas and caps its opacity where text keeps WCAG contrast for the current theme, and outline buttons, sidebar search, canvas panels and the remaining ai-elements panels now blend with the wallpaper instead of painting solid blocks. Nested wallpaper layers no longer stack into a brighter image than the setting allows, solid-colour wallpapers paint again, and the wallpaper panel now says when a wallpaper suits the other light/dark variant, with a one-click switch and a new "follow the wallpaper" automatic light/dark mode; automatic light/dark now runs on every page. Stat strips, the scheduler's task list and server fact lists now blend with the wallpaper too, the home and About glows no longer dim text over a wallpaper, and selected rows in the command palette, menus, settings navigation and skill list keep readable descriptions under colour presets and high-contrast themes.

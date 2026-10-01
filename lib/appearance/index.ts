@@ -61,16 +61,23 @@ export {
   AA_NORMAL_TEXT,
   bandRatio,
   computeOpacityVerdict,
-  effectiveContrast,
-  maxOpacityForRatio,
-  readThemeColors,
-  wallpaperFloorRatio,
+  readThemeInk,
 } from "./wallpaper-readability"
 export type {
   OpacityVerdict,
   ReadabilityBand,
   ReadabilityVerdict as WallpaperReadabilityVerdict,
 } from "./wallpaper-readability"
+export {
+  BLIND_EXTREMES,
+  WP_MAX_WEIGHT_VAR,
+  extremesOf,
+  formatMaxWeight,
+  isLegibilityGuardOn,
+  solveMaxImageWeight,
+  worstForegroundContrast,
+} from "./wallpaper-legibility"
+export type { LegibilityInk, WallpaperExtremes } from "./wallpaper-legibility"
 export {
   BUILTIN_COLOR_PRESETS,
   BUILTIN_GRADIENT_PRESETS,

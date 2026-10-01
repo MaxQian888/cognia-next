@@ -119,3 +119,23 @@ describe("resolveAutoPhase — sunset", () => {
     expect(["light", "dark"]).toContain(phase)
   })
 })
+
+describe("resolveAutoPhase — wallpaper", () => {
+  const base = { ...DEFAULT_AUTOMODE, enabled: true, trigger: "wallpaper" as const }
+
+  it("follows the variant the wallpaper suits", () => {
+    expect(
+      resolveAutoPhase(base, { now: new Date(), systemPrefersDark: false, wallpaperPhase: "dark" })
+    ).toBe("dark")
+    expect(
+      resolveAutoPhase(base, { now: new Date(), systemPrefersDark: true, wallpaperPhase: "light" })
+    ).toBe("light")
+  })
+
+  it("falls back to the system with no wallpaper or before it is measured", () => {
+    expect(
+      resolveAutoPhase(base, { now: new Date(), systemPrefersDark: true, wallpaperPhase: null })
+    ).toBe("dark")
+    expect(resolveAutoPhase(base, { now: new Date(), systemPrefersDark: false })).toBe("light")
+  })
+})

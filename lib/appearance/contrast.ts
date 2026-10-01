@@ -4,11 +4,21 @@ import { converter, formatCss, parse } from "culori"
 const toRgb = converter("rgb")
 const toOklch = converter("oklch")
 
+/**
+ * WCAG relative luminance of gamma-encoded sRGB channels in 0..1.
+ *
+ * Exposed for callers that already hold channels (a composited pixel, a raster
+ * sample) and would otherwise round-trip them through a CSS string per call.
+ */
+export function rgbRelativeLuminance(r: number, g: number, b: number): number {
+  const f = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+}
+
 function relLuminance(color: string): number {
   const rgb = toRgb(parse(color))
   if (!rgb) return 0
-  const f = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
-  return 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b)
+  return rgbRelativeLuminance(rgb.r, rgb.g, rgb.b)
 }
 
 /**

@@ -167,24 +167,26 @@ describe("normalizeToSingleLayer", () => {
 })
 
 describe("fadeToImage", () => {
-  it("dips opacity, swaps the image, then restores the configured opacity", () => {
+  it("dips the layer out, swaps the image, then brings it back", () => {
     const el = body()
     const timers: Array<() => void> = []
     fadeToImage({
       body: el,
       cssValue: "url(next.jpg)",
       plan: plan("fade", { transitionMs: 400 }),
-      opacity: 0.8,
       schedule: (fn) => {
         timers.push(fn)
         return 1
       },
     })
 
-    expect(el.style.getPropertyValue(BG_VARS.opacity)).toBe("0")
+    expect(el.style.getPropertyValue(BG_VARS.fade)).toBe("0")
     timers[0]()
     expect(el.style.getPropertyValue(TRANSITION_VARS.imageA)).toBe("url(next.jpg)")
-    expect(el.style.getPropertyValue(BG_VARS.opacity)).toBe("0.8")
+    expect(el.style.getPropertyValue(BG_VARS.fade)).toBe("1")
+    // The user's opacity is the image weight, not layer visibility; a fade
+    // must never write it.
+    expect(el.style.getPropertyValue(BG_VARS.opacity)).toBe("")
   })
 
   it("stays on one layer, because it is the fallback when layer B is unavailable", () => {
@@ -193,7 +195,6 @@ describe("fadeToImage", () => {
       body: el,
       cssValue: "url(next.jpg)",
       plan: plan("fade"),
-      opacity: 1,
       schedule: () => 1,
     })
     expect(el.hasAttribute(ATTR_TWO_LAYER)).toBe(false)
@@ -206,7 +207,6 @@ describe("fadeToImage", () => {
       body: el,
       cssValue: "url(stale.jpg)",
       plan: plan("fade"),
-      opacity: 1,
       schedule: (fn) => {
         timers.push(fn)
         return 1
@@ -216,7 +216,7 @@ describe("fadeToImage", () => {
     cancel()
     timers[0]()
     expect(el.style.getPropertyValue(TRANSITION_VARS.imageA)).toBe("")
-    expect(el.style.getPropertyValue(BG_VARS.opacity)).toBe("0")
+    expect(el.style.getPropertyValue(BG_VARS.fade)).toBe("0")
   })
 })
 

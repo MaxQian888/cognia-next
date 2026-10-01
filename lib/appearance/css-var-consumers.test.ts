@@ -40,6 +40,75 @@ describe("appearance custom properties have a consumer", () => {
     }
   )
 
+  // The wallpaper legibility guard writes `--wp-max-weight` on <body>; without
+  // a reader it would solve, persist and write a cap that nothing paints.
+  it.each([
+    "--wp-max-weight",
+    "--app-bg-painted-opacity",
+    "--control-bg",
+    "--surface-tonality-control",
+  ])("%s (wallpaper legibility) is read by at least one rule", (property) => {
+    expect(isRead(property)).toBe(true)
+  })
+
+  it("caps every wallpaper layer at the guard's weight", () => {
+    // Guarded with a fallback: an unset cap must mean uncapped, never an
+    // invalid `min()` that drops opacity to its initial value.
+    expect(STYLESHEETS).toContain("min(var(--app-bg-opacity), var(--wp-max-weight, 1))")
+    // No layer may read the raw slider value past the cap.
+    expect(STYLESHEETS).not.toMatch(/opacity:\s*var\(--app-bg-opacity\)/)
+  })
+
+  // Translucent layers compounded: body, #app and each shell target repaint
+  // the wallpaper under scope all/global, so a 21% cap showed ~60% image.
+  it("paints every wallpaper layer as one opaque veiled composite", () => {
+    const layers = STYLESHEETS.match(
+      /background-image: linear-gradient\(var\(--app-bg-veil\), var\(--app-bg-veil\)\), var\(--app-bg-image(-b)?\);/g
+    )
+    // body ::before / ::after and the scoped target ::before / ::after.
+    expect(layers).toHaveLength(4)
+    expect(STYLESHEETS).not.toMatch(/background-image:\s*var\(--app-bg-image(-b)?\);/)
+    expect(STYLESHEETS).not.toMatch(/opacity:\s*var\(--app-bg-painted-opacity\)/)
+    expect(isRead("--app-bg-fade")).toBe(true)
+    expect(isRead("--app-bg-veil")).toBe(true)
+  })
+
+  // A feature rail reads these as `bg-[var(--sidebar-pane-bg,var(--sidebar))]`;
+  // defined only inside a wallpaper scope, so outside one the rail keeps its
+  // solid tint and inside one it turns to the glass the guard solves for.
+  it.each(["--sidebar-pane-bg", "--sidebar-pane-filter"])(
+    "%s is defined in the wallpaper scope and read by the scheduler rail",
+    (property) => {
+      expect(STYLESHEETS).toMatch(new RegExp(`${property}:\\s*\\S`))
+      expect(css("components/scheduler/scheduler-shell.tsx")).toContain(`var(${property},`)
+    }
+  )
+
+  // Five scope selectors per wallpaper-only rule: chat, canvas, sidebar, all,
+  // global. A rule missing one would leave that scope's panels solid (or its
+  // glow on) while the rest adapt.
+  it.each([
+    ["hairline grid plate", String.raw`\[data-hairline-grid\]\s*[,{]`],
+    ["hairline grid cells", String.raw`\[data-hairline-grid\]\s*>\s*\*`],
+    ["ambient glows", String.raw`\[data-ambient-glow\]\s*[,{]`],
+  ])("scopes the %s rule to every wallpaper scope", (_name, tail) => {
+    for (const scope of ["chat", "canvas", "sidebar", "all", "global"]) {
+      const head = String.raw`body\[data-bg-enabled="true"\]\[data-bg-scope="${scope}"\][^,{]*`
+      expect(STYLESHEETS).toMatch(new RegExp(head + tail))
+    }
+  })
+
+  it("inks muted text inside a highlighted item for the accent fill", () => {
+    // The command palette's selected row and a hovered menu item's shortcut
+    // dropped toward 1:1 under a colour preset or high-contrast dark.
+    const start = STYLESHEETS.indexOf('[data-slot="command-item"][data-selected="true"]')
+    expect(start).toBeGreaterThan(-1)
+    const rule = STYLESHEETS.slice(start, STYLESHEETS.indexOf("}", start))
+    expect(rule).toContain(".text-muted-foreground")
+    expect(rule).toContain("[data-highlighted]")
+    expect(rule).toContain("color: var(--accent-foreground)")
+  })
+
   it("routes both leading knobs through a single multiplier", () => {
     expect(STYLESHEETS).toMatch(/--leading-multiplier:\s*calc\(/)
     // Guarded on both sides: an undefined var inside calc() invalidates the

@@ -1,14 +1,39 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { AutoModeTab } from "./auto-mode-tab"
-import { DEFAULT_AUTOMODE } from "@/types/appearance"
-import type { AutoModeSettings } from "@/types/appearance"
+import { DEFAULT_AUTOMODE, DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import type { AutoModeSettings, BackgroundSettings, Wallpaper } from "@/types/appearance"
+import {
+  __INTERNALS__ as CACHE,
+  analysisCacheKey,
+  writeCachedAnalysis,
+} from "@/lib/appearance/wallpaper-analysis-cache"
 
 const mockSave = jest.fn()
 let mockAutoMode: AutoModeSettings = { ...DEFAULT_AUTOMODE }
+let mockBackground: BackgroundSettings = { ...DEFAULT_BACKGROUND_SETTINGS }
+const NIGHT: Wallpaper = {
+  id: "wp_night",
+  name: "night",
+  kind: "color",
+  source: { kind: "color", value: "#0b1020" },
+  builtin: false,
+  createdAt: 1,
+}
+const PAPER: Wallpaper = {
+  ...NIGHT,
+  id: "wp_paper",
+  name: "paper",
+  source: { kind: "color", value: "#f5f1e8" },
+}
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
-    selector({ autoMode: mockAutoMode, save: mockSave }),
+    selector({
+      autoMode: mockAutoMode,
+      save: mockSave,
+      background: mockBackground,
+      wallpapers: [NIGHT, PAPER],
+    }),
 }))
 
 jest.mock("next-intl", () => ({
@@ -44,6 +69,9 @@ function setAutoMode(patch: Partial<AutoModeSettings>) {
 beforeEach(() => {
   mockSave.mockClear()
   setAutoMode({})
+  mockBackground = { ...DEFAULT_BACKGROUND_SETTINGS }
+  localStorage.clear()
+  CACHE.resetMemory()
 })
 
 describe("AutoModeTab", () => {
@@ -221,5 +249,61 @@ describe("AutoModeTab", () => {
     render(<AutoModeTab />)
     expect(screen.getByRole("button", { name: /sunset.useLocation/ })).toBeDisabled()
     expect(screen.getByText("sunset.unavailable")).toBeInTheDocument()
+  })
+})
+
+describe("AutoModeTab — follow wallpaper", () => {
+  it("offers the wallpaper trigger", () => {
+    render(<AutoModeTab />)
+    expect(screen.getByRole("option", { name: "trigger.wallpaper" })).toBeInTheDocument()
+  })
+
+  it("says it follows the system while no wallpaper is on", () => {
+    setAutoMode({ enabled: true, trigger: "wallpaper" })
+    render(<AutoModeTab />)
+    expect(screen.getByTestId("auto-wallpaper-status")).toHaveTextContent("wallpaper.noWallpaper")
+  })
+
+  it("says it is measuring until the wallpaper's analysis lands, then names the variant", () => {
+    setAutoMode({ enabled: true, trigger: "wallpaper" })
+    mockBackground = { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "wp_night" }
+    render(<AutoModeTab />)
+    expect(screen.getByTestId("auto-wallpaper-status")).toHaveTextContent("wallpaper.measuring")
+    act(() =>
+      writeCachedAnalysis(analysisCacheKey(NIGHT), {
+        accent: "#0b1020",
+        secondary: "#0b1020",
+        dominant: "#0b1020",
+        averageLuminance: 0.05,
+        luminanceSpread: 0,
+        darkExtreme: "#0b1020",
+        brightExtreme: "#0b1020",
+        baseVariant: "dark",
+      })
+    )
+    expect(screen.getByTestId("auto-wallpaper-status")).toHaveTextContent("wallpaper.suitsDark")
+  })
+
+  it("names light for a pale wallpaper", () => {
+    setAutoMode({ enabled: true, trigger: "wallpaper" })
+    mockBackground = { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "wp_paper" }
+    writeCachedAnalysis(analysisCacheKey(PAPER), {
+      accent: "#f5f1e8",
+      secondary: "#f5f1e8",
+      dominant: "#f5f1e8",
+      averageLuminance: 0.88,
+      luminanceSpread: 0,
+      darkExtreme: "#e3dccb",
+      brightExtreme: "#fbf8f1",
+      baseVariant: "light",
+    })
+    render(<AutoModeTab />)
+    expect(screen.getByTestId("auto-wallpaper-status")).toHaveTextContent("wallpaper.suitsLight")
+  })
+
+  it("shows no wallpaper status under the other triggers", () => {
+    setAutoMode({ enabled: true, trigger: "system" })
+    render(<AutoModeTab />)
+    expect(screen.queryByTestId("auto-wallpaper-status")).not.toBeInTheDocument()
   })
 })
