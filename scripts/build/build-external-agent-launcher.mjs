@@ -26,16 +26,18 @@ const projectRoot = resolve(scriptDir, "../..")
 
 export const LAUNCHER_BIN = "cognia-external-agent-launcher"
 
-export function launcherPaths(root, target, targetDir = join(root, "target")) {
+export function launcherPaths(root, target, targetDir = join(root, "target"), binary = LAUNCHER_BIN) {
   const extension = target.includes("windows") ? ".exe" : ""
   return {
-    source: join(targetDir, "release", `${LAUNCHER_BIN}${extension}`),
-    destination: join(root, "src-tauri", "binaries", `${LAUNCHER_BIN}-${target}${extension}`),
+    source: join(targetDir, "release", `${binary}${extension}`),
+    destination: join(root, "src-tauri", "binaries", `${binary}-${target}${extension}`),
   }
 }
 
 export function prepareExternalAgentLauncher({
   root = projectRoot,
+  binary = LAUNCHER_BIN,
+  packageName = "cognia-exec-sandbox",
   target = process.env.TAURI_ENV_TARGET_TRIPLE ?? process.env.CARGO_BUILD_TARGET,
   targetDir = process.env.CARGO_TARGET_DIR,
   run = spawnSync,
@@ -49,22 +51,19 @@ export function prepareExternalAgentLauncher({
     resolvedTarget = parseRustHost(rustc.stdout)
   }
 
-  const buildArgs = ["build", "-p", "cognia-exec-sandbox", "--bin", LAUNCHER_BIN, "--release"]
+  const buildArgs = ["build", "--locked", "-p", packageName, "--bin", binary, "--release"]
   if (target) buildArgs.push("--target", resolvedTarget)
   const build = run("cargo", buildArgs, {
     cwd: root,
     encoding: "utf8",
     stdio: "inherit",
-    env: cargoBuildEnvironment(),
+    env: { ...cargoBuildEnvironment(), ...(targetDir ? { CARGO_TARGET_DIR: resolve(root, targetDir) } : {}) },
   })
-  if (build.status !== 0) throw new Error(`building ${LAUNCHER_BIN} failed`)
+  if (build.status !== 0) throw new Error(`building ${binary} failed`)
 
-  const effectiveTargetDir = targetDir
-    ? resolve(root, targetDir)
-    : target
-      ? join(root, "target", resolvedTarget)
-      : join(root, "target")
-  const paths = launcherPaths(root, resolvedTarget, effectiveTargetDir)
+  const baseTargetDir = targetDir ? resolve(root, targetDir) : join(root, "target")
+  const effectiveTargetDir = target ? join(baseTargetDir, resolvedTarget) : baseTargetDir
+  const paths = launcherPaths(root, resolvedTarget, effectiveTargetDir, binary)
   mkdirSync(dirname(paths.destination), { recursive: true })
   copyFileSync(paths.source, paths.destination)
   if (!resolvedTarget.includes("windows")) chmodSync(paths.destination, 0o755)
@@ -73,8 +72,10 @@ export function prepareExternalAgentLauncher({
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const result = prepareExternalAgentLauncher()
-    console.log(`Prepared external-agent sandbox launcher: ${result.destination}`)
+    const result = prepareExternalAgentLauncher(process.argv.includes("--bootstrap")
+      ? { binary: "cognia-bootstrap", packageName: "cognia-bootstrap-agent" }
+      : {})
+    console.log(`Prepared ${process.argv.includes("--bootstrap") ? "bootstrap Agent" : "external-agent sandbox launcher"}: ${result.destination}`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1

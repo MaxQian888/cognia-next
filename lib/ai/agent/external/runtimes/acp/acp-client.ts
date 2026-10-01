@@ -104,6 +104,16 @@ const OPENCODE_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
   dontAsk: "build",
 }
 
+// Keep edit-only and deny-unapproved policies in Cognia's permission broker.
+// Goose's smart_approve would make its own approval decisions before the client.
+const GOOSE_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
+  default: "approve",
+  acceptEdits: "approve",
+  bypassPermissions: "auto",
+  plan: "chat",
+  dontAsk: "approve",
+}
+
 type CachedAcpToolCall = Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }> & {
   _meta?: Record<string, unknown> | null
 }
@@ -823,6 +833,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private terminalSessions: Map<string, string> = new Map()
   private featureProfile?: AcpFeatureProfile
   private terminalAuthState?: AcpTerminalAuthState
+  private terminalAuthPending = false
+  private pendingKimiForkMcp = new Set<string>()
   private dynamicMcpConnections = new Map<string, AcpDynamicMcpConnectionState>()
   private dynamicMcpServerSessions = new Map<string, string>()
 
@@ -831,6 +843,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   private assertDynamicMcpServersSupported(servers: AcpMcpServerConfig[]): void {
+    if (this.isClineAgent() && servers.length > 0) {
+      throw new Error(
+        "Cline ACP does not forward session MCP servers; configure native servers with cline mcp"
+      )
+    }
     const dynamicServers = servers.filter(isAcpChannelMcpServer)
     if (dynamicServers.length === 0) return
     const profile = this.featureProfile ?? this.resolveFeatureProfile()
@@ -981,7 +998,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         fileOperations: initResult.agentCapabilities?.promptCapabilities?.embeddedContext,
         // Stdio MCP servers are baseline ACP support. The negotiated flags
         // only describe additional HTTP/SSE server transports.
-        mcpTools: true,
+        mcpTools: !this.isClineAgent(),
         multiTurn:
           this._config?.metadata?.dshProfileId === "cognia-acp" ||
           initResult.agentCapabilities?.loadSession,
@@ -1053,6 +1070,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       await this.cleanupNativeSessionTerminals(sessionId)
     }
     this._sessions.clear()
+    this.pendingKimiForkMcp.clear()
     this.toolCallStates.clear()
     this.terminalSessions.clear()
     this.cumulativeUsage.clear()
@@ -1116,6 +1134,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // the `codex` preset so users don't have to log in twice. User-supplied
     // env vars on the agent config always win.
     const finalEnv = await buildAgentEnv(config, config.process.env || {})
+    if (this.isGooseAgent()) {
+      // A saved Goose config may default to auto. session/new must start with
+      // approval enabled before the manager applies the requested session mode.
+      finalEnv.GOOSE_MODE = "approve"
+    }
 
     // Spawn the external agent process, reclaiming the id if a process from a
     // previous JS realm (page reload / dev Fast Refresh) is still registered
@@ -1520,6 +1543,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     // Store agent info for later use
+    // Cline 3.0.67 advertises images but extracts only text from prompt blocks.
+    // Fail visibly through the existing content validator instead of dropping images.
+    if (this.isClineAgent() && result.agentCapabilities?.promptCapabilities) {
+      result.agentCapabilities = {
+        ...result.agentCapabilities,
+        promptCapabilities: { ...result.agentCapabilities.promptCapabilities, image: false },
+      }
+    }
     this._protocolVersion = result.protocolVersion
     this._agentCapabilities = normalizeAgentCapabilities(result.agentCapabilities)
     this._agentInfo = result.agentInfo
@@ -1575,12 +1606,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
   async cancelTerminalAuthentication(): Promise<void> {
     const state = this.terminalAuthState
-    if (!state?.terminalId || (state.status !== "starting" && state.status !== "running")) {
+    if (!state || (state.status !== "starting" && state.status !== "running")) {
       return
     }
-    await acpTerminalKill(state.terminalId)
-    await acpTerminalRelease(state.terminalId).catch(() => undefined)
     this.terminalAuthState = { ...state, status: "cancelled" }
+    if (state.terminalId) {
+      await acpTerminalKill(state.terminalId)
+      await acpTerminalRelease(state.terminalId).catch(() => undefined)
+    }
   }
 
   private async authenticateWithTerminal(
@@ -1594,29 +1627,45 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!profile.clientCapabilities.auth?.terminal) {
       throw new Error("Terminal authentication is unavailable on this host")
     }
+    if (this.terminalAuthPending) {
+      throw new Error("Terminal authentication is already in progress")
+    }
 
+    this.terminalAuthPending = true
     this.terminalAuthState = { methodId: method.id, status: "starting" }
-    await this.teardownTransport()
-    const env = await buildAgentEnv(config, {
-      ...(config.process.env ?? {}),
-      ...(method.env ?? {}),
-    })
-    const terminalId = await acpTerminalCreate(
-      `acp-auth:${config.id}`,
-      config.process.command,
-      [...buildSpawnArgs(config.process), ...(method.args ?? [])],
-      config.process.cwd,
-      env,
-      1024 * 1024
-    )
-    this.terminalAuthState = { methodId: method.id, terminalId, status: "running" }
-
-    try {
-      const result = await acpTerminalWaitForExit(terminalId)
-      const exitCode = result.exitStatus?.exitCode ?? null
+    let terminalId: string | undefined
+    const assertNotCancelled = () => {
       if (this.terminalAuthState?.status === "cancelled") {
         throw new Error("Terminal authentication was cancelled")
       }
+    }
+    try {
+      await this.teardownTransport()
+      this._connectionStatus = "disconnected"
+      assertNotCancelled()
+      const env = await buildAgentEnv(config, {
+        ...(config.process.env ?? {}),
+        ...(method.env ?? {}),
+      })
+      assertNotCancelled()
+      terminalId = await acpTerminalCreate(
+        `acp-auth:${config.id}`,
+        config.process.command,
+        [...buildSpawnArgs(config.process), ...(method.args ?? [])],
+        config.process.cwd,
+        env,
+        1024 * 1024
+      )
+      if (this.terminalAuthState?.status === "cancelled") {
+        await acpTerminalKill(terminalId).catch((error) =>
+          log.warn("Failed to kill cancelled ACP authentication terminal", { error })
+        )
+        assertNotCancelled()
+      }
+      this.terminalAuthState = { methodId: method.id, terminalId, status: "running" }
+      const result = await acpTerminalWaitForExit(terminalId)
+      const exitCode = result.exitStatus?.exitCode ?? null
+      assertNotCancelled()
       if (exitCode !== 0) {
         throw new Error(`Terminal authentication exited with code ${exitCode ?? "unknown"}`)
       }
@@ -1643,9 +1692,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
       throw error
     } finally {
-      await acpTerminalRelease(terminalId).catch((error) =>
-        log.warn("Failed to release ACP authentication terminal", { error })
-      )
+      if (terminalId) {
+        await acpTerminalRelease(terminalId).catch((error) =>
+          log.warn("Failed to release ACP authentication terminal", { error })
+        )
+      }
+      this.terminalAuthPending = false
     }
   }
 
@@ -1812,11 +1864,26 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Create a new session
    * @see https://agentclientprotocol.com/protocol/session-setup
    */
-  getCompactionCapability(sessionId: string) {
-    return this.getAdvertisedCommandCompactionCapability(sessionId)
+  async getCompactionCapability(sessionId: string) {
+    const capability = await this.getAdvertisedCommandCompactionCapability(sessionId)
+    if (this.isKimiAgent() && capability.status === "supported") {
+      // Kimi ACP acknowledges background begin(), without a terminal result.
+      // /tasks uses a separate task service and cannot confirm compaction.
+      return {
+        status: "unsupported" as const,
+        routes: [],
+        reason: "kimi_acp_compaction_completion_unavailable",
+      }
+    }
+    return capability
   }
 
-  compactSession(sessionId: string, options?: ExternalAgentCompactionOptions) {
+  async compactSession(sessionId: string, options?: ExternalAgentCompactionOptions) {
+    if (this.isKimiAgent()) {
+      throw new Error(
+        "Kimi ACP compaction completion capability is unavailable; native /compact only starts background work"
+      )
+    }
     return this.compactWithAdvertisedCommand(sessionId, options)
   }
 
@@ -1941,22 +2008,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.pendingKimiForkMcp.delete(sessionId)
     this.clearUsageTracking(sessionId)
     log.info("Closed session", { sessionId })
   }
 
   /**
    * Delete a session from the agent's listings (ACP v1 `session/delete`, gated
-   * by `sessionCapabilities.delete`). Removes local state regardless.
+   * by `sessionCapabilities.delete`). Keep local state until native deletion succeeds.
    */
   async deleteSession(sessionId: string): Promise<void> {
-    if (this._agentCapabilities?.sessionCapabilities?.delete) {
-      try {
-        await this.sendRequest("session/delete", { sessionId })
-      } catch (error) {
-        log.warn("session/delete failed", { sessionId, error })
-      }
+    if (!this._agentCapabilities?.sessionCapabilities?.delete) {
+      throw new Error("Agent does not advertise native session deletion support")
     }
+    await this.sendRequest("session/delete", { sessionId })
     this.toolCallStates.delete(sessionId)
     this.turnMessageId.delete(sessionId)
     await this.sessionCtxCleanup(sessionId)
@@ -1979,6 +2044,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.pendingKimiForkMcp.delete(sessionId)
     this.clearUsageTracking(sessionId)
   }
 
@@ -2022,6 +2088,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return
     }
     await this.sendRequest("logout", {})
+    this.terminalAuthState = undefined
     log.info("Logged out of agent")
   }
 
@@ -2554,13 +2621,81 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     )
   }
 
+  private isGooseAgent(): boolean {
+    return (
+      this._config?.metadata?.preset === "goose" ||
+      /(?:^|[\\/])goose(?:\.exe)?$/i.test(this._config?.process?.command ?? "")
+    )
+  }
+
+  private isQoderAgent(): boolean {
+    return (
+      this._config?.metadata?.preset === "qoder" ||
+      /(?:^|[\\/])qoder(?:\.exe)?$/i.test(this._config?.process?.command ?? "")
+    )
+  }
+
+  private isKimiAgent(): boolean {
+    return (
+      this._config?.metadata?.preset === "kimi" ||
+      /(?:^|[\\/])kimi(?:\.exe)?$/i.test(this._config?.process?.command ?? "")
+    )
+  }
+
+  private isClineAgent(): boolean {
+    return (
+      this._config?.metadata?.preset === "cline" ||
+      /(?:^|[\\/])cline(?:\.exe)?$/i.test(this._config?.process?.command ?? "")
+    )
+  }
+
   private nativePermissionMode(modeId: AcpPermissionMode): string {
+    if (this.isKimiAgent()) {
+      if (modeId === "plan") return "plan"
+      if (modeId === "bypassPermissions") return "yolo"
+      // Native auto also skips shell approvals; retain host edit-only/deny policy.
+      return "default"
+    }
+    if (this.isClineAgent()) return modeId === "plan" ? "plan" : "act"
+    if (this.isQoderAgent()) {
+      if (modeId === "acceptEdits") return "accept_edits"
+      if (modeId === "bypassPermissions") return "bypass_permissions"
+      if (modeId === "dontAsk") return "dont_ask"
+    }
+    if (this.isGooseAgent()) return GOOSE_PERMISSION_MODES[modeId] ?? modeId
     if (this.isDevinAgent()) return DEVIN_PERMISSION_MODES[modeId] ?? modeId
     if (this.isOpenCodeAgent()) return OPENCODE_PERMISSION_MODES[modeId] ?? modeId
     return modeId
   }
 
   private canonicalPermissionMode(nativeMode: string, sessionId?: string): AcpPermissionMode {
+    if (this.isKimiAgent()) {
+      if (nativeMode === "plan") return "plan"
+      if (nativeMode === "yolo") return "bypassPermissions"
+      const current = sessionId ? this._sessions.get(sessionId)?.permissionMode : undefined
+      if (nativeMode === "default" && current && this.nativePermissionMode(current) === nativeMode)
+        return current
+      return "default"
+    }
+    if (this.isClineAgent()) {
+      if (nativeMode === "plan") return "plan"
+      const current = sessionId ? this._sessions.get(sessionId)?.permissionMode : undefined
+      return current && current !== "plan" ? current : "default"
+    }
+    if (this.isQoderAgent()) {
+      if (nativeMode === "accept_edits") return "acceptEdits"
+      if (nativeMode === "bypass_permissions") return "bypassPermissions"
+      if (nativeMode === "dont_ask") return "dontAsk"
+      if (nativeMode === "plan") return "plan"
+      return "default"
+    }
+    if (this.isGooseAgent()) {
+      if (nativeMode === "chat") return "plan"
+      if (nativeMode === "auto") return "bypassPermissions"
+      const current = sessionId ? this._sessions.get(sessionId)?.permissionMode : undefined
+      if (current && GOOSE_PERMISSION_MODES[current] === nativeMode) return current
+      return "default"
+    }
     if (this.isOpenCodeAgent()) {
       if (nativeMode === "plan") return "plan"
       // "build" is the wire value for every executable canonical mode. Keep the
@@ -2596,6 +2731,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const modeOption = this.getConfigOptions(sessionId)?.find(
       (option) => option.type === "select" && option.category === "mode"
     )
+    if (this.isQoderAgent()) {
+      const session = this._sessions.get(sessionId)
+      if (!session) throw new Error(`Session not found: ${sessionId}`)
+      const modes = session.metadata?.modes as AcpSessionModesState | undefined
+      const offered =
+        modeOption?.type === "select"
+          ? modeOption.options
+              .flatMap((entry) => ("group" in entry ? entry.options : [entry]))
+              .map((option) => option.value)
+          : (modes?.availableModes.map((mode) => mode.id) ?? ["default", "bypass_permissions"])
+      if (!offered.includes(nativeMode))
+        throw new Error(`Qoder does not advertise permission mode: ${modeId}`)
+    }
     if (modeOption) {
       await this.setConfigOption(sessionId, modeOption.id, nativeMode)
       this.updateSession(sessionId, { permissionMode: modeId })
@@ -2957,10 +3105,38 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     try {
-      const additionalDirectories = this.resolveAdditionalDirectories(options)
-      const cwd = this.resolveSessionCwd(options)
+      let additionalDirectories = this.resolveAdditionalDirectories(options)
+      let cwd = this.resolveSessionCwd(options)
+      const inheritedMetadata = this._sessions.get(sessionId)?.metadata as
+        Record<string, unknown> | undefined
+      if (this.isKimiAgent() && typeof inheritedMetadata?.cwd === "string") {
+        const sourceRoots = this.getSessionWorkspaceRoots(sessionId)
+        const sourceDirectories = sourceRoots.slice(1)
+        if (
+          (options?.cwd !== undefined && cwd !== sourceRoots[0]) ||
+          (options?.additionalDirectories !== undefined &&
+            (additionalDirectories?.length ?? 0) !== sourceDirectories.length) ||
+          (options?.additionalDirectories !== undefined &&
+            additionalDirectories?.some((directory) => !sourceDirectories.includes(directory)))
+        ) {
+          throw new Error("Kimi fork inherits the source workspace and additional directories")
+        }
+        cwd = sourceRoots[0]
+        additionalDirectories = sourceDirectories
+      }
+      const sessionOptions = this.isKimiAgent()
+        ? { ...options, cwd, additionalDirectories }
+        : options
       const mcpServers = normalizeMcpServers(options?.mcpServers)
       this.assertDynamicMcpServersSupported(mcpServers)
+      const restoreKimiMcp = this.isKimiAgent() && mcpServers.length > 0
+      if (
+        restoreKimiMcp &&
+        (!this._agentCapabilities?.loadSession ||
+          !this._agentCapabilities.sessionCapabilities?.close)
+      ) {
+        throw new Error("Cannot restore Kimi fork MCP bindings without session close/load support")
+      }
       const result = await this.sendRequest<AcpNewSessionResult>(method, {
         sessionId,
         cwd,
@@ -2969,10 +3145,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         this._agentCapabilities?.sessionCapabilities?.additionalDirectories
           ? { additionalDirectories }
           : {}),
-        _meta: this.buildSessionRequestMeta(options),
+        _meta: this.buildSessionRequestMeta(sessionOptions),
       } as Record<string, unknown>)
-      const inheritedMetadata = this._sessions.get(sessionId)?.metadata as
-        Record<string, unknown> | undefined
+      if (this.isKimiAgent() && (!result.sessionId || result.sessionId === sessionId)) {
+        throw new Error("Kimi fork must return a distinct session ID")
+      }
       const forkedSession: ExternalAgentSession = {
         id: result.sessionId,
         agentId: this._config!.id,
@@ -2985,7 +3162,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         lastActivityAt: new Date(),
         metadata: {
           ...this.buildSessionMetadata(
-            options,
+            sessionOptions,
             {
               models: result.models,
               modes: result.modes,
@@ -2999,6 +3176,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       this._sessions.set(forkedSession.id, forkedSession)
       // A fork inherits the parent's history — its counters are not fresh.
       this.primedUsageSessions.add(forkedSession.id)
+      if (restoreKimiMcp) {
+        const restored = await this.restoreKimiForkMcp(forkedSession, sessionOptions)
+        this.setExtensionSupport(method, "supported", "ok")
+        return restored
+      }
+      if (this.isKimiAgent() && options?.mcpServers === undefined) {
+        // GUI forks precede tool-host authorization; execution supplies fresh grants.
+        this.pendingKimiForkMcp.add(forkedSession.id)
+      }
       this.registerDynamicMcpServers(forkedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
       return forkedSession
@@ -3023,6 +3209,84 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         error instanceof Error ? error.message : String(error)
       )
       throw error
+    }
+  }
+
+  /** Bind a GUI fork only after the execution coordinator has minted fresh grants. */
+  async prepareForkSessionForExecution(
+    sessionId: string,
+    options: SessionCreateOptions
+  ): Promise<ExternalAgentSession | undefined> {
+    if (!this.pendingKimiForkMcp.has(sessionId) || !options.mcpServers?.length) return undefined
+    const session = this._sessions.get(sessionId)
+    if (!session) throw new Error(`Unknown pending Kimi fork: ${sessionId}`)
+    const roots = this.getSessionWorkspaceRoots(sessionId)
+    const directories = this.resolveAdditionalDirectories(options)
+    if (
+      (options.cwd !== undefined && options.cwd !== roots[0]) ||
+      (options.additionalDirectories !== undefined &&
+        ((directories?.length ?? 0) !== roots.length - 1 ||
+          directories?.some((directory) => !roots.slice(1).includes(directory))))
+    ) {
+      throw new Error("Kimi fork inherits the source workspace and additional directories")
+    }
+    return this.restoreKimiForkMcp(session, {
+      ...options,
+      cwd: roots[0],
+      additionalDirectories: roots.slice(1),
+    })
+  }
+
+  private async restoreKimiForkMcp(
+    session: ExternalAgentSession,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    const mcpServers = normalizeMcpServers(options?.mcpServers)
+    this.assertDynamicMcpServersSupported(mcpServers)
+    // Kimi ignores fork MCP and live restore overrides; close before fresh load.
+    try {
+      if (
+        !this._agentCapabilities?.loadSession ||
+        !this._agentCapabilities.sessionCapabilities?.close
+      ) {
+        throw new Error("Cannot restore Kimi fork MCP bindings without session close/load support")
+      }
+      await this.sendRequest("session/close", { sessionId: session.id })
+      await this.sessionCtxCleanup(session.id)
+      const restored = await this.loadSession(session.id, {
+        ...options,
+        mcpServers,
+        metadata: { ...session.metadata, ...options?.metadata },
+      })
+      restored.metadata = {
+        ...restored.metadata,
+        cogniaInstructionContext:
+          restored.metadata?.cogniaInstructionContext ?? session.metadata?.cogniaInstructionContext,
+      }
+      this.pendingKimiForkMcp.delete(session.id)
+      return restored
+    } catch (error) {
+      try {
+        if (this._agentCapabilities?.sessionCapabilities?.delete) {
+          await this.deleteSession(session.id)
+        } else {
+          await this.sendRequest("session/close", { sessionId: session.id })
+        }
+      } catch (cleanupError) {
+        log.warn("Failed to remove Kimi fork after MCP restoration failure", {
+          sessionId: session.id,
+          error: cleanupError,
+        })
+      } finally {
+        this.pendingKimiForkMcp.delete(session.id)
+        this.toolCallStates.delete(session.id)
+        this.turnMessageId.delete(session.id)
+        await this.sessionCtxCleanup(session.id)
+      }
+      throw new Error(
+        `Failed to restore Kimi fork MCP bindings: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      )
     }
   }
 
@@ -3636,10 +3900,29 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         )
       : undefined
 
+    // Goose preserves the programmatic tool name in its initial tool-call
+    // metadata; permission updates carry only a generated human title.
+    const gooseMeta = toolMeta?.goose as { toolCall?: { toolName?: unknown } } | undefined
+    const rawGooseToolName = this.isGooseAgent() ? gooseMeta?.toolCall?.toolName : undefined
+    const gooseToolName =
+      typeof rawGooseToolName === "string" && rawGooseToolName.trim()
+        ? /^(cognia-tools|cognia-plugin-tools)__.+/.test(rawGooseToolName)
+          ? `mcp__${rawGooseToolName}`
+          : rawGooseToolName
+        : undefined
+    // Goose reports these platform file operations as "other". Classify only
+    // known identities so acceptEdits can apply the existing file policy.
+    const gooseKind =
+      gooseToolName === "read"
+        ? "read"
+        : gooseToolName === "write" || gooseToolName === "edit"
+          ? "edit"
+          : undefined
+
     const toolInfo: AcpToolInfo = params.toolInfo || {
       id: tcToolCallId || "tool_call",
-      name: devinToolName || tcTitle || "Tool request",
-      category: tcKind,
+      name: gooseToolName || devinToolName || tcTitle || "Tool request",
+      category: gooseKind || tcKind,
     }
     // JSON-RPC ids are collision-free on the connection. Tool/request domain
     // ids may repeat across concurrent nested requests and cannot safely key
@@ -3656,7 +3939,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       sessionId: sessionId || undefined,
       toolCallId: tcToolCallId || toolInfo.id,
       title: tcTitle || toolInfo.name,
-      kind: (tcKind || toolInfo.category || "other") as AcpToolCallKind,
+      kind: (gooseKind || tcKind || toolInfo.category || "other") as AcpToolCallKind,
       toolInfo,
       options: params.options,
       rawInput: tcRawInput,
@@ -3687,7 +3970,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // tool runs without a prompt.
     if (session?.permissionMode === "dontAsk") {
       const preApproved =
-        !!allowOption && isToolPreApproved(request.title, request.rawInput, session.allowedTools)
+        !!allowOption &&
+        isToolPreApproved(
+          this.isGooseAgent() ? request.toolInfo.name : request.title,
+          request.rawInput,
+          session.allowedTools
+        )
       if (preApproved) {
         return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
       }

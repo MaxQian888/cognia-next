@@ -37,6 +37,7 @@ import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prom
 import { validateAcpElicitationResponse } from "../acp/acp-elicitation"
 import { OpenCodeV2EventMapper, mapOpenCodeV2Messages } from "./opencode-v2-events"
 import {
+  assertOpenCodeV2LocalPlacement,
   canProjectOpenCodeV2Mcp,
   launchOpenCodeV2Service,
   type OpenCodeV2OwnedService,
@@ -175,6 +176,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     this._connectionStatus = "connecting"
     this.connection = new AbortController()
     try {
+      assertOpenCodeV2LocalPlacement(config)
       const explicitEndpoint = config.network?.endpoint?.trim()
       if (config.metadata?.cogniaGatewayTask) {
         this.connectionService = await this.launchService(
@@ -205,6 +207,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         )
       }
       const { OpenCode } = await import("@opencode/client")
+      assertOpenCodeV2LocalPlacement(config)
       this.client = OpenCode.make({
         baseUrl: endpoint,
         headers: Object.fromEntries(headers.entries()),

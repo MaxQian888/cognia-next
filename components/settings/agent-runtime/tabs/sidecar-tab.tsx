@@ -212,7 +212,10 @@ export function SidecarTab() {
       <SettingsBlock title={t("countsTitle")} description={t("countsDescription")}>
         {/* Jump-off counters: one divided strip, so four numbers do not arrive
             as four floating cards inside the runtime pane. */}
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border/60 @md/settings-stack:grid-cols-4">
+        <div
+          className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border/60 @md/settings-stack:grid-cols-4"
+          data-hairline-grid
+        >
           <CountTile
             label={t("countSessions")}
             value={sessionCount}

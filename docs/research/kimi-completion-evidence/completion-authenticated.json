@@ -1,0 +1,192 @@
+{
+  "ok": true,
+  "version": "2.1.1",
+  "protocolVersion": 1,
+  "sandboxedConnection": true,
+  "authenticated": true,
+  "modes": true,
+  "listForkCloseLoadResumeDelete": true,
+  "advertisedCapabilities": {
+    "loadSession": true,
+    "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": true
+    },
+    "mcpCapabilities": {
+      "http": true,
+      "sse": true
+    },
+    "sessionCapabilities": {
+      "fork": {},
+      "resume": {},
+      "close": {},
+      "delete": {},
+      "list": {},
+      "additionalDirectories": {}
+    },
+    "auth": {
+      "logout": {}
+    }
+  },
+  "configOptions": [
+    {
+      "id": "model",
+      "type": "select"
+    },
+    {
+      "id": "thinking",
+      "type": "select"
+    },
+    {
+      "id": "mode",
+      "type": "select"
+    }
+  ],
+  "reply": {
+    "reply": "KIMI_OK_efe790b5b72046ec95a17c9e3f6ea67f",
+    "stopReason": "end_turn",
+    "events": {
+      "session_info_update": 1,
+      "thinking": 63,
+      "message_delta": 25,
+      "done": 1
+    }
+  },
+  "tools": {
+    "reply": "The probe returned its marker. Now I'll write it to `result.txt` and read it back to verify.Verified. `result.txt` contains exactly the marker returned by the `kimi-probe` probe tool:\n\n```\nMCP_OK_fef04a7e-9fce-414f-9cb6-b13b2bf90031\n```",
+    "stopReason": "end_turn",
+    "events": {
+      "usage_update": 1,
+      "thinking": 329,
+      "tool_use_start": 3,
+      "tool_call_update": 42,
+      "permission_request": 1,
+      "permission_response": 1,
+      "tool_result": 3,
+      "message_delta": 73,
+      "done": 1
+    }
+  },
+  "image": {
+    "reply": "red",
+    "stopReason": "end_turn",
+    "events": {
+      "usage_update": 1,
+      "thinking": 33,
+      "message_delta": 1,
+      "done": 1
+    }
+  },
+  "resource": {
+    "reply": "RESOURCE_d51d2a0c-0192-4fa7-9c6f-64d0988d012f",
+    "stopReason": "end_turn",
+    "events": {
+      "usage_update": 1,
+      "thinking": 63,
+      "message_delta": 28,
+      "done": 1
+    }
+  },
+  "shell": {
+    "reply": "SHELL_3395f232-64ee-4c8c-be03-4fad3395a8d2",
+    "stopReason": "end_turn",
+    "events": {
+      "usage_update": 1,
+      "thinking": 136,
+      "tool_use_start": 1,
+      "tool_call_update": 41,
+      "permission_request": 1,
+      "permission_response": 1,
+      "tool_result": 1,
+      "message_delta": 26,
+      "done": 1
+    }
+  },
+  "question": {
+    "reply": "Tests, Alpha",
+    "stopReason": "end_turn",
+    "events": {
+      "usage_update": 1,
+      "thinking": 126,
+      "tool_use_start": 1,
+      "tool_call_update": 70,
+      "elicitation_request": 1,
+      "tool_result": 1,
+      "message_delta": 3,
+      "done": 1
+    }
+  },
+  "denial": {
+    "reply": "The call to `mcp__kimi-probe__probe` was not approved — the approval request was cancelled. Per your instruction, I'm stopping here without retrying or using any other tools.",
+    "stopReason": "end_turn",
+    "events": {
+      "commands_update": 1,
+      "session_info_update": 1,
+      "thinking": 125,
+      "tool_use_start": 1,
+      "tool_call_update": 2,
+      "permission_request": 1,
+      "permission_response": 1,
+      "tool_result": 1,
+      "message_delta": 40,
+      "done": 1
+    }
+  },
+  "dontAsk": {
+    "reply": "Permission was denied — the approval request for `mcp__kimi-probe__probe` was rejected. Stopping here without retrying or using any other tools, as instructed.",
+    "stopReason": "end_turn",
+    "events": {
+      "thinking": 59,
+      "tool_use_start": 1,
+      "tool_call_update": 2,
+      "tool_result": 1,
+      "message_delta": 37,
+      "done": 1
+    }
+  },
+  "compaction": {
+    "reply": "Context compaction started — it runs in the background and the compacted context applies once it finishes.",
+    "stopReason": "end_turn",
+    "events": {
+      "message_delta": 1,
+      "done": 1
+    }
+  },
+  "inFlightCancellation": {
+    "stopReason": "cancelled",
+    "toolStarted": true,
+    "toolFinished": false
+  },
+  "forkMcp": "MCP servers (3):\n- kimi-probe (stdio): connected, 1 tools\n- kimi-http-probe (http): connected, 1 tools\n- kimi-sse-probe (sse): connected, 1 tools",
+  "forkToolCall": {
+    "reply": "MCP_OK_fef04a7e-9fce-414f-9cb6-b13b2bf90031",
+    "stopReason": "end_turn",
+    "events": {
+      "thinking": 101,
+      "tool_use_start": 1,
+      "tool_call_update": 2,
+      "permission_request": 1,
+      "permission_response": 1,
+      "tool_result": 1,
+      "message_delta": 26,
+      "done": 1
+    }
+  },
+  "httpSseToolCalls": {
+    "reply": "KIMI_HTTP_OK\nKIMI_SSE_OK",
+    "stopReason": "end_turn",
+    "events": {
+      "usage_update": 1,
+      "thinking": 47,
+      "tool_use_start": 2,
+      "tool_call_update": 4,
+      "permission_request": 2,
+      "permission_response": 2,
+      "tool_result": 2,
+      "message_delta": 11,
+      "done": 1
+    }
+  },
+  "deferredForkMcp": "MCP servers (3):\n- kimi-probe (stdio): connected, 1 tools\n- kimi-http-probe (http): connected, 1 tools\n- kimi-sse-probe (sse): connected, 1 tools"
+}

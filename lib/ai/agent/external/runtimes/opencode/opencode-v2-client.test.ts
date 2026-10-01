@@ -21,6 +21,12 @@ import { Service } from "@opencode/client/service"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
 import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
+import {
+  __resetSpawnPlacementsForTests,
+  clearSpawnPlacement,
+  registerSpawnPlacement,
+} from "@/lib/sandbox/spawn-placement-registry"
+import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 
 const config = {
   id: "oc",
@@ -147,6 +153,7 @@ describe("current OpenCode V2 adapter", () => {
   let adapter: OpenCodeV2ClientAdapter
   let client: ReturnType<typeof fakeClient>
   beforeEach(() => {
+    __resetSpawnPlacementsForTests()
     jest.clearAllMocks()
     client = fakeClient()
     jest.mocked(OpenCode.make).mockReturnValue(client as never)
@@ -156,6 +163,46 @@ describe("current OpenCode V2 adapter", () => {
       headers: { Authorization: "Basic local" },
     })
     adapter = new OpenCodeV2ClientAdapter()
+  })
+  afterEach(() => __resetSpawnPlacementsForTests())
+
+  it.each(["endpoint", "discovery", "gateway"])(
+    "refuses selected sandbox before %s connection and clears stale state for retry",
+    async (mode) => {
+      const launch = jest.fn()
+      adapter = new OpenCodeV2ClientAdapter(launch)
+      await adapter.connect(config)
+      await adapter.createSession()
+      jest.clearAllMocks()
+      registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+      const selected = {
+        ...config,
+        network: mode === "endpoint" ? config.network : undefined,
+        ...(mode === "gateway" ? { metadata: { cogniaGatewayTask: true } } : {}),
+      }
+      await expect(adapter.connect(selected)).rejects.toThrow("OpenCode ACP")
+      expect(adapter.connectionStatus).toBe("error")
+      expect(() => adapter.getSdkClient()).toThrow("Not connected")
+      expect(launch).not.toHaveBeenCalled()
+      expect(OpenCode.make).not.toHaveBeenCalled()
+      expect(discoverOpenCodeV2ViaSidecar).not.toHaveBeenCalled()
+      expect(Service.discover).not.toHaveBeenCalled()
+      expect(platformStreamingFetch).not.toHaveBeenCalled()
+      clearSpawnPlacement(config.id)
+      await adapter.connect(config)
+      expect(adapter.connectionStatus).toBe("connected")
+      await adapter.disconnect()
+    }
+  )
+  it("refuses SDK connection when placement changes during discovery", async () => {
+    jest.mocked(discoverOpenCodeV2ViaSidecar).mockImplementationOnce(async () => {
+      registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+      return { endpoint: "http://localhost:1234", version: "2.0.0", headers: {} }
+    })
+    await expect(adapter.connect({ ...config, network: undefined })).rejects.toThrow("OpenCode ACP")
+    expect(OpenCode.make).not.toHaveBeenCalled()
+    expect(platformStreamingFetch).not.toHaveBeenCalled()
+    expect(adapter.connectionStatus).toBe("error")
   })
   it("starts a gateway-owned connection without shared discovery and isolates sessions even without MCP", async () => {
     const close = jest.fn().mockResolvedValue(undefined)

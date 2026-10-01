@@ -122,7 +122,17 @@ export function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) 
                     ? t("opencodeV2PresetDescription")
                     : id === "devin"
                       ? t("devinPresetDescription")
-                      : config.description}
+                      : id === "aider"
+                        ? t("aiderPresetDescription")
+                        : id === "qoder"
+                          ? t("qoderPresetDescription")
+                          : id === "kimi"
+                            ? t("kimiPresetDescription")
+                            : id === "cline"
+                              ? t("clinePresetDescription")
+                              : id === "goose"
+                                ? t("goosePresetDescription")
+                                : config.description}
                 </p>
                 {/* `tags` is optional on the preset type and a plugin can register
                     a preset at runtime, so the gallery must not assume the array

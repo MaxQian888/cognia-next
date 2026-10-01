@@ -1,14 +1,25 @@
 import type { PermissionRequestEvent, SendOptions, ToolHostEvent } from "@cognia/agent-config-types"
-import { callSidecarToolHost } from "@/lib/claude/feature-call"
+import { callSidecarToolHost, createSidecarFeatureCallClient } from "@/lib/claude/feature-call"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { dispatchPostToolUse, dispatchPreToolUse } from "@/lib/claude/adapter-hooks"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { transport } from "@/lib/tauri"
+import {
+  getActiveRemoteTransport,
+  getActiveRemoteEndpoint,
+  subscribeActiveRemoteTransport,
+} from "@/lib/tauri/transport-routing"
+import { spawnPlacementFor } from "@/lib/sandbox/spawn-placement-registry"
+import { activeHostFeatureManifest } from "@/stores/remote-host/remote-host-store"
+import { supportsHostFeatureOperation } from "@/lib/platform/host-feature-manifest"
 import type { AcpMcpServerConfig, ExternalAgentEvent } from "@/types/agent/external-agent"
 
 export const RENDERER_TOOL_HOST_APPROVAL_PREFIX = "external-tool-host:"
 
 export interface RendererToolHostStartOptions {
+  agentId?: string
+  /** Reserve plugins for a task-owned child that has not spawned yet. */
+  deferSandbox?: boolean
   sendOptions: SendOptions
   signal?: AbortSignal
   onPermissionRequest?: (
@@ -19,9 +30,12 @@ export interface RendererToolHostStartOptions {
 }
 
 export interface RendererToolHost {
-  start(
-    options: RendererToolHostStartOptions
-  ): Promise<{ mcpServers: AcpMcpServerConfig[]; catalogFingerprint: string }>
+  isCurrentHost(): boolean
+  start(options: RendererToolHostStartOptions): Promise<{
+    mcpServers: AcpMcpServerConfig[]
+    catalogFingerprint: string
+    sandboxToolHostLeaseId?: string
+  }>
   pause(): Promise<void>
   close(): Promise<void>
 }
@@ -35,12 +49,13 @@ interface Dependencies {
   randomUUID: () => string
 }
 
-function serverConfigs(value: unknown, leaseId: string) {
+function serverConfigs(value: unknown, leaseId: string, deferredSandbox: boolean) {
   const result = value as {
     leaseId?: string
     mcpServers?: unknown[]
     generation?: number
     catalogFingerprint?: string
+    sandboxToolHostLeaseId?: unknown
   } | null
   if (
     result?.leaseId !== leaseId ||
@@ -52,6 +67,15 @@ function serverConfigs(value: unknown, leaseId: string) {
   ) {
     throw new Error("Cognia tool host returned an invalid lease")
   }
+  const sandboxToolHostLeaseId = result.sandboxToolHostLeaseId
+  if (
+    (deferredSandbox || sandboxToolHostLeaseId !== undefined) &&
+    (typeof sandboxToolHostLeaseId !== "string" ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+        sandboxToolHostLeaseId
+      ))
+  )
+    throw new Error("Cognia tool host returned an invalid sandbox plugin lease; update the Host")
   const mcpServers: AcpMcpServerConfig[] = result.mcpServers.map((value) => {
     const server = value as {
       name?: string
@@ -88,6 +112,7 @@ function serverConfigs(value: unknown, leaseId: string) {
     mcpServers,
     generation: result.generation!,
     catalogFingerprint: result.catalogFingerprint,
+    ...(typeof sandboxToolHostLeaseId === "string" ? { sandboxToolHostLeaseId } : {}),
   }
 }
 
@@ -96,16 +121,90 @@ export function createRendererToolHost(
   ownerSessionId: string,
   overrides: Partial<Dependencies> = {}
 ): RendererToolHost {
+  const remote = getActiveRemoteTransport()
+  if (
+    remote &&
+    !supportsHostFeatureOperation(
+      activeHostFeatureManifest(),
+      "external-agent.process-plane",
+      "agent_tool_host_control"
+    )
+  )
+    throw new Error("This Host does not support Cognia plugin tool hosting; update the Host")
+  const deviceId = remote ? getActiveRemoteEndpoint()?.deviceId : undefined
+  if (remote && !deviceId) throw new Error("Remote tool host requires a paired device identity")
+  const remoteSubscriptions = new Set<() => void>()
+  const assertTarget = () => {
+    if (
+      getActiveRemoteTransport() !== remote ||
+      (remote && getActiveRemoteEndpoint()?.deviceId !== deviceId)
+    )
+      throw new Error("Cognia tool host belongs to a different Host")
+  }
+  const remoteSubscribe = async (event: string, handler: (payload: never) => void) => {
+    assertTarget()
+    const off = remote!.subscribe(event, (payload) => {
+      if (getActiveRemoteTransport() === remote) handler(payload as never)
+    })
+    remoteSubscriptions.add(off)
+    try {
+      const ready = (
+        remote as typeof remote & {
+          whenSubscribed?: (channels: readonly string[]) => Promise<void>
+        }
+      )?.whenSubscribed
+      if (ready) await ready.call(remote, [event])
+      assertTarget()
+      return () => {
+        off()
+        remoteSubscriptions.delete(off)
+      }
+    } catch (error) {
+      off()
+      remoteSubscriptions.delete(off)
+      throw error
+    }
+  }
+  const remoteClient = remote
+    ? createSidecarFeatureCallClient({
+        call: async (command, args) => {
+          assertTarget()
+          if (command !== "claude_feature_call")
+            throw new Error("Unsupported remote tool host command")
+          const result = await remote.call("agent_tool_host_control", args)
+          assertTarget()
+          return result
+        },
+        subscribe: remoteSubscribe,
+        randomUUID: () => crypto.randomUUID(),
+      })
+    : undefined
+  const stopWatching = remote
+    ? subscribeActiveRemoteTransport((next) => {
+        if (next !== remote) {
+          deactivate()
+          if (heartbeat) clearInterval(heartbeat)
+          remoteClient?.dispose(new Error("Cognia tool host Host changed"))
+          for (const off of remoteSubscriptions) off()
+          remoteSubscriptions.clear()
+        }
+      })
+    : undefined
   const deps: Dependencies = {
-    call: callSidecarToolHost,
-    subscribe: (handler) => transport.subscribe("claude://message", handler),
+    call: remoteClient
+      ? (operation, control) => callSidecarToolHost(operation, control, remoteClient.requestResult)
+      : callSidecarToolHost,
+    subscribe: (handler) =>
+      remote
+        ? remoteSubscribe("claude://message", handler)
+        : transport.subscribe("claude://message", handler),
     execute: handlePluginToolExec,
     review: dispatchPostToolUse,
     before: dispatchPreToolUse,
     randomUUID: () => crypto.randomUUID(),
     ...overrides,
   }
-  const leaseId = deps.randomUUID()
+  const leaseId = `${remote ? `remote-tool-host:${deviceId}:` : ""}${deps.randomUUID()}`
   const identity = { leaseId, ownerSessionId }
   let unsubscribe: (() => void) | undefined
   let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -280,9 +379,29 @@ export function createRendererToolHost(
   }
 
   const host: RendererToolHost = {
+    isCurrentHost: () => !closed && getActiveRemoteTransport() === remote,
     start(options) {
       return enqueue(async () => {
         if (closed) throw new Error("Cognia tool host is closed")
+        assertTarget()
+        const sandbox = Boolean(
+          options.sendOptions.sandboxRuntimeRef ||
+          (options.agentId && spawnPlacementFor(options.agentId))
+        )
+        const deferredSandbox = sandbox && options.deferSandbox === true
+        if (
+          sandbox &&
+          (!options.agentId ||
+            (remote &&
+              !supportsHostFeatureOperation(
+                activeHostFeatureManifest(),
+                "external-agent.sandbox-tools",
+                "agent_tool_host_control"
+              )))
+        )
+          throw new Error(
+            "This Host does not support sandbox hosted tools; update the Host and agent bundle"
+          )
         options.signal?.throwIfAborted()
         if (active) throw new Error("Pause the Cognia tool host before starting another turn")
         unsubscribe ??= await deps.subscribe((event) => {
@@ -305,10 +424,26 @@ export function createRendererToolHost(
           // Do not abort the start request itself: wait for its descriptor, then revoke it.
           const response = await deps.call("tool-host-start", {
             ...identity,
-            sendOptions: options.sendOptions,
+            ...(sandbox ? { sandboxAgentId: options.agentId } : {}),
+            ...(deferredSandbox ? { deferSandbox: true } : {}),
+            // Remote plugin tools execute through the renderer's existing
+            // permission/PII gate. Host builtins stay with the native agent;
+            // forwarding their cwd/sandbox options would create another exec path.
+            sendOptions:
+              remote || sandbox
+                ? {
+                    pluginTools: options.sendOptions.pluginTools,
+                    permissionMode: options.sendOptions.permissionMode,
+                    permissionRuleset: options.sendOptions.permissionRuleset,
+                    allowedTools: options.sendOptions.allowedTools,
+                    disallowedTools: options.sendOptions.disallowedTools,
+                    toolResultReviewEnabled: options.sendOptions.toolResultReviewEnabled,
+                  }
+                : options.sendOptions,
           })
           opened = true
-          const { mcpServers, generation, catalogFingerprint } = serverConfigs(response, leaseId)
+          const { mcpServers, generation, catalogFingerprint, sandboxToolHostLeaseId } =
+            serverConfigs(response, leaseId, deferredSandbox)
           turn.generation = generation
           if (closed || options.signal?.aborted || controller.signal.aborted)
             throw new DOMException("Cognia tool host start aborted", "AbortError")
@@ -322,7 +457,11 @@ export function createRendererToolHost(
               }
             })
           }, 60_000)
-          return { mcpServers, catalogFingerprint }
+          return {
+            mcpServers,
+            catalogFingerprint,
+            ...(sandboxToolHostLeaseId ? { sandboxToolHostLeaseId } : {}),
+          }
         } catch (error) {
           deactivate()
           await deps.call("tool-host-stop", identity).catch(() => undefined)
@@ -343,11 +482,16 @@ export function createRendererToolHost(
       if (heartbeat) clearInterval(heartbeat)
       return enqueue(async () => {
         try {
-          if (opened) await deps.call("tool-host-stop", identity)
+          if (opened && (!remote || getActiveRemoteTransport() === remote))
+            await deps.call("tool-host-stop", identity)
           opened = false
         } finally {
           unsubscribe?.()
           unsubscribe = undefined
+          remoteClient?.dispose()
+          stopWatching?.()
+          for (const off of remoteSubscriptions) off()
+          remoteSubscriptions.clear()
         }
       })
     },

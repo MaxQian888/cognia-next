@@ -91,6 +91,19 @@ pub trait AgentEventEmitter: Send + Sync + 'static {
     fn emit(&self, channel: &str, payload: Value);
 }
 
+/// Companion routes this server-owned context only to the originating device.
+/// Capture it at spawn: stdout/exit readers run after the request task returns.
+struct RemoteAgentEmitter {
+    inner: Arc<dyn AgentEventEmitter>,
+    device_id: String,
+}
+impl AgentEventEmitter for RemoteAgentEmitter {
+    fn emit(&self, channel: &str, mut payload: Value) {
+        payload["remoteExecutionContext"] = json!({ "originDeviceId": self.device_id });
+        self.inner.emit(channel, payload);
+    }
+}
+
 /// [`ExternalAgentEventSink`] that forwards reader/supervisor events through
 /// an [`AgentEventEmitter`] with the frozen shapes. Replaces the old
 /// Tauri-only `TauriEventSink`.
@@ -174,6 +187,19 @@ pub trait ExecBackend: Send + Sync + 'static {
     /// override it, because a container very much does outlive us.
     async fn reap_orphans(&self) -> Result<Vec<String>, String> {
         Ok(Vec::new())
+    }
+
+    /// Delete task state retained inside owned sandbox runtimes, if any.
+    async fn delete_retained_gateway_task(
+        &self,
+        _task_id: &str,
+        _device: Option<&str>,
+    ) -> Result<(), String> {
+        if self.kind() == "local-process" {
+            Ok(())
+        } else {
+            Err("This backend cannot delete retained gateway task state".into())
+        }
     }
 
     /// Whether this backend honours a spawn's runtime environment placement
@@ -282,6 +308,13 @@ pub async fn spawn_with_events(
         return Err("Cognia gateway tasks require a local process backend; remote gateway transport is not configured".into());
     }
     let id = config.id.clone();
+    let emitter: Arc<dyn AgentEventEmitter> = match crate::spawn_authority::current_origin() {
+        Some(device_id) => Arc::new(RemoteAgentEmitter {
+            inner: emitter,
+            device_id,
+        }),
+        None => emitter,
+    };
     let sink: Arc<dyn ExternalAgentEventSink> = EmitterEventSink::new(Arc::clone(&emitter));
 
     if let Some(placement) = config.sandbox.as_ref() {
@@ -489,6 +522,7 @@ mod tests {
             framing: Default::default(),
             sandbox: Some(
                 crate::sandbox_routing_backend::SandboxPlacement::Container {
+                    hosted_tool_host_lease_ids: Vec::new(),
                     spec: json!({}),
                     isolation_mandatory,
                 },
@@ -566,6 +600,54 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0, STATE_CHANGE_CHANNEL);
         assert_eq!(events[0].1, json!({ "agentId": "nope", "state": "Failed" }));
+    }
+
+    #[tokio::test]
+    async fn remote_process_output_retains_its_server_owned_device_after_spawn_returns() {
+        let backend = LocalProcessBackend::new();
+        let emitter = RecordingAgentEmitter::new();
+        let config = ExternalAgentSpawnConfig {
+            id: "private-remote-agent".into(),
+            command: "node".into(),
+            args: vec![
+                "-e".into(),
+                "setTimeout(()=>process.stdout.write('private output\\n'),30)".into(),
+            ],
+            env: HashMap::new(),
+            cwd: None,
+            framing: Default::default(),
+            sandbox: None,
+        };
+        crate::spawn_authority::with_remote_origin(
+            "device-owner",
+            spawn_with_events(backend.as_ref(), emitter.clone(), config),
+        )
+        .await
+        .expect("node child spawns");
+        assert_eq!(crate::spawn_authority::current_origin(), None);
+        let completed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !emitter
+                .events()
+                .iter()
+                .any(|(channel, _)| channel == EXIT_CHANNEL)
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        backend.kill_all().await.unwrap();
+        completed.expect("node child exits");
+        let events = emitter.events();
+        assert!(events
+            .iter()
+            .any(|(channel, payload)| channel == STDOUT_CHANNEL
+                && payload["data"] == "private output"));
+        for (_, payload) in events {
+            assert_eq!(
+                payload["remoteExecutionContext"]["originDeviceId"],
+                "device-owner"
+            );
+        }
     }
 
     /// Full delegation parity: spawn a real node child through the backend,

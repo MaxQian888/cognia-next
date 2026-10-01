@@ -60,6 +60,19 @@ describe("SubagentsNav", () => {
     expect(screen.getByTestId("subagent-nav-item-nesting")).not.toHaveAttribute("aria-current")
   })
 
+  it("inks the selected row's description for the accent pill, the rest muted", () => {
+    render(<SubagentsNav {...baseProps({ activeId: "nesting" })} />)
+    // Muted ink on the accent pill drops toward 1:1 under a saturated or pale
+    // accent (an ocean preset, high-contrast dark), so the selected row's
+    // description takes the pill's own foreground.
+    const descs = [...document.querySelectorAll("[data-nav-desc]")]
+    const active = screen.getByTestId("subagent-nav-item-nesting").querySelector("[data-nav-desc]")
+    expect(active).toHaveClass("text-accent-foreground")
+    const others = descs.filter((d) => d !== active)
+    expect(others.length).toBeGreaterThan(0)
+    for (const d of others) expect(d).toHaveClass("text-muted-foreground")
+  })
+
   it("selects on click", async () => {
     const onSelect = jest.fn()
     render(<SubagentsNav {...baseProps({ onSelect })} />)

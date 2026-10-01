@@ -9,6 +9,12 @@ import {
   openCodeV2McpConfig,
 } from "./opencode-v2-launcher"
 import type { ExternalAgentConfig, AcpMcpServerConfig } from "@/types/agent/external-agent"
+import {
+  __resetSpawnPlacementsForTests,
+  clearSpawnPlacement,
+  registerSpawnPlacement,
+} from "@/lib/sandbox/spawn-placement-registry"
+import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 
 const config = {
   id: "oc",
@@ -48,6 +54,37 @@ function setup() {
 }
 
 describe("OpenCode V2 session-owned services", () => {
+  beforeEach(() => __resetSpawnPlacementsForTests())
+  afterEach(() => __resetSpawnPlacementsForTests())
+
+  it("refuses a selected sandbox before starting a Host service and allows an explicit local retry", async () => {
+    const { host, invoke } = setup()
+    registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+    expect(canProjectOpenCodeV2Mcp(config, true)).toBe(false)
+    await expect(
+      launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+    ).rejects.toThrow("OpenCode ACP")
+    expect(host.listen).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
+    clearSpawnPlacement(config.id)
+    const service = await launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+    expect(invoke.mock.calls[0][1].config.id).toMatch(/^oc:opencode-v2:/)
+    await service.close()
+  })
+
+  it("rechecks placement after asynchronous listener registration before spawning", async () => {
+    const { host, invoke, unlisten } = setup()
+    host.listen = jest.fn(async () => {
+      registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+      return unlisten
+    }) as never
+    await expect(
+      launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+    ).rejects.toThrow("OpenCode ACP")
+    expect(invoke).not.toHaveBeenCalled()
+    expect(unlisten).toHaveBeenCalledTimes(3)
+  })
+
   it("projects only stdio/HTTP and disables codemode and OAuth for bearer servers", () => {
     expect(
       openCodeV2McpConfig([

@@ -1,4 +1,15 @@
-jest.mock("@/lib/claude/feature-call", () => ({ callSidecarToolHost: jest.fn() }))
+jest.mock("@/stores/remote-host/remote-host-store", () => ({
+  activeHostFeatureManifest: jest.fn(() => ({
+    schemaVersion: 1,
+    features: {
+      "external-agent.process-plane": { version: 1, operations: ["agent_tool_host_control"] },
+    },
+  })),
+}))
+jest.mock("@/lib/claude/feature-call", () => ({
+  ...jest.requireActual("@/lib/claude/feature-call"),
+  callSidecarToolHost: jest.fn(),
+}))
 jest.mock("@/lib/claude/plugin-tool-ipc", () => ({ handlePluginToolExec: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ transport: { subscribe: jest.fn() } }))
 jest.mock("@/lib/claude/adapter-hooks", () => ({
@@ -11,6 +22,17 @@ import { createRendererToolHost, RENDERER_TOOL_HOST_APPROVAL_PREFIX } from "./re
 import { callSidecarToolHost } from "@/lib/claude/feature-call"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { transport } from "@/lib/tauri"
+import {
+  setActiveRemoteTransport,
+  setActiveRemoteEndpoint,
+  __resetRoutingForTests,
+} from "@/lib/tauri/transport-routing"
+import {
+  registerSpawnPlacement,
+  __resetSpawnPlacementsForTests,
+} from "@/lib/sandbox/spawn-placement-registry"
+import { activeHostFeatureManifest } from "@/stores/remote-host/remote-host-store"
+import type { Transport } from "@/lib/tauri/transport-types"
 
 const leaseId = "renderer-tool-host-test-lease"
 const sendOptions = { cwd: "/workspace" } as SendOptions
@@ -424,5 +446,171 @@ describe("renderer Cognia tool host", () => {
     await flush()
     expect(execute).toHaveBeenCalledTimes(1)
     await host.close()
+  })
+})
+
+it("binds hosted plugins to the actual container agent and excludes Host builtins", async () => {
+  registerSpawnPlacement("container-agent", {
+    kind: "container",
+    isolationMandatory: true,
+    spec: { specDigest: "sha256:fixture" },
+  } as never)
+  const { host, call } = setup()
+  try {
+    await host.start({ agentId: "container-agent", sendOptions })
+    expect(call).toHaveBeenCalledWith(
+      "tool-host-start",
+      expect.objectContaining({ sandboxAgentId: "container-agent" })
+    )
+    const payload = call.mock.calls[0]![1] as { sendOptions?: Record<string, unknown> }
+    expect(payload.sendOptions).not.toHaveProperty("builtinTools")
+    expect(payload.sendOptions).not.toHaveProperty("cwd")
+    await host.close()
+  } finally {
+    __resetSpawnPlacementsForTests()
+  }
+})
+
+it("refuses a sandbox tool host before creating an unreachable endpoint", async () => {
+  const { host, call } = setup()
+  await expect(
+    host.start({ sendOptions: { ...sendOptions, sandboxRuntimeRef: { id: "sandbox" } } as never })
+  ).rejects.toThrow("does not support sandbox hosted tools")
+  expect(call).not.toHaveBeenCalled()
+  await host.close()
+})
+
+it("prepares an opaque plugin lease before the gateway child exists", async () => {
+  registerSpawnPlacement("configured-agent", {
+    kind: "container",
+    isolationMandatory: true,
+    spec: { specDigest: "fixture" },
+  } as never)
+  const { host, call } = setup()
+  const sandboxToolHostLeaseId = "f268714a-4659-4b2e-b35a-c749c54e852e"
+  call.mockResolvedValueOnce({ ...descriptor, sandboxToolHostLeaseId })
+  try {
+    await expect(
+      host.start({ agentId: "configured-agent", deferSandbox: true, sendOptions })
+    ).resolves.toMatchObject({ sandboxToolHostLeaseId })
+    expect(call).toHaveBeenCalledWith(
+      "tool-host-start",
+      expect.objectContaining({ sandboxAgentId: "configured-agent", deferSandbox: true })
+    )
+    await host.pause()
+    call.mockResolvedValueOnce(descriptor)
+    await expect(
+      host.start({ agentId: "configured-agent", deferSandbox: true, sendOptions })
+    ).rejects.toThrow("sandbox plugin lease")
+  } finally {
+    await host.close()
+    __resetSpawnPlacementsForTests()
+  }
+})
+
+describe("remote renderer tool-host transport", () => {
+  afterEach(() => {
+    __resetRoutingForTests()
+    jest.restoreAllMocks()
+  })
+
+  it("refuses older Hosts before transferring plugin metadata", () => {
+    const target = { call: jest.fn(), subscribe: jest.fn() }
+    setActiveRemoteTransport(target as Transport)
+    jest.mocked(activeHostFeatureManifest).mockReturnValueOnce(null)
+    expect(() => createRendererToolHost("chat")).toThrow("update the Host")
+    expect(target.call).not.toHaveBeenCalled()
+  })
+
+  it("refuses sandbox tools when the Host only supports native tool hosting", async () => {
+    const target = { call: jest.fn(), subscribe: jest.fn() }
+    setActiveRemoteEndpoint({ hostId: "host-a", deviceId: "device-a" } as never)
+    setActiveRemoteTransport(target as Transport)
+    const host = createRendererToolHost("chat")
+    await expect(
+      host.start({
+        agentId: "sandbox-agent",
+        sendOptions: { ...sendOptions, sandboxRuntimeRef: { id: "sandbox" } } as never,
+      })
+    ).rejects.toThrow("does not support sandbox hosted tools")
+    expect(target.call).not.toHaveBeenCalled()
+    await host.close()
+  })
+
+  it("creates loopback MCP on the authenticated remote Host and refuses Host switching", async () => {
+    jest.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000002")
+    jest
+      .mocked(callSidecarToolHost)
+      .mockImplementation((operation, toolHost, request) =>
+        request!({ operation, credentials: {}, toolHost })
+      )
+    const listeners = new Set<(payload: unknown) => void>()
+    const target = {
+      call: jest.fn(async (_command, args) => {
+        const request = args.request
+        const result =
+          request.operation === "tool-host-start"
+            ? { ...descriptor, leaseId: request.toolHost.leaseId }
+            : {}
+        for (const receive of listeners)
+          receive({ type: "feature_call_result", requestId: request.requestId, result })
+        return null
+      }),
+      subscribe: jest.fn((_event, handler) => {
+        listeners.add(handler)
+        return () => listeners.delete(handler)
+      }),
+      whenSubscribed: jest.fn(async () => {}),
+    }
+    setActiveRemoteEndpoint({ deviceId: "device-a" } as never)
+    setActiveRemoteTransport(target as Transport)
+    let toolSignal: AbortSignal | undefined
+    let finishTool: ((value: never) => void) | undefined
+    const host = createRendererToolHost("chat-remote", {
+      execute: jest.fn((request) => {
+        toolSignal = request.abortSignal
+        return new Promise((resolve) => {
+          finishTool = resolve
+        })
+      }),
+    })
+    const result = await host.start({ sendOptions })
+    expect(result.mcpServers[0].name).toBe("cognia-tools")
+    expect(target.call).toHaveBeenCalledWith("agent_tool_host_control", {
+      request: expect.objectContaining({
+        operation: "tool-host-start",
+        toolHost: expect.objectContaining({
+          leaseId: "remote-tool-host:device-a:00000000-0000-4000-8000-000000000002",
+          ownerSessionId: "chat-remote",
+        }),
+      }),
+    })
+    expect(target.whenSubscribed).toHaveBeenCalledWith(["claude://message"])
+    expect(target.call.mock.calls[0][1].request.toolHost.sendOptions).not.toHaveProperty("cwd")
+    for (const receive of listeners)
+      receive({
+        type: "tool_host_event",
+        sessionId: "chat-remote",
+        generation: 1,
+        leaseId: "remote-tool-host:device-a:00000000-0000-4000-8000-000000000002",
+        event: {
+          type: "plugin_tool_exec",
+          sessionId: "chat-remote",
+          toolUseId: "tool-1",
+          name: "plugin",
+          args: {},
+        },
+      })
+    await flush()
+    expect(toolSignal?.aborted).toBe(false)
+    const other = { call: jest.fn(), subscribe: jest.fn() }
+    setActiveRemoteTransport(other as Transport)
+    expect(listeners.size).toBe(0)
+    expect(toolSignal?.aborted).toBe(true)
+    finishTool?.({ result: "late" } as never)
+    await flush()
+    await expect(host.pause()).rejects.toThrow("Host")
+    await host.close().catch(() => undefined)
+    expect(other.call).not.toHaveBeenCalled()
   })
 })

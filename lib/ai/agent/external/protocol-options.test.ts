@@ -15,6 +15,7 @@ describe("externalProtocolOptions", () => {
     expect(values().sort()).toEqual([
       "a2a",
       "acp",
+      "aider-cli",
       "codex-app-server",
       "dsh-sdk",
       "opencode-v2",
@@ -63,7 +64,7 @@ describe("externalProtocolOptions", () => {
       selectable: false,
       reasonKey: "legacyProtocolUnavailable",
     })
-    expect(options).toHaveLength(7)
+    expect(options).toHaveLength(BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.length + 1)
   })
 
   /**
@@ -111,7 +112,7 @@ describe("externalProtocolOptions", () => {
   })
 
   it("does not duplicate a current value that is already a built-in", () => {
-    expect(values("acp")).toHaveLength(6)
+    expect(values("acp")).toHaveLength(BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.length)
     expect(values("acp").filter((v) => v === "acp")).toHaveLength(1)
   })
 

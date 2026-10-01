@@ -23,6 +23,38 @@ import { isTauri } from "@/lib/utils"
 import type { AcpHostCapabilities } from "./runtimes/acp/acp-feature-profile"
 import { canStartExternalAgentProcess } from "./capability/process-plane"
 import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
+import {
+  getActiveRemoteTransport,
+  getActiveRemoteEndpoint,
+  subscribeActiveRemoteTransport,
+} from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
+
+// A process id belongs to the Host that spawned it. Switching the selected
+// Host must never redirect a send/kill to an identically named remote process.
+const processHosts = new Map<string, string | Transport | null>()
+const processSubscriptions = new WeakMap<Transport, Set<Promise<void>>>()
+
+function processHostIdentity(remote: Transport | null): string | Transport | null {
+  if (!remote) return null
+  const endpoint = getActiveRemoteEndpoint()
+  if (!endpoint) return remote
+  // A replacement connection to the same authenticated Host may resume the
+  // process. A different device/key or Host certificate cannot reuse its id.
+  return JSON.stringify([
+    endpoint.serverFingerprint || endpoint.baseUrl,
+    endpoint.deviceId,
+    endpoint.deviceKeyThumbprint,
+  ])
+}
+
+export function __resetAgentProcessHostsForTests(): void {
+  processHosts.clear()
+}
+
+function localProcessTarget(): boolean {
+  return !getActiveRemoteTransport() && (isTauri() || isHeadlessHost())
+}
 
 /**
  * Whether an external agent process can be started from here at all.
@@ -40,7 +72,7 @@ import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
  * is the state during boot and in every test that never wires one.
  */
 export function supportsExternalAgents(): boolean {
-  return isTauri() || isHeadlessHost() || canStartExternalAgentProcess()
+  return localProcessTarget() || canStartExternalAgentProcess()
 }
 
 /**
@@ -57,23 +89,23 @@ export function supportsExternalAgents(): boolean {
  * being offered a control whose command can only ever be answered locally.
  */
 export function runsExternalAgentProcessesLocally(): boolean {
-  return isTauri() || isHeadlessHost()
+  return localProcessTarget()
 }
 
 /** Whether the ACP fs capability (read/write text file) is available. */
 export function supportsAgentFs(): boolean {
-  return isTauri() || isHeadlessHost()
+  return localProcessTarget() || canStartExternalAgentProcess()
 }
 
 /** Whether the ACP terminal capability is available (desktop-only). */
 export function supportsAgentTerminal(): boolean {
-  return isTauri()
+  return isTauri() && !getActiveRemoteTransport()
 }
 
 /** Runtime-owned ACP capability truth shared through the CLI build alias. */
 export function getAcpHostCapabilities(): AcpHostCapabilities {
-  const desktop = isTauri()
-  const headless = isHeadlessHost()
+  const desktop = isTauri() && !getActiveRemoteTransport()
+  const headless = isHeadlessHost() || Boolean(getActiveRemoteTransport())
   return {
     kind: desktop ? "desktop" : "headless",
     fs: { read: desktop || headless, write: desktop || headless },
@@ -108,12 +140,52 @@ export function getAcpHostCapabilities(): AcpHostCapabilities {
  */
 export async function agentInvoke<T>(name: string, args: Record<string, unknown>): Promise<T> {
   if (name === "spawn_external_agent") args = withSpawnPlacement(args)
-  if (isTauri()) {
-    const { invoke } = await import("@tauri-apps/api/core")
-    return invoke<T>(name, args)
+  const remote = getActiveRemoteTransport()
+  const hostIdentity = processHostIdentity(remote)
+  const agentId = typeof args.agentId === "string" ? args.agentId : undefined
+  if (agentId && processHosts.has(agentId) && processHosts.get(agentId) !== hostIdentity) {
+    throw new Error("External agent belongs to a different Host; reconnect to its original Host")
   }
-  const { transport } = await import("@/lib/tauri/transport-instance")
-  return transport.call<T>(name, args)
+  const config = args.config as { id?: string; env?: Record<string, string> } | undefined
+  if (
+    name === "spawn_external_agent" &&
+    config?.id &&
+    processHosts.has(config.id) &&
+    processHosts.get(config.id) !== hostIdentity
+  ) {
+    throw new Error("External agent id is already bound to a different Host")
+  }
+  if (remote && name === "spawn_external_agent" && config?.env) {
+    if (config.env.COGNIA_GATEWAY_TASK_CONFIG || config.env.COGNIA_GATEWAY_TOKEN) {
+      const { assertRemoteGatewayTask } = await import("@/lib/gateway/remote-task-lease")
+      assertRemoteGatewayTask(config.env, remote)
+    }
+    if (config.env.COGNIA_TOOLHOST_SOCKET || config.env.COGNIA_TOOLHOST_TOKEN) {
+      throw new Error("Remote Cognia tool host transport is not configured")
+    }
+  }
+  // Bind before dispatch: a timeout may mean the Host already spawned the
+  // child, so a retry must never reuse its id on another Host.
+  if (name === "spawn_external_agent" && config?.id) processHosts.set(config.id, hostIdentity)
+  let result: T
+  if (remote) {
+    await Promise.all(processSubscriptions.get(remote) ?? [])
+    if (getActiveRemoteTransport() !== remote) throw new Error("External agent Host changed")
+    result = await remote.call<T>(name, args)
+  } else if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core")
+    if (getActiveRemoteTransport() !== remote) throw new Error("External agent Host changed")
+    result = await invoke<T>(name, args)
+  } else {
+    const { transport } = await import("@/lib/tauri/transport-instance")
+    if (getActiveRemoteTransport() !== remote) throw new Error("External agent Host changed")
+    result = await transport.call<T>(name, args)
+  }
+  if (name === "spawn_external_agent") {
+    if (config?.id) processHosts.set(config.id, hostIdentity)
+    if (typeof result === "string") processHosts.set(result, hostIdentity)
+  }
+  return result
 }
 
 /**
@@ -124,13 +196,80 @@ export async function agentListen<T>(
   event: string,
   handler: (payload: T) => void
 ): Promise<() => void> {
-  if (isTauri()) {
+  const remote = getActiveRemoteTransport()
+  if (remote) {
+    const hostIdentity = processHostIdentity(remote)
+    let disposed = false
+    let off: (() => void) | undefined
+    let revision = 0
+    function bind(target: Transport | null): Promise<void> {
+      revision += 1
+      const currentRevision = revision
+      off?.()
+      off = undefined
+      if (!target || processHostIdentity(target) !== hostIdentity) return Promise.resolve()
+      off = target.subscribe<T>(event, (payload) => {
+        if (!disposed && currentRevision === revision && getActiveRemoteTransport() === target)
+          handler(payload)
+      })
+      const ready = (
+        target as Transport & { whenSubscribed?: (channels: readonly string[]) => Promise<void> }
+      ).whenSubscribed
+      const pending = Promise.resolve().then(async () => {
+        if (ready) await ready.call(target, [event])
+        if (disposed || currentRevision !== revision || getActiveRemoteTransport() !== target)
+          throw new Error("External agent Host changed during subscription")
+      })
+      const waits = processSubscriptions.get(target) ?? new Set<Promise<void>>()
+      processSubscriptions.set(target, waits)
+      waits.add(pending)
+      void pending.then(
+        () => waits.delete(pending),
+        () => {
+          if (currentRevision === revision) {
+            off?.()
+            off = undefined
+          }
+          // Retain failed readiness so a send cannot hang on a listenerless process.
+        }
+      )
+      return pending
+    }
+    const stopWatching = subscribeActiveRemoteTransport((target) => {
+      void bind(target).catch(() => undefined)
+    })
+    try {
+      await bind(remote)
+    } catch (error) {
+      stopWatching()
+      off?.()
+      throw error
+    }
+    return () => {
+      disposed = true
+      revision += 1
+      stopWatching()
+      off?.()
+    }
+  }
+  if (isTauri() && !remote) {
     const { listen } = await import("@tauri-apps/api/event")
-    const off = await listen<T>(event, (e) => handler(e.payload))
+    if (getActiveRemoteTransport() !== remote) throw new Error("External agent Host changed")
+    const off = await listen<T>(event, (e) => {
+      if (getActiveRemoteTransport() === remote) handler(e.payload)
+    })
     return () => safeUnlisten(off)
   }
-  const { transport } = await import("@/lib/tauri/transport-instance")
-  const off = transport.subscribe<T>(event, handler)
+  const transport = remote ?? (await import("@/lib/tauri/transport-instance")).transport
+  if (getActiveRemoteTransport() !== remote) throw new Error("External agent Host changed")
+  const off = transport.subscribe<T>(
+    event,
+    remote
+      ? (payload) => {
+          if (getActiveRemoteTransport() === remote) handler(payload)
+        }
+      : handler
+  )
   // Tauri's `listen` resolves once the listener is registered, so every caller
   // here was written to treat the await as "the host will deliver this now".
   // The companion plane's `subscribe` is synchronous and its control frame is
@@ -142,7 +281,13 @@ export async function agentListen<T>(
   // an empty stream. It then reported the agent as an unsupported version.
   const ready = (transport as { whenSubscribed?: (channels: readonly string[]) => Promise<void> })
     .whenSubscribed
-  if (typeof ready === "function") await ready.call(transport, [event])
+  try {
+    if (typeof ready === "function") await ready.call(transport, [event])
+    if (getActiveRemoteTransport() !== remote) throw new Error("External agent Host changed")
+  } catch (error) {
+    off()
+    throw error
+  }
   return off
 }
 
@@ -183,4 +328,11 @@ export async function agentWriteTextFile(
   }
   const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
   await agentInvoke("fs_write_workspace_file", { root, relPath, content })
+}
+
+/** Delete a runtime-owned file through the existing workspace boundary. */
+export async function agentDeleteTextFile(path: string, allowedRoots: string[]): Promise<void> {
+  if (!supportsAgentFs()) throw new Error("File system access not available in browser")
+  const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
+  await agentInvoke("fs_delete_workspace_entry", { root, relPath, recursive: false })
 }

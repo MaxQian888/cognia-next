@@ -43,12 +43,13 @@ describe("the registered protocol set", () => {
     expect(orphans).toEqual([])
   })
 
-  it("covers the six protocols this repository ships", () => {
+  it("covers the seven protocols this repository ships", () => {
     // A literal list as well, so DELETING a protocol from both sides at once
     // still has to be a deliberate edit to this file.
     expect([...SUPPORTED_EXTERNAL_AGENT_PROTOCOLS].sort()).toEqual([
       "a2a",
       "acp",
+      "aider-cli",
       "codex-app-server",
       "dsh-sdk",
       "opencode-v2",

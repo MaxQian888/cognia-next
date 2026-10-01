@@ -243,6 +243,26 @@ describe("SidecarTab — count tiles", () => {
     )
   })
 
+  it("marks the counts strip as a hairline grid whose children are the four tiles", () => {
+    // Over a wallpaper the grid becomes one translucent plate and the cells go
+    // clear (globals.css `[data-hairline-grid] > *`), so the marker must sit on
+    // the grid whose direct children are the count tiles.
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    render(<SidecarTab />)
+
+    const strip = screen.getByTestId("count-tile-sessions").parentElement
+    expect(strip).toHaveAttribute("data-hairline-grid")
+    expect(
+      Array.from(strip?.children ?? []).map((cell) => cell.getAttribute("data-testid"))
+    ).toEqual([
+      "count-tile-sessions",
+      "count-tile-slash-commands",
+      "count-tile-hooks",
+      "count-tile-mcp",
+    ])
+    expect(strip?.children[0]).toHaveTextContent("countSessions")
+  })
+
   it("clears the SDK session id when the session lookup rejects", async () => {
     getSidecarStatusMock.mockResolvedValue({ ready: true })
     getSessionMock.mockRejectedValue(new Error("dexie down"))

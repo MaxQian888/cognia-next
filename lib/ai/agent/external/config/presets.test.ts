@@ -27,6 +27,85 @@ afterEach(() => {
 })
 
 describe("EXTERNAL_AGENT_PRESETS", () => {
+  it("launches current Kimi Code directly with subscription login and native ACP", () => {
+    const config = createAgentFromPreset("kimi")!
+    expect(config).toMatchObject({
+      name: "Kimi Code",
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "kimi", args: ["acp"] },
+      defaultPermissionMode: "default",
+      metadata: {
+        preset: "kimi",
+        ecosystemAdapterId: "kimi",
+        ecosystemSurfaceId: "acp-stdio",
+        acpPreviewFeatures: { sessionFork: true },
+      },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("kimi")
+    expect(getRunnablePresets()).toContain("kimi")
+  })
+
+  it("offers Cline's native approval-enabled ACP runtime", () => {
+    const config = createAgentFromPreset("cline")!
+    expect(config).toMatchObject({
+      protocol: "acp",
+      transport: "stdio",
+      defaultPermissionMode: "default",
+      process: { command: "cline", args: ["--acp", "--auto-approve", "false"] },
+      metadata: { preset: "cline", ecosystemAdapterId: "cline" },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("cline")
+    expect(getRunnablePresets()).toContain("cline")
+  })
+
+  it("materializes Qoder's official ACP launch with explicit permissions and isolated MCP", () => {
+    const config = createAgentFromPreset("qoder")!
+    expect(config).toMatchObject({
+      protocol: "acp",
+      transport: "stdio",
+      defaultPermissionMode: "default",
+      process: {
+        command: "qoder",
+        args: [
+          "--acp",
+          "--permission-mode",
+          "default",
+          "--strict-mcp-config",
+          "--settings",
+          '{"general":{"enableAutoUpdate":false}}',
+        ],
+      },
+      metadata: { preset: "qoder", ecosystemAdapterId: "qoder", ecosystemSurfaceId: "acp-stdio" },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("qoder")
+    expect(getRunnablePresets()).toContain("qoder")
+  })
+
+  it("offers the official Aider CLI with explicit sandboxed automatic-confirmation mode", () => {
+    const config = createAgentFromPreset("aider")!
+    expect(config).toMatchObject({
+      protocol: "aider-cli",
+      transport: "stdio",
+      process: { command: "aider", args: [] },
+      defaultPermissionMode: "bypassPermissions",
+      metadata: { preset: "aider", ecosystemAdapterId: "aider", ecosystemSurfaceId: "cli-stdio" },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("aider")
+    expect(getRunnablePresets()).toContain("aider")
+  })
+  it("offers Goose through native ACP in chat, CLI, and teammate pickers", () => {
+    const config = createAgentFromPreset("goose")!
+    expect(config).toMatchObject({
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "goose", args: ["acp", "--with-builtin", "developer"] },
+      metadata: { preset: "goose", ecosystemAdapterId: "goose", ecosystemSurfaceId: "acp-stdio" },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("goose")
+    expect(getRunnablePresets()).toContain("goose")
+  })
+
   it("contains the executable presets and a null custom slot", () => {
     expect(EXTERNAL_AGENT_PRESETS.codex).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["claude-code"]).not.toBeNull()

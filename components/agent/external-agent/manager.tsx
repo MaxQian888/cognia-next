@@ -1,5 +1,7 @@
 "use client"
 
+import { ExternalAgentAuthentication } from "./authentication"
+
 /**
  * External Agent Manager
  *
@@ -21,7 +23,10 @@
  * the analytics hook + health badge are local stubs that no-op gracefully.
  */
 
+import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import { Spinner } from "@/components/ui/spinner"
+import { KvEditor } from "@/components/settings/mcp/kv-editor"
+import { kvRowsToObject, objectToKvRows } from "@/components/settings/mcp/mcp-server-utils"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -457,6 +462,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
   const detection = useInstalledAgentRuntimes(open)
   const [selectedPreset, setSelectedPreset] = useState<ExternalAgentPresetId | "">("")
   const [formData, setFormData] = useState<AddAgentFormData>(DEFAULT_ADD_AGENT_FORM_DATA)
+  const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows({}))
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isOpenCode = formData.protocol === "opencode"
@@ -471,6 +477,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
       // matching how the dropdown is built from getRunnablePresets().
       const preset = getPresetConfig(presetId)
       if (preset) {
+        setProcessEnvRows(objectToKvRows(preset.process?.env))
         const presetPort = preset.metadata?.port
         setFormData((current) => ({
           ...current,
@@ -478,7 +485,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
           protocol: preset.protocol,
           transport: preset.transport,
           command: preset.process?.command || "",
-          args: preset.process?.args.join(" ") || "",
+          args: preset.process?.args.map(shellQuote).join(" ") || "",
+          processEnv: preset.process?.env,
           endpoint: preset.network?.endpoint || "",
           autoSpawnServer: preset.metadata?.autoSpawnServer === true,
           port: typeof presetPort === "number" ? String(presetPort) : "",
@@ -539,7 +547,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
           transport: formData.transport,
           process: {
             command: formData.command || (formData.autoSpawnServer ? "opencode" : ""),
-            args: formData.args.split(" ").filter(Boolean),
+            args: tokenizeShellCommand(formData.args) ?? [],
           },
           network:
             formData.transport !== "stdio" && !formData.autoSpawnServer
@@ -554,16 +562,36 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
       toast.error(tGateway("invalid"))
       return
     }
+    if (
+      (isStdio || (isOpenCode && formData.autoSpawnServer)) &&
+      !managedDsh &&
+      tokenizeShellCommand(formData.args) === null
+    ) {
+      toast.error(tSettings("argumentsInvalid"))
+      return
+    }
+    const processEnv = kvRowsToObject(processEnvRows)
+    const names = processEnvRows.map((row) => row.key.trim()).filter(Boolean)
+    if (
+      names.some((key) => key.includes("=") || key.includes("\0")) ||
+      new Set(names).size !== names.length ||
+      Object.values(processEnv).some((value) => value.includes("\0"))
+    ) {
+      toast.error(tSettings("environmentInvalid"))
+      return
+    }
     setIsSubmitting(true)
     try {
       await onAdd({
         ...formData,
+        processEnv,
         preset: selectedPreset || undefined,
         name: formData.name.trim(),
         command: formData.command.trim(),
         endpoint: formData.endpoint.trim(),
       })
       setFormData(DEFAULT_ADD_AGENT_FORM_DATA)
+      setProcessEnvRows([])
       setSelectedPreset("")
       onOpenChange(false)
     } catch (error) {
@@ -674,7 +702,17 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                   <p>
                     {selectedPreset === "devin"
                       ? tManager("devinSetupHint")
-                      : currentPreset.setupHint}
+                      : selectedPreset === "aider"
+                        ? tManager("aiderSetupHint")
+                        : selectedPreset === "qoder"
+                          ? tManager("qoderSetupHint")
+                          : selectedPreset === "kimi"
+                            ? tManager("kimiSetupHint")
+                            : selectedPreset === "cline"
+                              ? tManager("clineSetupHint")
+                              : selectedPreset === "goose"
+                                ? tManager("gooseSetupHint")
+                                : currentPreset.setupHint}
                   </p>
                 )}
                 {relatedOfficialSurfaces.length > 0 && (
@@ -701,7 +739,17 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
             {currentPreset?.envVarHint && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
                 <span className="font-medium">{tManager("noteLabel")}:</span>{" "}
-                {currentPreset.envVarHint}
+                {selectedPreset === "aider"
+                  ? tManager("aiderEnvVarHint")
+                  : selectedPreset === "qoder"
+                    ? tManager("qoderEnvVarHint")
+                    : selectedPreset === "kimi"
+                      ? tManager("kimiEnvVarHint")
+                      : selectedPreset === "cline"
+                        ? tManager("clineEnvVarHint")
+                        : selectedPreset === "goose"
+                          ? tManager("gooseEnvVarHint")
+                          : currentPreset.envVarHint}
               </div>
             )}
 
@@ -951,40 +999,78 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     placeholder="@anthropics/claude-code --stdio"
                   />
                 </div>
-                <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="bare-flag" className="cursor-pointer text-sm">
-                        {tSettings("passBareFlag")}
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        {tSettings("passBareFlagHint")}
-                      </p>
+                {(formData.protocol === "aider-cli" ||
+                  selectedPreset === "qoder" ||
+                  selectedPreset === "cline" ||
+                  selectedPreset === "kimi") && (
+                  <>
+                    <div className="grid gap-2">
+                      <Label htmlFor="aider-cwd">{tSettings("workingDirectory")}</Label>
+                      <Input
+                        id="aider-cwd"
+                        value={formData.processCwd ?? ""}
+                        onChange={(event) =>
+                          setFormData({ ...formData, processCwd: event.target.value })
+                        }
+                      />
                     </div>
-                    <Switch
-                      id="bare-flag"
-                      checked={formData.bare}
-                      onCheckedChange={(v) => setFormData({ ...formData, bare: v })}
-                      aria-label={tSettings("passBareFlag")}
+                    <KvEditor
+                      label={tSettings(
+                        selectedPreset === "qoder"
+                          ? "qoderEnvironment"
+                          : selectedPreset === "kimi"
+                            ? "kimiEnvironment"
+                            : selectedPreset === "cline"
+                              ? "clineEnvironment"
+                              : "aiderEnvironment"
+                      )}
+                      maskValues
+                      rows={processEnvRows}
+                      onChange={setProcessEnvRows}
+                      keyPlaceholder={tSettings("aiderEnvironmentKey")}
+                      valuePlaceholder={tSettings("aiderEnvironmentValue")}
                     />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="debug-flag" className="cursor-pointer text-sm">
-                        {tSettings("passDebugFlag")}
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        {tSettings("passDebugFlagHint")}
-                      </p>
+                  </>
+                )}
+                {formData.protocol !== "aider-cli" &&
+                  selectedPreset !== "qoder" &&
+                  selectedPreset !== "cline" &&
+                  selectedPreset !== "kimi" && (
+                    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="bare-flag" className="cursor-pointer text-sm">
+                            {tSettings("passBareFlag")}
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            {tSettings("passBareFlagHint")}
+                          </p>
+                        </div>
+                        <Switch
+                          id="bare-flag"
+                          checked={formData.bare}
+                          onCheckedChange={(v) => setFormData({ ...formData, bare: v })}
+                          aria-label={tSettings("passBareFlag")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="debug-flag" className="cursor-pointer text-sm">
+                            {tSettings("passDebugFlag")}
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            {tSettings("passDebugFlagHint")}
+                          </p>
+                        </div>
+                        <Switch
+                          id="debug-flag"
+                          checked={formData.debug}
+                          onCheckedChange={(v) => setFormData({ ...formData, debug: v })}
+                          aria-label={tSettings("passDebugFlag")}
+                        />
+                      </div>
                     </div>
-                    <Switch
-                      id="debug-flag"
-                      checked={formData.debug}
-                      onCheckedChange={(v) => setFormData({ ...formData, debug: v })}
-                      aria-label={tSettings("passDebugFlag")}
-                    />
-                  </div>
-                </div>
+                  )}
               </>
             ) : (
               <div className="grid gap-2">
@@ -998,6 +1084,43 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 />
               </div>
             )}
+            {(isStdio || (isOpenCode && formData.autoSpawnServer)) &&
+              formData.protocol !== "aider-cli" &&
+              selectedPreset !== "qoder" &&
+              selectedPreset !== "cline" &&
+              selectedPreset !== "kimi" && (
+                <Collapsible className="rounded-md border">
+                  <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium">
+                    {tSettings("processEnvironment")}
+                    <ChevronDown className="h-4 w-4" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="grid gap-3 px-3 pb-3">
+                    <p className="text-xs text-muted-foreground">
+                      {tSettings("processEnvironmentHint")}
+                    </p>
+                    {!managedDsh && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="process-cwd">{tSettings("workingDirectory")}</Label>
+                        <Input
+                          id="process-cwd"
+                          value={formData.processCwd ?? ""}
+                          onChange={(event) =>
+                            setFormData({ ...formData, processCwd: event.target.value })
+                          }
+                        />
+                      </div>
+                    )}
+                    <KvEditor
+                      label={tSettings("processEnvironment")}
+                      maskValues
+                      rows={processEnvRows}
+                      onChange={setProcessEnvRows}
+                      keyPlaceholder={tSettings("aiderEnvironmentKey")}
+                      valuePlaceholder={tSettings("aiderEnvironmentValue")}
+                    />
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
             <Collapsible className="rounded-md border">
               <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium">
                 <span>{tManager("advancedOptions")}</span>
@@ -1095,7 +1218,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 transport: formData.transport,
                 process: {
                   command: formData.command || (formData.autoSpawnServer ? "opencode" : ""),
-                  args: formData.args.split(" ").filter(Boolean),
+                  args: tokenizeShellCommand(formData.args) ?? [],
                 },
                 network:
                   formData.transport !== "stdio" && !formData.autoSpawnServer
@@ -1169,6 +1292,13 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   /** Agent queued for removal; drives the confirmation AlertDialog. */
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null)
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState<{
+    agentId: string
+    sessionId: string
+  } | null>(null)
+  const [isDeletingSession, setIsDeletingSession] = useState(false)
+  const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const sessionListRequest = useRef(0)
   const [sessionList, setSessionList] = useState<
     Array<{
       sessionId: string
@@ -1196,6 +1326,8 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
     activeLastRunSnapshot,
     activeBenchmarkCapabilities,
     isExecuting,
+    isCompacting,
+    isProviderUndoing,
     isLoading,
     pendingPermission,
     pendingElicitation,
@@ -1219,8 +1351,18 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
     listSessions,
     forkSession,
     resumeSession,
+    deleteSession,
+    getAuthMethods,
+    authenticate,
+    getTerminalAuthState,
+    cancelTerminalAuthentication,
+    logout,
     refresh,
   } = useExternalAgent()
+  const selectedAgentRef = useRef(activeAgentId)
+  useEffect(() => {
+    selectedAgentRef.current = activeAgentId
+  }, [activeAgentId])
 
   // Read straight from the store rather than through the hook: the runtime
   // selector connects the same agents, and a failure recorded there has to
@@ -1252,6 +1394,13 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
         name: data.name,
         cogniaModel: data.cogniaModel ?? null,
         protocol: data.protocol,
+        ...(data.protocol === "aider-cli"
+          ? {
+              defaultPermissionMode: data.preset
+                ? (getPresetConfig(data.preset)?.defaultPermissionMode ?? "plan")
+                : "plan",
+            }
+          : {}),
         transport: data.transport,
         timeout: toNonNegativeInteger(data.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
         retryConfig: {
@@ -1278,7 +1427,9 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
           metadata.autoSpawnServer = true
           config.process = {
             command: data.command.trim() || "opencode",
-            args: data.args.split(" ").filter(Boolean),
+            args: tokenizeShellCommand(data.args) ?? [],
+            cwd: data.processCwd?.trim() || undefined,
+            env: data.processEnv ?? {},
           }
           const port = Number.parseInt(data.port, 10)
           if (!Number.isNaN(port) && port > 0) {
@@ -1307,11 +1458,17 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
       } else if (data.transport === "stdio") {
         config.process = {
           command: config.metadata?.requiresManagedRuntime ? "" : data.command,
-          args: config.metadata?.requiresManagedRuntime ? [] : data.args.split(" ").filter(Boolean),
+          args: config.metadata?.requiresManagedRuntime
+            ? []
+            : (tokenizeShellCommand(data.args) ?? []),
+          cwd: data.processCwd?.trim() || undefined,
+          env: data.processEnv ?? {},
           ...(config.metadata?.requiresManagedRuntime
             ? {
                 cwd: data.dshWorkspace?.trim() || undefined,
-                ...(data.dshApiKey ? { env: { DEEPSEEK_API_KEY: data.dshApiKey } } : {}),
+                ...(data.dshApiKey
+                  ? { env: { ...data.processEnv, DEEPSEEK_API_KEY: data.dshApiKey } }
+                  : {}),
               }
             : {}),
           bare: data.bare || undefined,
@@ -1415,6 +1572,9 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
   const isActiveAgentConnected =
     ((activeAgentId ? connectionStatuses[activeAgentId] : undefined) ??
       activeAgent?.connectionStatus) === "connected"
+  const negotiatedCapabilities = (activeAgentValidity ?? activeAgent?.validity)?.negotiation
+    ?.agentCapabilities
+  const canDeleteNativeSession = Boolean(negotiatedCapabilities?.sessionCapabilities?.delete)
   const listSupport = activeAgentValidity?.sessionExtensions["session/list"]
   const forkSupport = activeAgentValidity?.sessionExtensions["session/fork"]
   const resumeSupport = activeAgentValidity?.sessionExtensions["session/resume"]
@@ -1487,6 +1647,9 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
 
   const configuredCwd = String(activeAgent?.config.process?.cwd ?? "")
   const refreshSessions = useCallback(async () => {
+    const request = ++sessionListRequest.current
+    const isCurrent = () =>
+      selectedAgentRef.current === activeAgentId && sessionListRequest.current === request
     const clearSessionListIfNeeded = () => {
       setSessionList((prev) => (prev.length === 0 ? prev : []))
     }
@@ -1506,15 +1669,16 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
         activeAgentId,
         configuredCwd ? { cwd: configuredCwd } : undefined
       )
-      setSessionList(sessions)
+      if (isCurrent()) setSessionList(sessions)
     } catch (err) {
+      if (!isCurrent()) return
       const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/list")
       clearSessionListIfNeeded()
       if (!unsupported) {
         toast.error(getErrorMessage(err, refreshSessionsFailedMessage))
       }
     } finally {
-      setIsLoadingSessions(false)
+      if (isCurrent()) setIsLoadingSessions(false)
     }
   }, [
     activeAgentId,
@@ -1571,6 +1735,31 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
     },
     [forkSession, refreshSessions, sessionList, tManager, getErrorMessage]
   )
+
+  const handleDeleteSession = async () => {
+    if (
+      !deleteSessionTarget ||
+      deleteSessionTarget.agentId !== activeAgentId ||
+      !canDeleteNativeSession
+    )
+      return
+    setIsDeletingSession(true)
+    try {
+      const targetAgentId = deleteSessionTarget.agentId
+      await deleteSession(deleteSessionTarget.sessionId)
+      if (selectedAgentRef.current !== targetAgentId) return
+      setSessionList((current) =>
+        current.filter((entry) => entry.sessionId !== deleteSessionTarget.sessionId)
+      )
+      setDeleteSessionTarget(null)
+      toast.success(tManager("deleteNativeSessionSuccess"))
+      await refreshSessions()
+    } catch (err) {
+      toast.error(getErrorMessage(err, tManager("deleteNativeSessionFailed")))
+    } finally {
+      setIsDeletingSession(false)
+    }
+  }
 
   const mapAcpOptions = useCallback((options?: AcpPermissionOption[]) => {
     return options?.map((option) => ({
@@ -1741,129 +1930,187 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
 
         {/* Session Management */}
         {activeAgentId && (
-          <Collapsible defaultOpen className="rounded-xl bg-muted/20">
-            <div className="flex items-center justify-between gap-2 px-3 py-2">
-              <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
-                <span className="truncate">{tManager("sessions")}</span>
-                {sessionList.length > 0 && (
-                  <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
-                    {sessionList.length}
-                  </Badge>
-                )}
-                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-              </CollapsibleTrigger>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0"
-                onClick={refreshSessions}
-                disabled={isLoadingSessions || !canUseSessionActions}
-              >
-                {isLoadingSessions ? tCommon("loading") : tManager("refreshSessions")}
-              </Button>
-            </div>
-            <CollapsibleContent className="px-3 pb-3">
-              {!isActiveAgentExecutable ? (
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  {activeAgentBlockedReason || tDiag("notExecutable")}
-                </p>
-              ) : !isActiveAgentConnected ? (
-                <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
-              ) : listSupport?.state === "unsupported" ? (
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  {listSupport.reason || tDiag("sessionListingUnsupported")}
-                </p>
-              ) : sessionList.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
-              ) : (
-                <>
-                  {/* Bounded scroll region: the list alone can be hundreds of
+          <>
+            {activeAgentId &&
+              getAuthMethods &&
+              authenticate &&
+              getTerminalAuthState &&
+              cancelTerminalAuthentication &&
+              logout && (
+                <ExternalAgentAuthentication
+                  key={activeAgentId}
+                  agentId={activeAgentId}
+                  methods={getAuthMethods()}
+                  connected={isActiveAgentConnected}
+                  busy={
+                    isExecuting ||
+                    isCompacting ||
+                    isProviderUndoing ||
+                    isLoading ||
+                    isDeletingSession
+                  }
+                  onBusyChange={setIsAuthenticating}
+                  supportsLogout={Boolean(negotiatedCapabilities?.auth?.logout)}
+                  authenticate={authenticate}
+                  getTerminalAuthState={getTerminalAuthState}
+                  cancelTerminalAuthentication={cancelTerminalAuthentication}
+                  logout={logout}
+                />
+              )}
+            <Collapsible defaultOpen className="rounded-xl bg-muted/20">
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
+                  <span className="truncate">{tManager("sessions")}</span>
+                  {sessionList.length > 0 && (
+                    <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
+                      {sessionList.length}
+                    </Badge>
+                  )}
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={refreshSessions}
+                  disabled={isLoadingSessions || isAuthenticating || !canUseSessionActions}
+                >
+                  {isLoadingSessions ? tCommon("loading") : tManager("refreshSessions")}
+                </Button>
+              </div>
+              <CollapsibleContent className="px-3 pb-3">
+                {!isActiveAgentExecutable ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {activeAgentBlockedReason || tDiag("notExecutable")}
+                  </p>
+                ) : !isActiveAgentConnected ? (
+                  <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
+                ) : listSupport?.state === "unsupported" ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {listSupport.reason || tDiag("sessionListingUnsupported")}
+                  </p>
+                ) : sessionList.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
+                ) : (
+                  <>
+                    {/* Bounded scroll region: the list alone can be hundreds of
                       rows, and without a cap it swallows the whole dialog. */}
-                  <div
-                    className="max-h-72 space-y-2 overflow-y-auto"
-                    data-testid="external-agent-session-list"
-                  >
-                    {visibleSessions.map((session) => (
-                      <div
-                        key={session.sessionId}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/50 px-2 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-medium">
-                            {session.title || session.sessionId}
-                          </p>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {session.sessionId}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleResumeSession(session.sessionId)}
-                            disabled={
-                              isExecuting ||
-                              activeSession?.id === session.sessionId ||
-                              !isActiveAgentExecutable ||
-                              !isActiveAgentConnected ||
-                              resumeSupport?.state === "unsupported"
-                            }
-                          >
-                            {tManager("resume")}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleForkSession(session.sessionId)}
-                            disabled={
-                              isExecuting ||
-                              !isActiveAgentExecutable ||
-                              !isActiveAgentConnected ||
-                              forkSupport?.state === "unsupported"
-                            }
-                          >
-                            {tManager("fork")}
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {sessionList.length > SESSION_LIST_PREVIEW_COUNT && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-2 w-full text-xs text-muted-foreground"
-                      onClick={() =>
-                        setSessionsExpandedFor(sessionsExpanded ? null : activeAgentId)
-                      }
+                    <div
+                      className="max-h-72 space-y-2 overflow-y-auto"
+                      data-testid="external-agent-session-list"
                     >
-                      {sessionsExpanded
-                        ? tManager("showFewerSessions")
-                        : tManager("showAllSessions", { count: sessionList.length })}
-                    </Button>
-                  )}
-                </>
-              )}
-              {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
-                <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
-                  {resumeSupport?.state === "unsupported" && (
-                    <p>
-                      {tDiag("resumeUnsupported", {
-                        reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
-                      })}
-                    </p>
-                  )}
-                  {forkSupport?.state === "unsupported" && (
-                    <p>
-                      {tDiag("forkUnsupported", {
-                        reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
-                      })}
-                    </p>
-                  )}
-                </div>
-              )}
-            </CollapsibleContent>
-          </Collapsible>
+                      {visibleSessions.map((session) => (
+                        <div
+                          key={session.sessionId}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/50 px-2 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium">
+                              {session.title || session.sessionId}
+                            </p>
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {session.sessionId}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleResumeSession(session.sessionId)}
+                              disabled={
+                                isExecuting ||
+                                isLoading ||
+                                isAuthenticating ||
+                                isDeletingSession ||
+                                activeSession?.id === session.sessionId ||
+                                !isActiveAgentExecutable ||
+                                !isActiveAgentConnected ||
+                                resumeSupport?.state === "unsupported"
+                              }
+                            >
+                              {tManager("resume")}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleForkSession(session.sessionId)}
+                              disabled={
+                                isExecuting ||
+                                isLoading ||
+                                isAuthenticating ||
+                                isDeletingSession ||
+                                !isActiveAgentExecutable ||
+                                !isActiveAgentConnected ||
+                                forkSupport?.state === "unsupported"
+                              }
+                            >
+                              {tManager("fork")}
+                            </Button>
+                            {canDeleteNativeSession && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  activeAgentId &&
+                                  setDeleteSessionTarget({
+                                    agentId: activeAgentId,
+                                    sessionId: session.sessionId,
+                                  })
+                                }
+                                disabled={
+                                  isExecuting ||
+                                  isLoading ||
+                                  isDeletingSession ||
+                                  isAuthenticating ||
+                                  !isActiveAgentExecutable ||
+                                  !isActiveAgentConnected
+                                }
+                              >
+                                {tManager("deleteNativeSession")}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {sessionList.length > SESSION_LIST_PREVIEW_COUNT && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-2 w-full text-xs text-muted-foreground"
+                        onClick={() =>
+                          setSessionsExpandedFor(sessionsExpanded ? null : activeAgentId)
+                        }
+                      >
+                        {sessionsExpanded
+                          ? tManager("showFewerSessions")
+                          : tManager("showAllSessions", { count: sessionList.length })}
+                      </Button>
+                    )}
+                  </>
+                )}
+                {(resumeSupport?.state === "unsupported" ||
+                  forkSupport?.state === "unsupported") && (
+                  <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
+                    {resumeSupport?.state === "unsupported" && (
+                      <p>
+                        {tDiag("resumeUnsupported", {
+                          reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
+                        })}
+                      </p>
+                    )}
+                    {forkSupport?.state === "unsupported" && (
+                      <p>
+                        {tDiag("forkUnsupported", {
+                          reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
+                        })}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+          </>
         )}
 
         {/* Runtime Diagnostics */}
@@ -2100,6 +2347,40 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
       {/* Add Agent Dialog */}
       <AddAgentDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onAdd={handleAddAgent} />
 
+      <AlertDialog
+        open={deleteSessionTarget !== null && deleteSessionTarget.agentId === activeAgentId}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingSession) setDeleteSessionTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tManager("deleteNativeSession")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tManager("deleteNativeSessionConfirm")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingSession}>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={
+                isExecuting ||
+                isLoading ||
+                isDeletingSession ||
+                isAuthenticating ||
+                !isActiveAgentConnected ||
+                !canDeleteNativeSession
+              }
+              onClick={(event) => {
+                event.preventDefault()
+                void handleDeleteSession()
+              }}
+            >
+              {isDeletingSession ? tCommon("loading") : tManager("deleteNativeSession")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Remove confirmation */}
       <AlertDialog
         open={!!removeConfirmId}

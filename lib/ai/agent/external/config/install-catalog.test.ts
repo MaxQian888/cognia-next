@@ -62,6 +62,70 @@ function entry(
 }
 
 describe("catalog shape", () => {
+  it("catalogs Cline as system-owned and uncertified until authenticated acceptance", () => {
+    const runtime = findRuntimeByPresetId("cline")!
+    expect(runtime).toMatchObject({
+      runtimeId: "cline",
+      ownership: "system",
+      protocol: "acp",
+      systemCommand: "cline",
+      launchArgs: ["--acp", "--auto-approve", "false"],
+      distributions: [],
+      sandbox: { required: true, windowsExceptionEligible: false },
+    })
+    expect(runtime.certifiedVersions).toBeUndefined()
+    expect(deriveRuntimeBinding({ protocol: "acp", process: { command: "cline" } })).toEqual({
+      runtimeId: "cline",
+      ownership: "system",
+    })
+  })
+
+  it("catalogs Qoder as an uncertified system runtime without Windows sandbox claims", () => {
+    const runtime = findRuntimeByPresetId("qoder")!
+    expect(runtime).toMatchObject({
+      runtimeId: "qoder",
+      ownership: "system",
+      protocol: "acp",
+      systemCommand: "qoder",
+      distributions: [],
+      versionProbe: { args: ["--version"], parser: "semver-anywhere" },
+      sandbox: { required: true, windowsExceptionEligible: false },
+    })
+    expect(runtime.certifiedVersions).toBeUndefined()
+    expect(runtime.supportedRange).toBeUndefined()
+    expect(runtimeSupportsPlatform(runtime, "darwin")).toBe(true)
+    expect(runtimeSupportsPlatform(runtime, "linux")).toBe(true)
+    expect(runtimeSupportsPlatform(runtime, "win32")).toBe(false)
+    expect(deriveRuntimeBinding({ protocol: "acp", process: { command: "qoder" } })).toEqual({
+      runtimeId: "qoder",
+      ownership: "system",
+    })
+  })
+
+  it("binds and probes the system Goose runtime without claiming ownership of its files", () => {
+    const goose = findRuntimeByPresetId("goose")!
+    expect(goose).toMatchObject({
+      runtimeId: "goose",
+      ownership: "system",
+      protocol: "acp",
+      transport: "stdio",
+      systemCommand: "goose",
+      launchArgs: ["acp", "--with-builtin", "developer"],
+      versionProbe: { args: ["--version"], parser: "semver-anywhere" },
+      distributions: [],
+      supportedRange: ">=1.52.0 <2.0.0",
+      certifiedVersions: ["1.52.0"],
+      sandbox: { required: true, windowsExceptionEligible: false },
+    })
+    expect(deriveRuntimeBinding({ protocol: "acp", process: { command: "goose" } })).toEqual({
+      runtimeId: "goose",
+      ownership: "system",
+    })
+    expect(runtimeSupportsPlatform(goose, "darwin")).toBe(true)
+    expect(runtimeSupportsPlatform(goose, "linux")).toBe(true)
+    expect(runtimeSupportsPlatform(goose, "win32")).toBe(false)
+  })
+
   it("discovers Devin as a user-owned ACP runtime without installing or deleting it", () => {
     const devin = findRuntimeById("devin")!
     expect(devin).toMatchObject({

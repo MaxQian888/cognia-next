@@ -47,6 +47,9 @@ pub enum SandboxError {
     MissingCwd,
     /// No home directory to derive agent state roots from.
     MissingHome,
+    InvalidQoderConfigDir,
+    InvalidClineConfigDir,
+    InvalidKimiConfigDir,
 }
 
 impl SandboxError {
@@ -76,6 +79,9 @@ impl std::fmt::Display for SandboxError {
                 "The external-agent sandbox requires a working directory; set one on the agent \
                  before starting a session."
             ),
+            Self::InvalidClineConfigDir => write!(f, "Cline ACP requires a nonempty --config or CLINE_DIR inside the Bot state directory when isolated; --data-dir is unsupported in ACP."),
+            Self::InvalidKimiConfigDir => write!(f, "Kimi state directory must be nonempty and stay inside the Bot state directory when isolated."),
+            Self::InvalidQoderConfigDir => write!(f, "Qoder config directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::MissingHome => write!(
                 f,
                 "The external-agent sandbox could not determine this user's home directory."
@@ -157,6 +163,21 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     if base == "pi" {
         roots.push(home.join(".pi"));
     }
+    if base == "kimi" {
+        roots.push(home.join(".kimi-code"));
+    }
+    if base == "cline" {
+        roots.push(home.join(".cline"));
+    }
+    if base == "qoder" {
+        roots.push(home.join(".qoder"));
+    }
+    if base == "goose" {
+        roots.push(home.join(".config/goose"));
+        roots.push(home.join(".local/share/goose"));
+        roots.push(home.join(".local/state/goose"));
+        roots.push(home.join("Library/Application Support/Block/goose"));
+    }
     if base == "devin" {
         roots.push(home.join(".config").join("devin"));
         roots.push(home.join(".local").join("share").join("devin"));
@@ -234,11 +255,72 @@ pub fn build_sandbox_launcher_args(
     }
     out.push("--readable".to_string());
     out.push(home.to_string_lossy().into_owned());
+    if base_command(command) == "aider" {
+        for file in aider_implicit_config_paths(Path::new(cwd), home) {
+            out.push("--deny-readable".into());
+            out.push(file.to_string_lossy().into_owned());
+        }
+    }
     out.push("--network".to_string());
     out.push("--".to_string());
     out.push(command.to_string());
     out.extend(args.iter().cloned());
     out
+}
+
+/// Mirrors aiderImplicitConfigPaths in the CLI launcher. Aider searches these
+/// files implicitly, including startup commands and provider .env overrides.
+pub fn aider_implicit_config_paths(cwd: &Path, home: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![home.to_path_buf()];
+    for dir in cwd.ancestors() {
+        if !roots.iter().any(|root| root == dir) {
+            roots.push(dir.to_path_buf());
+        }
+    }
+    let mut files = Vec::new();
+    for root in roots {
+        for name in [
+            ".aider.conf.yml",
+            ".env",
+            ".aider.model.settings.yml",
+            ".aider.model.metadata.json",
+        ] {
+            files.push(root.join(name));
+        }
+    }
+    files.push(home.join(".aider/oauth-keys.env"));
+    files
+}
+
+pub fn is_aider_invocation(command: &str, args: &[String]) -> bool {
+    base_command(command) == "aider"
+        || args
+            .iter()
+            .position(|arg| arg == "--")
+            .and_then(|index| args.get(index + 1))
+            .is_some_and(|target| base_command(target) == "aider")
+}
+
+pub(crate) fn is_kimi_invocation(command: &str, args: &[String]) -> bool {
+    base_command(command) == "kimi"
+        || args
+            .iter()
+            .position(|arg| arg == "--")
+            .and_then(|index| args.get(index + 1))
+            .is_some_and(|target| base_command(target) == "kimi")
+}
+
+pub fn aider_model_env_key(key: &str) -> bool {
+    matches!(
+        key,
+        "AIDER_MODEL"
+            | "AIDER_WEAK_MODEL"
+            | "AIDER_EDITOR_MODEL"
+            | "AIDER_EDIT_FORMAT"
+            | "AIDER_EDITOR_EDIT_FORMAT"
+            | "AIDER_REASONING_EFFORT"
+            | "AIDER_THINKING_TOKENS"
+    )
 }
 
 /// Host facts the wrapper needs. A trait so tests can drive every branch
@@ -368,6 +450,201 @@ pub fn find_sandbox_launcher(host: &dyn SandboxHost) -> Option<PathBuf> {
         .find(|candidate| host.is_executable(candidate))
 }
 
+fn qoder_config_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+) -> Result<Option<PathBuf>, SandboxError> {
+    if base_command(&config.command) != "qoder" {
+        return Ok(None);
+    }
+    let mut selected = config
+        .env
+        .get("QODER_CONFIG_DIR")
+        .cloned()
+        .or_else(|| std::env::var("QODER_CONFIG_DIR").ok());
+    let mut args = config.args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--config-dir" {
+            selected = Some(args.next().cloned().unwrap_or_default());
+        } else if let Some(value) = arg.strip_prefix("--config-dir=") {
+            selected = Some(value.into());
+        }
+    }
+    let bot = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
+    let base = if bot {
+        config
+            .env
+            .get("COGNIA_BOT_STATE_DIR")
+            .map(PathBuf::from)
+            .ok_or(SandboxError::InvalidQoderConfigDir)?
+    } else {
+        home.to_path_buf()
+    };
+    if !base.is_absolute() {
+        return Err(SandboxError::InvalidQoderConfigDir);
+    }
+    let root = match selected {
+        Some(value) if value.trim().is_empty() => return Err(SandboxError::InvalidQoderConfigDir),
+        Some(value) => {
+            let path = PathBuf::from(value);
+            if path.is_absolute() {
+                path
+            } else {
+                Path::new(config.cwd.as_deref().ok_or(SandboxError::MissingCwd)?).join(path)
+            }
+        }
+        None => base.join(".qoder"),
+    };
+    let mut normalized = PathBuf::new();
+    for component in root.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::CurDir => {}
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    if bot && !normalized.starts_with(&base) {
+        return Err(SandboxError::InvalidQoderConfigDir);
+    }
+    Ok(Some(normalized))
+}
+
+fn cline_config_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+) -> Result<Option<PathBuf>, SandboxError> {
+    if base_command(&config.command) != "cline" {
+        return Ok(None);
+    }
+    if config
+        .args
+        .iter()
+        .any(|arg| arg == "--data-dir" || arg.starts_with("--data-dir="))
+    {
+        return Err(SandboxError::InvalidClineConfigDir);
+    }
+    let mut selected = config
+        .env
+        .get("CLINE_DIR")
+        .cloned()
+        .or_else(|| std::env::var("CLINE_DIR").ok());
+    let mut args = config.args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            selected = Some(args.next().cloned().unwrap_or_default());
+            break;
+        } else if let Some(value) = arg.strip_prefix("--config=") {
+            selected = Some(value.into());
+            break;
+        }
+    }
+    let bot = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
+    let base = if bot {
+        config
+            .env
+            .get("COGNIA_BOT_STATE_DIR")
+            .map(PathBuf::from)
+            .ok_or(SandboxError::InvalidClineConfigDir)?
+    } else {
+        home.to_path_buf()
+    };
+    if !base.is_absolute() {
+        return Err(SandboxError::InvalidClineConfigDir);
+    }
+    let root = match selected {
+        Some(value) if value.trim().is_empty() => return Err(SandboxError::InvalidClineConfigDir),
+        Some(value) => {
+            let path = PathBuf::from(value.trim());
+            if path.is_absolute() {
+                path
+            } else {
+                Path::new(config.cwd.as_deref().ok_or(SandboxError::MissingCwd)?).join(path)
+            }
+        }
+        None => base.join(".cline"),
+    };
+    let mut normalized = PathBuf::new();
+    for component in root.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::CurDir => {}
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    if bot && !normalized.starts_with(&base) {
+        return Err(SandboxError::InvalidClineConfigDir);
+    }
+    Ok(Some(normalized))
+}
+
+fn kimi_config_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+) -> Result<Option<PathBuf>, SandboxError> {
+    if base_command(&config.command) != "kimi" {
+        return Ok(None);
+    }
+    let selected = config
+        .env
+        .get("KIMI_CODE_HOME")
+        .cloned()
+        .or_else(|| std::env::var("KIMI_CODE_HOME").ok());
+    let bot = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
+    let base = if bot {
+        config
+            .env
+            .get("COGNIA_BOT_STATE_DIR")
+            .map(PathBuf::from)
+            .ok_or(SandboxError::InvalidKimiConfigDir)?
+    } else {
+        home.to_path_buf()
+    };
+    if !base.is_absolute() {
+        return Err(SandboxError::InvalidKimiConfigDir);
+    }
+    let root = match selected {
+        Some(value) if value.trim().is_empty() => return Err(SandboxError::InvalidKimiConfigDir),
+        Some(value) => {
+            let path = PathBuf::from(value);
+            if path.is_absolute() {
+                path
+            } else {
+                Path::new(config.cwd.as_deref().ok_or(SandboxError::MissingCwd)?).join(path)
+            }
+        }
+        None => base.join(".kimi-code"),
+    };
+    let mut normalized = PathBuf::new();
+    for component in root.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                if normalized.parent().is_some() {
+                    normalized.pop();
+                }
+            }
+            std::path::Component::CurDir => {}
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    if bot && !normalized.starts_with(&base) {
+        return Err(SandboxError::InvalidKimiConfigDir);
+    }
+    if bot {
+        let physical_base = cognia_exec_sandbox::paths::safe_canonicalize(&base)
+            .map_err(|_| SandboxError::InvalidKimiConfigDir)?;
+        let physical_root = cognia_exec_sandbox::paths::safe_canonicalize(&normalized)
+            .map_err(|_| SandboxError::InvalidKimiConfigDir)?;
+        if !physical_root.starts_with(&physical_base) {
+            return Err(SandboxError::InvalidKimiConfigDir);
+        }
+    }
+    Ok(Some(normalized))
+}
+
 /// Rewrite a validated spawn config so the agent runs under the launcher.
 ///
 /// Call this **after** the command allowlist has run: the allowlist requires a
@@ -393,8 +670,17 @@ pub fn wrap_with_sandbox(
         .filter(|value| !value.trim().is_empty())
         .ok_or(SandboxError::MissingCwd)?;
 
+    let kimi_root = kimi_config_root(&config, &home)?;
+    let cline_root = cline_config_root(&config, &home)?;
+    let qoder_root = qoder_config_root(&config, &home)?;
     let tool_host_dir = tool_host_runtime_dir(&host.temp_dir(), host.uid());
-    for root in agent_state_writable_roots(&config.command, &config.args, &home) {
+    for root in cline_root
+        .clone()
+        .or_else(|| qoder_root.clone())
+        .or_else(|| kimi_root.clone())
+        .map(|root| vec![root])
+        .unwrap_or_else(|| agent_state_writable_roots(&config.command, &config.args, &home))
+    {
         if is_state_file_root(&root) {
             host.ensure_file(&root);
         } else {
@@ -457,6 +743,17 @@ pub fn wrap_with_sandbox(
                 ],
             );
         }
+        if base_command(&config.command) == "qoder" {
+            for relative in [".qoder/entry", ".qoder/bin"] {
+                args.splice(
+                    0..0,
+                    [
+                        "--readable".into(),
+                        host_home.join(relative).to_string_lossy().into_owned(),
+                    ],
+                );
+            }
+        }
     }
     if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) {
         // All runtime state lives under this task root, not the user's roots.
@@ -495,6 +792,84 @@ pub fn wrap_with_sandbox(
     }
 
     let mut env = config.env.clone();
+    if let Some(root) = &kimi_root {
+        let default_root = home.join(".kimi-code").to_string_lossy().into_owned();
+        while let Some(index) = args
+            .windows(2)
+            .position(|pair| pair[0] == "--writable" && pair[1] == default_root)
+        {
+            args.drain(index..index + 2);
+        }
+        host.ensure_dir(root);
+        if !bot_isolation {
+            args.splice(
+                0..0,
+                ["--writable".into(), root.to_string_lossy().into_owned()],
+            );
+        }
+        env.insert("KIMI_CODE_HOME".into(), root.to_string_lossy().into_owned());
+        env.insert("KIMI_CODE_NO_AUTO_UPDATE".into(), "1".into());
+        env.insert("KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT".into(), "0".into());
+    }
+    if let Some(root) = cline_root {
+        let default_root = home.join(".cline").to_string_lossy().into_owned();
+        while let Some(index) = args
+            .windows(2)
+            .position(|pair| pair[0] == "--writable" && pair[1] == default_root)
+        {
+            args.drain(index..index + 2);
+        }
+        host.ensure_dir(&root);
+        args.splice(
+            0..0,
+            ["--writable".into(), root.to_string_lossy().into_owned()],
+        );
+        env.insert("CLINE_DIR".into(), root.to_string_lossy().into_owned());
+        env.insert("CLINE_NO_AUTO_UPDATE".into(), "1".into());
+        if !bot_isolation {
+            let temp = root.join("tmp");
+            host.ensure_dir(&temp);
+            for key in ["TMPDIR", "TMP", "TEMP"] {
+                env.insert(key.into(), temp.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    if let Some(root) = qoder_root {
+        // A custom configuration root must not also grant writes to the CLI login root.
+        let default_root = home.join(".qoder").to_string_lossy().into_owned();
+        while let Some(index) = args
+            .windows(2)
+            .position(|pair| pair[0] == "--writable" && pair[1] == default_root)
+        {
+            args.drain(index..index + 2);
+        }
+        host.ensure_dir(&root);
+        args.splice(
+            0..0,
+            ["--writable".into(), root.to_string_lossy().into_owned()],
+        );
+        env.insert(
+            "QODER_CONFIG_DIR".into(),
+            root.to_string_lossy().into_owned(),
+        );
+        if !bot_isolation {
+            let temp = root.join("tmp");
+            host.ensure_dir(&temp);
+            for key in ["TMPDIR", "TMP", "TEMP"] {
+                env.insert(key.into(), temp.to_string_lossy().into_owned());
+            }
+        }
+    }
+    if config.command == "goose" && !bot_isolation {
+        // Goose creates platform-extension temp files while opening a session.
+        // Keep them under an existing scoped write root, not ambient macOS temp.
+        let temp = home.join(".local/state/goose/tmp");
+        host.ensure_dir(&temp);
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            env.insert(key.into(), temp.to_string_lossy().into_owned());
+        }
+    }
     if bot_isolation {
         let state = Path::new(&config.env["COGNIA_BOT_STATE_DIR"]);
         for (key, relative) in [
@@ -516,6 +891,13 @@ pub fn wrap_with_sandbox(
     }
     if env.contains_key(crate::devin_mcp_config::PAYLOAD_ENV) {
         env.insert(crate::devin_mcp_config::WRAPPED_ENV.into(), "1".into());
+    }
+    if let Some(root) = &kimi_root {
+        let temp = root.join("tmp");
+        host.ensure_dir(&temp);
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            env.insert(key.into(), temp.to_string_lossy().into_owned());
+        }
     }
     Ok(ExternalAgentSpawnConfig {
         command: launcher.to_string_lossy().into_owned(),
@@ -601,6 +983,39 @@ mod tests {
     }
 
     #[test]
+    fn aider_hides_implicit_configuration_and_only_accepts_model_environment() {
+        let args = build_sandbox_launcher_args(
+            "aider",
+            &[],
+            "/work/project/sub",
+            Path::new("/home/user"),
+            Path::new("/tmp/toolhost"),
+        );
+        let denied: Vec<_> = args
+            .windows(2)
+            .filter(|pair| pair[0] == "--deny-readable")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        for file in [
+            "/home/user/.aider.conf.yml",
+            "/work/project/sub/.env",
+            "/work/project/.aider.conf.yml",
+            "/.aider.model.metadata.json",
+            "/home/user/.aider/oauth-keys.env",
+        ] {
+            assert!(denied.contains(&file));
+        }
+        assert!(is_aider_invocation(
+            "/launcher",
+            &["--".into(), "aider".into()]
+        ));
+        assert!(!is_aider_invocation("pi", &["--mode".into(), "rpc".into()]));
+        assert!(aider_model_env_key("AIDER_MODEL"));
+        assert!(!aider_model_env_key("AIDER_LOAD"));
+        assert!(!aider_model_env_key("AIDER_FILE"));
+    }
+
+    #[test]
     fn launcher_file_name_is_platform_correct() {
         assert_eq!(
             launcher_file_name("windows"),
@@ -616,6 +1031,228 @@ mod tests {
     fn pi_gets_its_session_store_as_a_writable_root() {
         let roots = agent_state_writable_roots("pi", &[], Path::new("/home/dev"));
         assert_eq!(roots, vec![PathBuf::from("/home/dev/.pi")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_bot_rejects_symlinked_state_escape_before_directory_provisioning() {
+        let owned = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), owned.path().join("escape")).unwrap();
+        let host = FakeHost::new("macos");
+        let mut input = config("kimi", &["acp"], Some("/work"));
+        input.env.extend([
+            ("COGNIA_BOT_ISOLATION".into(), "1".into()),
+            (
+                "COGNIA_BOT_STATE_DIR".into(),
+                owned.path().to_string_lossy().into_owned(),
+            ),
+            (
+                "KIMI_CODE_HOME".into(),
+                owned
+                    .path()
+                    .join("escape/new")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ]);
+        assert!(matches!(
+            wrap_with_sandbox(input, &host),
+            Err(SandboxError::InvalidKimiConfigDir)
+        ));
+        assert!(host.dirs.borrow().is_empty());
+    }
+
+    #[test]
+    fn kimi_scopes_native_state_temp_and_update_lifecycle() {
+        let host = FakeHost::new("macos");
+        for (selected, expected) in [
+            ("state/../kimi", "/work/kimi"),
+            (" state ", "/work/ state "),
+            ("/isolated/kimi", "/isolated/kimi"),
+        ] {
+            let mut input = config("kimi", &["acp"], Some("/work"));
+            input.env.insert("KIMI_CODE_HOME".into(), selected.into());
+            input
+                .env
+                .insert("KIMI_CODE_NO_AUTO_UPDATE".into(), "0".into());
+            input
+                .env
+                .insert("KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT".into(), "1".into());
+            let wrapped = wrap_with_sandbox(input, &host).unwrap();
+            assert_eq!(wrapped.env["KIMI_CODE_HOME"], expected);
+            assert_eq!(wrapped.env["TMPDIR"], format!("{expected}/tmp"));
+            assert_eq!(wrapped.env["KIMI_CODE_NO_AUTO_UPDATE"], "1");
+            assert_eq!(wrapped.env["KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT"], "0");
+            assert!(wrapped
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--writable", expected]));
+            assert!(!wrapped
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--writable", "/home/dev/.kimi-code"]));
+        }
+        assert_eq!(
+            agent_state_writable_roots("kimi", &[], Path::new("/home/dev")),
+            vec![PathBuf::from("/home/dev/.kimi-code")]
+        );
+    }
+
+    #[test]
+    fn kimi_bot_rejects_empty_and_escaping_state_and_retains_owned_temp() {
+        let host = FakeHost::new("macos");
+        for selected in ["", "   ", "/work/state/../escape", "/home/dev/.kimi-code"] {
+            let mut input = config("kimi", &["acp"], Some("/work"));
+            input.env.extend([
+                ("COGNIA_BOT_ISOLATION".into(), "1".into()),
+                ("COGNIA_BOT_STATE_DIR".into(), "/work/state".into()),
+                ("KIMI_CODE_HOME".into(), selected.into()),
+            ]);
+            assert!(matches!(
+                wrap_with_sandbox(input, &host),
+                Err(SandboxError::InvalidKimiConfigDir)
+            ));
+        }
+        let mut input = config("kimi", &["acp"], Some("/work"));
+        input.env.extend([
+            ("COGNIA_BOT_ISOLATION".into(), "1".into()),
+            ("COGNIA_BOT_STATE_DIR".into(), "/work/state".into()),
+            ("KIMI_CODE_HOME".into(), "/work/state/kimi".into()),
+        ]);
+        let wrapped = wrap_with_sandbox(input, &host).unwrap();
+        assert_eq!(wrapped.env["KIMI_CODE_HOME"], "/work/state/kimi");
+        assert_eq!(wrapped.env["TMPDIR"], "/work/state/kimi/tmp");
+        assert!(!wrapped.args.iter().any(|arg| arg == "/home/dev/.kimi-code"));
+    }
+
+    #[test]
+    fn cline_scopes_actual_acp_config_and_disables_updates() {
+        let host = FakeHost::new("macos");
+        let mut input = config("cline", &["--acp", "--config", "state"], Some("/work"));
+        input.env.insert("CLINE_DIR".into(), "/ignored".into());
+        let wrapped = wrap_with_sandbox(input, &host).unwrap();
+        assert!(wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--writable", "/work/state"]));
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--writable", "/home/dev/.cline"]));
+        assert_eq!(wrapped.env["CLINE_DIR"], "/work/state");
+        assert_eq!(wrapped.env["TMPDIR"], "/work/state/tmp");
+        assert_eq!(wrapped.env["CLINE_NO_AUTO_UPDATE"], "1");
+        assert_eq!(
+            agent_state_writable_roots("cline", &[], Path::new("/home/dev")),
+            vec![PathBuf::from("/home/dev/.cline")]
+        );
+    }
+    #[test]
+    fn cline_bot_cannot_escape_owned_state_or_use_ignored_data_flag() {
+        let host = FakeHost::new("macos");
+        let mut input = config("cline", &["--acp"], Some("/work"));
+        input.env.extend([
+            ("COGNIA_BOT_ISOLATION".into(), "1".into()),
+            ("COGNIA_BOT_STATE_DIR".into(), "/work/state".into()),
+            ("CLINE_DIR".into(), "/work/state/../escape".into()),
+        ]);
+        assert!(matches!(
+            wrap_with_sandbox(input, &host),
+            Err(SandboxError::InvalidClineConfigDir)
+        ));
+        let input = config(
+            "cline",
+            &["--acp", "--data-dir", "/work/state"],
+            Some("/work"),
+        );
+        assert!(matches!(
+            wrap_with_sandbox(input, &host),
+            Err(SandboxError::InvalidClineConfigDir)
+        ));
+    }
+
+    #[test]
+    fn qoder_custom_state_is_scoped_without_writing_the_default_login_root() {
+        let home = Path::new("/home/dev");
+        assert_eq!(
+            agent_state_writable_roots("qoder", &["--acp".into()], home),
+            vec![home.join(".qoder")]
+        );
+        let mut input = config(
+            "qoder",
+            &["--acp", "--config-dir", "state"],
+            Some("/work/project"),
+        );
+        input
+            .env
+            .insert("QODER_CONFIG_DIR".into(), "/ignored".into());
+        let wrapped = wrap_with_sandbox(input, &FakeHost::new("macos")).unwrap();
+        assert_eq!(wrapped.env["QODER_CONFIG_DIR"], "/work/project/state");
+        assert_eq!(wrapped.env["TMPDIR"], "/work/project/state/tmp");
+        assert!(wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--writable", "/work/project/state"]));
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--writable", "/home/dev/.qoder"]));
+    }
+
+    #[test]
+    fn qoder_bot_config_cannot_escape_owned_state() {
+        let mut input = config("qoder", &["--acp"], Some("/work"));
+        input.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        input
+            .env
+            .insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
+        input
+            .env
+            .insert("QODER_CONFIG_DIR".into(), "/work/state/../outside".into());
+        assert!(matches!(
+            wrap_with_sandbox(input, &FakeHost::new("macos")),
+            Err(SandboxError::InvalidQoderConfigDir)
+        ));
+    }
+
+    #[test]
+    fn qoder_bot_exposes_host_programs_without_the_login_root() {
+        let mut input = config("qoder", &["--acp"], Some("/work"));
+        input.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        input
+            .env
+            .insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
+        let wrapped = wrap_with_sandbox(input, &FakeHost::new("macos")).unwrap();
+        for root in ["/home/dev/.qoder/entry", "/home/dev/.qoder/bin"] {
+            assert!(wrapped
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--readable", root]));
+        }
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--readable", "/home/dev/.qoder"]));
+        assert_eq!(wrapped.env["QODER_CONFIG_DIR"], "/work/state/.qoder");
+    }
+
+    #[test]
+    fn goose_gets_its_config_data_and_state_on_both_unix_platforms() {
+        let home = Path::new("/home/dev");
+        assert_eq!(
+            agent_state_writable_roots("goose", &["acp".into()], home),
+            vec![
+                home.join(".config/goose"),
+                home.join(".local/share/goose"),
+                home.join(".local/state/goose"),
+                home.join("Library/Application Support/Block/goose"),
+            ]
+        );
+        assert_eq!(
+            agent_state_writable_roots("npx", &["-y".into(), "goose-adapter".into()], home),
+            vec![home.join(".npm")]
+        );
     }
 
     #[test]
@@ -759,6 +1396,28 @@ mod tests {
         // The real agent survives after the `--` separator.
         let separator = wrapped.args.iter().position(|arg| arg == "--").unwrap();
         assert_eq!(&wrapped.args[separator + 1..], ["pi", "--mode", "rpc"]);
+    }
+
+    #[test]
+    fn goose_temp_is_scoped_even_when_ambient_temp_or_custom_state_is_set() {
+        let host = FakeHost::new("macos");
+        let mut original = config("goose", &["acp"], Some("/work/project"));
+        original.env.insert("TMPDIR".into(), "/ambient/tmp".into());
+        original
+            .env
+            .insert("GOOSE_PATH_ROOT".into(), "/untrusted".into());
+        let wrapped = wrap_with_sandbox(original, &host).expect("sandbox wrap");
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            assert_eq!(wrapped.env[key], "/home/dev/.local/state/goose/tmp");
+        }
+        assert!(host
+            .dirs
+            .borrow()
+            .contains(&PathBuf::from("/home/dev/.local/state/goose/tmp")));
+        assert!(!wrapped
+            .args
+            .iter()
+            .any(|arg| arg == "/ambient/tmp" || arg == "/untrusted"));
     }
 
     #[test]

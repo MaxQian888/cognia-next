@@ -1693,6 +1693,8 @@ export type FeatureCallOperation =
 
 /** Trusted renderer-to-sidecar lease control; never exposed through MCP. */
 export interface ToolHostControl {
+  /** Native Host resolves this admitted container; never a caller-supplied URL. */
+  sandboxAgentId?: string
   leaseId: string
   ownerSessionId: string
   sendOptions?: SendOptions
@@ -4479,6 +4481,8 @@ export interface AppSettings {
   fontScale?: AppFontScale
   /** Active locale for translatable UI surfaces. */
   language?: AppLanguage
+  /** Follow this device's system language; omitted legacy locales remain manual. */
+  languageMode?: "system" | "manual"
   /** Disable non-essential animations and transitions. */
   reduceMotion?: boolean
   /**

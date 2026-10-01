@@ -1,0 +1,209 @@
+[
+  {
+    "action": "uiAssertion",
+    "detail": "Install confirmation shows exact reviewed command, no terminal launched"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Package confirmation Cancel closes without terminal launch"
+  },
+  {
+    "action": "terminal",
+    "detail": [
+      "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.1.1'",
+      "/tmp/kimi-owned-workspace",
+      ""
+    ]
+  },
+  {
+    "action": "toast",
+    "detail": "Native Kimi terminal opened"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Install reviewed version confirmation launches exactly one reviewed terminal recipe"
+  },
+  {
+    "action": "terminal",
+    "detail": [
+      "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.1.1'",
+      "/tmp/kimi-owned-workspace",
+      ""
+    ]
+  },
+  {
+    "action": "toast",
+    "detail": "Native Kimi terminal opened"
+  },
+  {
+    "action": "terminal",
+    "detail": [
+      "/bin/sh -c 'cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi upgrade'",
+      "/tmp/kimi-owned-workspace",
+      ""
+    ]
+  },
+  {
+    "action": "toast",
+    "detail": "Native Kimi terminal opened"
+  },
+  {
+    "action": "terminal",
+    "detail": [
+      "/bin/sh -c 'npm uninstall --global @moonshot-ai/kimi-code'",
+      "/tmp/kimi-owned-workspace",
+      ""
+    ]
+  },
+  {
+    "action": "toast",
+    "detail": "Native Kimi terminal opened"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Install reviewed version confirmation displays exact command"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Install reviewed version cancellation launches no terminal"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Restore reviewed version confirmation displays exact command"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Restore reviewed version cancellation launches no terminal"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Check native upgrade confirmation displays exact command"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Check native upgrade cancellation launches no terminal"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Uninstall npm installation confirmation displays exact command"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Uninstall npm installation cancellation launches no terminal"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Exactly four confirmed package actions launch the exact install, restore, upgrade, uninstall commands, each once"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Active selected Kimi connection disables all four package launch buttons"
+  },
+  {
+    "action": "uiAssertion",
+    "detail": "Another active Kimi configuration also disables all package launch buttons"
+  },
+  {
+    "action": "login"
+  },
+  {
+    "action": "openUrl",
+    "detail": "https://example.test/kimi-login"
+  },
+  {
+    "action": "cancel"
+  },
+  {
+    "action": "login"
+  },
+  {
+    "action": "complete"
+  },
+  {
+    "action": "logout"
+  },
+  {
+    "action": "clipboard",
+    "detail": "npm install --global @moonshot-ai/kimi-code@2.1.1"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "npm install --global @moonshot-ai/kimi-code@2.1.1"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi upgrade"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "npm uninstall --global @moonshot-ai/kimi-code"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi doctor"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi web"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "clipboard",
+    "detail": "cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi migrate"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  },
+  {
+    "action": "terminal",
+    "detail": [
+      "/bin/sh -c 'cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi web'",
+      "/tmp/kimi-owned-workspace",
+      ""
+    ]
+  },
+  {
+    "action": "toast",
+    "detail": "Native Kimi terminal opened"
+  },
+  {
+    "action": "clipboard",
+    "detail": "cd -- /tmp/kimi-owned-workspace && env KIMI_CODE_HOME=/tmp/kimi-owned-state kimi export session-harness-123 --no-include-global-log"
+  },
+  {
+    "action": "toast",
+    "detail": "Command copied"
+  }
+]

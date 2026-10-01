@@ -38,6 +38,7 @@ export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
   "codex-app-server",
   "dsh-sdk",
   "pi-rpc",
+  "aider-cli",
   "opencode-v2",
   "a2a",
 ] as const

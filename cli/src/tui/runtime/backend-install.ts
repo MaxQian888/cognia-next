@@ -32,7 +32,7 @@ import {
 
 import { resolveAgentSearchPath } from "../../runtime/external/agent-path"
 
-export type InstallMethodKind = "npm" | "pnpm" | "brew" | "curl"
+export type InstallMethodKind = "npm" | "pnpm" | "brew" | "curl" | "uv"
 
 /**
  * Who owns the bytes an install method puts on disk.
@@ -159,6 +159,81 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
     name: "Pi",
     methods: [npm("npm", "@earendil-works/pi-coding-agent")],
     docsUrl: "https://pi.dev/docs/latest/rpc",
+  },
+  kimi: {
+    command: "kimi",
+    runtimeId: "kimi",
+    name: "Kimi Code (Node.js 22.19+)",
+    methods: [npm("Kimi Code", "@moonshot-ai/kimi-code@2.1.1")],
+    docsUrl: "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started",
+  },
+  cline: {
+    command: "cline",
+    runtimeId: "cline",
+    name: "Cline",
+    methods: [npm("Cline", "cline@3.0.67")],
+    docsUrl: "https://docs.cline.bot/usage/acp",
+  },
+  qoder: {
+    command: "qoder",
+    runtimeId: "qoder",
+    name: "Qoder",
+    methods: [
+      {
+        ...curl("https://qoder.com/install", "bash"),
+        args: ["-o", "pipefail", "-c", "curl -fsSL https://qoder.com/install | bash"],
+      },
+    ],
+    docsUrl: "https://docs.qoder.com/cli/installation",
+  },
+  goose: {
+    command: "goose",
+    runtimeId: "goose",
+    name: "Goose",
+    methods: [
+      brew("block-goose-cli"),
+      {
+        ...curl(
+          "https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh",
+          "bash"
+        ),
+        display:
+          "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
+        args: [
+          "-o",
+          "pipefail",
+          "-c",
+          "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
+        ],
+      },
+    ],
+    docsUrl: "https://goose-docs.ai/docs/getting-started/installation/",
+  },
+  aider: {
+    command: "aider",
+    runtimeId: "aider",
+    name: "Aider",
+    methods: [
+      {
+        kind: "uv",
+        ownership: "user-managed",
+        label: "uv (isolated Python 3.12)",
+        display: "uv tool install --force --python python3.12 --with pip aider-chat==0.86.2",
+        command: "uv",
+        args: [
+          "tool",
+          "install",
+          "--force",
+          "--python",
+          "python3.12",
+          "--with",
+          "pip",
+          "aider-chat==0.86.2",
+        ],
+        requires: ["uv"],
+      },
+    ],
+    docsUrl: "https://aider.chat/docs/install.html",
   },
   devin: {
     command: "devin",

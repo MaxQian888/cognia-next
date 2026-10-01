@@ -36,8 +36,7 @@ describe("preset resolution", () => {
   })
 
   it("returns an empty list for a history-only source rather than throwing", () => {
-    expect(presetIdsForSessionSource("aider")).toEqual([])
-    expect(presetIdsForSessionSource("cline")).toEqual([])
+    expect(presetIdsForSessionSource("continue-dev")).toEqual([])
   })
 
   it("returns an empty list for an unknown source or ecosystem", () => {
@@ -56,7 +55,7 @@ describe("display names", () => {
   })
 
   it("answers null for a history-only ecosystem instead of a raw slug", () => {
-    expect(displayNameForEcosystem("aider")).toBeNull()
+    expect(displayNameForEcosystem("continue-dev")).toBeNull()
     expect(displayNameForMigrationVendor("nope")).toBeNull()
   })
 })
@@ -78,4 +77,13 @@ describe("current OpenCode runtime resolution", () => {
     expect(displayNameForMigrationVendor("opencode")).toBe("OpenCode V2")
     expect(displayNameForEcosystem("opencode")).toBe("OpenCode V2")
   })
+})
+
+it("maps Aider imported sessions to its official CLI preset", () => {
+  expect(presetIdsForSessionSource("aider")).toEqual(["aider"])
+  expect(displayNameForEcosystem("aider")).toBe("Aider")
+})
+
+it("maps Cline imported sessions to its native ACP preset", () => {
+  expect(presetIdsForSessionSource("cline")).toEqual(["cline"])
 })

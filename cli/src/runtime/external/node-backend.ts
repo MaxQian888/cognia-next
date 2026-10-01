@@ -44,6 +44,8 @@ export interface NodeExternalAgentSpawnConfig {
 export interface ExternalAgentLaunch {
   command: string
   args: string[]
+  /** Trusted host runtime overrides, applied after filtering user inputs. */
+  env?: Record<string, string>
 }
 
 export type ExternalAgentLaunchResolver = (
@@ -79,6 +81,11 @@ const BINARY_ALLOWLIST = new Set([
   "kiro-cli",
   "droid",
   "devin",
+  "cline",
+  "qoder",
+  "kimi",
+  "goose",
+  "aider",
   // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
   "pi",
 ])
@@ -93,6 +100,43 @@ const NPX_ALLOWLIST = new Set([
   "opencode-ai",
 ])
 const CONFIG_ENV_KEYS = new Set([
+  "KIMI_CODE_HOME",
+  "KIMI_CODE_NO_AUTO_UPDATE",
+  "KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT",
+  "KIMI_DISABLE_TELEMETRY",
+  "KIMI_MODEL_NAME",
+  "KIMI_MODEL_PROVIDER_TYPE",
+  "KIMI_MODEL_BASE_URL",
+  "KIMI_MODEL_API_KEY",
+  "KIMI_MODEL_CAPABILITIES",
+  "KIMI_MODEL_DISPLAY_NAME",
+  "KIMI_MODEL_MAX_CONTEXT_SIZE",
+  "KIMI_MODEL_MAX_OUTPUT_SIZE",
+  "KIMI_MODEL_MAX_COMPLETION_TOKENS",
+  "KIMI_MODEL_REASONING_KEY",
+  "KIMI_MODEL_ADAPTIVE_THINKING",
+  "KIMI_MODEL_TEMPERATURE",
+  "KIMI_MODEL_TOP_P",
+  "KIMI_MODEL_THINKING_EFFORT",
+  "KIMI_MODEL_THINKING_KEEP",
+  "KIMI_MCP_STARTUP_TIMEOUT_MS",
+  "KIMI_MCP_TOOL_TIMEOUT_MS",
+  "KIMI_LOOP_MAX_STEPS_PER_TURN",
+  "KIMI_LOOP_MAX_ATTEMPTS_PER_STEP",
+  "CLINE_API_KEY",
+  "CLINE_PROVIDER",
+  "CLINE_MODEL",
+  "CLINE_DIR",
+  "CLINE_NO_AUTO_UPDATE",
+  "QODER_PERSONAL_ACCESS_TOKEN",
+  "QODER_CONFIG_DIR",
+  "AIDER_MODEL",
+  "AIDER_WEAK_MODEL",
+  "AIDER_EDITOR_MODEL",
+  "AIDER_EDIT_FORMAT",
+  "AIDER_EDITOR_EDIT_FORMAT",
+  "AIDER_REASONING_EFFORT",
+  "AIDER_THINKING_TOKENS",
   "HTTP_PROXY",
   "HTTPS_PROXY",
   "NO_PROXY",
@@ -102,6 +146,14 @@ const CONFIG_ENV_KEYS = new Set([
   "TERM",
   "LANG",
   "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "NO_COLOR",
+  "FORCE_COLOR",
+  // Reviewed Codex ACP controls; log paths remain inside the launcher scope.
+  "NO_BROWSER",
+  "INITIAL_AGENT_MODE",
+  "APP_SERVER_LOGS",
   // Pins the DeepSeek Harness user-data root into Cognia-owned space; without
   // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
   // inject plugins and arbitrary JS into a certified composition.
@@ -169,6 +221,7 @@ const CONFIG_ENV_PREFIXES = [
   // DeepSeek Harness: the provider credential plus the composition's own
   // COGNIA_DSH_* inputs (workspace, session root, model, persona).
   "DEEPSEEK_",
+  "GOOSE_",
   "COGNIA_DSH_",
   // The tool-host handshake (socket path + per-attempt token + server name).
   // ACP agents never needed this because the token goes to the MCP bridge they
@@ -308,13 +361,19 @@ export function botRuntimeEnvironment(
 export function buildExternalAgentChildEnv(
   ambient: NodeJS.ProcessEnv,
   overrides: Record<string, string> | undefined,
-  managedDsh = false
+  managedDsh = false,
+  aider = false,
+  kimi = false
 ): NodeJS.ProcessEnv {
   if (managedDsh) {
     const inherited = new Set([
       "PATH",
       "LANG",
       "LC_ALL",
+      "LC_CTYPE",
+      "TERM",
+      "NO_COLOR",
+      "FORCE_COLOR",
       "TZ",
       "TMPDIR",
       "HOME",
@@ -341,6 +400,8 @@ export function buildExternalAgentChildEnv(
   }
   const env: NodeJS.ProcessEnv = { NODE_ENV: ambient.NODE_ENV ?? "production" }
   for (const [key, value] of Object.entries(ambient)) {
+    if (aider && key.startsWith("AIDER_")) continue
+    if (kimi && overrides?.COGNIA_BOT_ISOLATION === "1" && key.startsWith("KIMI_")) continue
     if (
       !DANGEROUS_ENV.test(key) &&
       (RUNTIME_ENV_KEYS.has(key) ||
@@ -524,8 +585,11 @@ export class NodeExternalAgentBackend {
     const env = buildExternalAgentChildEnv(
       process.env,
       config.env,
-      isDshLauncherInvocation(config.args ?? [], this.workspacesRoot)
+      isDshLauncherInvocation(config.args ?? [], this.workspacesRoot),
+      config.command === "aider",
+      config.command === "kimi"
     )
+    Object.assign(env, launch.env)
     const devinConfigRoot = devinOwnedConfigRoot(config)
     if (devinConfigRoot) env.XDG_CONFIG_HOME = devinConfigRoot
     // The launcher child (and the sandboxed exec it starts) resolves the agent

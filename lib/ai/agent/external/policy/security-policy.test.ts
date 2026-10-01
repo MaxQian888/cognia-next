@@ -38,10 +38,8 @@ describe("allowlists", () => {
     expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("claude-agent-acp")
   })
 
-  it("carries no binary that no preset can reach", () => {
-    // `cline` sat in the allowlist with no preset, no adapter and no surface —
-    // pure attack surface for the headless spawn RPC.
-    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain("cline")
+  it("admits Cline now that its native ACP preset reaches the binary", () => {
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("cline")
   })
 
   it("keeps the npx bridges the presets use", () => {
@@ -58,6 +56,25 @@ describe("allowlists", () => {
 })
 
 describe("agentStateWritableRoots", () => {
+  it("grants Qoder only its documented config root", () => {
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("cline")
+    expect(agentStateWritableRoots("cline", ["--acp"])).toEqual([".cline"])
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("qoder")
+    expect(agentStateWritableRoots("qoder", ["--acp"])).toEqual([".qoder"])
+    expect(agentStateWritableRoots("npx", ["-y", "qoder-adapter"])).toEqual([".npm"])
+  })
+
+  it("allows Goose state on macOS and Linux only for the actual binary", () => {
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("goose")
+    expect(agentStateWritableRoots("goose", ["acp"])).toEqual([
+      ".config/goose",
+      ".local/share/goose",
+      ".local/state/goose",
+      "Library/Application Support/Block/goose",
+    ])
+    expect(agentStateWritableRoots("npx", ["-y", "goose-adapter"])).toEqual([".npm"])
+  })
+
   it("gives only the Devin binary its config, sessions, and cache roots", () => {
     expect(agentStateWritableRoots("devin", ["acp"])).toEqual([
       ".config/devin",

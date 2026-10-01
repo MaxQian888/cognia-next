@@ -82,7 +82,6 @@ impl Default for AcpTerminalState {
 /// Both fail closed. Before this existed the desktop ran external agents with
 /// no policy, no sandbox and an inherited environment, while ADR-0077/0119
 /// documented the opposite.
-#[tauri::command]
 pub async fn spawn_external_agent(
     config: ExternalAgentSpawnConfig,
     state: State<'_, ExternalAgentState>,
@@ -132,6 +131,14 @@ pub async fn delete_gateway_task_for_backend(
     task_id: &str,
     backend: &dyn exec_backend::ExecBackend,
 ) -> Result<(), String> {
+    delete_gateway_task_for_device(task_id, backend, None).await
+}
+
+pub async fn delete_gateway_task_for_device(
+    task_id: &str,
+    backend: &dyn exec_backend::ExecBackend,
+    device: Option<&str>,
+) -> Result<(), String> {
     if backend.kind() != "local-process" {
         return Err("Gateway task state deletion requires a local process backend".into());
     }
@@ -144,10 +151,13 @@ pub async fn delete_gateway_task_for_backend(
     {
         return Err("Stop the gateway task before deleting its state".into());
     }
+    backend
+        .delete_retained_gateway_task(task_id, device)
+        .await?;
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .ok_or("Gateway task requires a host home directory")?;
-    crate::gateway_task::delete_task(task_id, std::path::Path::new(&home))
+    crate::gateway_task::delete_task_for_device(task_id, std::path::Path::new(&home), device)
 }
 
 /// Get status of an external agent process

@@ -5,6 +5,7 @@ import {
   normalizeCogniaModelBinding,
   parseGatewaySessionId,
 } from "./gateway-task"
+import { getPresetConfig } from "./presets"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 const config = (preset: string, protocol = "acp", transport = "stdio") =>
@@ -15,7 +16,10 @@ const config = (preset: string, protocol = "acp", transport = "stdio") =>
     protocol,
     transport,
     process: {
-      command: "agent",
+      command:
+        getPresetConfig(preset)?.process?.command ??
+        (protocol === "opencode-v2" ? "opencode" : "agent"),
+      args: getPresetConfig(preset)?.process?.args,
       env: { OPENAI_API_KEY: "upstream-secret", CODEX_HOME: "/user/home" },
     },
     metadata: { preset },
@@ -24,6 +28,321 @@ const binding = { providerId: "custom", modelId: "model", accountId: "account-on
 const settings = { providerSettings: {}, customProviders: [] }
 
 describe("isolated gateway task configuration", () => {
+  const prepare = (source: ExternalAgentConfig) =>
+    buildGatewayTaskConfig({
+      config: source,
+      binding,
+      taskId: "custom-task",
+      endpoint: "http://127.0.0.1:9000/v1",
+      secret: "lease-only",
+      model: "model",
+      settings,
+      ownerAccountId: null,
+    })
+
+  it("retains a custom Pi executable and explicit skills, extensions, prompts and locale", () => {
+    const source = config("pi-rpc", "pi-rpc")
+    source.process = {
+      command: "/opt/custom/pi",
+      cwd: "/workspace",
+      args: [
+        "--mode",
+        "rpc",
+        "--skill",
+        "./skills/review",
+        "-e",
+        "./extensions/review.ts",
+        "--append-system-prompt",
+        "Review carefully",
+        "--thinking",
+        "high",
+      ],
+      env: { LANG: "zh_CN.UTF-8", TZ: "Asia/Shanghai", OPENAI_API_KEY: "old-secret" },
+    }
+    const prepared = prepare(source).config
+    expect(prepared.process).toMatchObject({
+      command: source.process.command,
+      args: source.process.args,
+      cwd: "/workspace",
+    })
+    expect(prepared.process!.env).toMatchObject({ LANG: "zh_CN.UTF-8", TZ: "Asia/Shanghai" })
+    expect(prepared.process!.env).not.toHaveProperty("OPENAI_API_KEY")
+    expect(prepared.metadata?.piExtensionPolicy).toBe("isolated")
+  })
+
+  it("preserves Codex nonrouting configuration without replacing its selected binary", () => {
+    const source = config("codex-app-server", "codex-app-server")
+    source.process = {
+      command: "/opt/custom/codex",
+      args: [
+        "-c",
+        'developer_instructions="Review every change"',
+        "app-server",
+        "-c",
+        'model_reasoning_effort="high"',
+      ],
+    }
+    const prepared = prepare(source).config
+    expect(prepared.process!.command).toBe("/opt/custom/codex")
+    expect(prepared.process!.args).toEqual(expect.arrayContaining(source.process.args!))
+  })
+
+  it.each([
+    ["--provider", "other"],
+    ["--model", "other"],
+    ["--api-key", "secret"],
+    ["--session-dir", "/shared"],
+    ["--mode", "json"],
+    ["--unknown-flag"],
+  ])("refuses a conflicting Pi argument rather than silently discarding it: %s", (...extra) => {
+    const source = config("pi-rpc", "pi-rpc")
+    source.process!.args = ["--mode", "rpc", ...extra]
+    expect(() => prepare(source)).toThrow(/customization|argument/)
+  })
+
+  it.each([
+    'model_provider="other"',
+    'developer_instructions="review"\nmodel_provider="other"',
+    'developer_instructions={ model_provider="other" }',
+  ])("refuses unsafe Codex configuration without echoing its value", (value) => {
+    const source = config("codex-app-server", "codex-app-server")
+    source.process!.args = ["app-server", "-c", value]
+    expect(() => prepare(source)).toThrow(/customization/)
+    try {
+      prepare(source)
+    } catch (error) {
+      expect(String(error)).not.toContain(value)
+    }
+  })
+
+  it("refuses a command disguised by preset metadata", () => {
+    const source = config("pi-rpc", "pi-rpc")
+    source.process!.command = "/opt/custom/another-agent"
+    expect(() => prepare(source)).toThrow(/executable/)
+  })
+
+  it("refuses unknown environment customization instead of dropping it", () => {
+    const source = config("pi-rpc", "pi-rpc")
+    source.process!.env = { CUSTOM_PERSONA: "reviewer" }
+    expect(() => prepare(source)).toThrow(/environment customization.*CUSTOM_PERSONA/)
+  })
+
+  it("uses the bundled OpenCode ACP provider schema and pins background model requests", () => {
+    const env = prepare(config("opencode-acp")).config.process!.env!
+    const inline = JSON.parse(env.OPENCODE_CONFIG_CONTENT)
+    expect(inline).toMatchObject({
+      model: "cognia/model",
+      small_model: "cognia/model",
+      enabled_providers: ["cognia"],
+      provider: {
+        cognia: {
+          npm: "@ai-sdk/openai-compatible",
+          options: {
+            baseURL: "http://127.0.0.1:9000/v1",
+            apiKey: "{env:COGNIA_GATEWAY_TOKEN}",
+          },
+          models: { model: { tool_call: true } },
+        },
+      },
+    })
+    expect(inline.providers).toBeUndefined()
+    expect(JSON.stringify(inline)).not.toContain("lease-only")
+  })
+
+  it("omits incomplete V1 model limits instead of emitting an invalid provider schema", () => {
+    const prepared = buildGatewayTaskConfig({
+      config: config("opencode-acp"),
+      binding,
+      taskId: "partial-limits",
+      endpoint: "http://127.0.0.1:9000/v1",
+      secret: "synthetic",
+      model: "model",
+      settings,
+      ownerAccountId: null,
+      modelMetadata: { id: "model", contextLength: 32000 },
+    })
+    const inline = JSON.parse(prepared.config.process!.env!.OPENCODE_CONFIG_CONTENT)
+    expect(inline.provider.cognia.models.model).not.toHaveProperty("limit")
+  })
+
+  it.each([
+    ["opencode-acp", "acp", "agent", "prompt", "permission", { bash: "ask" }],
+    [
+      "opencode-v2-service",
+      "opencode-v2",
+      "agents",
+      "system",
+      "permissions",
+      [{ action: "bash", resource: "*", effect: "ask" }],
+    ],
+  ])(
+    "preserves inline Agent customization for %s with the selected model",
+    (preset, protocol, agentsKey, promptKey, permissionKey, permissions) => {
+      const source = config(
+        preset as string,
+        protocol as string,
+        protocol === "opencode-v2" ? "sse" : "stdio"
+      )
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          default_agent: "reviewer",
+          instructions: ["./instructions.md"],
+          [agentsKey as string]: {
+            reviewer: {
+              [promptKey as string]: "Review carefully",
+              description: "Code review",
+              model: "old-provider/old-model",
+              mode: "primary",
+              [permissionKey as string]: permissions,
+              steps: 12,
+            },
+          },
+          provider: { old: { options: { apiKey: "old-secret" } } },
+        }),
+      }
+      const inline = JSON.parse(prepare(source).config.process!.env!.OPENCODE_CONFIG_CONTENT)
+      expect(inline).toMatchObject({
+        default_agent: "reviewer",
+        instructions: ["./instructions.md"],
+        [agentsKey as string]: {
+          reviewer: {
+            [promptKey as string]: "Review carefully",
+            model: "cognia/model",
+            [permissionKey as string]: permissions,
+            steps: 12,
+          },
+        },
+      })
+      expect(JSON.stringify(inline)).not.toContain("old-secret")
+      expect(JSON.stringify(inline)).not.toContain("old-provider")
+    }
+  )
+
+  it("projects Codex ACP persona configuration while replacing only model route fields", () => {
+    const source = config("codex-acp")
+    source.process!.env = {
+      CODEX_CONFIG: JSON.stringify({
+        developer_instructions: "Review this code",
+        model_reasoning_effort: "high",
+        model_provider: "old",
+        model: "old-model",
+      }),
+    }
+    const env = prepare(source).config.process!.env!
+    expect(JSON.parse(env.CODEX_CONFIG)).toMatchObject({
+      developer_instructions: "Review this code",
+      model_reasoning_effort: "high",
+      model_provider: "cognia",
+      model: "model",
+    })
+    const payload = JSON.parse(env.COGNIA_GATEWAY_TASK_CONFIG)
+    expect(payload.files["codex/config.toml"]).toContain(
+      'developer_instructions = "Review this code"'
+    )
+  })
+
+  it.each([
+    ["opencode-acp", "acp", "command", { paths: ["./skills"] }],
+    ["opencode-v2-service", "opencode-v2", "commands", ["./skills"]],
+  ])(
+    "retains %s slash commands and skills without their old provider selection",
+    (preset, protocol, commandKey, skills) => {
+      const source = config(
+        preset as string,
+        protocol as string,
+        protocol === "opencode-v2" ? "sse" : "stdio"
+      )
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          skills,
+          [commandKey as string]: {
+            review: { template: "Review $ARGUMENTS", model: "old/model", subtask: true },
+          },
+        }),
+      }
+      const inline = JSON.parse(prepare(source).config.process!.env!.OPENCODE_CONFIG_CONTENT)
+      expect(inline.skills).toEqual(skills)
+      expect(inline[commandKey as string].review).toEqual({
+        template: "Review $ARGUMENTS",
+        model: "cognia/model",
+        subtask: true,
+      })
+    }
+  )
+
+  it.each([
+    "not-json",
+    "[]",
+    "null",
+    JSON.stringify({ plugin: ["unreviewed-plugin"] }),
+    JSON.stringify({ agent: { review: { options: { apiKey: "never-print-this" } } } }),
+    JSON.stringify({ agent: { review: { permission: { bash: "invalid" } } } }),
+    JSON.stringify({ agent: { review: { steps: -1 } } }),
+    JSON.stringify({
+      agents: { review: { request: { headers: { Authorization: "never-print-this" } } } },
+    }),
+    JSON.stringify({ instructions: [true] }),
+    JSON.stringify({ instructions: ["x".repeat(65_536)] }),
+  ])(
+    "refuses invalid or unreviewed inline OpenCode settings without exposing values (%#)",
+    (raw) => {
+      const source = config("opencode-acp")
+      source.process!.env = { OPENCODE_CONFIG_CONTENT: raw }
+      expect(() => prepare(source)).toThrow(
+        "Invalid or unsupported Cognia model OpenCode customization"
+      )
+    }
+  )
+
+  it.each(["OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR"])(
+    "refuses inaccessible %s configuration instead of silently discarding it",
+    (key) => {
+      const source = config("opencode-acp")
+      source.process!.env = { [key]: "/desktop/private-config" }
+      expect(() => prepare(source)).toThrow(/inline OpenCode settings/)
+    }
+  )
+
+  it.each([
+    ["opencode-acp", "acp", ["acp", "--log-level", "DEBUG"]],
+    [
+      "qwen-code",
+      "acp",
+      [
+        "-y",
+        "@qwen-code/qwen-code",
+        "--acp",
+        "--include-directories",
+        "/workspace/shared",
+        "--allowed-tools",
+        "read_file",
+      ],
+    ],
+  ])("preserves documented nonrouting options for %s", (preset, protocol, args) => {
+    const source = config(preset as string, protocol as string)
+    source.process!.args = args as string[]
+    expect(prepare(source).config.process!.args!.slice(0, args.length)).toEqual(args)
+  })
+
+  it.each([[], ["--yes"], ["--no-install"]])(
+    "preserves the supported npx runner prefix %j",
+    (...prefix) => {
+      const source = config("codex-acp")
+      source.process!.args = [...prefix, "@agentclientprotocol/codex-acp"]
+      expect(prepare(source).config.process!.args).toEqual(source.process!.args)
+    }
+  )
+
+  it("retains a globally installed Codex ACP adapter and its runtime settings", () => {
+    const source = config("codex-acp")
+    source.process = {
+      command: "/opt/custom/codex-acp",
+      args: [],
+      env: { CODEX_PATH: "/opt/custom/codex", NO_BROWSER: "1" },
+    }
+    expect(prepare(source).config.process).toMatchObject(source.process)
+  })
+
   it.each([
     ["codex-app-server", "codex-app-server"],
     ["opencode-acp", "acp"],
@@ -77,7 +396,7 @@ describe("isolated gateway task configuration", () => {
     }
     if (preset === "opencode-acp")
       expect(
-        JSON.parse(prepared.config.process!.env!.OPENCODE_CONFIG_CONTENT).providers.cognia.models
+        JSON.parse(prepared.config.process!.env!.OPENCODE_CONFIG_CONTENT).provider.cognia.models
           .model.limit
       ).toEqual({ context: 128000, input: 100000, output: 8000 })
     if (preset === "claude-code")

@@ -144,6 +144,7 @@ const baseHookValue = () => ({
   listSessions: jest.fn().mockResolvedValue([]),
   forkSession: jest.fn().mockResolvedValue(undefined),
   resumeSession: jest.fn().mockResolvedValue(undefined),
+  deleteSession: jest.fn().mockResolvedValue(undefined),
   refresh: jest.fn(),
   clearError: jest.fn(),
 })
@@ -883,6 +884,46 @@ describe("ExternalAgentManager", () => {
     ).toBe(true)
   })
 
+  it("preserves quoted launch arguments, cwd and generic environment from the chat dialog", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.change(screen.getByLabelText(en.externalAgent.manager.name), {
+      target: { value: "Custom reviewer" },
+    })
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.command), {
+      target: { value: "pi" },
+    })
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.arguments), {
+      target: { value: `--mode rpc --skill "./my skills" ''` },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /process environment variables/i }))
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.workingDirectory), {
+      target: { value: "/workspace/review" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }))
+    fireEvent.change(screen.getByPlaceholderText("Variable name"), {
+      target: { value: "AGENT_PERSONA" },
+    })
+    fireEvent.change(screen.getByPlaceholderText("Variable value"), {
+      target: { value: "reviewer" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        process: expect.objectContaining({
+          command: "pi",
+          args: ["--mode", "rpc", "--skill", "./my skills", ""],
+          cwd: "/workspace/review",
+          env: { AGENT_PERSONA: "reviewer" },
+        }),
+      })
+    )
+  })
+
   it("adds an OpenCode ACP agent from the preset (carries metadata)", async () => {
     const hook = baseHookValue()
     mockUseExternalAgent.mockReturnValue(hook)
@@ -934,6 +975,180 @@ describe("ExternalAgentManager", () => {
           cwd: "/work",
           env: { DEEPSEEK_API_KEY: "deepseek-transient-key" },
         }),
+      })
+    )
+  })
+
+  it("adds Aider through official CLI and displays localized installation and provider guidance", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /^Aider/i }))
+    expect(screen.getByText(en.externalAgent.manager.aiderSetupHint)).toBeInTheDocument()
+    expect(screen.getByText(en.externalAgent.manager.aiderEnvVarHint)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.workingDirectory), {
+      target: { value: "/workspace/aider" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }))
+    fireEvent.change(screen.getByPlaceholderText("Variable name"), {
+      target: { value: "DEEPSEEK_API_KEY" },
+    })
+    const value = screen.getByPlaceholderText("Variable value")
+    expect(value).toHaveAttribute("type", "password")
+    fireEvent.change(value, { target: { value: "fixture-provider-key" } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "aider-cli",
+        defaultPermissionMode: "bypassPermissions",
+        transport: "stdio",
+        process: expect.objectContaining({
+          command: "aider",
+          args: [],
+          cwd: "/workspace/aider",
+          env: { DEEPSEEK_API_KEY: "fixture-provider-key" },
+        }),
+        metadata: expect.objectContaining({ preset: "aider" }),
+      })
+    )
+  })
+
+  it("adds Kimi Code with a masked API key through native ACP", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /^Kimi Code/i }))
+    expect(screen.getByText(en.externalAgent.manager.kimiSetupHint)).toBeInTheDocument()
+    expect(screen.getByText(en.externalAgent.manager.kimiEnvVarHint)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.workingDirectory), {
+      target: { value: "/workspace/kimi" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }))
+    fireEvent.change(screen.getByPlaceholderText("Variable name"), {
+      target: { value: "KIMI_MODEL_API_KEY" },
+    })
+    const value = screen.getByPlaceholderText("Variable value")
+    expect(value).toHaveAttribute("type", "password")
+    fireEvent.change(value, { target: { value: "synthetic-kimi-pat" } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "acp",
+        metadata: expect.objectContaining({
+          preset: "kimi",
+          acpPreviewFeatures: { sessionFork: true },
+        }),
+        process: expect.objectContaining({
+          command: "kimi",
+          cwd: "/workspace/kimi",
+          args: expect.arrayContaining(["acp"]),
+          env: { KIMI_MODEL_API_KEY: "synthetic-kimi-pat" },
+        }),
+      })
+    )
+  })
+
+  it("adds Cline with a masked API key through native ACP", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /^Cline/i }))
+    expect(screen.getByText(en.externalAgent.manager.clineSetupHint)).toBeInTheDocument()
+    expect(screen.getByText(en.externalAgent.manager.clineEnvVarHint)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.workingDirectory), {
+      target: { value: "/workspace/cline" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }))
+    fireEvent.change(screen.getByPlaceholderText("Variable name"), {
+      target: { value: "CLINE_API_KEY" },
+    })
+    const value = screen.getByPlaceholderText("Variable value")
+    expect(value).toHaveAttribute("type", "password")
+    fireEvent.change(value, { target: { value: "synthetic-cline-pat" } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "acp",
+        metadata: expect.objectContaining({ preset: "cline" }),
+        process: expect.objectContaining({
+          command: "cline",
+          cwd: "/workspace/cline",
+          args: expect.arrayContaining(["--acp", "--auto-approve", "false"]),
+          env: { CLINE_API_KEY: "synthetic-cline-pat" },
+        }),
+      })
+    )
+  })
+
+  it("adds Qoder with a masked PAT through native ACP", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /^Qoder/i }))
+    expect(screen.getByText(en.externalAgent.manager.qoderSetupHint)).toBeInTheDocument()
+    expect(screen.getByText(en.externalAgent.manager.qoderEnvVarHint)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.workingDirectory), {
+      target: { value: "/workspace/qoder" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }))
+    fireEvent.change(screen.getByPlaceholderText("Variable name"), {
+      target: { value: "QODER_PERSONAL_ACCESS_TOKEN" },
+    })
+    const value = screen.getByPlaceholderText("Variable value")
+    expect(value).toHaveAttribute("type", "password")
+    fireEvent.change(value, { target: { value: "synthetic-qoder-pat" } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "acp",
+        metadata: expect.objectContaining({ preset: "qoder" }),
+        process: expect.objectContaining({
+          command: "qoder",
+          cwd: "/workspace/qoder",
+          args: expect.arrayContaining(["--acp", "--strict-mcp-config"]),
+          env: { QODER_PERSONAL_ACCESS_TOKEN: "synthetic-qoder-pat" },
+        }),
+      })
+    )
+  })
+
+  it("adds Goose through native ACP and displays localized installation and provider guidance", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /^Goose/i }))
+    expect(screen.getByText(en.externalAgent.manager.gooseSetupHint)).toBeInTheDocument()
+    expect(screen.getByText(en.externalAgent.manager.gooseEnvVarHint)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "acp",
+        transport: "stdio",
+        process: expect.objectContaining({
+          command: "goose",
+          args: ["acp", "--with-builtin", "developer"],
+        }),
+        metadata: expect.objectContaining({ preset: "goose" }),
       })
     )
   })
@@ -1078,6 +1293,100 @@ describe("ExternalAgentManager", () => {
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [makeAgent()] })
     render(wrap(<ExternalAgentManager />))
     expect(screen.queryByTestId("agent-failure-agent-1")).toBeNull()
+  })
+
+  it("confirms permanent native deletion before deleting history", async () => {
+    const agent = makeAgent()
+    agent.connectionStatus = "connected"
+    agent.validity = {
+      negotiation: { agentCapabilities: { sessionCapabilities: { delete: {} } } },
+    } as never
+    const deleteSession = jest.fn().mockResolvedValue(undefined)
+    const listSessions = jest
+      .fn()
+      .mockResolvedValue([{ sessionId: "s-delete", title: "Native history" }])
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: agent.config.id,
+      activeAgentValidity: {
+        executable: true,
+        sessionExtensions: {},
+        negotiation: { agentCapabilities: { sessionCapabilities: { delete: {} } } },
+      },
+      listSessions,
+      deleteSession,
+    })
+    render(wrap(<ExternalAgentManager />))
+    await act(async () => {})
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgent.manager.deleteNativeSession })
+    )
+    expect(deleteSession).not.toHaveBeenCalled()
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toHaveTextContent(en.externalAgent.manager.deleteNativeSessionConfirm)
+    await act(async () => {
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: en.externalAgent.manager.deleteNativeSession })
+      )
+    })
+    expect(deleteSession).toHaveBeenCalledWith("s-delete")
+  })
+
+  it("hides native deletion without a negotiated capability", async () => {
+    const agent = makeAgent()
+    agent.connectionStatus = "connected"
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: agent.config.id,
+      activeAgentValidity: {
+        executable: true,
+        sessionExtensions: {},
+        negotiation: { agentCapabilities: { sessionCapabilities: {} } },
+      },
+      listSessions: jest.fn().mockResolvedValue([{ sessionId: "s-keep" }]),
+    })
+    render(wrap(<ExternalAgentManager />))
+    await act(async () => {})
+    expect(
+      screen.queryByRole("button", { name: en.externalAgent.manager.deleteNativeSession })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps history visible and surfaces a native deletion failure", async () => {
+    const agent = makeAgent()
+    agent.connectionStatus = "connected"
+    agent.validity = {
+      negotiation: { agentCapabilities: { sessionCapabilities: { delete: {} } } },
+    } as never
+    const deleteSession = jest.fn().mockRejectedValue(new Error("disk failure"))
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: agent.config.id,
+      activeAgentValidity: {
+        executable: true,
+        sessionExtensions: {},
+        negotiation: { agentCapabilities: { sessionCapabilities: { delete: {} } } },
+      },
+      listSessions: jest.fn().mockResolvedValue([{ sessionId: "s-keep", title: "Keep history" }]),
+      deleteSession,
+    })
+    render(wrap(<ExternalAgentManager />))
+    await act(async () => {})
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgent.manager.deleteNativeSession })
+    )
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", {
+          name: en.externalAgent.manager.deleteNativeSession,
+        })
+      )
+    })
+    expect(screen.getByText("Keep history")).toBeInTheDocument()
+    expect(toast.error).toHaveBeenCalledWith("disk failure")
   })
 
   it("invokes resumeSession when the resume button is clicked", async () => {

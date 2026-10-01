@@ -18,6 +18,351 @@ import {
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
+  it("rejects a Kimi Bot home symlink outside its owned state before provisioning", async () => {
+    const owned = fs.mkdtempSync(path.join(os.tmpdir(), "kimi-owned-"))
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "kimi-outside-"))
+    const ensureDir = jest.fn()
+    try {
+      fs.symlinkSync(outside, path.join(owned, "escape"))
+      await expect(
+        resolveSandboxedExternalAgentLaunch(
+          {
+            id: "kimi",
+            command: "kimi",
+            cwd: "/work",
+            env: {
+              COGNIA_BOT_ISOLATION: "1",
+              COGNIA_BOT_STATE_DIR: owned,
+              KIMI_CODE_HOME: path.join(owned, "escape/new"),
+            },
+          },
+          {
+            platform: "darwin",
+            homedir: "/home/user",
+            candidates: ["/launcher"],
+            isExecutable: () => true,
+            supportsBotIsolation: () => true,
+            ensureDir,
+          }
+        )
+      ).rejects.toThrow("inside the Bot state")
+      expect(ensureDir).not.toHaveBeenCalled()
+      expect(fs.existsSync(path.join(outside, "new"))).toBe(false)
+    } finally {
+      fs.rmSync(owned, { recursive: true, force: true })
+      fs.rmSync(outside, { recursive: true, force: true })
+    }
+  })
+  it.each([
+    [{}, "/home/user/.kimi-code"],
+    [{ KIMI_CODE_HOME: "/isolated/kimi" }, "/isolated/kimi"],
+    [{ KIMI_CODE_HOME: "state/../kimi" }, "/work/project/kimi"],
+    [{ KIMI_CODE_HOME: " state " }, "/work/project/ state "],
+  ])("scopes Kimi state and temp to the selected native home", async (env, root) => {
+    const ensureDir = jest.fn()
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      { id: "kimi", command: "kimi", args: ["acp"], cwd: "/work/project", env },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir,
+      }
+    )
+    const writable = launch.args.filter((_, i) => launch.args[i - 1] === "--writable")
+    expect(writable).toContain(root)
+    if (root !== "/home/user/.kimi-code") expect(writable).not.toContain("/home/user/.kimi-code")
+    expect(launch.env).toMatchObject({
+      KIMI_CODE_HOME: root,
+      KIMI_CODE_NO_AUTO_UPDATE: "1",
+      KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT: "0",
+      TMPDIR: `${root}/tmp`,
+      TMP: `${root}/tmp`,
+      TEMP: `${root}/tmp`,
+    })
+    expect(ensureDir).toHaveBeenCalledWith(`${root}/tmp`)
+  })
+
+  it("uses ambient Kimi home unless explicit configuration overrides it", async () => {
+    const previous = process.env.KIMI_CODE_HOME
+    process.env.KIMI_CODE_HOME = "/ambient/kimi"
+    try {
+      for (const [env, expected] of [
+        [{}, "/ambient/kimi"],
+        [{ KIMI_CODE_HOME: "/explicit/kimi" }, "/explicit/kimi"],
+      ] as const) {
+        const launch = await resolveSandboxedExternalAgentLaunch(
+          { id: "kimi", command: "kimi", cwd: "/work", env },
+          {
+            platform: "darwin",
+            homedir: "/home/user",
+            candidates: ["/launcher"],
+            isExecutable: () => true,
+          }
+        )
+        expect(launch.env?.KIMI_CODE_HOME).toBe(expected)
+      }
+    } finally {
+      if (previous === undefined) delete process.env.KIMI_CODE_HOME
+      else process.env.KIMI_CODE_HOME = previous
+    }
+  })
+
+  it.each(["", "   ", "/work/state/../escape", "/home/user/.kimi-code"])(
+    "rejects unsafe Kimi Bot home %p",
+    (selected) => {
+      expect(() =>
+        buildSandboxLauncherArgs(
+          {
+            id: "kimi",
+            command: "kimi",
+            cwd: "/work",
+            env: {
+              COGNIA_BOT_ISOLATION: "1",
+              COGNIA_BOT_STATE_DIR: "/work/state",
+              KIMI_CODE_HOME: selected,
+            },
+          },
+          "/home/user"
+        )
+      ).toThrow(/Kimi/)
+    }
+  )
+
+  it("keeps Kimi Bot state separate from host subscription credentials", async () => {
+    const previous = process.env.KIMI_CODE_HOME
+    delete process.env.KIMI_CODE_HOME
+    try {
+      const launch = await resolveSandboxedExternalAgentLaunch(
+        {
+          id: "kimi",
+          command: "kimi",
+          cwd: "/work",
+          env: { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
+        },
+        {
+          platform: "darwin",
+          homedir: "/home/user",
+          candidates: ["/launcher"],
+          isExecutable: () => true,
+          supportsBotIsolation: () => true,
+        }
+      )
+      expect(launch.env?.KIMI_CODE_HOME).toBe("/work/state/.kimi-code")
+      expect(launch.args).not.toContain("/home/user/.kimi-code")
+      expect(launch.args).toEqual(expect.arrayContaining(["--deny-readable", "/home/user"]))
+    } finally {
+      if (previous !== undefined) process.env.KIMI_CODE_HOME = previous
+    }
+  })
+  it.each([
+    [{}, [], "/home/user/.cline"],
+    [{ CLINE_DIR: "/isolated/cline" }, [], "/isolated/cline"],
+    [{ CLINE_DIR: "/ignored" }, ["--config", "state"], "/work/project/state"],
+    [{}, ["--config=/isolated/other"], "/isolated/other"],
+  ])("scopes Cline state to its actual ACP config root", async (env, args, root) => {
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "cline",
+        command: "cline",
+        args: args as string[],
+        cwd: "/work/project",
+        env: env as Record<string, string>,
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir: jest.fn(),
+      }
+    )
+    const writable = launch.args.filter((_, i) => launch.args[i - 1] === "--writable")
+    expect(writable).toContain(root)
+    if (root !== "/home/user/.cline") expect(writable).not.toContain("/home/user/.cline")
+    expect(launch.env?.CLINE_DIR).toBe(root)
+    expect(launch.env?.TMPDIR).toBe(`${root}/tmp`)
+  })
+  it.each([
+    ["--config", ""],
+    ["--data-dir", "/state"],
+  ])("refuses ineffective or empty Cline selectors: %s", (...args) => {
+    expect(() =>
+      buildSandboxLauncherArgs({ id: "cline", command: "cline", cwd: "/work", args }, "/home/user")
+    ).toThrow(/Cline/)
+  })
+
+  it("refuses Cline state outside a Bot's owned root", () => {
+    expect(() =>
+      buildSandboxLauncherArgs(
+        {
+          id: "cline",
+          command: "cline",
+          cwd: "/work",
+          env: {
+            COGNIA_BOT_ISOLATION: "1",
+            COGNIA_BOT_STATE_DIR: "/work/state",
+            CLINE_DIR: "/work/state/../escape",
+          },
+        },
+        "/home/user"
+      )
+    ).toThrow("inside the Bot state")
+  })
+
+  it.each([
+    [{}, undefined, "/home/user/.qoder"],
+    [{ QODER_CONFIG_DIR: "/isolated/qoder" }, undefined, "/isolated/qoder"],
+    [{ QODER_CONFIG_DIR: "/ignored" }, ["--config-dir", "state"], "/work/project/state"],
+    [{}, ["--config-dir=/isolated/other"], "/isolated/other"],
+  ])("scopes Qoder config writes to the selected root", async (env, args, root) => {
+    const ensureDir = jest.fn()
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "qoder",
+        command: "qoder",
+        args: args as string[] | undefined,
+        cwd: "/work/project",
+        env: env as Record<string, string>,
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir,
+      }
+    )
+    const writable = launch.args.filter((_, index) => launch.args[index - 1] === "--writable")
+    expect(writable).toContain(root)
+    if (root !== "/home/user/.qoder") expect(writable).not.toContain("/home/user/.qoder")
+    expect(launch.env?.QODER_CONFIG_DIR).toBe(root)
+    expect(launch.env?.TMPDIR).toBe(`${root}/tmp`)
+    expect(ensureDir).toHaveBeenCalledWith(root)
+  })
+
+  it("refuses a Qoder config root outside isolated Bot state", async () => {
+    await expect(
+      resolveSandboxedExternalAgentLaunch(
+        {
+          id: "qoder",
+          command: "qoder",
+          cwd: "/work",
+          env: {
+            COGNIA_BOT_ISOLATION: "1",
+            COGNIA_BOT_STATE_DIR: "/work/state",
+            QODER_CONFIG_DIR: "/work/state/../outside",
+          },
+        },
+        {
+          platform: "darwin",
+          homedir: "/home/user",
+          candidates: ["/launcher"],
+          isExecutable: () => true,
+          supportsBotIsolation: () => true,
+        }
+      )
+    ).rejects.toThrow("inside the Bot state")
+  })
+
+  it("exposes only Qoder program directories from the host home to an isolated Bot", () => {
+    const args = buildSandboxLauncherArgs(
+      {
+        id: "qoder-bot",
+        command: "qoder",
+        cwd: "/work",
+        env: { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
+      },
+      "/home/user"
+    )
+    const readable = args.filter((_, index) => args[index - 1] === "--readable")
+    expect(readable).toContain("/home/user/.qoder/entry")
+    expect(readable).toContain("/home/user/.qoder/bin")
+    expect(readable).not.toContain("/home/user/.qoder")
+    expect(args).toEqual(expect.arrayContaining(["--deny-readable", "/home/user"]))
+  })
+
+  it("rejects an empty Qoder --config-dir", () => {
+    expect(() =>
+      buildSandboxLauncherArgs(
+        { id: "qoder", command: "qoder", cwd: "/work", args: ["--config-dir"] },
+        "/home/user"
+      )
+    ).toThrow("must not be empty")
+  })
+
+  it("hides implicit Aider config and dotenv files in home, cwd and Git ancestors", () => {
+    const args = buildSandboxLauncherArgs(
+      { id: "aider-test", command: "aider", cwd: "/work/project/sub" },
+      "/home/user"
+    )
+    const denied = args.filter((_, index) => args[index - 1] === "--deny-readable")
+    for (const file of [
+      "/home/user/.aider.conf.yml",
+      "/work/project/sub/.env",
+      "/work/project/.aider.conf.yml",
+      "/work/.aider.model.settings.yml",
+      "/.aider.model.metadata.json",
+      "/home/user/.aider/oauth-keys.env",
+    ])
+      expect(denied).toContain(file)
+    expect(args.slice(args.indexOf("--") + 1)).toEqual(["aider"])
+    const sibling = buildSandboxLauncherArgs(
+      { id: "pi", command: "pi", cwd: "/work" },
+      "/home/user"
+    )
+    expect(sibling).not.toContain("--deny-readable")
+  })
+  it("keeps Goose temporary files in the gateway task home", async () => {
+    const taskHome = "/work/task-home"
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "goose-task",
+        command: "goose",
+        cwd: "/work",
+        env: { COGNIA_GATEWAY_TASK_HOME: taskHome },
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+      }
+    )
+    expect(launch.env?.TMPDIR).toBe(`${taskHome}/.local/state/goose/tmp`)
+    expect(launch.args).toEqual(expect.arrayContaining(["--writable", taskHome]))
+  })
+
+  it("gives Goose a temporary directory inside its existing writable state root", async () => {
+    const ensureDir = jest.fn()
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "goose",
+        command: "goose",
+        args: ["acp"],
+        cwd: "/work",
+        env: { GOOSE_PATH_ROOT: "/untrusted", TMPDIR: "/ambient/tmp" },
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir,
+      }
+    )
+    expect(ensureDir).toHaveBeenCalledWith("/home/user/.local/state/goose/tmp")
+    expect(launch.env).toEqual({
+      TMPDIR: "/home/user/.local/state/goose/tmp",
+      TMP: "/home/user/.local/state/goose/tmp",
+      TEMP: "/home/user/.local/state/goose/tmp",
+    })
+    expect(launch.args).not.toContain("/untrusted")
+    expect(launch.args).not.toContain("/ambient/tmp")
+    expect(launch.args).toContain("/home/user/.local/state/goose")
+  })
+
   it("provisions all Bot environment directories without adding writable roots", async () => {
     const ensureDir = jest.fn()
     const launch = await resolveSandboxedExternalAgentLaunch(

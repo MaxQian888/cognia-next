@@ -54,6 +54,8 @@ export interface ResolveTeamRepoDeps {
 }
 
 export interface ResolvedTeamRepo {
+  /** Remote selected for this repository binding. */
+  remote?: string
   fullName: string
   /** The deployment the repository lives on — every read must go there. */
   host: GithubHost
@@ -103,6 +105,7 @@ export function createResolveTeamRepo(
       .defaultBranch(workingDir, origin.name)
       .catch(() => ({ branch: "main", source: "guess", exists: false }) as GitDefaultBranch)
     return {
+      remote: origin.name,
       fullName,
       host: parsed.host,
       defaultBranch: trunk.branch,

@@ -116,6 +116,8 @@ export interface ReplayEvent {
  * Form data for adding a new external agent
  */
 export interface AddAgentFormData {
+  processCwd?: string
+  processEnv?: Record<string, string>
   preset?: string
   cogniaModel?: import("./external-agent").ExternalAgentCogniaModelBinding | null
   /** DeepSeek key is handed only to the lifecycle keyring writer. */

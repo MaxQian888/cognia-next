@@ -49,6 +49,165 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   string,
   ExternalAgentEcosystemAdapterDefinition
 > = {
+  kimi: {
+    id: "kimi",
+    name: "Kimi Code",
+    description: "Moonshot AI Kimi Code over its native ACP server",
+    docsUrl: "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started",
+    tags: ["coding", "kimi", "moonshot", "acp"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "kimi",
+        name: "Kimi Code",
+        description:
+          "Native Kimi Code CLI with subscription login, streamed replies, images, tool approvals, MCP and persisted sessions.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "kimi", "acp"],
+        docsUrl: "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html",
+        setupHint:
+          "Install npm install -g @moonshot-ai/kimi-code@2.1.1 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp using the existing login. KIMI_CODE_HOME selects separate state; update outside hosted sessions with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. The archived Python kimi-cli is not this runtime.",
+        envVarHint:
+          "Subscription login needs no API key. Optional KIMI_CODE_HOME selects state (default ~/.kimi-code). For a custom provider use KIMI_MODEL_NAME, KIMI_MODEL_PROVIDER_TYPE, KIMI_MODEL_BASE_URL and KIMI_MODEL_API_KEY; these replace subscription model selection.",
+        process: { command: "kimi", args: ["acp"] },
+        icon: "kimi",
+      },
+    ],
+  },
+  cline: {
+    id: "cline",
+    name: "Cline",
+    description: "Cline's official CLI agent over native ACP",
+    docsUrl: "https://docs.cline.bot/usage/acp",
+    tags: ["coding", "cline", "acp"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "cline",
+        name: "Cline",
+        description:
+          "Official Cline CLI with streamed text, Plan/Act, tool approvals and persisted session resume.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "cline", "acp"],
+        docsUrl: "https://docs.cline.bot/usage/acp",
+        setupHint:
+          "Install npm install -g cline@3.0.67. Use cline auth for Cline, ClinePass or ChatGPT login, or set CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally for BYOK. --config or CLINE_DIR selects ACP state; --data-dir is ignored upstream in ACP and is rejected here. Auto-update is disabled while hosted. Remove only Cognia configuration; system installation and Cline data remain.",
+        envVarHint:
+          "CLINE_PROVIDER, CLINE_MODEL, CLINE_API_KEY; optional CLINE_DIR. A pinned provider disables provider switching. ACP restores saved OAuth credentials; other provider keys must be supplied through CLINE_API_KEY.",
+        limitationNote:
+          "Cline 3.0.67 ACP accepts but does not forward images or per-session MCP servers. Session listing/deletion is not advertised. Configure native MCP with cline mcp; authenticated model, edit and MCP acceptance is pending.",
+        process: { command: "cline", args: ["--acp", "--auto-approve", "false"] },
+      },
+    ],
+  },
+  aider: {
+    id: "aider",
+    name: "Aider",
+    description: "Official Aider CLI with Cognia session history",
+    docsUrl: "https://aider.chat/docs/scripting.html",
+    tags: ["coding", "aider", "cli"],
+    surfaces: [
+      {
+        id: "cli-stdio",
+        presetId: "aider",
+        name: "Aider",
+        description:
+          "Official Aider CLI with streamed text, file edits and separate Cognia session histories.",
+        protocol: "aider-cli",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "bypassPermissions",
+        tags: ["coding", "aider", "cli"],
+        docsUrl: "https://aider.chat/docs/install.html",
+        setupHint:
+          "Install Aider in an isolated Python 3.12 environment using uv tool install --force --python python3.12 --with pip aider-chat==0.86.2. Set --model and the provider API key in Cognia. Native .aider.conf.yml and .env discovery is isolated. Confirmations are automatic inside the mandatory host sandbox; Plan uses ask mode and dry-run. There are no native ACP approvals, MCP or structured tool events. Cognia removes its saved configuration and selected session history, never the system installation.",
+        envVarHint:
+          "For DeepSeek: --model deepseek/deepseek-flash with DEEPSEEK_API_KEY. Other providers use their Aider model identifier and provider key.",
+        process: { command: "aider", args: [] },
+      },
+    ],
+  },
+  qoder: {
+    id: "qoder",
+    name: "Qoder",
+    description: "Qoder over its official ACP server",
+    docsUrl: "https://docs.qoder.com/cli/acp",
+    tags: ["coding", "qoder", "acp"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "qoder",
+        name: "Qoder",
+        description:
+          "Run Qoder over native ACP with streamed replies, tool approval and per-session MCP servers.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "qoder", "acp"],
+        docsUrl: "https://docs.qoder.com/cli/acp",
+        setupHint:
+          "Install with curl -fsSL https://qoder.com/install | bash. Run qoder login, or supply QODER_PERSONAL_ACCESS_TOKEN locally. Cognia uses native ACP, explicit default permissions and per-session MCP; background auto-update is disabled for this process. Update separately with qoder update. Removing an agent keeps your system installation and Qoder data. Windows hosting is unavailable in Cognia's strict sandbox.",
+        envVarHint:
+          "Use your existing Qoder CLI login, or QODER_PERSONAL_ACCESS_TOKEN. QODER_CONFIG_DIR selects a separate configuration directory. A provider API key alone does not replace Qoder authentication; BYOK availability depends on your Qoder account.",
+        process: {
+          command: "qoder",
+          args: [
+            "--acp",
+            "--permission-mode",
+            "default",
+            "--strict-mcp-config",
+            "--settings",
+            '{"general":{"enableAutoUpdate":false}}',
+          ],
+        },
+      },
+    ],
+  },
+  goose: {
+    id: "goose",
+    name: "Goose",
+    description: "AAIF Goose over native ACP",
+    docsUrl: "https://goose-docs.ai/docs/gdk/acp/",
+    tags: ["coding", "goose", "aaif"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "goose",
+        name: "Goose",
+        description:
+          "Run Goose through its native ACP server with its developer extension and Cognia tools.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "goose", "acp"],
+        docsUrl: "https://goose-docs.ai/docs/gdk/acp/",
+        setupHint:
+          "Install Goose with `brew install block-goose-cli` on macOS, or the official CLI installer on Linux. Run `goose configure` to choose a provider and model, or set GOOSE_PROVIDER, GOOSE_MODEL, and the provider API key in this agent's environment. Update with your package manager or `goose update`. Cognia removes saved configurations, never your system installation.",
+        envVarHint:
+          "GOOSE_PROVIDER, GOOSE_MODEL, and the chosen provider's API key (for example OPENAI_API_KEY or ANTHROPIC_API_KEY). Existing Goose configuration is also supported.",
+        process: {
+          command: "goose",
+          args: ["acp", "--with-builtin", "developer"],
+          // Goose defaults to auto mode. Keep tool approval in the ACP client.
+          env: { GOOSE_MODE: "approve" },
+        },
+        icon: "goose",
+      },
+    ],
+  },
   devin: {
     id: "devin",
     name: "Devin",

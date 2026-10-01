@@ -31,7 +31,7 @@ function validateProperty(name: string, value: unknown): AcpElicitationPropertyS
   const type =
     typeof value.type === "string"
       ? value.type
-      : value.enum !== undefined || value.oneOf !== undefined
+      : value.enum !== undefined || value.oneOf !== undefined || value.anyOf !== undefined
         ? "string"
         : value.items !== undefined
           ? "array"
@@ -41,8 +41,30 @@ function validateProperty(name: string, value: unknown): AcpElicitationPropertyS
   if (SECRET_FIELD.test(name) || property.format === "password" || property.writeOnly === true) {
     throw new Error("unsafe_secret")
   }
+  // Kimi emits multi-select items as {anyOf: [{const, title}]} without
+  // an explicit type. Normalize that restricted choice dialect at the boundary
+  // so the shared form can render every option with its original label.
+  if (property.anyOf !== undefined) {
+    if (property.oneOf !== undefined) return undefined
+    property.oneOf = property.anyOf
+    delete property.anyOf
+  }
   if (type === "array") {
-    if (!isRecord(property.items) || property.items.type !== "string") return undefined
+    if (
+      !isRecord(property.items) ||
+      (property.items.type !== undefined && property.items.type !== "string")
+    )
+      return undefined
+    const items = validateProperty(name, property.items)
+    if (items?.type !== "string") return undefined
+    property.items = items
+    for (const bound of ["minItems", "maxItems"] as const) {
+      if (
+        property[bound] !== undefined &&
+        (!Number.isSafeInteger(property[bound]) || Number(property[bound]) < 0)
+      )
+        return undefined
+    }
   }
   if (
     property.enum !== undefined &&
@@ -213,7 +235,14 @@ export function validateAcpElicitationResponse(
       if (!property || !matchesType(value, property)) {
         throw new Error(`Invalid elicitation field: ${name}`)
       }
-      const allowed = property.enum ?? property.oneOf?.map((option) => option.const)
+      const choices = property.type === "array" ? property.items : property
+      const allowed = choices?.enum ?? choices?.oneOf?.map((option) => option.const)
+      if (
+        Array.isArray(value) &&
+        ((typeof property.minItems === "number" && value.length < property.minItems) ||
+          (typeof property.maxItems === "number" && value.length > property.maxItems))
+      )
+        throw new Error(`Invalid elicitation selection count: ${name}`)
       if (
         allowed &&
         (Array.isArray(value)

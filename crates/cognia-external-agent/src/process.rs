@@ -142,6 +142,7 @@ pub struct ExternalAgentProcess {
     pub pid: Option<u32>,
     /// Configuration used to spawn
     config: ExternalAgentSpawnConfig,
+    remote_origin: Option<String>,
     /// Stdin handle for sending messages
     stdin: ChildStdin,
     /// One-shot kill request channel consumed by the supervisor task. Taken on
@@ -263,6 +264,7 @@ impl ExternalAgentProcess {
             .collect();
         serde_json::json!({
             "id": config.id,
+            "originDeviceId": self.remote_origin,
             "pid": self.get_pid(),
             "state": state,
             "command": config.command,
@@ -387,6 +389,23 @@ impl ExternalAgentProcessManager {
             None
         };
         let mut cmd = Command::new(&program);
+        if crate::sandbox::is_aider_invocation(&config.command, &config.args) {
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("AIDER_") {
+                    cmd.env_remove(key);
+                }
+            }
+            config.env.retain(|key, _| {
+                !key.starts_with("AIDER_") || crate::sandbox::aider_model_env_key(key)
+            });
+        }
+        if crate::sandbox::is_kimi_invocation(&config.command, &config.args) {
+            configure_kimi_environment(
+                &mut cmd,
+                &mut config,
+                std::env::vars_os().map(|(key, _)| key),
+            );
+        }
         cmd.env_remove(crate::devin_mcp_config::PAYLOAD_ENV);
         cmd.env_remove(crate::devin_mcp_config::WRAPPED_ENV);
         if managed_gateway {
@@ -403,6 +422,10 @@ impl ExternalAgentProcessManager {
                     "PATH"
                         | "LANG"
                         | "LC_ALL"
+                        | "LC_CTYPE"
+                        | "TERM"
+                        | "NO_COLOR"
+                        | "FORCE_COLOR"
                         | "TZ"
                         | "TMPDIR"
                         | "DSH_HOME"
@@ -545,6 +568,7 @@ impl ExternalAgentProcessManager {
         // exits immediately is then still removed through the same supervised
         // lifecycle as a long-running child.
         let process = Arc::new(Mutex::new(ExternalAgentProcess {
+            remote_origin: crate::spawn_authority::current_origin(),
             pid,
             config,
             stdin,
@@ -732,8 +756,79 @@ impl ExternalAgentProcessManager {
     }
 }
 
+/// Native Kimi accepts environment hooks for OAuth, identity and executable paths.
+/// Preserve only its reviewed model/runtime contract; Bot credentials are explicit.
+fn configure_kimi_environment(
+    command: &mut Command,
+    config: &mut ExternalAgentSpawnConfig,
+    ambient_keys: impl IntoIterator<Item = std::ffi::OsString>,
+) {
+    let bot = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
+    for key in ambient_keys {
+        let name = key.to_string_lossy();
+        if name.starts_with("KIMI_") && (bot || !crate::presets::kimi_env_key(&name)) {
+            command.env_remove(key);
+        }
+    }
+    config
+        .env
+        .retain(|key, _| !key.starts_with("KIMI_") || crate::presets::kimi_env_key(key));
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kimi_environment_filters_ambient_identity_hooks_and_bot_credentials() {
+        for bot in [false, true] {
+            let mut command = Command::new("fixture");
+            let mut config = echo_config("kimi-env");
+            config.env.extend([
+                ("KIMI_CODE_HOME".into(), "/owned/kimi".into()),
+                ("KIMI_MODEL_API_KEY".into(), "explicit-fixture".into()),
+                ("KIMI_OAUTH_HOST".into(), "unreviewed".into()),
+            ]);
+            if bot {
+                config.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+            }
+            configure_kimi_environment(
+                &mut command,
+                &mut config,
+                [
+                    "KIMI_CODE_HOME",
+                    "KIMI_MODEL_API_KEY",
+                    "KIMI_OAUTH_HOST",
+                    "KIMI_CODE_USER_AGENT",
+                    "KIMI_BIN_PATH",
+                ]
+                .map(std::ffi::OsString::from),
+            );
+            let removed: Vec<_> = command
+                .as_std()
+                .get_envs()
+                .filter_map(|(key, value)| {
+                    value
+                        .is_none()
+                        .then_some(key.to_string_lossy().into_owned())
+                })
+                .collect();
+            for key in ["KIMI_OAUTH_HOST", "KIMI_CODE_USER_AGENT", "KIMI_BIN_PATH"] {
+                assert!(removed.contains(&key.to_string()));
+            }
+            assert_eq!(removed.contains(&"KIMI_MODEL_API_KEY".to_string()), bot);
+            assert_eq!(config.env["KIMI_CODE_HOME"], "/owned/kimi");
+            assert_eq!(config.env["KIMI_MODEL_API_KEY"], "explicit-fixture");
+            assert!(!config.env.contains_key("KIMI_OAUTH_HOST"));
+        }
+        assert!(crate::sandbox::is_kimi_invocation("kimi", &["acp".into()]));
+        assert!(crate::sandbox::is_kimi_invocation(
+            "/launcher",
+            &["--".into(), "kimi".into(), "acp".into()]
+        ));
+        assert!(!crate::sandbox::is_kimi_invocation(
+            "qoder",
+            &["acp".into()]
+        ));
+    }
     use super::*;
 
     /// Test sink that records everything the process emits. Only the
@@ -840,6 +935,25 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn process_origin_comes_from_server_context_not_launch_environment() {
+        let manager = ExternalAgentProcessManager::new();
+        let mut config = echo_config("origin-bound-agent");
+        config
+            .env
+            .insert("originDeviceId".into(), "forged-device".into());
+        crate::spawn_authority::with_remote_origin(
+            "paired-device",
+            manager.spawn(config, Arc::new(CollectorSink::default())),
+        )
+        .await
+        .unwrap();
+        let info = manager.get_info("origin-bound-agent").await.unwrap();
+        manager.kill("origin-bound-agent").await.unwrap();
+        assert_eq!(info["originDeviceId"], "paired-device");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn process_info_omits_hosted_agent_credentials() {
         let manager = ExternalAgentProcessManager::new();
         let mut config = echo_config("hosted-agent-secrets");
@@ -897,6 +1011,11 @@ mod tests {
             ),
             ("ANTHROPIC_API_KEY".into(), "must-not-leak".into()),
             ("HOME".into(), "/unmanaged-home".into()),
+            ("LC_CTYPE".into(), "UTF-8".into()),
+            ("TERM".into(), "xterm-256color".into()),
+            ("NO_COLOR".into(), "1".into()),
+            ("FORCE_COLOR".into(), "0".into()),
+            ("NODE_OPTIONS".into(), "--require=injected.js".into()),
         ]);
         mgr.spawn(cfg, sink.clone()).await.unwrap();
         let metadata = mgr.get_info("dsh-env-isolation").await.unwrap();
@@ -916,6 +1035,17 @@ mod tests {
         assert!(lines
             .iter()
             .any(|line| line == "DEEPSEEK_API_KEY=fixture-only"));
+        for expected in [
+            "LC_CTYPE=UTF-8",
+            "TERM=xterm-256color",
+            "NO_COLOR=1",
+            "FORCE_COLOR=0",
+        ] {
+            assert!(
+                lines.iter().any(|line| line == expected),
+                "missing {expected}"
+            );
+        }
         for line in lines.iter() {
             let key = line.split('=').next().unwrap();
             assert!(
@@ -928,6 +1058,10 @@ mod tests {
                         | "COGNIA_DSH_GATEWAY_TOKEN"
                         | "COGNIA_DSH_MCP_SERVERS"
                         | "PATH"
+                        | "LC_CTYPE"
+                        | "TERM"
+                        | "NO_COLOR"
+                        | "FORCE_COLOR"
                 ),
                 "unexpected inherited key: {key}"
             );

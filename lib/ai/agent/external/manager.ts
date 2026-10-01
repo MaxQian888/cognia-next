@@ -80,6 +80,7 @@ import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
 import { DshSdkClientAdapter } from "./runtimes/dsh/dsh-sdk-client"
 import { prepareDshManagedLaunch } from "./runtimes/dsh/dsh-managed-launch"
 import { clampThinkingLevel, PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
+import { AiderCliClientAdapter } from "./runtimes/aider/aider-cli-client"
 import {
   catalogModelSurface,
   EMPTY_THINKING_SURFACE,
@@ -352,6 +353,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   )
   // Pi's own RPC protocol, not ACP (ADR-0119).
   registry.register("pi-rpc", () => new PiRpcClientAdapter())
+  registry.register("aider-cli", () => new AiderCliClientAdapter())
   // Future: registry.register("http", () => new HttpClientAdapter())
 }
 
@@ -366,6 +368,32 @@ export function createConfiguredProtocolAdapter(
     : adapter
 }
 
+function placementWithToolHostLeases(
+  placement: import("@/types/sandbox/environment-spec").SandboxPlacement | undefined,
+  leaseIds: unknown
+) {
+  if (leaseIds === undefined) return placement
+  if (
+    !placement ||
+    !Array.isArray(leaseIds) ||
+    leaseIds.length === 0 ||
+    leaseIds.length > 8 ||
+    new Set(leaseIds).size !== leaseIds.length ||
+    leaseIds.some(
+      (id) =>
+        typeof id !== "string" ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)
+    )
+  )
+    throw new Error("Sandbox plugin leases require a valid task runtime environment")
+  if (
+    placement.hostedToolHostLeaseIds?.length === leaseIds.length &&
+    placement.hostedToolHostLeaseIds.every((id, index) => id === leaseIds[index])
+  )
+    return placement
+  return { ...placement, hostedToolHostLeaseIds: [...leaseIds] as string[] }
+}
+
 export class ExternalAgentManager {
   private static _instance: ExternalAgentManager | null = null
 
@@ -373,6 +401,7 @@ export class ExternalAgentManager {
   private instances: Map<string, ExternalAgentInstance> = new Map()
   private adapters: Map<string, ProtocolAdapter> = new Map()
   private nesSessions = new Map<string, Set<string>>()
+  private kimiDeletedSessions = new Map<string, Map<string, { cwd?: string; expiresAt: number }>>()
   private delegationRules: ExternalAgentDelegationRule[] = []
   private healthCheckTimer?: ReturnType<typeof setInterval>
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
@@ -386,6 +415,18 @@ export class ExternalAgentManager {
     { parentId: string; taskId: string; release: () => Promise<void> }
   >()
   private gatewayPreparing = new Set<string>()
+
+  private async bindSandboxToolHostLeases(
+    agentId: string,
+    options?: ExternalAgentExecutionOptions
+  ): Promise<() => void> {
+    const leaseIds = options?.context?.custom?.sandboxToolHostLeaseIds
+    if (leaseIds === undefined) return () => {}
+    const { spawnPlacementFor, acquireSpawnToolHostLeases } =
+      await import("@/lib/sandbox/spawn-placement-registry")
+    const placement = placementWithToolHostLeases(spawnPlacementFor(agentId), leaseIds)
+    return acquireSpawnToolHostLeases(agentId, placement!.hostedToolHostLeaseIds!)
+  }
 
   private gatewaySessionTarget(
     agentId: string,
@@ -420,10 +461,13 @@ export class ExternalAgentManager {
     if (!runtime)
       throw new Error("This external agent does not support isolated Cognia gateway tasks")
     const plane = externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
-    if (!plane.ok || plane.via !== "local")
-      throw new Error("Cognia gateway tasks require a local process host")
+    if (!plane.ok) throw new Error("Cognia gateway tasks require an available process host")
+    const { spawnPlacementFor, registerSpawnPlacement, clearSpawnPlacement } =
+      await import("@/lib/sandbox/spawn-placement-registry")
+    const placement = spawnPlacementFor(agentId)
     if (options?.signal?.aborted) throw new Error("External agent execution was aborted")
     const custom = options?.context?.custom
+    const childPlacement = placementWithToolHostLeases(placement, custom?.sandboxToolHostLeaseIds)
     const previousId =
       options?.sessionId ??
       (typeof custom?.sessionId === "string" ? custom.sessionId : undefined) ??
@@ -502,11 +546,12 @@ export class ExternalAgentManager {
     const release = (): Promise<void> =>
       (releasePromise ??= (async () => {
         // Revoke first, so even a stuck child cannot keep spending while teardown runs.
-        await gatewayRevokeRouteTicket(lease.ticketId).catch((error) =>
-          externalAgentManagerLogger.warn("Gateway task ticket revocation failed", {
-            ticketId: lease.ticketId,
-            error: this.normalizeErrorMessage(error),
-          })
+        await (lease.revoke ? lease.revoke() : gatewayRevokeRouteTicket(lease.ticketId)).catch(
+          (error) =>
+            externalAgentManagerLogger.warn("Gateway task ticket revocation failed", {
+              ticketId: lease.ticketId,
+              error: this.normalizeErrorMessage(error),
+            })
         )
         const child = this.instances.get(childId)
         for (const session of child?.sessions.values() ?? []) {
@@ -532,6 +577,8 @@ export class ExternalAgentManager {
           })
         }
         await this.removeAgent(childId)
+        if (childPlacement && spawnPlacementFor(childId) === childPlacement)
+          clearSpawnPlacement(childId)
         this.gatewayTasks.delete(childId)
         this.gatewayPreparing.delete(reservationKey)
       })().catch((error) => {
@@ -546,9 +593,13 @@ export class ExternalAgentManager {
       const { useSettingsStore } = await import("@/stores/settings")
       const settings = useSettingsStore.getState().settings
       if (!settings) throw new Error("Settings are not loaded")
+      lease.assertCurrent?.()
       const prepared = buildGatewayTaskConfig({ config: source.config, taskId, ...lease, settings })
       const cwd = this.buildSessionOptions(source, options).cwd
       if (cwd) prepared.config.process!.cwd = cwd
+      if (spawnPlacementFor(agentId) !== placement)
+        throw new Error("Agent runtime environment changed during task preparation")
+      if (childPlacement) registerSpawnPlacement(childId, childPlacement)
       await this.addAgent(prepared.config, { connect: false })
       childAdapter = this.adapters.get(childId)
       const mapEvent = (event: ExternalAgentEvent): ExternalAgentEvent => {
@@ -605,7 +656,8 @@ export class ExternalAgentManager {
         )
       }
       options?.signal?.addEventListener("abort", abort, { once: true })
-      if (options?.signal?.aborted) {
+      lease.signal?.addEventListener("abort", abort, { once: true })
+      if (options?.signal?.aborted || lease.signal?.aborted) {
         await release()
         throw new Error("External agent execution was aborted")
       }
@@ -620,6 +672,11 @@ export class ExternalAgentManager {
         },
         options: {
           ...options,
+          signal: lease.signal
+            ? options?.signal
+              ? AbortSignal.any([options.signal, lease.signal])
+              : lease.signal
+            : options?.signal,
           cogniaModel: null,
           sessionId: freshSdkTurn ? undefined : previous?.nativeSessionId,
           model: prepared.model,
@@ -639,6 +696,7 @@ export class ExternalAgentManager {
         } as ExternalAgentExecutionOptions,
         release: async () => {
           options?.signal?.removeEventListener("abort", abort)
+          lease.signal?.removeEventListener("abort", abort)
           await release()
           // A connection that was already pending when abort removed the child
           // may complete afterwards. Close that captured adapter as well.
@@ -692,6 +750,11 @@ export class ExternalAgentManager {
    * that already self-healed.
    */
   private async handleProcessExit(agentId: string): Promise<void> {
+    const gatewayTask = this.gatewayTasks.get(agentId)
+    if (gatewayTask) {
+      await gatewayTask.release()
+      return
+    }
     const instance = this.instances.get(agentId)
     const adapter = this.adapters.get(agentId)
     if (!instance || !adapter) {
@@ -1218,6 +1281,19 @@ export class ExternalAgentManager {
     try {
       const sessions = options ? await adapter.listSessions(options) : await adapter.listSessions()
       this.setSessionExtensionSupport(agentId, instance, "session/list", "supported", "ok")
+      const deleted = this.kimiDeletedSessions.get(agentId)
+      if (deleted) {
+        const listedIds = new Set(sessions.map((session) => session.sessionId))
+        for (const [id, marker] of deleted) {
+          if (
+            marker.expiresAt <= Date.now() ||
+            ((!options?.cwd || options.cwd === marker.cwd) && !listedIds.has(id))
+          )
+            deleted.delete(id)
+        }
+        if (deleted.size === 0) this.kimiDeletedSessions.delete(agentId)
+        return sessions.filter((session) => !deleted.has(session.sessionId))
+      }
       return sessions
     } catch (error) {
       if (
@@ -1560,7 +1636,10 @@ export class ExternalAgentManager {
 
   /**
    * Delete a session from the agent's listings (ACP v1 `session/delete`).
-   * Falls back to a local close when the adapter cannot delete.
+   * An adapter with `deleteSession` owns the decision: the ACP adapter throws
+   * when the agent does not advertise native deletion and keeps the session
+   * registered, so callers must gate on `sessionCapabilities.delete`. Only an
+   * adapter without `deleteSession` falls back to a local close.
    */
   async deleteSession(agentId: string, sessionId: string): Promise<void> {
     const gateway = parseGatewaySessionId(sessionId)
@@ -1577,9 +1656,24 @@ export class ExternalAgentManager {
     const adapter = this.adapters.get(agentId)
     if (adapter?.deleteSession) {
       await adapter.deleteSession(sessionId)
+      const instance = this.instances.get(agentId)
+      if (instance?.config.metadata?.preset === "kimi") {
+        // Kimi's background session-index projection can briefly republish a
+        // successfully deleted row. Keep native RPC results authoritative, but
+        // do not resurrect that row in the desktop while reconciliation catches up.
+        const deleted = this.kimiDeletedSessions.get(agentId) ?? new Map()
+        const cwd = instance.sessions.get(sessionId)?.metadata?.cwd
+        deleted.set(sessionId, {
+          cwd: typeof cwd === "string" ? cwd : undefined,
+          expiresAt: Date.now() + 120_000,
+        })
+        if (deleted.size > 256) deleted.delete(deleted.keys().next().value!)
+        this.kimiDeletedSessions.set(agentId, deleted)
+      }
     } else {
       await adapter?.closeSession(sessionId)
     }
+    this.instances.get(agentId)?.sessions.delete(sessionId)
     const sessions = this.nesSessions.get(agentId)
     sessions?.delete(sessionId)
     if (sessions?.size === 0) this.nesSessions.delete(agentId)
@@ -2222,6 +2316,7 @@ export class ExternalAgentManager {
     this.instances.delete(agentId)
     this.eventListeners.delete(agentId)
     this.nesSessions.delete(agentId)
+    this.kimiDeletedSessions.delete(agentId)
     this.capabilityCommandSignatures.delete(agentId)
 
     externalAgentManagerLogger.info("Removed external agent", { agentId })
@@ -2749,6 +2844,15 @@ export class ExternalAgentManager {
             .getSessions()
             .find((candidate) => candidate.metadata?.cogniaSessionId === chatSessionId)
         : undefined
+    if (session && adapter instanceof AcpClientAdapter) {
+      try {
+        session =
+          (await adapter.prepareForkSessionForExecution(session.id, sessionOptions)) ?? session
+      } catch (error) {
+        if (!adapter.getSession(session.id)) instance.sessions.delete(session.id)
+        throw error
+      }
+    }
     // A cached session was created earlier, with an earlier `selectedModel`;
     // unlike createSession/resumeSession it never sees `sessionOptions`, so a
     // model requested now has to be applied to it explicitly (below).
@@ -3264,6 +3368,19 @@ export class ExternalAgentManager {
       }
       return
     }
+    const releaseToolHosts = await this.bindSandboxToolHostLeases(agentId, options)
+    try {
+      yield* this.executePreparedStreaming(agentId, prompt, options)
+    } finally {
+      releaseToolHosts()
+    }
+  }
+
+  private async *executePreparedStreaming(
+    agentId: string,
+    prompt: string,
+    options?: ExternalAgentExecutionOptions
+  ): AsyncIterable<ExternalAgentEvent> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
 
@@ -3328,7 +3445,15 @@ export class ExternalAgentManager {
     let streamError: string | undefined
 
     try {
-      const streamIterator = adapter.prompt(session.id, message, options)[Symbol.asyncIterator]()
+      const streamIterator = adapter
+        .prompt(
+          session.id,
+          message,
+          instance.config.protocol === "aider-cli"
+            ? { ...options, permissionMode: effectivePermissionMode }
+            : options
+        )
+        [Symbol.asyncIterator]()
 
       while (true) {
         const nextResult = await this.withTimeout(
@@ -3566,6 +3691,19 @@ export class ExternalAgentManager {
         await gateway.release()
       }
     }
+    const releaseToolHosts = await this.bindSandboxToolHostLeases(agentId, options)
+    try {
+      return await this.executePrepared(agentId, prompt, options)
+    } finally {
+      releaseToolHosts()
+    }
+  }
+
+  private async executePrepared(
+    agentId: string,
+    prompt: string,
+    options?: ExternalAgentExecutionOptions
+  ): Promise<ExternalAgentResult> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
 
@@ -3664,6 +3802,14 @@ export class ExternalAgentManager {
           }
           const wrappedOptions: ExternalAgentExecutionOptions = {
             ...options,
+            ...(instance.config.protocol === "aider-cli"
+              ? {
+                  permissionMode: this.resolveEffectivePermissionMode(
+                    instance,
+                    options?.permissionMode
+                  ),
+                }
+              : {}),
             onEvent: (event) => {
               if (
                 event.type === "tool_use_start" ||
@@ -4646,6 +4792,7 @@ export class ExternalAgentManager {
 
     this.instances.clear()
     this.adapters.clear()
+    this.kimiDeletedSessions.clear()
     this.delegationRules = []
     this.eventListeners.clear()
     this.lifecycleListeners.clear()

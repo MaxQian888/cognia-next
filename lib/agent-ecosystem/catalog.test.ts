@@ -11,6 +11,26 @@ import {
 } from "./catalog"
 
 describe("lookups", () => {
+  it("links native Kimi ACP without conflating the subscription provider plugin or history import", () => {
+    expect(findEcosystemByRuntimeId("kimi")?.id).toBe("kimi")
+    expect(findEcosystemById("kimi")).toMatchObject({
+      runtimeIds: ["kimi"],
+      sessionSourceIds: [],
+      migrationVendor: null,
+      pluginEcosystem: null,
+    })
+  })
+
+  it("links Cline execution while preserving existing history and subagent importers", () => {
+    expect(findEcosystemByRuntimeId("cline")?.id).toBe("cline")
+    expect(findEcosystemById("cline")?.sessionSourceIds).toEqual(["cline"])
+  })
+
+  it("links Qoder's runtime without claiming a native history importer", () => {
+    expect(findEcosystemByRuntimeId("qoder")?.id).toBe("qoder")
+    expect(findEcosystemById("qoder")?.sessionSourceIds).toEqual([])
+  })
+
   it("owns the Cursor configuration root without offering a migration vendor", () => {
     expect(findEcosystemById("cursor")).toMatchObject({
       vendorRootKeys: ["cursorDir"],
@@ -85,9 +105,17 @@ describe("migration vendor accessors", () => {
 })
 
 it("keeps history-only ecosystems free of a launchable runtime", () => {
-  for (const id of ["cline", "continue-dev", "aider"]) {
+  for (const id of ["continue-dev"]) {
     expect(findEcosystemById(id)?.runtimeIds).toEqual([])
   }
+})
+
+it("links Aider's runnable CLI without inventing a machine-wide history root", () => {
+  expect(findEcosystemById("aider")).toMatchObject({
+    runtimeIds: ["aider"],
+    sessionSourceIds: ["aider"],
+    configRootKey: null,
+  })
 })
 
 it("keeps every row's arrays free of duplicates", () => {

@@ -16,6 +16,137 @@
   },
   "runtimes": [
     {
+      "runtimeId": "kimi",
+      "presetIds": ["kimi"],
+      "displayName": "Kimi Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "kimi",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started",
+      "notes": {
+        "certification": "Node CLI 2.1.1 researched; identity-bound uncertified-runtime consent is required. No certification claimed."
+      },
+      "supportedRange": ">=2.1.1 <3.0.0"
+    },
+    {
+      "runtimeId": "cline",
+      "presetIds": ["cline"],
+      "displayName": "Cline",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "cline",
+      "launchArgs": ["--acp", "--auto-approve", "false"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://docs.cline.bot/usage/acp",
+      "notes": {
+        "certification": "CLI 3.0.67 account-free ACP smoke only; authenticated acceptance is pending. Require identity-bound uncertified-runtime consent."
+      }
+    },
+    {
+      "runtimeId": "qoder",
+      "presetIds": ["qoder"],
+      "displayName": "Qoder",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "qoder",
+      "launchArgs": [
+        "--acp",
+        "--permission-mode",
+        "default",
+        "--strict-mcp-config",
+        "--settings",
+        "{\"general\":{\"enableAutoUpdate\":false}}"
+      ],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://docs.qoder.com/cli/installation",
+      "notes": {
+        "certification": "No authenticated acceptance evidence yet. Versions require explicit uncertified-runtime consent bound to executable identity and version."
+      }
+    },
+    {
+      "runtimeId": "aider",
+      "presetIds": ["aider"],
+      "displayName": "Aider",
+      "ownership": "system",
+      "protocol": "aider-cli",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "aider",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "supportedRange": ">=0.86.2 <0.87.0",
+      "certifiedVersions": ["0.86.2"],
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://aider.chat/docs/install.html"
+    },
+    {
+      "runtimeId": "goose",
+      "presetIds": ["goose"],
+      "displayName": "Goose",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "goose",
+      "launchArgs": ["acp", "--with-builtin", "developer"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://goose-docs.ai/docs/getting-started/installation/",
+      "supportedRange": ">=1.52.0 <2.0.0",
+      "certifiedVersions": ["1.52.0"]
+    },
+    {
       "runtimeId": "devin",
       "presetIds": ["devin"],
       "displayName": "Devin CLI",

@@ -32,6 +32,11 @@ const RUNTIME_CLASSES: Record<TeammateRuntime, string> = {
   "codex-acp": "bg-zinc-500/15 text-zinc-700 dark:text-zinc-200 ring-zinc-500/30",
   "claude-code": "bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-blue-500/30",
   "gemini-cli": "bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30",
+  kimi: "bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-blue-500/30",
+  cline: "bg-orange-500/15 text-orange-700 dark:text-orange-300 ring-orange-500/30",
+  qoder: "bg-purple-500/15 text-purple-700 dark:text-purple-300 ring-purple-500/30",
+  goose: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30",
+  aider: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 ring-indigo-500/30",
   "cursor-cli": "bg-slate-700/20 text-slate-100 ring-slate-500/30",
   "codex-app-server":
     "bg-neutral-500/15 text-neutral-700 dark:text-neutral-200 ring-neutral-500/30",

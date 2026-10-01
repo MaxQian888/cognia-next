@@ -36,6 +36,162 @@ function nextEvent<T>(
 }
 
 describe("NodeExternalAgentBackend", () => {
+  it("does not inherit Kimi host model credentials into an isolated Bot", () => {
+    const env = buildExternalAgentChildEnv(
+      { KIMI_MODEL_API_KEY: "ambient-host-key", KIMI_CODE_HOME: "/host/kimi" },
+      {
+        COGNIA_BOT_ISOLATION: "1",
+        COGNIA_BOT_STATE_DIR: "/work/state",
+        KIMI_CODE_HOME: "/work/state/kimi",
+        KIMI_MODEL_API_KEY: "explicit-bot-key",
+      },
+      false,
+      false,
+      true
+    )
+    expect(env.KIMI_CODE_HOME).toBe("/work/state/kimi")
+    expect(env.KIMI_MODEL_API_KEY).toBe("explicit-bot-key")
+    const noCredential = buildExternalAgentChildEnv(
+      { KIMI_MODEL_API_KEY: "ambient-host-key" },
+      { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
+      false,
+      false,
+      true
+    )
+    expect(noCredential.KIMI_MODEL_API_KEY).toBeUndefined()
+  })
+  it("forwards Kimi model settings without client identity, OAuth or executable injection", () => {
+    const env = buildExternalAgentChildEnv(
+      { KIMI_MODEL_NAME: "ambient", KIMI_MODEL_PROVIDER_TYPE: "anthropic" },
+      {
+        KIMI_MODEL_NAME: "explicit",
+        KIMI_MODEL_API_KEY: "synthetic",
+        KIMI_CODE_HOME: "/owned/kimi",
+        KIMI_MODEL_TEMPERATURE: "0.5",
+        KIMI_OAUTH_HOST: "https://untrusted",
+        KIMI_CODE_USER_AGENT: "spoofed",
+        KIMI_PLUGIN_ROOT: "/scripts",
+        KIMI_BIN_PATH: "/injected",
+      }
+    )
+    expect(env).toMatchObject({
+      KIMI_MODEL_NAME: "explicit",
+      KIMI_MODEL_PROVIDER_TYPE: "anthropic",
+      KIMI_MODEL_API_KEY: "synthetic",
+      KIMI_CODE_HOME: "/owned/kimi",
+      KIMI_MODEL_TEMPERATURE: "0.5",
+    })
+    for (const key of [
+      "KIMI_OAUTH_HOST",
+      "KIMI_CODE_USER_AGENT",
+      "KIMI_PLUGIN_ROOT",
+      "KIMI_BIN_PATH",
+    ])
+      expect(env[key]).toBeUndefined()
+  })
+  it("preserves reviewed runtime options from explicit agent configuration", () => {
+    const reviewed = {
+      LANG: "en_US.UTF-8",
+      LC_ALL: "C",
+      LC_CTYPE: "UTF-8",
+      TZ: "Asia/Shanghai",
+      TERM: "xterm-256color",
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+      NO_BROWSER: "1",
+      INITIAL_AGENT_MODE: "workspace-write",
+      APP_SERVER_LOGS: "./agent logs",
+    }
+    expect(
+      buildExternalAgentChildEnv(
+        { NODE_ENV: "test" },
+        {
+          ...reviewed,
+          NODE_OPTIONS: "--require=injected.js",
+          UNREVIEWED_RUNTIME_OPTION: "blocked",
+        }
+      )
+    ).toEqual({ NODE_ENV: "test", ...reviewed })
+  })
+
+  it("preserves reviewed locale and output options in the isolated DSH environment", () => {
+    const reviewed = { LC_CTYPE: "UTF-8", TERM: "xterm-256color", NO_COLOR: "1", FORCE_COLOR: "0" }
+    expect(
+      buildExternalAgentChildEnv(
+        { NODE_ENV: "test" },
+        { ...reviewed, NODE_OPTIONS: "--require=injected.js", NO_BROWSER: "unrelated" },
+        true
+      )
+    ).toEqual({ NODE_ENV: "production", ...reviewed })
+  })
+
+  it("forwards Cline BYOK and config selectors without binary or storage injection", () => {
+    const env = buildExternalAgentChildEnv(
+      { CLINE_API_KEY: "ambient", CLINE_PROVIDER: "deepseek" },
+      {
+        CLINE_API_KEY: "synthetic",
+        CLINE_MODEL: "deepseek-flash",
+        CLINE_DIR: "/owned/cline",
+        CLINE_BIN_PATH: "/injected",
+        CLINE_DATA_DIR: "/unscoped",
+        CLINE_PROVIDER_SETTINGS_PATH: "/credentials",
+      }
+    )
+    expect(env).toMatchObject({
+      CLINE_API_KEY: "synthetic",
+      CLINE_PROVIDER: "deepseek",
+      CLINE_MODEL: "deepseek-flash",
+      CLINE_DIR: "/owned/cline",
+    })
+    for (const key of ["CLINE_BIN_PATH", "CLINE_DATA_DIR", "CLINE_PROVIDER_SETTINGS_PATH"])
+      expect(env[key]).toBeUndefined()
+  })
+
+  it("forwards only documented Qoder authentication and config env keys", () => {
+    const env = buildExternalAgentChildEnv(
+      {
+        NODE_ENV: "test",
+        QODER_PERSONAL_ACCESS_TOKEN: "ambient-fixture",
+        QODER_CONFIG_DIR: "/ambient/qoder",
+        QODER_UNRELATED: "blocked",
+      },
+      {
+        QODER_PERSONAL_ACCESS_TOKEN: "explicit-fixture",
+        QODER_CONFIG_DIR: "/isolated/qoder",
+        QODER_UNRELATED: "blocked",
+        NODE_OPTIONS: "--inspect",
+      }
+    )
+    expect(env.QODER_PERSONAL_ACCESS_TOKEN).toBe("explicit-fixture")
+    expect(env.QODER_CONFIG_DIR).toBe("/isolated/qoder")
+    expect(env.QODER_UNRELATED).toBeUndefined()
+    expect(env.NODE_OPTIONS).toBeUndefined()
+  })
+
+  it("keeps Aider startup settings out of child env while forwarding explicit model credentials", () => {
+    const env = buildExternalAgentChildEnv(
+      {
+        NODE_ENV: "test",
+        AIDER_MODEL: "ambient",
+        AIDER_LOAD: "danger",
+        DEEPSEEK_API_KEY: "fixture",
+      },
+      {
+        AIDER_MODEL: "deepseek/test",
+        AIDER_LOAD: "commands",
+        DEEPSEEK_API_KEY: "fixture-explicit",
+      },
+      false,
+      true
+    )
+    expect(env.AIDER_MODEL).toBe("deepseek/test")
+    expect(env.AIDER_LOAD).toBeUndefined()
+    expect(env.DEEPSEEK_API_KEY).toBe("fixture-explicit")
+    expect(
+      buildExternalAgentChildEnv({ NODE_ENV: "test", AIDER_MODEL: "ambient" }, {}, false, true)
+        .AIDER_MODEL
+    ).toBeUndefined()
+  })
   it("derives writable Bot temp and package caches from the owned runtime state", () => {
     const env = buildExternalAgentChildEnv(
       { TMPDIR: "/ambient/tmp", pnpm_config_store_dir: "/ambient/store", NODE_ENV: "test" },
@@ -148,6 +304,34 @@ console.log(JSON.stringify({values, githubTokenPresent: !!process.env.GITHUB_TOK
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
+  })
+
+  it("preserves Goose provider and isolated configuration inputs without loader injection", () => {
+    const env = buildExternalAgentChildEnv(
+      {
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "synthetic-goose-key",
+        AWS_SECRET_ACCESS_KEY: "unrelated",
+      },
+      {
+        GOOSE_PROVIDER: "openai",
+        GOOSE_MODEL: "deepseek-flash",
+        GOOSE_MODE: "approve",
+        GOOSE_PATH_ROOT: "/work/goose-state",
+        OPENAI_BASE_URL: "https://api.deepseek.com/v1",
+        LD_PRELOAD: "untrusted",
+      }
+    )
+    expect(env).toMatchObject({
+      GOOSE_PROVIDER: "openai",
+      GOOSE_MODEL: "deepseek-flash",
+      GOOSE_MODE: "approve",
+      GOOSE_PATH_ROOT: "/work/goose-state",
+      OPENAI_BASE_URL: "https://api.deepseek.com/v1",
+      OPENAI_API_KEY: "synthetic-goose-key",
+    })
+    expect(env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
+    expect(env).not.toHaveProperty("LD_PRELOAD")
   })
 
   it("preserves Devin authentication inputs without admitting unrelated secrets", () => {
@@ -440,6 +624,8 @@ console.log(JSON.stringify({values, githubTokenPresent: !!process.env.GITHUB_TOK
     ["copilot", ["--acp"]],
     ["kiro-cli", ["acp"]],
     ["devin", ["acp"]],
+    ["kimi", ["acp"]],
+    ["goose", ["acp", "--with-builtin", "developer"]],
     ["droid", ["exec", "--output-format", "acp"]],
   ])("allows the shipped executable preset %s %j", async (command, args) => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-preset-"))

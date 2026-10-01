@@ -1,3 +1,6 @@
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
@@ -48,6 +51,7 @@ test("prepareExternalAgentLauncher builds the launcher bin from the automation c
     command: "cargo",
     args: [
       "build",
+      "--locked",
       "-p",
       "cognia-exec-sandbox",
       "--bin",
@@ -77,4 +81,42 @@ test("an explicit target triple is passed through to cargo for cross builds", ()
   // No rustc probe when the caller already knows the triple.
   assert.equal(calls[0].command, "cargo")
   assert.deepEqual(calls[0].args.slice(-2), ["--target", "x86_64-unknown-linux-gnu"])
+})
+
+
+test("bootstrap uses the same staging contract with its standalone crate", () => {
+  assert.deepEqual(launcherPaths("/repo", "aarch64-apple-darwin", "/build", "cognia-bootstrap"), {
+    source: "/build/release/cognia-bootstrap",
+    destination: "/repo/src-tauri/binaries/cognia-bootstrap-aarch64-apple-darwin",
+  })
+  const calls = []
+  assert.throws(() => prepareExternalAgentLauncher({
+    root: "/repo", target: "aarch64-apple-darwin", binary: "cognia-bootstrap",
+    packageName: "cognia-bootstrap-agent",
+    run: (command, args) => { calls.push({ command, args }); return { status: 1 } },
+  }), /building cognia-bootstrap failed/)
+  assert.deepEqual(calls[0].args, ["build", "--locked", "-p", "cognia-bootstrap-agent", "--bin", "cognia-bootstrap", "--release", "--target", "aarch64-apple-darwin"])
+})
+
+
+test("explicit target with a custom target root stages that exact compiled artifact", () => {
+  const root = mkdtempSync(join(tmpdir(), "cognia-bootstrap-stage-"))
+  try {
+    const target = "aarch64-apple-darwin"
+    const targetDir = join(root, "custom-target")
+    const source = join(targetDir, target, "release", "cognia-bootstrap")
+    mkdirSync(join(targetDir, target, "release"), { recursive: true })
+    writeFileSync(source, "fresh matching target")
+    mkdirSync(join(targetDir, "release"), { recursive: true })
+    writeFileSync(join(targetDir, "release", "cognia-bootstrap"), "stale wrong target")
+    const result = prepareExternalAgentLauncher({ root, target, targetDir,
+      binary: "cognia-bootstrap", packageName: "cognia-bootstrap-agent",
+      run: (_command, _args, options) => {
+        assert.equal(options.env.CARGO_TARGET_DIR, targetDir)
+        return { status: 0 }
+      },
+    })
+    assert.equal(result.source, source)
+    assert.equal(readFileSync(result.destination, "utf8"), "fresh matching target")
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

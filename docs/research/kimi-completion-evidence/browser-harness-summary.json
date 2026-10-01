@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-01",
+  "proofLevel": "Browser component harness; not packaged desktop or live account/package acceptance",
+  "components": ["ExternalAgentAuthentication", "KimiManagementCard"],
+  "boundaries": "Account actions, terminal output, native opener, clipboard and terminal launches are synthetic stubs; CSS is a harness fixture. Real React/next-intl/Radix components and Kimi recipes are bundled from workspace.",
+  "checks": [
+    "Package install, restore, upgrade, uninstall each display exact recipe and launch one terminal only after confirmation",
+    "Cancel all four package confirmations launches no terminal",
+    "Selected active Kimi connection disables all four package launch buttons",
+    "Another active Kimi configuration also blocks all package launches",
+    "Login output, HTTPS link, cancellation, completion and logout confirmation",
+    "All eight copy recipes, native web terminal and explicit session export"
+  ],
+  "nativeAccountOrPackageMutations": false,
+  "finalBrowserErrors": [],
+  "screenshots": [
+    "login-running.png",
+    "logout-confirmation.png",
+    "management-recipes.png",
+    "package-install-confirmation.png",
+    "package-connected-disabled.png"
+  ],
+  "reproductionRoot": "/tmp/cognia-kimi-ui"
+}

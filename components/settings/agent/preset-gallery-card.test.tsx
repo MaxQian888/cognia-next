@@ -29,6 +29,53 @@ afterEach(async () => {
 })
 
 describe("PresetGalleryCard", () => {
+  it("offers Kimi Code with subscription guidance and the native preset action", async () => {
+    const onPick = jest.fn()
+    render(<PresetGalleryCard disabled={false} onPick={onPick} />)
+    const card = screen.getByTestId("preset-card-kimi")
+    expect(card).toHaveTextContent("Kimi subscription login")
+    await userEvent.click(within(card).getByRole("button"))
+    expect(onPick).toHaveBeenCalledWith("kimi")
+  })
+
+  it("offers Cline's native ACP preset with localized guidance", async () => {
+    const onPick = jest.fn()
+    render(<PresetGalleryCard disabled={false} onPick={onPick} />)
+    const card = screen.getByTestId("preset-card-cline")
+    expect(card).toHaveTextContent("Plan/Act")
+    await userEvent.click(within(card).getByRole("button"))
+    expect(onPick).toHaveBeenCalledWith("cline")
+  })
+
+  it("offers Qoder's native ACP preset with localized guidance", async () => {
+    const onPick = jest.fn()
+    render(<PresetGalleryCard disabled={false} onPick={onPick} />)
+    const card = screen.getByTestId("preset-card-qoder")
+    expect(card).toHaveTextContent("Qoder Personal Access Token")
+    await userEvent.click(within(card).getByRole("button"))
+    expect(onPick).toHaveBeenCalledWith("qoder")
+  })
+
+  it("offers Aider with localized guidance and routes its action to the existing editor", async () => {
+    const onPick = jest.fn()
+    render(<PresetGalleryCard disabled={false} onPick={onPick} />)
+    const card = screen.getByTestId("preset-card-aider")
+    expect(card).toHaveTextContent("Aider")
+    expect(card).toHaveTextContent("Run the official Aider CLI")
+    await userEvent.click(within(card).getByRole("button"))
+    expect(onPick).toHaveBeenCalledWith("aider")
+  })
+
+  it("offers Goose with localized guidance and routes its action to the existing editor", async () => {
+    const onPick = jest.fn()
+    render(<PresetGalleryCard disabled={false} onPick={onPick} />)
+    const card = screen.getByTestId("preset-card-goose")
+    expect(card).toHaveTextContent("Goose")
+    expect(card).toHaveTextContent("Run Goose over native ACP")
+    await userEvent.click(within(card).getByRole("button"))
+    expect(onPick).toHaveBeenCalledWith("goose")
+  })
+
   it("renders one card per runnable preset and hides documented-only by default", () => {
     render(<PresetGalleryCard disabled={false} onPick={jest.fn()} />)
     const gallery = screen.getByTestId("preset-gallery-card")

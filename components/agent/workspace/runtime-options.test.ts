@@ -10,6 +10,21 @@ import {
 import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/config/presets"
 
 describe("runtime-options", () => {
+  it("offers Kimi Code in teammate runtimes with its localized label", () => {
+    expect(RUNTIME_OPTIONS).toContain("kimi")
+    expect(runtimeLabelKey("kimi")).toBe("kimi")
+  })
+
+  it("offers and labels Cline for teammate dispatch", () => {
+    expect(RUNTIME_OPTIONS).toContain("cline")
+    expect(runtimeLabelKey("cline")).toBe("cline")
+  })
+
+  it("offers and labels Qoder for teammate dispatch", () => {
+    expect(RUNTIME_OPTIONS).toContain("qoder")
+    expect(runtimeLabelKey("qoder")).toBe("qoder")
+  })
+
   it("lists claude first, then every executable preset (in lock-step with the catalog)", () => {
     expect(RUNTIME_OPTIONS[0]).toBe("claude")
     expect(RUNTIME_OPTIONS).toEqual(["claude", ...BUILTIN_EXECUTABLE_PRESET_IDS])
@@ -25,6 +40,13 @@ describe("runtime-options", () => {
   it("maps codex-app-server to a distinct label key", () => {
     expect(runtimeLabelKey("codex-app-server")).toBe("codexAppServer")
     expect(runtimeLabelKey("claude")).toBe("claude")
+  })
+
+  it("offers Goose with a localized teammate runtime label", () => {
+    expect(RUNTIME_OPTIONS).toContain("goose")
+    expect(RUNTIME_OPTIONS).toContain("aider")
+    expect(runtimeLabelKey("aider")).toBe("aider")
+    expect(runtimeLabelKey("goose")).toBe("goose")
   })
 
   it("offers Devin with a localized runtime label", () => {

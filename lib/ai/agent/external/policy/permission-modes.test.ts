@@ -8,6 +8,12 @@ import {
 } from "./permission-modes"
 
 describe("permission-modes", () => {
+  it("clamps Aider modes that require approval or allowlists to read-only", () => {
+    expect(supportedPermissionModes("aider-cli")).toEqual(["bypassPermissions", "plan"])
+    for (const mode of ["default", "acceptEdits", "dontAsk"] as const)
+      expect(adaptPermissionMode(mode, "aider-cli")).toMatchObject({ mode: "plan", adapted: true })
+    expect(adaptPermissionMode("bypassPermissions", "aider-cli").adapted).toBe(false)
+  })
   describe("supportedPermissionModes", () => {
     it("returns the full canonical set for ACP (the reference backend)", () => {
       expect(supportedPermissionModes("acp")).toEqual(ALL_PERMISSION_MODES)

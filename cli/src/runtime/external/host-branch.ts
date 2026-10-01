@@ -1,5 +1,5 @@
 import { constants } from "node:fs"
-import { open, realpath, stat, type FileHandle } from "node:fs/promises"
+import { open, realpath, stat, unlink, type FileHandle } from "node:fs/promises"
 import path from "node:path"
 
 import type { AcpHostCapabilities } from "@/lib/ai/agent/external/runtimes/acp/acp-feature-profile"
@@ -154,6 +154,27 @@ export async function agentWriteTextFile(
     await assertOpenedFileWithinRoots(handle, filePath, roots)
     await handle.truncate(0)
     await handle.writeFile(content, "utf8")
+  } finally {
+    await handle.close()
+  }
+}
+
+/** Delete a file, never a directory or a symlink target, inside a session root. */
+export async function agentDeleteTextFile(filePath: string, allowedRoots: string[]): Promise<void> {
+  if (!path.isAbsolute(filePath)) throw new Error(`ACP file path must be absolute: ${filePath}`)
+  const roots = await canonicalRoots(allowedRoots)
+  assertWithinRoots(await realpath(path.dirname(filePath)), roots, filePath)
+  let handle: FileHandle
+  try {
+    handle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return
+    throw error
+  }
+  try {
+    await assertOpenedFileWithinRoots(handle, filePath, roots)
+    if (!(await handle.stat()).isFile()) throw new Error("Runtime state path is not a file")
+    await unlink(filePath)
   } finally {
     await handle.close()
   }

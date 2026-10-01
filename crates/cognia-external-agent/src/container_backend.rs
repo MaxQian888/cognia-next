@@ -696,6 +696,7 @@ struct AgentEntry {
     /// Persistent sessions can reuse a container id; identity belongs to an
     /// adoption, not the shared container or reusable external agent id.
     generation: Arc<()>,
+    origin_device: Option<String>,
     cleanup_api: Arc<dyn ContainerApi>,
     state: ExternalAgentProcessState,
     stdin: RunnerStdin,
@@ -716,6 +717,17 @@ pub struct RunnerRegistry {
     api: Arc<dyn ContainerApi>,
     agents: Arc<Mutex<HashMap<String, AgentEntry>>>,
     pending: Arc<Mutex<HashMap<String, Arc<tokio::sync::watch::Sender<bool>>>>>,
+}
+
+/// An unforgeable adoption identity. Container ids alone do not identify a
+/// persistent agent session, and external agent ids may be reused.
+#[derive(Clone)]
+pub struct AgentServiceScope {
+    pub container_id: String,
+    pub project_id: String,
+    pub spec_digest: String,
+    agent_id: String,
+    generation: Arc<()>,
 }
 
 /// Reserves an agent id through preparation and creation. Dropping a cancelled
@@ -833,6 +845,7 @@ impl RunnerRegistry {
             AgentEntry {
                 container_id: container_id.clone(),
                 generation: Arc::clone(&generation),
+                origin_device: crate::spawn_authority::current_origin(),
                 cleanup_api: Arc::clone(&cleanup_api),
                 state: ExternalAgentProcessState::Starting,
                 stdin: running.stdin,
@@ -1017,6 +1030,24 @@ impl RunnerRegistry {
         result
     }
 
+    /// Cancel precisely the adoption retained by a failed startup guard.
+    /// A reused public agent id must never redirect old cleanup to its successor.
+    pub async fn kill_service_scope(&self, scope: &AgentServiceScope) -> Result<(), String> {
+        let target = {
+            let map = self.agents.lock();
+            map.get(&scope.agent_id)
+                .filter(|entry| Arc::ptr_eq(&entry.generation, &scope.generation))
+                .map(|entry| (entry.container_id.clone(), entry.cleanup_api.clone()))
+        };
+        let Some((container, api)) = target else {
+            return Ok(());
+        };
+        if assert_owned(&api, &container).await? {
+            api.kill(&container).await?;
+        }
+        Ok(())
+    }
+
     pub async fn kill_all(&self) -> Result<(), String> {
         let ids = self.list();
         let mut errors = Vec::new();
@@ -1093,6 +1124,68 @@ impl RunnerRegistry {
             info["placement"] = placement.clone();
         }
         Ok(info)
+    }
+
+    pub fn service_scope(
+        &self,
+        id: &str,
+        origin_device: Option<&str>,
+        owner_session: &str,
+    ) -> Result<AgentServiceScope, String> {
+        let agents = self.agents.lock();
+        let entry = agents.get(id).ok_or("Sandbox agent is not running")?;
+        if entry.origin_device.as_deref() != origin_device
+            || !matches!(
+                entry.state,
+                ExternalAgentProcessState::Starting | ExternalAgentProcessState::Running
+            )
+            || owner_session.is_empty()
+            || owner_session.len() > 256
+        {
+            return Err("Sandbox service owner does not match the running agent".into());
+        }
+        let environment = entry
+            .config
+            .sandbox
+            .as_ref()
+            .ok_or("Agent has no sandbox placement")?
+            .spec();
+        let result = AgentServiceScope {
+            container_id: entry.container_id.clone(),
+            project_id: environment
+                .get("projectId")
+                .and_then(Value::as_str)
+                .ok_or("Invalid sandbox project")?
+                .into(),
+            spec_digest: environment
+                .get("specDigest")
+                .and_then(Value::as_str)
+                .ok_or("Invalid sandbox digest")?
+                .into(),
+            agent_id: id.into(),
+            generation: entry.generation.clone(),
+        };
+        Ok(result)
+    }
+
+    pub fn service_scope_active(&self, scope: &AgentServiceScope) -> bool {
+        self.agents
+            .lock()
+            .get(&scope.agent_id)
+            .is_some_and(|entry| {
+                Arc::ptr_eq(&entry.generation, &scope.generation)
+                    && matches!(
+                        entry.state,
+                        ExternalAgentProcessState::Starting | ExternalAgentProcessState::Running
+                    )
+            })
+    }
+
+    pub fn origin_allowed(&self, id: &str, origin: &str) -> Option<bool> {
+        self.agents
+            .lock()
+            .get(id)
+            .map(|entry| entry.origin_device.as_deref() == Some(origin))
     }
 
     pub fn set_state(&self, id: &str, state: ExternalAgentProcessState) -> Result<(), String> {
@@ -2612,7 +2705,7 @@ pub mod test_support {
                     }
                     let _ = event_tx.send(RunnerEvent::Exited { code: Some(0) });
                 }
-                "renew-agent" => {
+                "renew-agent" | "delete-gateway-task" | "publish-gateway-ready" => {
                     let _ = event_tx.send(RunnerEvent::Exited { code: Some(0) });
                 }
                 "connect-port" => {
@@ -2625,6 +2718,31 @@ pub mod test_support {
                         }
                         let _ = event_tx.send(RunnerEvent::Exited { code: Some(0) });
                     });
+                }
+                "bridge-service" => {
+                    // Protocol-v1 READY, then a live private exec pipe. Tests
+                    // inject later frames through the ordinary fake handle.
+                    let port = spec
+                        .command
+                        .windows(2)
+                        .find(|pair| pair[0] == "--listen-port")
+                        .and_then(|pair| pair[1].parse::<u16>().ok())
+                        .unwrap_or(34567)
+                        .to_be_bytes();
+                    let _ = event_tx.send(RunnerEvent::Stdout(vec![
+                        1, 0, 0, 0, 0, 0, 0, 0, 2, port[0], port[1],
+                    ]));
+                    self.handles.lock().insert(
+                        format!(
+                            "bridge:{}:{}",
+                            spec.container_id,
+                            self.runtime_execs.lock().len()
+                        ),
+                        FakeHandle {
+                            events: event_tx,
+                            stdin: Mutex::new(Some(stdin_rx)),
+                        },
+                    );
                 }
                 "connect-agent" => {
                     self.handles.lock().insert(

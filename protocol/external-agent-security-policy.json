@@ -7,8 +7,10 @@
     "reasonKey": "sandboxUnavailableOnPlatform"
   },
   "binaryAllowlist": {
-    "note": "Bare binary names an external-agent spawn may execute (no path separators). Every entry must be justified: either a shipped preset names it as `process.command`, or it appears under `manualOnly` WITH a reason. An entry that is neither is attack surface the headless spawn RPC exposes and no Cognia code path can ask for -- which is exactly what `cline` was.",
+    "note": "Bare binary names an external-agent spawn may execute (no path separators). Every entry must be justified: either a shipped preset names it as `process.command`, or it appears under `manualOnly` WITH a reason. An entry that is neither is attack surface the headless spawn RPC exposes and no Cognia code path can ask for.",
     "commands": [
+      "aider",
+      "cline",
       "claude",
       "claude-agent-acp",
       "claude-code-acp",
@@ -19,9 +21,12 @@
       "devin",
       "droid",
       "gemini",
+      "goose",
       "kiro-cli",
       "opencode",
-      "pi"
+      "pi",
+      "qoder",
+      "kimi"
     ],
     "manualOnly": {
       "claude": "The Claude Code CLI itself. No preset spawns it (the `claude-code` preset uses the ACP adapter binary), but hand-configured agents and the container/kube backends do.",
@@ -46,6 +51,23 @@
   "agentStateWritableRoots": {
     "note": "Home-relative paths each agent family must be able to write inside the sandbox. Matching runs against the RESOLVED target: for `npx <package>` that is the package, otherwise the base command with any Windows executable suffix stripped. `match` is either \"contains\" (substring of the target), \"target\" (target equals one of `values`) or \"base\" (the base command equals one of `values`) -- Pi needs `base` rather than \"contains\" because \"copilot\" contains \"pi\". No rule uses \"target\" today: its only user was the `pi-acp` npx bridge, removed with that runtime. The mode is kept because it is the only correct match for an npx package name, which the next bridge will need. A missing root does not fail the launch; it silently breaks whatever the agent stores there, which is how OpenCode's absence went unnoticed while its session resume started over every time.",
     "rules": [
+      { "match": "base", "values": ["cline"], "roots": [".cline"] },
+      { "match": "base", "values": ["kimi"], "roots": [".kimi-code"] },
+      {
+        "match": "base",
+        "values": ["qoder"],
+        "roots": [".qoder"]
+      },
+      {
+        "match": "base",
+        "values": ["goose"],
+        "roots": [
+          ".config/goose",
+          ".local/share/goose",
+          ".local/state/goose",
+          "Library/Application Support/Block/goose"
+        ]
+      },
       {
         "match": "contains",
         "values": ["codex"],

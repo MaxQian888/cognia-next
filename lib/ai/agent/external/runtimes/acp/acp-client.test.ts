@@ -431,6 +431,62 @@ describe("AcpClientAdapter — Devin permission identity", () => {
     })
   })
 
+  it.each([
+    ["read", "read"],
+    ["write", "edit"],
+    ["developer__shell", "other"],
+    ["cognia-tools__read", "other"],
+    ["cognia-tools-evil__read", "other"],
+  ])("restores Goose tool identity %s without granting permission", async (name, kind) => {
+    const { adapter, emit } = adapterWithEvents("goose")
+    startTool(adapter, "s", { goose: { toolCall: { toolName: name, extensionName: "developer" } } })
+    const request = await permissionEvent(adapter, emit)
+    expect(request.title).toBe("Calling read from cognia-tools")
+    expect(request.toolInfo.name).toBe(
+      name === "cognia-tools__read" ? "mcp__cognia-tools__read" : name
+    )
+    expect(request.kind).toBe(kind)
+  })
+
+  it.each(["read", "write"])(
+    "auto-approves only Goose's known file identity %s in acceptEdits",
+    async (name) => {
+      const { adapter, emit } = adapterWithEvents("goose")
+      seedSession(adapter, "s", "acceptEdits")
+      startTool(adapter, "s", { goose: { toolCall: { toolName: name } } })
+      emit.mockClear()
+      await expect(
+        callPermission(adapter, {
+          sessionId: "s",
+          toolCall: { toolCallId: "mcp_call_tool_0" },
+          options: [ALLOW, REJECT],
+        })
+      ).resolves.toEqual({ outcome: { outcome: "selected", optionId: ALLOW.optionId } })
+      expect(emit).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ["read", true],
+    ["developer__shell", false],
+  ])(
+    "applies dontAsk to Goose identity %s instead of its generated title",
+    async (name, allowed) => {
+      const { adapter } = adapterWithEvents("goose")
+      seedSession(adapter, "s", "dontAsk", ["read"])
+      startTool(adapter, "s", { goose: { toolCall: { toolName: name } } })
+      await expect(
+        callPermission(adapter, {
+          sessionId: "s",
+          toolCall: { toolCallId: "mcp_call_tool_0" },
+          options: [ALLOW, REJECT],
+        })
+      ).resolves.toEqual({
+        outcome: { outcome: "selected", optionId: allowed ? ALLOW.optionId : REJECT.optionId },
+      })
+    }
+  )
+
   it("prefers inference identity over the vendor display name without automatically approving native tools", async () => {
     const { adapter, emit } = adapterWithEvents()
     startTool(adapter, "s", {
@@ -476,6 +532,8 @@ describe("AcpClientAdapter — Devin permission identity", () => {
 
   it.each([
     { preset: "claude-code", meta: { "cognition.ai/toolName": "mcp__cognia-tools__read" } },
+    { preset: "claude-code", meta: { goose: { toolCall: { toolName: "read" } } } },
+    { preset: "goose", meta: { goose: { toolCall: { toolName: 42 } } } },
     {
       preset: "devin",
       meta: { "cognition.ai/toolName": 42, "cognition.ai/inferenceToolName": " " },
@@ -791,6 +849,517 @@ describe("AcpClientAdapter — OpenCode permission modes", () => {
       modeId: "build",
     })
     expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+  })
+})
+
+describe("AcpClientAdapter — Kimi native modes", () => {
+  it.each<[AcpPermissionMode, string]>([
+    ["default", "default"],
+    ["plan", "plan"],
+    ["acceptEdits", "default"],
+    ["bypassPermissions", "yolo"],
+    ["dontAsk", "default"],
+  ])(
+    "maps %s to %s and preserves host approval authority on native echoes",
+    async (canonical, native) => {
+      const adapter = new AcpClientAdapter()
+      ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+        ...stdioConfig(),
+        metadata: { preset: "kimi" },
+        process: { command: "kimi", args: ["acp"] },
+      }
+      setStatus(adapter, "connected")
+      const configOptions: AcpConfigOption[] = [
+        {
+          id: "mode",
+          name: "Mode",
+          category: "mode",
+          type: "select",
+          currentValue: "default",
+          options: ["default", "plan", "auto", "yolo"].map((value) => ({ value, name: value })),
+        },
+      ]
+      const sendRequest = jest.fn().mockResolvedValue({ sessionId: "s", configOptions })
+      ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+      await adapter.createSession({ cwd: "/work" })
+      await adapter.setSessionMode("s", canonical)
+      expect(sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+        sessionId: "s",
+        configId: "mode",
+        value: native,
+      })
+      expect(adapter.getSession("s")?.permissionMode).toBe(canonical)
+      handleUpdate(adapter, "s", { sessionUpdate: "current_mode_update", currentModeId: native })
+      expect(adapter.getSession("s")?.permissionMode).toBe(canonical)
+    }
+  )
+})
+
+describe("AcpClientAdapter — Kimi background compaction boundary", () => {
+  it("keeps native /compact advertised but refuses a managed operation that cannot confirm completion", async () => {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "kimi" },
+      process: { command: "kimi", args: ["acp"] },
+    }
+    seedSession(adapter, "s", "default")
+    const commands = [
+      { name: "compact", description: "Compact context", input: { hint: "Instructions" } },
+    ]
+    adapter.getSession("s")!.metadata = { availableCommands: commands }
+    const execute = jest.spyOn(adapter, "execute").mockResolvedValue({ success: true } as never)
+    expect(await adapter.getCompactionCapability("s")).toEqual({
+      status: "unsupported",
+      routes: [],
+      reason: "kimi_acp_compaction_completion_unavailable",
+    })
+    await expect(
+      adapter.compactSession("s", { focus: "Retain project decisions" })
+    ).rejects.toThrow(/completion.*unavailable/)
+    expect(execute).not.toHaveBeenCalled()
+    expect(adapter.getSession("s")?.metadata?.availableCommands).toEqual(commands)
+  })
+})
+
+describe("AcpClientAdapter — Kimi fork MCP restoration", () => {
+  function forkAdapter(kimi = true) {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      ...(kimi
+        ? { metadata: { preset: "kimi" }, process: { command: "kimi", args: ["acp"] } }
+        : {}),
+    }
+    setStatus(adapter, "connected")
+    setAgentCaps(adapter, {
+      loadSession: true,
+      sessionCapabilities: { fork: {}, close: {}, delete: {} },
+    })
+    seedSession(adapter, "parent", "default")
+    adapter.getSession("parent")!.metadata = {
+      cwd: "/work",
+      cogniaInstructionContext: "Retain the project instructions",
+    }
+    const sendRequest = jest.fn(async (method: string) =>
+      method === "session/fork" ? { sessionId: "fork" } : {}
+    )
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    return { adapter, sendRequest }
+  }
+
+  const freshServers = [{ name: "cognia-tools", command: "node", args: ["fresh-host"], env: [] }]
+
+  it("closes and reloads a Kimi fork with explicitly supplied fresh servers before returning", async () => {
+    const { adapter, sendRequest } = forkAdapter()
+    const session = await adapter.forkSession("parent", {
+      cwd: "/work",
+      permissionMode: "dontAsk",
+      allowedTools: ["read_file"],
+      mcpServers: freshServers,
+    })
+    expect(sendRequest.mock.calls.map(([method]) => method)).toEqual([
+      "session/fork",
+      "session/close",
+      "session/load",
+    ])
+    expect(sendRequest).toHaveBeenLastCalledWith(
+      "session/load",
+      expect.objectContaining({ sessionId: "fork", cwd: "/work", mcpServers: freshServers })
+    )
+    expect(session).toMatchObject({
+      id: "fork",
+      permissionMode: "dontAsk",
+      allowedTools: ["read_file"],
+      metadata: { cogniaInstructionContext: "Retain the project instructions" },
+    })
+    expect(adapter.getSession("parent")).toBeDefined()
+  })
+
+  it.each([true, false])(
+    "does not restore or inherit servers without fresh options (Kimi=%s)",
+    async (kimi) => {
+      const { adapter, sendRequest } = forkAdapter(kimi)
+      adapter.getSession("parent")!.metadata!.mcpServers = [{ name: "stale-parent-credential" }]
+      await adapter.forkSession("parent", { cwd: "/work" })
+      expect(sendRequest.mock.calls.map(([method]) => method)).toEqual(["session/fork"])
+      expect(sendRequest).toHaveBeenCalledWith(
+        "session/fork",
+        expect.objectContaining({ mcpServers: [] })
+      )
+    }
+  )
+
+  it("preserves the ordinary ACP fork path for non-Kimi runtimes with servers", async () => {
+    const { adapter, sendRequest } = forkAdapter(false)
+    await adapter.forkSession("parent", { cwd: "/work", mcpServers: freshServers })
+    expect(sendRequest.mock.calls.map(([method]) => method)).toEqual(["session/fork"])
+  })
+
+  it("restores a GUI-created Kimi fork with newly authorized MCP options at first execution", async () => {
+    const { adapter, sendRequest } = forkAdapter()
+    const fork = await adapter.forkSession("parent", { cwd: "/work" })
+    sendRequest.mockClear()
+    const restored = await adapter.prepareForkSessionForExecution(fork.id, {
+      cwd: "/work",
+      mcpServers: freshServers,
+      allowedTools: ["read_file"],
+      systemPrompt: "Fresh execution instructions",
+    })
+    expect(sendRequest.mock.calls.map(([method]) => method)).toEqual([
+      "session/close",
+      "session/load",
+    ])
+    expect(restored?.allowedTools).toEqual(["read_file"])
+    expect(restored?.metadata?.cogniaInstructionContext).toBe("Fresh execution instructions")
+    sendRequest.mockClear()
+    await adapter.prepareForkSessionForExecution(fork.id, {
+      cwd: "/work",
+      mcpServers: freshServers,
+    })
+    expect(sendRequest).not.toHaveBeenCalled()
+  })
+
+  it("rejects a GUI fork's first execution when fresh MCP restoration fails", async () => {
+    const { adapter, sendRequest } = forkAdapter()
+    const fork = await adapter.forkSession("parent", { cwd: "/work" })
+    sendRequest.mockImplementation(async (method: string) => {
+      if (method === "session/load") throw new Error("fresh restoration failed")
+      return {}
+    })
+    await expect(
+      adapter.prepareForkSessionForExecution(fork.id, { cwd: "/work", mcpServers: freshServers })
+    ).rejects.toThrow("fresh restoration failed")
+    expect(adapter.getSession(fork.id)).toBeUndefined()
+    expect(adapter.getSession("parent")).toBeDefined()
+  })
+
+  it("inherits Kimi's source workspace and roots when options omit them", async () => {
+    const { adapter, sendRequest } = forkAdapter()
+    adapter.getSession("parent")!.metadata!.additionalDirectories = ["/shared"]
+    const forked = await adapter.forkSession("parent", { mcpServers: freshServers })
+    expect(forked.metadata).toMatchObject({ cwd: "/work", additionalDirectories: ["/shared"] })
+    expect(sendRequest).toHaveBeenLastCalledWith(
+      "session/load",
+      expect.objectContaining({ cwd: "/work" })
+    )
+  })
+
+  it.each([{ cwd: "/other" }, { additionalDirectories: ["/other"] }])(
+    "rejects Kimi workspace changes ignored by the native fork: %j",
+    async (changes) => {
+      const { adapter, sendRequest } = forkAdapter()
+      await expect(
+        adapter.forkSession("parent", { cwd: "/work", mcpServers: freshServers, ...changes })
+      ).rejects.toThrow(/inherits.*workspace/i)
+      expect(sendRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it("never closes or deletes the parent if the native fork returns the source ID", async () => {
+    const { adapter, sendRequest } = forkAdapter()
+    sendRequest.mockResolvedValue({ sessionId: "parent" })
+    await expect(
+      adapter.forkSession("parent", { cwd: "/work", mcpServers: freshServers })
+    ).rejects.toThrow(/distinct session/i)
+    expect(sendRequest.mock.calls.map(([method]) => method)).toEqual(["session/fork"])
+    expect(adapter.getSession("parent")).toBeDefined()
+  })
+
+  it.each(["load", "close"])(
+    "rejects before forking when Kimi cannot %s its fresh MCP bindings",
+    async (missing) => {
+      const { adapter, sendRequest } = forkAdapter()
+      setAgentCaps(adapter, {
+        loadSession: missing !== "load",
+        sessionCapabilities: { fork: {}, ...(missing !== "close" ? { close: {} } : {}) },
+      })
+      await expect(
+        adapter.forkSession("parent", { cwd: "/work", mcpServers: freshServers })
+      ).rejects.toThrow(/restore.*MCP/i)
+      expect(sendRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["session/close", "session/load"])(
+    "rejects and removes the new fork when %s fails",
+    async (failingMethod) => {
+      const { adapter, sendRequest } = forkAdapter()
+      sendRequest.mockImplementation(async (method: string) => {
+        if (method === failingMethod) throw new Error("restore failed")
+        return method === "session/fork" ? { sessionId: "fork" } : {}
+      })
+      await expect(
+        adapter.forkSession("parent", { cwd: "/work", mcpServers: freshServers })
+      ).rejects.toThrow("restore failed")
+      expect(sendRequest).toHaveBeenCalledWith("session/delete", { sessionId: "fork" })
+      expect(adapter.getSession("fork")).toBeUndefined()
+      expect(adapter.getSession("parent")).toBeDefined()
+      if (failingMethod === "session/close") {
+        expect(sendRequest.mock.calls.map(([method]) => method)).not.toContain("session/load")
+      }
+    }
+  )
+
+  it("preserves the original restore failure and clears local state when failed-fork deletion also fails", async () => {
+    const { adapter, sendRequest } = forkAdapter()
+    sendRequest.mockImplementation(async (method: string) => {
+      if (method === "session/load") throw new Error("restore failed")
+      if (method === "session/delete") throw new Error("cleanup failed")
+      return method === "session/fork" ? { sessionId: "fork" } : {}
+    })
+    await expect(
+      adapter.forkSession("parent", { cwd: "/work", mcpServers: freshServers })
+    ).rejects.toThrow("restore failed")
+    expect(adapter.getSession("fork")).toBeUndefined()
+    expect(adapter.getSession("parent")).toBeDefined()
+  })
+})
+
+describe("AcpClientAdapter — Cline Plan/Act", () => {
+  it("reports unsupported images and refuses ignored MCP declarations before RPC", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter()
+    const internal = adapter as unknown as { sendRequest: jest.Mock }
+    internal.sendRequest = jest.fn().mockResolvedValue({
+      protocolVersion: 1,
+      agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+    })
+    try {
+      await adapter.connect({
+        ...stdioConfig(),
+        metadata: { preset: "cline" },
+        process: { command: "cline", args: ["--acp"] },
+      })
+      expect(adapter.capabilities?.mcpTools).toBe(false)
+      expect(
+        adapter.getAcpInitializationMetadata().agentCapabilities?.promptCapabilities?.image
+      ).toBe(false)
+      internal.sendRequest.mockClear()
+      await expect(
+        adapter.createSession({
+          cwd: "/work",
+          mcpServers: [{ name: "cognia", command: "node", args: [], env: [] }],
+        })
+      ).rejects.toThrow("does not forward session MCP")
+      expect(internal.sendRequest).not.toHaveBeenCalled()
+    } finally {
+      await adapter.disconnect()
+      mockIsTauri.mockReturnValue(false)
+    }
+  })
+
+  it.each<[AcpPermissionMode, string]>([
+    ["default", "act"],
+    ["plan", "plan"],
+    ["acceptEdits", "act"],
+    ["bypassPermissions", "act"],
+    ["dontAsk", "act"],
+  ])("maps %s to %s while retaining Cognia's permission policy", async (canonical, native) => {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "cline" },
+      process: { command: "cline", args: ["--acp"] },
+    }
+    setStatus(adapter, "connected")
+    const configOptions: AcpConfigOption[] = [
+      {
+        id: "mode",
+        name: "Mode",
+        category: "mode",
+        type: "select",
+        currentValue: "act",
+        options: [
+          { value: "act", name: "Act" },
+          { value: "plan", name: "Plan" },
+        ],
+      },
+    ]
+    const sendRequest = jest.fn().mockResolvedValue({ sessionId: "s", configOptions })
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    expect((await adapter.createSession({ cwd: "/work" })).permissionMode).toBe("default")
+    await adapter.setSessionMode("s", canonical)
+    expect(sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+      sessionId: "s",
+      configId: "mode",
+      value: native,
+    })
+    expect(adapter.getSession("s")?.permissionMode).toBe(canonical)
+    handleUpdate(adapter, "s", { sessionUpdate: "current_mode_update", currentModeId: native })
+    expect(adapter.getSession("s")?.permissionMode).toBe(canonical)
+  })
+})
+
+describe("AcpClientAdapter — Qoder permission modes", () => {
+  function qoderAdapter() {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "qoder" },
+      process: { command: "qoder", args: ["--acp"], cwd: "/work" },
+    }
+    setStatus(adapter, "connected")
+    return adapter
+  }
+  const modeOptions = (currentValue: string): AcpConfigOption[] => [
+    {
+      id: "mode",
+      name: "Mode",
+      type: "select",
+      category: "mode",
+      currentValue,
+      options: ["default", "accept_edits", "bypass_permissions", "dont_ask"].map((value) => ({
+        value,
+        name: value,
+      })),
+    },
+  ]
+  it.each<[AcpPermissionMode, string]>([
+    ["default", "default"],
+    ["acceptEdits", "accept_edits"],
+    ["bypassPermissions", "bypass_permissions"],
+    ["dontAsk", "dont_ask"],
+  ])("maps canonical %s to Qoder %s and back", async (canonical, native) => {
+    const adapter = qoderAdapter()
+    const sendRequest = jest
+      .fn()
+      .mockResolvedValue({ sessionId: "s", configOptions: modeOptions(native) })
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    expect((await adapter.createSession({ cwd: "/work" })).permissionMode).toBe(canonical)
+    await adapter.setSessionMode("s", canonical)
+    expect(sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+      sessionId: "s",
+      configId: "mode",
+      value: native,
+    })
+    expect(adapter.getSession("s")?.permissionMode).toBe(canonical)
+  })
+  it("rejects Plan when Qoder does not advertise it instead of sending or escalating", async () => {
+    const adapter = qoderAdapter()
+    seedSession(adapter, "s", "default")
+    adapter.getSession("s")!.metadata = { configOptions: modeOptions("default") }
+    const sendRequest = jest.fn()
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    await expect(adapter.setSessionMode("s", "plan")).rejects.toThrow("does not advertise")
+    expect(sendRequest).not.toHaveBeenCalled()
+    expect(adapter.getSession("s")?.permissionMode).toBe("default")
+  })
+  it("uses the documented two-mode fallback only when no mode catalog exists", async () => {
+    const adapter = qoderAdapter()
+    seedSession(adapter, "s", "default")
+    const sendRequest = jest.fn().mockResolvedValue({})
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    await adapter.setSessionMode("s", "bypassPermissions")
+    expect(sendRequest).toHaveBeenCalledWith("session/set_mode", {
+      sessionId: "s",
+      modeId: "bypass_permissions",
+    })
+    await expect(adapter.setSessionMode("s", "acceptEdits")).rejects.toThrow("does not advertise")
+  })
+})
+
+describe("AcpClientAdapter — Goose permission modes", () => {
+  it("starts manual Goose binaries in approval mode even when stored env requests auto", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockInvoke.mockResolvedValue("goose-test")
+    const adapter = new AcpClientAdapter()
+    const config = {
+      ...stdioConfig(),
+      metadata: {},
+      process: {
+        command: "goose",
+        args: ["acp"],
+        env: { GOOSE_MODE: "auto", GOOSE_MODEL: "test-model" },
+      },
+    }
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = config
+    await (
+      adapter as unknown as { connectViaStdio: (config: ExternalAgentConfig) => Promise<void> }
+    ).connectViaStdio(config)
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "spawn_external_agent",
+      expect.objectContaining({
+        config: expect.objectContaining({
+          env: expect.objectContaining({ GOOSE_MODE: "approve", GOOSE_MODEL: "test-model" }),
+        }),
+      })
+    )
+    await adapter.disconnect()
+  })
+
+  const modeOptions = (currentValue: string): AcpConfigOption[] => [
+    {
+      id: "mode",
+      name: "Mode",
+      type: "select",
+      category: "mode",
+      currentValue,
+      options: ["auto", "approve", "smart_approve", "chat"].map((value) => ({
+        value,
+        name: value,
+      })),
+    },
+  ]
+  function gooseAdapter() {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "goose" },
+      process: { command: "goose", args: ["acp"], cwd: "/work" },
+    }
+    setStatus(adapter, "connected")
+    return adapter
+  }
+  it.each([
+    ["approve", "default"],
+    ["chat", "plan"],
+    ["auto", "bypassPermissions"],
+    ["smart_approve", "default"],
+  ])("canonicalizes %s as %s", async (native, canonical) => {
+    const adapter = gooseAdapter()
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest
+      .fn()
+      .mockResolvedValue({ sessionId: "s", configOptions: modeOptions(native) })
+    expect((await adapter.createSession({ cwd: "/work" })).permissionMode).toBe(canonical)
+  })
+  it.each<[AcpPermissionMode, string]>([
+    ["default", "approve"],
+    ["acceptEdits", "approve"],
+    ["dontAsk", "approve"],
+    ["bypassPermissions", "auto"],
+    ["plan", "chat"],
+  ])("maps %s to %s while retaining the client's approval policy", async (mode, native) => {
+    const adapter = gooseAdapter()
+    seedSession(adapter, "s", "default")
+    adapter.getSession("s")!.metadata = { configOptions: modeOptions("approve") }
+    const sendRequest = jest.fn().mockResolvedValue({ configOptions: modeOptions(native) })
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    await adapter.setSessionMode("s", mode)
+    expect(sendRequest).toHaveBeenCalledWith("session/set_config_option", {
+      sessionId: "s",
+      configId: "mode",
+      value: native,
+    })
+    ;(
+      adapter as unknown as { handleNotification: (notification: unknown) => void }
+    ).handleNotification({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "s",
+        update: { sessionUpdate: "current_mode_update", currentModeId: native },
+      },
+    })
+    expect(adapter.getSession("s")?.permissionMode).toBe(mode)
+  })
+  it("uses the native mode for legacy mode-only agents", async () => {
+    const adapter = gooseAdapter()
+    seedSession(adapter, "s", "default")
+    const sendRequest = jest.fn().mockResolvedValue({})
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    await adapter.setSessionMode("s", "plan")
+    expect(sendRequest).toHaveBeenCalledWith("session/set_mode", { sessionId: "s", modeId: "chat" })
   })
 })
 
@@ -1512,6 +2081,72 @@ describe("AcpClientAdapter — ACP v1.21 terminal authentication", () => {
 
     expect(mockTerminalKill).toHaveBeenCalledWith("terminal-1")
     expect(mockTerminalRelease).toHaveBeenCalledWith("terminal-1")
+    expect(adapter.getTerminalAuthState()?.status).toBe("cancelled")
+  })
+
+  function pendingTerminalAuth() {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter()
+    const internals = terminalAuthInternals(adapter)
+    internals._config = stdioConfig()
+    internals._authMethods = [{ type: "terminal", id: "login", name: "Login", args: ["auth"] }]
+    internals.teardownTransport = jest.fn<Promise<void>, []>(async () => undefined)
+    internals.connect = jest.fn<Promise<void>, [ExternalAgentConfig]>(async () => undefined)
+    return { adapter, internals }
+  }
+
+  it("reports terminal spawn failure and permits a later login attempt", async () => {
+    const { adapter, internals } = pendingTerminalAuth()
+    mockTerminalCreate.mockRejectedValueOnce(new Error("spawn failed"))
+    await expect(adapter.authenticate("login")).rejects.toThrow("spawn failed")
+    expect(adapter.getTerminalAuthState()).toMatchObject({
+      status: "failed",
+      error: "spawn failed",
+    })
+    expect(internals.connect).not.toHaveBeenCalled()
+    await adapter.authenticate("login")
+    expect(adapter.getTerminalAuthState()?.status).toBe("completed")
+  })
+
+  it("honors cancellation during transport teardown before spawning a login terminal", async () => {
+    const { adapter, internals } = pendingTerminalAuth()
+    let finishTeardown!: () => void
+    internals.teardownTransport.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishTeardown = resolve
+        })
+    )
+    const auth = adapter.authenticate("login")
+    const rejection = expect(auth).rejects.toThrow(/cancelled/)
+    await adapter.cancelTerminalAuthentication()
+    expect(adapter.getTerminalAuthState()?.status).toBe("cancelled")
+    finishTeardown()
+    await rejection
+    expect(mockTerminalCreate).not.toHaveBeenCalled()
+    expect(internals.connect).not.toHaveBeenCalled()
+  })
+
+  it("kills a terminal returned after starting-state cancellation and blocks overlapping login", async () => {
+    const { adapter, internals } = pendingTerminalAuth()
+    let finishCreate!: (id: string) => void
+    mockTerminalCreate.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCreate = resolve
+        })
+    )
+    const auth = adapter.authenticate("login")
+    const rejection = expect(auth).rejects.toThrow(/cancelled/)
+    while (!finishCreate) await new Promise((resolve) => setTimeout(resolve, 0))
+    await adapter.cancelTerminalAuthentication()
+    await expect(adapter.authenticate("login")).rejects.toThrow(/progress/)
+    finishCreate("late-terminal")
+    await rejection
+    expect(mockTerminalKill).toHaveBeenCalledWith("late-terminal")
+    expect(mockTerminalRelease).toHaveBeenCalledWith("late-terminal")
+    expect(mockTerminalWaitForExit).not.toHaveBeenCalled()
+    expect(internals.connect).not.toHaveBeenCalled()
     expect(adapter.getTerminalAuthState()?.status).toBe("cancelled")
   })
 })
@@ -3366,6 +4001,23 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
     expect(spy).toHaveBeenCalledWith("logout", {})
   })
 
+  it("clears completed terminal authentication only after successful logout", async () => {
+    const a = new AcpClientAdapter()
+    ;(a as unknown as { terminalAuthState: Record<string, unknown> }).terminalAuthState = {
+      methodId: "login",
+      status: "completed",
+    }
+    setAgentCaps(a, { auth: { logout: true } })
+    const spy = jest
+      .spyOn(a as unknown as { sendRequest: (m: string) => Promise<unknown> }, "sendRequest")
+      .mockRejectedValueOnce(new Error("logout failed"))
+    await expect(a.logout()).rejects.toThrow("logout failed")
+    expect(a.getTerminalAuthState()?.status).toBe("completed")
+    spy.mockResolvedValue({})
+    await a.logout()
+    expect(a.getTerminalAuthState()).toBeUndefined()
+  })
+
   it("closeSession sends session/close only when the capability is present", async () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")
@@ -3394,6 +4046,33 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
     expect(spy).toHaveBeenCalledWith("session/delete", { sessionId: "s1" })
     const sessions = (a as unknown as { _sessions: Map<string, unknown> })._sessions
     expect(sessions.has("s1")).toBe(false)
+  })
+
+  it("rejects native deletion errors without forgetting the session", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    setAgentCaps(a, { sessionCapabilities: { delete: {} } })
+    jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockRejectedValue(new Error("native deletion failed"))
+    await expect(a.deleteSession("s1")).rejects.toThrow("native deletion failed")
+    expect(a.getSession("s1")).toBeDefined()
+  })
+
+  it("rejects unadvertised native deletion without forgetting the session", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    setAgentCaps(a, { sessionCapabilities: {} })
+    const spy = jest.spyOn(
+      a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+      "sendRequest"
+    )
+    await expect(a.deleteSession("s1")).rejects.toThrow(/delet/i)
+    expect(spy).not.toHaveBeenCalled()
+    expect(a.getSession("s1")).toBeDefined()
   })
 })
 

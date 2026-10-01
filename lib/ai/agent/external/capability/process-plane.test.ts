@@ -88,18 +88,16 @@ describe("externalAgentProcessPlane", () => {
     expect(canStartExternalAgentProcess()).toBe(true)
   })
 
-  it("still runs locally while that shell is driving a remote host", () => {
-    // `agentInvoke` routes every plane command through Tauri `invoke` whenever
-    // `isTauri()` holds, remote host or not, so the child starts HERE. Judging
-    // the desktop against the remote manifest instead reported `unsupported`
-    // for a spawn that would have succeeded, and disabled Connect for it.
+  it("checks the selected remote Host even when the shell has a local process table", () => {
     restore = install({
       hasLocalProcessTable: () => true,
       isRemoteHostActive: () => true,
+      activeHostId: () => "remote",
       activeHostFeatureManifest: () => manifest({ features: {} }),
     })
-    expect(externalAgentProcessPlane()).toEqual({ ok: true, via: "local" })
-    expect(canStartExternalAgentProcess()).toBe(true)
+    expect(externalAgentProcessPlane()).toEqual({ ok: false, reason: "unsupported" })
+    expect(canStartExternalAgentProcess()).toBe(false)
+    expect(externalAgentProcessPlaneScope()).toBe("host:remote")
   })
 
   it("runs on a paired host that declares the plane and granted this device", () => {

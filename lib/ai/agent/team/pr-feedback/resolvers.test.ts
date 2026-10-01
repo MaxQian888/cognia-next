@@ -53,6 +53,7 @@ describe("createResolveTeamRepo", () => {
       defaultBranch: async () => trunk({ branch: "develop" }),
     })
     expect(await resolve("/repo")).toEqual({
+      remote: "origin",
       fullName: "acme/app",
       host: GITHUB_DOT_COM,
       defaultBranch: "develop",
@@ -87,7 +88,7 @@ describe("createResolveTeamRepo", () => {
         return trunk()
       },
     })
-    await resolve("/repo")
+    expect((await resolve("/repo"))?.remote).toBe("upstream")
     expect(seen).toEqual(["upstream"])
   })
 

@@ -36,6 +36,11 @@ export type ExternalAgentPresetId =
   | "pi-rpc"
   | "droid"
   | "devin"
+  | "kimi"
+  | "cline"
+  | "qoder"
+  | "goose"
+  | "aider"
   | "opencode-acp"
   | "opencode-server"
   | "opencode-remote"
@@ -288,6 +293,14 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "pi-rpc": buildPresetConfig("pi-rpc"),
   droid: buildPresetConfig("droid"),
   devin: buildPresetConfig("devin"),
+  kimi: {
+    ...buildPresetConfig("kimi"),
+    metadata: { acpPreviewFeatures: { sessionFork: true } },
+  },
+  cline: buildPresetConfig("cline"),
+  qoder: buildPresetConfig("qoder"),
+  goose: buildPresetConfig("goose"),
+  aider: buildPresetConfig("aider"),
   "opencode-acp": OPENCODE_ACP_PRESET,
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,

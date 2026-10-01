@@ -258,6 +258,8 @@ export interface UseExternalAgentActions {
   createSession: (options?: SessionCreateOptions) => Promise<ExternalAgentSession>
   /** Close a session */
   closeSession: (sessionId: string) => Promise<void>
+  /** Permanently delete provider-owned history, only when negotiated. */
+  deleteSession: (sessionId: string) => Promise<void>
   /** List existing sessions (ACP extension) */
   listSessions: (
     agentId?: string,
@@ -330,6 +332,8 @@ export interface UseExternalAgentActions {
   getTerminalAuthState: () => AcpTerminalAuthState | undefined
   /** Cancel the active ACP terminal-auth subprocess. */
   cancelTerminalAuthentication: () => Promise<void>
+  /** Log out and renegotiate authentication without retaining the active session. */
+  logout: () => Promise<void>
   listProviders: () => Promise<AcpListProvidersResponse>
   setProvider: (
     request: AcpSetProviderRequest,
@@ -1316,6 +1320,49 @@ export function useExternalAgent(): UseExternalAgentReturn {
     [getManager, activeAgentId, activeSession, storeRecordFailure]
   )
 
+  const deleteSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current ||
+        sessionMutationCountRef.current > 0
+      ) {
+        throw new Error("Cannot delete native history while the agent is busy")
+      }
+      sessionMutationCountRef.current += 1
+      setIsLoading(true)
+      setError(null)
+      try {
+        const manager = await getManager()
+        const capabilities =
+          manager.getAgent(activeAgentId)?.validity?.negotiation?.agentCapabilities
+        if (!capabilities?.sessionCapabilities?.delete) {
+          throw new Error("Agent does not support native session deletion")
+        }
+        await manager.deleteSession(activeAgentId, sessionId)
+        if (activeAgentIdRef.current === activeAgentId) {
+          if (executingSessionIdRef.current === sessionId) {
+            executingSessionIdRef.current = null
+            clearResumedInteractions()
+          }
+          setActiveSession((current) => (current?.id === sessionId ? null : current))
+        }
+      } catch (err) {
+        if (activeAgentIdRef.current === activeAgentId) {
+          setError(getExternalAgentErrorMessage(err))
+        }
+        storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
+        throw err
+      } finally {
+        sessionMutationCountRef.current -= 1
+        setIsLoading(false)
+      }
+    },
+    [getManager, activeAgentId, clearResumedInteractions, storeRecordFailure]
+  )
+
   const syncActiveAgentValidityFromRuntime = useCallback(
     (agentId: string, manager?: ExternalAgentManagerType | null) => {
       if (activeAgentIdRef.current !== agentId) {
@@ -1936,10 +1983,36 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
-      const manager = await getManager()
-      await manager.authenticate(activeAgentId, methodId, credentials)
+      if (
+        executionInProgressRef.current ||
+        sessionMutationCountRef.current > 0 ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Cannot authenticate while an agent operation is running")
+      }
+      sessionMutationCountRef.current++
+      setIsLoading(true)
+      try {
+        const manager = await getManager()
+        if (activeAgentIdRef.current !== activeAgentId) {
+          throw new Error("Selected agent changed before authentication started")
+        }
+        if (
+          getAuthMethods().some((method) => method.id === methodId && method.type === "terminal") &&
+          activeAgentIdRef.current === activeAgentId
+        ) {
+          clearResumedInteractions()
+          setActiveSession(null)
+        }
+        await manager.authenticate(activeAgentId, methodId, credentials)
+        await refresh()
+      } finally {
+        sessionMutationCountRef.current--
+        setIsLoading(false)
+      }
     },
-    [getManager, activeAgentId]
+    [getManager, activeAgentId, getAuthMethods, clearResumedInteractions, refresh]
   )
 
   const getTerminalAuthState = useCallback((): AcpTerminalAuthState | undefined => {
@@ -1952,6 +2025,35 @@ export function useExternalAgent(): UseExternalAgentReturn {
     const manager = await getManager()
     await manager.cancelTerminalAuthentication(activeAgentId)
   }, [activeAgentId, getManager])
+
+  const logout = useCallback(async (): Promise<void> => {
+    if (!activeAgentId) throw new Error("No active agent selected")
+    if (
+      executionInProgressRef.current ||
+      sessionMutationCountRef.current > 0 ||
+      compactionInProgressRef.current ||
+      providerUndoInProgressRef.current
+    ) {
+      throw new Error("Cannot log out while an agent operation is running")
+    }
+    sessionMutationCountRef.current++
+    setIsLoading(true)
+    try {
+      const manager = await getManager()
+      if (activeAgentIdRef.current !== activeAgentId) {
+        throw new Error("Selected agent changed before logout started")
+      }
+      await manager.logout(activeAgentId)
+      if (activeAgentIdRef.current === activeAgentId) {
+        clearResumedInteractions()
+        setActiveSession(null)
+      }
+      await reconnect(activeAgentId)
+    } finally {
+      sessionMutationCountRef.current--
+      setIsLoading(false)
+    }
+  }, [activeAgentId, getManager, reconnect, clearResumedInteractions])
 
   const listProviders = useCallback(async (): Promise<AcpListProvidersResponse> => {
     if (!activeAgentId) throw new Error("No active agent selected")
@@ -2098,6 +2200,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     setActiveAgent,
     createSession,
     closeSession,
+    deleteSession,
     listSessions,
     forkSession,
     compactSession,
@@ -2125,6 +2228,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     authenticate,
     getTerminalAuthState,
     cancelTerminalAuthentication,
+    logout,
     listProviders,
     setProvider,
     disableProvider,

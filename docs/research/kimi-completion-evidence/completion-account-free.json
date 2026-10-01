@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "version": "2.1.1",
+  "protocolVersion": 1,
+  "sandboxedConnection": true,
+  "authenticated": false,
+  "modes": true,
+  "listForkCloseLoadResumeDelete": true,
+  "advertisedCapabilities": {
+    "loadSession": true,
+    "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": true
+    },
+    "mcpCapabilities": {
+      "http": true,
+      "sse": true
+    },
+    "sessionCapabilities": {
+      "fork": {},
+      "resume": {},
+      "close": {},
+      "delete": {},
+      "list": {},
+      "additionalDirectories": {}
+    },
+    "auth": {
+      "logout": {}
+    }
+  },
+  "authenticationRequired": true,
+  "configOptions": [
+    {
+      "id": "model",
+      "type": "select"
+    },
+    {
+      "id": "thinking",
+      "type": "select"
+    },
+    {
+      "id": "mode",
+      "type": "select"
+    }
+  ],
+  "forkMcp": "MCP servers (3):\n- kimi-probe (stdio): connected, 1 tools\n- kimi-http-probe (http): connected, 1 tools\n- kimi-sse-probe (sse): connected, 1 tools",
+  "deferredForkMcp": "MCP servers (3):\n- kimi-probe (stdio): connected, 1 tools\n- kimi-http-probe (http): connected, 1 tools\n- kimi-sse-probe (sse): connected, 1 tools"
+}

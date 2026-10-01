@@ -132,6 +132,9 @@ export function buildSandboxLauncherArgs(
   homedir: string
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
+  qoderConfigRoot(config, homedir)
+  clineConfigRoot(config, homedir)
+  kimiConfigRoot(config, homedir)
   const taskHome = config.env?.COGNIA_GATEWAY_TASK_HOME
   const botIsolation = config.env?.COGNIA_BOT_ISOLATION === "1"
   const botState = config.env?.COGNIA_BOT_STATE_DIR
@@ -150,6 +153,9 @@ export function buildSandboxLauncherArgs(
   const devinConfigRoot = devinOwnedConfigRoot(config)
   if (devinConfigRoot) writable.push(devinConfigRoot)
   return [
+    ...(config.command === "aider"
+      ? aiderImplicitConfigPaths(config.cwd, homedir).flatMap((file) => ["--deny-readable", file])
+      : []),
     ...(config.env?.COGNIA_BOT_ISOLATION === "1"
       ? [
           "--bot-isolation",
@@ -164,6 +170,7 @@ export function buildSandboxLauncherArgs(
             ".cargo/bin",
             ".rustup/toolchains",
             "Library/pnpm",
+            ...(config.command === "qoder" ? [".qoder/entry", ".qoder/bin"] : []),
           ].flatMap((relative) => ["--readable", path.join(homedir, relative)]),
         ]
       : []),
@@ -197,6 +204,137 @@ export function buildSandboxLauncherArgs(
   ]
 }
 
+/** Aider searches cwd, Git ancestors and home even with explicit --config.
+ * Hide that implicit configuration so startup commands, extra files and .env
+ * cannot replace Cognia's explicit prompt, policies or provider credentials. */
+export function aiderImplicitConfigPaths(cwd: string, home: string): string[] {
+  const roots = new Set([home])
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    roots.add(dir)
+    if (dir === path.dirname(dir)) break
+  }
+  return [
+    ...[...roots].flatMap((root) =>
+      [".aider.conf.yml", ".env", ".aider.model.settings.yml", ".aider.model.metadata.json"].map(
+        (name) => path.join(root, name)
+      )
+    ),
+    path.join(home, ".aider/oauth-keys.env"),
+  ]
+}
+
+/** Keep the documented config override writable without moving or copying CLI credentials. */
+export function qoderConfigRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): string | undefined {
+  if (config.command !== "qoder") return undefined
+  let selected = config.env?.QODER_CONFIG_DIR ?? process.env.QODER_CONFIG_DIR
+  const args = config.args ?? []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--config-dir") selected = args[++i] ?? ""
+    else if (args[i].startsWith("--config-dir=")) selected = args[i].slice("--config-dir=".length)
+  }
+  if (selected !== undefined && !selected.trim())
+    throw new Error("Qoder config directory must not be empty")
+  const bot = config.env?.COGNIA_BOT_ISOLATION === "1"
+  const botState = config.env?.COGNIA_BOT_STATE_DIR
+  const home = bot ? botState : (config.env?.COGNIA_GATEWAY_TASK_HOME ?? homedir)
+  if (!home || !path.isAbsolute(home)) throw new Error("Qoder requires an absolute state directory")
+  const root = selected ? path.resolve(config.cwd ?? homedir, selected) : path.join(home, ".qoder")
+  if (
+    bot &&
+    (path.relative(home, root).startsWith("..") || path.isAbsolute(path.relative(home, root)))
+  )
+    throw new Error("Qoder config directory must stay inside the Bot state directory")
+  return root
+}
+
+/** ACP branches before upstream --data-dir setup; --config controls all persisted state. */
+export function clineConfigRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): string | undefined {
+  if (config.command !== "cline") return undefined
+  const args = config.args ?? []
+  if (args.some((arg) => arg === "--data-dir" || arg.startsWith("--data-dir=")))
+    throw new Error("Cline ACP requires --config or CLINE_DIR instead of --data-dir")
+  let selected = config.env?.CLINE_DIR ?? process.env.CLINE_DIR
+  // Upstream's early config pre-pass uses the first occurrence.
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--config" || args[i].startsWith("--config=")) {
+      selected = args[i] === "--config" ? (args[i + 1] ?? "") : args[i].slice("--config=".length)
+      break
+    }
+  }
+  if (selected !== undefined && !selected.trim())
+    throw new Error("Cline config directory must not be empty")
+  const bot = config.env?.COGNIA_BOT_ISOLATION === "1"
+  const home = bot
+    ? config.env?.COGNIA_BOT_STATE_DIR
+    : (config.env?.COGNIA_GATEWAY_TASK_HOME ?? homedir)
+  if (!home || !path.isAbsolute(home)) throw new Error("Cline requires an absolute state directory")
+  const root = selected
+    ? path.resolve(config.cwd ?? homedir, selected.trim())
+    : path.join(home, ".cline")
+  const relative = path.relative(home, root)
+  if (
+    bot &&
+    (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+  )
+    throw new Error("Cline config directory must stay inside the Bot state directory")
+  return root
+}
+
+/** Kimi Code resolves its native state home from the environment, relative to cwd. */
+export function kimiConfigRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): string | undefined {
+  if (config.command !== "kimi") return undefined
+  const selected = config.env?.KIMI_CODE_HOME ?? process.env.KIMI_CODE_HOME
+  if (selected !== undefined && !selected.trim())
+    throw new Error("Kimi state directory must not be empty")
+  const bot = config.env?.COGNIA_BOT_ISOLATION === "1"
+  const home = bot
+    ? config.env?.COGNIA_BOT_STATE_DIR
+    : (config.env?.COGNIA_GATEWAY_TASK_HOME ?? homedir)
+  if (!home || !path.isAbsolute(home)) throw new Error("Kimi requires an absolute state directory")
+  // Preserve whitespace in nonempty native paths; upstream does not trim these.
+  const root =
+    selected !== undefined
+      ? path.resolve(config.cwd ?? homedir, selected)
+      : path.join(home, ".kimi-code")
+  const relative = path.relative(home, root)
+  if (
+    bot &&
+    (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+  )
+    throw new Error("Kimi state directory must stay inside the Bot state directory")
+  if (bot) {
+    const existingPath = (candidate: string): string => {
+      const missing: string[] = []
+      for (let current = candidate; ; current = path.dirname(current)) {
+        try {
+          return path.join(fs.realpathSync(current), ...missing.reverse())
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+          if (current === path.dirname(current)) return candidate
+          missing.push(path.basename(current))
+        }
+      }
+    }
+    const physicalRelative = path.relative(existingPath(home), existingPath(root))
+    if (
+      physicalRelative === ".." ||
+      physicalRelative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(physicalRelative)
+    )
+      throw new Error("Kimi state directory must stay inside the Bot state directory")
+  }
+  return root
+}
+
 /**
  * The agent's own state directories, absolute.
  *
@@ -208,6 +346,12 @@ export function buildSandboxLauncherArgs(
  * not persist a session inside the sandbox and resume started over every time.
  */
 function agentStateWritableRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
+  const kimiRoot = kimiConfigRoot(config, homedir)
+  if (kimiRoot) return [kimiRoot]
+  const clineRoot = clineConfigRoot(config, homedir)
+  if (clineRoot) return [clineRoot]
+  const qoderRoot = qoderConfigRoot(config, homedir)
+  if (qoderRoot) return [qoderRoot]
   return policyAgentStateWritableRoots(config.command, config.args ?? []).map((root) =>
     path.join(homedir, ...root.split("/"))
   )
@@ -267,10 +411,52 @@ export async function resolveSandboxedExternalAgentLaunch(
     runtime.ensureDir?.(config.env.COGNIA_BOT_STATE_DIR)
     for (const root of new Set(Object.values(botRuntime))) runtime.ensureDir?.(root)
   }
+  const qoderRoot = qoderConfigRoot(config, runtime.homedir)
+  if (qoderRoot) runtime.ensureDir?.(qoderRoot)
+  // Goose's platform extensions create temporary files during session/new.
+  // macOS's ambient /var/folders temp root is outside the sandbox write scope.
+  let env: Record<string, string> | undefined
+  const kimiRoot = kimiConfigRoot(config, runtime.homedir)
+  if (kimiRoot) {
+    env = {
+      KIMI_CODE_HOME: kimiRoot,
+      KIMI_CODE_NO_AUTO_UPDATE: "1",
+      KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT: "0",
+    }
+    const temp = path.join(kimiRoot, "tmp")
+    runtime.ensureDir?.(temp)
+    Object.assign(env, { TMPDIR: temp, TMP: temp, TEMP: temp })
+  }
+  const clineRoot = clineConfigRoot(config, runtime.homedir)
+  if (clineRoot) {
+    env = { CLINE_DIR: clineRoot, CLINE_NO_AUTO_UPDATE: "1" }
+    if (config.env?.COGNIA_BOT_ISOLATION !== "1") {
+      const temp = path.join(clineRoot, "tmp")
+      runtime.ensureDir?.(temp)
+      Object.assign(env, { TMPDIR: temp, TMP: temp, TEMP: temp })
+    }
+  }
+  if (qoderRoot) {
+    env = { QODER_CONFIG_DIR: qoderRoot }
+    if (config.env?.COGNIA_BOT_ISOLATION !== "1") {
+      const temp = path.join(qoderRoot, "tmp")
+      runtime.ensureDir?.(temp)
+      Object.assign(env, { TMPDIR: temp, TMP: temp, TEMP: temp })
+    }
+  }
+  if (config.command === "goose" && config.env?.COGNIA_BOT_ISOLATION !== "1") {
+    const temp = path.join(
+      config.env?.COGNIA_GATEWAY_TASK_HOME ?? runtime.homedir,
+      ".local/state/goose/tmp"
+    )
+    runtime.ensureDir?.(temp)
+    env = { TMPDIR: temp, TMP: temp, TEMP: temp }
+  }
   runtime.ensureDir?.(toolHostRuntimeDir())
   for (const root of agentStateFileRoots(config, runtime.homedir)) runtime.ensureFile?.(root)
   return {
     command: launcher,
     args: buildSandboxLauncherArgs(config, runtime.homedir),
+    ...(env ? { env } : {}),
   }
 }

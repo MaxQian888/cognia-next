@@ -1,4 +1,5 @@
 import type { AcpMcpServerConfig, ExternalAgentConfig } from "@/types/agent/external-agent"
+import { spawnPlacementFor } from "@/lib/sandbox/spawn-placement-registry"
 import { agentInvoke, agentListen, runsExternalAgentProcessesLocally } from "../../agent-transport"
 
 export interface OpenCodeV2OwnedService {
@@ -7,11 +8,24 @@ export interface OpenCodeV2OwnedService {
   close(): Promise<void>
 }
 
+/** The V2 SDK cannot reach a container's private HTTP listener yet. */
+export function assertOpenCodeV2LocalPlacement(config: ExternalAgentConfig): void {
+  if (spawnPlacementFor(config.id)) {
+    throw new Error(
+      "OpenCode V2 cannot use the selected container until an authenticated HTTP bridge is available; select OpenCode ACP for this environment"
+    )
+  }
+}
+
 export function canProjectOpenCodeV2Mcp(
   config: ExternalAgentConfig,
   hostAvailable = runsExternalAgentProcessesLocally()
 ): boolean {
-  return hostAvailable && (!config.network?.endpoint?.trim() || Boolean(config.process?.command))
+  return (
+    !spawnPlacementFor(config.id) &&
+    hostAvailable &&
+    (!config.network?.endpoint?.trim() || Boolean(config.process?.command))
+  )
 }
 
 /** V2 MCP configuration is location-scoped; never write a chat token with mcp.add. */
@@ -65,6 +79,7 @@ export async function launchOpenCodeV2Service(
     available: runsExternalAgentProcessesLocally,
   }
 ): Promise<OpenCodeV2OwnedService> {
+  assertOpenCodeV2LocalPlacement(config)
   if (!host.available())
     throw new Error("Cognia MCP projection for OpenCode requires a local process host")
   if (config.network?.endpoint && !config.process?.command)
@@ -72,7 +87,7 @@ export async function launchOpenCodeV2Service(
       "An existing OpenCode endpoint cannot receive session-owned MCP servers; configure a local OpenCode executable"
     )
   signal?.throwIfAborted()
-  const id = `opencode-v2-${crypto.randomUUID()}`
+  const id = `${config.id}:opencode-v2:${crypto.randomUUID()}`
   const password = crypto.randomUUID()
   const base = config.process?.env?.OPENCODE_CONFIG_CONTENT
   let inherited: Record<string, unknown> = {}
@@ -150,6 +165,7 @@ export async function launchOpenCodeV2Service(
     )
     signal?.addEventListener("abort", abort, { once: true })
     signal?.throwIfAborted()
+    assertOpenCodeV2LocalPlacement(config)
     await host.invoke("spawn_external_agent", {
       config: {
         id,

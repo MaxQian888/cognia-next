@@ -53,10 +53,21 @@ pub enum SandboxPlacement {
         /// half (a multi-tenant baseline), and either one refuses a fallback.
         /// A client can only make its own run stricter with this.
         isolation_mandatory: bool,
+        /// Opaque, live Host-side tool leases; never part of the sealed spec.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hosted_tool_host_lease_ids: Vec<String>,
     },
 }
 
 impl SandboxPlacement {
+    pub fn hosted_tool_host_lease_ids(&self) -> &[String] {
+        match self {
+            Self::Container {
+                hosted_tool_host_lease_ids,
+                ..
+            } => hosted_tool_host_lease_ids,
+        }
+    }
     pub fn spec(&self) -> &Value {
         match self {
             Self::Container { spec, .. } => spec,
@@ -288,6 +299,18 @@ impl SandboxRoutingBackend {
 
 #[async_trait]
 impl ExecBackend for SandboxRoutingBackend {
+    async fn delete_retained_gateway_task(
+        &self,
+        task_id: &str,
+        device: Option<&str>,
+    ) -> Result<(), String> {
+        self.sandbox
+            .delete_retained_gateway_task(task_id, device)
+            .await?;
+        self.existing
+            .delete_retained_gateway_task(task_id, device)
+            .await
+    }
     async fn spawn(
         &self,
         config: ExternalAgentSpawnConfig,
@@ -622,6 +645,7 @@ mod tests {
 
     fn placement(isolation_mandatory: bool) -> SandboxPlacement {
         SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
             spec: json!({ "specDigest": "a".repeat(64) }),
             isolation_mandatory,
         }
@@ -675,6 +699,7 @@ mod tests {
     fn audit_fields_record_the_claim_in_the_shape_a_spec_has() {
         let image_digest = format!("sha256:{}", "c".repeat(64));
         let placement = SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
             spec: json!({
                 "specDigest": "b".repeat(64),
                 "projectId": "proj-1",
@@ -701,6 +726,7 @@ mod tests {
     #[test]
     fn audit_fields_drop_values_no_valid_spec_could_hold() {
         let placement = SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
             spec: json!({
                 "specDigest": "B".repeat(64),
                 "projectId": "x".repeat(257),
@@ -721,6 +747,7 @@ mod tests {
         );
 
         let empty = SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
             spec: json!({ "projectId": "   ", "image": "not an object" }),
             isolation_mandatory: false,
         };
@@ -730,6 +757,7 @@ mod tests {
 
         // A catalog id is a slug, not any id: a valid project id is not one.
         let not_a_slug = SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
             spec: json!({ "image": { "catalogEntryId": "Node 22" } }),
             isolation_mandatory: false,
         };
@@ -742,6 +770,7 @@ mod tests {
     fn audit_fields_keep_every_value_a_valid_spec_can_hold() {
         let upper = format!("sha256:{}", "AB".repeat(32));
         let placement = SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
             spec: json!({
                 "projectId": "x".repeat(256),
                 "image": { "digest": upper, "catalogEntryId": format!("9{}", "._-".repeat(21)) },

@@ -31,6 +31,7 @@ const PROTOCOL_LABELS: Record<BuiltinExecutableExternalAgentProtocol | "opencode
   "codex-app-server": "Codex app-server (JSON-RPC)",
   "dsh-sdk": "DeepSeek Harness SDK",
   "pi-rpc": "Pi native RPC",
+  "aider-cli": "Aider CLI",
   opencode: "OpenCode (HTTP + SSE)",
   "opencode-v2": "OpenCode V2 (HTTP + SSE)",
   a2a: "A2A (Agent-to-Agent)",

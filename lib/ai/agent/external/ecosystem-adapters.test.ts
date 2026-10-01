@@ -12,15 +12,20 @@ import {
 describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
   it("registers the expected adapters", () => {
     expect(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).sort()).toEqual([
+      "aider",
       "claude-code",
+      "cline",
       "codex",
       "copilot-cli",
       "cursor",
       "devin",
       "droid",
       "gemini-cli",
+      "goose",
+      "kimi",
       "kiro",
       "pi",
+      "qoder",
       "qwen-code",
     ])
   })
@@ -66,6 +71,7 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
           "acp",
           "codex-app-server",
           "pi-rpc",
+          "aider-cli",
           "custom",
           "http",
           "websocket",
@@ -80,7 +86,9 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
 
 describe("new ACP agent surfaces", () => {
   const cases: Array<{ presetId: string; command: string; args: string[] }> = [
+    { presetId: "kimi", command: "kimi", args: ["acp"] },
     { presetId: "devin", command: "devin", args: ["acp"] },
+    { presetId: "goose", command: "goose", args: ["acp", "--with-builtin", "developer"] },
     // The Claude Code / Gemini / Cursor ACP entrypoints are easy to get wrong
     // (a bare `--stdio` drops Gemini into interactive mode and hangs; Claude
     // Code has no native ACP flag and must run through the Zed adapter). Lock
@@ -115,7 +123,7 @@ describe("new ACP agent surfaces", () => {
       expect(found?.surface.transport).toBe("stdio")
       expect(found?.surface.supportTier).toBe("executable")
       expect(found?.surface.executionMode).toBe("direct")
-      expect(found?.surface.process).toEqual({ command, args })
+      expect(found?.surface.process).toMatchObject({ command, args })
       expect(found?.surface.docsUrl).toBeTruthy()
     }
   )
@@ -143,15 +151,20 @@ describe("listExternalAgentEcosystemAdapters", () => {
     const list = listExternalAgentEcosystemAdapters()
     expect(list.length).toBe(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).length)
     expect(list.map((a) => a.id).sort()).toEqual([
+      "aider",
       "claude-code",
+      "cline",
       "codex",
       "copilot-cli",
       "cursor",
       "devin",
       "droid",
       "gemini-cli",
+      "goose",
+      "kimi",
       "kiro",
       "pi",
+      "qoder",
       "qwen-code",
     ])
   })

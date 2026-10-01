@@ -13,6 +13,31 @@ import type { AgentEcosystemEntry } from "./types"
 
 export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
   {
+    // Native session management is negotiated over ACP; no portable importer is claimed.
+    id: "kimi",
+    runtimeIds: ["kimi"],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  },
+  {
+    id: "qoder",
+    runtimeIds: ["qoder"],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  },
+  {
     id: "devin",
     runtimeIds: ["devin"],
     sessionSourceIds: [],
@@ -127,10 +152,9 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     memoryAgentId: null,
   },
   {
-    // History import only. Cursor, Cline and Copilot CLI share the canonical
-    // portable-agent store, but only Cline has a subagent importer.
+    // Native CLI execution complements the existing portable history/subagent importers.
     id: "cline",
-    runtimeIds: [],
+    runtimeIds: ["cline"],
     sessionSourceIds: ["cline"],
     migrationVendor: null,
     vendorRootKeys: [],
@@ -153,10 +177,9 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     memoryAgentId: null,
   },
   {
-    // Picker-only. Aider keeps `.aider.chat.history.md` per repository, so it
-    // has no machine-wide root a scan could find.
+    // Aider runs through its official CLI; imported histories remain per repo.
     id: "aider",
-    runtimeIds: [],
+    runtimeIds: ["aider"],
     sessionSourceIds: ["aider"],
     migrationVendor: null,
     vendorRootKeys: [],

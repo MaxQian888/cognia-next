@@ -27,10 +27,12 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  __resetAgentProcessHostsForTests,
   agentInvoke,
   agentListen,
   agentReadTextFile,
   agentWriteTextFile,
+  agentDeleteTextFile,
   getAcpHostCapabilities,
   runsExternalAgentProcessesLocally,
   supportsAgentFs,
@@ -44,6 +46,13 @@ import {
   PROCESS_SPAWN_CAPABILITY,
 } from "./capability/process-plane"
 
+import {
+  setActiveRemoteTransport,
+  setActiveRemoteEndpoint,
+  __resetRoutingForTests,
+} from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
+
 const g = globalThis as Record<string, unknown>
 
 function setTauri(on: boolean): void {
@@ -56,6 +65,8 @@ function setTauri(on: boolean): void {
 }
 
 afterEach(() => {
+  __resetRoutingForTests()
+  __resetAgentProcessHostsForTests()
   delete g.__COGNIA_HEADLESS__
   delete g.window
   jest.clearAllMocks()
@@ -218,6 +229,19 @@ describe("agentInvoke / agentListen routing", () => {
 })
 
 describe("agent fs seam", () => {
+  it("deletes only a file through the confined workspace RPC and rejects outside paths", async () => {
+    g.__COGNIA_HEADLESS__ = true
+    transportCall.mockResolvedValue(undefined)
+    await agentDeleteTextFile("/workspace/session.json", ["/workspace"])
+    expect(transportCall).toHaveBeenCalledWith("fs_delete_workspace_entry", {
+      root: "/workspace",
+      relPath: "session.json",
+      recursive: false,
+    })
+    await expect(agentDeleteTextFile("/outside/session.json", ["/workspace"])).rejects.toThrow(
+      /outside/
+    )
+  })
   it("headless routes reads and writes through the confined workspace RPCs", async () => {
     g.__COGNIA_HEADLESS__ = true
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-fs-"))
@@ -314,4 +338,119 @@ it("contains native unregister rejections", async () => {
   const attached = spies.map((spy) => spy.mock.calls.length)
   await Promise.all(failures.map((failure) => failure.catch(() => {})))
   expect(attached).toEqual([1])
+})
+
+describe("remote Host process identity", () => {
+  function remote(call = jest.fn().mockResolvedValue("remote-pid")) {
+    return {
+      call,
+      subscribe: jest.fn().mockReturnValue(() => {}),
+      whenSubscribed: jest.fn().mockResolvedValue(undefined),
+    }
+  }
+
+  it("desktop spawns and subscribes through its selected Host", async () => {
+    setTauri(true)
+    const target = remote()
+    setActiveRemoteTransport(target as Transport)
+    await expect(
+      agentInvoke("spawn_external_agent", { config: { id: "remote-agent" } })
+    ).resolves.toBe("remote-pid")
+    await agentListen("external-agent://stdout", jest.fn())
+    expect(target.call).toHaveBeenCalledWith("spawn_external_agent", {
+      config: { id: "remote-agent" },
+    })
+    expect(target.whenSubscribed).toHaveBeenCalledWith(["external-agent://stdout"])
+    expect(invokeMock).not.toHaveBeenCalled()
+    expect(listenMock).not.toHaveBeenCalled()
+    expect(runsExternalAgentProcessesLocally()).toBe(false)
+    expect(supportsAgentTerminal()).toBe(false)
+  })
+
+  it("refuses cross-Host sends and suppresses late events", async () => {
+    setTauri(true)
+    const first = remote()
+    setActiveRemoteTransport(first as Transport)
+    await agentInvoke("spawn_external_agent", { config: { id: "a" } })
+    const handler = jest.fn()
+    await agentListen("external-agent://stdout", handler)
+    const second = remote()
+    setActiveRemoteTransport(second as Transport)
+    first.subscribe.mock.calls[0][1]({ agentId: "remote-pid", data: "late" })
+    await expect(
+      agentInvoke("send_to_external_agent", { agentId: "remote-pid", message: "secret" })
+    ).rejects.toThrow("different Host")
+    expect(handler).not.toHaveBeenCalled()
+    expect(second.call).not.toHaveBeenCalled()
+  })
+
+  it("permits reconnecting to the same paired Host with a new transport", async () => {
+    const endpoint = {
+      baseUrl: "https://host.test",
+      deviceId: "device-a",
+      devicePrivateKeyJwk: {},
+      deviceKeyThumbprint: "key-a",
+      serverVersion: "4",
+      serverFingerprint: "cert-a",
+    }
+    setActiveRemoteEndpoint(endpoint)
+    setActiveRemoteTransport(remote() as Transport)
+    await agentInvoke("spawn_external_agent", { config: { id: "a" } })
+    const eventHandler = jest.fn()
+    const unlisten = await agentListen("external-agent://stdout", eventHandler)
+    const reconnected = remote()
+    setActiveRemoteTransport(reconnected as Transport)
+    await agentInvoke("send_to_external_agent", { agentId: "remote-pid", message: "resume" })
+    expect(reconnected.call).toHaveBeenCalledWith("send_to_external_agent", {
+      agentId: "remote-pid",
+      message: "resume",
+    })
+    reconnected.subscribe.mock.calls[0][1]({ data: "resumed" })
+    expect(eventHandler).toHaveBeenCalledWith({ data: "resumed" })
+    unlisten()
+    setActiveRemoteEndpoint({ ...endpoint, serverFingerprint: "cert-b" })
+    await expect(agentInvoke("kill_external_agent", { agentId: "remote-pid" })).rejects.toThrow(
+      "different Host"
+    )
+  })
+
+  it("retains Host ownership when a spawn response is lost", async () => {
+    const first = remote(jest.fn().mockRejectedValue(new Error("response lost")))
+    setActiveRemoteTransport(first as Transport)
+    await expect(
+      agentInvoke("spawn_external_agent", { config: { id: "uncertain" } })
+    ).rejects.toThrow("response lost")
+    const second = remote()
+    setActiveRemoteTransport(second as Transport)
+    await expect(
+      agentInvoke("spawn_external_agent", { config: { id: "uncertain" } })
+    ).rejects.toThrow("different Host")
+    expect(second.call).not.toHaveBeenCalled()
+  })
+
+  it("cleans a subscription when readiness fails", async () => {
+    const target = remote()
+    const off = jest.fn()
+    target.subscribe.mockReturnValue(off)
+    target.whenSubscribed.mockRejectedValue(new Error("offline"))
+    setActiveRemoteTransport(target as Transport)
+    await expect(agentListen("external-agent://exit", jest.fn())).rejects.toThrow("offline")
+    expect(off).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["COGNIA_GATEWAY_TOKEN", "COGNIA_GATEWAY_TASK_CONFIG", "COGNIA_TOOLHOST_TOKEN"])(
+    "refuses unsupported local bridge %s before transfer",
+    async (key) => {
+      const target = remote()
+      setActiveRemoteTransport(target as Transport)
+      await expect(
+        agentInvoke("spawn_external_agent", { config: { id: "a", env: { [key]: "secret" } } })
+      ).rejects.toThrow(
+        key === "COGNIA_TOOLHOST_TOKEN"
+          ? "transport is not configured"
+          : "Remote gateway task lease"
+      )
+      expect(target.call).not.toHaveBeenCalled()
+    }
+  )
 })

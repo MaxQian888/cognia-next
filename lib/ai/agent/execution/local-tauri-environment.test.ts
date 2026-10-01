@@ -3,6 +3,11 @@ import type { WorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 import type { WorkspaceBundle } from "@/lib/task-workspace/types"
 import { createLocalTauriExecutionEnvironment } from "./local-tauri-environment"
 
+const mockExecuteBootstrapSetup = jest.fn()
+jest.mock("@/lib/project-environment/executor", () => ({
+  executeProjectEnvironment: (...args: unknown[]) => mockExecuteBootstrapSetup(...args),
+}))
+
 const profile = (
   overrides: Partial<ProjectEnvironmentVersion> = {}
 ): ProjectEnvironmentVersion => ({
@@ -21,6 +26,30 @@ const profile = (
 })
 
 describe("local Tauri AgentTeam execution environment", () => {
+  it("preserves bootstrap configuration when the real setup adapter converts an immutable profile", async () => {
+    const execute = mockExecuteBootstrapSetup.mockResolvedValue({ success: true, bypassed: false })
+    const bootstrapAgent = {
+      enabled: true,
+      task: "Prepare dependencies",
+      baseUrl: "https://api.example.org/v1",
+      model: "test-model",
+      checks: [{ name: "ready", command: "test -d node_modules" }],
+    }
+    try {
+      const environment = createLocalTauriExecutionEnvironment()
+      await environment.prepare(profile({ bootstrapAgent }), "/repo")
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environment: expect.objectContaining({ bootstrapAgent }),
+          scope: "managedWorktree",
+          surface: "scheduled",
+        })
+      )
+    } finally {
+      execute.mockReset()
+    }
+  })
+
   it("rejects duplicate child opens while the first workspace is still opening", async () => {
     let resolveOpen!: (workspace: { executionRoot: string; settle: jest.Mock }) => void
     const settle = jest.fn().mockResolvedValue([])

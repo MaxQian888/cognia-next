@@ -1,6 +1,70 @@
 import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
 
 describe("ACP elicitation validation", () => {
+  it("normalizes native Kimi multi-select anyOf items and validates selections", () => {
+    const result = normalizeAcpElicitationRequest("kimi-question", {
+      mode: "form",
+      sessionId: "kimi-session",
+      message: "Choose features",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          q0: {
+            type: "array",
+            minItems: 1,
+            items: {
+              anyOf: [
+                { const: "tests", title: "Tests" },
+                { const: "docs", title: "Documentation" },
+              ],
+            },
+          },
+        },
+        required: ["q0"],
+      },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("Native multi-select schema was rejected")
+    expect(result.request.requestedSchema?.properties.q0.items).toMatchObject({
+      type: "string",
+      oneOf: [
+        { const: "tests", title: "Tests" },
+        { const: "docs", title: "Documentation" },
+      ],
+    })
+    expect(
+      validateAcpElicitationResponse(result.request, {
+        requestId: "kimi-question",
+        action: "accept",
+        content: { q0: ["tests", "docs"] },
+      }).content
+    ).toEqual({ q0: ["tests", "docs"] })
+    for (const selected of [[], ["invalid"]]) {
+      expect(() =>
+        validateAcpElicitationResponse(result.request, {
+          requestId: "kimi-question",
+          action: "accept",
+          content: { q0: selected },
+        })
+      ).toThrow()
+    }
+  })
+
+  it.each([
+    { anyOf: [{ const: 7 }] },
+    { type: "string", oneOf: [{ title: "missing value" }] },
+    { anyOf: [{ type: "object" }] },
+  ])("rejects malformed native multi-select items %j", (items) => {
+    expect(
+      normalizeAcpElicitationRequest("kimi-question", {
+        mode: "form",
+        sessionId: "kimi-session",
+        message: "Pick",
+        requestedSchema: { properties: { q0: { type: "array", items } } },
+      })
+    ).toMatchObject({ ok: false, reason: "invalid_schema" })
+  })
+
   it("accepts a restricted flat form schema and preserves metadata", () => {
     const result = normalizeAcpElicitationRequest("rpc-1", {
       mode: "form",

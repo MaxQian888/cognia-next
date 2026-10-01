@@ -120,9 +120,8 @@ const defaultDeps: ProcessPlaneDeps = {
   isRemoteHostActive,
   activeHostId: () => useRemoteHostStore.getState().activeHostId ?? null,
   // Keyed on the capability rather than on `isTauri()`, because the headless
-  // brain and the CLI must answer `true` here too. An active remote host does
-  // not subtract from it: `agentInvoke` keeps sending the spawn to this
-  // machine's own process table.
+  // brain and the CLI must answer `true` here too. This describes the local
+  // fallback; an explicitly selected remote Host takes precedence below.
   //
   // The CLI needs the second term: `detectPlatform()` resolves it to `web`
   // (a Node process has no `window`, which is what SSR looks like too), so the
@@ -166,16 +165,6 @@ function deviceGrants(manifest: HostFeatureManifest, grant: string): readonly st
 export function externalAgentProcessPlane(
   operation?: ProcessPlaneCommand
 ): ProcessPlaneAvailability {
-  // A shell with its own process table answers `local` unconditionally, even
-  // while it is driving a remote Host, because that is where the child actually
-  // starts: `agentInvoke` sends every plane command through Tauri `invoke` the
-  // moment `isTauri()` holds, and never through the routing transport. Letting
-  // an active remote host win here judged the desktop against somebody else's
-  // manifest, and since no Host shipped `external-agent.process-plane` before
-  // this change, every stdio agent came back `transport_blocked` with its
-  // Connect button disabled while the spawn it refused would have succeeded.
-  if (deps.hasLocalProcessTable()) return { ok: true, via: "local" }
-
   const grant = requiredGrantFor(operation)
 
   if (deps.isRemoteHostActive()) {
@@ -189,6 +178,8 @@ export function externalAgentProcessPlane(
     }
     return { ok: true, via: "remote" }
   }
+
+  if (deps.hasLocalProcessTable()) return { ok: true, via: "local" }
 
   // No remote host is *active*, but the runtime snapshot may still describe one
   // this shell is attached to. Same fallback `remote-host-configs` uses, and the
@@ -240,13 +231,12 @@ export function subscribeExternalAgentProcessPlane(onChange: () => void): () => 
  * on nothing keeps describing the machine that answered first. Comparing this
  * key is how such a cache tells the two apart.
  *
- * `local` is one scope for every shell with its own process table, because
- * that is the machine the code is running on and it cannot change underneath
- * the process.
+ * With no remote selected, `local` identifies the shell's own process table.
+ * A selected remote always has its own scope, including on desktop.
  */
 export function externalAgentProcessPlaneScope(): string {
-  if (deps.hasLocalProcessTable()) return "local"
   if (deps.isRemoteHostActive()) return `host:${deps.activeHostId() ?? "unknown"}`
+  if (deps.hasLocalProcessTable()) return "local"
   return `target:${deps.getRuntimeSnapshot().target?.id ?? "none"}`
 }
 

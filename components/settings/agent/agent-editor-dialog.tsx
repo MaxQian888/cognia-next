@@ -11,6 +11,8 @@
  */
 
 import { Surface } from "@/components/surface/surface"
+import { KvEditor } from "@/components/settings/mcp/kv-editor"
+import { kvRowsToObject, objectToKvRows } from "@/components/settings/mcp/mcp-server-utils"
 import { useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
@@ -39,6 +41,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
+import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
@@ -86,6 +90,7 @@ interface AgentFormData {
   processCommand: string
   processArgs: string
   processCwd: string
+  processEnv?: Record<string, string>
   // Network config (for http/websocket)
   networkEndpoint: string
   networkApiKey: string
@@ -305,9 +310,9 @@ export function AgentEditorDialog({
     initialPreset ||
       (editingAgentId ? String(getAgent(editingAgentId)?.metadata?.preset ?? "") : "")
   )
-  // Both path affordances below are this device's filesystem: an external agent
-  // spawns through a local process, so there is no host to browse instead.
+  // A native picker only resolves paths on this device, never on a remote Host.
   const directoryPicker = useDirectoryPicker()
+  const localPaths = !isRemoteHostActive()
 
   const [formData, setFormData] = useState<AgentFormData>(() => {
     // Quick-start gallery: open with the preset's defaults so the user only
@@ -321,7 +326,8 @@ export function AgentEditorDialog({
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand: preset.process?.command ?? "",
-          processArgs: preset.process?.args?.join(" ") ?? "",
+          processArgs: preset.process?.args?.map(shellQuote).join(" ") ?? "",
+          processEnv: preset.process?.env,
           networkEndpoint: preset.network?.endpoint ?? "",
           defaultPermissionMode: preset.defaultPermissionMode,
           description:
@@ -329,7 +335,17 @@ export function AgentEditorDialog({
               ? t("opencodeV2PresetDescription")
               : initialPreset === "devin"
                 ? t("devinPresetDescription")
-                : preset.description,
+                : initialPreset === "aider"
+                  ? t("aiderPresetDescription")
+                  : initialPreset === "qoder"
+                    ? t("qoderPresetDescription")
+                    : initialPreset === "kimi"
+                      ? t("kimiPresetDescription")
+                      : initialPreset === "cline"
+                        ? t("clinePresetDescription")
+                        : initialPreset === "goose"
+                          ? t("goosePresetDescription")
+                          : preset.description,
           ...opencodeFieldsFromMetadata(preset.metadata),
         }
       }
@@ -349,8 +365,9 @@ export function AgentEditorDialog({
       protocol: agent.protocol,
       transport: agent.transport,
       processCommand: agent.process?.command || "",
-      processArgs: agent.process?.args?.join(" ") || "",
+      processArgs: agent.process?.args?.map(shellQuote).join(" ") || "",
       processCwd: agent.process?.cwd || "",
+      processEnv: agent.process?.env,
       networkEndpoint: agent.network?.endpoint || "",
       networkApiKey: agent.network?.apiKey || "",
       defaultPermissionMode: agent.defaultPermissionMode || "default",
@@ -373,8 +390,29 @@ export function AgentEditorDialog({
   })
 
   const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
+  const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows(formData.processEnv))
 
   const handleSave = useCallback(() => {
+    const usesProcess =
+      formData.transport === "stdio" ||
+      (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+    const processArgs = managedDsh ? [] : tokenizeShellCommand(formData.processArgs)
+    if (usesProcess && processArgs === null) {
+      toast.error(t("argumentsInvalid"))
+      return
+    }
+    const environment = kvRowsToObject(processEnvRows)
+    const environmentNames = processEnvRows.map((row) => row.key.trim()).filter(Boolean)
+    if (
+      usesProcess &&
+      (environmentNames.some((key) => key.includes("=") || key.includes("\0")) ||
+        new Set(environmentNames).size !== environmentNames.length ||
+        Object.values(environment).some((value) => value.includes("\0")))
+    ) {
+      toast.error(t("environmentInvalid"))
+      return
+    }
+
     const toNonNegativeInteger = (value: string, fallback: number): number => {
       const parsed = Number.parseInt(value, 10)
       if (Number.isNaN(parsed) || parsed < 0) {
@@ -448,8 +486,9 @@ export function AgentEditorDialog({
       if (formData.opencodeAutoSpawn) {
         input.process = {
           command: formData.processCommand.trim() || "opencode",
-          args: formData.processArgs.split(" ").filter(Boolean),
+          args: processArgs ?? [],
           cwd: formData.processCwd || undefined,
+          env: environment,
         }
       } else {
         if (!formData.networkEndpoint.trim()) {
@@ -468,11 +507,14 @@ export function AgentEditorDialog({
       }
       input.process = {
         command: managedDsh ? "" : formData.processCommand.trim(),
-        args: managedDsh ? [] : formData.processArgs.split(" ").filter(Boolean),
+        args: processArgs ?? [],
         cwd: formData.processCwd || undefined,
-        ...(managedDsh && formData.networkApiKey
-          ? { env: { DEEPSEEK_API_KEY: formData.networkApiKey } }
-          : {}),
+        env: {
+          ...environment,
+          ...(managedDsh && formData.networkApiKey
+            ? { DEEPSEEK_API_KEY: formData.networkApiKey }
+            : {}),
+        },
       }
     } else {
       if (!formData.networkEndpoint.trim()) {
@@ -581,7 +623,7 @@ export function AgentEditorDialog({
     onOpenChange(false)
     setFormData(DEFAULT_FORM_DATA)
     setSelectedPreset("")
-  }, [formData, selectedPreset, managedDsh, onSave, onOpenChange, t, tGateway])
+  }, [formData, processEnvRows, selectedPreset, managedDsh, onSave, onOpenChange, t, tGateway])
 
   // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
   // pattern. When a real preset is chosen, prefill the form fields so the user
@@ -593,13 +635,14 @@ export function AgentEditorDialog({
       if (!presetId || presetId === "custom") return
       const preset = getPresetConfig(presetId)
       if (!preset) return
+      if (preset.process?.env) setProcessEnvRows(objectToKvRows(preset.process.env))
       setFormData((current) => ({
         ...current,
         name: presetId === "opencode-v2-service" ? t("opencodeV2PresetName") : preset.name,
         protocol: preset.protocol,
         transport: preset.transport,
         processCommand: preset.process?.command || current.processCommand,
-        processArgs: preset.process?.args?.join(" ") || current.processArgs,
+        processArgs: preset.process?.args?.map(shellQuote).join(" ") || current.processArgs,
         networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
         defaultPermissionMode: preset.defaultPermissionMode,
         description:
@@ -607,7 +650,17 @@ export function AgentEditorDialog({
             ? t("opencodeV2PresetDescription")
             : presetId === "devin"
               ? t("devinPresetDescription")
-              : preset.description,
+              : presetId === "aider"
+                ? t("aiderPresetDescription")
+                : presetId === "qoder"
+                  ? t("qoderPresetDescription")
+                  : presetId === "kimi"
+                    ? t("kimiPresetDescription")
+                    : presetId === "cline"
+                      ? t("clinePresetDescription")
+                      : presetId === "goose"
+                        ? t("goosePresetDescription")
+                        : preset.description,
         ...opencodeFieldsFromMetadata(preset.metadata),
       }))
     },
@@ -623,6 +676,25 @@ export function AgentEditorDialog({
         </DialogHeader>
 
         <div className="-mx-1 grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-1 py-3">
+          {(selectedPreset === "goose" ||
+            selectedPreset === "aider" ||
+            selectedPreset === "qoder" ||
+            selectedPreset === "cline" ||
+            selectedPreset === "kimi") && (
+            <p className="rounded-md border p-3 text-xs text-muted-foreground">
+              {tManager(
+                selectedPreset === "qoder"
+                  ? "qoderSetupHint"
+                  : selectedPreset === "kimi"
+                    ? "kimiSetupHint"
+                    : selectedPreset === "cline"
+                      ? "clineSetupHint"
+                      : selectedPreset === "aider"
+                        ? "aiderSetupHint"
+                        : "gooseSetupHint"
+              )}
+            </p>
+          )}
           {/* Quick start preset — only shown when creating, not when editing,
               to avoid silently overwriting hand-tuned fields. */}
           {!editingAgentId && (
@@ -982,7 +1054,29 @@ export function AgentEditorDialog({
                       // i18n-exempt: example CLI arguments, not UI prose
                       placeholder="--stdio --model claude-sonnet"
                     />
+                    <p className="text-xs text-muted-foreground">{t("argumentsHint")}</p>
                   </div>
+                  {(formData.protocol === "aider-cli" ||
+                    selectedPreset === "qoder" ||
+                    selectedPreset === "cline" ||
+                    selectedPreset === "kimi") && (
+                    <KvEditor
+                      label={t(
+                        selectedPreset === "qoder"
+                          ? "qoderEnvironment"
+                          : selectedPreset === "kimi"
+                            ? "kimiEnvironment"
+                            : selectedPreset === "cline"
+                              ? "clineEnvironment"
+                              : "aiderEnvironment"
+                      )}
+                      maskValues
+                      rows={processEnvRows}
+                      onChange={setProcessEnvRows}
+                      keyPlaceholder={t("aiderEnvironmentKey")}
+                      valuePlaceholder={t("aiderEnvironmentValue")}
+                    />
+                  )}
                   <div className="grid gap-2">
                     <Label htmlFor="cwd">{t("workingDirectory")}</Label>
                     <div className="flex gap-2">
@@ -997,7 +1091,7 @@ export function AgentEditorDialog({
                           browse without a native picker and the input is the
                           control. The button used to render regardless and do
                           nothing at all when clicked. */}
-                      {directoryPicker.available && (
+                      {localPaths && directoryPicker.available && (
                         <Button
                           type="button"
                           variant="outline"
@@ -1044,13 +1138,32 @@ export function AgentEditorDialog({
             </FormSection>
           )}
 
+          {(formData.transport === "stdio" ||
+            (formData.protocol === "opencode" && formData.opencodeAutoSpawn)) &&
+            formData.protocol !== "aider-cli" &&
+            selectedPreset !== "qoder" &&
+            selectedPreset !== "cline" &&
+            selectedPreset !== "kimi" && (
+              <FormSection title={t("processEnvironment")} dataTestId="process-environment-section">
+                <p className="text-xs text-muted-foreground">{t("processEnvironmentHint")}</p>
+                <KvEditor
+                  label={t("processEnvironment")}
+                  maskValues
+                  rows={processEnvRows}
+                  onChange={setProcessEnvRows}
+                  keyPlaceholder={t("aiderEnvironmentKey")}
+                  valuePlaceholder={t("aiderEnvironmentValue")}
+                />
+              </FormSection>
+            )}
+
           <CogniaModelPicker
             config={{
               protocol: formData.protocol,
               transport: formData.transport,
               process: {
                 command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
-                args: formData.processArgs.split(" ").filter(Boolean),
+                args: tokenizeShellCommand(formData.processArgs) ?? [],
               },
               network:
                 formData.transport !== "stdio" && !formData.opencodeAutoSpawn
@@ -1230,7 +1343,7 @@ export function AgentEditorDialog({
                   {/* Same reasoning as the working-directory button above: the
                       textarea beside it is the control on a shell with no
                       picker, and this used to render inert. */}
-                  {directoryPicker.available && (
+                  {localPaths && directoryPicker.available && (
                     <Button
                       type="button"
                       variant="outline"

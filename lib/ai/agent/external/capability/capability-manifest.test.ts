@@ -213,3 +213,15 @@ describe("manifest / vocabulary parity", () => {
     )
   })
 })
+
+describe("official Aider CLI capability truth", () => {
+  it("declares host-owned history and launch controls without native tool approvals", () => {
+    const row = externalCapabilityManifest().protocols["aider-cli"].capabilities
+    expect(row["session.resume"].level).toBe("equivalent")
+    expect(row["session.multi-turn"].level).toBe("equivalent")
+    expect(row["set-model"].level).toBe("equivalent")
+    expect(row["permissions.interrupt-resume"].level).toBe("unsupported")
+    expect(row.mcp.level).toBe("unsupported")
+    expect(row["output.structured"].level).toBe("unsupported")
+  })
+})

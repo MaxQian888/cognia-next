@@ -45,12 +45,13 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains the six registered built-in adapters", () => {
+  it("contains the seven registered built-in adapters", () => {
     expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
       "acp",
       "codex-app-server",
       "dsh-sdk",
       "pi-rpc",
+      "aider-cli",
       "opencode-v2",
       "a2a",
     ])

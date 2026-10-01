@@ -6,12 +6,35 @@ import path from "node:path"
 import {
   agentReadTextFile,
   agentWriteTextFile,
+  agentDeleteTextFile,
   createCliAgentHost,
   getAcpHostCapabilities,
   runsExternalAgentProcessesLocally,
 } from "./host-branch"
 
 describe("CLI external-agent host branch", () => {
+  it("deletes owned files idempotently and refuses symlinks and directory escapes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aider-host-delete-"))
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "aider-host-outside-"))
+    try {
+      const file = path.join(root, "session.json")
+      fs.writeFileSync(file, "history")
+      await agentDeleteTextFile(file, [root])
+      expect(fs.existsSync(file)).toBe(false)
+      await agentDeleteTextFile(file, [root])
+      const target = path.join(outside, "keep.txt")
+      fs.writeFileSync(target, "keep")
+      const link = path.join(root, "linked.txt")
+      fs.symlinkSync(target, link)
+      await expect(agentDeleteTextFile(link, [root])).rejects.toThrow()
+      await expect(agentDeleteTextFile(target, [root])).rejects.toThrow(/outside/)
+      await expect(agentDeleteTextFile(root, [root])).rejects.toThrow()
+      expect(fs.readFileSync(target, "utf8")).toBe("keep")
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+      fs.rmSync(outside, { recursive: true, force: true })
+    }
+  })
   it("reports the CLI host and its durable elicitation overlay", () => {
     expect(runsExternalAgentProcessesLocally()).toBe(true)
     expect(getAcpHostCapabilities()).toMatchObject({

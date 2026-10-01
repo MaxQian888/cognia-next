@@ -57,10 +57,11 @@ function profileFrom(
 }
 
 describe("protocol vocabulary", () => {
-  it("registers exactly the six protocols that have an adapter", () => {
+  it("registers exactly the seven protocols that have an adapter", () => {
     expect([...BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS].sort()).toEqual([
       "a2a",
       "acp",
+      "aider-cli",
       "codex-app-server",
       "dsh-sdk",
       "opencode-v2",

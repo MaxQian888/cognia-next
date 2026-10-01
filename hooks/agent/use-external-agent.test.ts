@@ -191,6 +191,7 @@ interface FakeManager {
   reconnect: jest.Mock
   createSession: jest.Mock
   closeSession: jest.Mock
+  deleteSession: jest.Mock
   listSessions: jest.Mock
   forkSession: jest.Mock
   resumeSession: jest.Mock
@@ -208,6 +209,7 @@ interface FakeManager {
   authenticate: jest.Mock
   getTerminalAuthState: jest.Mock
   cancelTerminalAuthentication: jest.Mock
+  logout: jest.Mock
   listProviders: jest.Mock
   setProvider: jest.Mock
   disableProvider: jest.Mock
@@ -240,6 +242,7 @@ function makeManager(): FakeManager {
     reconnect: jest.fn(async () => undefined),
     createSession: jest.fn(async () => ({ id: "sess-1" })),
     closeSession: jest.fn(async () => undefined),
+    deleteSession: jest.fn(async () => undefined),
     listSessions: jest.fn(async () => []),
     forkSession: jest.fn(async () => ({ id: "sess-fork" })),
     resumeSession: jest.fn(async () => ({ id: "sess-resume" })),
@@ -263,6 +266,7 @@ function makeManager(): FakeManager {
     authenticate: jest.fn(async () => undefined),
     getTerminalAuthState: jest.fn(() => undefined),
     cancelTerminalAuthentication: jest.fn(async () => undefined),
+    logout: jest.fn(async () => undefined),
     listProviders: jest.fn(async () => ({ providers: [] })),
     setProvider: jest.fn(async () => ({})),
     disableProvider: jest.fn(async () => ({})),
@@ -339,6 +343,128 @@ function seedAgent(id = "a1") {
 function _chatStateClearActive() {
   storeStateRef.current.activeAgentId = null
 }
+
+describe("useExternalAgent authentication lifecycle", () => {
+  it.each(["authenticate", "logout"])(
+    "refuses a stale %s callback after agent selection changes",
+    async (operation) => {
+      seedAgent()
+      const { result, rerender } = renderHook(() => useExternalAgent())
+      await flush()
+      const authenticate = result.current.authenticate
+      const captured =
+        operation === "authenticate" ? () => authenticate("login") : result.current.logout
+      storeStateRef.current.activeAgentId = "a2"
+      rerender()
+      await flush()
+      await act(async () => {
+        await expect(captured()).rejects.toThrow("Selected agent changed")
+      })
+      expect(fakeManager.authenticate).not.toHaveBeenCalled()
+      expect(fakeManager.logout).not.toHaveBeenCalled()
+    }
+  )
+  it.each(["compaction", "provider undo"])(
+    "does not change accounts during %s",
+    async (operation) => {
+      seedAgent()
+      let finish!: () => void
+      const blocked = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      fakeManager.getCompactionCapability.mockResolvedValue({ status: "supported", routes: [] })
+      fakeManager.compactSession.mockReturnValue(blocked)
+      fakeManager.undoLastProviderChange.mockReturnValue(blocked)
+      const { result } = renderHook(() => useExternalAgent())
+      await flush()
+      act(() => result.current.acknowledgeProviderUndoWarning())
+      let running!: Promise<void>
+      await act(async () => {
+        running =
+          operation === "compaction"
+            ? result.current.compactSession("sess-1")
+            : result.current.undoLastProviderChange("sess-1")
+        await Promise.resolve()
+      })
+      await act(async () => {
+        await expect(result.current.authenticate("login")).rejects.toThrow("operation is running")
+        await expect(result.current.logout()).rejects.toThrow("operation is running")
+      })
+      expect(fakeManager.authenticate).not.toHaveBeenCalled()
+      expect(fakeManager.logout).not.toHaveBeenCalled()
+      await act(async () => {
+        finish()
+        await running
+      })
+    }
+  )
+  it("refuses concurrent account mutations and releases the busy state after login failure", async () => {
+    seedAgent()
+    let reject!: (error: Error) => void
+    fakeManager.authenticate.mockImplementation(
+      () =>
+        new Promise<void>((_, fail) => {
+          reject = fail
+        })
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    let login!: Promise<void>
+    await act(async () => {
+      login = result.current.authenticate("login")
+      await Promise.resolve()
+    })
+    expect(result.current.isLoading).toBe(true)
+    await act(async () => {
+      await expect(result.current.logout()).rejects.toThrow("operation is running")
+      await expect(result.current.authenticate("login")).rejects.toThrow("operation is running")
+    })
+    expect(fakeManager.logout).not.toHaveBeenCalled()
+    await act(async () => {
+      reject(new Error("Login refused"))
+      await expect(login).rejects.toThrow("Login refused")
+    })
+    expect(result.current.isLoading).toBe(false)
+  })
+  it("terminal authentication invalidates the active session and refreshes the handshake", async () => {
+    seedAgent()
+    fakeManager.getAuthMethods.mockReturnValue({
+      status: "ok",
+      data: [{ id: "login", type: "terminal" }],
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    expect(result.current.activeSession?.id).toBe("sess-1")
+    await act(async () => {
+      await result.current.authenticate("login")
+    })
+    expect(fakeManager.authenticate).toHaveBeenCalledWith("a1", "login", undefined)
+    expect(result.current.activeSession).toBeNull()
+  })
+
+  it("logout clears the active session and reconnects only after native logout succeeds", async () => {
+    seedAgent()
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    fakeManager.logout.mockRejectedValueOnce(new Error("logout refused"))
+    await act(async () => {
+      await expect(result.current.logout()).rejects.toThrow("logout refused")
+    })
+    expect(result.current.activeSession?.id).toBe("sess-1")
+    expect(fakeManager.reconnect).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.logout()
+    })
+    expect(result.current.activeSession).toBeNull()
+    expect(fakeManager.reconnect).toHaveBeenCalledWith("a1")
+  })
+})
 
 // Placed first so no earlier test's lingering async (a known React-19 race in
 // later pure-unit hook tests) can leak an unhandled rejection into the
@@ -632,6 +758,59 @@ describe("useExternalAgent core actions", () => {
       await result.current.closeSession("sess-1")
     })
     expect(fakeManager.closeSession).toHaveBeenCalledWith("a1", "sess-1")
+  })
+
+  it("deletes native history and clears only the active matching session", async () => {
+    seedAgent("a1")
+    fakeManager.getAgent.mockReturnValue({
+      validity: { negotiation: { agentCapabilities: { sessionCapabilities: { delete: {} } } } },
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await act(async () => {
+      await result.current.deleteSession("other")
+    })
+    expect(result.current.activeSession?.id).toBe("sess-1")
+    await act(async () => {
+      await result.current.deleteSession("sess-1")
+    })
+    expect(fakeManager.deleteSession).toHaveBeenLastCalledWith("a1", "sess-1")
+    expect(result.current.activeSession).toBeNull()
+  })
+
+  it("rejects unsupported native deletion without locally closing history", async () => {
+    seedAgent("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await expect(
+      act(async () => {
+        await result.current.deleteSession("s")
+      })
+    ).rejects.toThrow(/native session deletion/i)
+    expect(fakeManager.deleteSession).not.toHaveBeenCalled()
+    expect(fakeManager.closeSession).not.toHaveBeenCalled()
+  })
+
+  it("preserves active session when native deletion fails", async () => {
+    seedAgent("a1")
+    fakeManager.getAgent.mockReturnValue({
+      validity: { negotiation: { agentCapabilities: { sessionCapabilities: { delete: {} } } } },
+    })
+    fakeManager.deleteSession.mockRejectedValueOnce(new Error("native disk failure"))
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await expect(
+      act(async () => {
+        await result.current.deleteSession("sess-1")
+      })
+    ).rejects.toThrow("native disk failure")
+    expect(result.current.activeSession?.id).toBe("sess-1")
   })
 
   it("listSessions returns [] when neither argument nor active agent is available", async () => {

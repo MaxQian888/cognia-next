@@ -36,6 +36,9 @@ jest.mock("./opencode-status-card", () => ({
 jest.mock("./pi-auth-status-card", () => ({
   PiAuthStatusCard: () => <div data-testid="pi-auth-status-card" />,
 }))
+jest.mock("./kimi-management-card", () => ({
+  KimiManagementCard: () => <div data-testid="kimi-management-card" />,
+}))
 jest.mock("@/components/agent/external-agent/lifecycle-status-notice", () => ({
   LifecycleStatusNotice: () => null,
 }))
@@ -95,6 +98,11 @@ function renderInspector(over: Partial<Parameters<typeof AgentInspector>[0]> = {
 describe("AgentInspector", () => {
   beforeEach(() => updateConfigMock.mockClear())
 
+  it("mounts native management for the Kimi ACP preset only", () => {
+    renderInspector({ agent: { ...agent, metadata: { preset: "kimi" } } })
+    expect(screen.getByTestId("kimi-management-card")).toBeInTheDocument()
+  })
+
   it("duplicates the agent from the header", async () => {
     const user = userEvent.setup()
     const { onDuplicate } = renderInspector()
@@ -134,6 +142,28 @@ describe("AgentInspector", () => {
     const enableButtons = screen.getAllByTestId("inspector-next-action")
     await user.click(enableButtons[enableButtons.length - 1]!)
     expect(updateConfigMock).toHaveBeenCalledWith("a1", { enabled: true })
+  })
+
+  it("preserves argument boundaries and environment when changing the cwd inline", async () => {
+    const configured = {
+      ...agent,
+      process: {
+        command: "pi",
+        args: ["--skill", "./my skills", ""],
+        env: { AGENT_PERSONA: "reviewer" },
+        cwd: "/work",
+        debug: true,
+      },
+    }
+    renderInspector({ agent: configured })
+    await userEvent.click(screen.getByRole("tab", { name: /connection/i }))
+    const cwd = screen.getByLabelText(/working directory/i)
+    await userEvent.clear(cwd)
+    await userEvent.type(cwd, "/workspace/review")
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(updateConfigMock).toHaveBeenCalledWith("a1", {
+      process: { ...configured.process, cwd: "/workspace/review" },
+    })
   })
 
   it("edits the command inline and saves through the lifecycle service", async () => {

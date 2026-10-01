@@ -11,6 +11,8 @@ const messages = {
         claude: "Claude",
         codex: "Codex",
         devin: "Devin CLI",
+        goose: "Goose",
+        aider: "Aider",
         claudeCode: "Claude Code",
         geminiCli: "Gemini",
         cursorCli: "Cursor",
@@ -29,6 +31,21 @@ function renderBadge(runtime: TeammateRuntime, iconOnly = false) {
 }
 
 describe("RuntimeBadge", () => {
+  it("renders Kimi Code's runtime identity", () => {
+    renderBadge("kimi")
+    expect(screen.getByTestId("runtime-badge-kimi")).toHaveAttribute("title", "Kimi Code")
+  })
+
+  it("renders the Cline teammate label", () => {
+    renderBadge("cline")
+    expect(screen.getByText("Cline")).toBeInTheDocument()
+  })
+
+  it("renders the Qoder teammate label", () => {
+    renderBadge("qoder")
+    expect(screen.getByText("Qoder")).toBeInTheDocument()
+  })
+
   it("renders the Claude label with default icon-and-text layout", () => {
     renderBadge("claude")
     expect(screen.getByText("Claude")).toBeInTheDocument()
@@ -63,6 +80,21 @@ describe("RuntimeBadge", () => {
   it("renders the Cursor label", () => {
     renderBadge("cursor-cli")
     expect(screen.getByText("Cursor")).toBeInTheDocument()
+  })
+
+  it("renders the Goose teammate label and existing brand icon", () => {
+    renderBadge("goose")
+    expect(screen.getByText("Goose")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-badge-goose").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/goose.svg"
+    )
+  })
+
+  it("renders the Aider teammate label", () => {
+    renderBadge("aider")
+    expect(screen.getByText("Aider")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-badge-aider")).toHaveAttribute("title", "Aider")
   })
 
   it("renders the Devin label and brand icon", () => {

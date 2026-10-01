@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { assessRuntimeVersion } from "@/lib/ai/agent/external/config/runtime-version"
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
 
@@ -19,6 +20,91 @@ import {
 } from "./backend-install"
 
 describe("resolveInstallPlan", () => {
+  it("rejects the archived Python Kimi runtime and keeps supported Node versions uncertified", () => {
+    const policy = findRuntimeById("kimi")!
+    const observe = (output: string) =>
+      assessRuntimeVersion(policy, {
+        output,
+        parser: "semver-anywhere",
+        checkedAt: "2026-10-01T00:00:00Z",
+      })
+    expect(observe("kimi 1.52.0").verdict).toBe("unsupported")
+    expect(observe("kimi 2.1.1").verdict).toBe("supported-uncertified")
+    expect(observe("kimi 3.0.0").verdict).toBe("unsupported")
+  })
+
+  it("installs the current Node Kimi Code package at the researched version", () => {
+    const plan = resolveInstallPlan("kimi")!
+    expect(plan.runtimeId).toBe("kimi")
+    expect(plan.methods[0]).toMatchObject({
+      ownership: "user-managed",
+      command: "npm",
+      args: ["install", "-g", "@moonshot-ai/kimi-code@2.1.1"],
+    })
+    expect(installOfferFor(plan).ownership).toBe("user-managed")
+  })
+
+  it("installs the tested official Cline CLI pin as user-owned bytes", () => {
+    const plan = resolveInstallPlan("cline")!
+    expect(plan.runtimeId).toBe("cline")
+    expect(plan.methods[0]).toMatchObject({
+      ownership: "user-managed",
+      command: "npm",
+      args: ["install", "-g", "cline@3.0.67"],
+    })
+  })
+
+  it("offers Qoder's recommended native installer as a user-owned system installation", () => {
+    const plan = resolveInstallPlan("qoder")!
+    expect(plan.runtimeId).toBe("qoder")
+    expect(plan.methods).toHaveLength(1)
+    expect(plan.methods[0]).toMatchObject({
+      kind: "curl",
+      ownership: "user-managed",
+      command: "bash",
+      args: ["-o", "pipefail", "-c", "curl -fsSL https://qoder.com/install | bash"],
+      requires: ["curl", "bash"],
+    })
+    expect(plan.docsUrl).toBe("https://docs.qoder.com/cli/installation")
+  })
+
+  it("offers pinned Aider in an isolated uv environment and keeps ownership external", async () => {
+    const plan = resolveInstallPlan("aider")!
+    expect(plan.runtimeId).toBe("aider")
+    expect(installOfferFor(plan).ownership).toBe("user-managed")
+    expect(plan.methods[0]).toMatchObject({
+      command: "uv",
+      kind: "uv",
+      requires: ["uv"],
+      args: [
+        "tool",
+        "install",
+        "--force",
+        "--python",
+        "python3.12",
+        "--with",
+        "pip",
+        "aider-chat==0.86.2",
+      ],
+    })
+    expect(await pickInstallMethod(plan, async () => false)).toBeUndefined()
+    expect(await pickInstallMethod(plan, async (command) => command === "uv")).toBe(plan.methods[0])
+  })
+  it("offers Goose Homebrew or a noninteractive official installer without configuring credentials", async () => {
+    const plan = resolveInstallPlan("goose")!
+    expect(plan.runtimeId).toBe("goose")
+    expect(installOfferFor(plan).ownership).toBe("user-managed")
+    expect(plan.methods[0].display).toBe("brew install block-goose-cli")
+    const fallback = await pickInstallMethod(
+      plan,
+      async (command) => command === "curl" || command === "bash"
+    )
+    expect(fallback?.display).toBe(
+      "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash"
+    )
+    expect(await pickInstallMethod(plan, async (command) => command === "curl")).toBeUndefined()
+  })
+
   it("maps native-binary agents to their official install methods", () => {
     expect(resolveInstallPlan("claude-agent-acp")?.methods[0]?.display).toBe(
       "npm install -g @agentclientprotocol/claude-agent-acp"

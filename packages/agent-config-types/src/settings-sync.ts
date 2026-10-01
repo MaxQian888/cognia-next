@@ -145,6 +145,11 @@ export const SETTINGS_SYNC = {
   theme: { category: "shared" },
   fontScale: { category: "shared" },
   language: { category: "shared" },
+  languageMode: {
+    category: "device-local",
+    rationale:
+      "Following the operating system is a per-device choice; each device resolves its own language.",
+  },
   reduceMotion: { category: "shared" },
   workflowEditorPerformanceTier: {
     category: "device-local",

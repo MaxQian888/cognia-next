@@ -20,6 +20,7 @@
  * manager holding the old configuration.
  */
 
+import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import { Surface } from "@/components/surface/surface"
 import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useMemo, useState } from "react"
@@ -66,6 +67,7 @@ import { AgentReadinessPipeline, AgentStatePill } from "./agent-readiness-pipeli
 import { CodexAppServerStatusCard } from "./codex-app-server-status-card"
 import { OpencodeStatusCard } from "./opencode-status-card"
 import { PiAuthStatusCard } from "./pi-auth-status-card"
+import { KimiManagementCard } from "./kimi-management-card"
 import { PERMISSION_MODE_LABEL_KEY, declaredWebSearchOf } from "./agent-editor-dialog"
 
 const ACP_PREVIEW_FEATURES: readonly AcpPreviewFeature[] = [
@@ -102,7 +104,9 @@ interface ConnectionDraft {
 function draftFromAgent(agent: LifecycleExternalAgentConfig): ConnectionDraft {
   return {
     processCommand: agent.process?.command ?? "",
-    processArgs: Array.isArray(agent.process?.args) ? agent.process.args.join(" ") : "",
+    processArgs: Array.isArray(agent.process?.args)
+      ? agent.process.args.map(shellQuote).join(" ")
+      : "",
     processCwd: agent.process?.cwd ?? "",
     networkEndpoint: agent.network?.endpoint ?? "",
     networkApiKey: agent.network?.apiKey ?? "",
@@ -240,9 +244,15 @@ export function AgentInspector({
         toast.error(t("commandRequired"))
         return
       }
+      const args = tokenizeShellCommand(draft.processArgs)
+      if (args === null) {
+        toast.error(t("argumentsInvalid"))
+        return
+      }
       updates.process = {
+        ...agent.process,
         command: draft.processCommand.trim(),
-        args: draft.processArgs.split(" ").filter(Boolean),
+        args,
         cwd: draft.processCwd || undefined,
       }
     }
@@ -284,7 +294,7 @@ export function AgentInspector({
     } finally {
       setSaving(false)
     }
-  }, [draft, baseDraft, agent.transport, applyUpdate, t, tErrors])
+  }, [draft, baseDraft, agent.transport, agent.process, applyUpdate, t, tErrors])
 
   const runAction = useCallback(
     (action: AgentReadinessAction) => {
@@ -590,6 +600,7 @@ export function AgentInspector({
           {agent.protocol === "pi-rpc" && (
             <PiAuthStatusCard agentId={agent.id} connected={isConnected} />
           )}
+          {presetId === "kimi" && agent.protocol === "acp" && <KimiManagementCard agent={agent} />}
         </TabsContent>
 
         {/* Connection — the transport fields, editable inline. Only the

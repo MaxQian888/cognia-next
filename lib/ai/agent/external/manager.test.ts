@@ -29,6 +29,9 @@ jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
 jest.mock("./runtimes/acp/acp-client", () => ({
   AcpClientAdapter: class {
     readonly protocol = "acp"
+    async prepareForkSessionForExecution() {
+      return undefined
+    }
   },
 }))
 jest.mock("./runtimes/opencode/opencode-client", () => ({
@@ -73,9 +76,15 @@ import {
   checkExternalAgentDelegation,
   executeOnExternalAgent,
   shouldReconcileExitToDisconnected,
+  registerBuiltinProtocolAdapters,
   type ExternalAgentLifecycleEvent,
 } from "./manager"
-import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
+import {
+  protocolAdapterRegistry,
+  ProtocolAdapterRegistry,
+  type SessionCreateOptions,
+} from "./protocol-adapter"
+import { AiderCliClientAdapter } from "./runtimes/aider/aider-cli-client"
 import { PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
 import { AcpClientAdapter } from "./runtimes/acp/acp-client"
 import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
@@ -90,6 +99,14 @@ import { detectInstalledRuntimes } from "./config/installed-runtimes"
 import { __setProcessPlaneDepsForTests } from "./capability/process-plane"
 import { EMPTY_THINKING_SURFACE } from "./session/session-models"
 import { parseGatewaySessionId } from "./config/gateway-task"
+import {
+  __resetSpawnPlacementsForTests,
+  clearSpawnPlacement,
+  registerSpawnPlacement,
+  spawnPlacementFor,
+  withSpawnPlacement,
+} from "@/lib/sandbox/spawn-placement-registry"
+import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 import {
   __resetRunEnvironmentForTests,
   recordRunEnvironmentOutcome,
@@ -1241,6 +1258,122 @@ describe("Capability helpers (unsupported / ok / error)", () => {
     await m.deleteSession("agent-1", "s_2")
     expect(closeSpy).toHaveBeenCalledWith("s_2")
   })
+
+  it("removes native-deleted sessions from the instance map only after success", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const session = await m.createSession("agent-1")
+    currentMock.deleteSessionImpl = jest.fn().mockRejectedValue(new Error("delete failed"))
+    await expect(m.deleteSession("agent-1", session.id)).rejects.toThrow("delete failed")
+    expect(m.getAgent("agent-1")?.sessions.has(session.id)).toBe(true)
+    currentMock.deleteSessionImpl.mockResolvedValue(undefined)
+    await m.deleteSession("agent-1", session.id)
+    expect(m.getAgent("agent-1")?.sessions.has(session.id)).toBe(false)
+  })
+
+  it("does not resurrect deleted Kimi history from stale native listings and clears acknowledged tombstones", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
+    const session = await m.createSession("agent-1")
+    session.metadata = { cwd: "/work" }
+    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: session.id }])
+    await m.deleteSession("agent-1", session.id)
+    expect(await m.listSessions("agent-1", { cwd: "/work" })).toEqual([])
+    currentMock.listSessionsImpl.mockResolvedValueOnce([])
+    await m.listSessions("agent-1", { cwd: "/other" })
+    expect(await m.listSessions("agent-1", { cwd: "/work" })).toEqual([])
+    currentMock.listSessionsImpl.mockResolvedValueOnce([])
+    await m.listSessions("agent-1", { cwd: "/work" })
+    expect(await m.listSessions("agent-1", { cwd: "/work" })).toEqual([{ sessionId: session.id }])
+  })
+
+  it("does not suppress Kimi history when deletion fails", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
+    currentMock.deleteSessionImpl = jest.fn().mockRejectedValue(new Error("delete failed"))
+    currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "s_1" }])
+    await expect(m.deleteSession("agent-1", "s_1")).rejects.toThrow("delete failed")
+    expect(await m.listSessions("agent-1")).toEqual([{ sessionId: "s_1" }])
+  })
+
+  it("expires Kimi deletion tombstones without hiding native history indefinitely", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
+    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "deleted" }])
+    const now = Date.now()
+    await m.deleteSession("agent-1", "deleted")
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now + 120_001)
+    try {
+      expect(await m.listSessions("agent-1")).toEqual([{ sessionId: "deleted" }])
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it.each(["remove", "dispose"])("clears Kimi deletion markers on %s", async (operation) => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
+    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    await m.deleteSession("agent-1", "deleted")
+    if (operation === "remove") await m.removeAgent("agent-1")
+    else await m.dispose()
+    expect(
+      (m as unknown as { kimiDeletedSessions: Map<string, unknown> }).kimiDeletedSessions.size
+    ).toBe(0)
+  })
+
+  it("keeps other runtimes' native listings unchanged after deletion", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "listed" }])
+    await m.deleteSession("agent-1", "listed")
+    expect(await m.listSessions("agent-1")).toEqual([{ sessionId: "listed" }])
+  })
+
+  it.each([false, true])(
+    "prepares cached ACP forks with fresh execution MCP before any model call (fails=%s)",
+    async (fails) => {
+      const m = freshManager()
+      await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
+      const session = await m.createSession("agent-1")
+      const adapter = Object.assign(new AcpClientAdapter(), currentMock)
+      Object.defineProperties(adapter, Object.getOwnPropertyDescriptors(MockAdapter.prototype))
+      const prepare = jest.fn(async () => {
+        if (fails) {
+          currentMock.sessions.delete(session.id)
+          throw new Error("fork MCP rejected")
+        }
+        return session
+      })
+      Object.assign(adapter, { prepareForkSessionForExecution: prepare })
+      ;(m as unknown as { adapters: Map<string, unknown> }).adapters.set("agent-1", adapter)
+      const execute = jest.spyOn(adapter as unknown as MockAdapter, "execute")
+      const freshServers = [
+        { name: "cognia-tools", command: "node", args: ["fresh-host"], env: [] },
+      ]
+      const execution = m.execute("agent-1", "check tools", {
+        sessionId: session.id,
+        context: { custom: { mcpServers: freshServers } },
+      })
+      if (fails) {
+        await expect(execution).rejects.toThrow("fork MCP rejected")
+        expect(execute).not.toHaveBeenCalled()
+        expect(m.getAgent("agent-1")?.sessions.has(session.id)).toBe(false)
+      } else {
+        await execution
+        expect(prepare).toHaveBeenCalledWith(
+          session.id,
+          expect.objectContaining({ mcpServers: freshServers })
+        )
+        expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(
+          execute.mock.invocationCallOrder[0]
+        )
+      }
+    }
+  )
 })
 
 describe("capability profile (ADR-0090 external SSOT)", () => {
@@ -2388,6 +2521,38 @@ describe("execute / cancel", () => {
   })
 
   it.each(["execute", "streaming"])(
+    "%s sends the adapted Aider policy to the turn as well as the session",
+    async (execution) => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("aider-cli", () => currentMock as never)
+      await manager.addAgent(
+        buildBaseConfig({ protocol: "aider-cli", defaultPermissionMode: "bypassPermissions" })
+      )
+      const executeSpy = jest.spyOn(currentMock, "execute")
+      const promptSpy = jest.spyOn(currentMock, "prompt")
+      if (execution === "streaming") {
+        for await (const event of manager.executeStreaming("agent-1", "hi", {
+          permissionMode: "default",
+        }))
+          void event
+        expect(promptSpy).toHaveBeenCalledWith(
+          "s_1",
+          expect.anything(),
+          expect.objectContaining({ permissionMode: "plan" })
+        )
+      } else {
+        await manager.execute("agent-1", "hi", { permissionMode: "dontAsk" })
+        expect(executeSpy).toHaveBeenCalledWith(
+          "s_1",
+          expect.anything(),
+          expect.objectContaining({ permissionMode: "plan" })
+        )
+      }
+      expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "plan")
+    }
+  )
+
+  it.each(["execute", "streaming"])(
     "%s applies the configured permission default when the caller omits a mode",
     async (execution) => {
       const manager = freshManager()
@@ -3001,6 +3166,28 @@ describe("plugin lifecycle — teardown / restore / peekInstance", () => {
 
 describe("Cognia gateway task lifecycle", () => {
   const binding = { providerId: "provider", modelId: "model", accountId: "account-one" }
+  const placement = (): SandboxPlacement => ({
+    kind: "container",
+    isolationMandatory: true,
+    spec: {
+      version: 1,
+      specDigest: "a".repeat(64),
+      projectId: "project-one",
+      source: { kind: "deployment-default", catalogEntryId: "default" },
+      image: { registry: "ghcr.io", repository: "test/dev", digest: `sha256:${"b".repeat(64)}` },
+      bundle: { digest: `sha256:${"c".repeat(64)}`, releaseTag: "fixture", pinned: true },
+      isolation: { minimum: "container" },
+      sizeClassId: "small",
+      lifecycle: "persistent",
+      user: {},
+      containerEnv: {},
+      lifecycleCommands: {},
+      forwardPorts: [],
+      egress: { tier: "allowlist", presetIds: [], approvedDomains: [] },
+      browserSidecar: false,
+    },
+  })
+  afterEach(() => __resetSpawnPlacementsForTests())
   const managedConfig = () =>
     buildBaseConfig({
       id: "managed",
@@ -3030,6 +3217,156 @@ describe("Cognia gateway task lifecycle", () => {
     }))
     return { manager, children, restorePlane }
   }
+
+  it("uses the captured remote lease revoker after task completion", async () => {
+    const { manager, restorePlane } = prepare()
+    const revoke = jest.fn().mockResolvedValue(undefined)
+    mockGatewayMint.mockResolvedValueOnce({
+      endpoint: "http://127.0.0.1:9900/v1",
+      secret: "fake-secret",
+      ticketId: "remote-ticket",
+      model: "model",
+      binding,
+      modelMetadata: { id: "model" },
+      revoke,
+    })
+    try {
+      await manager.addAgent(managedConfig())
+      const result = await manager.execute("managed", "task")
+      expect(result.success).toBe(true)
+      expect(revoke).toHaveBeenCalledTimes(1)
+      expect(mockGatewayRevoke).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("keeps the gateway child and its session processes in the selected sandbox until teardown", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const selected = placement()
+      registerSpawnPlacement("managed", selected)
+      const hostedToolHostLeaseIds = ["d158f752-5929-4b9f-9af2-ebc844c8ce67"]
+      let childId = ""
+      protocolAdapterRegistry.register("acp", () => {
+        const child = new MockAdapter()
+        const connect = child.connect.bind(child)
+        child.connect = async (config) => {
+          childId = config.id
+          for (const id of [childId, `${childId}:session-one`]) {
+            expect(withSpawnPlacement({ config: { id } })).toMatchObject({
+              config: { sandbox: { ...selected, hostedToolHostLeaseIds } },
+            })
+          }
+          await connect(config)
+        }
+        return child as never
+      })
+      await expect(
+        manager.execute("managed", "task", {
+          context: { custom: { sandboxToolHostLeaseIds: hostedToolHostLeaseIds } },
+        })
+      ).resolves.toMatchObject({ success: true })
+      expect(childId).toMatch(/^gateway-task-/)
+      expect(spawnPlacementFor(childId)).toBeUndefined()
+      expect(spawnPlacementFor("managed")).toBe(selected)
+      expect(selected.hostedToolHostLeaseIds).toBeUndefined()
+      expect(mockGatewayRevoke).toHaveBeenCalledTimes(1)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it.each(["added", "removed", "replaced"])(
+    "revokes without launching when the environment is %s while minting",
+    async (change) => {
+      const { manager, children, restorePlane } = prepare()
+      try {
+        await manager.addAgent(managedConfig())
+        if (change !== "added") registerSpawnPlacement("managed", placement())
+        const mint = mockGatewayMint.getMockImplementation()!
+        const replacement = placement()
+        mockGatewayMint.mockImplementationOnce(async (...args) => {
+          if (change === "removed") clearSpawnPlacement("managed")
+          else registerSpawnPlacement("managed", replacement)
+          return mint(...args)
+        })
+        await expect(manager.execute("managed", "task")).rejects.toThrow(
+          "runtime environment changed"
+        )
+        expect(children).toHaveLength(1)
+        expect(mockGatewayRevoke).toHaveBeenCalledTimes(1)
+        expect(spawnPlacementFor("managed")).toBe(change === "removed" ? undefined : replacement)
+      } finally {
+        restorePlane()
+      }
+    }
+  )
+
+  it.each([false, true])(
+    "binds plugin leases before native-model session processes spawn (stream=%s)",
+    async (stream) => {
+      const { manager, children, restorePlane } = prepare()
+      try {
+        await manager.addAgent(managedConfig())
+        const selected = placement()
+        registerSpawnPlacement("managed", selected)
+        const ids = ["d158f752-5929-4b9f-9af2-ebc844c8ce67"]
+        const connect = children[0].connect.bind(children[0])
+        const observed = jest.spyOn(children[0], "connect").mockImplementation(async (config) => {
+          expect(withSpawnPlacement({ config: { id: `${config.id}:session-one` } })).toMatchObject({
+            config: { sandbox: { ...selected, hostedToolHostLeaseIds: ids } },
+          })
+          await connect(config)
+        })
+        const options = {
+          cogniaModel: null,
+          context: { custom: { sandboxToolHostLeaseIds: ids } },
+        }
+        if (stream) {
+          for await (const event of manager.executeStreaming("managed", "task", options)) {
+            expect(event).toBeDefined()
+          }
+        } else await manager.execute("managed", "task", options)
+        expect(observed).toHaveBeenCalledTimes(1)
+        expect(mockGatewayMint).not.toHaveBeenCalled()
+        expect(spawnPlacementFor("managed")).toBe(selected)
+      } finally {
+        restorePlane()
+      }
+    }
+  )
+
+  it("refuses plugin references without a placed environment before spending a model lease", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      await expect(
+        manager.execute("managed", "task", {
+          context: {
+            custom: { sandboxToolHostLeaseIds: ["d158f752-5929-4b9f-9af2-ebc844c8ce67"] },
+          },
+        })
+      ).rejects.toThrow("valid task runtime environment")
+      expect(mockGatewayMint).not.toHaveBeenCalled()
+      expect(children).toHaveLength(1)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("revokes a gateway child lease immediately when its process exits", async () => {
+    const manager = freshManager()
+    const release = jest.fn().mockResolvedValue(undefined)
+    const lifecycle = manager as unknown as {
+      gatewayTasks: Map<string, { parentId: string; taskId: string; release: () => Promise<void> }>
+      handleProcessExit: (agentId: string) => Promise<void>
+    }
+    lifecycle.gatewayTasks.set("gateway-child", { parentId: "managed", taskId: "task", release })
+    await lifecycle.handleProcessExit("gateway-child")
+    expect(release).toHaveBeenCalledTimes(1)
+  })
 
   it("never connects the saved configuration, isolates a task, revokes its lease and resumes the same native session", async () => {
     const { manager, children, restorePlane } = prepare()
@@ -3345,5 +3682,16 @@ describe("current OpenCode native client access", () => {
     expect(manager.getOpenCodeV2Adapter("current")).toBe(adapter)
     expect(manager.getOpenCodeV2Adapter("other")).toBeNull()
     expect(manager.getOpenCodeV2Adapter("missing")).toBeNull()
+  })
+})
+
+describe("official Aider CLI registration", () => {
+  it("builds a dedicated CLI adapter without routing through ACP", () => {
+    const registry = new ProtocolAdapterRegistry()
+    registerBuiltinProtocolAdapters(registry)
+    const adapter = registry.create("aider-cli")
+    expect(adapter).toBeInstanceOf(AiderCliClientAdapter)
+    expect(adapter?.protocol).toBe("aider-cli")
+    expect(adapter?.isConnected()).toBe(false)
   })
 })

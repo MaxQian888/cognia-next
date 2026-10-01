@@ -3,17 +3,22 @@
 //!
 //! `spawn_external_agent` over the companion RPC surface is remote code
 //! execution by construction: headless it is reachable with the brain's
-//! service token, so every spawn request is validated against a **preset-only**
+//! service token, so every spawn request is validated against the Host-owned
 //! policy before it touches the exec backend:
 //!
 //! - the command must be a bare binary name (no path separators) from the
 //!   agent-CLI allowlist, or `npx` with an allowlisted package, or the smoke
-//!   stub (only when `COGNIA_SMOKE_AGENT=1`);
+//!   stub (only when `COGNIA_SMOKE_AGENT=1`), or an operator-admitted custom CLI;
 //! - the working directory must canonicalize under the workspaces root
 //!   (`COGNIA_WORKSPACES_DIR`, default `<data_dir>/workspaces`);
 //! - env keys are allowlisted (provider credentials + proxy), with the
 //!   `LD_PRELOAD` class default-denied. Dropped keys are reported so the
 //!   audit log records them.
+//!
+//! Operators may extend bare commands and exact env keys with JSON arrays in
+//! `COGNIA_AGENT_COMMAND_ALLOWLIST` / `COGNIA_AGENT_ENV_ALLOWLIST`. These are read
+//! only from the Host process environment; invalid configuration denies spawns.
+//! Admission does not install a binary or bypass a pinned sandbox bundle manifest.
 //!
 //! Every allow AND deny is written to the append-only audit log
 //! (`companion_api::audit`) by the RPC arm.
@@ -38,6 +43,12 @@ pub const SMOKE_AGENT_ENV: &str = "COGNIA_SMOKE_AGENT";
 /// Env var naming the workspaces root external agents may run under.
 pub const WORKSPACES_DIR_ENV: &str = "COGNIA_WORKSPACES_DIR";
 
+const COMMAND_ALLOWLIST_ENV: &str = "COGNIA_AGENT_COMMAND_ALLOWLIST";
+const ENV_ALLOWLIST_ENV: &str = "COGNIA_AGENT_ENV_ALLOWLIST";
+const MAX_OPERATOR_CONFIG_BYTES: usize = 8192;
+const MAX_OPERATOR_ENTRIES: usize = 64;
+const MAX_OPERATOR_NAME_BYTES: usize = 128;
+
 /// Bare binary names an external-agent spawn may execute (ADR-0048/0049
 /// ecosystem; resolution itself goes through `command_resolver`).
 ///
@@ -45,7 +56,7 @@ pub const WORKSPACES_DIR_ENV: &str = "COGNIA_WORKSPACES_DIR";
 /// `protocol/external-agent-security-policy.json`, which the TypeScript
 /// launcher consumes directly. The two are kept in step by
 /// `pnpm audit:agent-capabilities` rather than by a comment: a security
-/// allowlist must stay compiled in, so it cannot read the JSON at runtime, and
+/// default allowlist stays compiled in; operator additions are a separate gate, and
 /// the last time the two were only linked by a comment they drifted in both
 /// directions at once.
 const BINARY_ALLOWLIST: &[&str] = &[
@@ -64,6 +75,11 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "kiro-cli",
     "droid",
     "devin",
+    "cline",
+    "qoder",
+    "kimi",
+    "goose",
+    "aider",
     // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
     "pi",
 ];
@@ -85,6 +101,36 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
 
 /// Exact env keys always allowed through.
 const ENV_KEY_ALLOWLIST: &[&str] = &[
+    "KIMI_CODE_HOME",
+    "KIMI_CODE_NO_AUTO_UPDATE",
+    "KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT",
+    "KIMI_DISABLE_TELEMETRY",
+    "KIMI_MODEL_NAME",
+    "KIMI_MODEL_PROVIDER_TYPE",
+    "KIMI_MODEL_BASE_URL",
+    "KIMI_MODEL_API_KEY",
+    "KIMI_MODEL_CAPABILITIES",
+    "KIMI_MODEL_DISPLAY_NAME",
+    "KIMI_MODEL_MAX_CONTEXT_SIZE",
+    "KIMI_MODEL_MAX_OUTPUT_SIZE",
+    "KIMI_MODEL_MAX_COMPLETION_TOKENS",
+    "KIMI_MODEL_REASONING_KEY",
+    "KIMI_MODEL_ADAPTIVE_THINKING",
+    "KIMI_MODEL_TEMPERATURE",
+    "KIMI_MODEL_TOP_P",
+    "KIMI_MODEL_THINKING_EFFORT",
+    "KIMI_MODEL_THINKING_KEEP",
+    "KIMI_MCP_STARTUP_TIMEOUT_MS",
+    "KIMI_MCP_TOOL_TIMEOUT_MS",
+    "KIMI_LOOP_MAX_STEPS_PER_TURN",
+    "KIMI_LOOP_MAX_ATTEMPTS_PER_STEP",
+    "CLINE_API_KEY",
+    "CLINE_PROVIDER",
+    "CLINE_MODEL",
+    "CLINE_DIR",
+    "CLINE_NO_AUTO_UPDATE",
+    "QODER_PERSONAL_ACCESS_TOKEN",
+    "QODER_CONFIG_DIR",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "NO_PROXY",
@@ -94,6 +140,15 @@ const ENV_KEY_ALLOWLIST: &[&str] = &[
     "TERM",
     "LANG",
     "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "NO_COLOR",
+    "FORCE_COLOR",
+    // Reviewed Codex ACP controls. INITIAL_AGENT_MODE governs its inner tool
+    // mode; APP_SERVER_LOGS names a directory, still confined by Cognia's sandbox.
+    "NO_BROWSER",
+    "INITIAL_AGENT_MODE",
+    "APP_SERVER_LOGS",
     // Pins the DeepSeek Harness user-data root into Cognia-owned space. Without
     // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
     // inject plugins and arbitrary JS into a certified composition.
@@ -135,6 +190,7 @@ const ENV_PREFIX_ALLOWLIST: &[&str] = &[
     // COGNIA_DSH_* inputs (workspace, session root, model, persona). DSH_HOME is
     // an exact key below — it is a path, not a prefix family.
     "DEEPSEEK_",
+    "GOOSE_",
     "COGNIA_DSH_",
     // Tool-host handshake for the bundled Cognia Pi extension. Pi has no
     // per-session mcpServers parameter, so the socket path and per-attempt
@@ -183,6 +239,9 @@ pub struct SpawnPolicy {
     /// nothing outside the executions tree becomes reachable.
     managed_execution_dir: Option<PathBuf>,
     smoke_agent_enabled: bool,
+    operator_commands: Vec<String>,
+    operator_env: Vec<String>,
+    operator_config_error: Option<PolicyViolation>,
 }
 
 impl SpawnPolicy {
@@ -191,6 +250,9 @@ impl SpawnPolicy {
             workspaces_dir,
             managed_execution_dir: None,
             smoke_agent_enabled,
+            operator_commands: Vec::new(),
+            operator_env: Vec::new(),
+            operator_config_error: None,
         }
     }
 
@@ -216,6 +278,32 @@ impl SpawnPolicy {
             .unwrap_or(false);
         Self::new(workspaces_dir, smoke)
             .with_managed_execution_dir(data_dir.join("task-workspaces").join("executions"))
+            .with_operator_allowlists(
+                std::env::var(COMMAND_ALLOWLIST_ENV),
+                std::env::var(ENV_ALLOWLIST_ENV),
+            )
+    }
+
+    // Private: renderer spawn configuration must never supply policy additions.
+    // Capture both lists atomically; a malformed list must not enable a partial policy.
+    fn with_operator_allowlists(
+        mut self,
+        commands: Result<String, std::env::VarError>,
+        keys: Result<String, std::env::VarError>,
+    ) -> Self {
+        let parsed = parse_operator_list(COMMAND_ALLOWLIST_ENV, commands, valid_operator_command)
+            .and_then(|commands| {
+                parse_operator_list(ENV_ALLOWLIST_ENV, keys, valid_operator_env)
+                    .map(|keys| (commands, keys))
+            });
+        match parsed {
+            Ok((commands, keys)) => {
+                self.operator_commands = commands;
+                self.operator_env = keys;
+            }
+            Err(error) => self.operator_config_error = Some(error),
+        }
+        self
     }
 
     /// The server-owned workspaces directory every confined path resolves
@@ -244,7 +332,8 @@ impl SpawnPolicy {
             .map_err(PolicyViolation)?;
         config.cwd = Some(self.validate_cwd(config.cwd.as_deref())?);
         validate_bot_runtime_state(&config)?;
-        let (env, dropped) = filter_env(std::mem::take(&mut config.env));
+        let (env, dropped) =
+            filter_env_with_additions(std::mem::take(&mut config.env), &self.operator_env);
         config.env = env;
         Ok(ValidatedSpawn {
             config,
@@ -298,7 +387,8 @@ impl SpawnPolicy {
             ),
         };
         validate_bot_runtime_state(&config)?;
-        let (env, dropped) = filter_env(std::mem::take(&mut config.env));
+        let (env, dropped) =
+            filter_env_with_additions(std::mem::take(&mut config.env), &self.operator_env);
         config.env = env;
         Ok(ValidatedSpawn {
             config,
@@ -307,6 +397,9 @@ impl SpawnPolicy {
     }
 
     fn validate_command(&self, command: &str, args: &[String]) -> Result<(), PolicyViolation> {
+        if let Some(error) = &self.operator_config_error {
+            return Err(error.clone());
+        }
         let trimmed = command.trim();
         if trimmed.is_empty() {
             return Err(PolicyViolation("empty command".into()));
@@ -332,6 +425,9 @@ impl SpawnPolicy {
             .or_else(|| lower.strip_suffix(".bat"))
             .unwrap_or(&lower);
 
+        if self.operator_commands.iter().any(|name| name == trimmed) {
+            return Ok(());
+        }
         if BINARY_ALLOWLIST.contains(&base) {
             return Ok(());
         }
@@ -522,7 +618,171 @@ fn validate_bot_runtime_state(config: &ExternalAgentSpawnConfig) -> Result<(), P
     Ok(())
 }
 
+fn parse_operator_list(
+    variable: &str,
+    raw: Result<String, std::env::VarError>,
+    valid: fn(&str) -> bool,
+) -> Result<Vec<String>, PolicyViolation> {
+    let invalid = |reason: &str| PolicyViolation(format!("Invalid Host {variable}: {reason}"));
+    let raw = match raw {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(_) => return Err(invalid("must contain Unicode JSON")),
+    };
+    if raw.len() > MAX_OPERATOR_CONFIG_BYTES {
+        return Err(invalid("exceeds 8192 bytes"));
+    }
+    let entries: Vec<String> =
+        serde_json::from_str(&raw).map_err(|_| invalid("expected a JSON array of names"))?;
+    if entries.len() > MAX_OPERATOR_ENTRIES {
+        return Err(invalid("exceeds 64 names"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for name in &entries {
+        if name.is_empty() || name.len() > MAX_OPERATOR_NAME_BYTES || !valid(name) {
+            return Err(invalid(
+                "contains an invalid or reserved name (maximum 128 ASCII characters)",
+            ));
+        }
+        if !seen.insert(name) {
+            return Err(invalid("contains duplicate names"));
+        }
+    }
+    Ok(entries)
+}
+
+fn valid_operator_command(name: &str) -> bool {
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric())
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+    {
+        return false;
+    }
+    let lower = name.to_ascii_lowercase();
+    // Scripts must be packaged behind an operator-installed bare executable;
+    // do not turn an interpreter/package runner into an unrestricted RPC shell.
+    let base = lower.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    !lower.ends_with(".cmd")
+        && !lower.ends_with(".bat")
+        && !lower.ends_with(".exe")
+        && ![
+            "sh",
+            "bash",
+            "zsh",
+            "dash",
+            "fish",
+            "ksh",
+            "csh",
+            "tcsh",
+            "cmd",
+            "powershell",
+            "pwsh",
+            "env",
+            "sudo",
+            "su",
+            "doas",
+            "busybox",
+            "xargs",
+            "node",
+            "nodejs",
+            "python",
+            "perl",
+            "ruby",
+            "php",
+            "lua",
+            "luajit",
+            "deno",
+            "bun",
+            "npm",
+            "npx",
+            "pnpm",
+            "yarn",
+            "uv",
+            "uvx",
+            "pip",
+            "cargo",
+            "rustc",
+            "go",
+            "java",
+            "js",
+            "qjs",
+            "awk",
+            "gawk",
+        ]
+        .contains(&base)
+}
+
+fn valid_operator_env(key: &str) -> bool {
+    if !key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        || !key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        || cognia_exec_sandbox::env::is_dangerous_env_key(key)
+    {
+        return false;
+    }
+    let upper = key.to_ascii_uppercase();
+    // Host control, executable resolution, interpreter loading and identity roots
+    // cannot be widened by an env addition. Existing preset env contracts remain.
+    !["COGNIA_", "BASH_FUNC_", "XDG_", "NPM_CONFIG_", "SSH_"]
+        .iter()
+        .any(|prefix| upper.starts_with(prefix))
+        && ![
+            "PATH",
+            "PATHEXT",
+            "HOME",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "COMSPEC",
+            "SYSTEMROOT",
+            "WINDIR",
+            "TMP",
+            "TEMP",
+            "TMPDIR",
+            "NODE_PATH",
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "PERL5LIB",
+            "RUBYLIB",
+            "CDPATH",
+            "SHELLOPTS",
+            "BASHOPTS",
+            "GLOBIGNORE",
+            "PSMODULEANALYSISCACHEPATH",
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "DSH_HOME",
+            "CLINE_DIR",
+            "QODER_CONFIG_DIR",
+            "KIMI_CODE_HOME",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "GOOSE_PATH_ROOT",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "AWS_SHARED_CREDENTIALS_FILE",
+            "AWS_CONFIG_FILE",
+        ]
+        .contains(&upper.as_str())
+}
+
+pub(crate) fn kimi_env_key(key: &str) -> bool {
+    key.starts_with("KIMI_") && ENV_KEY_ALLOWLIST.contains(&key)
+}
+
+#[cfg(test)]
 fn filter_env(env: HashMap<String, String>) -> (HashMap<String, String>, Vec<String>) {
+    filter_env_with_additions(env, &[])
+}
+
+fn filter_env_with_additions(
+    env: HashMap<String, String>,
+    additions: &[String],
+) -> (HashMap<String, String>, Vec<String>) {
     let mut kept = HashMap::new();
     let mut dropped = Vec::new();
     for (key, value) in env {
@@ -530,7 +790,9 @@ fn filter_env(env: HashMap<String, String>) -> (HashMap<String, String>, Vec<Str
             || ENV_PREFIX_ALLOWLIST
                 .iter()
                 .any(|prefix| key.starts_with(prefix));
-        if allowed {
+        let host_policy_key = key.eq_ignore_ascii_case(COMMAND_ALLOWLIST_ENV)
+            || key.eq_ignore_ascii_case(ENV_ALLOWLIST_ENV);
+        if !host_policy_key && (allowed || additions.contains(&key)) {
             kept.insert(key, value);
         } else {
             dropped.push(key);
@@ -543,6 +805,8 @@ fn filter_env(env: HashMap<String, String>) -> (HashMap<String, String>, Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static HOST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn config(command: &str, args: &[&str]) -> ExternalAgentSpawnConfig {
         ExternalAgentSpawnConfig {
@@ -560,6 +824,228 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let policy = SpawnPolicy::new(tmp.path().join("workspaces"), smoke);
         (tmp, policy)
+    }
+
+    fn custom_policy(commands: &str, keys: &str) -> (tempfile::TempDir, SpawnPolicy) {
+        let (tmp, policy) = policy(false);
+        (
+            tmp,
+            policy.with_operator_allowlists(Ok(commands.into()), Ok(keys.into())),
+        )
+    }
+
+    #[test]
+    fn reviewed_runtime_options_survive_host_and_bundle_environment_filters() {
+        let (_tmp, policy) = policy(false);
+        let reviewed = HashMap::from([
+            ("LANG".into(), "en_US.UTF-8".into()),
+            ("LC_ALL".into(), "C".into()),
+            ("LC_CTYPE".into(), "UTF-8".into()),
+            ("TZ".into(), "Asia/Shanghai".into()),
+            ("TERM".into(), "xterm-256color".into()),
+            ("NO_COLOR".into(), "1".into()),
+            ("FORCE_COLOR".into(), "0".into()),
+            ("NO_BROWSER".into(), "1".into()),
+            ("INITIAL_AGENT_MODE".into(), "workspace-write".into()),
+            ("APP_SERVER_LOGS".into(), "./agent logs".into()),
+        ]);
+        let mut request = config("codex-acp", &[]);
+        request.env = reviewed.clone();
+        request
+            .env
+            .insert("NODE_OPTIONS".into(), "--require=injected.js".into());
+        request
+            .env
+            .insert("UNREVIEWED_RUNTIME_OPTION".into(), "blocked".into());
+        for result in [
+            policy.validate(request.clone()),
+            policy.validate_desktop(request),
+        ] {
+            let validated = result.unwrap();
+            assert_eq!(validated.config.env, reviewed);
+            assert_eq!(
+                validated.dropped_env_keys,
+                ["NODE_OPTIONS", "UNREVIEWED_RUNTIME_OPTION"]
+            );
+            let mut env = validated.config.env.into_iter().collect();
+            assert!(cognia_exec_sandbox::env::filter_env(&mut env).is_empty());
+            let child =
+                cognia_sandboxd::env::build_child_env(&cognia_sandboxd::env::ChildEnvInput {
+                    parent: &env,
+                    layout: &Default::default(),
+                    libc: None,
+                    user: None,
+                    image_ca_bundle: None,
+                });
+            for (key, value) in &reviewed {
+                assert_eq!(child.get(key), Some(value), "bundle dropped {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn operator_customization_is_opt_in_on_both_hosts() {
+        let (_tmp, default) = policy(false);
+        assert!(default.validate(config("review-agent", &[])).is_err());
+        let mut request = config("pi", &[]);
+        request
+            .env
+            .insert("AGENT_PERSONA".into(), "reviewer".into());
+        assert_eq!(
+            default.validate(request).unwrap().dropped_env_keys,
+            ["AGENT_PERSONA"]
+        );
+
+        let (_tmp, policy) = custom_policy(r#"["review-agent"]"#, r#"["AGENT_PERSONA"]"#);
+        let mut request = config("review-agent", &["--stdio", "two words", ""]);
+        request
+            .env
+            .insert("AGENT_PERSONA".into(), "reviewer".into());
+        request.env.insert("UNLISTED".into(), "dropped".into());
+        for validated in [
+            policy.validate(request.clone()),
+            policy.validate_desktop(request),
+        ] {
+            let validated = validated.unwrap();
+            assert_eq!(validated.config.command, "review-agent");
+            assert_eq!(validated.config.args, ["--stdio", "two words", ""]);
+            assert_eq!(validated.config.env["AGENT_PERSONA"], "reviewer");
+            assert_eq!(validated.dropped_env_keys, ["UNLISTED"]);
+        }
+        assert!(policy
+            .validate(config("/usr/bin/review-agent", &[]))
+            .is_err());
+        assert!(policy.validate(config("./review-agent", &[])).is_err());
+        assert!(policy.validate(config("review-agent.cmd", &[])).is_err());
+    }
+
+    #[test]
+    fn malformed_operator_configuration_denies_even_preset_spawns() {
+        for raw in [
+            "",
+            "null",
+            "{}",
+            "[1]",
+            r#"["valid", "valid"]"#,
+            r#"["bad key"]"#,
+        ] {
+            for (commands, keys, expected) in [
+                (raw, "[]", COMMAND_ALLOWLIST_ENV),
+                ("[]", raw, ENV_ALLOWLIST_ENV),
+            ] {
+                let (_tmp, policy) = custom_policy(commands, keys);
+                for result in [
+                    policy.validate(config("pi", &[])),
+                    policy.validate_desktop(config("pi", &[])),
+                ] {
+                    assert!(result.unwrap_err().0.contains(expected), "{raw}");
+                }
+            }
+        }
+        for raw in [
+            serde_json::to_string(&vec!["x"; 65]).unwrap(),
+            serde_json::to_string(&vec!["x".repeat(129)]).unwrap(),
+            " ".repeat(8193),
+        ] {
+            let (_tmp, policy) = custom_policy(&raw, "[]");
+            assert!(policy.validate(config("pi", &[])).is_err());
+        }
+    }
+
+    #[test]
+    fn operator_lists_support_unset_empty_and_exact_names() {
+        let (_tmp, policy) = policy(false);
+        let policy = policy.with_operator_allowlists(
+            Err(std::env::VarError::NotPresent),
+            Err(std::env::VarError::NotPresent),
+        );
+        assert!(policy.validate(config("pi", &[])).is_ok());
+        let (_tmp, policy) = custom_policy("[]", r#"["agent_persona"]"#);
+        let mut request = config("pi", &[]);
+        request
+            .env
+            .insert("agent_persona".into(), "reviewer".into());
+        request.env.insert("AGENT_PERSONA".into(), "blocked".into());
+        let validated = policy.validate(request).unwrap();
+        assert_eq!(validated.config.env["agent_persona"], "reviewer");
+        assert_eq!(validated.dropped_env_keys, ["AGENT_PERSONA"]);
+        assert!(parse_operator_list(
+            ENV_ALLOWLIST_ENV,
+            Err(std::env::VarError::NotUnicode(std::ffi::OsString::from(
+                "invalid"
+            ))),
+            valid_operator_env
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn operator_cannot_admit_paths_shells_or_interpreters() {
+        for name in [
+            "/opt/review-agent",
+            "./review-agent",
+            r"C:\review-agent",
+            "..",
+            "bash",
+            "sh",
+            "pwsh",
+            "cmd",
+            "node",
+            "python3.13",
+            "npx",
+            "uv",
+            "env",
+            "review-agent.cmd",
+        ] {
+            let raw = serde_json::to_string(&[name]).unwrap();
+            let (_tmp, policy) = custom_policy(&raw, "[]");
+            assert!(policy.validate(config("pi", &[])).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn operator_cannot_admit_loader_auth_scope_or_host_controls() {
+        for key in [
+            "LD_PRELOAD",
+            "Dyld_Insert_Libraries",
+            "NODE_OPTIONS",
+            "PYTHONPATH",
+            "BASH_FUNC_x",
+            "HOME",
+            "PATH",
+            "XDG_CONFIG_HOME",
+            "SSH_AUTH_SOCK",
+            "NPM_CONFIG_USERCONFIG",
+            "COGNIA_AGENT_ENV_ALLOWLIST",
+            "COGNIA_GATEWAY_TOKEN",
+        ] {
+            let raw = serde_json::to_string(&[key]).unwrap();
+            let (_tmp, policy) = custom_policy("[]", &raw);
+            assert!(policy.validate(config("pi", &[])).is_err(), "{key}");
+        }
+    }
+
+    #[test]
+    fn request_environment_cannot_change_or_forward_operator_authority() {
+        let (_tmp, policy) = custom_policy("[]", "[]");
+        let mut request = config("review-agent", &[]);
+        request
+            .env
+            .insert(COMMAND_ALLOWLIST_ENV.into(), r#"["review-agent"]"#.into());
+        request
+            .env
+            .insert(ENV_ALLOWLIST_ENV.into(), r#"["AGENT_PERSONA"]"#.into());
+        request
+            .env
+            .insert("AGENT_PERSONA".into(), "reviewer".into());
+        assert!(policy.validate(request.clone()).is_err());
+        request.command = "pi".into();
+        let validated = policy.validate(request).unwrap();
+        assert!(validated.config.env.is_empty());
+        assert_eq!(
+            validated.dropped_env_keys,
+            ["AGENT_PERSONA", COMMAND_ALLOWLIST_ENV, ENV_ALLOWLIST_ENV]
+        );
     }
 
     #[test]
@@ -625,6 +1111,111 @@ mod tests {
     }
 
     // ── Policy matrix: command ───────────────────────────────────────────────
+
+    #[test]
+    fn kimi_launch_preserves_model_env_without_identity_or_script_injection() {
+        let (_tmp, policy) = policy(false);
+        let mut input = config("kimi", &["acp"]);
+        input.env.extend([
+            ("KIMI_CODE_HOME".into(), "/owned/kimi".into()),
+            ("KIMI_MODEL_API_KEY".into(), "synthetic".into()),
+            ("KIMI_MODEL_PROVIDER_TYPE".into(), "anthropic".into()),
+            ("KIMI_MODEL_TEMPERATURE".into(), "0.5".into()),
+            ("KIMI_CODE_USER_AGENT".into(), "spoofed".into()),
+            ("KIMI_OAUTH_HOST".into(), "https://untrusted".into()),
+            ("KIMI_PLUGIN_ROOT".into(), "/scripts".into()),
+            ("KIMI_BIN_PATH".into(), "/injected".into()),
+        ]);
+        for validated in [
+            policy.validate(input.clone()).unwrap(),
+            policy.validate_desktop(input).unwrap(),
+        ] {
+            assert_eq!(validated.config.env["KIMI_CODE_HOME"], "/owned/kimi");
+            assert_eq!(validated.config.env["KIMI_MODEL_API_KEY"], "synthetic");
+            assert_eq!(
+                validated.config.env["KIMI_MODEL_PROVIDER_TYPE"],
+                "anthropic"
+            );
+            for key in [
+                "KIMI_CODE_USER_AGENT",
+                "KIMI_OAUTH_HOST",
+                "KIMI_PLUGIN_ROOT",
+                "KIMI_BIN_PATH",
+            ] {
+                assert!(!validated.config.env.contains_key(key));
+            }
+        }
+        assert!(!valid_operator_env("KIMI_CODE_HOME"));
+    }
+
+    #[test]
+    fn cline_launch_filters_exact_environment_keys_on_both_hosts() {
+        let (_tmp, policy) = policy(false);
+        let mut input = config("cline", &["--acp"]);
+        input.env.extend([
+            ("CLINE_API_KEY".into(), "synthetic".into()),
+            ("CLINE_PROVIDER".into(), "deepseek".into()),
+            ("CLINE_MODEL".into(), "deepseek-flash".into()),
+            ("CLINE_DIR".into(), "/owned/cline".into()),
+            ("CLINE_BIN_PATH".into(), "/injected".into()),
+            ("CLINE_DATA_DIR".into(), "/unscoped".into()),
+        ]);
+        for validated in [
+            policy.validate(input.clone()).unwrap(),
+            policy.validate_desktop(input).unwrap(),
+        ] {
+            assert_eq!(validated.config.env["CLINE_API_KEY"], "synthetic");
+            assert_eq!(validated.config.env["CLINE_DIR"], "/owned/cline");
+            assert!(!validated.config.env.contains_key("CLINE_BIN_PATH"));
+            assert!(!validated.config.env.contains_key("CLINE_DATA_DIR"));
+        }
+    }
+
+    #[test]
+    fn qoder_launch_filters_environment_on_both_hosts() {
+        let (_tmp, policy) = policy(false);
+        let mut input = config("qoder", &["--acp"]);
+        input.env = HashMap::from([
+            ("QODER_PERSONAL_ACCESS_TOKEN".into(), "synthetic".into()),
+            ("QODER_CONFIG_DIR".into(), "/owned/qoder".into()),
+            ("QODER_UNRELATED".into(), "blocked".into()),
+            ("NODE_OPTIONS".into(), "--inspect".into()),
+        ]);
+        for validated in [
+            policy.validate(input.clone()).unwrap(),
+            policy.validate_desktop(input).unwrap(),
+        ] {
+            assert_eq!(
+                validated.config.env["QODER_PERSONAL_ACCESS_TOKEN"],
+                "synthetic"
+            );
+            assert_eq!(validated.config.env["QODER_CONFIG_DIR"], "/owned/qoder");
+            assert!(!validated.config.env.contains_key("QODER_UNRELATED"));
+            assert!(!validated.config.env.contains_key("NODE_OPTIONS"));
+        }
+    }
+
+    #[test]
+    fn goose_launch_keeps_provider_settings_and_filters_injection() {
+        let (_tmp, policy) = policy(false);
+        let mut input = config("goose", &["acp", "--with-builtin", "developer"]);
+        input.env = HashMap::from([
+            ("GOOSE_PROVIDER".into(), "openai".into()),
+            ("GOOSE_MODEL".into(), "deepseek-flash".into()),
+            ("GOOSE_MODE".into(), "approve".into()),
+            ("OPENAI_API_KEY".into(), "synthetic".into()),
+            ("LD_PRELOAD".into(), "/injected.so".into()),
+        ]);
+        for validated in [
+            policy.validate(input.clone()).unwrap(),
+            policy.validate_desktop(input).unwrap(),
+        ] {
+            assert_eq!(validated.config.env["GOOSE_MODEL"], "deepseek-flash");
+            assert_eq!(validated.config.env["GOOSE_MODE"], "approve");
+            assert!(validated.config.env.contains_key("OPENAI_API_KEY"));
+            assert_eq!(validated.dropped_env_keys, vec!["LD_PRELOAD"]);
+        }
+    }
 
     #[test]
     fn allowlisted_binaries_pass() {
@@ -693,12 +1284,11 @@ mod tests {
     }
 
     #[test]
-    fn binaries_no_preset_can_reach_are_denied() {
-        // `cline` sat in the allowlist with no preset, no adapter and no
-        // ecosystem surface — an executable the headless spawn RPC would run
-        // that no Cognia code path could ever ask for.
+    fn cline_binary_is_reachable_from_its_native_acp_preset() {
         let (_tmp, p) = policy(false);
-        assert!(p.validate(config("cline", &[])).is_err());
+        assert!(p
+            .validate(config("cline", &["--acp", "--auto-approve", "false"]))
+            .is_ok());
     }
 
     #[test]
@@ -1028,7 +1618,11 @@ mod tests {
 
     #[test]
     fn from_env_reads_smoke_gate_and_workspaces_dir() {
-        // Only this test touches these vars.
+        let _lock = HOST_ENV_LOCK.lock().unwrap();
+        let prev_commands = std::env::var_os(COMMAND_ALLOWLIST_ENV);
+        let prev_keys = std::env::var_os(ENV_ALLOWLIST_ENV);
+        std::env::set_var(COMMAND_ALLOWLIST_ENV, r#"["review-agent"]"#);
+        std::env::set_var(ENV_ALLOWLIST_ENV, r#"["AGENT_PERSONA"]"#);
         let prev_ws = std::env::var(WORKSPACES_DIR_ENV).ok();
         let prev_smoke = std::env::var(SMOKE_AGENT_ENV).ok();
 
@@ -1037,12 +1631,34 @@ mod tests {
         let p = SpawnPolicy::from_env(Path::new("/data"));
         assert_eq!(p.workspaces_dir, PathBuf::from("X:/ws"));
         assert!(p.smoke_agent_enabled);
+        assert!(p.validate_command("review-agent", &[]).is_ok());
+        assert_eq!(p.operator_env, ["AGENT_PERSONA"]);
+        std::env::set_var(COMMAND_ALLOWLIST_ENV, "[]");
+        // Policy snapshots cannot be widened by subsequent request/child env changes.
+        assert!(p.validate_command("review-agent", &[]).is_ok());
 
         std::env::remove_var(WORKSPACES_DIR_ENV);
         std::env::set_var(SMOKE_AGENT_ENV, "0");
         let p = SpawnPolicy::from_env(Path::new("/data"));
         assert_eq!(p.workspaces_dir, PathBuf::from("/data").join("workspaces"));
         assert!(!p.smoke_agent_enabled);
+        assert!(p.validate_command("review-agent", &[]).is_err());
+        std::env::set_var(ENV_ALLOWLIST_ENV, "invalid");
+        let invalid = SpawnPolicy::from_env(Path::new("/data"));
+        assert!(invalid
+            .validate_command("pi", &[])
+            .unwrap_err()
+            .0
+            .contains(ENV_ALLOWLIST_ENV));
+        for (key, previous) in [
+            (COMMAND_ALLOWLIST_ENV, prev_commands),
+            (ENV_ALLOWLIST_ENV, prev_keys),
+        ] {
+            match previous {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
 
         match prev_ws {
             Some(v) => std::env::set_var(WORKSPACES_DIR_ENV, v),
@@ -1200,6 +1816,8 @@ mod tests {
     /// again with nothing else changing.
     #[test]
     fn from_env_wires_the_managed_execution_root_beside_the_workspaces_root() {
+        let _lock = HOST_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(WORKSPACES_DIR_ENV);
         let data = tempfile::tempdir().expect("tempdir");
         let run_root = data
             .path()
@@ -1215,5 +1833,9 @@ mod tests {
         assert!(policy
             .validate_cwd(Some(run_root.to_str().expect("utf8")))
             .is_ok());
+        match previous {
+            Some(value) => std::env::set_var(WORKSPACES_DIR_ENV, value),
+            None => std::env::remove_var(WORKSPACES_DIR_ENV),
+        }
     }
 }
