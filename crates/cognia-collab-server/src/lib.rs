@@ -64,8 +64,12 @@ pub mod chat_attachment_store;
 pub mod chat_metrics;
 pub mod chat_store;
 pub mod cors;
+pub mod feed;
+pub mod field_merge;
 pub mod logto_management;
 pub mod model;
+pub mod notifications;
+pub mod socket_hub;
 pub mod store;
 
 pub use api::{router, AppState};

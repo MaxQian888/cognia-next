@@ -254,14 +254,48 @@ export class CollabError extends Error {
   }
 }
 
+/**
+ * One field a stale write clashed on (ADR-0208): this write's value, the
+ * server's, and the revision and person that changed it.
+ */
+export interface CollabFieldClash {
+  yours: unknown
+  theirs: unknown
+  changedAt: number
+  changedBy: string | null
+}
+
 export class CollabConflictError<T = unknown> extends CollabError {
   constructor(
     message: string,
-    readonly authoritative: T
+    readonly authoritative: T,
+    /**
+     * Present when the server merged by field and only these clashed; absent
+     * on a whole-record conflict (an impossible base, or a pre-0208 server).
+     */
+    readonly fields?: Record<string, CollabFieldClash>
   ) {
     super(409, message)
     this.name = "CollabConflictError"
   }
+}
+
+/** Keep only well-formed field clashes from a 409 body. */
+export function readFieldClashes(value: unknown): Record<string, CollabFieldClash> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const clashes: Record<string, CollabFieldClash> = {}
+  for (const [field, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue
+    const clash = raw as Record<string, unknown>
+    if (typeof clash.changedAt !== "number") continue
+    clashes[field] = {
+      yours: clash.yours,
+      theirs: clash.theirs,
+      changedAt: clash.changedAt,
+      changedBy: typeof clash.changedBy === "string" ? clash.changedBy : null,
+    }
+  }
+  return Object.keys(clashes).length > 0 ? clashes : undefined
 }
 
 export interface CollabClientOptions {
@@ -346,6 +380,9 @@ export interface AcceptedCollabInvitation {
 const GRANT_REFRESH_MARGIN_MS = 30_000
 export const SHARED_CHAT_PROTOCOL_VERSION = "2"
 
+/** The subprotocol the workspace change feed offers. Must match `FEED_SUBPROTOCOL` (ADR-0206). */
+export const FEED_SUBPROTOCOL = "cognia.collab.feed.v1"
+
 /** The subprotocol a Canvas socket offers. Must match `CANVAS_SUBPROTOCOL`. */
 export const CANVAS_SUBPROTOCOL = "cognia.canvas.v1"
 
@@ -420,6 +457,75 @@ export interface CollabCanvasPresence {
   color: string
   lastActive: number
 }
+
+// ── Per-recipient notifications (ADR-0207) ──────────────────────────────────
+
+/** What a notification row says happened to its reader. */
+export type CollabNotificationKind =
+  "issue.assigned" | "issue.mentioned" | "chat.approval_requested" | "chat.invited"
+
+/**
+ * One row addressed to the signed-in person. References only, never content:
+ * the client resolves titles from its own mirrors, so a row cannot show more
+ * than its reader may open.
+ */
+export interface CollabNotification {
+  /** `ntf_…` */
+  id: string
+  kind: CollabNotificationKind
+  workspaceId?: string
+  /** The thing to open. */
+  subject: { entity: "issue" | "chat_session" | "chat_invite"; id: string }
+  /** Who caused it (`usr_…`); never the reader. */
+  actorUserId?: string
+  /** Unique per reader; derived from the write that produced the row. */
+  dedupeKey: string
+  /** Per-reader monotonic; the pull cursor. */
+  seq: number
+  createdAt: number
+  /** Null until read on any of the reader's devices. */
+  readAt: number | null
+}
+
+/** A row marked read after the read cursor. */
+export interface CollabNotificationRead {
+  id: string
+  seq: number
+  readAt: number
+}
+
+/** Position in the reader's reads, ordered by `(at, seq)`. */
+export interface CollabNotificationReadCursor {
+  at: number
+  seq: number
+}
+
+/** One pull: rows after `afterSeq`, and reads after the read cursor. */
+export interface CollabNotificationPage {
+  /** Rows with `seq > afterSeq`, oldest first, withholding any the reader can no longer open. */
+  notifications: CollabNotification[]
+  /** Where the next pull starts, past withheld rows too. */
+  nextAfterSeq: number
+  hasMore: boolean
+  /** Rows (any seq) read after the read cursor, ordered by `(readAt, seq)`. */
+  reads: CollabNotificationRead[]
+  /** Where the next read pull starts. */
+  readCursor: CollabNotificationReadCursor
+  readsHaveMore: boolean
+}
+
+export interface ListCollabNotificationsQuery {
+  afterSeq: number
+  /** 1..200; the server defaults to 100. */
+  limit?: number
+  /** The read cursor's `at`. */
+  readAt: number
+  /** The read cursor's `seq`. */
+  readSeq: number
+}
+
+/** Mark named rows read, or every row up to a seq. Exactly one. */
+export type MarkCollabNotificationsReadInput = { ids: string[] } | { upToSeq: number }
 
 // ── Membership administration (ADR-0149 section 4) ─────────────────────────
 
@@ -856,6 +962,23 @@ export class CollabClient {
     )
   }
 
+  /**
+   * Accept an invite addressed to the signed-in user by id, with no token —
+   * the path a `chat.invited` notification takes (ADR-0207). The server only
+   * honours it for the invite's `targetUserId`; anybody else gets the same
+   * refusal as a used invite.
+   */
+  async acceptTargetedSessionInvite(
+    orgId: string,
+    inviteId: string
+  ): Promise<{ invite: SessionInvite; membership: SessionMembership }> {
+    return this.json<{ invite: SessionInvite; membership: SessionMembership }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-invites/${encodeURIComponent(inviteId)}/accept`,
+      { method: "POST", body: "{}" }
+    )
+  }
+
   async revokeSessionInvite(
     orgId: string,
     sessionId: string,
@@ -929,6 +1052,70 @@ export class CollabClient {
       ...handlers,
       protocols: ["cognia.chat.v1", ticket],
     })
+  }
+
+  /**
+   * Open the organisation's change feed (ADR-0206).
+   *
+   * Frames are invalidations only; the caller refreshes its mirrors through
+   * the normal pull path. A fresh ticket is minted per call so this doubles as
+   * a reconnect factory, and it goes through the shell transport for the same
+   * proxy and subprotocol reasons as the chat and Canvas streams.
+   */
+  async openWorkspaceFeed(
+    orgId: string,
+    handlers: PlatformWebSocketHandlers = {}
+  ): Promise<PlatformWebSocket> {
+    const { ticket } = await this.json<{ ticket: string; expiresAt: number }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/feed/tickets`,
+      { method: "POST", body: "{}" }
+    )
+    const url = new URL(`/v1/orgs/${encodeURIComponent(orgId)}/feed`, this.baseUrl)
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+    return this.openWebSocket(url.toString(), {
+      ...handlers,
+      protocols: [FEED_SUBPROTOCOL, ticket],
+    })
+  }
+
+  // ── Notifications (ADR-0207) ────────────────────────────────────────────
+
+  /**
+   * The signed-in person's notification rows after `afterSeq`, and the rows
+   * read after the read cursor. Scoped to the caller by the server; it never
+   * lists anyone else's.
+   */
+  async listNotifications(
+    orgId: string,
+    query: ListCollabNotificationsQuery
+  ): Promise<CollabNotificationPage> {
+    const search = new URLSearchParams({
+      afterSeq: String(query.afterSeq),
+      readAt: String(query.readAt),
+      readSeq: String(query.readSeq),
+    })
+    if (query.limit !== undefined) search.set("limit", String(query.limit))
+    return this.json<CollabNotificationPage>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/notifications?${search.toString()}`
+    )
+  }
+
+  /**
+   * Mark rows read, by id (1..500) or up to a seq. Idempotent; the server then
+   * tells the reader's other devices over the feed.
+   */
+  async markNotificationsRead(
+    orgId: string,
+    input: MarkCollabNotificationsReadInput
+  ): Promise<{ marked: number }> {
+    const body = "ids" in input ? { ids: input.ids } : { upToSeq: input.upToSeq }
+    return this.json<{ marked: number }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/notifications/read`,
+      { method: "POST", body: JSON.stringify(body) }
+    )
   }
 
   // ── Canvas documents ────────────────────────────────────────────────────
@@ -1614,7 +1801,11 @@ async function readJson<T>(response: Response): Promise<T> {
         ? body.error
         : `collaboration plane returned ${response.status}`
     if (response.status === 409 && body && "authoritative" in body) {
-      throw new CollabConflictError(message, body.authoritative)
+      throw new CollabConflictError(
+        message,
+        body.authoritative,
+        readFieldClashes((body as { fields?: unknown }).fields)
+      )
     }
     throw new CollabError(response.status, message)
   }

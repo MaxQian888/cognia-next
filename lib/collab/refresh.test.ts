@@ -540,3 +540,27 @@ describe("the server's user id is canonical", () => {
     expect(reconcile).not.toHaveBeenCalled()
   })
 })
+
+describe("refreshCollabPlane — refreshing only some legs (ADR-0206)", () => {
+  beforeEach(() => {
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+  })
+
+  it("runs identity and memberships always, and only the named legs besides", async () => {
+    const { calls, options } = deps({
+      memberships: { userId: ADA, orgId: ORG, orgRole: "member", workspaces: [] },
+    })
+    const result = await refreshCollabPlane({ ...options, legs: ["activity"] })
+    expect(result).toMatchObject({ status: "refreshed", legs: ["activity"], issues: 0 })
+    expect(calls.some((url) => url.includes("/memberships/me"))).toBe(true)
+    expect(calls.some((url) => url.includes("/plans"))).toBe(true)
+    expect(calls.some((url) => url.endsWith("/workspaces"))).toBe(false)
+    expect(calls.some((url) => /\/issues(\?|$)/.test(url))).toBe(false)
+  })
+
+  it("runs every leg when none are named", async () => {
+    const { options } = deps({})
+    const result = await refreshCollabPlane(options)
+    expect(result).toMatchObject({ legs: ["workspaces", "issues", "activity"] })
+  })
+})

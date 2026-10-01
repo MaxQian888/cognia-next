@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { NotificationRecord } from "@/types/notifications"
+import { NOTIFICATION_SOURCES, type NotificationRecord } from "@/types/notifications"
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
 import {
   HOVER_REVEAL_FORBIDDEN_CLASSES,
   HOVER_REVEAL_REQUIRED_VARIANTS,
@@ -235,5 +237,24 @@ describe("source workspace label", () => {
     seedWorkspaces("w1")
     setup({ projectId: "deleted" })
     expect(screen.queryByTestId("notification-workspace")).toBeNull()
+  })
+})
+
+describe("every notification source", () => {
+  // A source added to the union without a label printed the raw key in the
+  // centre; one without an icon fell back to the generic bell.
+  it.each(NOTIFICATION_SOURCES.map((source) => [source]))("renders %s with its label", (source) => {
+    setup({ source })
+    expect(screen.getByText(`notificationCenter.sources.${source}`)).toBeInTheDocument()
+  })
+
+  it.each([
+    ["en", enMessages],
+    ["zh-CN", zhMessages],
+  ])("labels every source in %s", (_locale, messages) => {
+    const labels = messages.notificationCenter.sources as Record<string, string>
+    for (const source of NOTIFICATION_SOURCES) {
+      expect(labels[source]).toEqual(expect.any(String))
+    }
   })
 })

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -7,7 +7,6 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
@@ -23,6 +22,7 @@ use crate::chat_store::{
     NewChatAttachment, NewChatRunLease, NewChatRunQueueItem, NewChatSessionInvite, NewSessionEvent,
     NewSharedSession,
 };
+use crate::socket_hub::{Channels, Expiring, TicketBook};
 use crate::store::{AuthorizationAuditEvent, StoreError};
 use cognia_tenant_auth::{OrgRole, WorkspaceCapability, WorkspaceRole};
 
@@ -58,55 +58,58 @@ struct AttachmentTicket {
     expires_at: i64,
 }
 
-#[derive(Default)]
+impl Expiring for SocketTicket {
+    fn expires_at(&self) -> i64 {
+        self.expires_at
+    }
+}
+
+impl Expiring for AttachmentTicket {
+    fn expires_at(&self) -> i64 {
+        self.expires_at
+    }
+}
+
+/// Session streams plus the tickets that open them, on the shared hub pieces
+/// (`socket_hub.rs`, ADR-0206).
 pub struct ChatHub {
-    senders: RwLock<HashMap<String, broadcast::Sender<SessionEvent>>>,
-    tickets: RwLock<HashMap<String, SocketTicket>>,
-    attachment_tickets: RwLock<HashMap<String, AttachmentTicket>>,
+    channels: Channels<String, SessionEvent>,
+    tickets: TicketBook<SocketTicket>,
+    attachment_tickets: TicketBook<AttachmentTicket>,
+}
+
+impl Default for ChatHub {
+    fn default() -> Self {
+        Self {
+            channels: Channels::new(256),
+            tickets: TicketBook::new("st_", MAX_PENDING_TICKETS),
+            attachment_tickets: TicketBook::new("att_", MAX_PENDING_TICKETS),
+        }
+    }
 }
 
 impl ChatHub {
     fn sender(&self, session_id: &str) -> broadcast::Sender<SessionEvent> {
-        if let Some(sender) = self.senders.read().get(session_id) {
-            return sender.clone();
-        }
-        let mut senders = self.senders.write();
-        senders
-            .entry(session_id.to_owned())
-            .or_insert_with(|| broadcast::channel(256).0)
-            .clone()
+        self.channels.sender(&session_id.to_owned())
     }
 
     fn issue_ticket(&self, ticket: SocketTicket) -> Result<String, ChatFailure> {
         // Expiry is assigned by this service, so it also captures issuance time.
         let now = ticket.expires_at.saturating_sub(SOCKET_TICKET_TTL_MS);
-        let mut tickets = self.tickets.write();
-        tickets.retain(|_, ticket| ticket.expires_at > now);
-        if tickets.len() >= MAX_PENDING_TICKETS {
-            return Err(ChatFailure::TicketCapacity);
-        }
-        let value = format!("st_{}", Uuid::new_v4().simple());
-        tickets.insert(value.clone(), ticket);
-        Ok(value)
+        self.tickets
+            .issue(ticket, now)
+            .map_err(|_| ChatFailure::TicketCapacity)
     }
 
     fn consume_ticket(&self, value: &str, now: i64) -> Option<SocketTicket> {
-        self.tickets
-            .write()
-            .remove(value)
-            .filter(|ticket| ticket.expires_at > now)
+        self.tickets.consume(value, now)
     }
 
     fn issue_attachment_ticket(&self, ticket: AttachmentTicket) -> Result<String, ChatFailure> {
         let now = ticket.expires_at.saturating_sub(ATTACHMENT_TICKET_TTL_MS);
-        let mut tickets = self.attachment_tickets.write();
-        tickets.retain(|_, ticket| ticket.expires_at > now);
-        if tickets.len() >= MAX_PENDING_TICKETS {
-            return Err(ChatFailure::TicketCapacity);
-        }
-        let value = format!("att_{}", Uuid::new_v4().simple());
-        tickets.insert(value.clone(), ticket);
-        Ok(value)
+        self.attachment_tickets
+            .issue(ticket, now)
+            .map_err(|_| ChatFailure::TicketCapacity)
     }
 
     fn consume_attachment_ticket(
@@ -116,27 +119,21 @@ impl ChatHub {
         now: i64,
     ) -> Option<AttachmentTicket> {
         self.attachment_tickets
-            .write()
-            .remove(value)
-            .filter(|ticket| ticket.expires_at > now && ticket.action == action)
+            .consume_if(value, now, |ticket| ticket.action == action)
     }
 
     fn revoke_user_tickets(&self, session_id: &str, user_id: &str) {
         self.tickets
-            .write()
-            .retain(|_, ticket| ticket.session_id != session_id || ticket.user_id != user_id);
+            .revoke(|ticket| ticket.session_id == session_id && ticket.user_id == user_id);
         self.attachment_tickets
-            .write()
-            .retain(|_, ticket| ticket.session_id != session_id || ticket.user_id != user_id);
+            .revoke(|ticket| ticket.session_id == session_id && ticket.user_id == user_id);
     }
 
     fn revoke_session_tickets(&self, session_id: &str) {
         self.tickets
-            .write()
-            .retain(|_, ticket| ticket.session_id != session_id);
+            .revoke(|ticket| ticket.session_id == session_id);
         self.attachment_tickets
-            .write()
-            .retain(|_, ticket| ticket.session_id != session_id);
+            .revoke(|ticket| ticket.session_id == session_id);
     }
 }
 
@@ -167,6 +164,10 @@ pub fn routes() -> Router<AppState> {
             delete(revoke_invite),
         )
         .route("/v1/orgs/{org_id}/chat-invites/accept", post(accept_invite))
+        .route(
+            "/v1/orgs/{org_id}/chat-invites/{invite_id}/accept",
+            post(accept_targeted_invite),
+        )
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/export-authorization",
             get(authorize_export),
@@ -956,6 +957,8 @@ async fn create_invite(
         .await?;
     }
     let token = format!("cit_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let org_id_for_notice = org_id.clone();
+    let workspace_for_notice = session.workspace_id.clone();
     let invite = state
         .chat_store
         .create_invite(NewChatSessionInvite {
@@ -974,6 +977,18 @@ async fn create_invite(
         })
         .await
         .map_err(ChatFailure::Store)?;
+    // A targeted invite can be accepted by its target without the token
+    // (`accept_targeted_invite`), so telling them is actionable.
+    if let Some(target) = invite.target_user_id.as_deref() {
+        crate::notifications::deliver(
+            &state,
+            &org_id_for_notice,
+            &workspace_for_notice,
+            &invite.created_by_user_id,
+            vec![crate::notifications::Draft::chat_invite(target, &invite.id)],
+        )
+        .await;
+    }
     Ok((
         StatusCode::CREATED,
         Json(CreateInviteResponse { invite, token }),
@@ -1011,6 +1026,32 @@ async fn accept_invite(
             grant.user_id.as_str(),
             (state.now)(),
         )
+        .await
+        .map_err(ChatFailure::Store)?;
+    let _ = state.chat_hub.sender(&invite.session_id).send(policy_event(
+        &invite.session_id,
+        &membership.user_id,
+        (state.now)(),
+    ));
+    Ok(Json(AcceptInviteResponse { invite, membership }))
+}
+
+/// Accept an invite addressed to the caller by name, without its token.
+///
+/// The token exists for invites nobody was named on: whoever holds it may
+/// join. An invite that names a person already says who may join, and the
+/// signed-in caller proves who they are, so the id is enough. That is what
+/// makes the `chat.invited` notification (ADR-0207) something its recipient
+/// can act on. Anyone else gets the same answer as a used invite.
+async fn accept_targeted_invite(
+    State(state): State<AppState>,
+    Path((org_id, invite_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<AcceptInviteResponse>, ChatFailure> {
+    let grant = claims(&state, &headers, &org_id).await?;
+    let (invite, membership) = state
+        .chat_store
+        .accept_targeted_invite(&org_id, &invite_id, grant.user_id.as_str(), (state.now)())
         .await
         .map_err(ChatFailure::Store)?;
     let _ = state.chat_hub.sender(&invite.session_id).send(policy_event(
@@ -2241,7 +2282,7 @@ async fn create_approval(
         .append_session_event(NewSessionEvent {
             id: format!("evt_{}", Uuid::new_v4().simple()),
             org_id,
-            workspace_id: session.workspace_id,
+            workspace_id: session.workspace_id.clone(),
             session_id: session_id.clone(),
             kind: "approval.requested".into(),
             actor_kind: if member.guest { "guest" } else { "human" }.into(),
@@ -2260,7 +2301,59 @@ async fn create_approval(
         .await
         .map_err(ChatFailure::Store)?;
     let _ = state.chat_hub.sender(&session_id).send(event);
+    deliver_approval_request(&state, &session, &approval).await;
     Ok((StatusCode::CREATED, Json(approval)))
+}
+
+/// Tell the people who may approve a high-risk request that a run is waiting
+/// on them (ADR-0207). An ordinary request is resolved by its requester alone
+/// (`resolve_approval`), so there is nobody else to tell.
+async fn deliver_approval_request(
+    state: &AppState,
+    session: &crate::chat::SharedSession,
+    approval: &crate::chat_store::ChatApprovalRequest,
+) {
+    if approval.risk != "high" {
+        return;
+    }
+    let members = match state
+        .chat_store
+        .list_members(&session.org_id, &session.id)
+        .await
+    {
+        Ok(members) => members,
+        Err(error) => {
+            tracing::warn!(%error, "approval notification: members unavailable");
+            return;
+        }
+    };
+    let drafts = members
+        .iter()
+        .filter(|member| {
+            authorize_session_action(
+                Some(member),
+                SessionAction::ApproveHighRisk,
+                session.policy_revision,
+            )
+            .allowed
+        })
+        .map(|member| {
+            crate::notifications::Draft::chat_session(
+                &member.user_id,
+                crate::notifications::NotificationKind::ChatApprovalRequested,
+                &session.id,
+                format!("chat.approval_requested:{}", approval.id),
+            )
+        })
+        .collect();
+    crate::notifications::deliver(
+        state,
+        &session.org_id,
+        &session.workspace_id,
+        &approval.requested_by_user_id,
+        drafts,
+    )
+    .await;
 }
 
 #[derive(Deserialize)]
@@ -2435,7 +2528,7 @@ async fn create_attachment(
         })
         .await
         .map_err(|error| {
-            state.chat_hub.attachment_tickets.write().remove(&ticket);
+            state.chat_hub.attachment_tickets.discard(&ticket);
             ChatFailure::Store(error)
         })?;
     Ok((
@@ -2942,6 +3035,194 @@ mod tests {
         }
     }
 
+    /// A store and state with Ada (owner of `session`), Bob and Cy all in
+    /// `workspace`, plus a grant per person.
+    async fn notification_fixture() -> (AppState, impl Fn(&str) -> String) {
+        use crate::chat_store::NewSharedSession;
+        use cognia_tenant_auth::{grant::GrantClaims, OrgId, UserId};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let store = crate::store::InMemoryStore::new();
+        for (user, name) in [(ADA, "Ada"), (BOB, "Bob"), (CY, "Cy")] {
+            store.add_user(user, name);
+            store.add_org_member(NOTICE_ORG, user, OrgRole::Member);
+            store.add_workspace_member(NOTICE_ORG, "workspace", user, WorkspaceRole::Member);
+        }
+        let signer = cognia_tenant_auth::grant::GrantSigner::new(&[9; 32]).unwrap();
+        let mut state = AppState::new(
+            Arc::new(store),
+            signer.clone(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 10);
+        state
+            .chat_store
+            .create_session(NewSharedSession {
+                id: "session".into(),
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                title: "Shared".into(),
+                status: SessionStatus::Active,
+                created_by_user_id: ADA.into(),
+                now: 1,
+                operation_id: "create".into(),
+            })
+            .await
+            .unwrap();
+        let grant = move |user: &str| {
+            let claims = GrantClaims::issue(
+                UserId::parse(user).unwrap(),
+                OrgId::parse(NOTICE_ORG).unwrap(),
+                None,
+                None,
+                Duration::from_secs(300),
+            )
+            .unwrap();
+            format!("Bearer {}", signer.sign(&claims).unwrap())
+        };
+        (state, grant)
+    }
+
+    const NOTICE_ORG: &str = "org_acme00000000000000000";
+    const ADA: &str = "usr_aaaaaaaaaaaaaaaaaaaaaaaa";
+    const BOB: &str = "usr_bbbbbbbbbbbbbbbbbbbbbbbb";
+    const CY: &str = "usr_cccccccccccccccccccccccc";
+
+    #[tokio::test]
+    async fn a_named_invitee_is_told_and_only_they_can_accept_by_id() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let (state, grant) = notification_fixture().await;
+        let app = routes().with_state(state.clone());
+        let send = |method: &str, path: String, user: &str, body: serde_json::Value| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("authorization", grant(user))
+                .header("content-type", "application/json")
+                .header(
+                    "x-cognia-collab-protocol",
+                    SHARED_CHAT_PROTOCOL_VERSION.to_string(),
+                )
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        let response = app
+            .clone()
+            .oneshot(send(
+                "POST",
+                format!("/v1/orgs/{NOTICE_ORG}/chat-sessions/session/invites"),
+                ADA,
+                serde_json::json!({
+                    "targetUserId": BOB, "role": "member", "expiresAt": 10 + 60_000,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let created: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let invite_id = created["invite"]["id"].as_str().unwrap().to_owned();
+
+        let told = state
+            .notification_store
+            .list(NOTICE_ORG, BOB, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(told.len(), 1);
+        assert_eq!(
+            told[0].kind,
+            crate::notifications::NotificationKind::ChatInvited
+        );
+        assert_eq!(told[0].subject.entity, "chat_invite");
+        assert_eq!(told[0].subject.id, invite_id);
+        assert!(state
+            .notification_store
+            .list(NOTICE_ORG, ADA, 0, 10)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let accept = |user: &str| {
+            send(
+                "POST",
+                format!("/v1/orgs/{NOTICE_ORG}/chat-invites/{invite_id}/accept"),
+                user,
+                serde_json::json!({}),
+            )
+        };
+        // Cy holds no token and is not named.
+        let refused = app.clone().oneshot(accept(CY)).await.unwrap();
+        assert_ne!(refused.status(), StatusCode::OK);
+        let accepted = app.clone().oneshot(accept(BOB)).await.unwrap();
+        assert_eq!(accepted.status(), StatusCode::OK);
+        let again = app.oneshot(accept(BOB)).await.unwrap();
+        assert_ne!(again.status(), StatusCode::OK, "an invite is used once");
+    }
+
+    #[tokio::test]
+    async fn a_high_risk_request_reaches_every_other_approver_and_an_ordinary_one_nobody() {
+        let (state, _) = notification_fixture().await;
+        for (user, role, approver) in [
+            (BOB, SessionRole::Member, true),
+            (CY, SessionRole::Viewer, false),
+        ] {
+            state
+                .chat_store
+                .put_member(
+                    NOTICE_ORG,
+                    "session",
+                    "workspace",
+                    user,
+                    role,
+                    approver,
+                    false,
+                    2,
+                )
+                .await
+                .unwrap();
+        }
+        let session = state
+            .chat_store
+            .admin_session(NOTICE_ORG, "session")
+            .await
+            .unwrap();
+        let request = |id: &str, risk: &str| crate::chat_store::ChatApprovalRequest {
+            id: id.into(),
+            session_id: "session".into(),
+            run_id: "run".into(),
+            action: "deploy".into(),
+            risk: risk.into(),
+            requested_by_user_id: ADA.into(),
+            status: "pending".into(),
+            resolved_by_user_id: None,
+            resolved_at: None,
+            expires_at: 100,
+            created_at: 10,
+            revision: 1,
+        };
+        deliver_approval_request(&state, &session, &request("apr_ordinary", "ordinary")).await;
+        deliver_approval_request(&state, &session, &request("apr_high", "high")).await;
+
+        let rows = |user: &'static str| {
+            let store = state.notification_store.clone();
+            async move { store.list(NOTICE_ORG, user, 0, 10).await.unwrap() }
+        };
+        let bob_rows = rows(BOB).await;
+        assert_eq!(bob_rows.len(), 1, "only the high-risk request");
+        assert_eq!(bob_rows[0].dedupe_key, "chat.approval_requested:apr_high");
+        // The requester is not told about their own request; a viewer cannot
+        // approve and is not asked to.
+        assert!(rows(ADA).await.is_empty());
+        assert!(rows(CY).await.is_empty());
+    }
+
     #[test]
     fn issuing_tickets_reclaims_expired_unused_credentials() {
         let hub = ChatHub::default();
@@ -2959,7 +3240,7 @@ mod tests {
             expires_at: SOCKET_TICKET_TTL_MS + 1,
         })
         .unwrap();
-        assert_eq!(hub.tickets.read().len(), 1);
+        assert_eq!(hub.tickets.len(), 1);
 
         for expires_at in [1, ATTACHMENT_TICKET_TTL_MS + 1] {
             hub.issue_attachment_ticket(AttachmentTicket {
@@ -2972,7 +3253,7 @@ mod tests {
             })
             .unwrap();
         }
-        assert_eq!(hub.attachment_tickets.read().len(), 1);
+        assert_eq!(hub.attachment_tickets.len(), 1);
     }
 
     #[tokio::test]
@@ -3050,13 +3331,11 @@ mod tests {
             action: AttachmentTicketAction::Upload,
             expires_at: ATTACHMENT_TICKET_TTL_MS + 1,
         };
-        for index in 0..MAX_PENDING_TICKETS {
-            hub.tickets
-                .write()
-                .insert(index.to_string(), socket.clone());
-            hub.attachment_tickets
-                .write()
-                .insert(index.to_string(), attachment.clone());
+        let first_socket = hub.tickets.issue(socket.clone(), 0).unwrap();
+        let first_attachment = hub.attachment_tickets.issue(attachment.clone(), 0).unwrap();
+        for _ in 1..MAX_PENDING_TICKETS {
+            hub.tickets.issue(socket.clone(), 0).unwrap();
+            hub.attachment_tickets.issue(attachment.clone(), 0).unwrap();
         }
         assert!(matches!(
             hub.issue_ticket(socket.clone()),
@@ -3070,14 +3349,14 @@ mod tests {
             ChatFailure::TicketCapacity.into_response().status(),
             StatusCode::TOO_MANY_REQUESTS
         );
-        assert!(hub.consume_ticket("0", 1).is_some());
+        assert!(hub.consume_ticket(&first_socket, 1).is_some());
         assert!(hub
-            .consume_attachment_ticket("0", AttachmentTicketAction::Upload, 1)
+            .consume_attachment_ticket(&first_attachment, AttachmentTicketAction::Upload, 1)
             .is_some());
         assert!(hub.issue_ticket(socket).is_ok());
         assert!(hub.issue_attachment_ticket(attachment).is_ok());
-        assert_eq!(hub.tickets.read().len(), MAX_PENDING_TICKETS);
-        assert_eq!(hub.attachment_tickets.read().len(), MAX_PENDING_TICKETS);
+        assert_eq!(hub.tickets.len(), MAX_PENDING_TICKETS);
+        assert_eq!(hub.attachment_tickets.len(), MAX_PENDING_TICKETS);
     }
 
     #[test]

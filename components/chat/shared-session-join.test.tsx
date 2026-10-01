@@ -54,6 +54,13 @@ it("accepts an invitation without an existing session and opens the discovered c
   fillInvite()
   await waitFor(() => expect(mockActivate).toHaveBeenCalledWith("local"))
   expect(mockAccept).toHaveBeenCalledWith("org", "token")
+  // Through the shared post-accept helper: the mirror pull names the session
+  // the accepted invite points at.
+  expect(mockSync).toHaveBeenCalledWith(
+    expect.objectContaining({ acceptSessionInvite: mockAccept }),
+    "org",
+    "shared"
+  )
   expect(mockWorkspace).toHaveBeenCalledWith("workspace")
   expect(mockNavigate).toHaveBeenCalled()
 })

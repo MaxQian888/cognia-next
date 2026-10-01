@@ -667,6 +667,8 @@ async fn assert_force_rls(client: &Client) {
             "SELECT relname, relrowsecurity, relforcerowsecurity \
              FROM pg_class WHERE relname = ANY($1) ORDER BY relname",
             &[&vec![
+                "collab_notification_cursors",
+                "collab_notifications",
                 "deployment_bootstrap_credentials",
                 "identity_provisioning_operations",
                 "issues",
@@ -679,7 +681,7 @@ async fn assert_force_rls(client: &Client) {
         )
         .await
         .expect("RLS metadata must be readable");
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 10);
     for row in rows {
         assert!(
             row.get::<_, bool>(1),
@@ -846,6 +848,305 @@ async fn bind_tenant(transaction: &tokio_postgres::Transaction<'_>, tenant: &str
         .execute("SELECT set_config('app.tenant_id', $1, true)", &[&tenant])
         .await
         .expect("tenant bind must succeed");
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn stale_patches_merge_by_field_in_postgres() {
+    use cognia_collab_server::model::{ActorKind, CollabActor, IssuePriority, IssueStatus};
+    use cognia_collab_server::store::{IssuePatch, MutationGuard, NewIssue, StoreError};
+    use cognia_collab_server::Store;
+
+    let database = TestDatabase::create().await;
+    let store = PgStore::connect(&database.url, 2).await.unwrap();
+    let scope = bootstrap("field_merge");
+    store.bootstrap_operator(&scope).await.unwrap();
+    let id = format!("iss_{}", uuid::Uuid::new_v4().simple());
+    store
+        .create_issue(NewIssue {
+            id: id.clone(),
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            issue_project_id: "cont-1".into(),
+            title: "Ship it".into(),
+            body: None,
+            status: IssueStatus::Todo,
+            priority: IssuePriority::Medium,
+            board_order: 1.0,
+            assignee: None,
+            created_by: CollabActor::new(ActorKind::Human, scope.user_id.clone(), None).unwrap(),
+            now: 1,
+            operation_id: format!("create-{id}"),
+        })
+        .await
+        .unwrap();
+    let guard = |op: &str, base: i64| MutationGuard {
+        operation_id: op.into(),
+        base_revision: base,
+        author: Some(scope.user_id.clone()),
+    };
+
+    store
+        .patch_issue(
+            &scope.org_id,
+            &id,
+            IssuePatch {
+                status: Some(IssueStatus::InProgress),
+                ..Default::default()
+            },
+            guard("first", 1),
+            2,
+        )
+        .await
+        .unwrap();
+    // Same stale base, a different field: merges through the jsonb stamps.
+    let merged = store
+        .patch_issue(
+            &scope.org_id,
+            &id,
+            IssuePatch {
+                priority: Some(IssuePriority::High),
+                ..Default::default()
+            },
+            guard("second", 1),
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(merged.status, IssueStatus::InProgress);
+    assert_eq!(merged.priority, IssuePriority::High);
+    assert_eq!(merged.revision, 3);
+    // Same stale base, the same field: a named clash with its author.
+    match store
+        .patch_issue(
+            &scope.org_id,
+            &id,
+            IssuePatch {
+                status: Some(IssueStatus::Done),
+                ..Default::default()
+            },
+            guard("third", 1),
+            4,
+        )
+        .await
+    {
+        Err(StoreError::FieldConflict { fields, .. }) => {
+            assert_eq!(fields["status"]["changedAt"], 2);
+            assert_eq!(fields["status"]["changedBy"], scope.user_id.as_str());
+        }
+        other => panic!("expected a field conflict, got {other:?}"),
+    }
+    drop(store);
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn notifications_are_per_recipient_ordered_and_deduplicated_in_postgres() {
+    use cognia_collab_server::notifications::{
+        NewNotification, NotificationKind, NotificationStore, NotificationSubject, ReadCursor,
+        ReadSelector, READ_RETENTION_MS,
+    };
+
+    let database = TestDatabase::create().await;
+    let store = PgStore::connect(&database.url, 2).await.unwrap();
+    let a = bootstrap("notify_a");
+    let b = bootstrap("notify_b");
+    store.bootstrap_operator(&a).await.unwrap();
+    store.bootstrap_operator(&b).await.unwrap();
+    let new = |org: &str, recipient: &str, key: &str, at: i64| NewNotification {
+        id: format!("ntf_{}", uuid::Uuid::new_v4().simple()),
+        org_id: org.into(),
+        recipient_user_id: recipient.into(),
+        workspace_id: Some(a.workspace_id.clone()),
+        kind: NotificationKind::IssueAssigned,
+        subject: NotificationSubject {
+            entity: "issue".into(),
+            id: "iss_1".into(),
+        },
+        actor_user_id: Some(a.user_id.clone()),
+        dedupe_key: key.into(),
+        created_at: at,
+    };
+
+    let (first, created) = store
+        .record(new(&a.org_id, &a.user_id, "k1", 1))
+        .await
+        .unwrap();
+    assert!(created);
+    let (second, _) = store
+        .record(new(&a.org_id, &a.user_id, "k2", 2))
+        .await
+        .unwrap();
+    let (other, _) = store
+        .record(new(&a.org_id, &b.user_id, "k1", 3))
+        .await
+        .unwrap();
+    assert_eq!((first.seq, second.seq, other.seq), (1, 2, 1));
+    let (replayed, created) = store
+        .record(new(&a.org_id, &a.user_id, "k1", 4))
+        .await
+        .unwrap();
+    assert!(!created);
+    assert_eq!(replayed.id, first.id);
+
+    // Concurrent writers for one recipient still get distinct, gapless seqs.
+    let writes = (0..8).map(|i| {
+        let store = &store;
+        let input = new(&a.org_id, &a.user_id, &format!("burst{i}"), 5);
+        async move { store.record(input).await.unwrap().0.seq }
+    });
+    let mut seqs = futures_util::future::join_all(writes).await;
+    seqs.sort_unstable();
+    assert_eq!(seqs, (3..=10).collect::<Vec<_>>());
+
+    let listed = store.list(&a.org_id, &a.user_id, 1, 100).await.unwrap();
+    assert_eq!(listed.first().map(|row| row.seq), Some(2));
+    assert_eq!(listed.len(), 9);
+    // Another tenant's scope sees none of it.
+    assert!(store
+        .list(&b.org_id, &a.user_id, 0, 100)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Marking is per recipient and idempotent; reads page by (read_at, seq).
+    let marked = store
+        .mark_read(
+            &a.org_id,
+            &b.user_id,
+            &ReadSelector::Ids(vec![first.id.clone()]),
+            50,
+        )
+        .await
+        .unwrap();
+    assert_eq!(marked, 0, "someone else's id marks nothing");
+    let marked = store
+        .mark_read(&a.org_id, &a.user_id, &ReadSelector::UpToSeq(3), 50)
+        .await
+        .unwrap();
+    assert_eq!(marked, 3);
+    let reads = store
+        .list_reads(&a.org_id, &a.user_id, ReadCursor::default(), 2)
+        .await
+        .unwrap();
+    assert_eq!(reads.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![1, 2]);
+    let rest = store
+        .list_reads(&a.org_id, &a.user_id, ReadCursor { at: 50, seq: 2 }, 10)
+        .await
+        .unwrap();
+    assert_eq!(rest.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![3]);
+
+    // A write past the read retention prunes this recipient's old read rows
+    // and leaves their unread ones and everyone else's alone.
+    store
+        .record(new(&a.org_id, &a.user_id, "late", READ_RETENTION_MS + 10))
+        .await
+        .unwrap();
+    let remaining = store.list(&a.org_id, &a.user_id, 0, 100).await.unwrap();
+    assert!(remaining.iter().all(|row| row.seq > 3));
+    assert_eq!(store.latest_seq(&a.org_id, &a.user_id).await.unwrap(), 11);
+    assert_eq!(
+        store
+            .list(&a.org_id, &b.user_id, 0, 100)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn a_targeted_invite_is_accepted_by_its_target_alone_in_postgres() {
+    use cognia_collab_server::chat::{SessionRole, SessionStatus};
+    use cognia_collab_server::chat_store::{ChatStore, NewChatSessionInvite, NewSharedSession};
+    use cognia_collab_server::store::StoreError;
+
+    let database = TestDatabase::create().await;
+    let store = PgStore::connect(&database.url, 2).await.unwrap();
+    let scope = bootstrap("invite_owner");
+    store.bootstrap_operator(&scope).await.unwrap();
+    let mut people = Vec::new();
+    for suffix in ["invite_target", "invite_other"] {
+        let mut person = bootstrap(suffix);
+        person.org_id = scope.org_id.clone();
+        person.logto_organization_id = scope.logto_organization_id.clone();
+        person.workspace_id = scope.workspace_id.clone();
+        store.bootstrap_operator(&person).await.unwrap();
+        people.push(person.user_id);
+    }
+    let (target, other) = (&people[0], &people[1]);
+    let session_id = format!("session_{}", uuid::Uuid::new_v4().simple());
+    store
+        .create_session(NewSharedSession {
+            id: session_id.clone(),
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            title: "Invites".into(),
+            status: SessionStatus::Active,
+            created_by_user_id: scope.user_id.clone(),
+            now: 1,
+            operation_id: session_id.clone(),
+        })
+        .await
+        .unwrap();
+    let invite =
+        |id: &str, token_hash: &str, target_user_id: Option<String>| NewChatSessionInvite {
+            id: id.into(),
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            session_id: session_id.clone(),
+            token_hash: token_hash.into(),
+            // `chat_invite_target`: an invite that names nobody is a guest invite.
+            guest: target_user_id.is_none(),
+            target_user_id,
+            role: SessionRole::Member,
+            approver: false,
+            created_by_user_id: scope.user_id.clone(),
+            expires_at: 1_000,
+            now: 2,
+        };
+    store
+        .create_invite(invite("inv_named", "hash_named", Some(target.clone())))
+        .await
+        .unwrap();
+    store
+        .create_invite(invite("inv_open", "hash_open", None))
+        .await
+        .unwrap();
+
+    let unavailable =
+        |result: Result<_, StoreError>| matches!(result, Err(StoreError::InvitationUnavailable));
+    // Someone else cannot use a named invite's id, and nobody can use the id
+    // of an invite that names no one: that one needs its token.
+    assert!(unavailable(
+        store
+            .accept_targeted_invite(&scope.org_id, "inv_named", other, 3)
+            .await
+    ));
+    assert!(unavailable(
+        store
+            .accept_targeted_invite(&scope.org_id, "inv_open", other, 3)
+            .await
+    ));
+    let (accepted, membership) = store
+        .accept_targeted_invite(&scope.org_id, "inv_named", target, 3)
+        .await
+        .unwrap();
+    assert_eq!(accepted.status, "accepted");
+    assert_eq!(membership.user_id, *target);
+    assert!(unavailable(
+        store
+            .accept_targeted_invite(&scope.org_id, "inv_named", target, 4)
+            .await
+    ));
+    // The token path still works on the same refactored statement.
+    let (by_token, _) = store
+        .accept_invite(&scope.org_id, "hash_open", other, 4)
+        .await
+        .unwrap();
+    assert_eq!(by_token.id, "inv_open");
 }
 
 fn bootstrap(suffix: &str) -> OperatorBootstrap {

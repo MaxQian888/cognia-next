@@ -90,6 +90,33 @@ export async function requestCollabRefresh(
   return promise
 }
 
+/**
+ * The refresh already running for this profile, if any. The change feed waits
+ * on it before starting its own: a refresh that began before a frame arrived
+ * may not include the change the frame announces.
+ */
+export function collabRefreshInFlight(
+  localAccountId: string
+): Promise<RefreshCollabPlaneResult | null> | undefined {
+  return inFlight.get(localAccountId)
+}
+
+/**
+ * Profiles whose change feed is connected (ADR-0206). While it is, the timed
+ * poll stands down; focus, online and visibility still refresh, which is what
+ * catches up anything missed while the socket was down.
+ */
+const liveFeeds = new Set<string>()
+
+export function setCollabFeedLive(localAccountId: string, live: boolean): void {
+  if (live) liveFeeds.add(localAccountId)
+  else liveFeeds.delete(localAccountId)
+}
+
+export function isCollabFeedLive(localAccountId: string): boolean {
+  return liveFeeds.has(localAccountId)
+}
+
 export function collabRefreshDelay(failures: number): number {
   return Math.min(
     COLLAB_REFRESH_MAX_BACKOFF_MS,
@@ -106,20 +133,31 @@ export function installCollabRefreshScheduler(
       "addEventListener" | "removeEventListener" | "setTimeout" | "clearTimeout"
     >
     document?: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">
+    /** Whether a live change feed makes the timed poll redundant. */
+    feedLive?: () => boolean
   } = {}
 ): () => void {
   const windowRef = deps.window ?? (typeof window === "undefined" ? undefined : window)
   const documentRef = deps.document ?? (typeof document === "undefined" ? undefined : document)
   if (!windowRef || !documentRef) return () => {}
+  const feedLive = deps.feedLive ?? (() => isCollabFeedLive(localAccountId))
   let stopped = false
   let timer: number | undefined
   const schedule = () => {
     if (stopped) return
     if (timer !== undefined) windowRef.clearTimeout(timer)
     timer = windowRef.setTimeout(
-      run,
+      tick,
       collabRefreshDelay(getCollabRefreshState(localAccountId).failures)
     )
+  }
+  // The timed poll only. A live feed already says when something changed.
+  const tick = () => {
+    if (feedLive()) {
+      schedule()
+      return
+    }
+    run()
   }
   const run = () => {
     if (stopped || documentRef.visibilityState !== "visible") {

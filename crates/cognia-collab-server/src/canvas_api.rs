@@ -39,7 +39,6 @@ use axum::{Json, Router};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
-use uuid::Uuid;
 
 use crate::api::AppState;
 use crate::auth::{authorize_workspace, verify_grant, AuthError, Caller};
@@ -50,6 +49,7 @@ use crate::canvas_store::{
     decode_payload, CanvasCatchUp, NewCanvasComment, NewCanvasDocument, NewCanvasSnapshot,
     NewCanvasUpdate, NewCanvasVersion, RenameCanvasDocument,
 };
+use crate::socket_hub::{Channels, Expiring, TicketBook};
 use crate::store::StoreError;
 
 /// The subprotocol a Canvas socket must offer. Bumping it is how a breaking
@@ -101,49 +101,52 @@ pub struct CanvasFrame {
     pub timestamp: i64,
 }
 
-/// Live sockets and their presence rosters, per document.
-#[derive(Default)]
+impl Expiring for SocketTicket {
+    fn expires_at(&self) -> i64 {
+        self.expires_at
+    }
+}
+
+/// Pending Canvas tickets beyond which minting is refused. Matches the shared
+/// chat bound; before the shared hub, Canvas had none.
+const MAX_PENDING_TICKETS: usize = 8_192;
+
+/// Live sockets and their presence rosters, per document. Streams and tickets
+/// ride the shared hub pieces (`socket_hub.rs`, ADR-0206).
 pub struct CanvasHub {
-    senders: RwLock<HashMap<String, broadcast::Sender<CanvasFrame>>>,
-    tickets: RwLock<HashMap<String, SocketTicket>>,
+    channels: Channels<String, CanvasFrame>,
+    tickets: TicketBook<SocketTicket>,
     presence: RwLock<HashMap<String, Vec<CanvasPresence>>>,
+}
+
+impl Default for CanvasHub {
+    fn default() -> Self {
+        Self {
+            channels: Channels::new(512),
+            tickets: TicketBook::new("ct_", MAX_PENDING_TICKETS),
+            presence: RwLock::new(HashMap::new()),
+        }
+    }
 }
 
 impl CanvasHub {
     fn sender(&self, document_id: &str) -> broadcast::Sender<CanvasFrame> {
-        if let Some(sender) = self.senders.read().get(document_id) {
-            return sender.clone();
-        }
-        let mut senders = self.senders.write();
-        senders
-            .entry(document_id.to_owned())
-            .or_insert_with(|| broadcast::channel(512).0)
-            .clone()
+        self.channels.sender(&document_id.to_owned())
     }
 
-    fn issue_ticket(&self, ticket: SocketTicket) -> String {
-        let value = format!("ct_{}", Uuid::new_v4().simple());
-        self.tickets.write().insert(value.clone(), ticket);
-        value
+    /// Mint a ticket; expired ones are swept first, so the book is bounded by
+    /// live tickets.
+    fn issue_ticket(&self, ticket: SocketTicket, now: i64) -> Result<String, CanvasFailure> {
+        self.tickets
+            .issue(ticket, now)
+            .map_err(|_| CanvasFailure::TicketCapacity)
     }
 
     /// Redeem a ticket. Removed on the way out whether or not it was still
     /// valid, so a leaked ticket cannot be replayed even by the person it was
     /// minted for.
     fn consume_ticket(&self, value: &str, now: i64) -> Option<SocketTicket> {
-        self.tickets
-            .write()
-            .remove(value)
-            .filter(|ticket| ticket.expires_at > now)
-    }
-
-    /// Drop expired tickets. Called when one is minted, so the map cannot grow
-    /// without bound on a server whose clients keep asking for tickets and
-    /// never connecting.
-    fn sweep_tickets(&self, now: i64) {
-        self.tickets
-            .write()
-            .retain(|_, ticket| ticket.expires_at > now);
+        self.tickets.consume(value, now)
     }
 
     fn join(&self, document_id: &str, participant: CanvasPresence) -> Vec<CanvasPresence> {
@@ -241,6 +244,8 @@ enum CanvasFailure {
     Hidden,
     Gone,
     BadRequest(String),
+    /// Too many tickets minted and never redeemed.
+    TicketCapacity,
     Store(StoreError),
 }
 
@@ -262,6 +267,10 @@ impl IntoResponse for CanvasFailure {
             Self::Gone => (
                 StatusCode::GONE,
                 serde_json::json!({"error":"expired or revoked"}),
+            ),
+            Self::TicketCapacity => (
+                StatusCode::TOO_MANY_REQUESTS,
+                serde_json::json!({"error":"too many pending tickets"}),
             ),
             Self::BadRequest(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -857,15 +866,17 @@ async fn create_stream_ticket(
     let (caller, workspace_id) =
         document_caller(&state, &headers, &org_id, &document_id, CanvasAction::Read).await?;
     let now = (state.now)();
-    state.canvas_hub.sweep_tickets(now);
     let expires_at = now + SOCKET_TICKET_TTL_MS;
-    let ticket = state.canvas_hub.issue_ticket(SocketTicket {
-        org_id,
-        document_id,
-        workspace_id,
-        user_id: caller.user_id,
-        expires_at,
-    });
+    let ticket = state.canvas_hub.issue_ticket(
+        SocketTicket {
+            org_id,
+            document_id,
+            workspace_id,
+            user_id: caller.user_id,
+            expires_at,
+        },
+        now,
+    )?;
     Ok(Json(TicketResponse { ticket, expires_at }))
 }
 
@@ -2115,21 +2126,23 @@ mod tests {
     #[test]
     fn socket_tickets_are_single_use_and_expire() {
         let hub = CanvasHub::default();
-        let value = hub.issue_ticket(ticket(20));
+        let value = hub.issue_ticket(ticket(20), 0).unwrap();
         assert!(hub.consume_ticket(&value, 10).is_some());
         assert!(
             hub.consume_ticket(&value, 10).is_none(),
             "a ticket must not be replayable"
         );
-        let expired = hub.issue_ticket(ticket(20));
+        let expired = hub.issue_ticket(ticket(20), 0).unwrap();
         assert!(hub.consume_ticket(&expired, 20).is_none());
     }
 
     #[test]
     fn sweeping_drops_expired_tickets_so_the_map_cannot_grow_without_bound() {
         let hub = CanvasHub::default();
-        let stale = hub.issue_ticket(ticket(10));
-        hub.sweep_tickets(50);
+        let stale = hub.issue_ticket(ticket(10), 0).unwrap();
+        // Minting at 50 sweeps the ticket that expired at 10.
+        hub.issue_ticket(ticket(100), 50).unwrap();
+        assert_eq!(hub.tickets.len(), 1);
         assert!(hub.consume_ticket(&stale, 5).is_none());
     }
 

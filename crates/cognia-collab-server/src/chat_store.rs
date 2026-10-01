@@ -292,6 +292,16 @@ pub trait ChatStore: Send + Sync {
         user_id: &str,
         now: i64,
     ) -> Result<(ChatSessionInvite, SessionMembership), StoreError>;
+    /// Accept, by id, an invite that names `user_id` as its target (ADR-0207).
+    /// An invite naming someone else or nobody, or one already used, revoked
+    /// or expired, is [`StoreError::InvitationUnavailable`].
+    async fn accept_targeted_invite(
+        &self,
+        org_id: &str,
+        invite_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(ChatSessionInvite, SessionMembership), StoreError>;
     async fn revoke_invite(
         &self,
         org_id: &str,
@@ -468,6 +478,59 @@ struct MemoryTables {
     queue: HashMap<String, (ChatRunQueueItem, String, String)>,
     break_glass: HashMap<String, (BreakGlassGrant, String, String)>,
     operations: HashMap<(String, String), String>,
+}
+
+/// The part of accepting an invite both lookups share: the invite is still
+/// usable and, if it names someone, names this caller.
+fn accept_stored_invite(
+    tables: &mut MemoryTables,
+    invite_id: &str,
+    user_id: &str,
+    now: i64,
+) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
+    let (invite, _, _) = tables
+        .invites
+        .get(invite_id)
+        .ok_or(StoreError::InvitationUnavailable)?;
+    if invite.status != "pending"
+        || invite.expires_at <= now
+        || invite
+            .target_user_id
+            .as_ref()
+            .is_some_and(|target| target != user_id)
+    {
+        return Err(StoreError::InvitationUnavailable);
+    }
+    let invite_snapshot = invite.clone();
+    let session = tables
+        .sessions
+        .get_mut(&invite_snapshot.session_id)
+        .ok_or(StoreError::InvitationUnavailable)?;
+    session.policy_revision += 1;
+    session.updated_at = now;
+    let membership = SessionMembership {
+        session_id: invite_snapshot.session_id.clone(),
+        user_id: user_id.to_owned(),
+        role: invite_snapshot.role,
+        approver: invite_snapshot.approver,
+        guest: invite_snapshot.guest,
+        display_name: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let membership = tables
+        .memberships
+        .entry((invite_snapshot.session_id.clone(), user_id.to_owned()))
+        .or_insert(membership)
+        .clone();
+    let (invite, _, _) = tables
+        .invites
+        .get_mut(invite_id)
+        .ok_or(StoreError::InvitationUnavailable)?;
+    invite.status = "accepted".into();
+    invite.accepted_by_user_id = Some(user_id.to_owned());
+    invite.accepted_at = Some(now);
+    Ok((invite.clone(), membership))
 }
 
 #[derive(Clone, Default)]
@@ -969,43 +1032,27 @@ impl ChatStore for InMemoryChatStore {
             })
             .map(|(id, _)| id.clone())
             .ok_or(StoreError::InvitationUnavailable)?;
-        let (invite, _, _) = tables.invites.get(&invite_id).unwrap();
-        if invite.status != "pending"
-            || invite.expires_at <= now
-            || invite
-                .target_user_id
-                .as_ref()
-                .is_some_and(|target| target != user_id)
-        {
+        accept_stored_invite(&mut tables, &invite_id, user_id, now)
+    }
+
+    async fn accept_targeted_invite(
+        &self,
+        org_id: &str,
+        invite_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
+        let mut tables = self.tables.write();
+        let named = tables
+            .invites
+            .get(invite_id)
+            .is_some_and(|(invite, stored_org, _)| {
+                stored_org == org_id && invite.target_user_id.as_deref() == Some(user_id)
+            });
+        if !named {
             return Err(StoreError::InvitationUnavailable);
         }
-        let invite_snapshot = invite.clone();
-        let session = tables
-            .sessions
-            .get_mut(&invite_snapshot.session_id)
-            .ok_or(StoreError::InvitationUnavailable)?;
-        session.policy_revision += 1;
-        session.updated_at = now;
-        let membership = SessionMembership {
-            session_id: invite_snapshot.session_id.clone(),
-            user_id: user_id.to_owned(),
-            role: invite_snapshot.role,
-            approver: invite_snapshot.approver,
-            guest: invite_snapshot.guest,
-            display_name: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let membership = tables
-            .memberships
-            .entry((invite_snapshot.session_id.clone(), user_id.to_owned()))
-            .or_insert(membership)
-            .clone();
-        let (invite, _, _) = tables.invites.get_mut(&invite_id).unwrap();
-        invite.status = "accepted".into();
-        invite.accepted_by_user_id = Some(user_id.to_owned());
-        invite.accepted_at = Some(now);
-        Ok((invite.clone(), membership))
+        accept_stored_invite(&mut tables, invite_id, user_id, now)
     }
 
     async fn revoke_invite(
@@ -2168,6 +2215,60 @@ fn queue_from_row(row: &Row) -> ChatRunQueueItem {
     }
 }
 
+/// How an invite being accepted is found.
+#[derive(Clone, Copy)]
+enum InviteKey<'a> {
+    /// Whoever holds the token.
+    TokenHash(&'a str),
+    /// By id, only for the person the invite names.
+    TargetedId(&'a str),
+}
+
+impl PgStore {
+    async fn accept_invite_by(
+        &self,
+        org_id: &str,
+        key: InviteKey<'_>,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
+        let (column, value) = match key {
+            InviteKey::TokenHash(hash) => ("token_hash", hash),
+            InviteKey::TargetedId(id) => ("id", id),
+        };
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org_id).await?;
+        // Use the same session-first lock ordering as membership and queue
+        // mutations; invitation acceptance must not race revocation.
+        tx.query_opt(&format!("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=(SELECT session_id FROM chat_session_invites WHERE org_id=$1 AND {column}=$2) FOR UPDATE"), &[&org_id, &value]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
+        let row = tx.query_opt(&format!("SELECT {INVITE_COLUMNS}, workspace_id FROM chat_session_invites WHERE org_id=$1 AND {column}=$2 FOR UPDATE"), &[&org_id,&value]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
+        let current = invite_from_row(&row)?;
+        if matches!(key, InviteKey::TargetedId(_))
+            && current.target_user_id.as_deref() != Some(user_id)
+        {
+            return Err(StoreError::InvitationUnavailable);
+        }
+        if current.status != "pending"
+            || current.expires_at <= now
+            || current
+                .target_user_id
+                .as_ref()
+                .is_some_and(|target| target != user_id)
+        {
+            return Err(StoreError::InvitationUnavailable);
+        }
+        let workspace_id: String = row.get("workspace_id");
+        tx.execute("INSERT INTO chat_session_memberships (org_id,workspace_id,session_id,user_id,role,approver,guest,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT (session_id,user_id) DO NOTHING", &[&org_id,&workspace_id,&current.session_id,&user_id,&current.role.as_str(),&current.approver,&current.guest,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
+        let invite_row = tx.query_one(&format!("UPDATE chat_session_invites SET status='accepted',accepted_by_user_id=$3,accepted_at=$4 WHERE org_id=$1 AND id=$2 RETURNING {INVITE_COLUMNS}"), &[&org_id,&current.id,&user_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
+        tx.execute("UPDATE chat_sessions SET policy_revision=policy_revision+1,updated_at=$3 WHERE org_id=$1 AND id=$2", &[&org_id,&current.session_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
+        let member_row = tx.query_one(&format!("SELECT {MEMBER_COLUMNS} FROM chat_session_memberships m LEFT JOIN users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3"), &[&org_id,&current.session_id,&user_id]).await.map_err(|error| StoreError::Database(error.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok((invite_from_row(&invite_row)?, member_from_row(&member_row)?))
+    }
+}
+
 #[async_trait]
 impl ChatStore for PgStore {
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError> {
@@ -2450,31 +2551,19 @@ impl ChatStore for PgStore {
         user_id: &str,
         now: i64,
     ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
-        let mut client = self.client().await?;
-        let tx = self.scoped(&mut client, org_id).await?;
-        // Use the same session-first lock ordering as membership and queue
-        // mutations; invitation acceptance must not race revocation.
-        tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=(SELECT session_id FROM chat_session_invites WHERE org_id=$1 AND token_hash=$2) FOR UPDATE", &[&org_id, &token_hash]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
-        let row = tx.query_opt(&format!("SELECT {INVITE_COLUMNS}, workspace_id FROM chat_session_invites WHERE org_id=$1 AND token_hash=$2 FOR UPDATE"), &[&org_id,&token_hash]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
-        let current = invite_from_row(&row)?;
-        if current.status != "pending"
-            || current.expires_at <= now
-            || current
-                .target_user_id
-                .as_ref()
-                .is_some_and(|target| target != user_id)
-        {
-            return Err(StoreError::InvitationUnavailable);
-        }
-        let workspace_id: String = row.get("workspace_id");
-        tx.execute("INSERT INTO chat_session_memberships (org_id,workspace_id,session_id,user_id,role,approver,guest,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT (session_id,user_id) DO NOTHING", &[&org_id,&workspace_id,&current.session_id,&user_id,&current.role.as_str(),&current.approver,&current.guest,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
-        let invite_row = tx.query_one(&format!("UPDATE chat_session_invites SET status='accepted',accepted_by_user_id=$3,accepted_at=$4 WHERE org_id=$1 AND id=$2 RETURNING {INVITE_COLUMNS}"), &[&org_id,&current.id,&user_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
-        tx.execute("UPDATE chat_sessions SET policy_revision=policy_revision+1,updated_at=$3 WHERE org_id=$1 AND id=$2", &[&org_id,&current.session_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
-        let member_row = tx.query_one(&format!("SELECT {MEMBER_COLUMNS} FROM chat_session_memberships m LEFT JOIN users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3"), &[&org_id,&current.session_id,&user_id]).await.map_err(|error| StoreError::Database(error.to_string()))?;
-        tx.commit()
+        self.accept_invite_by(org_id, InviteKey::TokenHash(token_hash), user_id, now)
             .await
-            .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok((invite_from_row(&invite_row)?, member_from_row(&member_row)?))
+    }
+
+    async fn accept_targeted_invite(
+        &self,
+        org_id: &str,
+        invite_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
+        self.accept_invite_by(org_id, InviteKey::TargetedId(invite_id), user_id, now)
+            .await
     }
 
     async fn revoke_invite(

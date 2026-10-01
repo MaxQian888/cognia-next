@@ -7,6 +7,7 @@
 
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
+  AtSignIcon,
   GlobeIcon,
   BellIcon,
   CalendarClockIcon,
@@ -55,6 +56,7 @@ const SOURCE_ICON: Record<NotificationSource, LucideIcon> = {
   workflow: WorkflowIcon,
   system: SettingsIcon,
   issue: CircleDotIcon,
+  collab: AtSignIcon,
 }
 
 const LEVEL_CLASS: Record<NotificationLevel, string> = {

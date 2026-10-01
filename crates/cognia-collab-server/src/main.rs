@@ -60,6 +60,10 @@ struct Args {
     /// Rollout gate for server-authoritative Canvas documents.
     #[arg(long, env = "COLLAB_CANVAS_ENABLED", default_value_t = false)]
     canvas_enabled: bool,
+    /// The per-organisation change feed (ADR-0206). On by default: it makes
+    /// existing reads fresher and grants nothing new.
+    #[arg(long, env = "COLLAB_FEED_ENABLED", default_value_t = true, action = clap::ArgAction::Set)]
+    feed_enabled: bool,
     /// Rollout gate for the account control plane: membership discovery,
     /// first-owner bootstrap and generic invitation acceptance.
     #[arg(
@@ -188,10 +192,12 @@ async fn main() -> anyhow::Result<()> {
     };
     let state = AppState::new(store.clone(), signer, Arc::new(oidc))
         .with_canvas_store(store.clone())
+        .with_notification_store(store.clone())
         .with_chat_store(store)
         .with_chat_attachments(Arc::new(attachment_store))
         .with_shared_chat_enabled(args.shared_chat_enabled)
         .with_canvas_enabled(args.canvas_enabled)
+        .with_feed_enabled(args.feed_enabled)
         .with_logto_management(logto)
         .with_account_control(account_control)
         .with_internal_service_credential(credential_hash(

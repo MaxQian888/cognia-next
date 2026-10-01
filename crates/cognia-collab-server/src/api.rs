@@ -65,6 +65,13 @@ pub struct AppState {
     pub canvas_hub: Arc<CanvasHub>,
     /// Rollout gate for the Canvas routes: `COLLAB_CANVAS_ENABLED`.
     pub canvas_enabled: bool,
+    /// Per-organisation change feed (ADR-0206).
+    pub feed_hub: Arc<crate::feed::FeedHub>,
+    /// `COLLAB_FEED_ENABLED`, on by default: the feed only makes an existing
+    /// read fresher and grants nothing new.
+    pub feed_enabled: bool,
+    /// Per-recipient notification rows (ADR-0207).
+    pub notification_store: Arc<dyn crate::notifications::NotificationStore>,
     pub signer: Arc<GrantSigner>,
     /// Verifies the OIDC access token a grant is exchanged for.
     pub oidc: Arc<dyn Authenticator>,
@@ -122,6 +129,9 @@ impl AppState {
             canvas_store: Arc::new(InMemoryCanvasStore::new()),
             canvas_hub: Arc::new(CanvasHub::default()),
             canvas_enabled: true,
+            feed_hub: Arc::new(crate::feed::FeedHub::default()),
+            feed_enabled: true,
+            notification_store: Arc::new(crate::notifications::InMemoryNotificationStore::new()),
             signer: Arc::new(signer),
             oidc,
             now: Arc::new(|| {
@@ -158,6 +168,19 @@ impl AppState {
 
     pub fn with_canvas_enabled(mut self, enabled: bool) -> Self {
         self.canvas_enabled = enabled;
+        self
+    }
+
+    pub fn with_feed_enabled(mut self, enabled: bool) -> Self {
+        self.feed_enabled = enabled;
+        self
+    }
+
+    pub fn with_notification_store(
+        mut self,
+        store: Arc<dyn crate::notifications::NotificationStore>,
+    ) -> Self {
+        self.notification_store = store;
         self
     }
 
@@ -239,7 +262,8 @@ pub fn router(state: AppState) -> Router {
             get(get_plan).patch(patch_plan),
         )
         .route("/v1/orgs/{org_id}/runs", get(list_runs).post(create_run))
-        .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run));
+        .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run))
+        .merge(crate::notifications::routes());
     let routes = if state.shared_chat_enabled {
         routes.merge(crate::chat_api::routes())
     } else {
@@ -247,6 +271,11 @@ pub fn router(state: AppState) -> Router {
     };
     let routes = if state.canvas_enabled {
         routes.merge(crate::canvas_api::routes())
+    } else {
+        routes
+    };
+    let routes = if state.feed_enabled {
+        routes.merge(crate::feed::routes())
     } else {
         routes
     };
@@ -262,7 +291,7 @@ struct HealthResponse {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let mut features = vec!["issue-writes", "plan-writes", "run-writes"];
+    let mut features = vec!["issue-writes", "plan-writes", "run-writes", "notifications"];
     if state.shared_chat_enabled {
         features.push("shared-chat");
         features.push("shared-chat-execution-v2");
@@ -359,7 +388,7 @@ struct ApiError {
 /// `Forbidden` deliberately does not distinguish "you are not a member" from
 /// "this workspace does not exist": both answers would let an outsider probe
 /// which workspaces an org has.
-enum Failure {
+pub(crate) enum Failure {
     Auth(AuthError),
     Store(StoreError),
     Actor(ActorError),
@@ -402,6 +431,19 @@ impl IntoResponse for Failure {
                 })),
             )
                 .into_response(),
+            // ADR-0208: `authoritative` stays the whole record so older
+            // clients keep working; `fields` names each same-field clash.
+            Self::Store(StoreError::FieldConflict { current, fields })
+            | Self::Auth(AuthError::Store(StoreError::FieldConflict { current, fields })) => (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "field conflict",
+                    "code": "field_conflict",
+                    "authoritative": current,
+                    "fields": fields,
+                })),
+            )
+                .into_response(),
             other => other.into_non_conflict_response(),
         }
     }
@@ -422,7 +464,9 @@ impl Failure {
             }
             Self::Auth(AuthError::Store(error)) | Self::Store(error) => match error {
                 StoreError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
-                StoreError::Conflict(_) => unreachable!("conflicts are handled before this match"),
+                StoreError::Conflict(_) | StoreError::FieldConflict { .. } => {
+                    unreachable!("conflicts are handled before this match")
+                }
                 StoreError::LastOwner => (StatusCode::CONFLICT, error.to_string()),
                 StoreError::InvitationUnavailable => (StatusCode::GONE, error.to_string()),
                 StoreError::BootstrapCredentialConsumed => {
@@ -581,6 +625,7 @@ fn mutation_guard(operation_id: String, base_revision: i64) -> Result<MutationGu
     Ok(MutationGuard {
         operation_id: validated_operation_id(operation_id)?,
         base_revision,
+        author: None,
     })
 }
 
@@ -1117,22 +1162,26 @@ async fn accept_invitation(
         .display_name
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| claims.subject.clone());
-    Ok(Json(
-        state
-            .store
-            .accept_invitation(AcceptInvitation {
-                org_id,
-                token_hash: invitation_token_hash(&body.token),
-                identity_provider: LOGTO_PROVIDER.into(),
-                identity_tenant: claims.tenant_id,
-                identity_subject: claims.subject,
-                display_name,
-                now: (state.now)(),
-                request_id: request_id(&headers),
-                source: request_source(&headers),
-            })
-            .await?,
-    ))
+    let accepted = state
+        .store
+        .accept_invitation(AcceptInvitation {
+            org_id: org_id.clone(),
+            token_hash: invitation_token_hash(&body.token),
+            identity_provider: LOGTO_PROVIDER.into(),
+            identity_tenant: claims.tenant_id,
+            identity_subject: claims.subject,
+            display_name,
+            now: (state.now)(),
+            request_id: request_id(&headers),
+            source: request_source(&headers),
+        })
+        .await?;
+    crate::feed::publish(
+        &state,
+        &org_id,
+        crate::feed::FeedFrame::membership(&accepted.user_id, None),
+    );
+    Ok(Json(accepted))
 }
 
 // ── Account control plane ────────────────────────────────────────────────────
@@ -1696,6 +1745,11 @@ async fn accept_invitation_by_token(
     operation.result = Some(serde_json::to_value(&response).unwrap_or_default());
     operation.updated_at = now;
     state.store.put_provisioning_operation(operation).await?;
+    crate::feed::publish(
+        &state,
+        &response.org_id,
+        crate::feed::FeedFrame::membership(&response.user_id, None),
+    );
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -1716,6 +1770,11 @@ async fn patch_org_member(
         .store
         .set_org_member(&org_id, &user_id, body.role, context)
         .await?;
+    crate::feed::publish(
+        &state,
+        &org_id,
+        crate::feed::FeedFrame::membership(&user_id, None),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1737,6 +1796,11 @@ async fn delete_org_member(
         .store
         .offboard_org_member(&org_id, &user_id, context)
         .await?;
+    crate::feed::publish(
+        &state,
+        &org_id,
+        crate::feed::FeedFrame::membership(&user_id, None),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1757,6 +1821,11 @@ async fn set_workspace_member(
         .store
         .set_workspace_member(&org_id, &workspace_id, &user_id, body.role, context)
         .await?;
+    crate::feed::publish(
+        &state,
+        &org_id,
+        crate::feed::FeedFrame::membership(&user_id, Some(&workspace_id)),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1777,6 +1846,11 @@ async fn delete_workspace_member(
         .store
         .remove_workspace_member(&org_id, &workspace_id, &user_id, context)
         .await?;
+    crate::feed::publish(
+        &state,
+        &org_id,
+        crate::feed::FeedFrame::membership(&user_id, Some(&workspace_id)),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1887,6 +1961,7 @@ async fn create_issue(
 
     // The creator is the authenticated caller, never a field on the request.
     // Accepting `createdBy` from the body would let any member forge authorship.
+    let actor_user_id = caller.user_id.clone();
     let created_by = CollabActor::new(ActorKind::Human, caller.user_id, None)?;
     let assignee = body.assignee.map(ActorBody::into_actor).transpose()?;
     validate_human_assignee(&state, &org_id, &body.workspace_id, assignee.as_ref()).await?;
@@ -1910,7 +1985,44 @@ async fn create_issue(
             operation_id,
         })
         .await?;
+    crate::feed::publish(
+        &state,
+        &issue.org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::Issue,
+            &issue.id,
+            &issue.workspace_id,
+            issue.revision,
+        ),
+    );
+    deliver_assignment(&state, &issue, &actor_user_id).await;
     Ok((StatusCode::CREATED, Json(issue)))
+}
+
+/// Tell a human assignee about an issue now assigned to them (ADR-0207).
+/// Keyed by revision, so a replayed write records nothing twice and a later
+/// reassignment back to the same person is news again.
+async fn deliver_assignment(state: &AppState, issue: &Issue, actor_user_id: &str) {
+    let Some(assignee) = issue
+        .assignee
+        .as_ref()
+        .filter(|actor| actor.kind == ActorKind::Human)
+    else {
+        return;
+    };
+    crate::notifications::deliver(
+        state,
+        &issue.org_id,
+        &issue.workspace_id,
+        actor_user_id,
+        vec![crate::notifications::Draft::issue(
+            &assignee.id,
+            crate::notifications::NotificationKind::IssueAssigned,
+            &issue.id,
+            format!("issue.assigned:{}:rev{}", issue.id, issue.revision),
+        )],
+    )
+    .await;
 }
 
 async fn patch_issue(
@@ -1919,17 +2031,20 @@ async fn patch_issue(
     headers: HeaderMap,
     Json(body): Json<PatchIssueBody>,
 ) -> Result<Json<Issue>, Failure> {
-    let mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
+    let mut mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
     // Read the issue first so the capability check runs against the workspace
     // the issue actually lives in, not one the caller names.
     let (claims, existing) = peek_issue(&state, &org_id, &issue_id, &headers).await?;
-    authorize_workspace(
+    let caller = authorize_workspace(
         state.store.as_ref(),
         &claims,
         &existing.workspace_id,
         WorkspaceCapability::Write,
     )
     .await?;
+    // Stamped on each field this write changes, so a later clash can say who.
+    let actor_user_id = caller.user_id.clone();
+    mutation_guard.author = Some(caller.user_id);
 
     let assignee = match body.assignee {
         Some(Some(actor)) => Some(Some(actor.into_actor()?)),
@@ -1939,6 +2054,11 @@ async fn patch_issue(
     if let Some(Some(actor)) = assignee.as_ref() {
         validate_human_assignee(&state, &org_id, &existing.workspace_id, Some(actor)).await?;
     }
+    // Only a change of hands is news; re-sending the current assignee is not.
+    let reassigned = matches!(
+        assignee.as_ref(),
+        Some(Some(actor)) if existing.assignee.as_ref() != Some(actor)
+    );
 
     let issue = state
         .store
@@ -1957,6 +2077,19 @@ async fn patch_issue(
             (state.now)(),
         )
         .await?;
+    crate::feed::publish(
+        &state,
+        &issue.org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::Issue,
+            &issue.id,
+            &issue.workspace_id,
+            issue.revision,
+        ),
+    );
+    if reassigned {
+        deliver_assignment(&state, &issue, &actor_user_id).await;
+    }
     Ok(Json(issue))
 }
 
@@ -1992,6 +2125,24 @@ async fn append_event(
     )
     .await?;
 
+    // Mentions are declared ids, checked against the room before anything is
+    // written: an unknown id is the caller's mistake to hear about, not a
+    // notification to drop silently.
+    let mentions =
+        crate::notifications::declared_mentions(&body.payload).map_err(Failure::BadRequest)?;
+    for mentioned in &mentions {
+        if !state
+            .store
+            .human_is_workspace_member(&org_id, &existing.workspace_id, mentioned)
+            .await?
+        {
+            return Err(Failure::BadRequest(
+                "a mention must name a current member of this workspace".into(),
+            ));
+        }
+    }
+    let actor_user_id = caller.user_id.clone();
+
     let event = IssueEvent {
         id: format!("evt_{}", Uuid::new_v4().simple()),
         issue_id,
@@ -2003,6 +2154,38 @@ async fn append_event(
         operation_id,
     };
     let event = state.store.append_event(&org_id, event).await?;
+    // The trail belongs to the issue: the client refreshes the issue leg and
+    // reads the events from there, so the frame names the issue.
+    crate::feed::publish(
+        &state,
+        &org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::IssueEvent,
+            &event.issue_id,
+            &existing.workspace_id,
+            existing.revision,
+        ),
+    );
+    // Keyed by the stored event, so a replayed append (same operation id,
+    // same event) records nothing twice.
+    crate::notifications::deliver(
+        &state,
+        &org_id,
+        &existing.workspace_id,
+        &actor_user_id,
+        mentions
+            .iter()
+            .map(|mentioned| {
+                crate::notifications::Draft::issue(
+                    mentioned,
+                    crate::notifications::NotificationKind::IssueMentioned,
+                    &event.issue_id,
+                    format!("issue.mentioned:{}", event.id),
+                )
+            })
+            .collect(),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
@@ -2137,6 +2320,16 @@ async fn create_plan(
             operation_id,
         })
         .await?;
+    crate::feed::publish(
+        &state,
+        &plan.org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::Plan,
+            &plan.id,
+            &plan.workspace_id,
+            plan.revision,
+        ),
+    );
     Ok((StatusCode::CREATED, Json(plan)))
 }
 
@@ -2146,7 +2339,7 @@ async fn patch_plan(
     headers: HeaderMap,
     Json(body): Json<PatchPlanBody>,
 ) -> Result<Json<Plan>, Failure> {
-    let mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
+    let mut mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
     // Read first, so the capability check runs against the workspace the plan
     // actually lives in rather than one the caller names.
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
@@ -2155,13 +2348,15 @@ async fn patch_plan(
         .get_plan(&org_id, &plan_id)
         .await?
         .ok_or(Failure::Store(StoreError::NotFound))?;
-    authorize_workspace(
+    let caller = authorize_workspace(
         state.store.as_ref(),
         &claims,
         &existing.workspace_id,
         WorkspaceCapability::Write,
     )
     .await?;
+    // Stamped on each field this write changes, so a later clash can say who.
+    mutation_guard.author = Some(caller.user_id);
 
     let plan = state
         .store
@@ -2187,6 +2382,16 @@ async fn patch_plan(
             (state.now)(),
         )
         .await?;
+    crate::feed::publish(
+        &state,
+        &plan.org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::Plan,
+            &plan.id,
+            &plan.workspace_id,
+            plan.revision,
+        ),
+    );
     Ok(Json(plan))
 }
 
@@ -2257,6 +2462,16 @@ async fn create_run(
             operation_id,
         })
         .await?;
+    crate::feed::publish(
+        &state,
+        &run.org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::Run,
+            &run.id,
+            &run.workspace_id,
+            run.revision,
+        ),
+    );
     Ok((StatusCode::CREATED, Json(run)))
 }
 
@@ -2306,6 +2521,16 @@ async fn patch_run(
             (state.now)(),
         )
         .await?;
+    crate::feed::publish(
+        &state,
+        &run.org_id,
+        crate::feed::FeedFrame::invalidate(
+            crate::feed::FeedEntity::Run,
+            &run.id,
+            &run.workspace_id,
+            run.revision,
+        ),
+    );
     Ok(Json(run))
 }
 
@@ -2541,7 +2766,7 @@ fn authorization_context(
     }
 }
 
-fn authorization(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn authorization(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -3112,6 +3337,252 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_committed_patch_is_announced_on_the_feed_and_a_refused_one_is_not() {
+        let store = seeded();
+        let id = create_issue_as_ada(&store).await;
+        let mut state = AppState::new(
+            Arc::new(store),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 1_000);
+        let hub = state.feed_hub.clone();
+        let mut feed = hub.subscribe_for_test(ORG);
+        let patch = |token: String, op: &str| {
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/v1/orgs/{ORG}/issues/{id}"))
+                .header("authorization", token)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "operationId": op, "baseRevision": 1, "status": "todo" })
+                        .to_string(),
+                ))
+                .unwrap()
+        };
+
+        // Bob is not in proj-1: refused, so nothing is announced.
+        let (status, _) = call(router(state.clone()), patch(token_for(&bob()), "bob-op")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(feed.try_recv().is_err());
+
+        let (status, _) = call(router(state), patch(token_for(&ada()), "ada-op")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            feed.try_recv().unwrap(),
+            crate::feed::FeedFrame::invalidate(crate::feed::FeedEntity::Issue, &id, "proj-1", 2)
+        );
+    }
+
+    #[tokio::test]
+    async fn assignments_and_mentions_reach_the_addressee_and_nobody_else() {
+        let store = seeded();
+        store.add_workspace_member(ORG, "proj-1", bob().as_str(), WorkspaceRole::Member);
+        let cy = UserId::parse("usr_cccccccccccccccccccccccc").unwrap();
+        store.add_user(cy.as_str(), "Cy");
+        store.add_org_member(ORG, cy.as_str(), OrgRole::Member);
+        let mut state = AppState::new(
+            Arc::new(store.clone()),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 1_000);
+        let mut feed = state.feed_hub.subscribe_for_test(ORG);
+        let app = router(state);
+        let human = |user: &UserId| serde_json::json!({ "kind": "human", "id": user.as_str() });
+        let list = |user: &UserId, query: &str| {
+            get(
+                &format!("/v1/orgs/{ORG}/notifications{query}"),
+                &token_for(user),
+            )
+        };
+
+        // Ada creates an issue assigned to Bob: Bob is told, Ada is not.
+        let mut body = create_body();
+        body["assignee"] = human(&bob());
+        let (status, issue) = call(
+            app.clone(),
+            post(&format!("/v1/orgs/{ORG}/issues"), &token_for(&ada()), body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{issue}");
+        let id = issue["id"].as_str().unwrap().to_owned();
+        let frames: Vec<_> = std::iter::from_fn(|| feed.try_recv().ok()).collect();
+        assert!(frames.contains(&crate::feed::FeedFrame::Notification {
+            recipient_user_id: bob().to_string(),
+            seq: 1,
+        }));
+
+        // Re-sending the same assignee is not news.
+        let (status, _) = call(
+            app.clone(),
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/v1/orgs/{ORG}/issues/{id}"))
+                .header("authorization", token_for(&ada()))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "operationId": "same", "baseRevision": 1, "assignee": human(&bob()) })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // A comment mentioning Bob and Ada herself tells only Bob.
+        let events = format!("/v1/orgs/{ORG}/issues/{id}/events");
+        let comment = |mentions: serde_json::Value| serde_json::json!({ "kind": "commented", "payload": { "body": "look", "mentions": mentions } });
+        let (status, _) = call(
+            app.clone(),
+            post(
+                &events,
+                &token_for(&ada()),
+                comment(serde_json::json!([bob().as_str(), ada().as_str()])),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        // Cy is in the org but not the workspace: naming them is refused and
+        // nothing is written.
+        let (status, _) = call(
+            app.clone(),
+            post(
+                &events,
+                &token_for(&ada()),
+                comment(serde_json::json!([cy.as_str()])),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (status, page) = call(app.clone(), list(&bob(), "")).await;
+        assert_eq!(status, StatusCode::OK);
+        let kinds: Vec<&str> = page["notifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["issue.assigned", "issue.mentioned"]);
+        assert_eq!(page["notifications"][0]["subject"]["id"], id.as_str());
+        assert_eq!(page["notifications"][0]["actorUserId"], ada().as_str());
+        assert_eq!(page["nextAfterSeq"], 2);
+        let (_, ada_page) = call(app.clone(), list(&ada(), "")).await;
+        assert!(ada_page["notifications"].as_array().unwrap().is_empty());
+
+        // Ada cannot mark Bob's rows; Bob can, and his other devices hear so.
+        let first_id = page["notifications"][0]["id"].as_str().unwrap().to_owned();
+        let read = |user: &UserId, body: serde_json::Value| {
+            post(
+                &format!("/v1/orgs/{ORG}/notifications/read"),
+                &token_for(user),
+                body,
+            )
+        };
+        let (_, marked) = call(
+            app.clone(),
+            read(&ada(), serde_json::json!({ "ids": [first_id] })),
+        )
+        .await;
+        assert_eq!(marked["marked"], 0);
+        while feed.try_recv().is_ok() {}
+        let (_, marked) = call(
+            app.clone(),
+            read(&bob(), serde_json::json!({ "upToSeq": 2 })),
+        )
+        .await;
+        assert_eq!(marked["marked"], 2);
+        assert_eq!(
+            feed.try_recv().unwrap(),
+            crate::feed::FeedFrame::Notification {
+                recipient_user_id: bob().to_string(),
+                seq: 2,
+            }
+        );
+        let (_, caught_up) = call(app.clone(), list(&bob(), "?afterSeq=2")).await;
+        assert!(caught_up["notifications"].as_array().unwrap().is_empty());
+        assert_eq!(caught_up["reads"].as_array().unwrap().len(), 2);
+        assert_eq!(caught_up["readCursor"]["seq"], 2);
+
+        // Once Bob loses the workspace his rows stop being shown, but the
+        // cursor still moves past them.
+        store
+            .remove_workspace_member(
+                ORG,
+                "proj-1",
+                bob().as_str(),
+                AuthorizationContext {
+                    actor_user_id: ada().to_string(),
+                    reason: "test".into(),
+                    request_id: "req_test".into(),
+                    grant_id: None,
+                    source: serde_json::json!({}),
+                    now: 1_000,
+                },
+            )
+            .await
+            .unwrap();
+        let (status, hidden) = call(app, list(&bob(), "")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(hidden["notifications"].as_array().unwrap().is_empty());
+        assert_eq!(hidden["nextAfterSeq"], 2);
+    }
+
+    #[tokio::test]
+    async fn concurrent_edits_to_different_fields_merge_and_a_same_field_clash_is_named() {
+        let store = seeded();
+        let id = create_issue_as_ada(&store).await;
+        let app = app(store);
+        let patch = |op: &str, base: i64, body: serde_json::Value| {
+            let mut body = body;
+            body["operationId"] = serde_json::json!(op);
+            body["baseRevision"] = serde_json::json!(base);
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/v1/orgs/{ORG}/issues/{id}"))
+                .header("authorization", token_for(&ada()))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+
+        // Two writers both start from revision 1.
+        let (status, _) = call(
+            app.clone(),
+            patch("first", 1, serde_json::json!({ "status": "todo" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, merged) = call(
+            app.clone(),
+            patch("second", 1, serde_json::json!({ "priority": "high" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{merged}");
+        assert_eq!(merged["status"], "todo");
+        assert_eq!(merged["priority"], "high");
+
+        let (status, conflict) = call(
+            app,
+            patch("third", 1, serde_json::json!({ "status": "done" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(conflict["code"], "field_conflict");
+        assert_eq!(conflict["authoritative"]["revision"], 3);
+        assert_eq!(
+            conflict["fields"]["status"],
+            serde_json::json!({
+                "yours": "done",
+                "theirs": "todo",
+                "changedAt": 2,
+                "changedBy": ada().as_str(),
+            })
+        );
     }
 
     #[tokio::test]

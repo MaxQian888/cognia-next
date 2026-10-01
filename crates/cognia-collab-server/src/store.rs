@@ -45,6 +45,13 @@ pub enum StoreError {
     Database(String),
     #[error("revision conflict")]
     Conflict(serde_json::Value),
+    /// A stale write clashed on these fields (ADR-0208). `current` is the whole
+    /// record, as `Conflict` carries; `fields` names each clash.
+    #[error("field conflict")]
+    FieldConflict {
+        current: serde_json::Value,
+        fields: serde_json::Value,
+    },
     #[error("the last active organization owner cannot be removed or downgraded")]
     LastOwner,
     #[error("invitation is expired, revoked, or already redeemed")]
@@ -372,6 +379,188 @@ pub struct IssuePatch {
 pub struct MutationGuard {
     pub operation_id: String,
     pub base_revision: i64,
+    /// Who is writing, stamped on each field the write changes (ADR-0208).
+    pub author: Option<String>,
+}
+
+/// Fields ordered by the server rather than merged: the later write wins.
+const ISSUE_LAST_WRITER_WINS: &[&str] = &["board_order"];
+
+impl IssuePatch {
+    /// The fields this patch names, in their stored spelling.
+    pub fn touched_fields(&self) -> Vec<String> {
+        let mut fields = Vec::new();
+        if self.title.is_some() {
+            fields.push("title".to_owned());
+        }
+        if self.body.is_some() {
+            fields.push("body".to_owned());
+        }
+        if self.status.is_some() {
+            fields.push("status".to_owned());
+        }
+        if self.priority.is_some() {
+            fields.push("priority".to_owned());
+        }
+        if self.board_order.is_some() {
+            fields.push("board_order".to_owned());
+        }
+        if self.assignee.is_some() {
+            fields.push("assignee".to_owned());
+        }
+        fields
+    }
+
+    /// This patch's values, keyed like the record, for a conflict report.
+    fn values(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        if let Some(title) = &self.title {
+            map.insert("title".into(), serde_json::json!(title));
+        }
+        if let Some(body) = &self.body {
+            map.insert("body".into(), serde_json::json!(body));
+        }
+        if let Some(status) = self.status {
+            map.insert("status".into(), serde_json::json!(status.as_str()));
+        }
+        if let Some(priority) = self.priority {
+            map.insert("priority".into(), serde_json::json!(priority.as_str()));
+        }
+        if let Some(order) = self.board_order {
+            map.insert("board_order".into(), serde_json::json!(order));
+        }
+        if let Some(assignee) = &self.assignee {
+            map.insert(
+                "assignee".into(),
+                serde_json::to_value(assignee).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        serde_json::Value::Object(map)
+    }
+}
+
+impl PlanPatch {
+    /// The fields this patch names; a step's progress is its own field,
+    /// `steps.<id>`, so reports on different steps never clash.
+    pub fn touched_fields(&self) -> Vec<String> {
+        let mut fields = Vec::new();
+        if self.title.is_some() {
+            fields.push("title".to_owned());
+        }
+        if self.description.is_some() {
+            fields.push("description".to_owned());
+        }
+        if self.status.is_some() {
+            fields.push("status".to_owned());
+        }
+        for step in &self.steps {
+            fields.push(format!("steps.{}", step.id));
+        }
+        fields
+    }
+
+    fn values(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        if let Some(title) = &self.title {
+            map.insert("title".into(), serde_json::json!(title));
+        }
+        if let Some(description) = &self.description {
+            map.insert("description".into(), serde_json::json!(description));
+        }
+        if let Some(status) = self.status {
+            map.insert(
+                "status".into(),
+                serde_json::to_value(status).unwrap_or_default(),
+            );
+        }
+        if !self.steps.is_empty() {
+            let steps: serde_json::Map<String, serde_json::Value> = self
+                .steps
+                .iter()
+                .map(|step| {
+                    (
+                        step.id.clone(),
+                        serde_json::to_value(step.status).unwrap_or_default(),
+                    )
+                })
+                .collect();
+            map.insert("steps".into(), serde_json::Value::Object(steps));
+        }
+        serde_json::Value::Object(map)
+    }
+}
+
+/// The row's `field_revisions`, read inside the caller's transaction (which
+/// already holds the row lock from its `FOR UPDATE`).
+async fn read_field_revisions(
+    transaction: &tokio_postgres::Transaction<'_>,
+    table: &str,
+    org_id: &str,
+    id: &str,
+) -> Result<crate::field_merge::FieldRevisions, StoreError> {
+    let row = transaction
+        .query_one(
+            &format!("SELECT field_revisions FROM {table} WHERE org_id = $1 AND id = $2"),
+            &[&org_id, &id],
+        )
+        .await
+        .map_err(|error| StoreError::Database(error.to_string()))?;
+    let value: serde_json::Value = row.get(0);
+    Ok(crate::field_merge::parse(&value))
+}
+
+/// A plan record reshaped so `steps.<id>` resolves to that step's status, for
+/// the "theirs" side of a conflict report.
+fn plan_report_view(plan: &Plan) -> serde_json::Value {
+    let mut view = serde_json::to_value(plan).unwrap_or_default();
+    if let Some(steps) = &plan.steps {
+        let by_id: serde_json::Map<String, serde_json::Value> = steps
+            .iter()
+            .map(|step| {
+                (
+                    step.id.clone(),
+                    serde_json::to_value(step.status).unwrap_or_default(),
+                )
+            })
+            .collect();
+        view["steps"] = serde_json::Value::Object(by_id);
+    }
+    view
+}
+
+/// Run ADR-0208's merge rule. `Ok(())` means apply; a clash becomes
+/// `FieldConflict`, an impossible base the pre-0208 whole-record `Conflict`.
+/// What a conflict report is built from: the record as stored, the same
+/// record shaped so field paths resolve (`steps.<id>`), and this write's values.
+struct ConflictSides<'a> {
+    current: serde_json::Value,
+    report_view: &'a serde_json::Value,
+    ours: serde_json::Value,
+}
+
+fn merge_gate(
+    current_revision: i64,
+    guard: &MutationGuard,
+    stamps: &crate::field_merge::FieldRevisions,
+    touched: &[String],
+    last_writer_wins: &[&str],
+    sides: ConflictSides<'_>,
+) -> Result<(), StoreError> {
+    use crate::field_merge::{clash_report, decide, MergeDecision};
+    match decide(
+        current_revision,
+        guard.base_revision,
+        stamps,
+        touched,
+        last_writer_wins,
+    ) {
+        MergeDecision::Apply => Ok(()),
+        MergeDecision::InvalidBase => Err(StoreError::Conflict(sides.current)),
+        MergeDecision::Clash(clashes) => Err(StoreError::FieldConflict {
+            fields: clash_report(&clashes, &sides.ours, sides.report_view),
+            current: sides.current,
+        }),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -860,6 +1049,10 @@ struct Tables {
     /// mirroring what the header-only Postgres query returns.
     plans: HashMap<String, Plan>,
     runs: HashMap<String, Run>,
+    /// ADR-0208 `field_revisions`, kept beside the rows because the model
+    /// types do not carry them over the wire.
+    issue_field_revisions: HashMap<String, crate::field_merge::FieldRevisions>,
+    plan_field_revisions: HashMap<String, crate::field_merge::FieldRevisions>,
 }
 
 /// Test double. Scopes by `org_id` in Rust on purpose — see the module note.
@@ -1809,6 +2002,7 @@ impl Store for InMemoryStore {
         now: i64,
     ) -> Result<Issue, StoreError> {
         let mut tables = self.tables.write();
+        let tables = &mut *tables;
         let issue = tables
             .issues
             .get_mut(id)
@@ -1817,12 +2011,25 @@ impl Store for InMemoryStore {
         if issue.last_operation_id == guard.operation_id {
             return Ok(issue.clone());
         }
-        if issue.revision != guard.base_revision {
-            return Err(StoreError::Conflict(
-                serde_json::to_value(issue.clone())
-                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
-            ));
-        }
+        let touched = patch.touched_fields();
+        let stamps = tables
+            .issue_field_revisions
+            .entry(id.to_owned())
+            .or_default();
+        let current = serde_json::to_value(issue.clone())
+            .map_err(|error| StoreError::Corrupt(error.to_string()))?;
+        merge_gate(
+            issue.revision,
+            &guard,
+            stamps,
+            &touched,
+            ISSUE_LAST_WRITER_WINS,
+            ConflictSides {
+                current: current.clone(),
+                report_view: &current,
+                ours: patch.values(),
+            },
+        )?;
         if let Some(title) = patch.title {
             issue.title = title;
         }
@@ -1843,6 +2050,7 @@ impl Store for InMemoryStore {
         }
         issue.updated_at = now;
         issue.revision += 1;
+        crate::field_merge::stamp(stamps, &touched, issue.revision, guard.author.as_deref());
         issue.last_operation_id = guard.operation_id;
         Ok(issue.clone())
     }
@@ -1985,6 +2193,7 @@ impl Store for InMemoryStore {
         now: i64,
     ) -> Result<Plan, StoreError> {
         let mut tables = self.tables.write();
+        let tables = &mut *tables;
         let plan = tables
             .plans
             .get_mut(id)
@@ -1993,12 +2202,24 @@ impl Store for InMemoryStore {
         if plan.last_operation_id == guard.operation_id {
             return Ok(plan.clone());
         }
-        if plan.revision != guard.base_revision {
-            return Err(StoreError::Conflict(
-                serde_json::to_value(plan.clone())
+        let touched = patch.touched_fields();
+        let stamps = tables
+            .plan_field_revisions
+            .entry(id.to_owned())
+            .or_default();
+        merge_gate(
+            plan.revision,
+            &guard,
+            stamps,
+            &touched,
+            &[],
+            ConflictSides {
+                current: serde_json::to_value(plan.clone())
                     .map_err(|error| StoreError::Corrupt(error.to_string()))?,
-            ));
-        }
+                report_view: &plan_report_view(plan),
+                ours: patch.values(),
+            },
+        )?;
         if let Some(title) = patch.title {
             plan.title = title;
         }
@@ -2024,6 +2245,7 @@ impl Store for InMemoryStore {
         plan.ended_at = ended_at_for(is_terminal_plan(plan.status), plan.ended_at, now);
         plan.updated_at = now;
         plan.revision += 1;
+        crate::field_merge::stamp(stamps, &touched, plan.revision, guard.author.as_deref());
         plan.last_operation_id = guard.operation_id;
         Ok(plan.clone())
     }
@@ -2277,6 +2499,12 @@ impl PgStore {
             .batch_execute(include_str!(
                 "../migrations/0011_chat_run_queue_binding.sql"
             ))
+            .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0012_field_revisions.sql"))
+            .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0013_notifications.sql"))
             .await?;
         transaction.commit().await?;
         Ok(())
@@ -3985,12 +4213,30 @@ impl Store for PgStore {
         if existing.last_operation_id == guard.operation_id {
             return Ok(existing);
         }
-        if existing.revision != guard.base_revision {
-            return Err(StoreError::Conflict(
-                serde_json::to_value(existing)
-                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
-            ));
-        }
+        let touched = patch.touched_fields();
+        let mut stamps = read_field_revisions(&transaction, "issues", org_id, id).await?;
+        let current = serde_json::to_value(&existing)
+            .map_err(|error| StoreError::Corrupt(error.to_string()))?;
+        merge_gate(
+            existing.revision,
+            &guard,
+            &stamps,
+            &touched,
+            ISSUE_LAST_WRITER_WINS,
+            ConflictSides {
+                current: current.clone(),
+                report_view: &current,
+                ours: patch.values(),
+            },
+        )?;
+        crate::field_merge::stamp(
+            &mut stamps,
+            &touched,
+            existing.revision + 1,
+            guard.author.as_deref(),
+        );
+        let stamps = serde_json::to_value(&stamps)
+            .map_err(|error| StoreError::Corrupt(error.to_string()))?;
         // COALESCE keeps this one statement instead of read-modify-write, which
         // would need the read and the write in the same transaction anyway and
         // would still lose a concurrent edit between them.
@@ -4018,7 +4264,8 @@ impl Store for PgStore {
                                               ELSE COALESCE($11, assignee_id) END, \
                        updated_at      = $12, \
                        revision        = revision + 1, \
-                       last_operation_id = $13 \
+                       last_operation_id = $13, \
+                       field_revisions = $14 \
                      WHERE org_id = $1 AND id = $2 \
                      RETURNING {ISSUE_COLUMNS}"
                 ),
@@ -4036,6 +4283,7 @@ impl Store for PgStore {
                     &assignee_id,
                     &now,
                     &guard.operation_id,
+                    &stamps,
                 ],
             )
             .await
@@ -4279,13 +4527,33 @@ impl Store for PgStore {
             plan.steps = Some(steps);
             return Ok(plan);
         }
-        if plan.revision != guard.base_revision {
-            plan.steps = Some(steps);
-            return Err(StoreError::Conflict(
-                serde_json::to_value(plan)
-                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
-            ));
+        let touched = patch.touched_fields();
+        let mut stamps = read_field_revisions(&transaction, "plans", org_id, id).await?;
+        {
+            let mut current = plan.clone();
+            current.steps = Some(steps.clone());
+            merge_gate(
+                plan.revision,
+                &guard,
+                &stamps,
+                &touched,
+                &[],
+                ConflictSides {
+                    current: serde_json::to_value(&current)
+                        .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+                    report_view: &plan_report_view(&current),
+                    ours: patch.values(),
+                },
+            )?;
         }
+        crate::field_merge::stamp(
+            &mut stamps,
+            &touched,
+            plan.revision + 1,
+            guard.author.as_deref(),
+        );
+        let stamps = serde_json::to_value(&stamps)
+            .map_err(|error| StoreError::Corrupt(error.to_string()))?;
 
         if let Some(title) = patch.title {
             plan.title = title;
@@ -4332,7 +4600,7 @@ impl Store for PgStore {
             .execute(
                 "UPDATE plans SET title = $3, description = $4, status = $5, \
                    total_steps = $6, completed_steps = $7, updated_at = $8, ended_at = $9, \
-                   revision = $10, last_operation_id = $11 \
+                   revision = $10, last_operation_id = $11, field_revisions = $12 \
                  WHERE org_id = $1 AND id = $2",
                 &[
                     &org_id,
@@ -4346,6 +4614,7 @@ impl Store for PgStore {
                     &plan.ended_at,
                     &plan.revision,
                     &plan.last_operation_id,
+                    &stamps,
                 ],
             )
             .await
@@ -4582,6 +4851,7 @@ mod tests {
         MutationGuard {
             operation_id: operation_id.into(),
             base_revision,
+            author: None,
         }
     }
 
@@ -5326,18 +5596,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(issue_replay, issue);
+        // ADR-0208: a stale base clashes only on a field changed after it.
         assert!(matches!(
             store
                 .patch_issue(
                     "org_a",
                     "iss_1",
-                    IssuePatch::default(),
+                    IssuePatch {
+                        title: Some("Mine".into()),
+                        ..Default::default()
+                    },
                     guard("stale-issue-patch", 1),
                     300,
                 )
                 .await,
-            Err(StoreError::Conflict(_))
+            Err(StoreError::FieldConflict { .. })
         ));
+        let merged = store
+            .patch_issue(
+                "org_a",
+                "iss_1",
+                IssuePatch {
+                    priority: Some(IssuePriority::High),
+                    ..Default::default()
+                },
+                guard("stale-disjoint-issue-patch", 1),
+                300,
+            )
+            .await
+            .unwrap();
+        assert_eq!(merged.title, "Updated", "the other writer's title survives");
+        assert_eq!(merged.revision, 3);
 
         let plan = store
             .patch_plan(
@@ -5360,13 +5649,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(plan_replay, plan);
+        // An impossible base (ahead of the record) is still the whole-record 409.
         assert!(matches!(
             store
                 .patch_plan(
                     "org_a",
                     "plan_1",
                     PlanPatch::default(),
-                    guard("stale-plan-patch", 1),
+                    guard("future-plan-patch", 9),
                     300,
                 )
                 .await,

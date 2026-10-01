@@ -26,6 +26,12 @@ export type NotificationSource =
    * produced nothing at all.
    */
   | "site"
+  /**
+   * The collaboration plane (ADR-0207): something addressed to this person by
+   * a teammate — an assignment, a declared mention, an approval request, an
+   * invitation. One center row per server notification row.
+   */
+  | "collab"
 
 /** Severity / obtrusiveness tier. `critical` bypasses DND + per-source mute. */
 export type NotificationLevel = "info" | "success" | "warning" | "error" | "critical"
@@ -55,6 +61,7 @@ export const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   "system",
   "issue",
   "site",
+  "collab",
 ] as const
 
 export const NOTIFICATION_LEVELS: readonly NotificationLevel[] = [

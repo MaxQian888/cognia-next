@@ -52,6 +52,19 @@ export type CollabSkipReason =
   /** Signed in, but the binding names no org — a personal account. */
   | "no-org"
 
+/**
+ * The independently refreshable parts of the plane (ADR-0206). Identity and
+ * this person's own memberships always run: they decide what the other legs
+ * may show, so skipping them could leave rows visible that should not be.
+ */
+export type CollabRefreshLeg = "workspaces" | "issues" | "activity"
+
+export const ALL_COLLAB_REFRESH_LEGS: readonly CollabRefreshLeg[] = [
+  "workspaces",
+  "issues",
+  "activity",
+]
+
 export type RefreshCollabPlaneResult =
   | { status: "skipped"; reason: CollabSkipReason }
   | {
@@ -73,6 +86,11 @@ export type RefreshCollabPlaneResult =
       plans: number
       /** Runs mirrored for this org. */
       runs: number
+      /**
+       * The legs this refresh ran. Counts for a leg that did not run are 0 and
+       * say nothing about the mirror.
+       */
+      legs: CollabRefreshLeg[]
     }
 
 export interface RefreshCollabPlaneDeps {
@@ -88,6 +106,8 @@ export interface RefreshCollabPlaneDeps {
     deps?: ReconcileUserIdDeps
   ) => Promise<unknown>
   now?: () => number
+  /** Refresh only these legs; every leg when absent. */
+  legs?: readonly CollabRefreshLeg[]
 }
 
 /**
@@ -99,18 +119,27 @@ async function defaultAccessToken(localAccountId: string): Promise<string | null
   return readActiveAccessToken(localAccountId)
 }
 
-/**
- * Refresh this profile's slice of the collaboration plane.
- *
- * Throws only when a configured, signed-in profile could not be refreshed —
- * which is a real failure a caller may want to surface. Everything else comes
- * back as `skipped`.
- */
-export async function refreshCollabPlane(
-  deps: RefreshCollabPlaneDeps = {}
-): Promise<RefreshCollabPlaneResult> {
-  const localAccountId = deps.localAccountId ?? getActiveAccountId()
+export type ResolvedCollabClient =
+  | { status: "skipped"; reason: CollabSkipReason }
+  | {
+      status: "ready"
+      client: CollabClient
+      binding: NonNullable<Awaited<ReturnType<UserBindingRegistry["get"]>>> & { orgId: string }
+      readToken: (localAccountId: string) => Promise<string | null>
+    }
 
+/**
+ * The client and org this profile would talk to, or why there is none. Shared
+ * by the refresh and the change feed so both answer "configured? signed in?
+ * in an org?" the same way.
+ */
+export async function resolveCollabClient(
+  deps: Pick<
+    RefreshCollabPlaneDeps,
+    "localAccountId" | "registry" | "fetchImpl" | "accessToken" | "now"
+  > = {}
+): Promise<ResolvedCollabClient> {
+  const localAccountId = deps.localAccountId ?? getActiveAccountId()
   const connection = loadCollabConnection(localAccountId)
   if (!connection) return { status: "skipped", reason: "not-configured" }
 
@@ -129,6 +158,24 @@ export async function refreshCollabPlane(
     fetchImpl: deps.fetchImpl ?? createPlatformFetch(),
     ...(deps.now ? { now: deps.now } : {}),
   })
+  return { status: "ready", client, binding: { ...binding, orgId: binding.orgId }, readToken }
+}
+
+/**
+ * Refresh this profile's slice of the collaboration plane.
+ *
+ * Throws only when a configured, signed-in profile could not be refreshed —
+ * which is a real failure a caller may want to surface. Everything else comes
+ * back as `skipped`.
+ */
+export async function refreshCollabPlane(
+  deps: RefreshCollabPlaneDeps = {}
+): Promise<RefreshCollabPlaneResult> {
+  const localAccountId = deps.localAccountId ?? getActiveAccountId()
+
+  const resolved = await resolveCollabClient({ ...deps, localAccountId })
+  if (resolved.status === "skipped") return resolved
+  const { client, binding, readToken } = resolved
 
   // The server is the authority for who this person IS. A profile bound
   // before the server existed carries a derived id, and every row the pulls
@@ -164,24 +211,31 @@ export async function refreshCollabPlane(
   // Workspaces second: their rosters write OTHER people into the projection,
   // and doing that before this caller's own memberships are settled would let
   // a roster's `orgMember` fact race the authoritative answer about oneself.
-  const workspaces = await pullCollabWorkspaces(
-    client,
-    { orgId: binding.orgId },
-    ...(deps.now ? [{ now: deps.now }] : [])
-  )
-  const issues = await pullCollabIssues(
-    client,
-    { orgId: binding.orgId },
-    ...(deps.now ? [{ now: deps.now }] : [])
-  )
+  const legs = new Set(deps.legs ?? ALL_COLLAB_REFRESH_LEGS)
+  const workspaces = legs.has("workspaces")
+    ? await pullCollabWorkspaces(
+        client,
+        { orgId: binding.orgId },
+        ...(deps.now ? [{ now: deps.now }] : [])
+      )
+    : { members: 0 }
+  const issues = legs.has("issues")
+    ? await pullCollabIssues(
+        client,
+        { orgId: binding.orgId },
+        ...(deps.now ? [{ now: deps.now }] : [])
+      )
+    : { count: 0 }
   // Last, because it is the only leg the board does not need. Issues are what
   // a person opens the app for; plans and runs say what is happening TO them,
   // and a slow activity listing must not delay the rows it annotates.
-  const activity = await pullCollabActivity(
-    client,
-    { orgId: binding.orgId },
-    ...(deps.now ? [{ now: deps.now }] : [])
-  )
+  const activity = legs.has("activity")
+    ? await pullCollabActivity(
+        client,
+        { orgId: binding.orgId },
+        ...(deps.now ? [{ now: deps.now }] : [])
+      )
+    : { plans: 0, runs: 0 }
 
   return {
     status: "refreshed",
@@ -194,6 +248,7 @@ export async function refreshCollabPlane(
     orgMember: memberships.orgMember,
     plans: activity.plans,
     runs: activity.runs,
+    legs: ALL_COLLAB_REFRESH_LEGS.filter((leg) => legs.has(leg)),
   }
 }
 

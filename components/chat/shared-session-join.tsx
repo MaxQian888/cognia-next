@@ -17,9 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { resolveCurrentCollabContext } from "@/lib/collab/runtime-client"
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
-import { syncSharedSession } from "@/lib/collab/shared-chat-sync"
-import { useChatStore } from "@/stores/chat"
-import { useProjectStore } from "@/stores/project/project-store"
+import { openAcceptedSharedSession } from "@/lib/collab/open-shared-session"
 import { useShellNav } from "@/components/shell/use-shell-nav"
 import { cn } from "@/lib/utils"
 
@@ -47,14 +45,12 @@ export function SharedSessionJoin({ className }: { className?: string } = {}) {
         return
       }
       const accepted = await context.client.acceptSessionInvite(context.orgId, token.trim())
-      const synced = await syncSharedSession(
-        context.client,
-        context.orgId,
-        accepted.invite.sessionId
-      )
-      useProjectStore.getState().setActiveProject(synced.session.workspaceId)
-      useChatStore.getState().setActiveSession(synced.localSessionId)
-      switchToDm()
+      await openAcceptedSharedSession({
+        client: context.client,
+        orgId: context.orgId,
+        sharedSessionId: accepted.invite.sessionId,
+        switchToDm,
+      })
       setToken("")
       setOpen(false)
       toast.success(t("inviteAccepted"))

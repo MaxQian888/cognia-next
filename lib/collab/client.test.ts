@@ -1,6 +1,7 @@
 import {
   CollabClient,
   CollabConflictError,
+  readFieldClashes,
   CollabError,
   SHARED_CHAT_PROTOCOL_VERSION,
   encodeReasonHeader,
@@ -394,6 +395,45 @@ describe("CollabClient", () => {
     })
   })
 
+  it("carries the clashing fields of a field-level conflict (ADR-0208)", async () => {
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url) =>
+        url.endsWith("/grants")
+          ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          : jsonResponse(
+              {
+                error: "field conflict",
+                code: "field_conflict",
+                authoritative: { id: "iss_1", revision: 3 },
+                fields: {
+                  status: { yours: "done", theirs: "todo", changedAt: 2, changedBy: ADA },
+                  junk: "not a clash",
+                },
+              },
+              409
+            ),
+      now: () => 0,
+    })
+    const error = await client
+      .patchIssue(ORG, "iss_1", { operationId: "op-1", baseRevision: 1 })
+      .catch((caught) => caught)
+    expect(error).toBeInstanceOf(CollabConflictError)
+    expect(error.fields).toEqual({
+      status: { yours: "done", theirs: "todo", changedAt: 2, changedBy: ADA },
+    })
+  })
+
+  it("reads no field clashes from a malformed or absent fields object", () => {
+    expect(readFieldClashes(undefined)).toBeUndefined()
+    expect(readFieldClashes([])).toBeUndefined()
+    expect(readFieldClashes({ status: { yours: 1 } })).toBeUndefined()
+    expect(readFieldClashes({ status: { changedAt: 2, changedBy: 7 } })).toEqual({
+      status: { yours: undefined, theirs: undefined, changedAt: 2, changedBy: null },
+    })
+  })
+
   it("uses explicit shared-session membership routes and never puts a grant in the URL", async () => {
     const calls: Call[] = []
     const client = new CollabClient({
@@ -415,6 +455,144 @@ describe("CollabClient", () => {
     )
     expect(call.url).not.toContain("grant-1")
     expect(grantHeader(call)).toBe("Bearer grant-1")
+  })
+
+  describe("notifications (ADR-0207)", () => {
+    function notificationsClient(answer: unknown, status = 200) {
+      const calls: Call[] = []
+      const client = new CollabClient({
+        baseUrl: "https://collab.test",
+        accessToken: async () => "logto-token",
+        fetchImpl: async (url, init) => {
+          calls.push({ url, init })
+          if (url.endsWith("/grants"))
+            return jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          return jsonResponse(answer, status)
+        },
+        now: () => 0,
+      })
+      return { client, calls }
+    }
+
+    it("lists rows after a seq with the read cursor and an optional limit", async () => {
+      const page = {
+        notifications: [
+          {
+            id: "ntf_1",
+            kind: "issue.assigned",
+            workspaceId: "ws_1",
+            subject: { entity: "issue", id: "iss_1" },
+            actorUserId: "usr_bob",
+            dedupeKey: "issue.assigned:iss_1:rev2",
+            seq: 4,
+            createdAt: 10,
+            readAt: null,
+          },
+        ],
+        nextAfterSeq: 4,
+        hasMore: false,
+        reads: [{ id: "ntf_0", seq: 3, readAt: 9 }],
+        readCursor: { at: 9, seq: 3 },
+        readsHaveMore: false,
+      }
+      const { client, calls } = notificationsClient(page)
+
+      await expect(
+        client.listNotifications(ORG, { afterSeq: 3, readAt: 7, readSeq: 2, limit: 50 })
+      ).resolves.toEqual(page)
+      const call = calls.at(-1)!
+      const url = new URL(call.url)
+      expect(url.pathname).toBe(`/v1/orgs/${ORG}/notifications`)
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        afterSeq: "3",
+        readAt: "7",
+        readSeq: "2",
+        limit: "50",
+      })
+      expect(call.init?.method).toBeUndefined()
+      expect(grantHeader(call)).toBe("Bearer grant-1")
+    })
+
+    it("leaves the limit to the server when none is asked for", async () => {
+      const { client, calls } = notificationsClient({
+        notifications: [],
+        nextAfterSeq: 0,
+        hasMore: false,
+        reads: [],
+        readCursor: { at: 0, seq: 0 },
+        readsHaveMore: false,
+      })
+      await client.listNotifications(ORG, { afterSeq: 0, readAt: 0, readSeq: 0 })
+      expect(new URL(calls.at(-1)!.url).searchParams.has("limit")).toBe(false)
+    })
+
+    it("marks rows read by id", async () => {
+      const { client, calls } = notificationsClient({ marked: 2 })
+      await expect(client.markNotificationsRead(ORG, { ids: ["ntf_1", "ntf_2"] })).resolves.toEqual(
+        { marked: 2 }
+      )
+      const call = calls.at(-1)!
+      expect(call.url).toBe(`https://collab.test/v1/orgs/${ORG}/notifications/read`)
+      expect(call.init?.method).toBe("POST")
+      expect(JSON.parse(String(call.init?.body))).toEqual({ ids: ["ntf_1", "ntf_2"] })
+      const headers = call.init?.headers as Record<string, string>
+      expect(headers["content-type"]).toBe("application/json")
+    })
+
+    it("marks rows read up to a seq, naming nothing else", async () => {
+      const { client, calls } = notificationsClient({ marked: 5 })
+      await client.markNotificationsRead(ORG, { upToSeq: 12 })
+      expect(JSON.parse(String(calls.at(-1)!.init?.body))).toEqual({ upToSeq: 12 })
+    })
+
+    it("surfaces a refused read as a CollabError", async () => {
+      const { client } = notificationsClient({ error: "name either ids or upToSeq" }, 400)
+      await expect(client.markNotificationsRead(ORG, { ids: ["ntf_1"] })).rejects.toBeInstanceOf(
+        CollabError
+      )
+    })
+  })
+
+  it("accepts a targeted invite by id with an empty body and the shared-chat protocol", async () => {
+    const calls: Call[] = []
+    const accepted = { invite: { id: "inv / 1" }, membership: { userId: ADA } }
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        if (url.endsWith("/grants"))
+          return jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+        return jsonResponse(accepted)
+      },
+      now: () => 0,
+    })
+
+    await expect(client.acceptTargetedSessionInvite(ORG, "inv / 1")).resolves.toEqual(accepted)
+    const call = calls.at(-1)!
+    expect(call.url).toBe(`https://collab.test/v1/orgs/${ORG}/chat-invites/inv%20%2F%201/accept`)
+    expect(call.init?.method).toBe("POST")
+    // No token: the server matches the invite's target against the grant.
+    expect(call.init?.body).toBe("{}")
+    const headers = call.init?.headers as Record<string, string>
+    expect(headers["x-cognia-collab-protocol"]).toBe(SHARED_CHAT_PROTOCOL_VERSION)
+    expect(headers.authorization).toBe("Bearer grant-1")
+  })
+
+  it("surfaces a refused targeted accept as a CollabError", async () => {
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url) =>
+        url.endsWith("/grants")
+          ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          : jsonResponse({ error: "invite already used" }, 409),
+      now: () => 0,
+    })
+
+    await expect(client.acceptTargetedSessionInvite(ORG, "inv_1")).rejects.toBeInstanceOf(
+      CollabError
+    )
   })
 
   it("opens realtime chat with a one-time subprotocol ticket", async () => {
@@ -545,6 +723,39 @@ describe("CollabClient", () => {
       // A ticket in the URL lands in proxy logs and browser history.
       expect(sockets[0].url).not.toContain("ct_one_time")
       expect(messages).toEqual(["hello"])
+    })
+
+    it("opens the workspace change feed with a one-time subprotocol ticket", async () => {
+      const sockets: { url: string; protocols: readonly string[] | undefined }[] = []
+      const requested: string[] = []
+      const client = new CollabClient({
+        baseUrl: "https://collab.test",
+        accessToken: async () => "logto-token",
+        fetchImpl: async (url) => {
+          requested.push(url)
+          return url.endsWith("/grants")
+            ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+            : jsonResponse({ ticket: "ft_one_time", expiresAt: 30_000 })
+        },
+        now: () => 0,
+        openWebSocket: async (url, options) => {
+          sockets.push({ url, protocols: options.protocols })
+          return {
+            id: "t",
+            kind: "browser",
+            send: async () => undefined,
+            close: async () => undefined,
+          }
+        },
+      })
+      await client.openWorkspaceFeed(ORG)
+      expect(requested.at(-1)).toBe(`https://collab.test/v1/orgs/${ORG}/feed/tickets`)
+      expect(sockets).toEqual([
+        {
+          url: `wss://collab.test/v1/orgs/${ORG}/feed`,
+          protocols: ["cognia.collab.feed.v1", "ft_one_time"],
+        },
+      ])
     })
 
     it("mints a new ticket for every socket it opens", async () => {
