@@ -161,6 +161,11 @@ invented.
   console's Pause still writes the deny list through `companion_revoke_device`,
   exactly as the card did. Moving to the canonical `LifecycleAction` vocabulary
   is a behaviour change to the enforcement path and belongs in its own change.
+  *Update, 2026-09-30:* that change has landed. Pause now calls
+  `companion_suspend_device`, and Resume calls `companion_resume_device`, on
+  Tauri IPC, or over `POST /api/devices/{id}/suspend|resume` from a shell
+  that is not the Host (`hooks/devices/use-device-grant-actions.ts`,
+  `lib/devices/lifecycle-http.ts`). A paused device no longer loses its key.
 - **Presence does not survive a reload.** `device-presence-registry` is an
   in-process map with no subscription; the console polls it and falls back to
   Dexie's durable `lastSeenAt`, so a freshly-loaded window shows durable

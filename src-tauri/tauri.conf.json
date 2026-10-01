@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && node scripts/dev/free-port.mjs 3000 && pnpm dev",
-    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && pnpm build && pnpm tauri:frontend:check"
+    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm bootstrap-agent:prepare:dev && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && node scripts/dev/free-port.mjs 3000 && pnpm dev",
+    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm bootstrap-agent:prepare && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && pnpm build && pnpm tauri:frontend:check"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -41,7 +41,11 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/cognia-server", "binaries/cognia-external-agent-launcher"],
+    "externalBin": [
+      "binaries/cognia-server",
+      "binaries/cognia-external-agent-launcher",
+      "binaries/cognia-bootstrap"
+    ],
     "targets": "all",
     "resources": [
       "../sidecar/agent-host.mjs",

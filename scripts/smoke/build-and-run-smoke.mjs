@@ -11,24 +11,49 @@ import { fileURLToPath } from "node:url"
 import { createCliExternalAgentAliasPlugin } from "../build/cli-external-agent-aliases.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
+const kimiAcp = process.argv.includes("--kimi-acp")
+const clineAcp = process.argv.includes("--cline-acp")
+const qoderAcp = process.argv.includes("--qoder-acp")
+const gooseAcp = process.argv.includes("--goose-acp")
+const aiderCli = process.argv.includes("--aider-cli")
 const devinAcp = process.argv.includes("--devin-acp")
 const pi = process.argv.includes("--pi")
 const dsh = process.argv.includes("--deepseek-harness") || pi || process.argv.includes("--opencode")
 const entry = path.join(
   root,
-  dsh
-    ? "scripts/smoke/deepseek-harness-adapter-smoke.ts"
-    : devinAcp
-      ? "scripts/smoke/devin-acp-smoke.ts"
-      : "scripts/smoke/external-cognia-parity-smoke.ts"
+  kimiAcp
+    ? "scripts/smoke/kimi-acp-smoke.ts"
+    : clineAcp
+      ? "scripts/smoke/cline-acp-smoke.ts"
+      : qoderAcp
+        ? "scripts/smoke/qoder-acp-smoke.ts"
+        : aiderCli
+          ? "scripts/smoke/aider-cli-smoke.ts"
+          : gooseAcp
+            ? "scripts/smoke/goose-acp-smoke.ts"
+            : dsh
+              ? "scripts/smoke/deepseek-harness-adapter-smoke.ts"
+              : devinAcp
+                ? "scripts/smoke/devin-acp-smoke.ts"
+                : "scripts/smoke/external-cognia-parity-smoke.ts"
 )
 const outfile = path.join(
   root,
-  dsh
-    ? "cli/dist/smoke/deepseek-harness-adapter-smoke.mjs"
-    : devinAcp
-      ? "cli/dist/smoke/devin-acp-smoke.mjs"
-      : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
+  kimiAcp
+    ? "cli/dist/smoke/kimi-acp-smoke.mjs"
+    : clineAcp
+      ? "cli/dist/smoke/cline-acp-smoke.mjs"
+      : qoderAcp
+        ? "cli/dist/smoke/qoder-acp-smoke.mjs"
+        : aiderCli
+          ? "cli/dist/smoke/aider-cli-smoke.mjs"
+          : gooseAcp
+            ? "cli/dist/smoke/goose-acp-smoke.mjs"
+            : dsh
+              ? "cli/dist/smoke/deepseek-harness-adapter-smoke.mjs"
+              : devinAcp
+                ? "cli/dist/smoke/devin-acp-smoke.mjs"
+                : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
 )
 
 const esbuild = await import("esbuild")

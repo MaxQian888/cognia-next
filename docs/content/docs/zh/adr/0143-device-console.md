@@ -72,6 +72,7 @@ description: "设备管理收敛为一个基于 placement 候选空间的机队�
 - **teammate 执行绑定仍读 `useFleetSnapshot()`。** 它需要真实的 `activeTurns` / `maxActiveTurns` 来做派发决策，而本目录拒绝声明容量；切换过去等于用编造的数字换掉真实的数字。
 - **worker 不给平台能力矩阵。** 它的登记携带的是 SecurityStore 能力 id，属于另一套词表；放进平台矩阵会读错。
 - **`companion_suspend_device` / `companion_resume_device` 仍未被调用。** 控制台的「暂停」仍与旧卡片一样通过 `companion_revoke_device` 写拒绝名单。迁移到规范的 `LifecycleAction` 词表会改变强制执行路径的行为，应当单独成一次改动。
+  *更新（2026-09-30）：* 这一改动已落地。「暂停」现在调用 `companion_suspend_device`，「恢复」调用 `companion_resume_device`；在 Tauri IPC 上直接调用，非 Host 的外壳则走 `POST /api/devices/{id}/suspend|resume`（`hooks/devices/use-device-grant-actions.ts`、`lib/devices/lifecycle-http.ts`）。暂停的设备不再丢失密钥。
 - **在场信息不跨刷新存活。** `device-presence-registry` 是进程内 Map、没有订阅接口；控制台轮询它，并以 Dexie 的持久 `lastSeenAt` 打底，因此刚加载的窗口先显示持久在场，直到第一条流上报。
 
 ## 修订

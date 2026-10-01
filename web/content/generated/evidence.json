@@ -1,6 +1,6 @@
 {
-  "readAt": "2026-09-29T04:21:15.221Z",
-  "lastGoodReadAt": "2026-09-29T04:21:15.221Z",
+  "readAt": "2026-09-30T04:35:57.121Z",
+  "lastGoodReadAt": "2026-09-30T04:35:57.121Z",
   "errors": [],
   "repo": {
     "stars": 54,
@@ -251,6 +251,18 @@
       "date": "2026-09-03T00:39:55+08:00"
     },
     {
+      "id": "android-back-closes-overlays",
+      "bump": "patch",
+      "summary": "Android: the back button now closes the open sheet, dialog, drawer or menu (the same way Esc does) instead of sending the app to the background, the image viewer's close button no longer slides off-screen on a phone, the message-card designer keeps its close button and actions in view, and sheet and dialog close buttons have a thumb-sized tap target.",
+      "date": "2026-09-30T12:34:24+08:00"
+    },
+    {
+      "id": "android-native-bridge-injection",
+      "bump": "patch",
+      "summary": "Android: the native bridge now loads. Capacitor was injecting everything under the app's `/plugins` folder (page data and theme images) into its startup script as JavaScript, so the script failed and the app ran as a plain browser: no clipboard, sharing, file export, microphone or notification permissions, the device shown as \"Linux browser\", and desktop-only sync errors. Enabling push on a build without Firebase no longer crashes the app, and an account created while the bridge was broken now gets its unlock screen instead of an app where every message fails.",
+      "date": "2026-09-30T12:34:24+08:00"
+    },
+    {
       "id": "animated-action-icons",
       "bump": "patch",
       "summary": "Action icons across the app now animate on interaction instead of sitting static. Copy, download, play/pause, bookmark, bell, heart and the other repeated action glyphs are drawn from a shared animated icon set and rendered through one `AnimatedActionIcon` wrapper, so a copy button confirms itself by morphing to a check rather than swapping in a different icon, and play/pause transitions rather than cutting. The surfaces covered are the chat renderers (code, diff, image, audio, video, math, mermaid), message actions and the conversation minimap, the pet action grid, the TTS now-playing bar, share panels, the notification bell, and the mobile chat, goals and command-history screens. Motion is skipped under `prefers-reduced-motion`.",
@@ -333,6 +345,12 @@
       "bump": "minor",
       "summary": "Workflows can now create, revise, read and export artifacts, and create and read Canvas documents. Until now an artifact could only be born from a chat turn, so \"every Monday, chart last week's numbers and post the picture to the team channel\" had no way to be expressed. Export hands the bytes to the next step rather than opening a save dialog, so an unattended run never stops on a prompt nobody is there to answer. Deleting an artifact, and writing into a Canvas document someone may have open, stay out of workflows on purpose.",
       "date": "2026-08-29T17:39:27+08:00"
+    },
+    {
+      "id": "artifact-card-polish",
+      "bump": "patch",
+      "summary": "Artifact cards in chat look cleaner and do more: a typed icon with localized kind, language, line count and version; documents render padded at chat size and fit their content with a Show more fade; a Preview/Source switch and an enlarge toggle; and the preview no longer stamps a \"READY\" badge over content that loaded fine.",
+      "date": "2026-09-30T12:34:00+08:00"
     },
     {
       "id": "artifact-dock-motion-and-layout",
@@ -1037,6 +1055,12 @@
       "date": "2026-09-25T01:02:47+08:00"
     },
     {
+      "id": "chat-background-session-holds",
+      "bump": "patch",
+      "summary": "Sessions can now be held live in the background without a surface: a held session still counts as open for event routing and peer-message drains, so approvals wait for a person (surfaced through Attention) with a 24-hour backstop instead of being auto-denied.",
+      "date": "2026-09-29T17:40:20+08:00"
+    },
+    {
       "id": "chat-chrome-matches-wallpaper",
       "bump": "patch",
       "summary": "Fix the chat top bar and conversation list reading as opaque slabs next to a chat pane that shows your wallpaper. The header now opts into the same wallpaper-aware translucent surface as the composer, and the conversation rail carries a single tint instead of stacking a sidebar tint under a gradient that painted over the wallpaper — so the chrome and the message area finally match. Both still go fully opaque under `prefers-reduced-transparency`, and nothing changes when no wallpaper is set.",
@@ -1251,6 +1275,12 @@
       "bump": "patch",
       "summary": "Make the chat message column stop resizing when a tool call is expanded or collapsed, and tighten the space between consecutive tool calls. The assistant column was `w-fit`, so its width tracked the widest _mounted_ child — collapsing a tool card unmounts its body, which snapped the whole column narrow and made it jump back out on expand; the assistant side is now pinned to the full row so the width is constant either way. Consecutive tool calls also no longer carry a strip of chrome between them: a turn made up of only tool calls renders no action bar (it has no prose to copy, quote, read aloud or turn into a card, but the bar still reserved a ~40px row while invisible), the plugin context-menu wrapper no longer reserves a slot when no plugin contributed items, and an empty text part — what a model emits when it writes no prose between two tool calls — now renders nothing and no longer splits one tool-activity group into two.",
       "date": "2026-07-15T19:23:29+08:00"
+    },
+    {
+      "id": "chat-video-generation",
+      "bump": "minor",
+      "summary": "Generate videos from chat: the agent can start one with `video_generate` (it asks first) and `/video` animates a staged image or a prompt. A live card follows each job, with cancel, check again and try again, and defaults live in Settings → Media generation (ADR-0205).",
+      "date": "2026-09-30T02:51:33+08:00"
     },
     {
       "id": "chat-workspace-dock",
@@ -1679,6 +1709,12 @@
       "date": "2026-08-31T18:04:07+08:00"
     },
     {
+      "id": "companion-memory-search-as-of",
+      "bump": "patch",
+      "summary": "Paired devices can pass `asOf` (epoch milliseconds or ISO 8601) to `memory_search` to search memory as it was at a past instant, matching MCP and plugin search.",
+      "date": "2026-09-29T15:48:00+08:00"
+    },
+    {
       "id": "companion-multi-host-credential-book",
       "bump": "minor",
       "summary": "Replace the single-`CompanionConfig` pairing record with a multi-host credential book: public `CompanionHostRecord`s (endpoints, TLS pin, immutable cursor namespace, generation-guarded connection state) are kept apart from `CompanionHostCredential`s, which never leave the browser Vault or the platform keystore. Pairings are addressed by `{hostId, accountNamespace}`, so the same desktop paired from two accounts no longer shares a token, a watermark, or a mirrored row. Existing pairings migrate once, and the legacy record is only removed after both halves are read back and verified.",
@@ -2015,6 +2051,12 @@
       "date": "2026-07-14T02:17:35+08:00"
     },
     {
+      "id": "connector-reauth-surfacing",
+      "bump": "patch",
+      "summary": "Connections: when a platform rejects a connection's credential, the adapter now shows \"Re-authenticate\" (in the inbox badge and the Connections list) instead of a generic \"circuit open\", and it is no longer restarted in a loop by the health probe. OneBot edits now fall back to sending a new message instead of failing.",
+      "date": "2026-09-29T21:03:58+08:00"
+    },
+    {
       "id": "connector-resume-reconnect-health-gate",
       "bump": "patch",
       "summary": "IM connectors (Lark long-connection, Discord/Slack/QQ/DingTalk gateways) no longer reconnect every few minutes during normal desktop use. The resume-reconnect watcher used to tear down and re-open **every** adapter whenever the window regained focus after just 30 seconds away — so on a desktop app, where the window loses focus constantly, a perfectly healthy connection was churned dozens of times an hour (each reconnect opens a brief message-loss window). It now (1) only triggers after a multi-minute away period, sized for a real OS suspend rather than an ordinary window switch, and (2) skips any transport that is still `running` and delivered traffic in the last minute — only a possibly-half-open connection is reconnected.",
@@ -2109,6 +2151,12 @@
       "bump": "minor",
       "summary": "Context Workbench: split view is now real. On desktop in Wide or Focus mode the layout menu offers \"Split below\", stacking a second panel under the one in front with a draggable divider (also resizable from the keyboard) whose ratio is remembered per resource. Navigating to the panel already in the lower pane swaps the two and keeps each at the height it had; the mobile drawer and any workbench too narrow for two panes fall back to a single pane without disturbing the stored desktop layout. Both panes stay live — each keeps focus, its own error boundary, and its plugin visibility signal — and neither is rebuilt when the split opens, closes, resizes or swaps, so embedded editors, browsers and terminals survive the gesture. Replaces the disabled \"Split view (not available yet)\" entry, which now explains what to switch to instead of only saying no.",
       "date": "2026-08-15T17:17:54+08:00"
+    },
+    {
+      "id": "continue-as-project",
+      "bump": "minor",
+      "summary": "Add \"Continue as project\" to the conversation menu: the conversation becomes the first thread of its workspace's project and the coordinator plans what remains. A new project's coordinator also offers a one-time starting plan on its first turn.",
+      "date": "2026-09-29T20:54:25+08:00"
     },
     {
       "id": "converge-chat-dock-workbench",
@@ -2330,7 +2378,7 @@
       "id": "desktop-browser-local-chromium",
       "bump": "minor",
       "summary": "The desktop browser can run a local Chromium or attach to your own Chrome, with tabs, a download manager, Chrome extensions, cookie and password import from every major browser, a password vault with autofill, local files and dev-server discovery, and browser tools for external agents.",
-      "date": null
+      "date": "2026-09-29T16:10:45+08:00"
     },
     {
       "id": "desktop-chat-copilot",
@@ -2511,6 +2559,12 @@
       "bump": "minor",
       "summary": "Terminal sessions now survive a window reload and an app restart. The PTY is owned by a separate host process instead of the app window, so reloading the UI reattaches to the running shell — with scrollback replayed — rather than killing it and starting over. Adds a host state banner that says when the host is starting, reconnecting or unavailable, terminal host profiles, and remote terminal access as an explicit per-device grant (existing paired devices start without it, so no previously granted control or agent permission silently authorizes a shell).",
       "date": "2026-08-01T03:32:20+08:00"
+    },
+    {
+      "id": "durable-video-jobs",
+      "bump": "patch",
+      "summary": "Video generation (plugins and `videos.generate`) now works in the desktop and mobile apps and survives reloads: a started video keeps generating, is checked again after the app reopens, and is saved once it finishes, with honest cancel and clear failure reasons (ADR-0205).",
+      "date": "2026-09-30T01:35:40+08:00"
     },
     {
       "id": "durable-work-submission",
@@ -2819,6 +2873,12 @@
       "date": "2026-08-21T14:24:18+08:00"
     },
     {
+      "id": "external-bridge-workspace-tools",
+      "bump": "minor",
+      "summary": "External Bridge: local MCP clients can now list, read, search and edit files, read git state and run shell commands in the workspace roots you grant each client (new default-off `workspace:read`, `workspace:write`, `git:read` and `shell:run` scopes, Settings → External Bridge → Workspace access), with credential files always refused, risky commands and deletes approved in-app, and structured results the agent can act on.",
+      "date": "2026-09-30T12:33:43+08:00"
+    },
+    {
       "id": "external-turn-failure-states",
       "bump": "patch",
       "summary": "Chat turns that never ran now say so on the message itself: a send waiting for a busy working copy shows as queued (naming what holds it, with Cancel), an external agent that fails to start or finds its process or working copy held elsewhere is marked failed with a localized reason and Retry, in-session plan steps run on external agents now complete or halt like built-in ones, the performance page shares one host metrics lease instead of reporting `device-purpose-limit`, and the sandbox chip no longer claims \"Sandbox off\" for external-runtime sessions.",
@@ -2841,6 +2901,12 @@
       "bump": "minor",
       "summary": "File paths now carry a file-type icon instead of one generic page glyph. `@`-reference chips, the composer's file picker, message file attachments, the workspace changes list and the Pro IDE file tree all resolve the icon from the filename — a `.tsx`, an image, a lockfile and a Dockerfile are distinguishable at a glance, in both themes. When a plugin contributes a VS Code icon theme (Material Icon Theme and friends), that theme's icons are preferred; the built-in set is the default everywhere else, including web and mobile where an on-disk theme can never resolve.",
       "date": "2026-08-31T13:49:50+08:00"
+    },
+    {
+      "id": "files-and-workflow-video-generation",
+      "bump": "minor",
+      "summary": "Generated videos show up on the Files page with their prompt as the name, a new Video filter, an inline player and the prompt, provider and model in the preview; a new \"Generate video\" workflow node generates a video and hands its file to the other video nodes.",
+      "date": "2026-09-30T09:50:00+08:00"
     },
     {
       "id": "files-page",
@@ -2999,6 +3065,12 @@
       "date": "2026-07-17T17:49:56+08:00"
     },
     {
+      "id": "generated-video-details-outlive-chat",
+      "bump": "patch",
+      "summary": "A generated video kept in Files keeps its prompt, model, duration and size after the conversation that made it is deleted.",
+      "date": "2026-09-30T11:18:02+08:00"
+    },
+    {
       "id": "gentle-moons-invite",
       "bump": "minor",
       "summary": "Add `cognia plugin import`: convert an existing MCP server, agent skill, or CLI binary into a plugin project. Nothing from the source is executed and no credential or machine-specific path is ever copied — they become user-filled preset fields. Also fixes plugin-contributed skills whose `source.path` was relative: the host now anchors it against the plugin's install directory instead of the process working directory.",
@@ -3027,6 +3099,12 @@
       "bump": "minor",
       "summary": "GitHub Enterprise Server is reachable. Add your server's address when connecting a GitHub account and its requests, clones, pushes, and branch stacks go to your own server instead of api.github.com. Leave the field empty and nothing changes: existing accounts keep talking to github.com exactly as before, and a host is only ever contacted once you have configured an account on it.",
       "date": "2026-09-10T01:03:46+08:00"
+    },
+    {
+      "id": "github-integration-gaps",
+      "bump": "minor",
+      "summary": "GitHub integration: every GitHub read (issue mirror and import sync, PR observation, stack publishing, project-thread PR watch, PR review) now uses the accounts connected in Settings → Connections before falling back to the `gh` CLI, and reads a GitHub Enterprise repository from its own server with that server's credential (the issue loop, bot publication and the Devin bot included). A GitHub webhook now refreshes the issue board within seconds instead of waiting for the 15-minute poll, and transferred or deleted issues leave the board. PR observation reads every page of reviews, review comments and check runs, so a long review no longer reports a stale \"changes requested\". Webhooks can be delivered through a public or tunnel URL; personal-access-token accounts get their repository webhook configured for them, and the loopback listener address is never written to GitHub. New webhook events (review comments, comment edits and deletions, assignment changes, milestones, transfers, commit statuses, branch and tag creation and deletion, release creation), with PR conversation comments joining the pull request's inbox thread. New `createIssue` action and read actions (`getIssue`, `getPullRequest`, `getCommitStatus`, `listIssueComments`, `searchIssues`) for workflows. Issues can be published to a bound GitHub repository or Lark tasklist/table from the detail panel, which also shows the GitHub conversation, and a changed assignee now syncs back to GitHub when it is a GitHub user.",
+      "date": "2026-09-30T12:33:50+08:00"
     },
     {
       "id": "global-search-and-history-import",
@@ -3353,6 +3431,12 @@
       "date": "2026-08-26T21:07:33+08:00"
     },
     {
+      "id": "im-issue-card-sender-policy",
+      "bump": "patch",
+      "summary": "IM issue cards: the Move and Run buttons now follow the bot's sender rules, so someone the bot ignores (blocklist), or isn't on an allowlist-only bot's list, can no longer move or start a run by clicking.",
+      "date": "2026-09-30T01:27:11+08:00"
+    },
+    {
       "id": "im-keyring-device-plane",
       "bump": "patch",
       "summary": "The four connector keyring commands move off the loopback-only service plane onto the device plane, where every call must present a valid admin lease. This is the protocol change a paired browser needs before it can configure a bot at all; the client side that uses it is not wired yet, so the settings screen still says the bot runs on the paired host.",
@@ -3557,6 +3641,18 @@
       "date": "2026-09-06T00:37:23+08:00"
     },
     {
+      "id": "issue-run-steer",
+      "bump": "minor",
+      "summary": "Issues: an active run can be steered from the issue's detail panel — the message goes straight to the running agent, and runs whose engine takes no input mid-run say so instead of offering a send.",
+      "date": "2026-09-30T00:54:50+08:00"
+    },
+    {
+      "id": "issue-stage-triage-everywhere",
+      "bump": "minor",
+      "summary": "Sub-issue stages and triage can now be set from plugins (`ctx.issues`), workflow nodes, the External Bridge (`issues_create` / `issues_update`), a paired phone and the create-issue page; the phone also shows and accepts triage.",
+      "date": "2026-09-30T00:45:00+08:00"
+    },
+    {
       "id": "issue-tracker-github-sync",
       "bump": "minor",
       "summary": "Issue board: mirror GitHub issues onto `/issues`, and write back to them.\n\nBind a GitHub repository to a project from the project inspector and its issues\nappear on the board as read-only federated rows. A background task refreshes the\nmirror every 15 minutes (created when the first repo is bound, retired when the\nlast one is removed), and \"Sync now\" forces a full re-read. Commenting, labelling\nand closing write back through the existing `github-delivery` integration, each\nbehind a confirmation dialog that names the account the write goes out on.",
@@ -3627,6 +3723,24 @@
       "bump": "minor",
       "summary": "An issue opened on a phone now shows its history. The activity trail, its\ncomments, and the record of which engine was asked to run the issue and how it\nended all reach a paired device, so the mobile detail sheet no longer stops at\nthe fields. Federated rows from GitHub or an agent board keep their history in\nthose systems and say nothing here rather than showing an empty trail.",
       "date": "2026-09-02T01:46:24+08:00"
+    },
+    {
+      "id": "issue-triage-stages-deliverables",
+      "bump": "minor",
+      "summary": "Issues: sub-issues can be grouped into ordered stages, and the parent is woken as each stage completes (wakeups can also wait for a specific stage). An issue can wait in triage — chats and wakeups will not start an agent on it until someone accepts it — and GitHub import can file new open, unassigned issues there. A wakeup can wait for a linked pull request to merge (import-mode GitHub projects), and PRs a run opens are linked onto its issue. Agents can hand over results with `issue_link_artifact`; the inspector lists them as versioned deliverables with inline previews, shows a run history strip, and collapses repeated run failures in the activity trail.",
+      "date": "2026-09-29T23:23:49+08:00"
+    },
+    {
+      "id": "issue-wakeup-pr-checks",
+      "bump": "minor",
+      "summary": "Issue wakeups can wait for a linked pull request's checks to pass or fail: the GitHub import sync now reads each open linked PR's CI and records changes on the issue's trail.",
+      "date": "2026-09-30T02:24:20+08:00"
+    },
+    {
+      "id": "issue-wakeups",
+      "bump": "minor",
+      "summary": "Issue wakeups: subscribe an issue to its own activity (comments, status changes, any trail kind, people-only), to every sub-issue finishing, to another issue finishing, or to a timer, and an agent run starts on the issue with the instruction and what happened. An input that lands while a run is active joins it (steered into the live session) or is held until that run settles instead of being lost; a person assignee gets a notification instead of a run. Rules that loop between agents or fire more than 12 times an hour pause themselves and say why on the board card, the issue's Wakeups section and the scheduler; finishing an issue stops its rules. Periodic rules' runs can check in (`issue_wakeup_checkin`) to settle without moving the issue to review. Every parent issue automatically waits for its sub-issues. Agents get `issue_wakeup_create/list/set_enabled/delete/checkin`, all under the scheduler's agent-write policy.",
+      "date": "2026-09-29T23:23:49+08:00"
     },
     {
       "id": "issues-collapsed-rail",
@@ -4121,6 +4235,12 @@
       "date": "2026-09-02T13:25:14+08:00"
     },
     {
+      "id": "memory-ages-and-can-be-undone",
+      "bump": "minor",
+      "summary": "Memory keeps every earlier wording and lets you restore it, forgets rarely-used memories before often-used ones, shows how well each memory is corroborated, adds a Health tab, optional past-conversation routing, corroboration weighting and utility-model reranking for recall, an opt-in daily pass that compacts or folds cold episodes, and memory search as of a past date for integrations.",
+      "date": "2026-09-29T15:40:05+08:00"
+    },
+    {
       "id": "memory-console-rebuild",
       "bump": "minor",
       "summary": "Rebuild the `/memory` workspace on the shared feature shell: one header band (tabs, recall-status chip, corpus summary, quick views, search, Filter, Display) over a list that now owns ~84% of the viewport instead of a third. Archiving is the primary row action with permanent delete demoted behind a confirmation, the inspector renders a memory's evidence and audit history rather than counting it, and the External agent memory tab is translated for the first time and finally shows OpenCode and Pi files alongside Claude Code and Codex.",
@@ -4265,10 +4385,22 @@
       "date": "2026-07-30T17:13:10+08:00"
     },
     {
+      "id": "mobile-composer-one-surface",
+      "bump": "patch",
+      "summary": "Mobile composer: one surface instead of two. The message field gets its own full-width, taller row, and the attach / voice buttons, model and status controls and the send button share one row inside the same box, instead of a single-line box with a loose toolbar row under it. The field no longer paints a tinted box inside the composer in dark mode, and the send button is sized in proportion to the row while keeping a 44px tap area.",
+      "date": "2026-09-30T12:34:10+08:00"
+    },
+    {
       "id": "mobile-composer-plus-sheet",
       "bump": "minor",
       "summary": "Rebuild the mobile composer's `+` into a bottom sheet with the same three groups as the desktop menu — attach, this turn, extend — with a thumb-sized tile grid for the media pickers, rows for everything else, and one level of in-place drill-down for `@`-referenceable records and cloud documents.",
       "date": "2026-08-27T16:17:18+08:00"
+    },
+    {
+      "id": "mobile-composer-touch-fixes",
+      "bump": "patch",
+      "summary": "Mobile composer and chat: tooltips no longer stick after a tap on touch devices; tapping anywhere on a \"⋯\" row (Agent mode, Preset, Sandbox) opens that control; the skill and web-search panels of the `+` menu open above their row on a phone instead of off-screen; Backspace on an Android keyboard deletes a command chip as one piece; the model chip shows a short name (\"Sonnet 4.6\") when space is tight; changing the permission mode from the icon-only chip announces the new mode; an open \"Edit and resend\" box closes when you start using the composer; bookmarked messages show a bookmark mark; \"Compact now\" explains when there is nothing to compact and reports a failed request.",
+      "date": "2026-09-30T12:34:10+08:00"
     },
     {
       "id": "mobile-conversation-actions-parity",
@@ -4281,6 +4413,12 @@
       "bump": "patch",
       "summary": "Phone preferences: the default model is saved when you finish typing (blur or Enter) instead of on every keystroke, which queued a desktop update per letter; the section is titled \"Display & model\".",
       "date": "2026-09-26T21:09:06+08:00"
+    },
+    {
+      "id": "mobile-encrypted-cursor-and-error-triage",
+      "bump": "patch",
+      "summary": "Fix exporting and deleting a conversation on a fresh (encrypted) profile failing with \"TransactionInactiveError: Failed to execute 'continue' on 'IDBCursor'\": encrypted rows read by cursor now resume iteration inside an active IndexedDB transaction. A provider's \"API key is invalid.\" on the phone's direct path is now reported as an authentication error with a way to the credentials (the HTTP status is carried through, and more rejected-key wordings are recognised). Opaque cross-origin \"Script error.\" events are folded into one counted log entry per five minutes instead of filling the log buffer, log viewer rows no longer overlap after new entries arrive, and logs written to the Android/iOS native console serialize their data instead of printing \"[object Object]\".",
+      "date": "2026-09-30T12:34:24+08:00"
     },
     {
       "id": "mobile-goals-open-chat",
@@ -4319,10 +4457,34 @@
       "date": "2026-09-14T21:29:39+08:00"
     },
     {
+      "id": "mobile-native-bridges-unhang",
+      "bump": "patch",
+      "summary": "Android app: native features work again after startup. Copy and paste (including Paste on the pairing screen and Copy link to message), Share message, the notification permission prompt, and voice input no longer do nothing. Download and Export buttons now open the system share sheet with the file, and Appearance → Export no longer reports success when nothing was saved. Appearance → Import opens the file picker. The mic button asks for microphone permission and says when it is denied or when voice input doesn't start. Turning on system or push notifications first asks Android for permission and explains when the device can't deliver them. Paste now tells an empty clipboard apart from one it couldn't read.",
+      "date": "2026-09-30T12:34:24+08:00"
+    },
+    {
       "id": "mobile-notification-source-labels",
       "bump": "patch",
       "summary": "Notification settings on a phone label the Issues and Sites sources instead of showing raw translation keys.",
       "date": "2026-09-26T21:01:42+08:00"
+    },
+    {
+      "id": "mobile-outbound-queue-recovery",
+      "bump": "patch",
+      "summary": "Mobile queued actions no longer get stuck on \"Sending\" after the app restarts: a send whose process died is recovered automatically, a send that never answers now times out and retries, and a stuck one can be withdrawn from the Queued actions sheet. Tapping Run again on a workflow that is already queued says so instead of queueing a duplicate run. The workflow list, banner and queue sheet now use the same words (\"Queued\" while waiting for the desktop, \"Sending\" only while it is actually being sent), and the banner's Review link has a larger tap target.",
+      "date": "2026-09-30T12:34:24+08:00"
+    },
+    {
+      "id": "mobile-overlay-legibility-and-layout",
+      "bump": "patch",
+      "summary": "Mobile readability and layout fixes. With a wallpaper on, sheets, dialogs, drawers, popovers, menus, select lists, toasts and tooltips are now near-opaque, so the page underneath no longer reads through them (the slash menu, the model picker, session settings, the Discover detail card and the Edit character form were unreadable on Android, where the backdrop blur is often not painted). The mobile workflow canvas has a solid ground instead of showing the wallpaper behind nodes and edges. The mobile workflow editor's top bar keeps the workflow name visible at phone width: the saved/unsaved badge sits under the name instead of overflowing onto the mode toggle, and select mode and Workbench move into the overflow menu. The half-open workbench drawer no longer lays its content out below the screen, so the artifacts list's empty state (and any panel's bottom row) is visible. The perf HUD never mounts on a touch-only device, where it covered the tab bar.",
+      "date": "2026-09-30T12:34:24+08:00"
+    },
+    {
+      "id": "mobile-platform-aware-copy",
+      "bump": "patch",
+      "summary": "Mobile: an unpaired device no longer shows sync tables as failed and sync retries report their real result; the device console names the phone's model; keyboard hints (Esc, ⌘/Ctrl+Enter, Shift+Tab, arrow keys) are hidden on touch devices; \"browser\" copy is platform-neutral; workspace-only starter prompts are hidden without a working directory; `/sessions` and `/resume` output is localized; biometric copy no longer says Face ID on Android; dictation follows the app language until a language is picked.",
+      "date": "2026-09-30T12:34:24+08:00"
     },
     {
       "id": "mobile-platform-shell-seam",
@@ -4349,6 +4511,12 @@
       "date": "2026-08-23T09:36:47+08:00"
     },
     {
+      "id": "mobile-settings-state-consistency",
+      "bump": "patch",
+      "summary": "Mobile settings and providers: a provider that can't be enabled yet now says why under its switch instead of only in a tooltip, which touch screens never show. An empty Default Model field names the provider's catalog default, matching the ticked setup step. Raw model ids show their display names in the chat list and the character editor. The character editor's avatar colour swatch shows the real colour instead of black. The Diagnostics tab explains that a provider's Error status comes from its last connection test, and says why the Endpoint list is empty (or that the paired desktop picks it) instead of showing a blank dropdown. OCR settings now show Auto after an unavailable default provider is switched to Auto. Issues, Delivery projects and Workspace are no longer marked \"Requires desktop\", since they work without one. The Cloud deployment \"Check\" button explains an empty address. The \"Related\" links on the Subscription, MCP and other Claude Code pages now open on a phone. The bottom tab bar keeps its space reserved while the keyboard is closed.",
+      "date": "2026-09-30T12:34:19+08:00"
+    },
+    {
       "id": "mobile-storage-sync-redesign",
       "bump": "minor",
       "summary": "Redesign the mobile Storage and Sync pages: one usage bar split by category with health and persistence inline, a single refresh for the whole page, per-category rows with icon tiles, a Manage block linking to backups instead of a second file list, and a sync summary that leads with a verdict and pulls failed tables into a \"Needs attention\" group. Both pages now adapt to the panel width (two columns on tablets).",
@@ -4371,6 +4539,12 @@
       "bump": "minor",
       "summary": "The mobile Chat tab badge and the Inbox dot now show real numbers on a paired device. Both counted a host-only dedupe ledger that is not part of the companion sync protocol, so both read zero on every phone regardless of how many conversations were waiting. They now read the same per-session unread pointers the desktop's own badges use, and those pointers sync.",
       "date": "2026-09-01T23:04:36+08:00"
+    },
+    {
+      "id": "mobile-welcome-quieter",
+      "bump": "patch",
+      "summary": "Mobile welcome: quieter and customizable. An empty conversation now uses the same compact welcome as the home screen (it fell back to the desktop hero and ignored your name), the minimal hero drops the generic subtitle, and the activity dashboard stays hidden until there is usage to show, with its view and range controls moved behind its settings button. \"Customize home\" gains an Activity switch, which also brings the dashboard back after it was dismissed.",
+      "date": "2026-09-30T12:34:10+08:00"
     },
     {
       "id": "mobile-workspace-switcher",
@@ -4469,6 +4643,12 @@
       "date": "2026-09-27T02:12:29+08:00"
     },
     {
+      "id": "notification-feed-honors-retention",
+      "bump": "patch",
+      "summary": "Notification Center: notifications removed by retention now also leave the open panel, so a long session's feed no longer grows past the history limit until reload.",
+      "date": "2026-09-30T01:04:34+08:00"
+    },
+    {
       "id": "notification-tables-governed",
       "bump": "patch",
       "summary": "Notification delivery data is now encrypted on disk like the rest of your account's content: the rendered text queued to go to a chat or webhook, the chat each delivery target points at, and the run result summaries notifications quote. Rows already written stay readable and are encrypted the next time they're saved. None of the notification delivery data is copied to paired devices or into portable backups.",
@@ -4497,6 +4677,12 @@
       "bump": "minor",
       "summary": "Cognia Office workbooks keep their formulas correct through structural edits: inserting or deleting rows and columns, renaming a sheet, or deleting one now rewrites every formula reference across the workbook the way Excel does (references into deleted cells become `#REF!`). Overlapping merges are refused instead of crashing the XLSX export, `unmerge` releases any merge the range touches, and a freeze with no rows or columns removes the frozen pane. New `clearRange`, `setRangeStyle`, and `appendRows` operations, an `office_read_range` tool that reads cell values under a budget, and `office_list_versions` / `office_restore_version` round out editing; create, import, and apply return a compact summary instead of the whole workbook.\n\nCognia Documents accepts Markdown: `documents_create` takes a `markdown` body and the new `appendMarkdown` / `insertMarkdown` operations turn headings, nested lists, quotes, fenced code, and tables into real blocks, reporting any inline formatting it flattened. `documents_read_markdown` reads a document back as Markdown with optional block-id markers. Documents gain headings 1–6, nested list levels, quote and code blocks (exported with Word Quote and Source Code styles and read back from them), `replaceBlock`, `findReplace` with optional tracked changes, and table row/column insert and delete. Session transcripts export their Markdown as structured Word content, and multi-line paragraphs and tracked changes now keep their line breaks in the right place in exported DOCX files.\n\nBoth previews gain an Export button (with a confirmation when imported features would be lost), both plugins render their tool results as chat cards, and the artifact panel no longer offers PDF or \"Download as Word\" for plugin-owned workbooks and documents, which it could only print as JSON. Work mode can write documents and reports as native DOCX (`format: \"docx\"`), reviews workbooks and DOCX documents as their text instead of their JSON model, reports a parsed review status, and points follow-up edits of native deliverables at their owning plugin's tools.",
       "date": "2026-09-28T10:30:00+08:00"
+    },
+    {
+      "id": "office-formula-eval-cell-edit-artifact-capture",
+      "bump": "minor",
+      "summary": "Office workbooks now compute their formulas: every create and edit recalculates the workbook (own parser plus the MIT `@formulajs/formulajs` function library) and stores each formula's real value instead of a number the agent asserted, turning cycles into `#REF!`, keeping the cached value of anything it cannot evaluate, and reporting error cells and unevaluated formulas back to the agent. People can now fix a cell directly in the workbook preview (Enter / F2 / double-click or just type; Delete clears; each edit is a new, recalculated version with a conflict notice if the agent changed it meanwhile). And a new `artifact_capture` tool lets the agent see any artifact the way the user does — workbooks, PDFs, documents, charts, pages — as an image, so it can catch clipped, blank or wrong-looking output before calling the work done.",
+      "date": "2026-09-30T12:34:00+08:00"
     },
     {
       "id": "olive-cameras-shave",
@@ -5423,6 +5609,12 @@
       "date": "2026-09-26T01:22:01+08:00"
     },
     {
+      "id": "project-budget",
+      "bump": "minor",
+      "summary": "Add per-workspace spending limits and a Usage tab to the workspace page: set a daily or monthly USD ceiling for one workspace, and see what its conversations and threads spent, by conversation and by model.",
+      "date": "2026-09-29T19:54:16+08:00"
+    },
+    {
       "id": "project-claim-deletion-closure",
       "bump": "patch",
       "summary": "Deleting a message or a conversation now withdraws the project facts that were learned from it. Previously a mined claim kept being used even after the chat it came from was gone.",
@@ -5439,6 +5631,42 @@
       "bump": "minor",
       "summary": "Learn about the project, not just about you: chats bound to a workspace are now mined in the background for durable project facts — its current state, the constraints it must obey, decisions and why they were made, verified outcomes, and environment gotchas. Mined claims are kept in a separate corpus from personal memories, so they never appear as something you told Cognia about yourself.",
       "date": "2026-08-30T11:47:33+08:00"
+    },
+    {
+      "id": "project-coordination-settings",
+      "bump": "minor",
+      "summary": "Add a Project coordination section to the workspace manager: the project goal, where threads run, thread limits, automatic pull-request fixes, the workspace's spending limit and notification rule, and a link to its memory (the memory page now opens filtered with `?workspace=`).",
+      "date": "2026-09-29T20:28:13+08:00"
+    },
+    {
+      "id": "project-coordinator-data-model",
+      "bump": "patch",
+      "summary": "Add the project-coordinator data model (ADR-0204 groundwork): sessions can carry a project role and thread attachment, projects gain a coordinator config resolved per workspace, and machine-started threads no longer overwrite the workspace's remembered execution defaults.",
+      "date": "2026-09-29T17:40:20+08:00"
+    },
+    {
+      "id": "project-coordinator-sessions-runtime",
+      "bump": "patch",
+      "summary": "Add the coordinator/thread session machinery (ADR-0204 groundwork): one coordinator conversation per workspace, thread sessions in their own managed worktrees with a PII-gated brief, and a background runtime handling admission, holds, follow-ups, stop and reload reconciliation.",
+      "date": "2026-09-29T17:40:20+08:00"
+    },
+    {
+      "id": "project-coordinator-thread-reports",
+      "bump": "patch",
+      "summary": "Threads report back to their coordinator (ADR-0204 groundwork): lifecycle-linked sessions pass peer messages through background holds and queue them when the receiver is not live, thread results travel as coalesced coordinator-bound reports, and a single store observer settles every thread turn and releases its hold.",
+      "date": "2026-09-29T17:40:20+08:00"
+    },
+    {
+      "id": "project-coordinator-tools",
+      "bump": "patch",
+      "summary": "Add the coordinator/thread tool family, protocol and project status (ADR-0204 groundwork): spawn_thread, propose_threads, start/message/stop/resolve_thread, list_threads, read_thread_report, remember_project_note and set_project_preference, gated on the caller's project role with a lowest-layer ruleset, plus a derived per-thread board state with a 7-day auto-resolve rule.",
+      "date": "2026-09-29T17:40:20+08:00"
+    },
+    {
+      "id": "project-coordinator",
+      "bump": "minor",
+      "summary": "Add project coordination: turn it on for a workspace to get a long-lived coordinator conversation that splits work into background threads (each in its own worktree and branch in a git workspace), collects their results, and tracks them on a threads board in the workspace overview.",
+      "date": "2026-09-29T17:14:58+08:00"
     },
     {
       "id": "project-editor-model-lifetime-and-preview-tabs",
@@ -5465,6 +5693,18 @@
       "date": "2026-08-30T15:40:44+08:00"
     },
     {
+      "id": "project-model-defaults",
+      "bump": "minor",
+      "summary": "Choose the model and effort that new project coordinator and thread conversations start with, show the project icon on the threads board, and tell the coordinator which workspace roots it can send threads to.",
+      "date": "2026-09-29T20:38:50+08:00"
+    },
+    {
+      "id": "project-notifications",
+      "bump": "minor",
+      "summary": "Notify when a conversation you are not looking at finishes, fails, or waits for your approval — including project threads running in the background — and allow notification rules per workspace.",
+      "date": "2026-09-29T20:14:15+08:00"
+    },
+    {
       "id": "project-overview-and-resource-evidence",
       "bump": "minor",
       "summary": "The workspace dock gains a project overview panel, and the task resources panel now shows the evidence a run actually produced — which files and tools a task touched — projected from durable events rather than reconstructed from the transcript. Deleting a project now purges its scoped resources instead of leaving them behind.",
@@ -5477,10 +5717,22 @@
       "date": "2026-09-25T13:20:15+08:00"
     },
     {
+      "id": "project-pause",
+      "bump": "minor",
+      "summary": "Pause and resume a coordinated project: pausing stops its coordinator and running threads and keeps them from starting until you resume, with a banner above the composer and in the workspace's coordination card.",
+      "date": "2026-09-29T20:09:30+08:00"
+    },
+    {
       "id": "project-runtime-environments",
       "bump": "minor",
       "summary": "Projects can run their agents in a container image of their choice (ADR-0182). A project environment's new \"Runtime environment\" panel picks an image from the deployment's catalog, or approves the one the repository declares in `.cognia/workspace.json` or `devcontainer.json`, and shows what the next run would do before it happens. Each run is readied where its environment puts it: a run that needs a sandbox it cannot get is refused with a reason instead of silently running unsandboxed. The agent settings show the sandbox the server actually gave each run, with its image digest, isolation tier and user, and the server's audit log records which environment each spawn asked for. Tenant administrators get a new \"Image catalog\" settings page to add, edit and revoke images on servers that run the sandbox pool. The compose deployment gains an optional `docker-compose.runtime-environment.yml` overlay and a smoke script for it. Everything is off unless an operator enables the pool and a project opts in; deployments and projects that do neither run exactly as before.",
       "date": "2026-09-16T21:23:16+08:00"
+    },
+    {
+      "id": "project-thread-stop-hold",
+      "bump": "patch",
+      "summary": "Stopping a project thread whose turn fails to stop now still marks it interrupted and releases it, coalesced thread reports survive a deleted reporter, and the agent browser refuses an unknown user-chrome browser instead of silently attaching to Chrome.",
+      "date": "2026-09-30T12:34:06+08:00"
     },
     {
       "id": "prompt-mention-namespace",
@@ -5709,6 +5961,12 @@
       "bump": "patch",
       "summary": "A conversation that runs on an external agent the paired host owns can now choose which model it runs on. The model picker lists that agent's own catalog instead of standing empty, and the model and thinking level the composer shows are the ones the turn actually runs with. Until now the host lane carried no model at all, so every such turn silently ran on whatever the agent defaults to while the chip promised something else.",
       "date": "2026-09-03T21:16:16+08:00"
+    },
+    {
+      "id": "redact-more-secret-shapes",
+      "bump": "patch",
+      "summary": "Redaction now also catches Stripe, GitHub user/refresh, AWS temporary, Google OAuth, Meta, Telegram and Slack app tokens, `Bearer` tokens, secret-looking environment assignments and credential directory paths, and ignores terminal escape / bidi control characters that could split a secret.",
+      "date": "2026-09-29T14:36:27+08:00"
     },
     {
       "id": "reference-a-single-message",
@@ -6044,13 +6302,13 @@
       "id": "router-fusion-chat-turn-fixes",
       "bump": "patch",
       "summary": "Router + Fusion chat fixes: the chat breaker now trips after three turns in a row that each lost the ledger mid-turn; image-only turns are refused by Cascade and Panel (and never picked by Auto) instead of losing their images; retries, reroutes and durable replays reseal on the original turn's routing inputs and runtime lane; a replay that goes out unledgered is checked against the cost budget again; turns handed to the host are no longer sealed; the run card marks Claude Agent SDK runs as an estimated cap; every refusal the chat can show has a sentence; and recovery replays pending outbox effects at every boot.",
-      "date": null
+      "date": "2026-09-29T14:14:23+08:00"
     },
     {
       "id": "router-fusion-delegate-agents-workflows",
       "bump": "patch",
       "summary": "Router + Fusion delegate now works from workflow steps and Squad members: the run gets its project, checkout and approved test profile, a run that needs your approval asks on the workflow or Squad run in Agent Runs and continues once you answer, and a delegate can be set to apply its verified patch to the workspace. The Run API reports the pending approval id and approval events, the E2B microVM tier falls back when it cannot take a local worktree, and patch writes no longer fall back to a non-atomic path on an authorization error.",
-      "date": null
+      "date": "2026-09-29T14:12:52+08:00"
     },
     {
       "id": "router-fusion-delegate-workspace-cas",
@@ -6065,10 +6323,16 @@
       "date": "2026-09-17T02:12:08+08:00"
     },
     {
+      "id": "router-fusion-gateway-headless",
+      "bump": "patch",
+      "summary": "The headless Cognia server now serves the Router + Fusion Run API, the `cognia/*` models and the passthrough ledger; `/v1/embeddings` calls are ledgered too, a reservation is always settled even if the switch changes mid-request, and artifact read links stay valid across restarts.",
+      "date": "2026-09-29T14:12:19+08:00"
+    },
+    {
       "id": "router-fusion-ledger-coverage",
       "bump": "patch",
       "summary": "With Router + Fusion's ledger switches on, every model call of the `ai.prompt` v2 node (explicit and routed, each fallback attempt included), `ai.council`, `ai.ensemble`, the `/council` command, Agent auto-compose and Agent text-only runs is now reserved and settled on the ledger under the right workspace; concurrent background calls are no longer double-counted, and a call that falls back unledgered raises a \"Model call not ledgered\" notice.",
-      "date": null
+      "date": "2026-09-29T14:12:35+08:00"
     },
     {
       "id": "router-fusion-ledger-package-generations",
@@ -6092,7 +6356,7 @@
       "id": "router-fusion-reservation-owner",
       "bump": "patch",
       "summary": "A paired device can now answer Router + Fusion spending reservations only for turns it started itself, and removing a Companion Host deletes its encrypted database and Router + Fusion ledger along with the plaintext one.",
-      "date": null
+      "date": "2026-09-29T14:12:01+08:00"
     },
     {
       "id": "router-fusion-role-call-tools",
@@ -6755,6 +7019,12 @@
       "date": "2026-08-25T15:21:36+08:00"
     },
     {
+      "id": "shiny-moons-hide",
+      "bump": "patch",
+      "summary": "Fix the perf HUD auto-mounting on production web/Pages bundles: `globalThis.process` is absent in real browsers, so the `NODE_ENV !== \"production\"` gate read `\"\"` and treated production as dev. Non-production auto-mount now requires an explicit non-empty `NODE_ENV`. Also ship `public/_worker.js`, a Pages Function that scopes the public share host to `/share/view` and real assets, redirecting all other routes instead of exposing the full app shell.",
+      "date": "2026-09-30T12:33:38+08:00"
+    },
+    {
       "id": "side-browser-from-chat-links",
       "bump": "minor",
       "summary": "Chat links open in the right rail's browser panel. Clicking a source citation, a web-search result or a markdown link in a message now reveals the side browser and loads the page there, rather than throwing you out to the OS browser. A modified click still belongs to your own browser, and a surface with no panel to show it falls back exactly as before.",
@@ -7367,6 +7637,12 @@
       "date": "2026-08-03T01:14:36+08:00"
     },
     {
+      "id": "strix-security-lifecycle-and-ui",
+      "bump": "patch",
+      "summary": "Strix Security keeps its scans honest across reloads and is easier to use in the workbench. A scan row left \"running\" by a previous session is now marked cancelled on activation instead of spinning forever, and deactivating or reloading the plugin aborts an in-flight scan rather than orphaning its terminal session — a remounted panel still offers Cancel. `/security <target>` now pre-fills the scan form, and the panel remembers your last target and model override between sessions. The scan form tucks the model and session-only API-key overrides behind an Advanced disclosure and re-arms the authorization checkbox the moment you edit the target, so consent can never carry silently to a different system. Scan history shows each run's timestamp, duration and a status-colored badge, highlights the run you're viewing, and refuses to delete a scan while it's still running; both delete and \"Clear all\" now ask for confirmation through the host dialog and remove the on-disk report directory that holds the proof-of-concept exploits. Findings show their code locations with file/line ranges, carry a verdict badge once triaged, and can be filtered between all, open and muted, spreading into two columns when the panel is docked wide; a failed, cancelled or in-progress run shows a status banner so an empty findings list can no longer pass for a clean scan. The console bounds itself to the newest output, says so when earlier lines were dropped, and stops yanking the scroll position while you read upward; terminal output no longer mangles multibyte characters split across PTY chunks. The plugin also drops a database permission it never needed.",
+      "date": "2026-09-15T00:40:39+08:00"
+    },
+    {
       "id": "structured-chat-errors",
       "bump": "minor",
       "summary": "Chat and Agent Team failures now carry structure instead of a bare string, so the error card can say what actually went wrong and what to do about it. A rate limit shows the provider's real Retry-After as a countdown rather than discarding it; an auth failure offers \"Open settings\" because the failure _is_ an auth failure, not because its English text happened to contain \"api key\" — that check silently never fired for providers answering in another language. Agent Team errors (\"team no longer exists\", \"no supervisor configured\", a failed member run) are localized rather than hard-coded English, and a member's name no longer gets glued onto the front of the error text where it stopped the parsers recognising the underlying failure.",
@@ -7383,6 +7659,12 @@
       "bump": "minor",
       "summary": "Appearance: add style packs (Soft / Studio / Sharp) and layer-semantic surfaces.\n\nPick a look in Settings → Appearance → Style. **Sharp** squares everything that\nis not a circle — corners, badges, switches, the composer — drops shadows in\nfavour of stronger borders, tightens density, and sets timestamps and counts in\nmonospace caps. **Studio** matches the Cognia website: restrained corners,\nhairline rules, no oversized pills. **Soft** is today's look, unchanged.\n\nPacks only control shape, so any pack composes with any colour theme, accent\npreset, or imported VSCode theme.\n\nAlso fixes image backgrounds. A wallpaper now appears on `/logs`, `/devices`,\n`/agent-runs`, `/templates`, `/goals`, `/integrations`, `/servers` and every\nmobile sub-page, where it previously rendered nothing at all, and panels across\nthe app take their translucency from one of three shared tiers instead of each\npicking their own — so neighbouring surfaces stop disagreeing about how much of\nthe image shows through.\n\nThe corner-radius slider moves to the new Style panel, where it reads as an\noverride on the active pack. Setting it to zero now genuinely reaches zero;\npreviously the largest step stayed at 4px.",
       "date": "2026-08-25T17:38:35+08:00"
+    },
+    {
+      "id": "sub-issue-handoff-backlog-and-instruction",
+      "bump": "minor",
+      "summary": "Issues: a parent waiting in backlog is woken once, with every sub-issue stage that finished meanwhile, when it leaves backlog. What the agent is asked to do when sub-issues finish can now be set per project (project inspector) and overridden per issue (the issue's Wakeups section).",
+      "date": "2026-09-30T01:52:33+08:00"
     },
     {
       "id": "subagent-card-open-and-fit",
@@ -8363,6 +8645,12 @@
       "date": "2026-09-02T22:17:19+08:00"
     },
     {
+      "id": "video-files-follow-account-data",
+      "bump": "patch",
+      "summary": "Clearing all data or deleting an account now also removes the videos workflows generated and any leftover composer video copies; a daily sweep removes video files nothing refers to anymore.",
+      "date": "2026-09-30T10:28:48+08:00"
+    },
+    {
       "id": "visual-output-before-dynamic-tail",
       "bump": "patch",
       "summary": "With prompt cache optimization on, the per-turn memory and twin context stay at the very end of the system prompt again, so the stable part before them is cached. The \"how to show something\" guidance was being appended after that per-turn text, which left the whole appended prompt uncached on Anthropic models.",
@@ -8373,6 +8661,12 @@
       "bump": "minor",
       "summary": "Charts and diagrams now have a route. A new built-in `chart-design` skill teaches the exact contract the app's chart renderer enforces, so asking for a trend, a comparison or a breakdown produces a live chart in the artifact dock — themed, hoverable, versioned and exportable — instead of a hand-drawn picture of one. A short routing table now travels with every turn so the assistant picks the right surface for what it is showing (an inline mermaid diagram for structure, a chart artifact for numbers, an A2UI surface when you have to choose something, a canvas for something you will keep editing) and, in an IM thread where there is no artifact dock, stops offering the surfaces that cannot render there.",
       "date": "2026-08-21T13:21:07+08:00"
+    },
+    {
+      "id": "wakeup-deadlines",
+      "bump": "minor",
+      "summary": "Issue wakeups can have a deadline (1 hour to 2 weeks) and, when it passes before what they wait for, either stop or wake the issue once more to say the wait ran out. Event-triggered scheduled tasks now actually expire at their end date instead of firing past it.",
+      "date": "2026-09-30T02:05:17+08:00"
     },
     {
       "id": "wallpaper-carousel-and-daily",
@@ -8693,6 +8987,12 @@
       "date": "2026-09-07T08:17:28+08:00"
     },
     {
+      "id": "workflow-node-fields-localized",
+      "bump": "patch",
+      "summary": "Workflow node settings drawn from a field schema (files, browser, media, image, search, sessions, notifications, knowledge and several triggers) now show their field labels, hints and choices in the app's language, and provider pickers name Fal AI, Replicate, Doubao, Volcengine and Qwen instead of showing their ids.",
+      "date": "2026-09-30T12:01:14+08:00"
+    },
+    {
       "id": "workflow-node-groups",
       "bump": "minor",
       "summary": "Workflow subgraphs can be grouped and inserted as one reusable unit instead of being rebuilt node by node, and the workflow library gains search across name, description and the node kinds a workflow contains.",
@@ -8894,10 +9194,10 @@
   "inventory": {
     "plugins": 66,
     "connectors": 11,
-    "workflowNodeKinds": 236,
+    "workflowNodeKinds": 237,
     "crates": 59,
     "packages": 33,
-    "adrs": 195,
-    "testFiles": 10803
+    "adrs": 199,
+    "testFiles": 11004
   }
 }

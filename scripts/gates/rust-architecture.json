@@ -31,6 +31,7 @@
     "cognia-browser-cookies": "platform",
 
     "cognia-git": "domain",
+    "cognia-github-runner": "domain",
     "cognia-ocr": "domain",
     "cognia-vector": "domain",
     "cognia-automation": "domain",
@@ -58,6 +59,7 @@
     "cognia-companion": "companion",
     "cognia-companion-rpc": "companion",
 
+    "cognia-bootstrap-agent": "service",
     "cognia-cli": "service",
     "cognia-collab-server": "service",
     "cognia-ops-controller": "service",

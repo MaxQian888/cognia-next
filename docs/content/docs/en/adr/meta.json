@@ -200,6 +200,10 @@
     "0202-memory-ages-and-every-change-can-be-undone",
     "0203-external-bridge-workspace-tools",
     "0204-a-project-coordinator-runs-threads-in-the-background",
-    "0205-video-generation-runs-as-durable-jobs"
+    "0205-video-generation-runs-as-durable-jobs",
+    "0206-a-workspace-streams-its-changes-instead-of-being-polled",
+    "0207-a-collaboration-event-reaches-people-who-are-not-in-the-room",
+    "0208-edits-to-different-fields-merge",
+    "0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs"
   ]
 }

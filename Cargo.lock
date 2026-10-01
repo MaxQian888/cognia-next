@@ -1878,6 +1878,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-bootstrap-agent"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "cognia-exec-sandbox",
+ "cognia-net",
+ "hex",
+ "libc",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "cognia-browser-cookies"
 version = "0.1.0"
 dependencies = [
@@ -2241,6 +2261,7 @@ dependencies = [
  "cognia-observability",
  "cognia-ocr",
  "cognia-plugin-runtime",
+ "cognia-sandbox-pool",
  "cognia-scheduling",
  "cognia-secrets",
  "cognia-sidecar",
@@ -2447,6 +2468,7 @@ dependencies = [
  "bollard",
  "cognia-exec-sandbox",
  "cognia-net",
+ "cognia-sandboxd",
  "futures-util",
  "hex",
  "k8s-openapi",
@@ -2526,6 +2548,7 @@ dependencies = [
  "tauri",
  "thiserror 2.0.21",
  "tokio",
+ "toml_edit 0.25.15+spec-1.1.0",
  "tower",
  "tower-http 0.7.1",
  "uuid",
@@ -2561,6 +2584,26 @@ dependencies = [
  "regex",
  "sha2 0.11.0",
  "tempfile",
+]
+
+[[package]]
+name = "cognia-github-runner"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "hkdf 0.13.0",
+ "p256 0.14.0",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "url",
+ "uuid",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -2754,6 +2797,7 @@ dependencies = [
  "cognia-gateway",
  "cognia-git",
  "cognia-git-mirror",
+ "cognia-github-runner",
  "cognia-headless-contract",
  "cognia-hooks",
  "cognia-instrument",

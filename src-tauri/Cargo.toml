@@ -100,6 +100,7 @@ cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-hos
 cognia-power = { path = "../crates/cognia-power" }
 cognia-sidecar = { path = "../crates/cognia-sidecar" }
 cognia-companion-rpc = { path = "../crates/cognia-companion-rpc", features = ["tauri-host"] }
+cognia-github-runner = { path = "../crates/cognia-github-runner" }
 cognia-codeserver = { path = "../crates/cognia-codeserver", features = ["tauri-host"] }
 # ADR-0196 P6c — the settings-hook runtime and the Claude settings readers;
 # `hooks` and `settings` re-export it at their old paths. `tauri-host` adds the

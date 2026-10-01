@@ -594,3 +594,86 @@ would have been relabelling rather than wiring.
   path is CodeMirror 6 decorations over `@codemirror/lang-markdown`, which is
   already a dependency and, unlike a ProseMirror round-trip, cannot lose an
   unsupported construct because the buffer never stops being Markdown.
+
+## Amendment (proposed), 2026-09-30: what must be true before Canvas collaboration defaults on
+
+**Status of this amendment:** Proposed. The source study is
+`docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`, gap A5.
+
+The amendments above left three items deliberately open, and a fourth turned
+up when the client was read against the server: the compaction this ADR chose
+has no trigger. `CollabClient.pushCanvasSnapshot` and `pullCanvasUpdates`
+exist in `lib/collab/client.ts` and nothing calls them. Neither do
+`listCanvasComments`, `createCanvasComment`, `listCanvasVersions`,
+`createCanvasVersion` or `readCanvasPresence`. The server keeps
+`canvas_document_updates` growing without bound, and a joiner replays every
+update ever written.
+
+Nothing here reopens a decision above. The server still never decodes an
+update, and `yrs` stays out of the build.
+
+### 1. The replay queue survives a reload
+
+`CanvasWebSocketProvider.messageQueue` becomes a projection of a Dexie table,
+`canvasPendingUpdates: "[documentId+operationId], documentId, queuedAt"`. That
+needs a `CURRENT_SCHEMA` edit, a version bump, and a `CORE_TABLE_NAMES` entry.
+A local update is written there before the socket is asked to send it, and
+deleted when the server's acknowledgement, the stored row, comes back.
+
+`(document_id, operation_id)` is already unique on the server, so draining
+the table after a reload is the same safe resend the in-memory queue does
+after a blip. The table is local-only and never syncs to a paired phone: an
+unsent edit belongs to the device that made it.
+
+### 2. A maintainer's client compacts, on a rule rather than by hand
+
+Compaction stays a maintainer's act, as decided above. What changes is that a
+maintainer's client now does it without being asked:
+
+- **When it runs:** the document has more than 500 updates past its snapshot
+  marker, or more than 2 MiB of them. The client learns both from the
+  `pullCanvasUpdates` page it already needs on join.
+- **Who runs it:** the maintainer whose client is fully synced, meaning no
+  pending rows in `canvasPendingUpdates` and caught up to the stream head.
+  Among several such maintainers, the one with the lowest awareness
+  `clientID`.
+- **What it sends:** `Y.encodeStateAsUpdate(doc)` through `pushCanvasSnapshot`,
+  with `coversSequence` = the last sequence it applied. The store already
+  refuses a marker that moves backwards or past what exists, so a race
+  between two maintainers costs one wasted upload, not an edit.
+
+A workspace with no maintainer online simply does not compact until one
+arrives. That is the property the "only a maintainer" rule was chosen for.
+
+### 3. Comments and named versions move onto the plane
+
+- Canvas comments leave `contextComments` for the plane's comment routes, with
+  the Yjs relative-position anchor the amendment above already computes.
+- Existing local comments on a document that becomes collaborative are posted
+  once, by the owner, through an explicit "bring comments along" step. This is
+  the same explicit-conversion rule shared chat follows.
+- A named version is created on the plane with `createCanvasVersion`, from the
+  version history panel that already exists (`components/canvas/version-history-panel.tsx`).
+- Local, non-collaborative documents keep `contextComments` and local
+  versions. Nothing changes for them.
+
+### 4. The default flips only on evidence
+
+`canvas.collaboration.enabled` (`types/canvas/settings.ts`) and
+`COLLAB_CANVAS_ENABLED` turn on by default only when all of these hold:
+
+- items 1–3 have shipped;
+- the `postgres-rls` CI job (`.github/workflows/test.yml`) passes on the change,
+  with the Canvas routes covered by it;
+- a two-machine `tauri-smoke` passes: concurrent typing, a reload mid-edit
+  with the socket down, and a compaction observed from the second machine;
+- the subsystem page `subsystems/canvas/collaboration.mdx` describes the Yjs
+  architecture that actually ships. It was rewritten from the code on
+  2026-09-30, and must be kept current as items 1–3 land.
+
+### Still open after this amendment
+
+- **Rich Markdown editing**, unchanged from the list above.
+- **Presence** is the awareness protocol's, per document. A presence model
+  shared with devices and shared chat is roadmap item P2-12 in the source
+  study, not part of this amendment.

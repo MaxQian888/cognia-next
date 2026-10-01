@@ -78,6 +78,7 @@ pub use cognia_gateway as gateway;
 // `crate::git::…` reference (incl. `generate_handler!` + `.manage()`) resolves.
 pub use cognia_git as git;
 mod gateway_brain_bridge;
+mod gateway_agent;
 mod github;
 pub mod headless;
 mod hooks;
@@ -1020,6 +1021,12 @@ pub fn run() {
             settings::write_claude_local_settings,
             shell::shell_exec,
             project_environment::project_environment_execute,
+            github::runner::github_runner_preflight,
+            github::runner::github_runner_create,
+            github::runner::github_runner_list,
+            github::runner::github_runner_refresh,
+            github::runner::github_runner_cancel,
+            github::runner::github_runner_pairing,
             terminal_host_bridge::terminal_spawn,
             terminal_host_bridge::terminal_reattach,
             terminal_host_bridge::terminal_write,
@@ -1086,6 +1093,7 @@ pub fn run() {
             cli_bridge::resolve_cli_home,
             cli_bridge::write_cli_home_file,
             cli_bridge::plugin_install_from_directory,
+            cli_bridge::plugin_install_from_files,
             cli_bridge::preview_local_manifest,
             cli_bridge::detect::detect_binary,
             cli_bridge::detect::detect_binary_invalidate,
@@ -1096,7 +1104,7 @@ pub fn run() {
             external_agent::commands::dsh_runtime_install,
             external_agent::commands::dsh_runtime_finalize,
             external_agent::commands::dsh_runtime_remove,
-            external_agent::commands::spawn_external_agent,
+            gateway_agent::spawn_external_agent,
             external_agent::commands::send_to_external_agent,
             external_agent::commands::kill_external_agent,
             external_agent::commands::external_agent_delete_gateway_task,
@@ -1488,6 +1496,7 @@ pub fn run() {
             plugin_api::vscode::commands::plugin_vscode_send_response,
             plugin_api::vscode::commands::ensure_system_lsp_host,
             plugin_api::backup::plugin_backup_create,
+            plugin_api::plugin_tree::plugin_export_tree,
             plugin_api::backup::plugin_backup_restore,
             plugin_api::backup::plugin_backup_delete,
             plugin_api::marketplace::plugin_marketplace_versions,
