@@ -178,6 +178,10 @@ jest.mock("@/lib/companion/agent-task-write-handlers", () => ({
 
 // The remote toggle must persist lifecycle intent through the canonical manager.
 const mockSetPluginIntent = jest.fn().mockResolvedValue(undefined)
+const mockSwitchCogsetFromRemote = jest.fn(async (_id: string) => undefined)
+jest.mock("@/lib/plugin/cogset/actions", () => ({
+  switchCogsetFromRemote: (id: string) => mockSwitchCogsetFromRemote(id),
+}))
 jest.mock("@/lib/plugin/core/manager", () => ({
   getPluginManager: () => ({ setPluginIntent: mockSetPluginIntent }),
 }))
@@ -1165,6 +1169,47 @@ describe("dispatchCommand: plugin_set_enabled", () => {
     await expect(dispatchCommand("plugin_set_enabled", { id: "p1" })).rejects.toThrow(
       /must be boolean/
     )
+  })
+})
+
+describe("dispatchCommand: cogsets (ADR-0209)", () => {
+  it("records a remote cogset switch through the host's own switch path", async () => {
+    await dispatchCommand("plugin_cogset_activate", { cogsetId: "writing" })
+    expect(mockSwitchCogsetFromRemote).toHaveBeenCalledWith("writing")
+    await expect(dispatchCommand("plugin_cogset_activate", {})).rejects.toThrow(
+      /cogsetId is required/
+    )
+  })
+
+  it("writes a validated install origin to the host's table", async () => {
+    const record = {
+      pluginId: "tools",
+      version: "1.0.0",
+      origin: { kind: "github", owner: "a", repo: "b", commit: "0".repeat(40) },
+      recordedAt: 5,
+    }
+    await dispatchCommand("plugin_install_origin_record", { record })
+    expect(await getDb().pluginInstallOrigins.get("tools")).toEqual(record)
+    await expect(
+      dispatchCommand("plugin_install_origin_record", {
+        record: { ...record, origin: { kind: "made-up" } },
+      })
+    ).rejects.toThrow(/record is invalid/)
+    await expect(dispatchCommand("plugin_install_origin_record", {})).rejects.toThrow(
+      /record is invalid/
+    )
+    // A later export pins what the record says: a non-https remote or a
+    // branch name is refused, not written.
+    for (const origin of [
+      { kind: "git", url: "http://example.com/x.git", commit: "0".repeat(40) },
+      { kind: "github", owner: "a", repo: "b", commit: "main" },
+      { kind: "local", via: "made-up" },
+    ]) {
+      await expect(
+        dispatchCommand("plugin_install_origin_record", { record: { ...record, origin } })
+      ).rejects.toThrow(/record is invalid/)
+    }
+    expect(await getDb().pluginInstallOrigins.get("tools")).toEqual(record)
   })
 })
 

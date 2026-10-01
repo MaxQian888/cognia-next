@@ -17,6 +17,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
+use cognia_signaling_core::limits::{QuotaDecision, RelayByteQuota, DATA_LANE_ROOM_QUOTA_BYTES};
 use cognia_signaling_core::policy::{evaluate_subscribe, RoomLimits, SubscribeDecision};
 
 use crate::proto::{PeerRole, ServerFrame, SubscribeProof};
@@ -51,15 +52,60 @@ pub struct AuthenticatedJoin {
 /// Top-level shared state. Clone freely — both `Arc<Mutex<...>>`. Access is
 /// short-lived (no `await` inside the critical section) so the parking_lot
 /// mutex is the right primitive.
-#[derive(Default)]
 pub struct RoomRegistry {
     rooms: Mutex<HashMap<String, Vec<PeerHandle>>>,
     next_peer_id: AtomicU64,
+    /// Data-lane byte budget per rendezvous. Kept apart from `rooms` because a
+    /// room entry disappears when its last peer leaves, and a quota that reset
+    /// on every reconnect would bound nothing.
+    relay_quotas: Mutex<HashMap<String, RelayByteQuota>>,
+    relay_quota_bytes: u64,
 }
+
+impl Default for RoomRegistry {
+    fn default() -> Self {
+        Self::with_relay_quota(DATA_LANE_ROOM_QUOTA_BYTES)
+    }
+}
+
+/// Past this many tracked quotas, a charge first drops the expired ones.
+const RELAY_QUOTA_PRUNE_AT: usize = 4_096;
 
 impl RoomRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A registry whose rooms may each relay `bytes` on the data lane per
+    /// quota window.
+    pub fn with_relay_quota(bytes: u64) -> Self {
+        Self {
+            rooms: Mutex::new(HashMap::new()),
+            next_peer_id: AtomicU64::new(0),
+            relay_quotas: Mutex::new(HashMap::new()),
+            relay_quota_bytes: bytes,
+        }
+    }
+
+    /// Charge `bytes` of data-lane egress to `rendezvous_id` at `now_ms`.
+    pub fn charge_relay(&self, rendezvous_id: &str, bytes: u64, now_ms: f64) -> QuotaDecision {
+        let mut quotas = self.relay_quotas.lock();
+        if quotas.len() >= RELAY_QUOTA_PRUNE_AT && !quotas.contains_key(rendezvous_id) {
+            quotas.retain(|_, quota| !quota.is_expired(now_ms));
+        }
+        quotas
+            .entry(rendezvous_id.to_owned())
+            .or_insert_with(|| RelayByteQuota::new(self.relay_quota_bytes))
+            .try_charge(bytes, now_ms)
+    }
+
+    /// Bytes `rendezvous_id` has relayed in its current quota window.
+    pub fn relay_bytes_used(&self, rendezvous_id: &str) -> u64 {
+        self.relay_quotas
+            .lock()
+            .get(rendezvous_id)
+            .map(RelayByteQuota::used_bytes)
+            .unwrap_or(0)
     }
 
     pub fn next_peer_id(&self) -> PeerId {
@@ -408,5 +454,34 @@ mod tests {
         assert_eq!(joined.existing.len(), 1);
         assert_eq!(joined.existing[0].role, PeerRole::Mobile);
         assert_eq!(reg.stats().peers, 2);
+    }
+    #[test]
+    fn relay_quota_outlives_the_room_and_is_per_rendezvous() {
+        let reg = RoomRegistry::with_relay_quota(100);
+        assert_eq!(
+            reg.charge_relay("room-a", 80, 0.0),
+            QuotaDecision::Allowed { remaining: 20 }
+        );
+        // A second room has its own budget.
+        assert_eq!(
+            reg.charge_relay("room-b", 80, 0.0),
+            QuotaDecision::Allowed { remaining: 20 }
+        );
+        // No peers ever joined, so there is no room entry; the quota stands.
+        assert!(matches!(
+            reg.charge_relay("room-a", 21, 1.0),
+            QuotaDecision::Exceeded { .. }
+        ));
+        assert_eq!(reg.relay_bytes_used("room-a"), 80);
+        assert_eq!(reg.relay_bytes_used("room-unknown"), 0);
+    }
+
+    #[test]
+    fn default_registry_uses_the_shared_default_quota() {
+        let reg = RoomRegistry::new();
+        assert_eq!(
+            reg.charge_relay("room", DATA_LANE_ROOM_QUOTA_BYTES, 0.0),
+            QuotaDecision::Allowed { remaining: 0 }
+        );
     }
 }

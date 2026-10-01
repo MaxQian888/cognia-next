@@ -51,6 +51,7 @@ import { syncMcpServers } from "./handlers/mcp-servers"
 import { syncMemories } from "./handlers/memory"
 import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
+import { syncPluginCogsets, syncPluginCogsetState } from "./handlers/plugin-cogsets"
 import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
 import { syncConnectorDrafts } from "./handlers/connector-drafts"
@@ -260,6 +261,14 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "issueRuns", stage: "background", run: syncIssueRuns, after: ["issues"] },
   { table: "issueCycles", stage: "background", run: syncIssueCycles, after: ["issues"] },
   { table: "plugins", stage: "background", run: syncPlugins },
+  // After the plugins their members name, then the state that points at them.
+  { table: "pluginCogsets", stage: "background", run: syncPluginCogsets, after: ["plugins"] },
+  {
+    table: "pluginCogsetState",
+    stage: "background",
+    run: syncPluginCogsetState,
+    after: ["pluginCogsets"],
+  },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
   // After the adapters they hang off: a contact, a binding or a deployment
   // keyed by an adapter that has not arrived is a row with nothing to attach to.
@@ -399,6 +408,8 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   issueRuns: syncDomain("tombstone"),
   issueCycles: syncDomain("tombstone"),
   plugins: syncDomain("tombstone"),
+  pluginCogsets: syncDomain("tombstone"),
+  pluginCogsetState: syncDomain("tombstone"),
   adapterInstances: syncDomain("tombstone"),
   settings: syncDomain("tombstone", "internal"),
   conversationOverrides: syncDomain("tombstone"),

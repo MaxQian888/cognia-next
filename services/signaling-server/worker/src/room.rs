@@ -16,7 +16,10 @@
 //! server uses, so the two deployments cannot diverge.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use cognia_signaling_core::limits::{max_frame_bytes, LaneBuckets, TokenBucket};
+use cognia_signaling_core::limits::{
+    max_frame_bytes, relay_quota_message, room_quota_bytes_from, LaneBuckets, QuotaDecision,
+    RelayByteQuota, TokenBucket, DATA_LANE_ROOM_QUOTA_ENV, RELAY_QUOTA_EXCEEDED_CODE,
+};
 use cognia_signaling_core::policy::{
     rendezvous_id_matches_upgrade_room, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE,
 };
@@ -113,11 +116,18 @@ impl Attachment {
 pub struct RoomDurableObject {
     state: State,
     env: Env,
+    /// The room's data-lane byte quota, loaded from storage on first use and
+    /// kept in memory between frames (see [`RoomDurableObject::charge_relay`]).
+    relay_quota: std::cell::RefCell<Option<RelayByteQuota>>,
 }
 
 impl DurableObject for RoomDurableObject {
     fn new(state: State, env: Env) -> Self {
-        Self { state, env }
+        Self {
+            state,
+            env,
+            relay_quota: std::cell::RefCell::new(None),
+        }
     }
 
     async fn fetch(&self, req: Request) -> Result<Response> {
@@ -424,6 +434,25 @@ impl DurableObject for RoomDurableObject {
                 // passive observer who knows the rid (matches axum, where
                 // unsubscribed sockets are simply not in the room registry).
                 let others = self.subscribed_others(&ws, &rendezvous_id)?;
+                if lane == RelayLane::Data {
+                    // Same rule as the axum server: data-lane egress is charged
+                    // per delivered copy, and an over-quota frame is refused
+                    // with the socket left open for signalling.
+                    let bytes = (payload.len() * others.len()) as u64;
+                    if let QuotaDecision::Exceeded { retry_after_ms } =
+                        self.charge_relay(bytes, now).await?
+                    {
+                        console_log!("signaling: relay_quota_exceeded");
+                        self.record_hot(&mut attach, "relay_quota_exceeded", None, 0.0);
+                        ws.serialize_attachment(&attach)?;
+                        send_error(
+                            &ws,
+                            RELAY_QUOTA_EXCEEDED_CODE,
+                            &relay_quota_message(retry_after_ms),
+                        );
+                        return Ok(());
+                    }
+                }
                 // `relay` keeps its historical meaning (every lane); the data
                 // lane also lands in `relay_data` with the egress byte count in
                 // `double2`, so `SUM(double1 * double2)` over that event is the
@@ -511,7 +540,60 @@ impl DurableObject for RoomDurableObject {
     }
 }
 
+/// Durable Object storage key for the room's [`RelayByteQuota`].
+const RELAY_QUOTA_KEY: &str = "relay_quota";
+/// The in-memory quota is written back each time its usage crosses another
+/// multiple of this, so an eviction loses at most this much accounting while
+/// a busy room does not pay a storage write per frame.
+const RELAY_QUOTA_PERSIST_STEP: u64 = 1024 * 1024;
+
 impl RoomDurableObject {
+    fn relay_quota_bytes(&self) -> u64 {
+        room_quota_bytes_from(
+            self.env
+                .var(DATA_LANE_ROOM_QUOTA_ENV)
+                .ok()
+                .map(|v| v.to_string())
+                .as_deref(),
+        )
+    }
+
+    /// Charge `bytes` of data-lane egress to this room.
+    async fn charge_relay(&self, bytes: u64, now_ms: f64) -> Result<QuotaDecision> {
+        if self.relay_quota.borrow().is_none() {
+            let stored = self
+                .state
+                .storage()
+                .get::<RelayByteQuota>(RELAY_QUOTA_KEY)
+                .await
+                .ok()
+                .flatten();
+            let limit = self.relay_quota_bytes();
+            // A limit changed by redeploy applies at the next window; a stored
+            // window is otherwise kept so eviction cannot reset the budget.
+            let quota = match stored {
+                Some(q) if q.limit_bytes() == limit => q,
+                _ => RelayByteQuota::new(limit),
+            };
+            *self.relay_quota.borrow_mut() = Some(quota);
+        }
+        let (decision, snapshot) = {
+            let mut slot = self.relay_quota.borrow_mut();
+            let quota = slot.as_mut().expect("quota loaded above");
+            let before = quota.used_bytes();
+            let decision = quota.try_charge(bytes, now_ms);
+            let after = quota.used_bytes();
+            let persist = after < before
+                || after / RELAY_QUOTA_PERSIST_STEP != before / RELAY_QUOTA_PERSIST_STEP
+                || matches!(decision, QuotaDecision::Exceeded { .. });
+            (decision, persist.then(|| quota.clone()))
+        };
+        if let Some(quota) = snapshot {
+            self.state.storage().put(RELAY_QUOTA_KEY, quota).await?;
+        }
+        Ok(decision)
+    }
+
     fn max_conn_per_ip(&self) -> usize {
         self.env_usize(
             "SIGNALING_MAX_CONN_PER_IP_PER_ROOM",

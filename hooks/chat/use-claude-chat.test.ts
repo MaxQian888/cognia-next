@@ -410,10 +410,13 @@ jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-execute", () => ({
   ...jest.requireActual("@/lib/ai/agent/external/runtimes/remote/remote-execute"),
   executeOnRemoteHostAgent: (...args: unknown[]) => executeOnRemoteHostAgentMock(...args),
 }))
-const rendererToolHostStartMock = jest.fn(async (..._args: unknown[]) => ({
-  mcpServers: [] as import("@/types/agent/external-agent").AcpMcpServerConfig[],
-  catalogFingerprint: "catalog-1",
-}))
+const rendererToolHostStartMock = jest.fn(
+  async (
+    ..._args: unknown[]
+  ): ReturnType<
+    import("@/lib/ai/agent/external/session/renderer-tool-host").RendererToolHost["start"]
+  > => ({ mcpServers: [], catalogFingerprint: "catalog-1" })
+)
 const rendererToolHostPauseMock = jest.fn(async () => {})
 const rendererToolHostCloseMock = jest.fn(async () => {})
 const createRendererToolHostMock = jest.fn((..._args: unknown[]) => ({
@@ -2998,12 +3001,20 @@ describe("useClaudeChat — actions", () => {
       accountId: "account-a",
     })
     executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    rendererToolHostStartMock.mockResolvedValueOnce({
+      mcpServers: [],
+      catalogFingerprint: "catalog-gateway",
+      sandboxToolHostLeaseId: "de4120d3-08d6-4610-927d-c0e3933ac987",
+    })
     const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {
       await result.current.send("hi", undefined, { sessionId: "sess-1" })
     })
     expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith("ext-1", { deferConnect: true })
+    expect(rendererToolHostStartMock).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "ext-1", deferSandbox: true })
+    )
     expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
       "hi",
       expect.objectContaining({
@@ -3013,7 +3024,10 @@ describe("useClaudeChat — actions", () => {
           accountId: "account-a",
         },
         context: expect.objectContaining({
-          custom: expect.objectContaining({ chatSessionId: "sess-1" }),
+          custom: expect.objectContaining({
+            chatSessionId: "sess-1",
+            sandboxToolHostLeaseIds: ["de4120d3-08d6-4610-927d-c0e3933ac987"],
+          }),
         }),
       })
     )
@@ -3228,6 +3242,35 @@ describe("useClaudeChat — actions", () => {
       "native-first"
     )
     expect(closeExternalSessionMock).toHaveBeenCalledWith("ext-1", "native-first")
+  })
+
+  it("replaces a disconnected tool host before the next external turn", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "done",
+      sessionId: "native-1",
+    })
+    let current = true
+    createRendererToolHostMock.mockImplementationOnce(() => ({
+      start: rendererToolHostStartMock,
+      pause: rendererToolHostPauseMock,
+      close: rendererToolHostCloseMock,
+      isCurrentHost: () => current,
+    }))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("first")
+    })
+    current = false
+    await act(async () => {
+      await result.current.send("reconnected")
+    })
+    expect(createRendererToolHostMock).toHaveBeenCalledTimes(2)
+    expect(rendererToolHostCloseMock).toHaveBeenCalledTimes(1)
+    expect(rendererToolHostStartMock).toHaveBeenCalledTimes(2)
+    expect(closeExternalSessionMock).not.toHaveBeenCalled()
   })
 
   it("retains one Cognia tool host across external turns and closes its native session on chat disposal", async () => {

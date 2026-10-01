@@ -120,9 +120,193 @@ impl TokenBucket {
     }
 }
 
+/// Data-lane bytes one room may relay per quota window (ADR-0170 amendment).
+///
+/// The frame buckets above bound a burst; they do not bound a day. A room
+/// whose DataChannel never opens relays everything, and a pair of admitted
+/// peers could otherwise use the rendezvous as free bandwidth. 2 GiB a day is
+/// several times what a phone mirroring its Host consumes, including media.
+pub const DATA_LANE_ROOM_QUOTA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Length of one quota window.
+pub const DATA_LANE_QUOTA_WINDOW_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
+/// Env var both deployments read to override [`DATA_LANE_ROOM_QUOTA_BYTES`].
+pub const DATA_LANE_ROOM_QUOTA_ENV: &str = "SIGNALING_RELAY_ROOM_QUOTA_BYTES";
+
+/// What [`RelayByteQuota::try_charge`] decided.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum QuotaDecision {
+    /// The bytes were charged; `remaining` is what the window still allows.
+    Allowed { remaining: u64 },
+    /// The frame would cross the limit and was not charged. The window
+    /// resets `retry_after_ms` from now.
+    Exceeded { retry_after_ms: u64 },
+}
+
+/// A fixed-window byte budget for one room's data lane.
+///
+/// Room-scoped rather than connection-scoped: a reconnect must not reset it.
+/// The clock is injected like [`TokenBucket`]'s, and the struct round-trips
+/// through serde so the Worker can persist it in Durable Object storage.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RelayByteQuota {
+    limit_bytes: u64,
+    window_ms: f64,
+    /// Start of the current window; `None` until the first charge.
+    window_start_ms: Option<f64>,
+    used_bytes: u64,
+}
+
+impl RelayByteQuota {
+    pub fn new(limit_bytes: u64) -> Self {
+        Self::with_window(limit_bytes, DATA_LANE_QUOTA_WINDOW_MS)
+    }
+
+    pub fn with_window(limit_bytes: u64, window_ms: f64) -> Self {
+        Self {
+            limit_bytes,
+            window_ms,
+            window_start_ms: None,
+            used_bytes: 0,
+        }
+    }
+
+    /// Charge `bytes` at `now_ms`. A frame that would cross the limit is
+    /// refused whole rather than partly charged, so a peer that backs off and
+    /// retries after the reset is not already in debt.
+    pub fn try_charge(&mut self, bytes: u64, now_ms: f64) -> QuotaDecision {
+        self.roll(now_ms);
+        let start = *self.window_start_ms.get_or_insert(now_ms);
+        let next = self.used_bytes.saturating_add(bytes);
+        if next > self.limit_bytes {
+            let reset_at = start + self.window_ms;
+            return QuotaDecision::Exceeded {
+                retry_after_ms: (reset_at - now_ms).max(0.0).ceil() as u64,
+            };
+        }
+        self.used_bytes = next;
+        QuotaDecision::Allowed {
+            remaining: self.limit_bytes - next,
+        }
+    }
+
+    /// Bytes charged in the current window.
+    pub fn used_bytes(&self) -> u64 {
+        self.used_bytes
+    }
+
+    pub fn limit_bytes(&self) -> u64 {
+        self.limit_bytes
+    }
+
+    /// Whether the window has ended, so a holder may drop this entry: a fresh
+    /// quota would behave identically.
+    pub fn is_expired(&self, now_ms: f64) -> bool {
+        match self.window_start_ms {
+            Some(start) => now_ms >= start + self.window_ms,
+            None => true,
+        }
+    }
+
+    fn roll(&mut self, now_ms: f64) {
+        if let Some(start) = self.window_start_ms {
+            if now_ms >= start + self.window_ms {
+                self.window_start_ms = None;
+                self.used_bytes = 0;
+            }
+        }
+    }
+}
+
+/// Error code both deployments send when a data-lane frame hits the quota.
+/// The socket stays open: the signal lane still works, so the peers can go on
+/// negotiating the DataChannel that would take the traffic off the relay.
+pub const RELAY_QUOTA_EXCEEDED_CODE: &str = "relay_quota_exceeded";
+
+/// The `message` for [`RELAY_QUOTA_EXCEEDED_CODE`], carrying the reset time
+/// in a stable machine-readable suffix (`retry_after_ms=<n>`).
+pub fn relay_quota_message(retry_after_ms: u64) -> String {
+    format!("room relay quota exhausted; retry_after_ms={retry_after_ms}")
+}
+
+/// Read the reset time back out of a [`relay_quota_message`].
+pub fn parse_relay_quota_retry_after_ms(message: &str) -> Option<u64> {
+    let (_, tail) = message.split_once("retry_after_ms=")?;
+    let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// Parse an override for [`DATA_LANE_ROOM_QUOTA_BYTES`]. Unset, empty, zero or
+/// unparsable values fall back to the default; the quota cannot be switched
+/// off, only resized.
+pub fn room_quota_bytes_from(value: Option<&str>) -> u64 {
+    value
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|bytes| *bytes > 0)
+        .unwrap_or(DATA_LANE_ROOM_QUOTA_BYTES)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quota_charges_until_the_limit_and_refuses_the_crossing_frame_whole() {
+        let mut q = RelayByteQuota::with_window(100, 1_000.0);
+        assert_eq!(q.try_charge(60, 0.0), QuotaDecision::Allowed { remaining: 40 });
+        assert_eq!(q.try_charge(40, 10.0), QuotaDecision::Allowed { remaining: 0 });
+        assert_eq!(
+            q.try_charge(1, 250.0),
+            QuotaDecision::Exceeded { retry_after_ms: 750 }
+        );
+        // The refused frame was not charged.
+        assert_eq!(q.used_bytes(), 100);
+    }
+
+    #[test]
+    fn quota_resets_when_the_window_ends() {
+        let mut q = RelayByteQuota::with_window(10, 1_000.0);
+        assert!(matches!(q.try_charge(10, 0.0), QuotaDecision::Allowed { .. }));
+        assert!(matches!(q.try_charge(1, 999.0), QuotaDecision::Exceeded { .. }));
+        assert!(!q.is_expired(999.0));
+        assert!(q.is_expired(1_000.0));
+        assert_eq!(q.try_charge(10, 1_000.0), QuotaDecision::Allowed { remaining: 0 });
+    }
+
+    #[test]
+    fn a_fresh_quota_is_expired_and_starts_its_window_on_first_charge() {
+        let mut q = RelayByteQuota::with_window(10, 1_000.0);
+        assert!(q.is_expired(0.0));
+        assert!(matches!(q.try_charge(1, 5_000.0), QuotaDecision::Allowed { .. }));
+        assert!(!q.is_expired(5_999.0));
+    }
+
+    #[test]
+    fn quota_round_trips_through_serde_with_its_usage() {
+        let mut q = RelayByteQuota::new(DATA_LANE_ROOM_QUOTA_BYTES);
+        q.try_charge(4_096, 0.0);
+        let restored: RelayByteQuota =
+            serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+        assert_eq!(restored, q);
+        assert_eq!(restored.used_bytes(), 4_096);
+    }
+
+    #[test]
+    fn quota_message_round_trips_its_reset_time() {
+        assert_eq!(
+            parse_relay_quota_retry_after_ms(&relay_quota_message(90_000)),
+            Some(90_000)
+        );
+        assert_eq!(parse_relay_quota_retry_after_ms("no reset time"), None);
+    }
+
+    #[test]
+    fn quota_override_cannot_disable_the_quota() {
+        assert_eq!(room_quota_bytes_from(None), DATA_LANE_ROOM_QUOTA_BYTES);
+        assert_eq!(room_quota_bytes_from(Some("")), DATA_LANE_ROOM_QUOTA_BYTES);
+        assert_eq!(room_quota_bytes_from(Some("0")), DATA_LANE_ROOM_QUOTA_BYTES);
+        assert_eq!(room_quota_bytes_from(Some("nope")), DATA_LANE_ROOM_QUOTA_BYTES);
+        assert_eq!(room_quota_bytes_from(Some(" 1048576 ")), 1_048_576);
+    }
 
     #[test]
     fn full_bucket_accepts_capacity_calls() {

@@ -22,6 +22,7 @@ pub(super) const COMMANDS: &[&str] = &[
     // `claude://message`, a default-on channel for every device.
     "claude_session_control",
     "agent_session_api",
+    "agent_tool_host_control",
     "claude_plugin_tool_response",
     "claude_tool_result_decision",
     "claude_protocol_adapter_message",
@@ -172,6 +173,29 @@ pub(super) async fn dispatch(
                 method,
                 params,
                 send_options,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        "agent_tool_host_control" => {
+            let request: Value = required(&args, "request")?;
+            let owner = request
+                .pointer("/toolHost/ownerSessionId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let context = json!({
+                "hostId": opaque_host_id(state),
+                "originDeviceId": device_id,
+                "sessionId": owner,
+            });
+            claude_commands::remote_tool_host_control_impl(
+                host.sidecar_host(),
+                host.sidecar_state(),
+                request,
+                device_id,
+                context,
             )
             .await
             .map(|_| Value::Null)
@@ -668,6 +692,11 @@ async fn send_arm(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_tool_host_control_is_exposed_without_general_feature_calls() {
+        assert!(super::COMMANDS.contains(&"agent_tool_host_control"));
+        assert!(!super::COMMANDS.contains(&"claude_feature_call"));
+    }
     use super::*;
 
     /// ADR-0090 names `agent_*` canonical and `claude_*` deprecated. The four

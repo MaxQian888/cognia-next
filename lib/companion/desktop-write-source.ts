@@ -43,6 +43,7 @@
  *   - `desktop-write-source.workflow-api.test.ts` — the `workflow_api_*` delegation
  */
 
+import type { PluginInstallOriginRecord } from "@/types/plugin/plugin-cogset"
 import {
   dispatchRouterFusionBridgeCommand,
   isRouterFusionBridgeCommand,
@@ -400,6 +401,10 @@ export async function dispatchCommand(
       return skillSetEnabled(payload)
     case "plugin_set_enabled":
       return pluginSetEnabled(payload)
+    case "plugin_cogset_activate":
+      return pluginCogsetActivate(payload)
+    case "plugin_install_origin_record":
+      return pluginInstallOriginRecord(payload)
     case "mcp_set_enabled":
       return mcpSetEnabled(payload)
     case "mcp_set_tool_rules":
@@ -1464,6 +1469,42 @@ async function skillSetEnabled(payload: Record<string, unknown>): Promise<null> 
     status: enabled ? "enabled" : "disabled",
     updatedAt: Date.now(),
   })
+  return null
+}
+
+/**
+ * A paired client switched cogsets (ADR-0209). Recorded in the same scope as a
+ * switch made here and left to the cogset follower, which defers it while agent
+ * runs are in flight: nobody at the host is there to confirm.
+ */
+async function pluginCogsetActivate(payload: Record<string, unknown>): Promise<null> {
+  const cogsetId = payload.cogsetId
+  if (typeof cogsetId !== "string" || !cogsetId) {
+    throw new Error("plugin_cogset_activate.cogsetId is required")
+  }
+  const { switchCogsetFromRemote } = await import("@/lib/plugin/cogset/actions")
+  await switchCogsetFromRemote(cogsetId)
+  return null
+}
+
+/**
+ * An install a paired client drove ran here; its origin is recorded here, the
+ * only table a cogpack export reads (ADR-0209). It arrives from another device
+ * and a later export pins exactly what it says, so it is validated as strictly
+ * as a cogpack member source before it is written.
+ */
+async function pluginInstallOriginRecord(payload: Record<string, unknown>): Promise<null> {
+  const { parseInstallOriginRecord } = await import("@/lib/plugin/origin/install-origin")
+  let record: PluginInstallOriginRecord
+  try {
+    record = parseInstallOriginRecord(payload.record)
+  } catch (error) {
+    throw new Error(
+      `plugin_install_origin_record.record is invalid: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+  const { putInstallOrigin } = await import("@/lib/db/plugin-install-origins")
+  await putInstallOrigin(record)
   return null
 }
 

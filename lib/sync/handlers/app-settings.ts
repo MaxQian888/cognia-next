@@ -5,6 +5,7 @@ import { listByStatus } from "@/lib/db/mobile-outbound-queue"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
+import { resolveLocalePreference } from "@/lib/i18n/locale-preference"
 
 import type { SyncCursor, SyncOutcome } from "../types"
 import { runSyncHandler } from "./base"
@@ -84,11 +85,14 @@ async function applySettingsRows(rows: AppSettings[], assertCurrent: () => void)
   const merged: Record<string, unknown> = {
     ...(current ?? { id: "singleton" as const }),
     id: "singleton",
+    // An incoming host locale is not a manual choice on a fresh phone.
+    languageMode: resolveLocalePreference(current).languageMode,
   }
   for (const key of CROSS_PLATFORM_SETTING_KEYS) {
     if (inFlight.has(key)) continue
     if (incoming[key] !== undefined) merged[key] = incoming[key]
   }
+  Object.assign(merged, resolveLocalePreference(merged))
   assertCurrent()
   await db.settings.put(merged as unknown as AppSettings)
 }

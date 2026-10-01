@@ -1831,6 +1831,24 @@
     "git_worktree_remove": {
       "to": "git.worktree.delete"
     },
+    "github_runner_preflight": {
+      "to": "github.runner.probe"
+    },
+    "github_runner_create": {
+      "to": "github.runner.create"
+    },
+    "github_runner_list": {
+      "to": "github.runner.get_all"
+    },
+    "github_runner_refresh": {
+      "to": "github.runner.refresh"
+    },
+    "github_runner_cancel": {
+      "to": "github.runner.cancel"
+    },
+    "github_runner_pairing": {
+      "to": "github.runner.get_pairing"
+    },
     "github_workspace_clone": {
       "to": "github.workspace.clone"
     },
@@ -4051,6 +4069,12 @@
     },
     "plugin_media_read_chunk": {
       "to": "media.read_chunk"
+    },
+    "plugin_cogset_activate": {
+      "to": "plugin.cogset.activate"
+    },
+    "plugin_install_origin_record": {
+      "to": "plugin.install_origin.record"
     }
   }
 }

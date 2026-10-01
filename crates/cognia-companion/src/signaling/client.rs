@@ -46,6 +46,9 @@ use tokio_tungstenite::{
 use webrtc::peer_connection::{RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionState};
 
 use super::carrier::{DataCarrier, RelayFrame, RELAY_OUTBOUND_QUEUE};
+
+/// Relay data pause when a `relay_quota_exceeded` refusal names no reset time.
+const RELAY_QUOTA_DEFAULT_PAUSE_MS: u64 = 15 * 60 * 1000;
 use super::dispatch::spawn as spawn_dispatcher;
 use super::envelope::{
     build_envelope, build_subscribe_proof, now_ms, verify_and_decrypt_envelope, EnvelopeError,
@@ -1065,6 +1068,18 @@ async fn run_one_session(
                                     "signaling::client[{}]: server error {code}: {message}",
                                     config.device_id
                                 );
+                                if code == cognia_signaling_core::limits::RELAY_QUOTA_EXCEEDED_CODE {
+                                    // The room spent its relay byte quota. The
+                                    // socket stays up for signalling; stop
+                                    // offering data to the relay until the reset
+                                    // instead of earning a refusal per frame.
+                                    let retry_after = cognia_signaling_core::limits::parse_relay_quota_retry_after_ms(&message)
+                                        .unwrap_or(RELAY_QUOTA_DEFAULT_PAUSE_MS);
+                                    if let Some(carrier) = ps.carrier.as_ref() {
+                                        carrier.pause_relay_data_for(retry_after);
+                                    }
+                                    continue;
+                                }
                                 if matches!(
                                     code.as_str(),
                                     "rate_limited" | "auth_failed" | "session_replaced"

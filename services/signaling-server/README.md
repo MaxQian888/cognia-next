@@ -103,6 +103,15 @@ verification does not depend on JSON property order.
   chunks) has its own 256-frame bucket refilling at 64 frames/sec. Exceeding
   either triggers `error{code:"rate_limited"}` followed by a disconnect. The
   constants live in `core/src/limits.rs` and are shared with the Worker.
+- Per-room data-lane byte quota: `SIGNALING_RELAY_ROOM_QUOTA_BYTES`, default
+  2 GiB per 24 h window, charged per delivered copy. It is keyed by rendezvous,
+  not by connection, so a reconnect does not reset it; the Worker persists it in
+  Durable Object storage every MiB. An over-quota `data` frame is refused with
+  `error{code:"relay_quota_exceeded", message:"…retry_after_ms=<n>"}` and the
+  socket stays open, because the `signal` lane is still needed to reach a
+  DataChannel. Zero or invalid values keep the default: the quota can be
+  resized, not switched off. Rejections count toward
+  `signaling_frames_rejected_total{reason="quota"}`.
 - Per-source-IP connection cap: `SIGNALING_MAX_CONN_PER_IP`, default `50`.
   By default the raw TCP peer address is used. Set
   `SIGNALING_TRUST_PROXY_HEADERS=1` only behind a trusted proxy that overwrites

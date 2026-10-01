@@ -192,6 +192,10 @@ export async function readDexieDelta(
       return readTwinProfileDelta(since)
     case "plugins":
       return readPluginsDelta(since)
+    case "pluginCogsets":
+      return readPluginCogsetsDelta(since)
+    case "pluginCogsetState":
+      return readPluginCogsetStateDelta(since)
     case "adapterInstances":
       return readAdapterInstancesDelta(since)
     case "mcpServers":
@@ -467,7 +471,7 @@ async function readCursorDelta(
   }
   return {
     rows,
-    deleted_ids: deleted.ids,
+    deleted_ids: excludeLiveKeys(table, rows, deleted.ids),
     next_since: Math.max(since, next.at, next.deletedAt),
     next_cursor: JSON.stringify(next),
     has_more: hasMore,
@@ -749,6 +753,17 @@ async function readPluginsDelta(since: number): Promise<SyncDelta<unknown>> {
   // Plugin storage belongs to the execution host, including encrypted values.
   const publicRows = rows.map(({ storage: _storage, ...row }) => row)
   return finalizeDelta("plugins", publicRows as UpdatedAtRow[], since)
+}
+
+async function readPluginCogsetsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().pluginCogsets.where("updatedAt").above(since).toArray()
+  return finalizeDelta("pluginCogsets", rows as UpdatedAtRow[], since)
+}
+
+async function readPluginCogsetStateDelta(since: number): Promise<SyncDelta<unknown>> {
+  // A singleton, so there is no index worth keeping on `updatedAt`.
+  const rows = (await getDb().pluginCogsetState.toArray()).filter((row) => row.updatedAt > since)
+  return finalizeDelta("pluginCogsetState", rows as UpdatedAtRow[], since)
 }
 
 async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
@@ -1306,10 +1321,41 @@ async function finalizeDelta<T extends UpdatedAtRow>(
 
   return {
     rows,
-    deleted_ids: deletedIds,
+    deleted_ids: excludeLiveKeys(table, rows, deletedIds),
     next_since: highestCursor,
     has_more: hasMore,
   }
+}
+
+/**
+ * The primary key a paired client stores each table under, where it is not
+ * `id`. Tombstones are recorded under this key, and the client deletes by it.
+ */
+const SYNC_PRIMARY_KEY: Partial<Record<SyncableTable, string>> = {
+  templateDefinitions: "storageKey",
+  templatePackages: "key",
+}
+
+/**
+ * Drop every tombstoned key whose row is also in this delta. The rows are read
+ * from the live table, so a key present there exists on the Host now: it was
+ * deleted and then recreated inside one pull window (a plugin reinstalled under
+ * its manifest id, a template re-imported). The client applies rows before
+ * deletions, so sending both would delete the live row it had just written.
+ */
+export function excludeLiveKeys(
+  table: SyncableTable,
+  rows: readonly unknown[],
+  deletedIds: readonly string[]
+): string[] {
+  if (deletedIds.length === 0 || rows.length === 0) return [...deletedIds]
+  const keyField = SYNC_PRIMARY_KEY[table] ?? "id"
+  const live = new Set<string>()
+  for (const row of rows) {
+    const key = (row as Record<string, unknown> | null)?.[keyField]
+    if (typeof key === "string") live.add(key)
+  }
+  return deletedIds.filter((id) => !live.has(id))
 }
 
 /** Test-only — reset the install guard. */

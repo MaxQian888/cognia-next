@@ -68,6 +68,8 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   workflows: "workflows",
   twinProfile: "twinProfile",
   plugins: "plugins",
+  pluginCogsets: "pluginCogsets",
+  pluginCogsetState: "pluginCogsetState",
   adapterInstances: "adapterInstances",
   settings: "settings",
   conversationOverrides: "conversationOverrides",

@@ -2,6 +2,18 @@
   "schemaVersion": 1,
   "groups": [
     {
+      "disposition": "local-only",
+      "reason": "Temporary GitHub runner provisioning belongs to the initiating desktop: it uses that user's GitHub CLI account and durable private-key lease ledger. Remote Hosts cannot dispatch or cancel jobs through these local credentials. Execution after pairing uses the ordinary Companion commands.",
+      "commands": [
+        "github_runner_preflight",
+        "github_runner_create",
+        "github_runner_list",
+        "github_runner_refresh",
+        "github_runner_cancel",
+        "github_runner_pairing"
+      ]
+    },
+    {
       "disposition": "covered-by-headless",
       "reason": "The operator-facing capability already exists through the canonical Headless control plane or standard Headless configuration; exposing the desktop IPC command would duplicate that surface. Every command in this group names the covering surface in commandReasons — a claim with no named cover is not a disposition, it is a guess.",
       "commands": [

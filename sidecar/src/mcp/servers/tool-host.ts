@@ -24,6 +24,7 @@ interface HostFrame extends Record<string, unknown> {
   toolUseId?: string
 }
 export interface ToolHostEvent {
+  remoteExecutionContext?: Record<string, unknown>
   type: "tool_host_event"
   sessionId: string
   leaseId: string
@@ -31,6 +32,7 @@ export interface ToolHostEvent {
   event: HostFrame
 }
 interface Lease {
+  remoteExecutionContext?: Record<string, unknown>
   id: string
   owner: string
   generation: number
@@ -44,15 +46,23 @@ interface Lease {
   requests: Map<string, AbortController>
   connections: Set<Server>
   paused: boolean
+  starting?: boolean
   server: http.Server
   ready?: Promise<void>
   host?: string
+  sandboxAgentId?: string
+  deferSandbox?: boolean
+  pendingBridge?: { bridgeId: string; host: string; heartbeat: ReturnType<typeof setInterval> }
+  bridge?: { bridgeId: string; host: string; heartbeat: ReturnType<typeof setInterval> }
   expiry?: ReturnType<typeof setTimeout>
   closing?: Promise<void>
   toolSession?: ToolSessionContext
   emit?: (event: HostFrame) => void
 }
 export interface ToolHostInput {
+  sandboxAgentId?: string
+  deferSandbox?: boolean
+  remoteExecutionContext?: Record<string, unknown>
   leaseId: string
   ownerSessionId: string
   renew?: boolean
@@ -65,6 +75,7 @@ export interface ToolHostInput {
     ToolSessionSendOptions & { toolResultReviewEnabled?: boolean }
 }
 export interface ToolHostDescriptor {
+  sandboxToolHostLeaseId?: string
   leaseId: string
   generation: number
   catalogFingerprint: string
@@ -160,6 +171,32 @@ export function createToolHostManager({
     lease.expiry.unref?.()
   }
 
+  function watchBridge(lease: Lease, bridgeId: string, host: string, pending = false) {
+    const bridge = {
+      bridgeId,
+      host,
+      heartbeat: setInterval(() => {
+        void hostRpc!
+          .call("sandbox.toolHost.renew", { bridgeId })
+          .then(async (result) => {
+            if (
+              !lease.starting &&
+              (pending ? lease.pendingBridge : lease.bridge) === bridge &&
+              (result as { active?: boolean })?.active !== true
+            )
+              await destroy(lease)
+          })
+          .catch(() => {
+            if (!lease.starting && (pending ? lease.pendingBridge : lease.bridge) === bridge)
+              return destroy(lease).catch(() => {})
+            return undefined
+          })
+      }, 20_000),
+    }
+    bridge.heartbeat.unref?.()
+    return bridge
+  }
+
   function pause(lease: Lease) {
     lease.paused = true
     for (const controller of lease.calls) controller.abort(new Error("Cognia tool host paused"))
@@ -176,6 +213,9 @@ export function createToolHostManager({
     lease.preflights.clear()
     emit({
       type: "tool_host_event",
+      ...(lease.remoteExecutionContext
+        ? { remoteExecutionContext: lease.remoteExecutionContext }
+        : {}),
       sessionId: lease.owner,
       leaseId: lease.id,
       generation: lease.generation,
@@ -189,6 +229,15 @@ export function createToolHostManager({
     clearTimeout(lease.expiry)
     leases.delete(lease.id)
     lease.closing = (async () => {
+      const bridge = lease.bridge
+      lease.bridge = undefined
+      const pending = lease.pendingBridge
+      lease.pendingBridge = undefined
+      for (const entry of [bridge, pending]) {
+        if (!entry) continue
+        clearInterval(entry.heartbeat)
+        await hostRpc?.call("sandbox.toolHost.close", { bridgeId: entry.bridgeId }).catch(() => {})
+      }
       await Promise.allSettled([lease.ready])
       await Promise.allSettled([...lease.connections].map((connection) => connection.close()))
       lease.server.closeAllConnections()
@@ -202,7 +251,8 @@ export function createToolHostManager({
     const endpoint = SERVERS.find((name) => req.url === `/${name}`)
     if (
       !endpoint ||
-      req.headers.host !== lease.host ||
+      (req.headers.host !== lease.host &&
+        (!lease.bridge || req.headers.host !== lease.bridge.host)) ||
       req.headers.origin ||
       !authorize(req.headers.authorization, lease.token)
     ) {
@@ -326,6 +376,9 @@ export function createToolHostManager({
           for (const [map, id] of roundTrips) {
             emit({
               type: "tool_host_event",
+              ...(lease.remoteExecutionContext
+                ? { remoteExecutionContext: lease.remoteExecutionContext }
+                : {}),
               sessionId: lease.owner,
               leaseId: lease.id,
               generation,
@@ -363,6 +416,8 @@ export function createToolHostManager({
   function start(input: ToolHostInput): Promise<ToolHostDescriptor | { leaseId: string }>
   async function start(input: ToolHostInput): Promise<ToolHostDescriptor | { leaseId: string }> {
     let lease = identity(input)
+    if (input.deferSandbox && !input.sandboxAgentId)
+      throw new Error("Deferred tool host requires a sandbox agent")
     if (input.renew) {
       if (!lease || lease.closing) throw new Error("Cognia tool host lease has expired")
       touch(lease)
@@ -370,7 +425,7 @@ export function createToolHostManager({
     }
     if (!input.sendOptions || typeof input.sendOptions !== "object")
       throw new Error("tool host requires sendOptions")
-    if (lease && (!lease.paused || lease.calls.size))
+    if (lease && (lease.starting || !lease.paused || lease.calls.size))
       throw new Error("Pause the Cognia tool host before updating its tools")
     if (!lease) {
       const server = http.createServer()
@@ -378,6 +433,7 @@ export function createToolHostManager({
         server,
         id: input.leaseId,
         owner: input.ownerSessionId,
+        remoteExecutionContext: input.remoteExecutionContext,
         generation: 0,
         token: randomBytes(32).toString("base64url"),
         tools: {},
@@ -409,12 +465,107 @@ export function createToolHostManager({
       })
     }
     const active = lease
+    active.starting = true
     try {
       await active.ready
       if (active.closing) throw new Error("Cognia tool host was closed during startup")
       const sendOptions = input.sendOptions
+      if (active.sandboxAgentId && active.sandboxAgentId !== input.sandboxAgentId)
+        throw new Error("Cognia tool host belongs to another sandbox agent")
+      if (active.sandboxAgentId && active.deferSandbox !== Boolean(input.deferSandbox))
+        throw new Error("Cognia tool host sandbox mode cannot change")
+      if (input.sandboxAgentId) {
+        // A sandbox receives the renderer plugin projection only. Host-native
+        // builtins would bypass its execution admission and are never exposed.
+        if (!hostRpc || !input.sandboxAgentId || input.sandboxAgentId.length > 256)
+          throw new Error("Sandbox hosted services are unavailable")
+        sendOptions.builtinTools = {}
+        sendOptions.planTools = false
+        active.sandboxAgentId = input.sandboxAgentId
+        active.deferSandbox = Boolean(input.deferSandbox)
+      }
       active.generation = (active.generation ?? 0) + 1
       const generation = active.generation
+      if (active.deferSandbox && active.pendingBridge) {
+        const renewed = (await hostRpc!.call("sandbox.toolHost.renew", {
+          bridgeId: active.pendingBridge.bridgeId,
+        })) as { active?: boolean }
+        if (renewed?.active !== true) throw new Error("Sandbox tool host authority expired")
+      }
+      if (active.deferSandbox && !active.pendingBridge) {
+        const registered = (await hostRpc!.call("sandbox.toolHost.register", {
+          agentId: active.sandboxAgentId,
+          ownerSessionId: active.owner,
+          originDeviceId: active.remoteExecutionContext?.originDeviceId ?? null,
+          leaseId: active.id,
+          generation,
+          port: Number(active.host!.split(":")[1]),
+        })) as { bridgeId?: unknown }
+        if (
+          typeof registered?.bridgeId !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            registered.bridgeId
+          )
+        )
+          throw new Error("Sandbox returned an invalid pending service lease")
+        active.pendingBridge = watchBridge(active, registered.bridgeId, active.host!, true)
+        if (active.closing) {
+          clearInterval(active.pendingBridge.heartbeat)
+          active.pendingBridge = undefined
+          await hostRpc!
+            .call("sandbox.toolHost.close", { bridgeId: registered.bridgeId })
+            .catch(() => {})
+          throw new Error("Cognia tool host closed while registering the sandbox")
+        }
+      }
+      if (active.sandboxAgentId && !active.deferSandbox && active.bridge) {
+        const previous = active.bridge
+        // Detach first: a pending heartbeat for the old adoption must not
+        // destroy the next turn's replacement while renewal is in flight.
+        active.bridge = undefined
+        clearInterval(previous.heartbeat)
+        try {
+          const renewed = (await hostRpc!.call("sandbox.toolHost.renew", {
+            bridgeId: previous.bridgeId,
+          })) as { active?: boolean }
+          if (renewed?.active === true && !active.closing)
+            active.bridge = watchBridge(active, previous.bridgeId, previous.host)
+        } finally {
+          if (!active.bridge)
+            await hostRpc!
+              .call("sandbox.toolHost.close", { bridgeId: previous.bridgeId })
+              .catch(() => {})
+        }
+        if (active.closing) throw new Error("Cognia tool host was closed during startup")
+      }
+      if (active.sandboxAgentId && !active.deferSandbox && !active.bridge) {
+        const opened = (await hostRpc!.call("sandbox.toolHost.open", {
+          agentId: active.sandboxAgentId,
+          ownerSessionId: active.owner,
+          originDeviceId: active.remoteExecutionContext?.originDeviceId ?? null,
+          leaseId: active.id,
+          generation,
+          port: Number(active.host!.split(":")[1]),
+        })) as { bridgeId?: unknown; port?: unknown }
+        if (
+          typeof opened.bridgeId !== "string" ||
+          opened.bridgeId.length !== 36 ||
+          !Number.isInteger(opened.port) ||
+          Number(opened.port) < 1 ||
+          Number(opened.port) > 65535
+        )
+          throw new Error("Sandbox returned an invalid service bridge")
+        const bridgeId = opened.bridgeId
+        // Only the private native bridge may add this exact loopback authority.
+        // Renderer payloads cannot choose an alias or an upstream destination.
+        active.bridge = watchBridge(active, bridgeId, `127.0.0.1:${opened.port}`)
+        if (active.closing) {
+          clearInterval(active.bridge.heartbeat)
+          active.bridge = undefined
+          await hostRpc!.call("sandbox.toolHost.close", { bridgeId }).catch(() => {})
+          throw new Error("Cognia tool host closed while connecting the sandbox")
+        }
+      }
       if (active.toolSession) active.toolSession.refreshResolvers(sendOptions)
       else
         active.toolSession = createToolSessionContext({
@@ -449,6 +600,9 @@ export function createToolHostManager({
           calls.getStore()?.roundTrips.push([map, id])
           emit({
             type: "tool_host_event",
+            ...(active.remoteExecutionContext
+              ? { remoteExecutionContext: active.remoteExecutionContext }
+              : {}),
             sessionId: active.owner,
             leaseId: active.id,
             generation,
@@ -503,19 +657,22 @@ export function createToolHostManager({
         throw new Error("Tool catalog blocked by the PII redaction gate")
       const catalogFingerprint = createHash("sha256").update(JSON.stringify(catalog)).digest("hex")
       return {
+        ...(active.pendingBridge ? { sandboxToolHostLeaseId: active.pendingBridge.bridgeId } : {}),
         leaseId: active.id,
         generation: active.generation,
         catalogFingerprint,
         mcpServers: SERVERS.map((name) => ({
           name,
           transport: "http",
-          url: `http://${active.host}/${name}`,
+          url: `http://${active.bridge?.host ?? active.host}/${name}`,
           headers: { Authorization: `Bearer ${active.token}` },
         })),
       }
     } catch (error) {
       await destroy(active)
       throw error
+    } finally {
+      active.starting = false
     }
   }
 

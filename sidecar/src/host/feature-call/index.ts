@@ -23,6 +23,7 @@ export interface FeatureCallMessage {
   providerId?: string
   credentials?: AdapterCredentials
   options?: Partial<ModelCallOptions> & Partial<EmbeddingModelV3CallOptions>
+  remoteExecutionContext?: Record<string, unknown>
   toolHost?: ToolHostInput
   mcpServer?: Parameters<typeof defaultDiscoverMcpServer>[0] & { id?: string; name?: string }
   protocolAdapterSpec?: unknown
@@ -269,7 +270,7 @@ async function streamProtocolAdapter(
 }
 
 export function createFeatureCallHandler({
-  emit,
+  emit: publish,
   hostRpc,
   buildModel = defaultBuildModel,
   buildEmbeddingModel = defaultBuildEmbeddingModel,
@@ -285,9 +286,16 @@ export function createFeatureCallHandler({
       sessionId: string
     }
   >()
-  const toolHosts = createToolHostManager({ emit, hostRpc })
+  const toolHosts = createToolHostManager({ emit: publish, hostRpc })
 
   async function call(message: FeatureCallMessage) {
+    const emit: typeof publish = (event) =>
+      publish({
+        ...event,
+        ...(message.remoteExecutionContext
+          ? { remoteExecutionContext: message.remoteExecutionContext }
+          : {}),
+      })
     const { requestId, operation } = message
     if (!requestId || active.has(requestId)) {
       emit({

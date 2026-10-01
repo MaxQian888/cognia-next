@@ -52,6 +52,11 @@ SIGNALING_MAX_DESKTOPS = "1"
 # by default (home desktop + mobile often share one public IP); the global
 # per-IP defense is the edge Rate Limiting rule documented above.
 SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
+# Data-lane bytes one room may relay per 24 h window (2 GiB when unset, zero
+# or invalid; the quota can be resized, not switched off). Shared with the
+# axum server. An over-quota frame gets `relay_quota_exceeded` and the socket
+# stays open for signalling.
+SIGNALING_RELAY_ROOM_QUOTA_BYTES = "2147483648"
 # Comma-separated exact HTTPS WebSocket Origin allowlist. Empty = same-origin
 # browser access only; native clients send no Origin and remain allowed. Add
 # only explicit split-origin web deployments, e.g. "https://app.cognia.cn".
@@ -101,6 +106,11 @@ name = "cognia-signaling-staging"
 SIGNALING_MAX_PEERS_PER_ROOM = "2"
 SIGNALING_MAX_DESKTOPS = "1"
 SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
+# Data-lane bytes one room may relay per 24 h window (2 GiB when unset, zero
+# or invalid; the quota can be resized, not switched off). Shared with the
+# axum server. An over-quota frame gets `relay_quota_exceeded` and the socket
+# stays open for signalling.
+SIGNALING_RELAY_ROOM_QUOTA_BYTES = "2147483648"
 SIGNALING_ALLOWED_ORIGINS = ""
 AE_SAMPLE_N = "10"
 

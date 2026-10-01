@@ -3909,6 +3909,7 @@ export function useClaudeChat() {
           const { resolvedMcpServerMapToAcpConfigs } =
             await import("@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers")
           const externalMcpServers = resolvedMcpServerMapToAcpConfigs(sendOptions.mcpServers)
+          let sandboxToolHostLeaseIds: string[] | undefined
           let externalContinuationContext: string | undefined
           let resetExternalSession = false
           let verifiedNativeResume = false
@@ -3954,6 +3955,13 @@ export function useClaudeChat() {
               const { createRendererToolHost } =
                 await import("@/lib/ai/agent/external/session/renderer-tool-host")
               let entry = externalToolHostsRef.current.get(sessionId)
+              if (entry?.host.isCurrentHost?.() === false) {
+                // A replaced connection already revoked this renderer bridge.
+                // Do not close an old native session through the new Host.
+                externalToolHostsRef.current.delete(sessionId)
+                await entry.host.close()
+                entry = undefined
+              }
               if (entry && entry.agentId !== extAgentId) {
                 await releaseExternalToolHost(sessionId)
                 entry = undefined
@@ -3963,6 +3971,9 @@ export function useClaudeChat() {
                 externalToolHostsRef.current.set(sessionId, entry)
               }
               const hosted = await entry.host.start({
+                agentId: extAgentId,
+                // Session-scoped runtimes spawn after tools are prepared.
+                deferSandbox: true,
                 sendOptions,
                 signal: gatewayController?.signal,
                 // DSH publishes its own broker tool calls; duplicating them here
@@ -3997,6 +4008,8 @@ export function useClaudeChat() {
                   }
                 },
               })
+              if (hosted.sandboxToolHostLeaseId)
+                sandboxToolHostLeaseIds = [hosted.sandboxToolHostLeaseId]
               const launchContextSignature = JSON.stringify({
                 catalog: hosted.catalogFingerprint,
                 servers: [...hosted.mcpServers, ...externalMcpServers],
@@ -4186,6 +4199,7 @@ export function useClaudeChat() {
                       additionalDirectories: sendOptions.additionalDirectories ?? [],
                       chatSessionId: sessionId,
                       mcpServers: externalMcpServers,
+                      ...(sandboxToolHostLeaseIds ? { sandboxToolHostLeaseIds } : {}),
                       ...(externalContinuationContext
                         ? { conversationHistory: externalContinuationContext }
                         : {}),

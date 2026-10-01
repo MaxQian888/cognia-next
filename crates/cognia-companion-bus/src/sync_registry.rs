@@ -74,7 +74,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "skills".to_string(),
             description: "Installed skill manifests".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "sessions".to_string(),
@@ -94,9 +94,9 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "workflowRuns".to_string(),
             description: "Workflow run history (read-only; cursors on max(startedAt, completedAt) so the mobile library badges + runs feed reflect desktop-executed runs)".to_string(),
-            // Runs are append-mostly; deletions are not tombstoned (the mobile
-            // runs viewer accumulates and ages them out of the recent feed).
-            has_tombstones: false,
+            // Runs are append-mostly, but a user can delete one (or every run
+            // of a deleted workflow), and those deletes are tombstoned.
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "executionRuns".to_string(),
@@ -106,7 +106,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "twinProfile".to_string(),
             description: "Distilled twin profiles for the mobile twin switcher".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "twins".to_string(),
@@ -168,12 +168,22 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "plugins".to_string(),
             description: "Installed plugins (toggle from mobile via plugin_set_enabled)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "pluginCogsets".to_string(),
+            description: "Cogsets: named plugin sets, read-only (switch via plugin_cogset_activate)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "pluginCogsetState".to_string(),
+            description: "The host's cogset state: which cogset runs, always-on plugins, a pending switch".to_string(),
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "adapterInstances".to_string(),
             description: "Connector adapter instances (policy editable from mobile)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "settings".to_string(),
@@ -187,20 +197,19 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "conversationOverrides".to_string(),
             description: "Per-conversation Inbox overrides (pinned, archived, lastReadAt, allowComputerUse, allowGoalDriving, mode)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // Per-session unread pointers. The mobile Chat tab badge and the
         // Inbox dot both counted `inboundLedger`, a host-only dedupe ledger
         // that never syncs, so both read 0 on every paired device. This is the
         // table the desktop's own unread badges read.
         //
-        // No tombstones: a deleted session is tombstoned on `sessions`, and an
-        // orphaned state row counts toward nothing because every reader
-        // resolves the session before counting it.
+        // The session-delete cascade tombstones the state row next to the
+        // session itself (`lib/db/sessions.ts`).
         SyncTableDescriptor {
             name: "sessionState".to_string(),
             description: "Per-session unread pointers (read-only mirror for the mobile Chat badge and Inbox dot)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // Companion read-mostly views. Both have desktop sync readers
         // (`readGoalsDelta` / `readMemoriesDelta`) and TS handlers, but were
@@ -210,7 +219,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "goals".to_string(),
             description: "Goal console rows (read-only mirror; goals are authored on the desktop)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // ADR-0045 — AgentPlan rows. The companion mounts the plan approval
         // dock and the step tracker; without this allowlist entry `sync_pull`
@@ -221,12 +230,12 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "plans".to_string(),
             description: "AgentPlan rows (read-only mirror for the companion plan dock / tracker)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "memories".to_string(),
             description: "Long-term memory rows (read-only mirror for the mobile memory viewer)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
         // mobile `/me/mcp` page lists the desktop's servers; the phone has no
@@ -235,13 +244,13 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "mcpServers".to_string(),
             description: "Configured MCP servers (read-only mirror for the mobile /me/mcp viewer)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // ADR-0039 (phase 2) — durable terminal command history. One-way
         // read-only mirror; the phone has no shell so it never writes back.
         // The desktop projector cursors on `ts` (no updatedAt/createdAt on the
         // row), and prune-deletions are not tombstoned (rows age out passively
-        // on the phone), same omission class as mcpServers/settings.
+        // on the phone).
         SyncTableDescriptor {
             name: "terminalHistory".to_string(),
             description: "Durable terminal command history (read-only mirror for the mobile /me/command-history viewer)".to_string(),
@@ -278,12 +287,12 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "templateDefinitions".to_string(),
             description: "Portable template definitions (read-only mobile catalog projection)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "templatePackages".to_string(),
             description: "Template package metadata and trust (no assets or device bindings)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "templateInstances".to_string(),
@@ -295,17 +304,17 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "agentTeams".to_string(),
             description: "Squad definitions (roster and task ids; run history syncs separately)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "agentTeammates".to_string(),
             description: "Squad roster members and their per-teammate configuration".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "agentTeamTasks".to_string(),
             description: "Squad task board entries (definition-side; execution state lives in agentTeamRuns)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // ADR-0131 cross-shell inbox relay.
         SyncTableDescriptor {
@@ -316,7 +325,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "outboundQueue".to_string(),
             description: "Connector outbound delivery status projection (no message payload; host-owned, never dispatched by the client)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // The Inbox sidebar's host-only tables. Each is read by a surface the
         // thin client mounts, and none had a sync path, so every one of them
@@ -369,7 +378,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "botEventDeliveries".to_string(),
             description: "Bot delivery status projection (no event envelope, no dedupe key; host-owned, never drained by the client)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
     ]
 }
@@ -383,6 +392,8 @@ mod tests {
         let r = SyncTableRegistry::with_defaults();
         assert!(r.contains("characters"));
         assert!(r.contains("workflows"));
+        assert!(r.contains("pluginCogsets"));
+        assert!(r.contains("pluginCogsetState"));
         assert!(r.contains("workflowRuns"));
         assert!(r.contains("executionRuns"));
         assert!(r.contains("goals"));
@@ -428,6 +439,46 @@ mod tests {
             "duplicate name in default_tables()"
         );
         assert!(!r.contains("ohai"));
+    }
+
+    #[test]
+    fn user_deletable_tables_carry_tombstones() {
+        // A pull only carries rows that still exist, so a table a user can
+        // delete from must tombstone or the row outlives its delete on every
+        // paired client. `lib/data-governance/table-catalog.ts` declares the
+        // strategy per table and the data-governance gate holds the two equal.
+        let r = SyncTableRegistry::with_defaults();
+        let by_name: std::collections::HashMap<String, bool> = r
+            .list()
+            .into_iter()
+            .map(|d| (d.name, d.has_tombstones))
+            .collect();
+        for name in [
+            "skills",
+            "plugins",
+            "pluginCogsets",
+            "mcpServers",
+            "memories",
+            "goals",
+            "plans",
+            "templateDefinitions",
+            "templatePackages",
+            "agentTeams",
+            "agentTeammates",
+            "agentTeamTasks",
+            "adapterInstances",
+            "conversationOverrides",
+            "twinProfile",
+            "workflowRuns",
+            "outboundQueue",
+            "botEventDeliveries",
+            "sessionState",
+        ] {
+            assert_eq!(by_name.get(name), Some(&true), "{name} must tombstone");
+        }
+        for name in ["settings", "terminalHistory", "connectorHeartbeats", "executionRuns"] {
+            assert_eq!(by_name.get(name), Some(&false), "{name} has no tombstones");
+        }
     }
 
     #[test]

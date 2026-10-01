@@ -238,6 +238,35 @@ async function main() {
     "heartbeat survives hibernation API"
   )
 
+  // Opt-in: only a deployment started with a small
+  // SIGNALING_RELAY_ROOM_QUOTA_BYTES can be driven to its quota in a smoke run.
+  const quotaBytes = Number(process.env.SIGNALING_EXPECT_ROOM_QUOTA_BYTES ?? 0)
+  if (quotaBytes > 0) {
+    const chunk = "q".repeat(1024)
+    let refused = null
+    for (let sent = 0; sent <= quotaBytes + chunk.length && !refused; sent += chunk.length) {
+      replacement.client.send({
+        kind: "relay",
+        rendezvousId: room.descriptor.roomId,
+        payload: chunk,
+        lane: "data",
+      })
+      // Only the sender is read: the quota error goes to it, and a timed-out
+      // next() drops its waiter, so no frame is swallowed. Relayed copies
+      // simply queue on the desktop socket.
+      const frame = await replacement.client.next(250).catch(() => null)
+      if (frame?.kind === "error" && frame.code === "relay_quota_exceeded") refused = frame
+    }
+    assert(refused, "data lane is refused once the room quota is spent")
+    assert(/retry_after_ms=\d+/.test(refused.message), "quota error carries the reset time")
+    replacement.client.send({ kind: "ping" })
+    await nextMatching(
+      replacement.client,
+      (frame) => frame.kind === "pong",
+      "socket stays open after a quota refusal"
+    )
+  }
+
   // Upgrade room and signed descriptor must agree.
   const mismatchUpgradeRoom = await createRoom()
   const otherRoom = await createRoom()

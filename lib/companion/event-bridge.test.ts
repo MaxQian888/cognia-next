@@ -10,7 +10,11 @@
 
 import "fake-indexeddb/auto"
 import { waitFor } from "@testing-library/react"
-import { installCompanionEventBridge } from "./event-bridge"
+import {
+  announceDevicePaired,
+  installCompanionEventBridge,
+  PAIRING_ALERT_WINDOW_MS,
+} from "./event-bridge"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listPairedDevices } from "@/lib/db/paired-devices"
@@ -48,6 +52,30 @@ jest.mock("@/stores/account/account-store", () => {
     },
   }
 })
+
+const mockNotify = jest.fn().mockResolvedValue("ntf-1")
+jest.mock("@/lib/notifications/runtime", () => ({
+  notify: (...args: unknown[]) => mockNotify(...args),
+}))
+
+// Resolves real en.json strings; next-intl is ESM and mocked out under Jest.
+jest.mock("@/lib/i18n/runtime-translator", () => {
+  const en = jest.requireActual("@/i18n/messages/en.json") as {
+    devices: { pairingAlert: Record<string, string> }
+  }
+  return {
+    getRuntimeTranslator: async () => (key: string, values?: Record<string, unknown>) =>
+      en.devices.pairingAlert[key].replace(/\{(\w+)\}/g, (_m, name: string) =>
+        String(values?.[name] ?? "")
+      ),
+  }
+})
+
+const mockLoadCompanionConfig = jest.fn().mockReturnValue(null)
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  ...jest.requireActual("@/lib/tauri/transport-companion"),
+  loadCompanionConfig: () => mockLoadCompanionConfig(),
+}))
 
 type Handler = (payload: unknown) => void
 
@@ -430,5 +458,74 @@ describe("installCompanionEventBridge", () => {
     getDb()
     await whenSeeded()
     warnSpy.mockRestore()
+  })
+})
+
+describe("announceDevicePaired", () => {
+  const payload = {
+    device_id: "dev-new",
+    label: "Pixel 9",
+    platform: "android",
+    paired_at_ms: 1_000_000,
+  }
+
+  beforeEach(() => {
+    mockNotify.mockClear()
+    mockLoadCompanionConfig.mockReset().mockReturnValue(null)
+  })
+
+  it("raises a directed warning that links to the device console", async () => {
+    await announceDevicePaired(payload, payload.paired_at_ms + 1_000)
+    expect(mockNotify).toHaveBeenCalledTimes(1)
+    const input = mockNotify.mock.calls[0][0]
+    expect(input).toMatchObject({
+      source: "system",
+      level: "warning",
+      href: "/devices",
+      directed: true,
+      dedupeKey: "device-paired:dev-new",
+      sourceRef: { kind: "paired-device", id: "dev-new" },
+    })
+    expect(input.body).toContain("Pixel 9")
+    expect(input.body).toContain("android")
+  })
+
+  it("stays silent on the device that was just paired", async () => {
+    mockLoadCompanionConfig.mockReturnValue({ deviceId: "dev-new" })
+    await announceDevicePaired(payload, payload.paired_at_ms + 1_000)
+    expect(mockNotify).not.toHaveBeenCalled()
+  })
+
+  it("stays silent for a pairing replayed after the alert window", async () => {
+    await announceDevicePaired(payload, payload.paired_at_ms + PAIRING_ALERT_WINDOW_MS + 1)
+    expect(mockNotify).not.toHaveBeenCalled()
+  })
+
+  it("never throws when the notification pipe fails", async () => {
+    mockNotify.mockRejectedValueOnce(new Error("center closed"))
+    jest.spyOn(console, "warn").mockImplementation(() => {})
+    await expect(
+      announceDevicePaired(payload, payload.paired_at_ms + 1_000)
+    ).resolves.toBeUndefined()
+  })
+
+  it("is raised by the device-paired handler after the row is written", async () => {
+    const handlers = new Map<string, Handler>()
+    jest.spyOn(transport, "subscribe").mockImplementation(((channel: string, handler: Handler) => {
+      handlers.set(channel, handler)
+      return () => {}
+    }) as never)
+    installCompanionEventBridge()
+    handlers.get("companion://device-paired")?.({
+      device_id: "dev-live",
+      account_id: "local_acct_a",
+      label: "iPad",
+      platform: "ios",
+      pubkey: "pk",
+      paired_at_ms: Date.now(),
+      app_version: "1.0.0",
+    })
+    await waitFor(() => expect(mockNotify).toHaveBeenCalledTimes(1))
+    expect((await listPairedDevices()).map((row) => row.deviceId)).toContain("dev-live")
   })
 })

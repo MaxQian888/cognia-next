@@ -613,6 +613,44 @@ pub async fn plugin_install_from_directory(
     }
 }
 
+/// IPC surface — install a plugin a cogpack embeds (ADR-0209). The files
+/// arrive as data because the webview's file-system scope cannot reach a temp
+/// directory; `handlers::install_embedded_files_blocking` writes them into one
+/// (every path checked first by `materialize_plugin_tree`) and installs them
+/// with the same directory installer as "Load unpacked", refusing a tree whose
+/// manifest is not `plugin_id`. It runs on a blocking thread: the tree is
+/// written and copied, and a cogpack member can be large.
+#[tauri::command]
+pub async fn plugin_install_from_files(
+    app: tauri::AppHandle,
+    plugin_id: String,
+    files: Vec<cognia_plugin_runtime::plugin_tree::EmbeddedPluginFile>,
+) -> Result<PluginInstallReceipt, String> {
+    use tauri::Emitter;
+    let installer = app.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        handlers::install_embedded_files_blocking(&installer, &files, &plugin_id)
+    })
+    .await
+    .map_err(|e| format!("install embedded plugin: {e}"))?;
+    match outcome {
+        Ok((plugin_id, warnings)) => {
+            let _ = app.emit(
+                "cli-bridge:plugin-installed",
+                serde_json::json!({ "plugin_id": plugin_id, "source": "cogpack" }),
+            );
+            Ok(PluginInstallReceipt {
+                plugin_id,
+                warnings,
+            })
+        }
+        Err(err) => {
+            log::warn!("plugin_install_from_files failed: {err:#}");
+            Err(err.to_string())
+        }
+    }
+}
+
 /// Trigger a graceful shutdown of the axum task. Idempotent — safe to call
 /// from the `RunEvent::Exit` hook in `lib.rs::run` so the listener releases
 /// its socket before the process tears down its tokio runtime.

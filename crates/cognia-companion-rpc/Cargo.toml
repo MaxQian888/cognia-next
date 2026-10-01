@@ -35,6 +35,7 @@ url.workspace = true
 cognia-agent-state = { path = "../cognia-agent-state" }
 cognia-jobs = { path = "../cognia-jobs" }
 cognia-sidecar = { path = "../cognia-sidecar" }
+cognia-sandbox-pool = { path = "../cognia-sandbox-pool" }
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-observability = { path = "../cognia-observability", features = ["runtime-host"] }
 async-trait.workspace = true

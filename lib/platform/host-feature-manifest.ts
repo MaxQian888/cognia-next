@@ -63,6 +63,7 @@ export const HOST_FEATURE_IDS = [
   // out of reach here, instead of the client guessing from `isTauri()` and
   // telling every browser user to install the desktop app.
   "external-agent.process-plane",
+  "external-agent.sandbox-tools",
   // Pro IDE (ADR-0088). Its presence is what tells a companion that this host
   // can run a workbench at all, which nothing could discover before: the five
   // lifecycle commands were reachable over the wire while the manifest said
@@ -454,6 +455,10 @@ export function buildLocalHostFeatureManifest({
     // Starting the process. Named per operation like its neighbours: a host
     // that can spawn but whose status arm predates this is describable, and the
     // client gates the run on `spawn_external_agent` specifically.
+    features["external-agent.sandbox-tools"] = {
+      version: 1,
+      operations: ["agent_tool_host_control"],
+    }
     features["external-agent.process-plane"] = {
       version: 1,
       operations: [
@@ -461,6 +466,11 @@ export function buildLocalHostFeatureManifest({
         "send_to_external_agent",
         "kill_external_agent",
         "get_external_agent_status",
+        // The Rust Host RPC is shared by desktop and cognia-server.
+        "agent_tool_host_control",
+        "agent_gateway_lease_prepare",
+        "agent_gateway_lease_renew",
+        "agent_gateway_lease_revoke",
         // Not a spawn, but the same plane: a host that cannot start an agent
         // has nothing useful to say about which agent binaries it has, and a
         // client that cannot see this operation must not render a detection
@@ -702,18 +712,24 @@ export function buildLocalHostFeatureManifest({
       eventStreamReady: 1,
     },
     features,
-    operations: Object.entries(features).flatMap(([feature, descriptor]) =>
-      (descriptor?.operations ?? []).map((name) => {
-        const health = healthFor(name)
-        return {
-          name,
-          feature: feature as HostFeatureId,
-          featureVersion: descriptor!.version,
-          healthy: health.healthy,
-          ...(health.reason ? { reason: health.reason } : {}),
-        }
-      })
-    ),
+    operations: [
+      ...new Map(
+        Object.entries(features)
+          .flatMap(([feature, descriptor]) =>
+            (descriptor?.operations ?? []).map((name) => {
+              const health = healthFor(name)
+              return {
+                name,
+                feature: feature as HostFeatureId,
+                featureVersion: descriptor!.version,
+                healthy: health.healthy,
+                ...(health.reason ? { reason: health.reason } : {}),
+              }
+            })
+          )
+          .map((operation) => [operation.name, operation])
+      ).values(),
+    ],
     deviceGrants: [...new Set(deviceGrants)],
     limits: { ...DEFAULT_LIMITS },
   }

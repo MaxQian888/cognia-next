@@ -132,6 +132,33 @@ export class RtcCarrierError extends Error {
   override name = "RtcCarrierError"
 }
 
+/** Error code the rendezvous sends when a room has spent its relay byte quota. */
+export const RELAY_QUOTA_EXCEEDED_CODE = "relay_quota_exceeded"
+
+/**
+ * The rendezvous refused a data-lane frame because the room spent its relay
+ * byte quota (`services/signaling-server/core/src/limits.rs`). A carrier error,
+ * so callers retry on HTTPS exactly as for any other carrier loss; `retryAt`
+ * is when the relay takes data again.
+ */
+export class RtcRelayQuotaError extends RtcCarrierError {
+  override name = "RtcRelayQuotaError"
+  constructor(readonly retryAt: number) {
+    super(`TransportRtc: relay quota exhausted until ${new Date(retryAt).toISOString()}`)
+  }
+}
+
+/** Read `retry_after_ms=<n>` from a `relay_quota_exceeded` message. */
+export function parseRelayQuotaRetryAfterMs(message: string): number | null {
+  const match = /retry_after_ms=(\d+)/.exec(message)
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isSafeInteger(value) ? value : null
+}
+
+/** Fallback when a quota refusal does not say when the window resets. */
+const RELAY_QUOTA_DEFAULT_BACKOFF_MS = 15 * 60 * 1000
+
 export interface RtcCallOptions {
   idempotencyKey?: string
   deadlineAt?: number
@@ -343,6 +370,9 @@ export class TransportRtc {
   private signalingDetach: (() => void) | null = null
   /** The Host answered our `hello` with `relay: true` on this signaling session. */
   private relayOpen = false
+  /** Epoch ms until which the room's relay byte quota is spent. */
+  private relayQuotaUntil = 0
+  private relayQuotaTimer: ReturnType<typeof setTimeout> | null = null
   /** `hello` already sent on the current signaling session (re-sent per session). */
   private helloSent = false
   /** Timer that decides the Host does not speak the relay data lane. */
@@ -450,8 +480,53 @@ export class TransportRtc {
    */
   getCarrier(): RtcCarrier | null {
     if (this.dc?.readyState === "open") return "datachannel"
-    if (this.relayOpen && this.signaling) return "relay"
+    if (this.relayUsable() && this.signaling) return "relay"
     return null
+  }
+
+  /**
+   * The relay is open and the room still has quota. While the quota is spent
+   * the relay stays subscribed (signalling still works and may yet reach a
+   * DataChannel) but carries no data, so `getCarrier()` stops offering it and
+   * `CompanionTransport` ranks the next tier instead.
+   */
+  private relayUsable(now: number = Date.now()): boolean {
+    return this.relayOpen && now >= this.relayQuotaUntil
+  }
+
+  /** When the relay takes data again, or `null` when it is not throttled. */
+  getRelayQuotaResetAt(now: number = Date.now()): number | null {
+    return this.relayQuotaUntil > now ? this.relayQuotaUntil : null
+  }
+
+  /**
+   * The rendezvous refused a data frame for quota. Stop offering the relay
+   * until the window resets and fail every request still waiting on it now,
+   * rather than letting each one run out its own timeout.
+   */
+  private handleRelayQuotaExceeded(message: string): void {
+    const retryAfter = parseRelayQuotaRetryAfterMs(message) ?? RELAY_QUOTA_DEFAULT_BACKOFF_MS
+    this.relayQuotaUntil = Date.now() + retryAfter
+    if (this.dc?.readyState === "open") return
+    const error = new RtcRelayQuotaError(this.relayQuotaUntil)
+    for (const pending of this.pending.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pending.clear()
+    for (const pending of this.pendingBinary.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pendingBinary.clear()
+    // Tier consumers recompute now (relay withdrawn) and again at the reset
+    // (relay offered back); nothing else would wake them at that moment.
+    if (this.relayQuotaTimer) clearTimeout(this.relayQuotaTimer)
+    this.relayQuotaTimer = setTimeout(() => {
+      this.relayQuotaTimer = null
+      this.notifyStateListeners()
+    }, retryAfter)
+    this.notifyStateListeners()
   }
 
   /** Whether any carrier can take a frame. */
@@ -594,6 +669,11 @@ export class TransportRtc {
         }
         if (code === "auth_failed" || code === "session_replaced") {
           this.fail(new Error(`signaling rejected: ${code} ${message}`))
+          return
+        }
+        if (code === RELAY_QUOTA_EXCEEDED_CODE) {
+          // Only data frames are charged, so this never breaks a handshake.
+          this.handleRelayQuotaExceeded(message)
           return
         }
         if (this.state === "open") {
@@ -1175,6 +1255,10 @@ export class TransportRtc {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
+    if (this.relayQuotaTimer) {
+      clearTimeout(this.relayQuotaTimer)
+      this.relayQuotaTimer = null
+    }
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
       p.reject(new RtcCarrierError("TransportRtc: connection closing"))
@@ -1427,7 +1511,7 @@ export class TransportRtc {
       return
     }
     const signaling = this.signaling
-    if (this.relayOpen && signaling) {
+    if (this.relayUsable() && signaling) {
       const body: DataBody =
         typeof frame === "string"
           ? { text: frame }
@@ -1505,6 +1589,9 @@ export class TransportRtc {
       return
     }
     const signaling = this.signaling
+    if (this.relayOpen && signaling && !this.relayUsable()) {
+      throw new RtcRelayQuotaError(this.relayQuotaUntil)
+    }
     if (!this.relayOpen || !signaling) {
       throw new RtcCarrierError("TransportRtc: DataChannel not open and no relay carrier")
     }

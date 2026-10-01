@@ -766,6 +766,7 @@ mod tests {
             env: Default::default(),
             framing: Default::default(),
             sandbox: placed.then(|| SandboxPlacement::Container {
+                hosted_tool_host_lease_ids: Vec::new(),
                 spec: serde_json::json!({ "projectId": "prj1" }),
                 isolation_mandatory: false,
             }),

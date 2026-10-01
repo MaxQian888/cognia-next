@@ -525,6 +525,39 @@ describe("external-agent.host-configs", () => {
 })
 
 describe("external-agent.process-plane", () => {
+  it.each(["tauri", "headless"] as const)(
+    "advertises task gateway and sandbox tool hosting on %s",
+    (platform) => {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(
+        supportsHostFeatureOperation(
+          manifest,
+          "external-agent.sandbox-tools",
+          "agent_tool_host_control"
+        )
+      ).toBe(true)
+      expect(manifest.features["external-agent.process-plane"]?.operations).toEqual(
+        expect.arrayContaining([
+          "agent_gateway_lease_prepare",
+          "agent_gateway_lease_renew",
+          "agent_gateway_lease_revoke",
+        ])
+      )
+    }
+  )
+
+  it("advertises remote plugin tool hosting only on the native RPC Host", () => {
+    for (const platform of ["tauri", "headless", "web"] as const) {
+      expect(
+        supportsHostFeatureOperation(
+          buildLocalHostFeatureManifest({ platform }),
+          "external-agent.process-plane",
+          "agent_tool_host_control"
+        )
+      ).toBe(platform === "tauri" || platform === "headless")
+    }
+  })
+
   it.each(["tauri", "headless"] as const)("advertises the spawn arms on %s", (platform) => {
     expect(
       buildLocalHostFeatureManifest({ platform }).features["external-agent.process-plane"]

@@ -30,6 +30,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "character_bind_twin",
     "skill_set_enabled",
     "plugin_set_enabled",
+    "plugin_cogset_activate",
+    "plugin_install_origin_record",
     "issue_apply_action",
     "issue_create",
     "mcp_set_enabled",
@@ -704,6 +706,10 @@ pub(super) async fn dispatch(
         | "character_bind_twin"
         | "skill_set_enabled"
         | "plugin_set_enabled"
+        // Cogsets (ADR-0209): a paired client switches the host's cogset, and
+        // records where an install it drove came from, in the host's tables.
+        | "plugin_cogset_activate"
+        | "plugin_install_origin_record"
         // Issue tracker writes from a paired phone (spec 2026-09-06 D8). The
         // TS arm re-runs the board's own gates, so a stale phone cannot move
         // an issue the runtime currently owns.

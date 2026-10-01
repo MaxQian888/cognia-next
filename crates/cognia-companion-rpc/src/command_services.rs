@@ -250,9 +250,21 @@ fn notification_center_push_payload(
     if !matches!(level, "info" | "success" | "warning" | "error" | "critical") {
         return Err("level must be a valid notification level".into());
     }
+    // Every `NotificationSource` (`types/notifications/index.ts`). A source
+    // missing here silently loses its push channel: `notify()` treats the
+    // refusal as a failed channel and keeps going.
     if !matches!(
         source,
-        "scheduler" | "agent-team" | "plugin" | "connector" | "session" | "workflow" | "system"
+        "scheduler"
+            | "agent-team"
+            | "plugin"
+            | "connector"
+            | "session"
+            | "workflow"
+            | "system"
+            | "issue"
+            | "site"
+            | "collab"
     ) {
         return Err("source must be a valid notification source".into());
     }
@@ -435,6 +447,28 @@ mod tests {
         let encoded = serde_json::to_string(&payload).expect("payload serializes");
         assert!(!encoded.contains("Private task title"));
         assert!(!encoded.contains("Private task body"));
+    }
+
+    #[test]
+    fn notification_center_push_payload_accepts_every_notification_source() {
+        // Mirrors `NOTIFICATION_SOURCES` in `types/notifications/index.ts`.
+        for source in [
+            "scheduler",
+            "agent-team",
+            "plugin",
+            "connector",
+            "session",
+            "workflow",
+            "system",
+            "issue",
+            "site",
+            "collab",
+        ] {
+            assert!(
+                notification_center_push_payload("id", source, "info", Some("/issues")).is_ok(),
+                "{source} must be pushable"
+            );
+        }
     }
 
     #[test]

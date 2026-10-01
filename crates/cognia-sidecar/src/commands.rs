@@ -743,6 +743,139 @@ pub fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
     Ok(request)
 }
 
+/// Narrow remote entry point: no provider credentials or general feature calls.
+/// Lease ids are namespaced by the authenticated device, so another paired
+/// device cannot renew, replace, answer, or close its tool host.
+pub fn build_remote_tool_host_payload(
+    request: Value,
+    device_id: &str,
+    remote_context: Value,
+) -> Result<Value, String> {
+    let object = request
+        .as_object()
+        .ok_or("tool host request must be an object")?;
+    if object.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "requestId" | "operation" | "toolHost" | "credentials"
+        )
+    }) || object
+        .get("credentials")
+        .is_some_and(|value| value != &json!({}))
+    {
+        return Err("remote tool host accepts only lease controls".into());
+    }
+    let operation = object
+        .get("operation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !matches!(
+        operation,
+        "tool-host-start" | "tool-host-stop" | "tool-host-reply"
+    ) {
+        return Err("unsupported remote tool host operation".into());
+    }
+    let mut tool_host = object
+        .get("toolHost")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or("tool host control must be an object")?;
+    if tool_host.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "leaseId"
+                | "sandboxAgentId"
+                | "deferSandbox"
+                | "ownerSessionId"
+                | "sendOptions"
+                | "renew"
+                | "pause"
+                | "kind"
+                | "id"
+                | "result"
+                | "generation"
+                | "remoteExecutionContext"
+        )
+    }) {
+        return Err("unsupported remote tool host control field".into());
+    }
+    if let Some(options) = tool_host.get_mut("sendOptions") {
+        let options = options
+            .as_object_mut()
+            .ok_or("tool host sendOptions must be an object")?;
+        if options.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "pluginTools"
+                    | "permissionMode"
+                    | "permissionRuleset"
+                    | "allowedTools"
+                    | "disallowedTools"
+                    | "toolResultReviewEnabled"
+            )
+        }) {
+            return Err("remote tool host supports plugin tools only; Host builtins and credentials are not accepted".into());
+        }
+        options.insert("builtinTools".into(), json!({}));
+        options.insert("planTools".into(), json!(false));
+    }
+    let lease_id = tool_host
+        .get("leaseId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let prefix = format!("remote-tool-host:{device_id}:");
+    if device_id.is_empty()
+        || !device_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+        || !lease_id.starts_with(&prefix)
+        || lease_id.len() > 256
+        || lease_id.len() <= prefix.len()
+    {
+        return Err("remote tool host lease belongs to another device".into());
+    }
+    let owner = tool_host
+        .get("ownerSessionId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if owner.is_empty() || owner.len() > 256 {
+        return Err("remote tool host requires an owner session".into());
+    }
+    if tool_host.get("sandboxAgentId").is_some_and(|value| {
+        !value
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 256)
+    }) {
+        return Err("Invalid sandbox agent identity".into());
+    }
+    if tool_host.get("deferSandbox").is_some_and(|value| {
+        !value.is_boolean()
+            || value == &Value::Bool(true) && !tool_host.contains_key("sandboxAgentId")
+    }) {
+        return Err("Invalid deferred sandbox tool host".into());
+    }
+    // Never accept caller-authored origin metadata.
+    tool_host.insert("remoteExecutionContext".into(), remote_context.clone());
+    let mut payload = build_feature_call_payload(json!({
+        "requestId": object.get("requestId"), "operation": operation,
+        "credentials": {}, "toolHost": tool_host,
+    }))?;
+    payload["remoteExecutionContext"] = remote_context;
+    Ok(payload)
+}
+
+pub async fn remote_tool_host_control_impl(
+    host: Arc<dyn SidecarHost>,
+    state: SidecarState,
+    request: Value,
+    device_id: &str,
+    remote_context: Value,
+) -> Result<(), String> {
+    let payload = build_remote_tool_host_payload(request, device_id, remote_context)?;
+    spawn_sidecar(host, state.clone()).await?;
+    state.write_command(&payload).await
+}
+
 /// Build the `plugin_tool_response` JSON line written to the sidecar stdin.
 /// Pure so it is unit-testable without a running sidecar.
 fn build_plugin_tool_response_payload(
@@ -899,6 +1032,81 @@ pub async fn agent_command_telemetry() -> Result<serde_json::Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deferred_remote_tools_require_a_sandbox_identity_and_keep_host_targets_private() {
+        let context = serde_json::json!({"originDeviceId":"device-a"});
+        let request = serde_json::json!({"requestId":"request-1", "operation":"tool-host-start", "credentials":{}, "toolHost":{"leaseId":"remote-tool-host:device-a:lease-1", "ownerSessionId":"chat-1", "sandboxAgentId":"unspawned-parent", "deferSandbox":true}});
+        let prepared =
+            super::build_remote_tool_host_payload(request.clone(), "device-a", context.clone())
+                .unwrap();
+        assert_eq!(prepared["toolHost"]["deferSandbox"], true);
+        for bad in [serde_json::json!("true"), serde_json::json!(0)] {
+            let mut input = request.clone();
+            input["toolHost"]["deferSandbox"] = bad;
+            assert!(
+                super::build_remote_tool_host_payload(input, "device-a", context.clone()).is_err()
+            );
+        }
+        let mut missing = request.clone();
+        missing["toolHost"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sandboxAgentId");
+        assert!(
+            super::build_remote_tool_host_payload(missing, "device-a", context.clone()).is_err()
+        );
+        for key in ["port", "host", "sandboxToolHostLeaseId"] {
+            let mut input = request.clone();
+            input["toolHost"][key] = serde_json::json!("forged");
+            assert!(
+                super::build_remote_tool_host_payload(input, "device-a", context.clone()).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn remote_tool_host_is_device_bound_and_operation_scoped() {
+        let context = serde_json::json!({"originDeviceId":"device-a"});
+        let request = serde_json::json!({"requestId":"request-1", "operation":"tool-host-start", "credentials":{}, "toolHost":{"leaseId":"remote-tool-host:device-a:lease-1", "ownerSessionId":"chat-1", "remoteExecutionContext":{"originDeviceId":"forged"}}});
+        let payload =
+            super::build_remote_tool_host_payload(request.clone(), "device-a", context.clone())
+                .unwrap();
+        assert_eq!(payload["remoteExecutionContext"], context);
+        assert_eq!(payload["toolHost"]["remoteExecutionContext"], context);
+        assert!(super::build_remote_tool_host_payload(
+            request.clone(),
+            "device-b",
+            context.clone()
+        )
+        .is_err());
+        let mut bad = request.clone();
+        bad["operation"] = serde_json::json!("language-generate");
+        assert!(super::build_remote_tool_host_payload(bad, "device-a", context.clone()).is_err());
+        let mut bad = request.clone();
+        bad["credentials"] = serde_json::json!({"apiKey":"secret"});
+        assert!(super::build_remote_tool_host_payload(bad, "device-a", context.clone()).is_err());
+        for key in [
+            "cwd",
+            "builtinTools",
+            "builtinProcessSandbox",
+            "providerCredentials",
+            "env",
+        ] {
+            let mut bad = request.clone();
+            bad["toolHost"]["sendOptions"] = json!({ (key): {} });
+            assert!(
+                super::build_remote_tool_host_payload(bad, "device-a", context.clone()).is_err()
+            );
+        }
+        let mut plugin = request.clone();
+        plugin["toolHost"]["sendOptions"] = json!({ "pluginTools": [] });
+        let payload = super::build_remote_tool_host_payload(plugin, "device-a", context).unwrap();
+        assert_eq!(
+            payload["toolHost"]["sendOptions"]["builtinTools"],
+            json!({})
+        );
+        assert_eq!(payload["toolHost"]["sendOptions"]["planTools"], false);
+    }
     use super::*;
 
     /// `claude_sidecar_status` answers this struct over the companion RPC, and

@@ -14,8 +14,12 @@
 
 use super::*;
 use crate::gateway::GatewayState;
+use std::sync::Arc;
 
 pub(super) const COMMANDS: &[&str] = &[
+    "agent_gateway_lease_prepare",
+    "agent_gateway_lease_renew",
+    "agent_gateway_lease_revoke",
     "gateway_status",
     "gateway_list_models",
     "gateway_provider_capabilities",
@@ -48,6 +52,98 @@ fn with_gateway<R>(
         ));
     };
     Ok(f(&gateway, "desktop"))
+}
+
+/// Bind a remote process's gateway environment to its authenticated task lease.
+/// Service callers retain the existing local gateway path.
+pub(super) async fn authorize_task_agent_control(
+    host: &super::super::dispatch_host::DispatchHost,
+    device: &str,
+    agent_id: &str,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let info = host
+        .exec_backend()
+        .get_info(agent_id)
+        .await
+        .map_err(RpcError::internal)?;
+    if info
+        .get("originDeviceId")
+        .and_then(Value::as_str)
+        .is_some_and(|owner| owner != device)
+    {
+        return Err(RpcError::forbidden(
+            "agent process belongs to another paired device",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_task_endpoints(
+    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
+    payload: &Value,
+    endpoint: &str,
+) -> Result<(), String> {
+    crate::gateway::task_lease::validate_task_endpoints(
+        &config.env,
+        &config.args,
+        payload,
+        endpoint,
+    )
+}
+
+pub(super) fn authorize_task_spawn(
+    state: &SharedState,
+    host: &super::super::dispatch_host::DispatchHost,
+    device: &str,
+    tenant: Option<&str>,
+    scope: Option<&str>,
+    config: &mut crate::external_agent::process::ExternalAgentSpawnConfig,
+) -> Result<
+    Option<cognia_external_agent::spawn_authority::GatewayAuthority>,
+    (StatusCode, Json<RpcError>),
+> {
+    if scope == Some("service") || !config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG") {
+        return Ok(None);
+    }
+    let mut payload: Value = serde_json::from_str(&config.env["COGNIA_GATEWAY_TASK_CONFIG"])
+        .map_err(|_| RpcError::validation_failed("invalid gateway task payload".into()))?;
+    let task = payload
+        .get("taskId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::validation_failed("gateway task id is missing".into()))?;
+    let secret = config
+        .env
+        .get("COGNIA_GATEWAY_TOKEN")
+        .ok_or_else(|| RpcError::forbidden("gateway task lease is missing"))?;
+    let tenant = tenant.ok_or_else(|| RpcError::forbidden("gateway task account is missing"))?;
+    with_gateway(state, host, |gateway, _| {
+        gateway.validate_task_secret(tenant, device, task, secret)
+    })?
+    .map_err(RpcError::forbidden)?;
+    let endpoint = with_gateway(state, host, |gateway, _| gateway.status().bound_port)?
+        .ok_or_else(|| RpcError::forbidden("gateway task listener is unavailable"))?;
+    validate_task_endpoints(config, &payload, &format!("http://127.0.0.1:{endpoint}/v1"))
+        .map_err(RpcError::forbidden)?;
+    let gateway = with_gateway(state, host, |gateway, _| gateway.clone())?;
+    let tenant = tenant.to_owned();
+    let device_owned = device.to_owned();
+    let task_owned = task.to_owned();
+    let secret = secret.clone();
+    let authority = cognia_external_agent::spawn_authority::GatewayAuthority {
+        port: endpoint,
+        device_id: Some(device.to_owned()),
+        task_id: task.to_owned(),
+        authorized: Arc::new(move || {
+            gateway
+                .validate_task_secret(&tenant, &device_owned, &task_owned, &secret)
+                .is_ok()
+        }),
+    };
+    payload["originDeviceId"] = Value::String(device.to_owned());
+    config
+        .env
+        .insert("COGNIA_GATEWAY_TASK_CONFIG".into(), payload.to_string());
+    Ok(Some(authority))
 }
 
 /// Everything the snapshot says a provider can do, from the gateway's point
@@ -160,6 +256,114 @@ pub(super) async fn dispatch(
     use tauri::Manager as _;
     let _ = (device_id, tenant_id, scope);
     match name {
+        "agent_gateway_lease_prepare" => {
+            let tenant = tenant_id.ok_or_else(|| {
+                RpcError::forbidden("gateway task requires an authenticated account")
+            })?;
+            let mut request: crate::gateway::task_lease::TaskLeaseRequest =
+                serde_json::from_value(args.get("request").cloned().unwrap_or(Value::Null))
+                    .map_err(|_| {
+                        RpcError::validation_failed("invalid gateway task request".into())
+                    })?;
+            let generation = with_gateway(state, host, |gateway, _| {
+                gateway.status().account_generation
+            })?;
+            request.upstream_client = Some(
+                crate::gateway::task_lease::validate_public_upstream(&request.provider.base_url)
+                    .await
+                    .map_err(RpcError::validation_failed)?,
+            );
+            let deny_list = Arc::clone(&state.deny_list);
+            let authority_tenant = tenant.to_owned();
+            let authority_device = device_id.to_owned();
+            request.authority = Some(Arc::new(move || {
+                !deny_list.is_revoked(&authority_tenant, &authority_device)
+                    && crate::companion_api::security_store::security_store().is_some_and(|store| {
+                        store
+                            .has_capability(&authority_tenant, &authority_device, "process.spawn")
+                            .unwrap_or(false)
+                    })
+            }));
+            let lease = with_gateway(state, host, |gateway, _| {
+                gateway.mint_task_lease(tenant, device_id, generation, request)
+            })?
+            .map_err(|_| {
+                RpcError::validation_failed(
+                    "invalid gateway task configuration or authority".into(),
+                )
+            })?;
+            let start = if let Some(services) = host.headless() {
+                if services.gateway.status().running {
+                    Ok(())
+                } else {
+                    services
+                        .gateway
+                        .start_for_task(
+                            Arc::new(crate::headless::gateway_host::HeadlessGatewayHost {
+                                event_bus: Arc::clone(&state.event_bus),
+                            }),
+                            &lease.ticket_id,
+                        )
+                        .await
+                }
+            } else {
+                let app = crate::companion_api::host::tauri_app(&state.renderer)
+                    .ok_or_else(|| no_gateway("gateway host unavailable"))?;
+                let gateway = app.state::<GatewayState>();
+                if gateway.status().running {
+                    Ok(())
+                } else {
+                    gateway
+                        .start_for_task(
+                            Arc::new(crate::gateway::host::TauriGatewayHost(app.clone())),
+                            &lease.ticket_id,
+                        )
+                        .await
+                }
+            };
+            let status = with_gateway(state, host, |gateway, _| gateway.status())?;
+            if start.is_err() && !status.running
+                || status.account_generation != generation
+                || !status.running
+            {
+                with_gateway(state, host, |gateway, _| {
+                    gateway.revoke_route_ticket(&lease.ticket_id)
+                })?;
+                return Err(no_gateway(
+                    "task gateway listener failed or account changed",
+                ));
+            }
+            let mut result =
+                serde_json::to_value(lease).map_err(|e| RpcError::internal(e.to_string()))?;
+            result["endpoint"] = Value::String(format!(
+                "http://127.0.0.1:{}/v1",
+                status
+                    .bound_port
+                    .ok_or_else(|| no_gateway("gateway port unavailable"))?
+            ));
+            Ok(result)
+        }
+        "agent_gateway_lease_renew" | "agent_gateway_lease_revoke" => {
+            let tenant = tenant_id.ok_or_else(|| {
+                RpcError::forbidden("gateway task requires an authenticated account")
+            })?;
+            let task: String = required(&args, "taskId")?;
+            let ticket: String = required(&args, "ticketId")?;
+            let generation: u64 = required(&args, "accountGeneration")?;
+            with_gateway(state, host, |gateway, _| {
+                gateway.control_task_lease(
+                    tenant,
+                    device_id,
+                    &task,
+                    &ticket,
+                    generation,
+                    name == "agent_gateway_lease_renew",
+                )
+            })?
+            .map(Value::Bool)
+            .map_err(RpcError::forbidden)
+        }
+
         "gateway_status" => with_gateway(state, host, |gateway, host_kind| {
             let status = gateway.status();
             let now = chrono::Utc::now().timestamp_millis();
@@ -262,11 +466,50 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn malformed_task_credentials_never_enter_rpc_diagnostics() {
+        let state = super::super::tests::test_state();
+        let result = dispatch("agent_gateway_lease_prepare", serde_json::json!({"request": {
+            "taskId":"task", "model":"model", "ingressProtocol":"openai-chat",
+            "provider":{"id":"provider","protocol":"openai","baseUrl":"https://api.example.com","enabled":"fake-secret-must-not-leak","apiKey":"fake-key"}
+        }}), &state, &headless_host(), "device", Some("tenant"), None).await;
+        let (_, Json(error)) = result.unwrap_err();
+        let message = serde_json::to_string(&error).unwrap();
+        assert!(message.contains("invalid gateway task request"));
+        assert!(!message.contains("fake-secret"));
+        assert!(!message.contains("fake-key"));
+    }
+
+    #[test]
+    fn task_launch_cannot_redirect_host_lease_credentials() {
+        let mut config: crate::external_agent::process::ExternalAgentSpawnConfig =
+            serde_json::from_value(
+                serde_json::json!({"id":"task", "command":"codex", "args":[], "env":{}}),
+            )
+            .unwrap();
+        let endpoint = "http://127.0.0.1:12345/v1";
+        let payload = serde_json::json!({"files":{"codex/config.toml":"[model_providers.cognia]\nbase_url = \"http://127.0.0.1:12345/v1\""}});
+        assert!(validate_task_endpoints(&config, &payload, endpoint).is_ok());
+        config
+            .env
+            .insert("OPENAI_BASE_URL".into(), "http://127.0.0.1:8317/v1".into());
+        assert!(validate_task_endpoints(&config, &payload, endpoint).is_err());
+        config.env.clear();
+        config.env.insert(
+            "CODEX_CONFIG".into(),
+            r#"{"model_providers":{"cognia":{"base_url":"https://elsewhere.test/v1"}}}"#.into(),
+        );
+        assert!(validate_task_endpoints(&config, &payload, endpoint).is_err());
+    }
+
     #[test]
     fn command_family_is_closed() {
         assert_eq!(
             COMMANDS,
             &[
+                "agent_gateway_lease_prepare",
+                "agent_gateway_lease_renew",
+                "agent_gateway_lease_revoke",
                 "gateway_status",
                 "gateway_list_models",
                 "gateway_provider_capabilities",

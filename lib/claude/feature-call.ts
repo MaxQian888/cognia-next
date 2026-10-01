@@ -74,6 +74,7 @@ function abortError(): DOMException {
 export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
   const pending = new Map<string, Pending>()
   let listener: (() => void) | Promise<() => void> | undefined
+  let disposed: Error | undefined
 
   function settle(event: FeatureCallEvent) {
     const entry = pending.get(event.requestId)
@@ -98,10 +99,12 @@ export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
   }
 
   async function ensureListener() {
+    if (disposed) throw disposed
     listener ??= deps.subscribe(SIDECAR_EVENT, (event) => {
       if (isFeatureCallEvent(event)) settle(event)
     })
     await listener
+    if (disposed) throw disposed
   }
 
   async function sendAbort(requestId: string) {
@@ -120,8 +123,11 @@ export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
     const onAbort = () => void sendAbort(requestId)
     abortSignal?.addEventListener("abort", onAbort, { once: true })
     try {
-      await deps.call("claude_feature_call", { request: { ...request, requestId } })
-      return await result
+      const [, value] = await Promise.all([
+        deps.call("claude_feature_call", { request: { ...request, requestId } }),
+        result,
+      ])
+      return value
     } catch (error) {
       pending.delete(requestId)
       throw error
@@ -215,7 +221,21 @@ export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
     }
   }
 
-  return { languageModel, embeddingModel, requestResult }
+  function dispose(error = new Error("Feature call Host disconnected")) {
+    if (disposed) return
+    disposed = error
+    for (const entry of pending.values()) {
+      if (entry.kind === "result") entry.reject(error)
+      else entry.controller.error(error)
+    }
+    pending.clear()
+    if (listener)
+      void Promise.resolve(listener)
+        .then((off) => off())
+        .catch(() => undefined)
+  }
+
+  return { languageModel, embeddingModel, requestResult, dispose }
 }
 
 const defaultClient = createSidecarFeatureCallClient({

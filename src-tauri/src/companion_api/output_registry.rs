@@ -267,6 +267,8 @@ mod tests {
         ("character_bind_twin", OutputShape::Opaque(RootType::Any)),
         ("skill_set_enabled", OutputShape::Opaque(RootType::Any)),
         ("plugin_set_enabled", OutputShape::Opaque(RootType::Any)),
+        ("plugin_cogset_activate", OutputShape::Scalar(ScalarShape::Null)),
+        ("plugin_install_origin_record", OutputShape::Scalar(ScalarShape::Null)),
         ("issue_apply_action", OutputShape::Declared(RootType::Object)),
         ("issue_create", OutputShape::Declared(RootType::Object)),
         ("mcp_set_enabled", OutputShape::Scalar(ScalarShape::Null)),

@@ -2,6 +2,7 @@ import type { TestContext } from "node:test"
 import type { ToolHostEvent, ToolHostOptions, ToolHostInput } from "./tool-host.ts"
 import test from "node:test"
 import assert from "node:assert/strict"
+import net from "node:net"
 import { setTimeout as delay } from "node:timers/promises"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
@@ -25,6 +26,304 @@ const options = {
     },
   ],
 }
+
+test("pending sandbox tools preserve their endpoint before any agent exists and revoke on close", async (t) => {
+  const calls: string[] = []
+  let registeredPort = 0
+  const bridgeId = "00000000-0000-4000-8000-000000000019"
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async (method, params) => {
+        calls.push(method)
+        if (method === "sandbox.toolHost.register") {
+          const request = params as Record<string, unknown>
+          assert.equal(request.agentId, "unspawned-parent")
+          assert.equal(request.ownerSessionId, identity.ownerSessionId)
+          assert.equal(request.originDeviceId, "paired-device")
+          registeredPort = Number(request.port)
+          return { bridgeId }
+        }
+        if (method === "sandbox.toolHost.renew") return { active: true }
+        if (method === "sandbox.toolHost.close") {
+          assert.equal((params as { bridgeId: string }).bridgeId, bridgeId)
+          return { closed: true }
+        }
+        throw new Error("No agent has been spawned")
+      },
+    },
+  })
+  t.after(() => host.close())
+  const input = {
+    ...identity,
+    sandboxAgentId: "unspawned-parent",
+    deferSandbox: true,
+    remoteExecutionContext: { originDeviceId: "paired-device" },
+    sendOptions: { ...options },
+  }
+  const first = await host.start(input)
+  assert.equal(first.sandboxToolHostLeaseId, bridgeId)
+  assert.equal(new URL(first.mcpServers[1]!.url).port, String(registeredPort))
+  const client = new Client({ name: "pending-sandbox", version: "1" })
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(first.mcpServers[1]!.url), {
+      requestInit: { headers: first.mcpServers[1]!.headers },
+    })
+  )
+  assert.deepEqual(
+    (await client.listTools()).tools.map((tool) => tool.name),
+    ["echo"]
+  )
+  await client.close()
+  await host.stop({ ...identity, pause: true })
+  const next = await host.start(input)
+  assert.equal(next.sandboxToolHostLeaseId, bridgeId)
+  assert.equal(next.mcpServers[1]!.url, first.mcpServers[1]!.url)
+  assert.equal(calls.filter((method) => method === "sandbox.toolHost.register").length, 1)
+  await host.stop(identity)
+  assert.equal(calls.filter((method) => method === "sandbox.toolHost.close").length, 1)
+})
+
+test("pending sandbox tools fail closed when registration fails or identity is absent", async () => {
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async () => {
+        throw new Error("Host authority revoked")
+      },
+    },
+  })
+  await assert.rejects(
+    host.start({
+      ...identity,
+      sandboxAgentId: "parent",
+      deferSandbox: true,
+      sendOptions: { ...options },
+    }),
+    /authority revoked/
+  )
+  await assert.rejects(
+    host.start({ ...identity, deferSandbox: true, sendOptions: { ...options } }),
+    /sandbox agent/
+  )
+  await host.close()
+})
+
+test("closing during pending registration revokes the late reference and cannot resurrect the lease", async () => {
+  let registered!: () => void
+  let finish!: (value: unknown) => void
+  const entered = new Promise<void>((resolve) => {
+    registered = resolve
+  })
+  const pending = new Promise<unknown>((resolve) => {
+    finish = resolve
+  })
+  const revoked: string[] = []
+  const bridgeId = "00000000-0000-4000-8000-000000000027"
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async (method, params) => {
+        if (method === "sandbox.toolHost.register") {
+          registered()
+          return pending
+        }
+        if (method === "sandbox.toolHost.close")
+          revoked.push((params as { bridgeId: string }).bridgeId)
+        return { closed: true }
+      },
+    },
+  })
+  const starting = host.start({
+    ...identity,
+    sandboxAgentId: "parent",
+    deferSandbox: true,
+    sendOptions: { ...options },
+  })
+  await entered
+  await host.stop(identity)
+  finish({ bridgeId })
+  await assert.rejects(starting, /closed while registering/)
+  assert.deepEqual(revoked, [bridgeId])
+  await assert.rejects(host.start({ ...identity, renew: true }), /expired/)
+  await host.close()
+})
+
+test("pending sandbox leases refuse revoked authority and a change to live-agent mode", async (t) => {
+  let live = true
+  let closed = 0
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async (method) => {
+        if (method === "sandbox.toolHost.register")
+          return { bridgeId: "00000000-0000-4000-8000-000000000033" }
+        if (method === "sandbox.toolHost.renew") return { active: live }
+        if (method === "sandbox.toolHost.close") closed++
+        return { closed: true }
+      },
+    },
+  })
+  t.after(() => host.close())
+  const input = {
+    ...identity,
+    sandboxAgentId: "parent",
+    deferSandbox: true,
+    sendOptions: { ...options },
+  }
+  await host.start(input)
+  await host.stop({ ...identity, pause: true })
+  live = false
+  await assert.rejects(host.start(input), /authority expired/)
+  assert.equal(closed, 1)
+  live = true
+  await host.start(input)
+  await host.stop({ ...identity, pause: true })
+  await assert.rejects(host.start({ ...input, deferSandbox: false }), /mode cannot change/)
+  assert.equal(closed, 2)
+})
+
+test("sandbox descriptor uses only its private bridge authority and keeps bearer and Origin checks", async (t) => {
+  let upstreamPort = 0
+  let sandboxPort = 0
+  let closed = false
+  const sockets = new Set<net.Socket>()
+  const proxy = net.createServer((client) => {
+    const upstream = net.connect(upstreamPort, "127.0.0.1")
+    for (const socket of [client, upstream]) {
+      sockets.add(socket)
+      socket.on("error", () => socket.destroy())
+      socket.on("close", () => sockets.delete(socket))
+    }
+    client.pipe(upstream).pipe(client)
+  })
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve))
+  sandboxPort = (proxy.address() as net.AddressInfo).port
+  const bridgeId = "00000000-0000-4000-8000-000000000007"
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async (method, params) => {
+        if (method === "sandbox.toolHost.open") {
+          const input = params as Record<string, unknown>
+          assert.equal(input.agentId, "sandbox-agent")
+          assert.equal(input.ownerSessionId, identity.ownerSessionId)
+          assert.equal(input.originDeviceId, "paired-device")
+          upstreamPort = input.port as number
+          return { bridgeId, port: sandboxPort }
+        }
+        if (method === "sandbox.toolHost.close") {
+          closed = true
+          return { closed: true }
+        }
+        return { active: true }
+      },
+    },
+  })
+  t.after(async () => {
+    await host.close()
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>((resolve) => proxy.close(() => resolve()))
+  })
+  const descriptor = await host.start({
+    ...identity,
+    sandboxAgentId: "sandbox-agent",
+    remoteExecutionContext: { originDeviceId: "paired-device" },
+    sendOptions: { ...options },
+  })
+  const endpoint = descriptor.mcpServers[1]!
+  assert.equal(new URL(endpoint.url).port, String(sandboxPort))
+  const client = new Client({ name: "sandbox-test", version: "1" })
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(endpoint.url), {
+      requestInit: { headers: endpoint.headers },
+    })
+  )
+  assert.deepEqual(
+    (await client.listTools()).tools.map((tool) => tool.name),
+    ["echo"]
+  )
+  assert.equal((await fetch(endpoint.url, { method: "POST" })).status, 403)
+  assert.equal(
+    (
+      await fetch(endpoint.url, {
+        method: "POST",
+        headers: { ...endpoint.headers, Origin: "https://evil.test" },
+      })
+    ).status,
+    403
+  )
+  await client.close()
+  await host.stop(identity)
+  assert.equal(closed, true)
+})
+
+test("sandbox bridge startup failure does not return a Host loopback fallback", async () => {
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async () => {
+        throw new Error("old bundle")
+      },
+    },
+  })
+  await assert.rejects(
+    host.start({ ...identity, sandboxAgentId: "agent", sendOptions: { ...options } }),
+    /old bundle/
+  )
+  await host.close()
+})
+
+test("a paused sandbox lease immediately rebinds after respawn without disturbing siblings", async (t) => {
+  let generation = 1
+  let running = true
+  const bridges = new Map<string, number>()
+  const closed: string[] = []
+  let next = 0
+  const host = createToolHostManager({
+    emit: () => {},
+    hostRpc: {
+      call: async (method, params) => {
+        const id = (params as { bridgeId: string }).bridgeId
+        if (method === "sandbox.toolHost.open") {
+          if (!running) throw new Error("Agent is not running")
+          const bridgeId = `00000000-0000-4000-8000-${String(++next).padStart(12, "0")}`
+          bridges.set(bridgeId, generation)
+          return { bridgeId, port: 34000 + next }
+        }
+        if (method === "sandbox.toolHost.renew")
+          return { active: running && bridges.get(id) === generation }
+        if (method === "sandbox.toolHost.close") {
+          closed.push(id)
+          bridges.delete(id)
+        }
+        return { closed: true }
+      },
+    },
+  })
+  t.after(() => host.close())
+  const input = { ...identity, sandboxAgentId: "agent", sendOptions: { ...options } }
+  const first = await host.start(input)
+  const siblingInput = {
+    ...input,
+    leaseId: `${identity.leaseId}-sibling`,
+    ownerSessionId: "sibling",
+  }
+  await host.start(siblingInput)
+  await host.stop({ ...identity, pause: true })
+  generation++
+  const replacement = await host.start(input)
+  assert.notEqual(first.mcpServers[1]!.url, replacement.mcpServers[1]!.url)
+  assert.equal(closed.length, 1)
+  assert.equal(bridges.size, 2)
+  await host.stop({ ...identity, pause: true })
+  const unchanged = await host.start(input)
+  assert.equal(unchanged.mcpServers[1]!.url, replacement.mcpServers[1]!.url)
+  await host.stop({ ...identity, pause: true })
+  running = false
+  await assert.rejects(host.start(input), /Agent is not running/)
+  assert.equal(bridges.size, 1, "failed restart must preserve its sibling lease")
+})
 async function setup(
   t: TestContext,
   configuration: Partial<ToolHostOptions> & { autoPreflight?: boolean } = {}
@@ -484,4 +783,15 @@ test("PreToolUse timeout fails closed and pause cancels the outstanding prefligh
     }).accepted,
     false
   )
+})
+
+test("remote tool-host lifecycle frames retain device targeting", async (t) => {
+  const frames: ToolHostEvent[] = []
+  const host = createToolHostManager({ emit: (event) => frames.push(event) })
+  t.after(() => host.close())
+  const remoteExecutionContext = { originDeviceId: "device-a", sessionId: "chat-owner" }
+  await host.start({ ...identity, remoteExecutionContext, sendOptions: options })
+  await host.stop({ ...identity })
+  assert.ok(frames.length > 0)
+  assert.ok(frames.every((frame) => frame.remoteExecutionContext === remoteExecutionContext))
 })

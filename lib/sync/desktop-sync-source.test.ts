@@ -33,6 +33,7 @@ jest.mock("@/stores/project/project-store", () => ({
 
 import {
   __resetInstalledForTests,
+  excludeLiveKeys,
   HEARTBEAT_FIRST_SYNC_WINDOW_MS,
   HEARTBEAT_PAGE_SIZE,
   installDesktopSyncSource,
@@ -784,6 +785,62 @@ describe("readDexieDelta", () => {
     expect((await db.plugins.get("private-owner"))?.storage).toBeDefined()
   })
 
+  it("does not tombstone a plugin that was deleted and re-put under the same id in one window", async () => {
+    const db = getDb()
+    await db.syncTombstones.bulkPut([
+      { table: "plugins", id: "reinstalled", deletedAt: 15 },
+      { table: "plugins", id: "uninstalled", deletedAt: 16 },
+    ])
+    await db.plugins.put({ id: "reinstalled", updatedAt: 20 } as never)
+
+    const delta = await readDexieDelta("plugins", 10)
+
+    expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["reinstalled"])
+    expect(delta.deleted_ids).toEqual(["uninstalled"])
+    expect(delta.deleted_ids).not.toContain("reinstalled")
+    expect(delta.next_since).toBe(20)
+  })
+
+  it("reads cogsets past the cursor with their tombstones, and the cogset state (ADR-0209)", async () => {
+    const db = getDb()
+    await db.pluginCogsets.clear()
+    await db.pluginCogsetState.clear()
+    await db.pluginCogsets.bulkPut([
+      {
+        id: "old",
+        name: "Old",
+        members: [],
+        source: { kind: "manual" },
+        createdAt: 1,
+        updatedAt: 5,
+      },
+      {
+        id: "new",
+        name: "New",
+        members: [],
+        source: { kind: "manual" },
+        createdAt: 1,
+        updatedAt: 30,
+      },
+    ])
+    await db.syncTombstones.put({ table: "pluginCogsets", id: "deleted", deletedAt: 25 })
+    await db.pluginCogsetState.put({
+      id: "host",
+      alwaysOn: ["core"],
+      appliedCogsetId: "new",
+      updatedAt: 40,
+    })
+
+    const cogsets = await readDexieDelta("pluginCogsets", 10)
+    expect(cogsets.rows.map((r) => (r as { id: string }).id)).toEqual(["new"])
+    expect(cogsets.deleted_ids).toEqual(["deleted"])
+    expect(cogsets.next_since).toBe(30)
+
+    const state = await readDexieDelta("pluginCogsetState", 10)
+    expect(state.rows).toEqual([expect.objectContaining({ id: "host", appliedCogsetId: "new" })])
+    await expect(readDexieDelta("pluginCogsetState", 40)).resolves.toMatchObject({ rows: [] })
+  })
+
   it("returns workflow runs whose start OR completion is past the cursor, cursored on max(startedAt, completedAt)", async () => {
     const db = getDb()
     await db.workflowRuns.bulkPut([
@@ -1145,6 +1202,41 @@ describe("readDexieDelta", () => {
 
   it("throws on an unknown table", async () => {
     await expect(readDexieDelta("unknown" as never, 0)).rejects.toThrow(/unknown sync table/)
+  })
+})
+
+describe("excludeLiveKeys", () => {
+  it("drops tombstoned ids whose row is in the same delta, keyed by id", () => {
+    expect(
+      excludeLiveKeys("plugins", [{ id: "back" }, { id: "fresh" }], ["back", "gone", "also-gone"])
+    ).toEqual(["gone", "also-gone"])
+  })
+
+  it("keys templateDefinitions by storageKey rather than id", () => {
+    const rows = [{ id: "def-1", storageKey: "pkg/def-1@2" }]
+    expect(excludeLiveKeys("templateDefinitions", rows, ["pkg/def-1@2", "def-1"])).toEqual([
+      "def-1",
+    ])
+  })
+
+  it("keys templatePackages by key rather than id", () => {
+    const rows = [{ id: "pkg-row", key: "acme/pack" }]
+    expect(excludeLiveKeys("templatePackages", rows, ["acme/pack", "pkg-row"])).toEqual(["pkg-row"])
+  })
+
+  it("returns the ids unchanged (as a copy) when the delta carries no rows", () => {
+    const deleted = ["a", "b"]
+    const result = excludeLiveKeys("sessions", [], deleted)
+    expect(result).toEqual(["a", "b"])
+    expect(result).not.toBe(deleted)
+  })
+
+  it("returns an empty list when nothing was deleted", () => {
+    expect(excludeLiveKeys("sessions", [{ id: "s1" }], [])).toEqual([])
+  })
+
+  it("ignores rows that are null or carry a non-string key", () => {
+    expect(excludeLiveKeys("plugins", [null, { id: 7 }, {}], ["7", "x"])).toEqual(["7", "x"])
   })
 })
 

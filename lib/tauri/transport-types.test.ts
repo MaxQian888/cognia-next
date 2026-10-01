@@ -36,3 +36,9 @@ it("keeps concrete transports on the asynchronous, idempotent public contract", 
     unsubscribe()
   }).not.toThrow()
 })
+
+it("keeps remote bootstrap deadline beyond the native initialization and cleanup cap", () => {
+  expect(transportCommandTimeoutMs("project_environment_execute")).toBe(3_620_000)
+  expect(transportCommandTimeoutMs("project_environment_execute")).toBeGreaterThan(3_605_000)
+  expect(transportCommandTimeoutMs("shell_exec")).toBe(30_000)
+})

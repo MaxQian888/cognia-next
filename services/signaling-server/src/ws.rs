@@ -37,7 +37,10 @@ use tracing::{debug, info, warn};
 
 use crate::{
     ip_limits::{extract_client_ip, AcquireOutcome, Acquired},
-    limits::{max_frame_bytes, LaneBuckets, DATA_MAX_FRAME_BYTES},
+    limits::{
+        max_frame_bytes, relay_quota_message, LaneBuckets, QuotaDecision, DATA_MAX_FRAME_BYTES,
+        RELAY_QUOTA_EXCEEDED_CODE,
+    },
     metrics::RejectReason,
     proto::{ClientFrame, PeerRole, PeerSnapshot, RelayLane, ServerFrame},
     room::{PeerHandle, PEER_OUTBOUND_BUFFER},
@@ -497,6 +500,33 @@ async fn handle_frame(
             };
             let fanout = others.len() as u64;
             let payload_bytes = payload.len() as u64;
+            if lane == RelayLane::Data {
+                // Egress is what the relay pays for, so the quota is charged
+                // per delivered copy. The signal lane is never charged: it is
+                // how the peers negotiate the DataChannel that stops the
+                // relaying.
+                let decision = state.registry.charge_relay(
+                    &rendezvous_id,
+                    payload_bytes.saturating_mul(fanout),
+                    now_ms() as f64,
+                );
+                if let QuotaDecision::Exceeded { retry_after_ms } = decision {
+                    warn!(
+                        target: "signaling",
+                        peer_id,
+                        rendezvous_id = %rendezvous_id,
+                        "relay quota exceeded"
+                    );
+                    state.metrics.frame_rejected(RejectReason::Quota);
+                    let _ = tx
+                        .send(ServerFrame::Error {
+                            code: RELAY_QUOTA_EXCEEDED_CODE.into(),
+                            message: relay_quota_message(retry_after_ms),
+                        })
+                        .await;
+                    return;
+                }
+            }
             for (target_peer_id, sender) in others {
                 if sender
                     .try_send(ServerFrame::Relay {
@@ -955,6 +985,44 @@ mod tests {
             state.metrics.frames_relayed_total.load(Ordering::Relaxed),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn data_lane_relay_stops_at_the_room_quota_and_the_signal_lane_does_not() {
+        let mut state = state();
+        state.registry = Arc::new(RoomRegistry::with_relay_quota(8));
+        let rid = room_id();
+        let mut other_rx = seed_peer(&state, &rid, PeerRole::Desktop);
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Mobile), &tx, &mut rooms).await;
+        let _ = other_rx.try_recv(); // PeerJoined
+        while rx.try_recv().is_ok() {} // Subscribed
+
+        let relay = |lane| ClientFrame::Relay {
+            rendezvous_id: rid.clone(),
+            payload: "AAAAAA".into(), // 6 bytes x 1 peer
+            lane,
+        };
+        handle_frame(&state, peer_id, relay(RelayLane::Data), &tx, &mut rooms).await;
+        assert!(matches!(other_rx.try_recv(), Ok(ServerFrame::Relay { .. })));
+
+        // 6 + 6 > 8: refused, not delivered, and the sender is told why.
+        handle_frame(&state, peer_id, relay(RelayLane::Data), &tx, &mut rooms).await;
+        assert!(other_rx.try_recv().is_err(), "over-quota frame must not be delivered");
+        match rx.try_recv().expect("quota error") {
+            ServerFrame::Error { code, message } => {
+                assert_eq!(code, RELAY_QUOTA_EXCEEDED_CODE);
+                assert!(message.contains("retry_after_ms="));
+            }
+            other => panic!("expected quota error, got {other:?}"),
+        }
+        assert_eq!(state.metrics.frames_rejected_quota.load(Ordering::Relaxed), 1);
+
+        // Signalling still flows, so the peers can still reach a DataChannel.
+        handle_frame(&state, peer_id, relay(RelayLane::Signal), &tx, &mut rooms).await;
+        assert!(matches!(other_rx.try_recv(), Ok(ServerFrame::Relay { .. })));
     }
 
     #[tokio::test]

@@ -4,6 +4,9 @@
  */
 
 import {
+  parseRelayQuotaRetryAfterMs,
+  RELAY_QUOTA_EXCEEDED_CODE,
+  RtcRelayQuotaError,
   RECONNECT_BACKOFF_MS,
   RtcCarrierError,
   TransportRtc,
@@ -1523,6 +1526,49 @@ describe("TransportRtc", () => {
       )
       await expect(call).resolves.toEqual([1])
       rtc.close()
+    })
+
+    it("withdraws the relay on a quota refusal, fails its waiting RPCs, and offers it back at reset", async () => {
+      jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+      try {
+        const { rtc, sig } = makeRtc()
+        const connect = rtc.connect()
+        await jest.advanceTimersByTimeAsync(5)
+        sig.emitEnvelope(hostHello())
+        await connect
+        const states: string[] = []
+        rtc.onStateChange((state) => states.push(state))
+
+        const waiting = rtc.call("sessions_list", { limit: 1 })
+        await jest.advanceTimersByTimeAsync(1)
+        sig.emitError(RELAY_QUOTA_EXCEEDED_CODE, "room relay quota exhausted; retry_after_ms=60000")
+
+        const error = await waiting.catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(RtcRelayQuotaError)
+        expect(error).toBeInstanceOf(RtcCarrierError)
+        // The session stays up for signalling; only the data carrier is gone.
+        expect(rtc.getState()).toBe("open")
+        expect(rtc.getCarrier()).toBeNull()
+        expect(rtc.getRelayQuotaResetAt()).not.toBeNull()
+        await expect(rtc.call("sessions_list")).rejects.toBeInstanceOf(RtcCarrierError)
+        const notified = states.length
+        expect(notified).toBeGreaterThan(0)
+
+        await jest.advanceTimersByTimeAsync(60_000)
+        expect(rtc.getCarrier()).toBe("relay")
+        expect(rtc.getRelayQuotaResetAt()).toBeNull()
+        expect(states.length).toBeGreaterThan(notified)
+        rtc.close()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("parses the reset time out of a quota refusal", () => {
+      expect(parseRelayQuotaRetryAfterMs("room relay quota exhausted; retry_after_ms=1234")).toBe(
+        1234
+      )
+      expect(parseRelayQuotaRetryAfterMs("room relay quota exhausted")).toBeNull()
     })
 
     it("delivers relayed events and acks them on the same carrier", async () => {

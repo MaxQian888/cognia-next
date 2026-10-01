@@ -48,6 +48,16 @@ pub(crate) fn shell_exec_with_env(
     timeout_secs: Option<u64>,
     environment: BTreeMap<String, String>,
 ) -> Result<ShellResult, String> {
+    shell_exec_with_env_timeout_cap(cmd, cwd, timeout_secs, environment, MAX_TIMEOUT_SECS)
+}
+
+pub(crate) fn shell_exec_with_env_timeout_cap(
+    cmd: String,
+    cwd: String,
+    timeout_secs: Option<u64>,
+    environment: BTreeMap<String, String>,
+    max_timeout_secs: u64,
+) -> Result<ShellResult, String> {
     let trimmed = cmd.trim();
     if trimmed.is_empty() {
         return Err("empty command".into());
@@ -58,7 +68,7 @@ pub(crate) fn shell_exec_with_env(
     }
     let timeout = timeout_secs
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
-        .clamp(1, MAX_TIMEOUT_SECS);
+        .clamp(1, max_timeout_secs);
 
     let mut command = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
@@ -76,33 +86,58 @@ pub(crate) fn shell_exec_with_env(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let mut child = command.spawn().map_err(|e| format!("spawn shell: {}", e))?;
 
-    let status = match child.wait_timeout(Duration::from_secs(timeout)) {
-        Ok(Some(s)) => Some(s),
+    // Drain both streams while the child runs: waiting before reading can
+    // deadlock an initialization command that fills either OS pipe.
+    let stdout_reader = child.stdout.take().map(|mut stream| {
+        std::thread::spawn(move || {
+            let mut output = String::new();
+            let truncated = read_capped(&mut stream, &mut output);
+            (output, truncated)
+        })
+    });
+    let stderr_reader = child.stderr.take().map(|mut stream| {
+        std::thread::spawn(move || {
+            let mut output = String::new();
+            let truncated = read_capped(&mut stream, &mut output);
+            (output, truncated)
+        })
+    });
+    let waited = child.wait_timeout(Duration::from_secs(timeout));
+    // Also reap background children after normal completion so inherited
+    // pipe handles cannot keep the reader threads alive indefinitely.
+    cognia_exec_sandbox::proc_group::kill_process_group(Some(child.id()));
+    let status = match waited {
+        Ok(Some(status)) => Some(status),
         Ok(None) => {
             let _ = child.kill();
             let _ = child.wait();
             None
         }
-        Err(e) => {
+        Err(error) => {
             let _ = child.kill();
-            return Err(format!("wait shell: {}", e));
+            let _ = child.wait();
+            if let Some(reader) = stdout_reader {
+                let _ = reader.join();
+            }
+            if let Some(reader) = stderr_reader {
+                let _ = reader.join();
+            }
+            return Err(format!("wait shell: {error}"));
         }
     };
-
-    let mut stdout_buf = String::new();
-    let mut stderr_buf = String::new();
-    let stdout_truncated = if let Some(mut s) = child.stdout.take() {
-        read_capped(&mut s, &mut stdout_buf)
-    } else {
-        false
-    };
-    let stderr_truncated = if let Some(mut s) = child.stderr.take() {
-        read_capped(&mut s, &mut stderr_buf)
-    } else {
-        false
-    };
+    let (stdout_buf, stdout_truncated) = stdout_reader
+        .map(|reader| reader.join().unwrap_or_default())
+        .unwrap_or_default();
+    let (stderr_buf, stderr_truncated) = stderr_reader
+        .map(|reader| reader.join().unwrap_or_default())
+        .unwrap_or_default();
 
     Ok(ShellResult {
         stdout: stdout_buf,
@@ -147,7 +182,11 @@ mod tests {
     use super::*;
 
     fn temp_cwd() -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("cognia-shell-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "cognia-shell-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
         let _ = std::fs::create_dir_all(&p);
         p
     }
@@ -169,6 +208,35 @@ mod tests {
         assert!(!res.timed_out);
         assert_eq!(res.exit_code, Some(0));
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn drains_large_output_without_waiting_for_timeout() {
+        let cwd = temp_cwd();
+        let result = shell_exec(
+            "yes x | head -c 200000; yes y | head -c 200000 >&2".into(),
+            cwd.to_string_lossy().into(),
+            Some(5),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert!(!result.timed_out);
+        assert!(result.stdout_truncated && result.stderr_truncated);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn timeout_closes_descendant_pipes() {
+        let started = std::time::Instant::now();
+        let result = shell_exec(
+            "sleep 30 & wait".into(),
+            std::env::temp_dir().to_string_lossy().into(),
+            Some(1),
+        )
+        .unwrap();
+        assert!(result.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

@@ -294,3 +294,37 @@ describe("sidecar MCP discovery wrapper", () => {
     )
   })
 })
+
+it("disposes in-flight feature calls even while their dispatch is pending", async () => {
+  const unsubscribe = jest.fn()
+  let dispatched: (() => void) | undefined
+  const started = new Promise<void>((resolve) => {
+    dispatched = resolve
+  })
+  const client = createSidecarFeatureCallClient({
+    randomUUID: () => "pending-disconnect",
+    subscribe: async () => unsubscribe,
+    call: async () => {
+      dispatched?.()
+      return new Promise(() => {})
+    },
+  })
+  const pending = client.requestResult({
+    operation: "tool-host-stop",
+    credentials: {},
+    toolHost: { leaseId: "lease", ownerSessionId: "chat" },
+  })
+  const rejected = expect(pending).rejects.toThrow("Host switched")
+  await started
+  client.dispose(new Error("Host switched"))
+  await rejected
+  await Promise.resolve()
+  expect(unsubscribe).toHaveBeenCalledTimes(1)
+  await expect(
+    client.requestResult({
+      operation: "tool-host-stop",
+      credentials: {},
+      toolHost: { leaseId: "lease", ownerSessionId: "chat" },
+    })
+  ).rejects.toThrow("Host switched")
+})

@@ -41,6 +41,8 @@
     },
     "agent": {
       "children": {
+        "tool_host": {},
+        "gateway_lease": {},
         "account_env": {},
         "api_key": {},
         "call_reservation": {},
@@ -658,6 +660,7 @@
     },
     "github": {
       "children": {
+        "runner": {},
         "workspace": {}
       }
     },
@@ -908,7 +911,9 @@
           }
         },
         "workspace_repo": {},
-        "workspace_repo_dir": {}
+        "workspace_repo_dir": {},
+        "cogset": {},
+        "install_origin": {}
       }
     },
     "process": {

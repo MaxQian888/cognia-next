@@ -151,6 +151,11 @@ pub async fn inject_runtime_env(cmd: &mut Command) {
 }
 
 pub async fn dispatch_runtime_rpc(method: &str, params: &Value) -> Result<Value, String> {
+    // Private child IPC only: no companion RPC or renderer command dispatches
+    // these methods. The trusted tool-host manager supplies its own listener.
+    if method.starts_with("sandbox.toolHost.") {
+        return dispatch_tool_host_bridge(method, params).await;
+    }
     // Session-store calls are routed FIRST and never reach the jobs dispatcher:
     // that one opens with `require_supervisor()?`, so on a host without
     // background jobs every session-store call would fail with a message about
@@ -162,8 +167,79 @@ pub async fn dispatch_runtime_rpc(method: &str, params: &Value) -> Result<Value,
     }
 }
 
+async fn dispatch_tool_host_bridge(method: &str, params: &Value) -> Result<Value, String> {
+    let runtime = cognia_companion::environment_pool::installed()
+        .and_then(|pool| pool.runtime)
+        .ok_or("Sandbox runtime is unavailable")?;
+    match method {
+        "sandbox.toolHost.open" | "sandbox.toolHost.register" => {
+            let mut request =
+                serde_json::from_value::<cognia_sandbox_pool::runtime::ToolHostService>(
+                    params.clone(),
+                )
+                .map_err(|_| "Invalid private tool-host bridge request")?;
+            let origin = request.origin_device_id.clone();
+            request.authorization = Some(std::sync::Arc::new(move || {
+                origin
+                    .as_deref()
+                    .is_none_or(cognia_companion::workspace_access::device_can_control)
+            }));
+            if method.ends_with(".register") {
+                let id = runtime
+                    .register_tool_host(request)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                return Ok(serde_json::json!({"bridgeId": id}));
+            }
+            let bridge = runtime
+                .open_tool_host(request)
+                .await
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(bridge).map_err(|error| error.to_string())
+        }
+        "sandbox.toolHost.renew" | "sandbox.toolHost.close" => {
+            let object = params.as_object().ok_or("Invalid private bridge control")?;
+            if object.len() != 1 {
+                return Err("Invalid private bridge control".into());
+            }
+            let id = object
+                .get("bridgeId")
+                .and_then(Value::as_str)
+                .filter(|id| id.len() == 36)
+                .ok_or("Invalid bridge identity")?;
+            if method.ends_with(".renew") {
+                Ok(serde_json::json!({"active":runtime.renew_tool_host(id)}))
+            } else {
+                runtime.close_tool_host(id);
+                Ok(serde_json::json!({"closed":true}))
+            }
+        }
+        _ => Err("Unsupported private tool-host bridge method".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn private_bridge_payload_cannot_choose_an_address_or_supply_host_authority() {
+        let request = serde_json::json!({"agentId":"agent","ownerSessionId":"chat","originDeviceId":null,"leaseId":"renderer-tool-host-fixture","generation":1,"port":12345});
+        assert!(
+            serde_json::from_value::<cognia_sandbox_pool::runtime::ToolHostService>(
+                request.clone()
+            )
+            .unwrap()
+            .authorization
+            .is_none()
+        );
+        for key in ["url", "host", "authorization"] {
+            let mut forged = request.clone();
+            forged[key] = serde_json::json!("127.0.0.1:22");
+            assert!(
+                serde_json::from_value::<cognia_sandbox_pool::runtime::ToolHostService>(forged)
+                    .is_err()
+            );
+        }
+    }
     #[test]
     fn host_rpc_routes_session_store_before_the_jobs_dispatcher() {
         assert!(

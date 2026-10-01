@@ -39,6 +39,10 @@
 //!   The selected provider is often a plugin that exists on one device only (laya runs in the
 //!   desktop Python host) and the endpoint key sits in that device's keyring.
 //!
+//! `languageMode` — device-local (never crosses the wire).
+//!   Following the operating system is a per-device choice; each device resolves its own
+//!   language.
+//!
 //! `lockScreen` — device-local (never crosses the wire).
 //!   Lock-screen preferences can reference wallpapers stored only on this device.
 //!

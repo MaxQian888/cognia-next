@@ -45,6 +45,42 @@ describe("syncAppSettings", () => {
     expect((await getDb().settings.get("singleton"))?.theme).toBe("dark")
   })
 
+  it("keeps a fresh phone in system mode when its first settings row comes from the host", async () => {
+    const languages = jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-CN"])
+    try {
+      await syncAppSettings(
+        makeTransport({
+          rows: [{ id: "singleton", language: "en", languageMode: "manual" } as never],
+          deleted_ids: [],
+          next_since: 7,
+        }),
+        { since: 0 }
+      )
+      expect(await getDb().settings.get("singleton")).toMatchObject({
+        language: "zh-CN",
+        languageMode: "system",
+      })
+    } finally {
+      languages.mockRestore()
+    }
+  })
+
+  it("preserves legacy manual mode while accepting a synchronized explicit locale", async () => {
+    await getDb().settings.put({ id: "singleton", language: "en" } as never)
+    await syncAppSettings(
+      makeTransport({
+        rows: [{ id: "singleton", language: "zh-CN", languageMode: "system" } as never],
+        deleted_ids: [],
+        next_since: 7,
+      }),
+      { since: 0 }
+    )
+    expect(await getDb().settings.get("singleton")).toMatchObject({
+      language: "zh-CN",
+      languageMode: "manual",
+    })
+  })
+
   it("merges only cross-platform fields, preserving device-local ones", async () => {
     await getDb().settings.put({
       id: "singleton",

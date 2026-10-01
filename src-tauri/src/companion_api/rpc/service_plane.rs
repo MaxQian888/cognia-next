@@ -157,6 +157,22 @@ pub(super) async fn dispatch(
     use tauri::Manager as _;
 
     let _ = (state, host, device_id, tenant_id, scope);
+    if matches!(
+        name,
+        "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status"
+    ) {
+        let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
+        super::gateway_plane::authorize_task_agent_control(host, device_id, &agent_id).await?;
+        if crate::companion_api::environment_pool::installed()
+            .and_then(|pool| pool.runtime)
+            .and_then(|runtime| runtime.agent_origin_allowed(&agent_id, device_id))
+            == Some(false)
+        {
+            return Err(RpcError::forbidden(
+                "Sandbox agent belongs to another device",
+            ));
+        }
+    }
     let result = match name {
         // ── Headless external-agent execution plane (ADR-0059 R11) ───────────
         // Service-scope only (gated above + in rpc_handler); every decision
@@ -164,8 +180,16 @@ pub(super) async fn dispatch(
         // SpawnPolicy preset allowlist before it touches the exec backend.
         "spawn_external_agent" => {
             let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
-            let config: crate::external_agent::process::ExternalAgentSpawnConfig =
+            let mut config: crate::external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
+            let gateway_authority = super::gateway_plane::authorize_task_spawn(
+                state,
+                host,
+                device_id,
+                tenant_id,
+                scope,
+                &mut config,
+            )?;
             let mut summary = serde_json::json!({
                 "agent_id": config.id,
                 "command": config.command,
@@ -211,10 +235,16 @@ pub(super) async fn dispatch(
                     let hardened = host
                         .harden_spawn_config(validated.config)
                         .map_err(RpcError::internal)?;
-                    crate::external_agent::exec_backend::spawn_with_events(
-                        host.exec_backend().as_ref(),
-                        host.agent_event_emitter(),
-                        hardened,
+                    cognia_external_agent::spawn_authority::with_remote_origin(
+                        device_id,
+                        cognia_external_agent::spawn_authority::with_gateway(
+                            gateway_authority,
+                            crate::external_agent::exec_backend::spawn_with_events(
+                                host.exec_backend().as_ref(),
+                                host.agent_event_emitter(),
+                                hardened,
+                            ),
+                        ),
                     )
                     .await
                     .map(Value::String)
@@ -260,9 +290,10 @@ pub(super) async fn dispatch(
 
         "external_agent_delete_gateway_task" => {
             let task_id: String = required_aliased(&args, "task_id", "taskId")?;
-            crate::external_agent::commands::delete_gateway_task_for_backend(
+            crate::external_agent::commands::delete_gateway_task_for_device(
                 &task_id,
                 host.exec_backend().as_ref(),
+                (scope != Some("service")).then_some(device_id),
             )
             .await
             .map_err(RpcError::internal)?;

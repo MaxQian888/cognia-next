@@ -15,6 +15,7 @@ use cognia_signaling_core::policy::{is_valid_allowed_origin, RoomLimits};
 
 use crate::{
     ip_limits::{default_max_conn_per_ip, trust_proxy_headers_from_env, IpLimits},
+    limits::{room_quota_bytes_from, DATA_LANE_ROOM_QUOTA_ENV},
     metrics::Metrics,
     room::RoomRegistry,
     ws::ws_upgrade,
@@ -60,6 +61,12 @@ pub fn room_limits_from_env() -> RoomLimits {
         max_peers,
         max_desktops,
     }
+}
+
+/// Per-room data-lane byte quota, from `SIGNALING_RELAY_ROOM_QUOTA_BYTES`
+/// (the same variable the Worker reads). Unset or invalid keeps the default.
+pub fn relay_room_quota_from_env() -> u64 {
+    room_quota_bytes_from(std::env::var(DATA_LANE_ROOM_QUOTA_ENV).ok().as_deref())
 }
 
 /// Parse the comma-separated `SIGNALING_ALLOWED_ORIGINS` env var into a list.
@@ -139,7 +146,7 @@ fn build_state(
     trust_proxy_headers: bool,
 ) -> AppState {
     AppState {
-        registry: Arc::new(RoomRegistry::new()),
+        registry: Arc::new(RoomRegistry::with_relay_quota(relay_room_quota_from_env())),
         metrics: Arc::new(Metrics::new()),
         ip_limits: IpLimits::new(max_conn_per_ip),
         room_limits,

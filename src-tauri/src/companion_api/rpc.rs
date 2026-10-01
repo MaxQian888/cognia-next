@@ -226,6 +226,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     // the state they need is the host's sidecar, which both hosts own.
     "claude_session_control",
     "agent_session_api",
+    "agent_tool_host_control",
+    "agent_gateway_lease_prepare",
+    "agent_gateway_lease_renew",
+    "agent_gateway_lease_revoke",
     "claude_sidecar_status",
     "claude_set_api_key",
     "claude_has_api_key",
@@ -332,6 +336,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "character_bind_twin",
     "skill_set_enabled",
     "plugin_set_enabled",
+    "plugin_cogset_activate",
+    "plugin_install_origin_record",
     // Issue tracker writes from a paired phone (spec 2026-09-06 D8), round-
     // tripped through desktop_writes_bridge like the Wave 2 commands above.
     "issue_apply_action",

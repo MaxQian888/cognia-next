@@ -42,6 +42,7 @@ pub struct Metrics {
     pub frames_rejected_role_taken: AtomicU64,
     pub frames_rejected_room_mismatch: AtomicU64,
     pub frames_rejected_origin: AtomicU64,
+    pub frames_rejected_quota: AtomicU64,
     /// `Instant` is sufficient because we only ever subtract from a single
     /// process — no clock-skew concerns vs. a wall clock here.
     pub started_at: Instant,
@@ -66,6 +67,7 @@ impl Metrics {
             frames_rejected_role_taken: AtomicU64::new(0),
             frames_rejected_room_mismatch: AtomicU64::new(0),
             frames_rejected_origin: AtomicU64::new(0),
+            frames_rejected_quota: AtomicU64::new(0),
             started_at: Instant::now(),
         }
     }
@@ -104,6 +106,7 @@ impl Metrics {
             RejectReason::RoleTaken => &self.frames_rejected_role_taken,
             RejectReason::RoomMismatch => &self.frames_rejected_room_mismatch,
             RejectReason::OriginRejected => &self.frames_rejected_origin,
+            RejectReason::Quota => &self.frames_rejected_quota,
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
@@ -128,6 +131,7 @@ impl Metrics {
         let rej_role_taken = self.frames_rejected_role_taken.load(Ordering::Relaxed);
         let rej_room_mismatch = self.frames_rejected_room_mismatch.load(Ordering::Relaxed);
         let rej_origin = self.frames_rejected_origin.load(Ordering::Relaxed);
+        let rej_quota = self.frames_rejected_quota.load(Ordering::Relaxed);
         let mut out = String::with_capacity(1024);
         out.push_str(
             "# HELP signaling_frames_in_total Inbound client frames accepted for processing.\n",
@@ -210,6 +214,10 @@ impl Metrics {
             "signaling_frames_rejected_total{{reason=\"origin\"}} {}\n",
             rej_origin
         ));
+        out.push_str(&format!(
+            "signaling_frames_rejected_total{{reason=\"quota\"}} {}\n",
+            rej_quota
+        ));
         out.push_str("# HELP signaling_rooms_active Currently-tracked rendezvous rooms.\n");
         out.push_str("# TYPE signaling_rooms_active gauge\n");
         out.push_str(&format!("signaling_rooms_active {}\n", registry.rooms));
@@ -251,6 +259,8 @@ pub enum RejectReason {
     RoomMismatch,
     /// WS upgrade carrying an `Origin` not on the configured allowlist.
     OriginRejected,
+    /// A data-lane frame the room's relay byte quota refused.
+    Quota,
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +305,7 @@ mod tests {
         m.frame_rejected(RejectReason::RoleTaken);
         m.frame_rejected(RejectReason::RoomMismatch);
         m.frame_rejected(RejectReason::OriginRejected);
+        m.frame_rejected(RejectReason::Quota);
         let s = m.render_prometheus(stats(2, 5));
         assert!(s.contains("signaling_frames_in_total 2\n"));
         assert!(s.contains("signaling_frames_relayed_total 3\n"));
@@ -308,6 +319,7 @@ mod tests {
         assert!(s.contains("signaling_frames_rejected_total{reason=\"role_taken\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"room_mismatch\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"origin\"} 1\n"));
+        assert!(s.contains("signaling_frames_rejected_total{reason=\"quota\"} 1\n"));
         assert!(s.contains("signaling_rooms_active 2\n"));
         assert!(s.contains("signaling_peers_active 5\n"));
     }

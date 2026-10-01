@@ -1143,6 +1143,51 @@ pub async fn install_converted_from_directory_inner<P: tauri::Runtime>(
     install_from_directory_blocking(app_handle, source_dir, None, generated_files)
 }
 
+/// Install a plugin a cogpack embeds (ADR-0209) from its files.
+///
+/// Blocking: the caller runs it on a blocking thread, since the tree is
+/// written once to a staging directory and then copied by the directory
+/// installer. `expected_plugin_id` is the member id the import review showed;
+/// a tree whose `plugin.json` names another plugin is refused before anything
+/// installed is touched, so an embedded member can never replace a different
+/// plugin.
+pub fn install_embedded_files_blocking<P: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<P>,
+    files: &[cognia_plugin_runtime::plugin_tree::EmbeddedPluginFile],
+    expected_plugin_id: &str,
+) -> anyhow::Result<(String, Vec<String>)> {
+    let staging = stage_embedded_files(files, expected_plugin_id)?;
+    install_from_directory_blocking(
+        app_handle,
+        &staging.path().to_string_lossy(),
+        Some(expected_plugin_id),
+        &BTreeMap::new(),
+    )
+}
+
+/// Write an embedded plugin's files into a fresh staging directory and check
+/// its manifest names `expected_plugin_id` before any of it is copied again.
+/// The directory installer repeats the check on the tree it registers; this
+/// one refuses an impostor before that copy and keeps the refusal testable
+/// without an `AppHandle`.
+fn stage_embedded_files(
+    files: &[cognia_plugin_runtime::plugin_tree::EmbeddedPluginFile],
+    expected_plugin_id: &str,
+) -> anyhow::Result<tempfile::TempDir> {
+    if expected_plugin_id.trim().is_empty() {
+        anyhow::bail!("an embedded plugin must name the plugin id it installs");
+    }
+    let staging = tempfile::Builder::new()
+        .prefix(".cognia-plugin-embedded-")
+        .tempdir()?;
+    cognia_plugin_runtime::plugin_tree::materialize_plugin_tree(files, staging.path())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (_, plugin_id) =
+        read_manifest_from_bytes(&std::fs::read(staging.path().join("plugin.json"))?)?;
+    validate_expected_plugin_id(Some(expected_plugin_id), &plugin_id)?;
+    Ok(staging)
+}
+
 /// Install a plugin directory, optionally overlaying a conversion result.
 ///
 /// `generated_files` is the TS converter's output for a foreign bundle (a
@@ -1756,6 +1801,45 @@ mod tests {
             "old"
         );
         assert!(!target.join("partial.txt").exists());
+    }
+
+    fn embedded(
+        path: &str,
+        bytes: &[u8],
+    ) -> cognia_plugin_runtime::plugin_tree::EmbeddedPluginFile {
+        use base64::Engine as _;
+        serde_json::from_value(serde_json::json!({
+            "path": path,
+            "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn stage_embedded_files_installs_only_the_reviewed_plugin_id() {
+        let manifest = br#"{"id":"notes","name":"Notes","version":"1.0.0"}"#;
+        let files = vec![
+            embedded("plugin.json", manifest),
+            embedded("dist/a.js", b"x"),
+        ];
+        let staged = stage_embedded_files(&files, "notes").unwrap();
+        assert!(staged.path().join("dist/a.js").is_file());
+
+        // A tree whose manifest is another plugin cannot replace that plugin.
+        let error = stage_embedded_files(&files, "other").unwrap_err();
+        assert!(
+            error.downcast_ref::<PluginIdMismatch>().is_some(),
+            "{error:#}"
+        );
+        assert!(stage_embedded_files(&files, " ").is_err());
+        // Path checks run first: nothing outside staging, no case twins.
+        let twin = vec![
+            embedded("plugin.json", manifest),
+            embedded("PLUGIN.JSON", manifest),
+        ];
+        assert!(stage_embedded_files(&twin, "notes").is_err());
+        let escape = vec![embedded("plugin.json", manifest), embedded("../x", b"x")];
+        assert!(stage_embedded_files(&escape, "notes").is_err());
     }
 
     #[test]

@@ -17,6 +17,9 @@ import { releaseDeviceAttachmentUploads } from "@/lib/db/session-attachment-uplo
 import { noteDeviceSeen } from "@/lib/companion/device-presence-registry"
 import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
+import { notify } from "@/lib/notifications/runtime"
 import { useAccountStore } from "@/stores/account/account-store"
 import type { DevicePlatform } from "@/types/mobile/paired-device"
 import type { RoomDescriptor } from "@/lib/signaling/crypto"
@@ -146,6 +149,53 @@ async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
   } catch (err) {
     // Dexie unavailable / closed during shutdown — non-fatal.
     console.warn("companion event-bridge: addPairedDevice failed", err)
+    return
+  }
+  await announceDevicePaired(payload)
+}
+
+/** Window in which a pairing is still news; older ones arrive only on replay. */
+export const PAIRING_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Tell this person that a device was paired with their Host.
+ *
+ * `companion://device-paired` reaches every paired client and the Host's own
+ * renderer (`ChannelAudience::Any`, default on). Mirroring it into
+ * `pairedDevices` alone meant nobody was told, which is the one thing a
+ * pairing someone else made must not be. Signal and Google both alert every
+ * other signed-in device for the same reason.
+ *
+ * Skipped on the device that was just paired (it would be announcing itself)
+ * and for pairings older than the event plane's replay window, which a
+ * reconnecting client receives again. The dedupe key makes a replay inside
+ * the window bump the existing row rather than add one.
+ */
+export async function announceDevicePaired(
+  payload: Pick<DevicePairedPayload, "device_id" | "label" | "platform" | "paired_at_ms">,
+  now: number = Date.now()
+): Promise<void> {
+  try {
+    const ownDeviceId = loadCompanionConfig()?.deviceId
+    if (ownDeviceId && ownDeviceId === payload.device_id) return
+    if (now - payload.paired_at_ms > PAIRING_ALERT_WINDOW_MS) return
+    const t = await getRuntimeTranslator("devices.pairingAlert")
+    await notify({
+      source: "system",
+      level: "warning",
+      title: t("title"),
+      body: t("body", {
+        label: payload.label || payload.device_id,
+        platform: normalizePlatform(payload.platform),
+      }),
+      href: "/devices",
+      dedupeKey: `device-paired:${payload.device_id}`,
+      sourceRef: { kind: "paired-device", id: payload.device_id },
+      directed: true,
+    })
+  } catch (err) {
+    // A failed alert must not undo the pairing row written above.
+    console.warn("companion event-bridge: pairing alert failed", err)
   }
 }
 

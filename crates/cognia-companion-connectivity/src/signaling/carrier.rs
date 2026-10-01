@@ -16,7 +16,7 @@
 //! The carrier never encrypts: keys live in the session loop with the rest of
 //! the peer crypto, and a channel of raw frames is all that crosses.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, RwLock};
@@ -54,6 +54,17 @@ pub struct DataCarrier {
     peer: RwLock<Option<Arc<PeerSession>>>,
     relay_tx: Option<mpsc::Sender<RelayFrame>>,
     relay_open: AtomicBool,
+    /// Epoch ms until which the rendezvous refuses this room's data lane
+    /// (`relay_quota_exceeded`). The relay stays open for signalling; data
+    /// sends fail fast instead of each earning its own refusal.
+    relay_paused_until_ms: AtomicU64,
+}
+
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl DataCarrier {
@@ -63,6 +74,7 @@ impl DataCarrier {
             peer: RwLock::new(Some(peer)),
             relay_tx: None,
             relay_open: AtomicBool::new(false),
+            relay_paused_until_ms: AtomicU64::new(0),
         })
     }
 
@@ -73,6 +85,7 @@ impl DataCarrier {
             peer: RwLock::new(None),
             relay_tx: Some(relay_tx),
             relay_open: AtomicBool::new(true),
+            relay_paused_until_ms: AtomicU64::new(0),
         })
     }
 
@@ -90,6 +103,19 @@ impl DataCarrier {
 
     pub fn relay_open(&self) -> bool {
         self.relay_tx.is_some() && self.relay_open.load(Ordering::Acquire)
+    }
+
+    /// Stop putting data on the relay for `retry_after_ms`: the room spent
+    /// its byte quota. `relay_open` is unchanged, since the session still
+    /// lives on the relay's signal lane.
+    pub fn pause_relay_data_for(&self, retry_after_ms: u64) {
+        self.relay_paused_until_ms
+            .store(epoch_ms().saturating_add(retry_after_ms), Ordering::Release);
+    }
+
+    /// Whether a data frame may go on the relay right now.
+    pub fn relay_data_usable(&self) -> bool {
+        self.relay_open() && epoch_ms() >= self.relay_paused_until_ms.load(Ordering::Acquire)
     }
 
     /// Whether *anything* can currently take a frame. Cheap: it does not
@@ -124,7 +150,7 @@ impl DataCarrier {
         let peer = self.peer.read().await.clone();
         if let Some(peer) = peer {
             match peer.send_bytes(bytes.clone()).await {
-                Err(PeerSendError::ChannelClosed) if self.relay_open() => {}
+                Err(PeerSendError::ChannelClosed) if self.relay_data_usable() => {}
                 other => return other,
             }
         }
@@ -141,11 +167,11 @@ impl DataCarrier {
         let peer = self.peer.read().await.clone();
         if let Some(peer) = peer {
             match peer.send_binary_resource(request_id, bytes).await {
-                Err(PeerSendError::ChannelClosed) if self.relay_open() => {}
+                Err(PeerSendError::ChannelClosed) if self.relay_data_usable() => {}
                 other => return other,
             }
         }
-        let Some(tx) = self.relay_tx.as_ref().filter(|_| self.relay_open()) else {
+        let Some(tx) = self.relay_tx.as_ref().filter(|_| self.relay_data_usable()) else {
             return Err(PeerSendError::ChannelClosed);
         };
         let chunk_bytes = RELAY_BINARY_RESOURCE_CHUNK_BYTES;
@@ -170,7 +196,7 @@ impl DataCarrier {
     }
 
     async fn send_relay_message(&self, bytes: Vec<u8>) -> Result<(), PeerSendError> {
-        let Some(tx) = self.relay_tx.as_ref().filter(|_| self.relay_open()) else {
+        let Some(tx) = self.relay_tx.as_ref().filter(|_| self.relay_data_usable()) else {
             return Err(PeerSendError::ChannelClosed);
         };
         let message_id = uuid::Uuid::new_v4().to_string();
@@ -250,5 +276,24 @@ mod tests {
             carrier.send_bytes(b"{}".to_vec()).await,
             Err(PeerSendError::ChannelClosed)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_quota_pause_refuses_relay_data_but_keeps_the_relay_open() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let carrier = DataCarrier::with_relay(tx);
+        carrier.pause_relay_data_for(60_000);
+        assert!(carrier.relay_open(), "the session still lives on the relay");
+        assert!(!carrier.relay_data_usable());
+        assert!(matches!(
+            carrier.send_bytes(b"{}".to_vec()).await,
+            Err(PeerSendError::ChannelClosed)
+        ));
+        assert!(rx.try_recv().is_err(), "nothing was queued for the relay");
+
+        carrier.pause_relay_data_for(0);
+        assert!(carrier.relay_data_usable());
+        carrier.send_bytes(b"{}".to_vec()).await.unwrap();
+        assert!(rx.try_recv().is_ok());
     }
 }

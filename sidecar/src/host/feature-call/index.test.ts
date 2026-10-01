@@ -669,3 +669,34 @@ test("feature tool-host operations own a scoped listener and shutdown closes it"
     "feature_call_aborted"
   )
 })
+
+test("remote tool host results and failures retain their originating device", async () => {
+  const events: FixtureEvent[] = []
+  const handler = createFeatureCallHandler({ emit: (event) => events.push(event as FixtureEvent) })
+  const remoteExecutionContext = { originDeviceId: "device-a", sessionId: "chat-1" }
+  await handler.call({
+    requestId: "remote-stop",
+    operation: "tool-host-stop",
+    remoteExecutionContext,
+    toolHost: {
+      leaseId: "remote-tool-host:device-a:fixture",
+      ownerSessionId: "chat-1",
+      remoteExecutionContext,
+    },
+  })
+  assert.equal(events[0]?.type, "feature_call_result")
+  assert.deepEqual(events[0]?.remoteExecutionContext, remoteExecutionContext)
+  await handler.call({
+    requestId: "remote-invalid",
+    operation: "tool-host-start",
+    remoteExecutionContext,
+    toolHost: {
+      leaseId: "remote-tool-host:device-a:fixture",
+      ownerSessionId: "chat-1",
+      remoteExecutionContext,
+    },
+  })
+  assert.equal(events[1]?.type, "feature_call_error")
+  assert.deepEqual(events[1]?.remoteExecutionContext, remoteExecutionContext)
+  await handler.close()
+})

@@ -11257,6 +11257,12 @@
     "plugin_runtime_snapshot": {
       "$ref": "#/$defs/PluginRuntimeSnapshot"
     },
+    "plugin_cogset_activate": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_install_origin_record": {
+      "$ref": "#/$defs/NullResult"
+    },
     "plugin_set_enabled": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -12438,6 +12444,47 @@
       "$ref": "#/$defs/NullResult"
     },
     "claude_session_control": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "agent_gateway_lease_prepare": {
+      "type": "object",
+      "required": [
+        "ticketId",
+        "secret",
+        "endpoint",
+        "accountGeneration",
+        "expiresAtMs",
+        "ownerAccountId"
+      ],
+      "properties": {
+        "ticketId": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "accountGeneration": {
+          "type": "integer"
+        },
+        "expiresAtMs": {
+          "type": "integer"
+        },
+        "ownerAccountId": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_gateway_lease_renew": {
+      "type": "boolean"
+    },
+    "agent_gateway_lease_revoke": {
+      "type": "boolean"
+    },
+    "agent_tool_host_control": {
       "$ref": "#/$defs/NullResult"
     },
     "agent_session_api": {

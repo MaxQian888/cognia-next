@@ -429,6 +429,86 @@
       },
       "additionalProperties": false
     },
+    "agent_gateway_lease_prepare": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": [
+            "taskId",
+            "provider",
+            "model",
+            "ingressProtocol"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "model": {
+              "type": "string"
+            },
+            "ingressProtocol": {
+              "enum": [
+                "openai-chat",
+                "openai-responses",
+                "anthropic"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_gateway_lease_renew": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "ticketId",
+        "accountGeneration"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "ticketId": {
+          "type": "string"
+        },
+        "accountGeneration": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_gateway_lease_revoke": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "ticketId",
+        "accountGeneration"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "ticketId": {
+          "type": "string"
+        },
+        "accountGeneration": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "agent_interrupt": {
       "type": "object",
       "required": [
@@ -686,6 +766,62 @@
         "taskId": {
           "type": "string",
           "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_tool_host_control": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": [
+            "requestId",
+            "operation",
+            "toolHost"
+          ],
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "tool-host-start",
+                "tool-host-stop",
+                "tool-host-reply"
+              ]
+            },
+            "credentials": {
+              "type": "object",
+              "additionalProperties": false
+            },
+            "toolHost": {
+              "type": "object",
+              "required": [
+                "leaseId",
+                "ownerSessionId"
+              ],
+              "properties": {
+                "leaseId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "ownerSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -7458,6 +7594,135 @@
       },
       "additionalProperties": false
     },
+    "github_runner_cancel": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    "github_runner_create": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": [
+            "repository",
+            "workflowRef",
+            "hostImage",
+            "agentBundleImage",
+            "developmentImage",
+            "signalingUrl",
+            "label",
+            "lifetimeMinutes"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workflowRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hostImage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "agentBundleImage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "developmentImage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "signalingUrl": {
+              "type": "string",
+              "minLength": 1
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lifetimeMinutes": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 330
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "github_runner_list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "github_runner_pairing": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    "github_runner_preflight": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": [
+            "repository",
+            "workflowRef"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workflowRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "github_runner_refresh": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
     "github_workspace_clone": {
       "type": "object",
       "required": [
@@ -9437,6 +9702,18 @@
       },
       "additionalProperties": false
     },
+    "plugin_cogset_activate": {
+      "type": "object",
+      "required": [
+        "cogsetId"
+      ],
+      "properties": {
+        "cogsetId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "plugin_commit_staged_update": {
       "type": "object",
       "required": [
@@ -9584,6 +9861,75 @@
         "deferCommit": {
           "type": "boolean",
           "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_install_origin_record": {
+      "type": "object",
+      "required": [
+        "record"
+      ],
+      "properties": {
+        "record": {
+          "type": "object",
+          "required": [
+            "pluginId",
+            "version",
+            "origin",
+            "recordedAt"
+          ],
+          "properties": {
+            "pluginId": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "origin": {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "builtin",
+                    "github",
+                    "git",
+                    "registry",
+                    "url",
+                    "openvsx",
+                    "local"
+                  ]
+                }
+              }
+            },
+            "viaCogpack": {
+              "type": "object",
+              "required": [
+                "cogpackId",
+                "version",
+                "fingerprint"
+              ],
+              "properties": {
+                "cogpackId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "fingerprint": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "recordedAt": {
+              "type": "number"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -11927,6 +12273,8 @@
             "workflowRuns",
             "twinProfile",
             "plugins",
+            "pluginCogsets",
+            "pluginCogsetState",
             "adapterInstances",
             "settings",
             "conversationOverrides",
