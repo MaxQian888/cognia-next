@@ -8,7 +8,7 @@ The agent CLIs and `cognia-sandboxd`, packaged to be injected into whatever imag
 /opt/cognia/bundle-manifest.json   release tag, runtimes, libc and commands per runtime (per architecture)
 /opt/cognia/bin/cognia-sandboxd    static musl; also the image entrypoint
 /opt/cognia/common/git/            static, relocatable git (RUNTIME_PREFIX), https via a static libcurl
-/opt/cognia/common/bin/{git,rg}    reached on PATH from any image
+/opt/cognia/common/bin/{git,rg,cognia-bootstrap}    reached on PATH from any image
 /opt/cognia/certs/ca-bundle.pem    for images without a CA store
 /opt/cognia/<libc>/node/           Node; on musl with its own loader, libstdc++ and libgcc_s
 /opt/cognia/<libc>/lib/agents/     the npm tree (npm ci from npm/package-lock.json)
@@ -82,3 +82,12 @@ The `agent-bundle` job in `.github/workflows/images.yml` does the following:
 - runs `smoke.sh` against `debian:bookworm-slim`, `python:3.12-slim`, `alpine:3.22` and `busybox:uclibc`, plus a non-root refusal case, on both architectures.
 
 Inside the image build, each libc stage runs every command once. The `assemble` stage then installs every tree with `cognia-sandboxd` itself, so a broken symlink or special file fails the build.
+
+The core stage includes the static `cognia-bootstrap` executable before a Node
+or libc-specific Agent runtime is installed. A user image needs `/bin/sh`.
+Run `cognia-bootstrap init --config-env COGNIA_BOOTSTRAP_CONFIG` from a configured
+lifecycle command, or use `init --then -- PROGRAM ARG...` to start the full
+Agent after fresh-shell readiness checks pass. Provider credentials are process
+variables supplied by the environment secret mechanism; never include values in
+runtime configuration. See [the standalone contract](../../crates/cognia-bootstrap-agent/README.md).
+The supervisor's fixed image compatibility and admission probes still run first.

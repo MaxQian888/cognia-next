@@ -53,6 +53,8 @@ import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
  * arrangement `spawn-reclaim.ts` uses for in-flight spawn ids.
  */
 const current = new Map<string, SandboxPlacement>()
+type ToolHostGroup = { base: SandboxPlacement; counts: Map<string, number> }
+let toolHostGroups = new WeakMap<SandboxPlacement, ToolHostGroup>()
 
 /**
  * The spec digest each process id was last spawned with; `null` for a spawn
@@ -87,6 +89,46 @@ export function spawnPlacementFor(agentId: string): SandboxPlacement | undefined
   return current.get(agentId)
 }
 
+/** Attach a turn's opaque service leases without changing its selected environment. */
+export function acquireSpawnToolHostLeases(
+  agentId: string,
+  leaseIds: readonly string[]
+): () => void {
+  const selected = current.get(agentId)
+  if (!selected) throw new Error("Sandbox plugin leases require a placed environment")
+  const group = toolHostGroups.get(selected) ?? {
+    base: selected,
+    counts: new Map<string, number>(),
+  }
+  const acquiredIds = [...new Set(leaseIds)]
+  for (const id of acquiredIds) group.counts.set(id, (group.counts.get(id) ?? 0) + 1)
+  const publish = () => {
+    const overlay = {
+      ...group.base,
+      hostedToolHostLeaseIds: [
+        ...new Set([...(group.base.hostedToolHostLeaseIds ?? []), ...group.counts.keys()]),
+      ],
+    }
+    toolHostGroups.set(overlay, group)
+    current.set(agentId, overlay)
+  }
+  publish()
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    for (const id of acquiredIds) {
+      const count = group.counts.get(id) ?? 0
+      if (count <= 1) group.counts.delete(id)
+      else group.counts.set(id, count - 1)
+    }
+    const active = current.get(agentId)
+    if (!active || toolHostGroups.get(active) !== group) return
+    if (group.counts.size) publish()
+    else current.set(agentId, group.base)
+  }
+}
+
 /**
  * The spec digest the process `processId` was last spawned with.
  *
@@ -107,6 +149,7 @@ export function pendingSpawnPlacementIds(): string[] {
 export function __resetSpawnPlacementsForTests(): void {
   current.clear()
   spawned.clear()
+  toolHostGroups = new WeakMap()
 }
 
 /**

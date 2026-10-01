@@ -44,6 +44,8 @@ import {
 } from "@/lib/workspace/capability-overlay"
 import { useProjectStore } from "@/stores/project/project-store"
 
+import { WorkspaceCogsetBinding } from "./workspace-cogset-binding"
+
 const STATES: WorkspaceCapabilityState[] = ["inherit", "on", "off"]
 
 interface CapabilityRow {
@@ -220,11 +222,13 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
         onSet={setState}
       />
 
+      <WorkspaceCogsetBinding workspaceId={workspaceId} />
+
       {/*
         Deliberately a statement, not a disabled control. `plugins.enabled` is
         the runtime's loaded state rather than a preference, so there is nothing
-        here to switch — and a greyed-out row would read as "coming soon" when
-        the honest answer is "this one is machine-wide on purpose".
+        here to switch plugin by plugin. What a workspace can choose is a whole
+        cogset (ADR-0209), above, which the host reconciles to.
       */}
       <p
         className="text-xs text-muted-foreground"

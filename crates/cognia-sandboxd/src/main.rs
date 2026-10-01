@@ -43,6 +43,29 @@ enum StageArg {
 #[derive(Subcommand)]
 enum Mode {
     #[cfg(unix)]
+    /// Private Host-bound service relay; requires protocol support on the Host.
+    BridgeService {
+        #[arg(long)]
+        gateway_nonce: Option<String>,
+        #[arg(long)]
+        listen_port: Option<u16>,
+    },
+    #[cfg(unix)]
+    /// Complete a second adoption of an existing private service bridge.
+    PublishGatewayReady {
+        #[arg(long)]
+        nonce: String,
+        #[arg(long)]
+        port: u16,
+    },
+    /// Delete one stopped task's retained state; no caller-controlled paths.
+    DeleteGatewayTask {
+        #[arg(long)]
+        task_id: String,
+        #[arg(long)]
+        device_id: Option<String>,
+    },
+    #[cfg(unix)]
     /// Keep one workspace container ready for concurrent agent sessions.
     Serve {
         #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
@@ -176,6 +199,51 @@ enum Mode {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        #[cfg(unix)]
+        Mode::PublishGatewayReady { nonce, port } => {
+            match cognia_sandboxd::gateway_task::sandbox::publish(&nonce, port) {
+                Ok(file) => {
+                    file.persist();
+                    ExitCode::SUCCESS
+                }
+                Err(error) => fail(error, 1),
+            }
+        }
+        Mode::DeleteGatewayTask { task_id, device_id } => {
+            match cognia_sandboxd::gateway_task::delete_task_for_device(
+                &task_id,
+                Path::new("/run/cognia-agent-task-state"),
+                device_id.as_deref(),
+            ) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => fail(error, 1),
+            }
+        }
+        #[cfg(unix)]
+        Mode::BridgeService {
+            gateway_nonce,
+            listen_port,
+        } => {
+            use std::os::fd::{AsFd, OwnedFd};
+            let result = (|| -> std::io::Result<()> {
+                let input: OwnedFd = std::io::stdin().as_fd().try_clone_to_owned()?;
+                let output: OwnedFd = std::io::stdout().as_fd().try_clone_to_owned()?;
+                cognia_sandboxd::service_bridge::run_gateway(
+                    input,
+                    output,
+                    std::time::Duration::from_secs(60),
+                    gateway_nonce.as_deref(),
+                    listen_port,
+                )
+            })();
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("service bridge failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         #[cfg(unix)]
         Mode::Serve {
             socket,

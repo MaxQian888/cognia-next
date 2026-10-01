@@ -48,7 +48,10 @@ fn exec_spec(container_id: &str, args: &[&str]) -> RunnerExecSpec {
     }
 }
 
-async fn control(api: &Arc<dyn SandboxDockerApi>, spec: RunnerExecSpec) -> Result<Vec<u8>, String> {
+pub(super) async fn control(
+    api: &Arc<dyn SandboxDockerApi>,
+    spec: RunnerExecSpec,
+) -> Result<Vec<u8>, String> {
     tokio::time::timeout(Duration::from_secs(10), async {
         let mut running = api.exec_runtime(spec).await?;
         drop(running.stdin);
@@ -355,6 +358,7 @@ impl DockerSandboxBackend {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        self.remember_retained_task(config, &container_id, environment)?;
         let session = sha256_hex(format!("{}:{}", config.id, default_instance_id()).as_bytes());
         let mut request = exec_spec(
             &container_id,

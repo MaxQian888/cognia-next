@@ -167,7 +167,7 @@ pub fn run(options: InitOptions) -> Result<i32, InitError> {
 /// The lifecycle and agent share one signal subscription: there is no gap
 /// between preparation phases during which PID 1 can lose a cancellation.
 pub fn run_with_runtime(
-    options: InitOptions,
+    mut options: InitOptions,
     runtime: Option<&RuntimeConfigV1>,
 ) -> Result<i32, InitError> {
     if options.argv.is_empty() {
@@ -180,6 +180,30 @@ pub fn run_with_runtime(
     let mut watched: Vec<i32> = FORWARDED_SIGNALS.to_vec();
     watched.push(SIGCHLD);
     let mut signals = Signals::new(&watched).map_err(InitError::Signals)?;
+    let mut env = options
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let mut argv = options
+        .argv
+        .iter()
+        .map(|v| v.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let _task_files = crate::gateway_task::sandbox::initialize(&mut env, &mut argv, || {
+        signals.pending().any(|signal| signal != SIGCHLD)
+    })
+    .map_err(|error| InitError::Output(io::Error::other(error)))?;
+    if let Some(task_files) = &_task_files {
+        if let Some(user) = options.user.as_ref() {
+            task_files
+                .assign_owner(&env, user.uid, user.gid)
+                .map_err(|error| InitError::Output(io::Error::other(error)))?;
+        }
+    }
+    options.env = env.into_iter().collect();
+    options.argv = argv.into_iter().map(OsString::from).collect();
+
     if let Some(runtime) = runtime {
         for phase in &runtime.lifecycle_phases {
             if let Some(command) = runtime.lifecycle_commands.get(*phase) {

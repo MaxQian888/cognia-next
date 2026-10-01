@@ -1,5 +1,6 @@
 import {
   __resetSpawnPlacementsForTests,
+  acquireSpawnToolHostLeases,
   clearSpawnPlacement,
   pendingSpawnPlacementIds,
   registerSpawnPlacement,
@@ -37,6 +38,36 @@ const sandboxOf = (args: Record<string, unknown>) =>
 
 beforeEach(() => {
   __resetSpawnPlacementsForTests()
+})
+
+describe("turn-owned plugin leases", () => {
+  it("keeps concurrent sessions attached and restores the selected placement after both end", () => {
+    const selected = placement()
+    registerSpawnPlacement("agent", selected)
+    const first = acquireSpawnToolHostLeases("agent", ["shared", "first"])
+    const second = acquireSpawnToolHostLeases("agent", ["shared", "second"])
+    first()
+    first()
+    expect(spawnPlacementFor("agent")?.hostedToolHostLeaseIds).toEqual(["shared", "second"])
+    expect(
+      sandboxOf(withSpawnPlacement({ config: { id: "agent:session" } }))?.hostedToolHostLeaseIds
+    ).toEqual(["shared", "second"])
+    second()
+    expect(spawnPlacementFor("agent")).toBe(selected)
+  })
+
+  it.each([true, false])(
+    "does not restore an environment after replacement or removal (%s)",
+    (replace) => {
+      registerSpawnPlacement("agent", placement())
+      const release = acquireSpawnToolHostLeases("agent", ["old"])
+      const next = placement("next")
+      if (replace) registerSpawnPlacement("agent", next)
+      else clearSpawnPlacement("agent")
+      release()
+      expect(spawnPlacementFor("agent")).toBe(replace ? next : undefined)
+    }
+  )
 })
 
 describe("the current placement", () => {

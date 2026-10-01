@@ -1,5 +1,16 @@
 import type { GatewayRoutingSnapshot } from "@/types/gateway"
 
+const remoteMock = jest.fn()
+const remoteAcquireMock = jest.fn()
+const accountListeners = new Set<(next: typeof accountState, prior: typeof accountState) => void>()
+const settingsListeners = new Set<
+  (next: typeof settingsState, prior: typeof settingsState) => void
+>()
+jest.mock("@/lib/tauri/transport-routing", () => ({ getActiveRemoteTransport: () => remoteMock() }))
+jest.mock("./remote-task-lease", () => ({
+  captureRemoteGatewayTarget: () => ({ target: {}, assertCurrent: jest.fn() }),
+  acquireRemoteTaskLease: (...args: unknown[]) => remoteAcquireMock(...args),
+}))
 const flagMock = jest.fn()
 jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
   isAgentExecutionFlagEnabled: (...args: unknown[]) => flagMock(...args),
@@ -40,10 +51,28 @@ const settingsState = {
     routingConfig: { strategy: "difficulty", maxFallbackAttempts: 2 },
   },
 }
-jest.mock("@/stores/settings", () => ({ useSettingsStore: { getState: () => settingsState } }))
-const accountState = { unlockedAccountId: "local-a" as string | null }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => settingsState,
+    subscribe: (listener: (next: typeof settingsState, prior: typeof settingsState) => void) => {
+      settingsListeners.add(listener)
+      return () => settingsListeners.delete(listener)
+    },
+  },
+}))
+const accountState = {
+  unlockedAccountId: "local-a" as string | null,
+  locked: false,
+  activeAccountId: "local-a",
+}
 jest.mock("@/stores/account/account-store", () => ({
-  useAccountStore: { getState: () => accountState },
+  useAccountStore: {
+    getState: () => accountState,
+    subscribe: (listener: (next: typeof accountState, prior: typeof accountState) => void) => {
+      accountListeners.add(listener)
+      return () => accountListeners.delete(listener)
+    },
+  },
 }))
 const activeAccountMock = jest.fn()
 jest.mock("@/lib/subscription/core/transport", () => ({
@@ -95,6 +124,9 @@ const INPUT = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  remoteMock.mockReturnValue(null)
+  accountListeners.clear()
+  settingsListeners.clear()
   flagMock.mockReturnValue(true)
   statusMock.mockResolvedValue({ running: true, boundPort: 8317 })
   buildSnapshotMock.mockReturnValue(snapshot())
@@ -528,5 +560,104 @@ describe("required external agent gateway leases", () => {
       modelId: "family:model",
     })
     expect(mintMock.mock.calls[0][0].candidates[0].modelId).toBe("family:model")
+  })
+})
+
+describe("remote task account authority", () => {
+  it("retains desktop owner and immediately invalidates account ABA without publishing a Host snapshot", async () => {
+    remoteMock.mockReturnValue({})
+    const invalidated = jest.fn()
+    remoteAcquireMock.mockImplementation(async (options) => {
+      options.assertCurrent()
+      options.subscribeAuthority(invalidated)
+      return {
+        endpoint: "http://127.0.0.1:9876/v1",
+        ticketId: "fake-ticket",
+        secret: "fake-secret",
+        ownerAccountId: null,
+        revoke: async () => options.onDisposed(),
+      }
+    })
+    const route = await prepareExternalAgentGatewayRoute({
+      sessionId: "remote-task",
+      providerId: "anthropic",
+      modelId: "claude-opus-5",
+    })
+    expect(route.ownerAccountId).toBe("local-a")
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(statusMock).not.toHaveBeenCalled()
+    const before = { ...accountState }
+    accountListeners.forEach((listener) =>
+      listener({ ...before, locked: true, unlockedAccountId: null }, before)
+    )
+    accountListeners.forEach((listener) =>
+      listener(before, { ...before, locked: true, unlockedAccountId: null })
+    )
+    expect(invalidated).toHaveBeenCalledTimes(2)
+    expect(remoteAcquireMock.mock.calls[0][0].assertCurrent).toThrow(
+      "account or model settings changed"
+    )
+    await route.revoke?.()
+    expect(accountListeners.size).toBe(0)
+    expect(settingsListeners.size).toBe(0)
+  })
+  it("keeps the lease through unrelated settings writes but revokes on a route input change", async () => {
+    remoteMock.mockReturnValue({})
+    const invalidated = jest.fn()
+    remoteAcquireMock.mockImplementation(async (options) => {
+      options.subscribeAuthority(invalidated)
+      return {
+        endpoint: "http://127.0.0.1:9876/v1",
+        ticketId: "fake-ticket",
+        secret: "fake-secret",
+        ownerAccountId: null,
+        revoke: async () => options.onDisposed(),
+      }
+    })
+    const original = settingsState.settings
+    try {
+      const route = await prepareExternalAgentGatewayRoute({
+        sessionId: "remote-task",
+        providerId: "anthropic",
+        modelId: "claude-opus-5",
+      })
+      const prior = { settings: original }
+      // A theme or usage-stats write replaces the settings object only.
+      settingsState.settings = { ...original, theme: "dark" } as typeof original
+      settingsListeners.forEach((listener) => listener({ ...settingsState }, prior))
+      expect(invalidated).not.toHaveBeenCalled()
+      expect(remoteAcquireMock.mock.calls[0][0].assertCurrent).not.toThrow()
+      // The selected provider's credential is what the lease was built from.
+      settingsState.settings = {
+        ...original,
+        providerSettings: { anthropic: { providerId: "anthropic", apiKey: "rotated-key" } },
+      }
+      settingsListeners.forEach((listener) => listener({ ...settingsState }, prior))
+      expect(invalidated).toHaveBeenCalledTimes(1)
+      expect(remoteAcquireMock.mock.calls[0][0].assertCurrent).toThrow(
+        "account or model settings changed"
+      )
+      await route.revoke?.()
+    } finally {
+      settingsState.settings = original
+    }
+  })
+  it("rejects account changes during credential resolution and removes subscriptions", async () => {
+    remoteMock.mockReturnValue({})
+    enrichedMock.mockImplementation(async () => {
+      accountListeners.forEach((listener) =>
+        listener({ ...accountState, locked: true }, { ...accountState, locked: false })
+      )
+      return snapshot()
+    })
+    await expect(
+      prepareExternalAgentGatewayRoute({
+        sessionId: "remote-task",
+        providerId: "anthropic",
+        modelId: "claude-opus-5",
+      })
+    ).rejects.toThrow("account or model settings changed")
+    expect(remoteAcquireMock).not.toHaveBeenCalled()
+    expect(accountListeners.size).toBe(0)
   })
 })

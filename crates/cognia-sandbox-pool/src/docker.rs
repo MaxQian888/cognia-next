@@ -87,6 +87,8 @@ use crate::status::SandboxDriverStatus;
 
 mod persistent;
 mod ports;
+mod retained_tasks;
+mod services;
 
 /// Label carrying the bundle digest a staged volume holds, so a sweep can tell
 /// a volume for a retired bundle from one still in use.
@@ -230,6 +232,9 @@ pub struct DockerSandboxBackend {
     bundle_locks: Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>,
     prepare_slots: Arc<tokio::sync::Semaphore>,
     port_slots: Arc<tokio::sync::Semaphore>,
+    service_bridges: Mutex<HashMap<String, services::ServiceLease>>,
+    retained_tasks: Mutex<retained_tasks::RetainedTasks>,
+    pending_tool_hosts: Mutex<HashMap<String, services::PendingToolHost>>,
     own: Weak<Self>,
     /// Volumes this process has already filled. The install itself is
     /// idempotent (it records the manifest digest in a marker), so this only
@@ -256,6 +261,9 @@ impl DockerSandboxBackend {
             prepare_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREPARES)),
             staged: Mutex::new(BTreeSet::new()),
             port_slots: Arc::new(tokio::sync::Semaphore::new(64)),
+            service_bridges: Mutex::new(HashMap::new()),
+            retained_tasks: Mutex::new(retained_tasks::RetainedTasks::default()),
+            pending_tool_hosts: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1149,11 +1157,74 @@ impl SandboxDriverStatus for DockerSandboxBackend {
 impl DockerSandboxBackend {
     async fn prepare_spawn(
         &self,
-        config: ExternalAgentSpawnConfig,
+        mut config: ExternalAgentSpawnConfig,
         sink: Arc<dyn ExternalAgentEventSink>,
         leases: OperationLeases,
     ) -> Result<String, SandboxSpawnError> {
         let id = config.id.clone();
+        let refs = config
+            .sandbox
+            .as_ref()
+            .map(|p| p.hosted_tool_host_lease_ids())
+            .unwrap_or_default();
+        if refs.len() > 16
+            || refs.iter().collect::<std::collections::HashSet<_>>().len() != refs.len()
+        {
+            return Err(SandboxSpawnError::refused(
+                "sandbox_tool_host_invalid",
+                "Invalid hosted tool lease references",
+            ));
+        }
+        let tool_hosts = refs
+            .iter()
+            .map(|id| self.pending_service(id, &config.id))
+            .collect::<Result<Vec<_>, _>>()?;
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        if !tool_hosts.is_empty() {
+            config
+                .env
+                .insert("COGNIA_GATEWAY_BRIDGE_NONCE".into(), nonce.clone());
+        }
+        let gateway = if config
+            .env
+            .contains_key(cognia_sandboxd::gateway_task::PAYLOAD_ENV)
+        {
+            let authority = cognia_external_agent::spawn_authority::gateway().ok_or_else(|| {
+                SandboxSpawnError::refused(
+                    "sandbox_gateway_authority_missing",
+                    "A sandbox model task needs an authenticated Host gateway lease",
+                )
+            })?;
+            if !(authority.authorized)() {
+                return Err(SandboxSpawnError::refused(
+                    "sandbox_gateway_authority_revoked",
+                    "The model task lease is no longer valid",
+                ));
+            }
+            config
+                .env
+                .insert("COGNIA_GATEWAY_BRIDGE_NONCE".into(), nonce.clone());
+            config.env.insert(
+                "COGNIA_GATEWAY_HOST_PORT".into(),
+                authority.port.to_string(),
+            );
+            let managed_env: HashMap<_, _> = [
+                "OPENAI_BASE_URL",
+                "OPENAI_API_KEY",
+                "ANTHROPIC_BASE_URL",
+                "ANTHROPIC_AUTH_TOKEN",
+            ]
+            .into_iter()
+            .filter_map(|name| config.env.get(name).map(|value| (name, value)))
+            .collect();
+            config.env.insert(
+                "COGNIA_GATEWAY_RUNTIME_ENV".into(),
+                serde_json::to_string(&managed_env).expect("gateway environment serializes"),
+            );
+            Some(authority)
+        } else {
+            None
+        };
         let Some(placement) = config.sandbox.as_ref() else {
             return Err(SandboxSpawnError::refused(
                 "sandbox_placement_required",
@@ -1319,9 +1390,12 @@ impl DockerSandboxBackend {
                 .start_persistent(spec, auth, &admitted.spec, &config, leases)
                 .await?;
             sink.sandbox_placement(&id, &placement);
-            return Ok(self
+            let id = self
                 .runners
-                .adopt_scoped(config, running, Some(placement), sink, cleanup));
+                .adopt_scoped(config, running, Some(placement), sink, cleanup);
+            return self
+                .finish_gateway_spawn(id, gateway, tool_hosts, nonce)
+                .await;
         }
         let running = self
             .start(spec, auth, leases)
@@ -1342,7 +1416,77 @@ impl DockerSandboxBackend {
             })?;
 
         sink.sandbox_placement(&id, &placement);
-        Ok(self.runners.adopt(config, running, Some(placement), sink))
+        let id = self.runners.adopt(config, running, Some(placement), sink);
+        self.finish_gateway_spawn(id, gateway, tool_hosts, nonce)
+            .await
+    }
+
+    async fn finish_gateway_spawn(
+        &self,
+        id: String,
+        gateway: Option<cognia_external_agent::spawn_authority::GatewayAuthority>,
+        tool_hosts: Vec<crate::runtime::ToolHostService>,
+        nonce: String,
+    ) -> Result<String, SandboxSpawnError> {
+        if gateway.is_none() && tool_hosts.is_empty() {
+            return Ok(id);
+        }
+        // Cancellation during bridge startup must retain cleanup, just as
+        // cancellation during the Docker create/exec handoff does.
+        struct Pending {
+            backend: Arc<DockerSandboxBackend>,
+            scope: Option<cognia_external_agent::container_backend::AgentServiceScope>,
+        }
+        impl Drop for Pending {
+            fn drop(&mut self) {
+                if let Some(scope) = self.scope.take() {
+                    let backend = self.backend.clone();
+                    tokio::spawn(async move {
+                        let _ = backend.runners.kill_service_scope(&scope).await;
+                    });
+                }
+            }
+        }
+        let mut pending = Pending {
+            backend: self.own.upgrade().expect("active backend"),
+            scope: Some(
+                self.runners
+                    .service_scope(
+                        &id,
+                        cognia_external_agent::spawn_authority::current_origin().as_deref(),
+                        "startup",
+                    )
+                    .map_err(|error| {
+                        SandboxSpawnError::fault("sandbox_startup_scope_missing", error)
+                    })?,
+            ),
+        };
+        let count = tool_hosts.len();
+        for (index, service) in tool_hosts.into_iter().enumerate() {
+            let ready = (gateway.is_none() && index + 1 == count).then(|| nonce.clone());
+            self.open_pending_bridge(service, ready).await?;
+        }
+        if let Some(authority) = gateway {
+            let lease_id = match authority.device_id.as_deref() {
+                Some(device) => format!("remote-tool-host:{device}:gateway:{nonce}"),
+                None => format!("local-gateway:{nonce}"),
+            };
+            self.open_gateway_bridge(
+                crate::runtime::ToolHostService {
+                    agent_id: id.clone(),
+                    owner_session_id: authority.task_id,
+                    origin_device_id: authority.device_id.clone(),
+                    lease_id,
+                    generation: 1,
+                    port: authority.port,
+                    authorization: Some(authority.authorized),
+                },
+                nonce,
+            )
+            .await?;
+        }
+        pending.scope = None;
+        Ok(id)
     }
 }
 
@@ -1386,6 +1530,159 @@ impl SandboxExecBackend for DockerSandboxBackend {
 
 #[async_trait]
 impl ExecBackend for DockerSandboxBackend {
+    async fn delete_retained_gateway_task(
+        &self,
+        task_id: &str,
+        device: Option<&str>,
+    ) -> Result<(), String> {
+        if task_id.is_empty()
+            || task_id.len() > 128
+            || !task_id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            || device.is_some_and(|id| id.is_empty() || id.len() > 256)
+        {
+            return Err("Invalid gateway task identity".into());
+        }
+        let prefix = format!("gateway-task-{task_id}");
+        if self
+            .runners
+            .list()
+            .iter()
+            .any(|id| id == &prefix || id.starts_with(&format!("{prefix}:")))
+        {
+            return Err("Stop the gateway task before deleting its state".into());
+        }
+        let locations = self.retained_tasks.lock().locations(task_id, device);
+        for location in locations {
+            let Some(state) = tokio::time::timeout(
+                Duration::from_secs(10),
+                self.api.inspect_runtime(&location.container),
+            )
+            .await
+            .map_err(|_| "Runtime inspection timed out")??
+            else {
+                continue;
+            };
+            let key = state
+                .labels
+                .get("cognia.runtime-key")
+                .ok_or("Retained runtime has no ownership key")?;
+            let lock = self.stage_lock(&format!("runtime:{key}"));
+            let guard = lock.lock_owned().await;
+            let Some(state) = tokio::time::timeout(
+                Duration::from_secs(10),
+                self.api.inspect_runtime(&location.container),
+            )
+            .await
+            .map_err(|_| "Runtime inspection timed out")??
+            else {
+                continue;
+            };
+            if !cognia_external_agent::container_backend::is_owned(&state.labels)
+                || state
+                    .labels
+                    .get(cognia_external_agent::container_backend::DEPLOYMENT_LABEL)
+                    .map(String::as_str)
+                    != Some(self.config.deployment_id.as_str())
+                || state
+                    .labels
+                    .get(cognia_external_agent::container_backend::PERSISTENT_RUNTIME_LABEL)
+                    .map(String::as_str)
+                    != Some("1")
+                || state.labels.get("cognia.project-id") != Some(&location.project)
+                || state.labels.get("cognia.spec-digest") != Some(&location.digest)
+            {
+                return Err("Retained task runtime ownership changed".into());
+            }
+            let body = self
+                .admission
+                .stored_spec(&location.digest)
+                .ok_or("Retained task environment is no longer authorized")?;
+            let tiers = self.available_tiers().await.map_err(|e| e.to_string())?;
+            let admitted = self
+                .admission
+                .recheck(&body, &tiers)
+                .map_err(|e| e.to_string())?;
+            if admitted.spec.spec_digest != location.digest
+                || admitted.spec.project_id != location.project
+            {
+                return Err("Retained task environment changed".into());
+            }
+            struct Restore {
+                api: Arc<dyn SandboxDockerApi>,
+                id: Option<String>,
+                guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+            }
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    if let Some(id) = self.id.take() {
+                        let api = self.api.clone();
+                        let guard = self.guard.take();
+                        tokio::spawn(async move {
+                            let _guard = guard;
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(10),
+                                api.stop_runtime(&id),
+                            )
+                            .await;
+                        });
+                    }
+                }
+            }
+            let mut restore = Restore {
+                api: self.api.clone(),
+                id: (!state.running).then(|| location.container.clone()),
+                guard: Some(guard),
+            };
+            if !state.running {
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    self.api.start_runtime(&location.container),
+                )
+                .await
+                .map_err(|_| "Runtime startup timed out")??;
+            }
+            if self
+                .port_spec(&location.project, &location.container)
+                .await
+                .map_err(|e| e.to_string())?
+                .is_none_or(|spec| spec.spec_digest != location.digest)
+            {
+                return Err("Retained task runtime admission changed".into());
+            }
+            let mut command = vec![
+                format!("{INJECTION_ROOT}/bin/cognia-sandboxd"),
+                "delete-gateway-task".into(),
+                "--task-id".into(),
+                task_id.into(),
+            ];
+            if let Some(device) = device {
+                command.extend(["--device-id".into(), device.into()]);
+            }
+            persistent::control(
+                &self.api,
+                cognia_external_agent::container_backend::RunnerExecSpec {
+                    container_id: location.container.clone(),
+                    command,
+                    env: vec![],
+                    working_dir: WORKSPACE_TARGET.into(),
+                },
+            )
+            .await?;
+            if !state.running {
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    self.api.stop_runtime(&location.container),
+                )
+                .await
+                .map_err(|_| "Runtime stop timed out")??;
+                restore.id = None;
+            }
+        }
+        self.retained_tasks.lock().forget(task_id, device)?;
+        Ok(())
+    }
     /// Reached only when this backend is used without the router. A spawn with
     /// a placement still works; one without has no environment to run in.
     async fn spawn(
@@ -1743,6 +2040,7 @@ mod tests {
             cwd: Some(CWD.to_string()),
             framing: Default::default(),
             sandbox: Some(SandboxPlacement::Container {
+                hosted_tool_host_lease_ids: Vec::new(),
                 spec: serde_json::to_value(spec).expect("a spec serializes"),
                 isolation_mandatory: false,
             }),
@@ -2772,6 +3070,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deletes_retained_task_state_in_owned_runtime_using_fixed_scoped_helper() {
+        let mut environment = spec(EgressTier::Off, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let harness = Harness::new(
+            admitted(environment.clone(), IsolationTier::Container),
+            report(vec![command("kiro-cli", None)], vec![]),
+            0,
+        );
+        harness
+            .spawn(spawn_config(
+                "gateway-task-retained",
+                "kiro-cli",
+                &[],
+                &environment,
+            ))
+            .await
+            .unwrap();
+        let runtime = harness
+            .backend
+            .get_info("gateway-task-retained")
+            .await
+            .unwrap()["containerId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut retained = spawn_config("gateway-task-retained", "kiro-cli", &[], &environment);
+        retained.env.insert(
+            cognia_sandboxd::gateway_task::PAYLOAD_ENV.into(),
+            serde_json::json!({"taskId":"retained","originDeviceId":"device-a"}).to_string(),
+        );
+        harness
+            .backend
+            .remember_retained_task(&retained, &runtime, &environment)
+            .unwrap();
+        assert!(harness
+            .backend
+            .delete_retained_gateway_task("retained", Some("device-a"))
+            .await
+            .is_err());
+        harness.backend.kill_all().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while harness.backend.runners.contains("gateway-task-retained") {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        harness.api.stop_runtime(&runtime).await.unwrap();
+        harness
+            .backend
+            .delete_retained_gateway_task("unknown", Some("device-a"))
+            .await
+            .unwrap();
+        assert!(
+            !harness
+                .api
+                .inspect_runtime(&runtime)
+                .await
+                .unwrap()
+                .unwrap()
+                .running,
+            "unknown task must not start any retained image"
+        );
+        let original = harness.admission.outcome.lock().clone();
+        *harness.admission.outcome.lock() =
+            Err(SandboxSpawnError::refused("revoked", "test revocation"));
+        assert!(harness
+            .backend
+            .delete_retained_gateway_task("retained", Some("device-a"))
+            .await
+            .is_err());
+        assert!(
+            !harness
+                .api
+                .inspect_runtime(&runtime)
+                .await
+                .unwrap()
+                .unwrap()
+                .running,
+            "revoked image must not start for cleanup"
+        );
+        *harness.admission.outcome.lock() = original;
+        harness
+            .backend
+            .delete_retained_gateway_task("retained", Some("device-a"))
+            .await
+            .unwrap();
+        assert!(
+            !harness
+                .api
+                .inspect_runtime(&runtime)
+                .await
+                .unwrap()
+                .unwrap()
+                .running,
+            "cleanup restores the original stopped state"
+        );
+        let execs = harness.api.runtime_execs.lock();
+        let cleanup = execs
+            .iter()
+            .find(|exec| {
+                exec.command
+                    .get(1)
+                    .is_some_and(|c| c == "delete-gateway-task")
+            })
+            .unwrap();
+        assert_eq!(
+            &cleanup.command[1..],
+            &[
+                "delete-gateway-task",
+                "--task-id",
+                "retained",
+                "--device-id",
+                "device-a"
+            ]
+        );
+        assert!(cleanup.env.is_empty());
+        assert!(
+            !harness.api.removes.lock().contains(&cleanup.container_id),
+            "cleanup preserves unrelated workspace state"
+        );
+    }
+
+    #[tokio::test]
     async fn ambient_provider_credentials_are_stripped_but_a_gateway_lease_passes() {
         let spec = spec(EgressTier::Allowlist, None);
         let harness = Harness::new(
@@ -2795,7 +3217,20 @@ mod tests {
             ("DEEPSEEK_API_KEY".to_string(), "ds".to_string()),
             ("GITHUB_TOKEN".to_string(), "gh".to_string()),
         ]);
-        harness.spawn(spawn).await.expect("the sandbox starts");
+        cognia_external_agent::spawn_authority::with_remote_origin(
+            "device-a",
+            cognia_external_agent::spawn_authority::with_gateway(
+                Some(cognia_external_agent::spawn_authority::GatewayAuthority {
+                    port: 32123,
+                    device_id: Some("device-a".into()),
+                    task_id: "task".into(),
+                    authorized: Arc::new(|| true),
+                }),
+                harness.spawn(spawn),
+            ),
+        )
+        .await
+        .expect("the sandbox starts");
 
         let agent = harness.specs().last().cloned().expect("an agent container");
         let runtime = decode_agent_environment(&agent.env);

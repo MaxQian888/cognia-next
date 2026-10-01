@@ -120,6 +120,8 @@ RUN cargo build --release --locked --bin cognia-server \
 # Agent-first loopback operator CLI. It is intentionally shipped in the same
 # image so service-token issuance and the network peer both stay in-container.
 RUN cargo build --release --locked -p cognia-cli --bin cognia
+# Small initialization utility: available beside the server before any Node runtime.
+RUN cargo build --release --locked -p cognia-bootstrap-agent --bin cognia-bootstrap
 # The Brain layout shells out to this external-agent launcher. Build it in the
 # Rust stage and pass the artifact to brain-builder instead of installing a
 # second Rust toolchain in the Node stage. It lives in the Tauri-free
@@ -277,6 +279,7 @@ RUN groupadd --system --gid 10001 cognia \
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=builder /work/target/release/cognia /usr/local/bin/cognia
+COPY --from=builder /work/target/release/cognia-bootstrap /usr/local/bin/cognia-bootstrap
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
 # Webclone's Babel analyzer intentionally uses createRequire because Babel 8's
 # ESM visitor types do not match its compatibility adapter. The sidecar bundle

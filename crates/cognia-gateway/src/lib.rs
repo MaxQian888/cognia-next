@@ -47,6 +47,7 @@ pub mod runs;
 pub mod server;
 pub mod session_key;
 pub mod snapshot;
+pub mod task_lease;
 pub mod translate;
 pub mod types;
 pub mod virtual_models;
@@ -693,9 +694,32 @@ impl GatewayState {
     }
 
     pub async fn start(&self, host: Arc<dyn GatewayHost>) -> Result<(), GatewayError> {
+        self.start_authorized(host, true).await
+    }
+
+    /// A task lease authorizes only ticket traffic; it never creates a reusable API key.
+    pub async fn start_for_task(
+        &self,
+        host: Arc<dyn GatewayHost>,
+        ticket_id: &str,
+    ) -> Result<(), GatewayError> {
+        if !self
+            .tickets
+            .is_live(ticket_id, chrono::Utc::now().timestamp_millis())
+        {
+            return Err(GatewayError::TokenMissing);
+        }
+        self.start_authorized(host, false).await
+    }
+
+    async fn start_authorized(
+        &self,
+        host: Arc<dyn GatewayHost>,
+        require_api_key: bool,
+    ) -> Result<(), GatewayError> {
         {
             let now = chrono::Utc::now().timestamp_millis();
-            if !api_keys::has_usable_key(&self.keys.read(), now) {
+            if require_api_key && !api_keys::has_usable_key(&self.keys.read(), now) {
                 return Err(GatewayError::TokenMissing);
             }
             if self.inner.lock().server.is_some() {

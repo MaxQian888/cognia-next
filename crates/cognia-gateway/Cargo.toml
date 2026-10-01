@@ -38,6 +38,7 @@ cognia-instrument = { path = "../cognia-instrument" }
 tauri = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+toml_edit = { workspace = true, features = ["serde"] }
 axum = { workspace = true, features = ["macros", "ws"] }
 tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "sync", "time"] }

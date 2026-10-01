@@ -21,7 +21,7 @@ async fn wait_for_idle(
 }
 
 impl DockerSandboxBackend {
-    async fn port_spec(
+    pub(super) async fn port_spec(
         &self,
         project_id: &str,
         container_id: &str,
@@ -60,6 +60,128 @@ impl DockerSandboxBackend {
 
 #[async_trait]
 impl SandboxRuntimeControl for DockerSandboxBackend {
+    fn agent_origin_allowed(&self, agent_id: &str, device_id: &str) -> Option<bool> {
+        self.runners.origin_allowed(agent_id, device_id)
+    }
+    async fn register_tool_host(
+        &self,
+        service: crate::runtime::ToolHostService,
+    ) -> Result<String, SandboxSpawnError> {
+        let parent = service.agent_id.clone();
+        let origin = service.origin_device_id.clone();
+        let id = self.register_pending_tool_host(service)?;
+        struct Registration {
+            backend: Arc<DockerSandboxBackend>,
+            id: Option<String>,
+        }
+        impl Drop for Registration {
+            fn drop(&mut self) {
+                if let Some(id) = &self.id {
+                    self.backend.pending_tool_hosts.lock().remove(id);
+                }
+            }
+        }
+        let mut registration = Registration {
+            backend: self.own.upgrade().expect("active backend"),
+            id: Some(id.clone()),
+        };
+        for agent in self
+            .runners
+            .list()
+            .into_iter()
+            .filter(|agent| agent == &parent || agent.starts_with(&format!("{parent}:")))
+        {
+            if self
+                .runners
+                .service_scope(&agent, origin.as_deref(), "pending")
+                .is_err()
+            {
+                continue;
+            }
+            let mut service = self
+                .pending_tool_hosts
+                .lock()
+                .get(&id)
+                .map(|lease| lease.service.clone())
+                .ok_or_else(|| {
+                    SandboxSpawnError::refused(
+                        "sandbox_service_unavailable",
+                        "Hosted tool registration expired",
+                    )
+                })?;
+            service.agent_id = agent;
+            let backend = self.own.clone();
+            let key = id.clone();
+            service.authorization = Some(Arc::new(move || {
+                backend.upgrade().is_some_and(|backend| {
+                    backend
+                        .pending_tool_hosts
+                        .lock()
+                        .get(&key)
+                        .is_some_and(|lease| {
+                            lease.deadline > tokio::time::Instant::now()
+                                && lease
+                                    .service
+                                    .authorization
+                                    .as_ref()
+                                    .is_some_and(|check| check())
+                        })
+                })
+            }));
+            if let Err(error) = self.open_pending_bridge(service, None).await {
+                self.pending_tool_hosts.lock().remove(&id);
+                return Err(error);
+            }
+        }
+        registration.id = None;
+        Ok(id)
+    }
+    async fn open_tool_host(
+        &self,
+        service: crate::runtime::ToolHostService,
+    ) -> Result<crate::runtime::ToolHostBridge, SandboxSpawnError> {
+        self.open_service_bridge(service).await
+    }
+    fn renew_tool_host(&self, bridge_id: &str) -> bool {
+        {
+            let mut pending = self.pending_tool_hosts.lock();
+            if let Some(lease) = pending.get_mut(bridge_id) {
+                if lease.deadline <= tokio::time::Instant::now()
+                    || !lease
+                        .service
+                        .authorization
+                        .as_ref()
+                        .is_some_and(|check| check())
+                {
+                    pending.remove(bridge_id);
+                    return false;
+                }
+                lease.deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+                return true;
+            }
+        }
+        let mut leases = self.service_bridges.lock();
+        let Some(lease) = leases.get_mut(bridge_id) else {
+            return false;
+        };
+        if lease.deadline <= tokio::time::Instant::now()
+            || !lease
+                .scopes
+                .lock()
+                .iter()
+                .any(|scope| self.runners.service_scope_active(scope))
+            || !(lease.authorization)()
+        {
+            leases.remove(bridge_id);
+            return false;
+        }
+        lease.deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        true
+    }
+    fn close_tool_host(&self, bridge_id: &str) {
+        self.pending_tool_hosts.lock().remove(bridge_id);
+        self.service_bridges.lock().remove(bridge_id);
+    }
     async fn list_ports(&self, project_id: &str) -> Result<Vec<RuntimePort>, SandboxSpawnError> {
         let mut ports = Vec::new();
         for container in self.api.list_owned().await.map_err(unavailable)? {

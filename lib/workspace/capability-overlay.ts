@@ -42,8 +42,15 @@
  * actually running, destroying the global baseline it also serves as. Doing it
  * properly needs a second column separating "installed and enabled by default"
  * from "loaded right now" — a definition-table change this layer exists to
- * avoid. Plugins therefore stay workspace-wide, and the Capabilities tab says
- * so rather than leaving the user to infer it.
+ * avoid. Plugins therefore stay out of this overlay, and the Capabilities tab
+ * says so rather than leaving the user to infer it.
+ *
+ * What a workspace can choose instead is a whole cogset (ADR-0209):
+ * `Project.pluginCogsetId`. That is the "separate column" the paragraph above
+ * asks for, done one level up. A cogset owns which plugins *should* run; opening
+ * the workspace makes its cogset the effective one, and the host reconciles to
+ * it through `PluginManager.setPluginIntent` (`lib/plugin/cogset/`), so
+ * `plugins.enabled` stays the record of what is loaded.
  */
 
 /**

@@ -50,7 +50,7 @@ tempfile.workspace = true
 tar.workspace = true
 url.workspace = true
 sha2.workspace = true
-tokio = { workspace = true, features = ["sync", "time", "io-util", "process", "fs", "macros", "rt"] }
+tokio = { workspace = true, features = ["sync", "time", "io-util", "process", "fs", "macros", "rt", "net"] }
 
 [dev-dependencies]
 cognia-external-agent = { path = "../cognia-external-agent", default-features = false, features = ["test-support"] }

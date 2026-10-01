@@ -133,7 +133,8 @@ pub fn install_with(
         false,
     )?);
     let multi_tenant = admission.baseline().multi_tenant;
-    let (sandbox, status, runtime) = docker_driver(Arc::clone(&admission), default_deployment_id)?;
+    let (sandbox, status, runtime) =
+        docker_driver(Arc::clone(&admission), default_deployment_id, data_dir)?;
     log::info!(
         "runtime environment sandboxes: on (docker driver, baseline {}, multi-tenant {multi_tenant})",
         loaded.origin.as_str()
@@ -160,12 +161,14 @@ type Driver = (
 fn docker_driver(
     admission: Arc<EnvironmentSandboxAdmission>,
     default_deployment_id: &str,
+    data_dir: &Path,
 ) -> Result<Driver, String> {
     use cognia_external_agent::container_backend::bollard_api::BollardContainerApi;
 
     let api = BollardContainerApi::connect()?;
     let config = crate::docker::DockerSandboxConfig::from_env(default_deployment_id)?;
     let backend = crate::docker::DockerSandboxBackend::new(api, admission, config);
+    backend.configure_retained_tasks(data_dir)?;
     Ok((
         Arc::clone(&backend) as Arc<dyn SandboxExecBackend>,
         Arc::clone(&backend) as Arc<dyn SandboxDriverStatus>,
@@ -177,6 +180,7 @@ fn docker_driver(
 fn docker_driver(
     _admission: Arc<EnvironmentSandboxAdmission>,
     _default_deployment_id: &str,
+    _data_dir: &Path,
 ) -> Result<Driver, String> {
     Err("the sandbox pool is enabled but this binary was built without the `docker` feature".into())
 }

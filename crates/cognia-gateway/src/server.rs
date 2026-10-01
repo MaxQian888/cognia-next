@@ -275,9 +275,18 @@ impl GatewayHost for AccountBoundHost {
 impl AppState {
     fn for_request(mut self, ctx: &ReqCtx) -> Self {
         if let Some(ticket) = &ctx.ticket {
+            if let Some(client) = self.tickets.task_client(&ticket.ticket_id) {
+                self.http = Arc::new(UpstreamClients::fixed(client));
+            }
             let overrides = self.tickets.provider_overrides(&ticket.ticket_id);
             if !overrides.is_empty() {
-                let snapshot = self.snapshot.read().clone().map(|mut snapshot| {
+                let snapshot = Some(
+                    self.snapshot
+                        .read()
+                        .clone()
+                        .unwrap_or_else(crate::task_lease::empty_snapshot),
+                )
+                .map(|mut snapshot| {
                     for provider in overrides {
                         snapshot.providers.retain(|p| p.id != provider.id);
                         snapshot.providers.push(provider);
@@ -414,6 +423,7 @@ fn body_has_no_leaking_pii(body: &Value) -> bool {
 pub(crate) struct UpstreamClients {
     connect_timeout: Duration,
     fallback: reqwest::Client,
+    fixed: bool,
     cache: parking_lot::Mutex<std::collections::HashMap<u64, reqwest::Client>>,
 }
 
@@ -431,12 +441,25 @@ impl UpstreamClients {
         Self {
             connect_timeout,
             fallback,
+            fixed: false,
+            cache: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn fixed(client: reqwest::Client) -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(15),
+            fallback: client,
+            fixed: true,
             cache: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
     /// The client that dials `url` under the current policy.
     pub(crate) fn client_for(&self, url: &str) -> reqwest::Client {
+        if self.fixed {
+            return self.fallback.clone();
+        }
         let Ok(policy) = cognia_net::proxy_config::current() else {
             return self.fallback.clone();
         };
@@ -6527,7 +6550,10 @@ mod router_fusion_server_tests {
         assert_eq!(settles[0]["outcome"], "succeeded");
         assert_eq!(settles[0]["final"], true);
         // The prompt tokens are the whole bill; the output side is a true zero.
-        assert_eq!(settles[0]["usage"], json!({ "inputTokens": 7, "outputTokens": 0 }));
+        assert_eq!(
+            settles[0]["usage"],
+            json!({ "inputTokens": 7, "outputTokens": 0 })
+        );
     }
 
     #[tokio::test]
@@ -6662,7 +6688,12 @@ mod router_fusion_server_tests {
         assert_eq!(reserved[0]["requestId"], reserved[1]["requestId"]);
 
         let mut settles = settled(&bridge, 2).await;
-        settles.sort_by_key(|payload| payload["attemptId"].as_str().unwrap_or_default().to_string());
+        settles.sort_by_key(|payload| {
+            payload["attemptId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        });
         // The 503 gave the reservation back as a server error, not the last word.
         assert_eq!(settles[0]["attemptId"], "a1");
         assert_eq!(settles[0]["outcome"], "failed");

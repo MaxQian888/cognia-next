@@ -293,6 +293,8 @@ struct TicketRecord {
     /// Present only for tickets minted in THIS process lifetime.
     secret: Option<String>,
     provider_overrides: Vec<crate::snapshot::ProviderSnapshot>,
+    task_client: Option<reqwest::Client>,
+    task_authority: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 /// Everything the accounting needs, behind ONE lock.
@@ -325,6 +327,8 @@ impl RouteTicketRegistry {
                 ticket,
                 secret: None,
                 provider_overrides: Vec::new(),
+                task_client: None,
+                task_authority: None,
             })
             .collect();
         Self {
@@ -353,6 +357,8 @@ impl RouteTicketRegistry {
                     ticket,
                     secret: None,
                     provider_overrides: Vec::new(),
+                    task_client: None,
+                    task_authority: None,
                 });
             }
         }
@@ -369,6 +375,7 @@ impl RouteTicketRegistry {
             if record.ticket.revoked || record.ticket.expires_at_ms <= now {
                 record.secret = None;
                 record.provider_overrides.clear();
+                record.task_client = None;
             }
         }
         if !inner.dirty {
@@ -557,6 +564,8 @@ impl RouteTicketRegistry {
             ticket: ticket.clone(),
             secret: Some(secret.clone()),
             provider_overrides: request.provider_overrides,
+            task_client: None,
+            task_authority: None,
         });
         self.persist(&inner.records)?;
         Ok(MintedTicket { ticket, secret })
@@ -610,7 +619,12 @@ impl RouteTicketRegistry {
         let ticket_id = inner.records[index].ticket.ticket_id.clone();
         {
             let ticket = &inner.records[index].ticket;
-            if ticket.revoked {
+            if ticket.revoked
+                || inner.records[index]
+                    .task_authority
+                    .as_ref()
+                    .is_some_and(|check| !check())
+            {
                 return Err(TicketReject::Revoked);
             }
             if now_ms >= ticket.expires_at_ms {
@@ -756,7 +770,12 @@ impl RouteTicketRegistry {
         let inner = self.inner.lock();
         let index = Self::match_secret(&inner.records, supplied).ok_or(TicketReject::Unknown)?;
         let ticket = &inner.records[index].ticket;
-        if ticket.revoked {
+        if ticket.revoked
+            || inner.records[index]
+                .task_authority
+                .as_ref()
+                .is_some_and(|check| !check())
+        {
             return Err(TicketReject::Revoked);
         }
         if now_ms >= ticket.expires_at_ms {
@@ -772,6 +791,7 @@ impl RouteTicketRegistry {
         for record in &mut inner.records {
             if record.ticket.expires_at_ms <= now || record.ticket.revoked {
                 record.provider_overrides.clear();
+                record.task_client = None;
             }
         }
         inner
@@ -788,7 +808,68 @@ impl RouteTicketRegistry {
                 && !record.ticket.revoked
                 && record.ticket.expires_at_ms > now_ms
                 && record.secret.is_some()
+                && record.task_authority.as_ref().is_none_or(|check| check())
         })
+    }
+
+    pub fn set_task_authority(
+        &self,
+        ticket_id: &str,
+        authority: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) {
+        if let Some(record) = self
+            .inner
+            .lock()
+            .records
+            .iter_mut()
+            .find(|r| r.ticket.ticket_id == ticket_id)
+        {
+            record.task_authority = Some(authority);
+        }
+    }
+
+    pub fn set_task_client(&self, ticket_id: &str, client: reqwest::Client) {
+        if let Some(record) = self
+            .inner
+            .lock()
+            .records
+            .iter_mut()
+            .find(|r| r.ticket.ticket_id == ticket_id)
+        {
+            record.task_client = Some(client);
+        }
+    }
+
+    pub fn task_client(&self, ticket_id: &str) -> Option<reqwest::Client> {
+        self.inner
+            .lock()
+            .records
+            .iter()
+            .find(|r| r.ticket.ticket_id == ticket_id)
+            .and_then(|r| r.task_client.clone())
+    }
+
+    pub fn renew(&self, ticket_id: &str, now_ms: i64, ttl_ms: i64) -> bool {
+        let mut inner = self.inner.lock();
+        let Some(record) = inner.records.iter_mut().find(|r| {
+            r.ticket.ticket_id == ticket_id
+                && !r.ticket.revoked
+                && r.ticket.expires_at_ms > now_ms
+                && r.secret.is_some()
+                && r.task_authority.as_ref().is_none_or(|check| check())
+        }) else {
+            return false;
+        };
+        record.ticket.expires_at_ms =
+            (now_ms + ttl_ms).min(record.ticket.issued_at_ms + MAX_TTL_MS);
+        inner.dirty = true;
+        true
+    }
+
+    pub fn secret_matches_ticket(&self, ticket_id: &str, secret: &str) -> bool {
+        let inner = self.inner.lock();
+        Self::match_secret(&inner.records, secret)
+            .is_some_and(|index| inner.records[index].ticket.ticket_id == ticket_id)
     }
 
     pub fn revoke(&self, ticket_id: &str) -> bool {
@@ -799,6 +880,7 @@ impl RouteTicketRegistry {
                 record.ticket.revoked = true;
                 record.secret = None;
                 record.provider_overrides.clear();
+                record.task_client = None;
                 hit = true;
             }
         }
@@ -816,6 +898,7 @@ impl RouteTicketRegistry {
                 record.ticket.revoked = true;
                 record.secret = None;
                 record.provider_overrides.clear();
+                record.task_client = None;
                 count += 1;
             }
         }

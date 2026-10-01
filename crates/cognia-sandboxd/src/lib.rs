@@ -18,9 +18,12 @@ pub mod manifest;
 pub mod passwd;
 pub mod probe;
 pub mod rootfs;
+pub mod service_bridge;
 
 #[cfg(unix)]
 pub mod init;
 
 #[cfg(unix)]
 pub mod serve;
+
+pub mod gateway_task;

@@ -7,7 +7,7 @@
 #
 #   /opt/cognia/bundle-manifest.json   release tag, runtimes, libc per runtime
 #   /opt/cognia/bin/cognia-sandboxd    static (musl)
-#   /opt/cognia/common/{git,bin}       static git + rg, either libc
+#   /opt/cognia/common/{git,bin}       static git + rg + cognia-bootstrap, either libc
 #   /opt/cognia/certs/ca-bundle.pem    for images without a CA store
 #   /opt/cognia/glibc/                 node, npm CLIs, glibc vendor binaries
 #   /opt/cognia/musl/                  node on its own loader, musl builds
@@ -23,7 +23,7 @@ ARG ALPINE_VERSION=3.24
 
 # ── cognia-sandboxd, static musl ─────────────────────────────────────────────
 FROM rust:1.96.1-alpine AS sandboxd
-RUN apk add --no-cache musl-dev binutils
+RUN apk add --no-cache build-base musl-dev binutils
 WORKDIR /work
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
@@ -33,6 +33,12 @@ COPY crates ./crates
 # manifest even when building one package.
 COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo build --release --locked -p cognia-sandboxd --bin cognia-sandboxd \
+    && cargo build --release --locked -p cognia-bootstrap-agent --bin cognia-bootstrap \
+    && install -D -m 0755 target/release/cognia-bootstrap /out/common/bin/cognia-bootstrap \
+    && /out/common/bin/cognia-bootstrap --version \
+    && if readelf -l /out/common/bin/cognia-bootstrap | grep -q INTERP; then \
+         echo "cognia-bootstrap must be statically linked" >&2; exit 1; \
+       fi \
     && install -D -m 0755 target/release/cognia-sandboxd /out/bin/cognia-sandboxd \
     && if readelf -l /out/bin/cognia-sandboxd | grep -q INTERP; then \
          echo "cognia-sandboxd must be statically linked" >&2; exit 1; \

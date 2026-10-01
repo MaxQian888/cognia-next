@@ -77,6 +77,8 @@ hosts_runtimes() {
   libc=$(probe_field libc)
   [ "$libc" = "$expected_libc" ] || fail "$image: probed libc $libc, expected $expected_libc"
   echo "smoke: $image probed as $libc; runtimes: $(probe_field runtimes)"
+  # The bootstrap executable must run before any Node/libc runtime is staged.
+  docker run --rm -v "$injection:/cognia" --entrypoint /cognia/common/bin/cognia-bootstrap "$image" --version
   docker run --rm -v "$injection:/cognia" "$bundle" install --stage libc --from /opt/cognia --to /cognia >/dev/null
   in_image "$image" "/cognia/$libc/node/bin/node" --version
   for command in $(node "$script" commands --pins "$pins" --libc "$libc"); do
