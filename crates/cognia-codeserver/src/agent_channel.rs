@@ -98,6 +98,7 @@ use super::credential::{
     content_bearer, credential_file_path, derive_session_key, remove_credential_file,
     secrets_equal, write_credential_file, BootstrapCredential,
 };
+use super::profile::IdeProfile;
 
 /// Depth of a connection's outbound frame queue. Frames are tiny and infrequent
 /// (one per agent editor action), so a small bound is plenty and still applies
@@ -202,6 +203,59 @@ pub enum BrokerIssue {
     RegistrationFailed,
     /// A bootstrap credential was presented twice while its first user was live.
     CredentialReplayed,
+}
+
+/// Why a managed workbench is running without its broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrokerDisabledReason {
+    /// The operator set the managed-IDE kill switch.
+    AdminDisabled,
+    InstallFailed,
+    RegistrationFailed,
+    ProtocolIncompatible,
+}
+
+/// Whether agent drive is available in a managed workbench, and if not, why.
+///
+/// Carried on every status so the desktop and a companion host describe the
+/// same degraded state the same way: the workbench runs, the broker does not.
+/// `None` for the native profile, which never has a broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerStatus {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<BrokerDisabledReason>,
+}
+
+/// The broker status for a workbench in `profile` given the kill switch and
+/// the issue last recorded for its root.
+pub fn broker_status_from(
+    profile: IdeProfile,
+    platform_enabled: bool,
+    issue: Option<BrokerIssue>,
+) -> Option<BrokerStatus> {
+    if !profile.allows_broker() {
+        return None;
+    }
+    let reason = if !platform_enabled {
+        Some(BrokerDisabledReason::AdminDisabled)
+    } else {
+        match issue {
+            Some(BrokerIssue::InstallFailed) => Some(BrokerDisabledReason::InstallFailed),
+            Some(BrokerIssue::RegistrationFailed) => Some(BrokerDisabledReason::RegistrationFailed),
+            Some(BrokerIssue::ProtocolIncompatible) => {
+                Some(BrokerDisabledReason::ProtocolIncompatible)
+            }
+            // A replay re-mints the credential; the broker keeps serving.
+            Some(BrokerIssue::CredentialReplayed) | None => None,
+        }
+    };
+    Some(BrokerStatus {
+        enabled: reason.is_none(),
+        reason,
+    })
 }
 
 /// What [`AgentChannel::register_instance_for_host`] hands the spawn path.
@@ -483,6 +537,12 @@ impl AgentChannel {
         }) {
             self.emit_renderer(CODESERVER_BROKER_ISSUE_EVENT, payload);
         }
+    }
+
+    /// The broker status for the workbench at canonical `root`.
+    pub fn broker_status(&self, root: &str, profile: IdeProfile) -> Option<BrokerStatus> {
+        let issue = self.lock_registry().issues.get(root).copied();
+        broker_status_from(profile, super::managed_platform_enabled(), issue)
     }
 
     pub async fn content_port(self: &Arc<Self>) -> Result<u16, String> {
@@ -2274,6 +2334,75 @@ mod tests {
 
     fn has_bootstrap(channel: &AgentChannel, root: &str) -> bool {
         channel.lock_registry().instances[root].bootstrap.is_some()
+    }
+
+    #[test]
+    fn broker_status_says_why_a_managed_workbench_has_no_broker() {
+        use BrokerDisabledReason as R;
+        let status = |platform, issue| broker_status_from(IdeProfile::Managed, platform, issue);
+        assert_eq!(
+            status(true, None),
+            Some(BrokerStatus {
+                enabled: true,
+                reason: None
+            })
+        );
+        assert_eq!(
+            status(true, Some(BrokerIssue::CredentialReplayed)),
+            Some(BrokerStatus {
+                enabled: true,
+                reason: None
+            })
+        );
+        for (issue, reason) in [
+            (BrokerIssue::InstallFailed, R::InstallFailed),
+            (BrokerIssue::RegistrationFailed, R::RegistrationFailed),
+            (BrokerIssue::ProtocolIncompatible, R::ProtocolIncompatible),
+        ] {
+            assert_eq!(
+                status(true, Some(issue)),
+                Some(BrokerStatus {
+                    enabled: false,
+                    reason: Some(reason)
+                })
+            );
+        }
+        // The kill switch outranks whatever else went wrong.
+        assert_eq!(
+            status(false, Some(BrokerIssue::InstallFailed)),
+            Some(BrokerStatus {
+                enabled: false,
+                reason: Some(R::AdminDisabled)
+            })
+        );
+        assert_eq!(broker_status_from(IdeProfile::Native, true, None), None);
+        assert_eq!(
+            serde_json::to_value(status(false, None)).unwrap(),
+            serde_json::json!({ "enabled": false, "reason": "admin-disabled" })
+        );
+        assert_eq!(
+            serde_json::to_value(status(true, None)).unwrap(),
+            serde_json::json!({ "enabled": true })
+        );
+    }
+
+    #[tokio::test]
+    async fn broker_status_follows_the_recorded_issue_until_the_extension_connects() {
+        let channel = AgentChannel::new();
+        channel.record_issue("/w", BrokerIssue::ProtocolIncompatible);
+        assert_eq!(
+            channel
+                .broker_status("/w", IdeProfile::Managed)
+                .map(|s| s.reason),
+            Some(Some(BrokerDisabledReason::ProtocolIncompatible))
+        );
+        channel.deregister("/w");
+        assert_eq!(
+            channel
+                .broker_status("/w", IdeProfile::Managed)
+                .map(|s| s.enabled),
+            Some(true)
+        );
     }
 
     fn issue_of(channel: &AgentChannel, root: &str) -> Option<BrokerIssue> {

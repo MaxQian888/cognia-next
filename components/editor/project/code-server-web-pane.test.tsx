@@ -89,7 +89,9 @@ describe("CodeServerWebPane", () => {
   it("localizes a superseded host opening", async () => {
     ensure.mockRejectedValueOnce(new Error("CODESERVER_OPEN_SUPERSEDED"))
     render(<CodeServerWebPane root="/repo" />)
-    expect(await screen.findByText("projectEditor.proIde.openSuperseded")).toBeInTheDocument()
+    expect(
+      await screen.findByText("projectEditor.proIde.errors.openSuperseded.message")
+    ).toBeInTheDocument()
     expect(screen.queryByText("Error: CODESERVER_OPEN_SUPERSEDED")).not.toBeInTheDocument()
   })
 
@@ -301,7 +303,9 @@ it("withdraws broker actions when another tab switches the workspace profile", a
     await act(async () => {
       await jest.advanceTimersByTimeAsync(5_000)
     })
-    expect(screen.getByText("projectEditor.proIde.profileChanged")).toBeInTheDocument()
+    expect(
+      screen.getByText("projectEditor.proIde.errors.profileChanged.message")
+    ).toBeInTheDocument()
     expect(screen.queryByTestId("web-frame")).not.toBeInTheDocument()
     expect(mockWorkspaceSync).toHaveBeenLastCalledWith(false, "/repo")
     expect(useCodeServerProjectOpener).toHaveBeenLastCalledWith(

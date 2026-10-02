@@ -226,7 +226,7 @@ export function useCodeServerPane(
         ? payload.root === root || payload.root.replace(/\/+$/, "") === root.replace(/\/+$/, "")
         : payload.port === port
       if (!matches) return
-      setError(`code-server for ${payload.root} stopped responding`)
+      setError(`CODESERVER_UNRESPONSIVE: ${payload.root}`)
       setPhase("error")
     }).then((fn) => {
       if (cancelled) fn()

@@ -57,6 +57,8 @@ plugin_permission_revoke   send_to_external_agent    spawn_external_agent
 
 A mobile client paired to the *cloud* can start external agents and drive code-server; paired to the *desktop* it cannot. That is backwards from any user's expectation.
 
+> **Status, 2026-10-02:** the four `codeserver_*` arms now branch per host (`src-tauri/src/companion_api/dispatch_host.rs`). A desktop host also relays its workbench through `/ide/relay/{id}` to a paired device its owner approved for that project ([ADR-0088](../adr/0088-pro-ide-code-server), 2026-10-02 amendment). The relay needs the device's DPoP proof on every request, so a Cognia desktop client can open it and a phone still cannot, on either kind of host.
+
 ### The plugin subsystem is split in half, with neither half complete
 
 `rpc/plugins.rs` holds **52 headless-only arms** (`plugin_set_status`, `plugin_permission_*`, …) and **12 desktop-only ones** (`plugin_list`, `plugin_runtime_snapshot`, `plugin_backup_*`, `plugin_stage_version`, `plugin_uninstall`, staged-update commit/discard/finalize). None of the desktop-only twelve has a physical reason — `plugin_list` and `plugin_runtime_snapshot` are read-only. This is two migrations that each stopped halfway.

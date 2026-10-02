@@ -57,6 +57,8 @@ plugin_permission_revoke   send_to_external_agent    spawn_external_agent
 
 手机配对**云端**能拉起 external agent、能用 code-server；配对**桌面**反而不行。这与任何用户的预期都是反的。
 
+> **状态，2026-10-02：** 四个 `codeserver_*` arm 现已按主机分支（`src-tauri/src/companion_api/dispatch_host.rs`）。桌面主机也会通过 `/ide/relay/{id}` 把工作台中继给所有者已为该项目批准的已配对设备（[ADR-0088](../adr/0088-pro-ide-code-server)，2026-10-02 修订）。中继的每个请求都需要设备的 DPoP proof，因此 Cognia 桌面客户端可以打开它，而手机在任何一种主机上都仍然不行。
+
 ### 插件子系统被劈成两半，两边都不完整
 
 `rpc/plugins.rs` 里有 **52 条云端专属 arm**（`plugin_set_status`、`plugin_permission_*` …）和 **12 条桌面专属 arm**（`plugin_list`、`plugin_runtime_snapshot`、`plugin_backup_*`、`plugin_stage_version`、`plugin_uninstall`、staged-update 的 commit/discard/finalize）。这 12 条没有一条有物理理由 —— `plugin_list` 和 `plugin_runtime_snapshot` 是只读的。这是两次各走了一半的迁移。

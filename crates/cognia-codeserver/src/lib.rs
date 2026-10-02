@@ -16,11 +16,14 @@ mod broker_protocol;
 pub mod content_bridge;
 mod credential;
 pub mod download;
+pub mod error_code;
 pub mod host;
 pub mod process;
 pub mod profile;
 pub mod proxy;
 pub mod relay;
+pub mod relay_grants;
+pub mod relay_table;
 pub mod remote;
 
 pub use process::CodeServerState;

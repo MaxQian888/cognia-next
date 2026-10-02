@@ -29364,6 +29364,15 @@
     "previewOpenHint": "打开预览",
     "previewTab": "{name} —— 预览标签页，双击可固定",
     "proIde": {
+      "brokerDisabled": {
+        "label": "智能体驱动已关闭",
+        "reason": {
+          "admin-disabled": "管理员已关闭 Cognia 的托管 IDE 功能。VS Code 可正常使用，但 Cognia 无法驱动它，也无法把它的上下文发送到聊天。",
+          "install-failed": "Cognia 扩展无法安装到 VS Code，因此 Cognia 无法驱动它，也无法把它的上下文发送到聊天。请重启 Pro IDE 重试。",
+          "protocol-incompatible": "VS Code 中的 Cognia 扩展来自另一个版本的 Cognia，无法连接。请重启 Pro IDE 以重新安装匹配的版本。",
+          "registration-failed": "Cognia 无法为这个 VS Code 创建连接密钥，因此无法驱动它，也无法把它的上下文发送到聊天。请重启 Pro IDE 重试。"
+        }
+      },
       "brokerIssue": {
         "credential-replayed": "此工作区中有其他程序使用了 Cognia 的 Pro IDE 连接密钥，Cognia 已将其吊销并重新签发。如果这不是你预期的，请检查 VS Code 终端和任务中正在运行的内容。",
         "install-failed": "VS Code 中的 Cognia 扩展未通过完整性校验或无法安装。VS Code 仍在运行，但 Cognia 无法驱动编辑器，也无法把编辑器上下文发送到聊天。重启 Pro IDE 以重试。",
@@ -29387,21 +29396,97 @@
       },
       "checkingTooltip": "正在检查 Pro IDE 是否可用…",
       "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
+      "downloadProgressLabel": "VS Code（code-server）下载进度",
       "downloading": "正在下载 VS Code… {percent}%",
       "errorTitle": "无法启动 VS Code",
+      "errors": {
+        "archiveInvalid": {
+          "hint": "请重试。如果磁盘快满了，请先释放一些空间。",
+          "message": "下载的 VS Code 安装包无法解压。"
+        },
+        "checksumMismatch": {
+          "hint": "请重试。如果反复出现，可能是网络中有设备篡改了下载内容。",
+          "message": "下载的 VS Code 与官方指纹不符，已被丢弃。"
+        },
+        "downloadCancelled": {
+          "hint": "没有安装任何内容，准备好后可以重新开始。",
+          "message": "VS Code 下载已取消。"
+        },
+        "downloadFailed": {
+          "hint": "请检查网络或代理设置后重试。",
+          "message": "无法下载 VS Code。"
+        },
+        "healthTimeout": {
+          "hint": "请重试。电脑繁忙时可能需要再试一次。",
+          "message": "VS Code 已启动，但没有及时响应。"
+        },
+        "installFailed": {
+          "hint": "请确认应用数据文件夹可写且有剩余空间，然后重试。",
+          "message": "无法在这台电脑上准备 VS Code 的文件。"
+        },
+        "notRunning": {
+          "hint": "请重新启动。",
+          "message": "这个项目的 VS Code 已不在运行。"
+        },
+        "openSuperseded": {
+          "hint": "请重试以打开当前工作区。",
+          "message": "工作区主机已更改，或编辑器已停止。"
+        },
+        "profileChanged": {
+          "hint": "请重试以打开所选配置。",
+          "message": "另一个编辑器已更改此工作区的扩展配置。"
+        },
+        "relayGrantRequired": {
+          "hint": "请在主机电脑上批准请求，然后重试。",
+          "message": "主机电脑尚未允许此设备进入这个项目的 VS Code。"
+        },
+        "rootInvalid": {
+          "hint": "请从项目当前所在位置重新打开。",
+          "message": "这个项目的文件夹已不存在，或者不是文件夹。"
+        },
+        "spawnFailed": {
+          "hint": "请重试。如果一直失败，请在设置中重新安装 Pro IDE。",
+          "message": "无法启动 VS Code。"
+        },
+        "unknown": {
+          "hint": "请重试。如需反馈问题，下方详情会有帮助。",
+          "message": "启动 VS Code 时出现问题。"
+        },
+        "unresponsive": {
+          "hint": "请重试以启动一个新的实例。",
+          "message": "VS Code 已停止响应。"
+        },
+        "unsupportedPlatform": {
+          "hint": "请使用内置编辑器，或在你自己的 VS Code 中打开项目。",
+          "message": "VS Code（code-server）没有适用于这台电脑系统的版本。"
+        },
+        "upgradeRequired": {
+          "hint": "请在主机电脑上更新 Cognia 后重试。",
+          "message": "主机电脑上没有本应用所需的 VS Code 版本。"
+        }
+      },
       "languageRestart": "正在重启 Pro IDE 以应用新的界面语言……",
       "languageUnavailable": "Pro IDE 没有 {locale} 的界面翻译，将继续显示英文。",
       "localVsCodeFailed": "无法打开本机 VS Code：{error}",
       "openFileFailed": "无法在 VS Code 中打开文件：{error}",
       "openLocalVsCode": "用本机 VS Code 打开",
-      "openSuperseded": "工作区主机已更改或编辑器已停止，请重试以打开当前工作区。",
-      "profileChanged": "另一个编辑器已更改此工作区的扩展配置。请重试以打开所选配置。",
       "profileLabel": "扩展配置",
       "profileManaged": "托管",
       "profileManagedTooltip": "仅加载锁定的内置扩展、Cognia broker 和已签名的生成代理。智能体驱动、聊天上下文和插件 IDE 能力都依赖此配置。",
       "profileNative": "扩展",
       "profileNativeTooltip": "加载你自己的 Open VSX 扩展，运行在独立进程中，拥有独立的设置和扩展目录。它不会拿到 Cognia broker 凭据，因此这里没有智能体驱动和插件 IDE 能力。",
       "profileSwitchRestarts": "切换配置会启动另一个 VS Code。已打开的编辑器和终端会留在原配置里。",
+      "relayGrant": {
+        "approve": "允许",
+        "deny": "不允许",
+        "description": "{device} 想在这台电脑的 VS Code 中打开项目“{project}”。",
+        "failed": "此请求已过期或已被处理。请让该设备重试。",
+        "folderLabel": "文件夹：",
+        "lasting": "允许后将一直有效，直到你在 设置 → Pro IDE 中撤销。",
+        "more": "还有 {count} 个请求在等待。",
+        "risk": "这里的 VS Code 不需要密码且带完整终端，因此该设备能以你的身份在此项目中运行任意命令。",
+        "title": "允许已配对的设备进入 VS Code？"
+      },
       "remoteWorkbenchLabel": "远程工作台",
       "remoteWorkbenchTooltip": "编辑器运行在所选主机上。文件操作、设置、工作区面板，以及 Managed 配置的编辑器转聊天操作均通过已配对的主机连接同步。",
       "retry": "重试",
@@ -32009,7 +32094,6 @@
       "latestUpdate": "最新进展",
       "loadMore": "加载更多事件",
       "loadMoreError": "无法加载更早的事件。",
-      "loadOlder": "查找更早的事件",
       "loadingMore": "正在加载…",
       "noMore": "没有更早的事件了。",
       "pastEmpty": "暂无历史事件记录。",
@@ -45020,6 +45104,7 @@
       "download": "立即下载",
       "downloadCancelled": "已取消下载，未完成的安装包已删除。",
       "downloadDone": "已安装 code-server {version}。",
+      "downloadProgressLabel": "VS Code（code-server）下载进度",
       "failed": "操作失败：{error}",
       "host": {
         "boundTo": "绑定到 {root}",
@@ -45037,6 +45122,14 @@
       "location": "安装位置",
       "notInstalled": "未安装",
       "reclaimable": "可回收",
+      "relayGrantsDescription": "你允许进入这台电脑上某个项目 VS Code 的已配对设备。它们可以在其中以你的身份运行命令。",
+      "relayGrantsEmpty": "没有已配对设备可以打开这台电脑上的 VS Code。",
+      "relayGrantsGrantedAt": "允许于 {date}",
+      "relayGrantsRevoke": "撤销",
+      "relayGrantsRevokeFailed": "无法撤销访问权限：{error}",
+      "relayGrantsRevokeLabel": "撤销 {device} 的 VS Code 访问权限",
+      "relayGrantsRevoked": "已撤销访问权限。该设备打开的 VS Code 会在几秒内关闭。",
+      "relayGrantsTitle": "可进入 VS Code 的设备",
       "runningFor": "正在服务 {root}",
       "runningLabel": "运行状态",
       "runningNone": "未运行",

@@ -398,19 +398,29 @@ pub async fn companion_seed_deny_list(
 ///
 /// Writes the security store, tears down the signaling registration and its
 /// Host-side key, rebuilds the hub, mirrors into the deny-list cache and closes
-/// the device's live sockets.
+/// the device's live sockets. Its Pro IDE relay approvals go with it, so the
+/// owner's Settings never list a device that no longer exists.
 #[tauri::command]
 pub async fn companion_revoke_device(
     device_id: String,
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    use tauri::Manager;
     apply_lifecycle(
         &state,
-        app_handle,
+        app_handle.clone(),
         &device_id,
         super::device_lifecycle::LifecycleAction::Revoke,
     )?;
+    // The device's authentication is already gone, which closes the relay
+    // itself; this only drops its now-meaningless approvals.
+    if let Err(error) = app_handle
+        .state::<crate::codeserver::CodeServerState>()
+        .forget_relay_device(&device_id)
+    {
+        log::warn!("forget Pro IDE relay approvals for {device_id}: {error}");
+    }
     Ok(())
 }
 

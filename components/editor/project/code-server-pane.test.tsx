@@ -254,7 +254,7 @@ it("localizes a superseded host opening instead of exposing the error code", () 
   paneState.phase = "error"
   paneState.error = "Error: CODESERVER_OPEN_SUPERSEDED"
   renderPane()
-  expect(screen.getByText("proIde.openSuperseded")).toBeInTheDocument()
+  expect(screen.getByText("openSuperseded.message")).toBeInTheDocument()
   expect(screen.queryByText("Error: CODESERVER_OPEN_SUPERSEDED")).not.toBeInTheDocument()
 })
 
@@ -431,6 +431,7 @@ it("renders a real progress bar while downloading", () => {
   paneState.progress = 0.42
   renderPane()
   const bar = screen.getByTestId("code-server-progress")
+  expect(bar).toHaveAttribute("aria-label", "proIde.downloadProgressLabel")
   expect(bar).toBeInTheDocument()
   // The vendored shadcn `Progress` never forwards `value` to the Radix root, so
   // the fill lives entirely in the indicator's transform — assert what actually
@@ -454,13 +455,19 @@ it("explains the unsupported platform and points at local VS Code", () => {
   expect(screen.getByText("proIde.unsupportedTitle")).toBeInTheDocument()
 })
 
-it("shows the error + retry, and retry invokes the hook", () => {
+it("explains the error with its next step, and retry invokes the hook", () => {
   paneState.phase = "error"
-  paneState.error = "spawn code-server: ENOENT"
+  paneState.error = "CODESERVER_SPAWN_FAILED: ENOENT"
   renderPane()
-  expect(screen.getByTestId("code-server-error")).toBeInTheDocument()
-  expect(screen.getByText("spawn code-server: ENOENT")).toBeInTheDocument()
-  fireEvent.click(screen.getByText("proIde.retry"))
+  expect(screen.getByTestId("code-server-error")).toHaveAttribute(
+    "data-error-code",
+    "CODESERVER_SPAWN_FAILED"
+  )
+  expect(screen.getByText("spawnFailed.message")).toBeInTheDocument()
+  expect(screen.getByText("spawnFailed.hint")).toBeInTheDocument()
+  // The host's log text is not what a person needs to read.
+  expect(screen.queryByText(/ENOENT/)).toBeNull()
+  fireEvent.click(screen.getByText("retry"))
   expect(paneState.retry).toHaveBeenCalled()
 })
 

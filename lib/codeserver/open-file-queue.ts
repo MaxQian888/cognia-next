@@ -12,8 +12,10 @@
  * call is ever in flight, and intermediate targets are dropped — the user only
  * ever wants to land on the most recent file.
  *
- * This stays in place once W3's companion-extension channel lands: it becomes
- * the degraded path used when the extension isn't active.
+ * The pane prefers the broker extension's `openFile` verb, which reveals in the
+ * running window without a process. This queue serves the CLI fallback that
+ * remains for a workbench whose extension is not connected (native profile,
+ * kill switch, failed install, or the moments before it connects).
  */
 
 export interface CodeServerOpenTarget {

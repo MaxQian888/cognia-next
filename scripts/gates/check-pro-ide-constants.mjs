@@ -17,6 +17,9 @@
  *     without the `.sha256` the build writes beside it. If the build stops
  *     writing it, or a bundle (Tauri resources, the server image) stops
  *     shipping it, the broker silently never installs.
+ *   - **Lifecycle error codes.** The host leads every failure with a code the
+ *     renderer maps to a translated message. A code only one side knows shows
+ *     the generic "something went wrong" instead of the actual next step.
  *   - **Broker extension id.** The proxy generator stamps it into every
  *     generated VSIX's `extensionDependencies`; a mismatch means the proxy
  *     activates before the broker it depends on.
@@ -39,6 +42,8 @@ const FILES = {
   extBuild: "sidecar/codeserver-agent-ext/build.mjs",
   tauriConf: "src-tauri/tauri.conf.json",
   serverImage: "Dockerfile.cognia-server",
+  errorCodeRs: "crates/cognia-codeserver/src/error_code.rs",
+  errorCodeTs: "lib/codeserver/error-messages.ts",
 }
 
 const BROKER_VSIX = "cognia-managed-broker.vsix"
@@ -144,6 +149,27 @@ export function auditProIdeConstants(sources) {
     problems.push(`${FILES.serverImage}: the server image does not copy ${BROKER_VSIX}.sha256`)
   }
 
+  // ── Lifecycle error codes: Rust enum ⇄ renderer map ──────────────────────
+  const rustCodes = [...sources.errorCodeRs.matchAll(/=> "(CODESERVER_[A-Z_]+)"/g)].map((m) => m[1])
+  const tsBlock = /export const HOST_ERROR_CODES = \[([\s\S]*?)\] as const/.exec(
+    sources.errorCodeTs
+  )
+  if (rustCodes.length === 0) {
+    problems.push(`${FILES.errorCodeRs}: found no CODESERVER_* codes — did as_str() move?`)
+  } else if (!tsBlock) {
+    problems.push(`${FILES.errorCodeTs}: HOST_ERROR_CODES is missing — did the declaration move?`)
+  } else {
+    const tsCodes = [...tsBlock[1].matchAll(/"(CODESERVER_[A-Z_]+)"/g)].map((m) => m[1])
+    for (const code of rustCodes.filter((code) => !tsCodes.includes(code))) {
+      problems.push(`${FILES.errorCodeTs}: HOST_ERROR_CODES lacks ${code}, which the host reports`)
+    }
+    for (const code of tsCodes.filter((code) => !rustCodes.includes(code))) {
+      problems.push(
+        `${FILES.errorCodeTs}: HOST_ERROR_CODES lists ${code}, which the host never reports`
+      )
+    }
+  }
+
   return problems
 }
 
@@ -151,7 +177,9 @@ function main() {
   const sources = Object.fromEntries(Object.keys(FILES).map((key) => [key, read(key)]))
   const problems = auditProIdeConstants(sources)
   if (problems.length === 0) {
-    process.stdout.write("[audit:pro-ide-constants] OK — catalog, versions and ids agree\n")
+    process.stdout.write(
+      "[audit:pro-ide-constants] OK — catalog, versions, ids and error codes agree\n"
+    )
     return
   }
   process.stderr.write("[audit:pro-ide-constants] FAIL\n")

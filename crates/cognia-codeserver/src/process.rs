@@ -25,7 +25,12 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use super::download;
+#[cfg(feature = "tauri-host")]
+use super::error_code::ensure_coded;
+use super::error_code::{coded, CodeServerErrorCode};
 use super::profile::{IdeProfile, ProfilePaths};
+use super::relay_grants::{PendingRelayGrant, RelayGrant, RelayGrantStore};
+use super::relay_table::RelayTable;
 
 /// Emitted when a healthy instance stops answering `/healthz`, so the pane can
 /// leave `ready` instead of sitting on a dead page.
@@ -48,8 +53,21 @@ pub struct CodeServerExited {
     pub port: u16,
 }
 
+/// Source of [`RunningInstance::generation`]. Process-wide and never reused,
+/// so a relay id minted for one child can never resolve to its successor.
+#[cfg(any(feature = "tauri-host", test))]
+static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(any(feature = "tauri-host", test))]
+fn next_generation() -> u64 {
+    NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
 /// A live code-server instance for one project root.
 struct RunningInstance {
+    /// Which process this is. A respawn for the same root is a new generation,
+    /// which is what retires the relay ids minted for the old one.
+    generation: u64,
     port: u16,
     profile: IdeProfile,
     child: Child,
@@ -114,11 +132,166 @@ pub struct CodeServerState {
     /// `operation_lock` already serializes downloads, so there is only ever one
     /// to cancel.
     download_cancel: Arc<download::DownloadCancel>,
+    /// Paired devices admitted to a workbench through `/ide/relay/{id}`.
+    /// A sync mutex: never held across an await.
+    relays: std::sync::Mutex<RelayTable>,
+    /// The owner's per-project approvals for those devices. `None` until the
+    /// desktop shell attaches the file (see [`Self::attach_relay_grants`]);
+    /// until then nothing is granted.
+    grants: std::sync::Mutex<Option<RelayGrantStore>>,
 }
 
 impl CodeServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn lock_relays(&self) -> std::sync::MutexGuard<'_, RelayTable> {
+        self.relays
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn with_grants<R>(&self, f: impl FnOnce(&mut RelayGrantStore) -> R) -> Result<R, String> {
+        let mut grants = self
+            .grants
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        grants
+            .as_mut()
+            .map(f)
+            .ok_or_else(|| "Pro IDE relay grants are not available yet".to_string())
+    }
+
+    /// Load the owner's relay approvals from `path`. Called once by the
+    /// desktop shell at startup; a second call keeps the store already loaded.
+    pub fn attach_relay_grants(&self, path: PathBuf) {
+        let mut grants = self
+            .grants
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if grants.is_none() {
+            *grants = Some(RelayGrantStore::load(path));
+        }
+    }
+
+    /// Whether the owner let `device_id` into the workbench for `root`.
+    pub fn relay_granted(&self, device_id: &str, root: &str) -> bool {
+        let canonical = canonicalize_root(root).unwrap_or_else(|_| root.to_string());
+        self.with_grants(|grants| grants.is_granted(device_id, &canonical))
+            .unwrap_or(false)
+    }
+
+    /// Ask the owner to let `device_id` into `root` (idempotent while pending).
+    pub fn request_relay_grant(
+        &self,
+        device_id: &str,
+        root: &str,
+    ) -> Result<PendingRelayGrant, String> {
+        let canonical = canonicalize_root(root)?;
+        self.with_grants(|grants| grants.request(device_id, &canonical))
+    }
+
+    pub fn pending_relay_grants(&self) -> Vec<PendingRelayGrant> {
+        self.with_grants(RelayGrantStore::pending)
+            .unwrap_or_default()
+    }
+
+    /// Answer an ask from the desktop. Only the desktop shell exposes this.
+    pub fn respond_relay_grant(
+        &self,
+        id: &str,
+        approve: bool,
+    ) -> Result<Option<RelayGrant>, String> {
+        self.with_grants(|grants| grants.resolve(id, approve))?
+    }
+
+    pub fn relay_grants(&self) -> Vec<RelayGrant> {
+        self.with_grants(|grants| grants.list()).unwrap_or_default()
+    }
+
+    /// Withdraw one approval; the device's relay into that workbench closes
+    /// on its next request (WebSocket relays re-check every two seconds).
+    pub fn revoke_relay_grant(&self, device_id: &str, root: &str) -> Result<bool, String> {
+        let revoked = self.with_grants(|grants| grants.revoke(device_id, root))??;
+        self.lock_relays().revoke_device_root(device_id, root);
+        Ok(revoked)
+    }
+
+    /// Forget an unpaired device: its approvals, asks and relay admissions.
+    pub fn forget_relay_device(&self, device_id: &str) -> Result<bool, String> {
+        self.lock_relays().revoke_device(device_id);
+        self.with_grants(|grants| grants.revoke_device(device_id))?
+    }
+
+    /// Admit `device_id` to the running workbench for `root` and return the
+    /// relay id it reaches it through. Requires the owner's approval and a
+    /// live instance; the id dies with that instance.
+    pub async fn admit_relay(&self, root: &str, device_id: &str) -> Result<String, String> {
+        let canonical = canonicalize_root(root)?;
+        if !self.relay_granted(device_id, &canonical) {
+            return Err(coded(
+                CodeServerErrorCode::RelayGrantRequired,
+                "the host's owner has not approved this device for this project",
+            ));
+        }
+        let generation = {
+            let mut map = self.instances.lock().await;
+            map.get_mut(&canonical)
+                .and_then(|instance| instance.is_reusable().then_some(instance.generation))
+                .ok_or_else(|| {
+                    coded(
+                        CodeServerErrorCode::NotRunning,
+                        "no code-server for this project root",
+                    )
+                })?
+        };
+        Ok(self.lock_relays().admit(&canonical, generation, device_id))
+    }
+
+    /// The relay id `device_id` already holds for `root`'s current instance.
+    pub async fn relay_id_for(&self, root: &str, device_id: &str) -> Option<String> {
+        let canonical = canonicalize_root(root).unwrap_or_else(|_| root.to_string());
+        if !self.relay_granted(device_id, &canonical) {
+            return None;
+        }
+        let generation = {
+            let mut map = self.instances.lock().await;
+            let instance = map.get_mut(&canonical)?;
+            instance.is_reusable().then_some(instance.generation)?
+        };
+        self.lock_relays().id_for(&canonical, generation, device_id)
+    }
+
+    /// The loopback port behind `relay_id`, for `device_id` only, and only
+    /// while the owner's approval stands and the instance it was minted for
+    /// is still the one serving. Asked on every relayed request.
+    pub async fn relay_port(&self, relay_id: &str, device_id: &str) -> Option<u16> {
+        let target = self.lock_relays().resolve(relay_id, device_id)?;
+        if !self.relay_granted(device_id, &target.root) {
+            return None;
+        }
+        let port = {
+            let mut map = self.instances.lock().await;
+            map.get_mut(&target.root).and_then(|instance| {
+                (instance.generation == target.generation && instance.is_reusable())
+                    .then_some(instance.port)
+            })
+        };
+        if port.is_none() {
+            self.lock_relays().forget(relay_id);
+        }
+        port
+    }
+
+    /// The broker status of the workbench `root` would run in `profile`.
+    pub fn broker_status(
+        &self,
+        root: &str,
+        profile: IdeProfile,
+    ) -> Option<super::agent_channel::BrokerStatus> {
+        let canonical = canonicalize_root(root).unwrap_or_else(|_| root.to_string());
+        super::agent_channel::global().broker_status(&canonical, profile)
     }
 
     /// Status for a project root: `(running, port, profile)`.
@@ -169,25 +342,37 @@ impl CodeServerState {
 
         let info = download::ensure_code_server(app, Some(self.download_cancel.clone()))
             .await
-            .map_err(|e| format!("install code-server: {e:#}"))?;
-        let migration_root = download::code_server_root(app)
-            .map_err(|error| format!("resolve code-server root: {error:#}"))?;
+            .map_err(|e| ensure_coded(format!("{e:#}"), CodeServerErrorCode::InstallFailed))?;
+        let migration_root = download::code_server_root(app).map_err(|error| {
+            coded(
+                CodeServerErrorCode::InstallFailed,
+                format!("resolve code-server root: {error:#}"),
+            )
+        })?;
         tokio::task::spawn_blocking(move || {
             super::profile::migrate_legacy_profile_state(&migration_root)?;
             super::profile::sync_portable_preferences_once(&migration_root, profile)?;
             Ok::<(), String>(())
         })
         .await
-        .map_err(|error| format!("migrate code-server profiles task: {error}"))??;
+        .map_err(|error| format!("migrate code-server profiles task: {error}"))
+        .and_then(|migrated| migrated)
+        .map_err(|error| coded(CodeServerErrorCode::InstallFailed, error))?;
 
-        let paths = profile_paths(app, profile)?;
+        let paths = profile_paths(app, profile)
+            .map_err(|error| coded(CodeServerErrorCode::InstallFailed, error))?;
         let user_data_dir = paths.user_data_dir;
         let extensions_dir = paths.extensions_dir;
-        std::fs::create_dir_all(&user_data_dir)
-            .map_err(|e| format!("create {}: {e}", user_data_dir.display()))?;
-        std::fs::create_dir_all(&extensions_dir)
-            .map_err(|e| format!("create {}: {e}", extensions_dir.display()))?;
-        let port = pick_free_loopback_port()?;
+        for dir in [&user_data_dir, &extensions_dir] {
+            std::fs::create_dir_all(dir).map_err(|e| {
+                coded(
+                    CodeServerErrorCode::InstallFailed,
+                    format!("create {}: {e}", dir.display()),
+                )
+            })?;
+        }
+        let port = pick_free_loopback_port()
+            .map_err(|error| coded(CodeServerErrorCode::SpawnFailed, error))?;
         let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir, profile);
 
         // Side-load the managed-broker extension (best-effort, once per version) BEFORE
@@ -280,6 +465,7 @@ impl CodeServerState {
             map.insert(
                 canonical.clone(),
                 RunningInstance {
+                    generation: next_generation(),
                     port,
                     profile,
                     child,
@@ -341,7 +527,7 @@ impl CodeServerState {
         let _guard = self.operation_lock.lock().await;
         download::ensure_code_server(app, Some(self.download_cancel.clone()))
             .await
-            .map_err(|e| format!("{e:#}"))
+            .map_err(|e| ensure_coded(format!("{e:#}"), CodeServerErrorCode::InstallFailed))
     }
 
     /// Abort an in-flight first-run download. No-op when none is running, so
@@ -467,6 +653,7 @@ impl CodeServerState {
         if let Some(mut inst) = map.remove(&canonical) {
             inst.retire();
             super::agent_channel::global().deregister(&canonical);
+            self.lock_relays().revoke_root(&canonical);
             true
         } else {
             false
@@ -617,12 +804,18 @@ impl CodeServerState {
         let (binary_path, user_data_dir, extensions_dir) = {
             let mut map = self.instances.lock().await;
             let Some(instance) = map.get_mut(&canonical) else {
-                return Err("code-server is not running for this project root".to_string());
+                return Err(coded(
+                    CodeServerErrorCode::NotRunning,
+                    "no code-server for this project root",
+                ));
             };
             if !instance.is_reusable() {
                 instance.retire();
                 map.remove(&canonical);
-                return Err("code-server exited before the file could be opened".to_string());
+                return Err(coded(
+                    CodeServerErrorCode::NotRunning,
+                    "code-server exited before the file could be opened",
+                ));
             }
             (
                 instance.binary_path.clone(),
@@ -759,6 +952,10 @@ pub struct CodeServerStatus {
     pub port: Option<u16>,
     pub version: String,
     pub profile: Option<IdeProfile>,
+    /// Whether agent drive is available (managed profile only); see
+    /// [`super::agent_channel::BrokerStatus`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker: Option<super::agent_channel::BrokerStatus>,
 }
 
 /// Canonicalize a project root so the same folder maps to one instance
@@ -767,7 +964,13 @@ fn canonicalize_root(root: &str) -> Result<String, String> {
     let p = Path::new(root);
     let canonical = p
         .canonicalize()
-        .map_err(|e| format!("resolve project root {root}: {e}"))?;
+        .map_err(|e| coded(CodeServerErrorCode::RootInvalid, format!("{root}: {e}")))?;
+    if !canonical.is_dir() {
+        return Err(coded(
+            CodeServerErrorCode::RootInvalid,
+            format!("{root} is not a directory"),
+        ));
+    }
     Ok(canonical.to_string_lossy().into_owned())
 }
 
@@ -1423,7 +1626,9 @@ fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|e| format!("spawn code-server: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| coded(CodeServerErrorCode::SpawnFailed, e))?;
 
     // Drain stdout/stderr so a full pipe buffer can't block code-server. These
     // tasks end when the child dies (pipes close → next_line yields None).
@@ -1521,9 +1726,9 @@ async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
             }
         }
         if Instant::now() >= deadline {
-            return Err(format!(
-                "code-server did not become healthy on port {port} within {}s",
-                budget.as_secs()
+            return Err(coded(
+                CodeServerErrorCode::HealthTimeout,
+                format!("port {port} did not answer within {}s", budget.as_secs()),
             ));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -1879,6 +2084,7 @@ mod tests {
         state.instances.lock().await.insert(
             root.to_string(),
             RunningInstance {
+                generation: next_generation(),
                 port,
                 profile: IdeProfile::Managed,
                 child,
@@ -1890,6 +2096,97 @@ mod tests {
             },
         );
         unhealthy
+    }
+
+    /// A state whose owner approvals live in a temp dir, as the desktop
+    /// shell's would under the code-server root.
+    fn state_with_grants() -> (CodeServerState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let state = CodeServerState::new();
+        state.attach_relay_grants(dir.path().join("relay-grants.json"));
+        (state, dir)
+    }
+
+    fn approve(state: &CodeServerState, device: &str, root: &str) {
+        let ask = state.request_relay_grant(device, root).unwrap();
+        state.respond_relay_grant(&ask.id, true).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_device_reaches_the_desktop_workbench_only_with_the_owner_s_approval() {
+        let (state, dir) = state_with_grants();
+        let root = dir.path().to_string_lossy().into_owned();
+        let canonical = canonicalize_root(&root).unwrap();
+        insert_fake_instance(&state, &canonical, 43_120).await;
+
+        let refused = state.admit_relay(&root, "phone").await.unwrap_err();
+        assert!(
+            refused.starts_with("CODESERVER_RELAY_GRANT_REQUIRED"),
+            "{refused}"
+        );
+        assert_eq!(state.relay_id_for(&root, "phone").await, None);
+
+        approve(&state, "phone", &root);
+        let id = state.admit_relay(&root, "phone").await.unwrap();
+        assert_eq!(state.relay_port(&id, "phone").await, Some(43_120));
+        assert_eq!(state.relay_id_for(&root, "phone").await, Some(id.clone()));
+        // Another device cannot ride the same id.
+        assert_eq!(state.relay_port(&id, "laptop").await, None);
+        state.stop(&root).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn revoking_the_approval_or_unpairing_closes_the_relay() {
+        let (state, dir) = state_with_grants();
+        let root = dir.path().to_string_lossy().into_owned();
+        let canonical = canonicalize_root(&root).unwrap();
+        insert_fake_instance(&state, &canonical, 43_121).await;
+        approve(&state, "phone", &root);
+        approve(&state, "laptop", &root);
+        let id = state.admit_relay(&root, "phone").await.unwrap();
+        assert_eq!(state.admit_relay(&root, "laptop").await.unwrap(), id);
+
+        assert!(state.revoke_relay_grant("phone", &canonical).unwrap());
+        assert_eq!(state.relay_port(&id, "phone").await, None);
+        assert_eq!(state.relay_port(&id, "laptop").await, Some(43_121));
+
+        assert!(state.forget_relay_device("laptop").unwrap());
+        assert_eq!(state.relay_port(&id, "laptop").await, None);
+        assert!(state.relay_grants().is_empty());
+        state.stop(&root).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_respawned_or_stopped_workbench_retires_its_relay_ids() {
+        let (state, dir) = state_with_grants();
+        let root = dir.path().to_string_lossy().into_owned();
+        let canonical = canonicalize_root(&root).unwrap();
+        insert_fake_instance(&state, &canonical, 43_122).await;
+        approve(&state, "phone", &root);
+        let old = state.admit_relay(&root, "phone").await.unwrap();
+
+        // A new process for the same root: the old id must not follow it.
+        insert_fake_instance(&state, &canonical, 43_123).await;
+        assert_eq!(state.relay_port(&old, "phone").await, None);
+        let new = state.admit_relay(&root, "phone").await.unwrap();
+        assert_ne!(new, old);
+        assert_eq!(state.relay_port(&new, "phone").await, Some(43_123));
+
+        state.stop(&root).await;
+        assert_eq!(state.relay_port(&new, "phone").await, None);
+        let gone = state.admit_relay(&root, "phone").await.unwrap_err();
+        assert!(gone.starts_with("CODESERVER_NOT_RUNNING"), "{gone}");
+    }
+
+    #[test]
+    fn without_the_desktop_s_grant_file_nothing_is_granted() {
+        let state = CodeServerState::new();
+        assert!(!state.relay_granted("phone", "/w"));
+        assert!(state.request_relay_grant("phone", "/").is_err());
+        assert!(state.pending_relay_grants().is_empty());
     }
 
     /// The retry regression: the watchdog fires while the child is still alive,

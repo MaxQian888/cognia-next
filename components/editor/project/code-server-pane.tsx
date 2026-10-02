@@ -7,11 +7,12 @@
 
 import { useCallback, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, MonitorXIcon, RotateCwIcon } from "lucide-react"
+import { Loader2Icon, MonitorXIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { CodeServerErrorNotice } from "./code-server-error-notice"
 import { useCodeServerBrokerIssues } from "@/hooks/codeserver/use-code-server-broker-issues"
 import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
 import { useCodeServerWorkspaceNavigation } from "@/hooks/codeserver/use-code-server-workspace-navigation"
@@ -174,23 +175,7 @@ export function CodeServerPane({
               <p className="text-xs text-muted-foreground">{t("proIde.unsupportedDesc")}</p>
             </div>
           ) : phase === "error" ? (
-            <div
-              className="flex max-w-sm flex-col items-center gap-3"
-              data-testid="code-server-error"
-            >
-              <p className="text-sm font-medium">{t("proIde.errorTitle")}</p>
-              {error ? (
-                <p className="text-xs text-muted-foreground">
-                  {error.includes("CODESERVER_OPEN_SUPERSEDED")
-                    ? t("proIde.openSuperseded")
-                    : error}
-                </p>
-              ) : null}
-              <Button size="sm" variant="outline" onClick={retry}>
-                <RotateCwIcon className="size-3.5" />
-                {t("proIde.retry")}
-              </Button>
-            </div>
+            <CodeServerErrorNotice error={error} onRetry={retry} data-testid="code-server-error" />
           ) : (
             <div
               className="flex w-full max-w-xs flex-col items-center gap-2 text-sm text-muted-foreground"
@@ -205,7 +190,12 @@ export function CodeServerPane({
               {/* The first run pulls ~100-200MB; a bare percentage is a weak
                   affordance for a wait that long. */}
               {phase === "downloading" && percent != null ? (
-                <Progress value={percent} className="h-1.5" data-testid="code-server-progress" />
+                <Progress
+                  value={percent}
+                  className="h-1.5"
+                  aria-label={t("proIde.downloadProgressLabel")}
+                  data-testid="code-server-progress"
+                />
               ) : null}
               {/* …and a wait that long with no way out is a trap: a mis-click
                   on the engine toggle used to commit the user to the whole

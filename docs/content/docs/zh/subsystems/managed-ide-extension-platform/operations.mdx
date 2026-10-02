@@ -18,6 +18,17 @@ relay 挂载在 companion 前门的 `/ide/relay/<opaque-id>/`
 对同一 host、path 与 fingerprint 的重复 ensure 会**原地**替换 token 并保留已绑定
 端口：重新绑定会给 webview 一个新 URL 并重启 workbench，正好丢掉 pane 要保护的会话。
 
+配对主机既可以是 headless 服务器，也可以是另一台 Cognia 桌面。桌面通过同一个
+`/ide/relay/` 入口提供工作台，但它的 code-server 以 `--auth none` 运行且为所有者
+提供完整终端，因此仅有设备的 Remote Control 能力并不够。设备第一次在那里打开某个
+项目时，桌面会向所有者弹出提示，写明设备与文件夹；在所有者允许之前，该设备的请求
+会以 `CODESERVER_RELAY_GRANT_REQUIRED` 失败。批准按设备、按项目生效，持久保存在
+code-server 根目录下的 `relay-grants.json`（权限 `0600`），并可在 设置 → Pro IDE
+中查看和撤销。撤销批准、取消配对或收回 Remote Control，都会在两秒内关闭已打开的
+会话。relay id 绑定到单个 code-server 进程：工作台重启后，设备重新调用 `ensure`
+获得新的 id。本机上的浏览器不经过中继，它通过 loopback 平面访问工作台，并直接在
+`codeserver_ensure` 的响应中拿到端口。
+
 插件更新使用持久事务：
 
 1. `plugin_stage_version` 下载并校验 checksum/signature，在 host-owned transaction

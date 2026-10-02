@@ -25,6 +25,21 @@ export interface CodeServerStatus {
   profile?: CodeServerProfile | null
   /** Remote companion path. Never contains a credential or the host loopback port. */
   relayPath?: string | null
+  /**
+   * Whether agent drive is available in this workbench. Present only for a
+   * running managed-profile instance; the workbench runs either way.
+   */
+  broker?: CodeServerBrokerStatus
+}
+
+/** Why a managed workbench is running without its broker. */
+export type CodeServerBrokerDisabledReason =
+  "admin-disabled" | "install-failed" | "registration-failed" | "protocol-incompatible"
+
+/** Mirror of `codeserver::agent_channel::BrokerStatus`. */
+export interface CodeServerBrokerStatus {
+  enabled: boolean
+  reason?: CodeServerBrokerDisabledReason
 }
 
 /** Mirror of `codeserver::download::CodeServerDiskUsage`. */
@@ -285,7 +300,25 @@ export const CODESERVER_EVENTS = {
   brokerRequest: "codeserver://broker-request",
   brokerNotification: "codeserver://broker-notification",
   brokerIssue: "codeserver://broker-issue",
+  /** A paired device asks this desktop's owner to open a project's Pro IDE. */
+  relayGrantRequested: "codeserver://relay-grant-requested",
 } as const
+
+/** Mirror of `codeserver::relay_grants::PendingRelayGrant`. */
+export interface CodeServerRelayGrantRequest {
+  id: string
+  deviceId: string
+  /** Canonical project root on this desktop. */
+  root: string
+  requestedAtMs: number
+}
+
+/** Mirror of `codeserver::relay_grants::RelayGrant`. */
+export interface CodeServerRelayGrant {
+  deviceId: string
+  root: string
+  grantedAtMs: number
+}
 
 let remoteLifecycleRevision = 0
 
@@ -321,7 +354,10 @@ export const codeServerClient = {
     }
     if (!endpoint) return status
     if (!status.relayPath) {
-      throw new Error("remote host did not provide a managed IDE relay path")
+      // A host this old serves the workbench to no paired device at all.
+      throw new Error(
+        "CODESERVER_UPGRADE_REQUIRED: the host did not provide a managed IDE relay path"
+      )
     }
     // A remote instance answers on a loopback port on the HOST, which `status`
     // reports as null because it means nothing here. What the pane can navigate
@@ -356,6 +392,24 @@ export const codeServerClient = {
   stopAll: () => stopInstance<void>("codeserver_stop_all", {}),
   /** Download + install code-server without spawning (pre-fetch). */
   download: () => transport.call<CodeServerInstallInfo>("codeserver_download", {}),
+  /**
+   * Paired devices waiting for this desktop's owner to let them into a
+   * project's Pro IDE. The four relay-grant calls are desktop-local by
+   * contract: a paired device can never answer its own request.
+   */
+  relayGrantPending: () =>
+    transport.call<CodeServerRelayGrantRequest[]>("codeserver_relay_grant_pending", {}),
+  /** Approve or deny one request; approving lasts until revoked. */
+  relayGrantRespond: (id: string, approve: boolean) =>
+    transport.call<CodeServerRelayGrant | null>("codeserver_relay_grant_respond", {
+      id,
+      approve,
+    }),
+  /** Every standing approval. */
+  relayGrants: () => transport.call<CodeServerRelayGrant[]>("codeserver_relay_grants", {}),
+  /** Withdraw one approval; that device's open session closes within seconds. */
+  relayGrantRevoke: (deviceId: string, root: string) =>
+    transport.call<boolean>("codeserver_relay_grant_revoke", { deviceId, root }),
   /** Generate and locally sign a managed proxy from normalized manifest IR. */
   buildProxy: (request: CodeServerProxyBuildRequest) =>
     transport.call<CodeServerProxyArtifact>("codeserver_build_proxy", { request }),

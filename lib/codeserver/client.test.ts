@@ -76,7 +76,7 @@ it("fails closed when the remote host advertises no relay path", async () => {
   call.mockResolvedValueOnce({ running: true, port: null, version: "4.128.0", relayPath: null })
 
   await expect(codeServerClient.ensure("/remote/work")).rejects.toThrow(
-    "did not provide a managed IDE relay path"
+    /^CODESERVER_UPGRADE_REQUIRED: .*did not provide a managed IDE relay path/
   )
   expect(call).toHaveBeenCalledTimes(1)
 })
@@ -439,4 +439,26 @@ it("cleans locally before a slow remote stop completes and preserves a later ope
   await stopping
   expect(call.mock.calls.at(-1)[0]).toBe("codeserver_remote_relay_ensure")
   expect(isRemoteIdeRelayActive()).toBe(true)
+})
+
+it("manages the owner's relay approvals through the desktop-local commands", async () => {
+  call.mockResolvedValueOnce([{ id: "a1", deviceId: "phone", root: "/w", requestedAtMs: 1 }])
+  await expect(codeServerClient.relayGrantPending()).resolves.toHaveLength(1)
+  expect(call).toHaveBeenLastCalledWith("codeserver_relay_grant_pending", {})
+
+  await codeServerClient.relayGrantRespond("a1", true)
+  expect(call).toHaveBeenLastCalledWith("codeserver_relay_grant_respond", {
+    id: "a1",
+    approve: true,
+  })
+
+  await codeServerClient.relayGrants()
+  expect(call).toHaveBeenLastCalledWith("codeserver_relay_grants", {})
+
+  await codeServerClient.relayGrantRevoke("phone", "/w")
+  expect(call).toHaveBeenLastCalledWith("codeserver_relay_grant_revoke", {
+    deviceId: "phone",
+    root: "/w",
+  })
+  expect(CODESERVER_EVENTS.relayGrantRequested).toBe("codeserver://relay-grant-requested")
 })

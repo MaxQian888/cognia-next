@@ -22,6 +22,21 @@ host, path and fingerprint swaps the token **in place** and keeps the bound
 port: rebinding would hand the webview a new URL and reboot the workbench,
 losing exactly the session the pane exists to protect.
 
+The paired host can be another Cognia desktop as well as a headless server. A
+desktop serves its workbench through the same `/ide/relay/` front door, but its
+code-server runs with `--auth none` and full terminals for its owner, so a
+device's Remote Control capability is not enough. The first time a device opens
+a project there, the desktop shows its owner a prompt naming the device and the
+folder, and the device's request fails with `CODESERVER_RELAY_GRANT_REQUIRED`
+until the owner allows it. The approval is per device and per project, persists
+in `relay-grants.json` (mode `0600`) under the code-server root, and is listed
+and revocable in Settings → Pro IDE. Revoking it, unpairing the device, or
+withdrawing Remote Control closes an open session within two seconds. Relay ids
+are bound to one code-server process: when the workbench restarts, the device
+calls `ensure` again and gets a new id. A browser on the same machine is not
+relayed; it reaches the workbench over the loopback plane and gets the port
+directly in the `codeserver_ensure` reply.
+
 Plugin updates use a durable transaction:
 
 1. `plugin_stage_version` downloads and verifies checksum/signature, extracts

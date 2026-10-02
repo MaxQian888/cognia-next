@@ -4,6 +4,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
+// Its own suite covers it; here it only has to be mounted beside the install card.
+jest.mock("./pro-ide-relay-grants", () => ({
+  ProIdeRelayGrants: () => <div data-testid="pro-ide-relay-grants" />,
+}))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
 let mockIsTauri = true
@@ -143,7 +147,10 @@ it("renders a real progress bar during the pre-fetch", async () => {
   fireEvent.click(screen.getByTestId("pro-ide-download"))
   act(() => progressCb?.({ stage: "downloading", bytesDone: 50, bytesTotal: 100 }))
 
-  expect(await screen.findByTestId("pro-ide-progress")).toBeInTheDocument()
+  expect(await screen.findByTestId("pro-ide-progress")).toHaveAttribute(
+    "aria-label",
+    "downloadProgressLabel"
+  )
 
   finish(install)
   await waitFor(() => expect(screen.queryByTestId("pro-ide-progress")).not.toBeInTheDocument())
@@ -189,6 +196,29 @@ it("tears the native pane down before reclaiming disk", async () => {
 
   await waitFor(() => expect(client.uninstall).toHaveBeenCalledWith(true))
   expect(destroyPane).toHaveBeenCalledTimes(2)
+})
+
+it("lists the devices allowed into this desktop's VS Code beside the install card", async () => {
+  render(<ProIdeSection />)
+  expect(await screen.findByTestId("pro-ide-section")).toBeInTheDocument()
+  expect(screen.getByTestId("pro-ide-relay-grants")).toBeInTheDocument()
+})
+
+it("explains a classified download failure in the user's language", async () => {
+  client.download.mockRejectedValueOnce(
+    new Error("CODESERVER_CHECKSUM_MISMATCH: expected abc, got def")
+  )
+  client.diskUsage.mockResolvedValue({ ...USAGE, installed: false })
+  render(<ProIdeSection />)
+
+  await waitFor(() => expect(screen.getByTestId("pro-ide-download")).toBeEnabled())
+  fireEvent.click(screen.getByTestId("pro-ide-download"))
+
+  await waitFor(() =>
+    expect(toasts.error).toHaveBeenCalledWith("checksumMismatch.message", {
+      description: "checksumMismatch.hint",
+    })
+  )
 })
 
 it("surfaces failures as a toast and refreshes anyway", async () => {

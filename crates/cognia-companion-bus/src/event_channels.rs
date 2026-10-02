@@ -514,6 +514,14 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         tauri_forwarded: true,
         note: "IDE broker problem (install, protocol, credential tripwire); workspace root and an issue code",
     },
+    EventChannelSpec {
+        pattern: "codeserver://relay-grant-requested",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "a paired device asks the desktop owner to open a project's Pro IDE; ask id, \
+               device id and project root. Answered only at the desktop",
+    },
     // Plugin runtime.
     EventChannelSpec {
         pattern: "plugin:python",

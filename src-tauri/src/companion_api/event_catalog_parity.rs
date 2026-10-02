@@ -52,6 +52,10 @@ mod tests {
                 crate::codeserver::agent_channel::CODESERVER_BROKER_ISSUE_EVENT,
             ),
             (
+                "codeserver://relay-grant-requested",
+                crate::codeserver::relay_grants::CODESERVER_RELAY_GRANT_EVENT,
+            ),
+            (
                 "session-import://changed",
                 crate::session_import_watch::SESSION_CHANGED_EVENT,
             ),

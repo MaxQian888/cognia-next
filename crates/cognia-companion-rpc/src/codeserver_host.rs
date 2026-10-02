@@ -1,6 +1,10 @@
 //! Companion policy adapter for the shared IDE runtime.
 use cognia_codeserver::remote;
-struct CompanionCodeServerHost;
+
+/// Companion policy for the IDE runtime. Public so the desktop shell can wrap
+/// it with its own workbenches (`src-tauri/src/codeserver/desktop_host.rs`)
+/// rather than restate the policy.
+pub struct CompanionCodeServerHost;
 
 #[async_trait::async_trait]
 impl cognia_codeserver::host::CodeServerHost for CompanionCodeServerHost {

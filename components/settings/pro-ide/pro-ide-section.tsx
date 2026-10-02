@@ -29,6 +29,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { ProIdeHostCard } from "./pro-ide-host-card"
+import { ProIdeRelayGrants } from "./pro-ide-relay-grants"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import {
   CODESERVER_EVENTS,
@@ -37,6 +38,7 @@ import {
   type CodeServerStatus,
   codeServerClient,
 } from "@/lib/codeserver/client"
+import { codeServerErrorCode, describeCodeServerError } from "@/lib/codeserver/error-messages"
 import { destroyCodeServerPane, getActiveProIdeRoot } from "@/lib/codeserver/pane-manager"
 import { formatBytes } from "@/lib/perf/backend/format"
 import { isTauri } from "@/lib/tauri"
@@ -47,6 +49,7 @@ type Busy = "download" | "clean" | "uninstall" | null
 
 export function ProIdeSection() {
   const t = useTranslations("settings.proIde")
+  const tErrors = useTranslations("projectEditor.proIde.errors")
   /**
    * This card manages the LOCAL install: the pinned version, the on-disk
    * footprint, the pre-fetch, and reclaiming the space afterwards. All four of
@@ -142,8 +145,15 @@ export function ProIdeSection() {
     } catch (cause) {
       // A cancelled pre-fetch rejects through this same path. Reporting it as a
       // failure would tell the user their own click went wrong.
-      if (cancelledRef.current) toast.info(t("downloadCancelled"))
-      else toast.error(t("failed", { error: String(cause) }))
+      const code = codeServerErrorCode(cause)
+      if (cancelledRef.current || code === "CODESERVER_DOWNLOAD_CANCELLED") {
+        toast.info(t("downloadCancelled"))
+      } else if (code) {
+        // A classified install failure says what went wrong and what to do,
+        // in the user's language, instead of the installer's English chain.
+        const view = describeCodeServerError(cause, tErrors)
+        toast.error(view.message, { description: view.hint })
+      } else toast.error(t("failed", { error: String(cause) }))
     } finally {
       setBusy(null)
       setProgress(null)
@@ -237,129 +247,136 @@ export function ProIdeSection() {
   }
 
   return (
-    <Card data-testid="pro-ide-section">
-      <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2">
-          <dt className="text-muted-foreground">{t("version")}</dt>
-          <dd className="flex items-center gap-2">
-            <span className="font-mono" data-testid="pro-ide-version">
-              {usage?.version ?? "—"}
-            </span>
-            <Badge variant="secondary" data-testid="pro-ide-installed">
-              {usage?.installed ? t("installed") : t("notInstalled")}
-            </Badge>
-          </dd>
-
-          <dt className="text-muted-foreground">{t("diskUsage")}</dt>
-          <dd className="font-mono tabular-nums" data-testid="pro-ide-total">
-            {usage ? formatBytes(usage.totalBytes) : "—"}
-          </dd>
-
-          <dt className="text-muted-foreground">{t("reclaimable")}</dt>
-          <dd className="font-mono tabular-nums" data-testid="pro-ide-reclaimable">
-            {usage ? formatBytes(usage.reclaimableBytes) : "—"}
-            {usage && usage.staleVersions.length > 0 ? (
-              <span className="ml-2 font-sans text-xs text-muted-foreground">
-                {t("staleVersions", { versions: usage.staleVersions.join(", ") })}
+    <div className="flex flex-col gap-4">
+      <Card data-testid="pro-ide-section">
+        <CardHeader>
+          <CardTitle>{t("title")}</CardTitle>
+          <CardDescription>{t("description")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2">
+            <dt className="text-muted-foreground">{t("version")}</dt>
+            <dd className="flex items-center gap-2">
+              <span className="font-mono" data-testid="pro-ide-version">
+                {usage?.version ?? "—"}
               </span>
-            ) : null}
-          </dd>
+              <Badge variant="secondary" data-testid="pro-ide-installed">
+                {usage?.installed ? t("installed") : t("notInstalled")}
+              </Badge>
+            </dd>
 
-          <dt className="text-muted-foreground">{t("location")}</dt>
-          <dd className="truncate font-mono text-xs" data-testid="pro-ide-root">
-            {usage?.root ?? "—"}
-          </dd>
+            <dt className="text-muted-foreground">{t("diskUsage")}</dt>
+            <dd className="font-mono tabular-nums" data-testid="pro-ide-total">
+              {usage ? formatBytes(usage.totalBytes) : "—"}
+            </dd>
 
-          {/* The install answers "what is on disk". This answers "is any of it
+            <dt className="text-muted-foreground">{t("reclaimable")}</dt>
+            <dd className="font-mono tabular-nums" data-testid="pro-ide-reclaimable">
+              {usage ? formatBytes(usage.reclaimableBytes) : "—"}
+              {usage && usage.staleVersions.length > 0 ? (
+                <span className="ml-2 font-sans text-xs text-muted-foreground">
+                  {t("staleVersions", { versions: usage.staleVersions.join(", ") })}
+                </span>
+              ) : null}
+            </dd>
+
+            <dt className="text-muted-foreground">{t("location")}</dt>
+            <dd className="truncate font-mono text-xs" data-testid="pro-ide-root">
+              {usage?.root ?? "—"}
+            </dd>
+
+            {/* The install answers "what is on disk". This answers "is any of it
               running, and for which workspace" — the question the managed-process
               tab cannot answer, because a child process does not carry a
               workspace root. */}
-          <dt className="text-muted-foreground">{t("runningLabel")}</dt>
-          <dd className="truncate text-xs" data-testid="pro-ide-running">
-            {running ? (
-              <span className="font-mono">{t("runningFor", { root: activeRoot ?? "" })}</span>
-            ) : (
-              t("runningNone")
-            )}
-          </dd>
-        </dl>
+            <dt className="text-muted-foreground">{t("runningLabel")}</dt>
+            <dd className="truncate text-xs" data-testid="pro-ide-running">
+              {running ? (
+                <span className="font-mono">{t("runningFor", { root: activeRoot ?? "" })}</span>
+              ) : (
+                t("runningNone")
+              )}
+            </dd>
+          </dl>
 
-        {busy === "download" && progress != null ? (
-          <Progress value={Math.round(progress * 100)} data-testid="pro-ide-progress" />
-        ) : null}
+          {busy === "download" && progress != null ? (
+            <Progress
+              value={Math.round(progress * 100)}
+              aria-label={t("downloadProgressLabel")}
+              data-testid="pro-ide-progress"
+            />
+          ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy !== null || usage?.installed === true}
-            onClick={download}
-            data-testid="pro-ide-download"
-          >
-            {busy === "download" ? (
-              <Loader2Icon className="size-3.5 animate-spin" />
-            ) : (
-              <DownloadIcon className="size-3.5" />
-            )}
-            {t("download")}
-          </Button>
-          {busy === "download" ? (
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              variant="ghost"
-              onClick={cancelDownload}
-              data-testid="pro-ide-cancel-download"
+              variant="outline"
+              disabled={busy !== null || usage?.installed === true}
+              onClick={download}
+              data-testid="pro-ide-download"
             >
-              <XIcon className="size-3.5" />
-              {t("cancelDownload")}
+              {busy === "download" ? (
+                <Loader2Icon className="size-3.5 animate-spin" />
+              ) : (
+                <DownloadIcon className="size-3.5" />
+              )}
+              {t("download")}
             </Button>
-          ) : null}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy !== null || !usage || usage.reclaimableBytes === 0}
-            onClick={clean}
-            data-testid="pro-ide-clean"
-          >
-            <RotateCwIcon className="size-3.5" />
-            {t("clean")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-destructive hover:text-destructive"
-            disabled={busy !== null || !usage?.installed}
-            onClick={() => setConfirmUninstall(true)}
-            data-testid="pro-ide-uninstall"
-          >
-            <Trash2Icon className="size-3.5" />
-            {t("uninstall")}
-          </Button>
-        </div>
-      </CardContent>
-
-      <AlertDialog open={confirmUninstall} onOpenChange={setConfirmUninstall}>
-        <AlertDialogContent data-testid="pro-ide-uninstall-dialog">
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("uninstallConfirmTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("uninstallConfirmBody")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              data-testid="pro-ide-uninstall-confirm"
-              onClick={uninstall}
+            {busy === "download" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={cancelDownload}
+                data-testid="pro-ide-cancel-download"
+              >
+                <XIcon className="size-3.5" />
+                {t("cancelDownload")}
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy !== null || !usage || usage.reclaimableBytes === 0}
+              onClick={clean}
+              data-testid="pro-ide-clean"
             >
+              <RotateCwIcon className="size-3.5" />
+              {t("clean")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              disabled={busy !== null || !usage?.installed}
+              onClick={() => setConfirmUninstall(true)}
+              data-testid="pro-ide-uninstall"
+            >
+              <Trash2Icon className="size-3.5" />
               {t("uninstall")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
+            </Button>
+          </div>
+        </CardContent>
+
+        <AlertDialog open={confirmUninstall} onOpenChange={setConfirmUninstall}>
+          <AlertDialogContent data-testid="pro-ide-uninstall-dialog">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("uninstallConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("uninstallConfirmBody")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                data-testid="pro-ide-uninstall-confirm"
+                onClick={uninstall}
+              >
+                {t("uninstall")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Card>
+      <ProIdeRelayGrants />
+    </div>
   )
 }

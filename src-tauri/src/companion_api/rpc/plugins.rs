@@ -840,20 +840,31 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
-            host.ide_ensure(&root, profile, device_id)
+            // A caller on this machine's loopback plane embeds the workbench
+            // directly; everyone else goes through the relay.
+            let via_relay = plane != ExecutionPlane::LoopbackPlaintext;
+            let status = host
+                .ide_ensure(&root, profile, device_id, via_relay)
                 .await
-                .and_then(|status| {
-                    serde_json::to_value(status)
-                        .map_err(|error| format!("serialize code-server status: {error}"))
-                })
-                .map_err(RpcError::service_unavailable)
+                .map_err(codeserver_rpc_error)?;
+            // Same disclosure rule as `codeserver_status` below: only a caller
+            // on this machine's loopback plane learns the port. Answering it
+            // here spares that browser a blank pane until its first poll.
+            let status = if discloses_loopback_port(plane, status.running) {
+                status.with_loopback_port(host.ide_loopback_port(&root, device_id).await)
+            } else {
+                status
+            };
+            serde_json::to_value(status).map_err(|error| {
+                RpcError::internal(format!("serialize code-server status: {error}"))
+            })
         }
         "codeserver_status" => {
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let status = host
                 .ide_status(&root, device_id)
                 .await
-                .map_err(RpcError::service_unavailable)?;
+                .map_err(codeserver_rpc_error)?;
             // The workbench answers on a loopback port on the HOST, so the port
             // is worth exactly nothing to a caller that cannot reach that
             // loopback, and telling them anyway is a disclosure for no gain.
@@ -865,7 +876,7 @@ pub(super) async fn dispatch(
             // The plane is the check, not the Origin or the Host header. Both
             // of those are the caller's own claim. The plaintext listener's
             // `127.0.0.1` bind is not.
-            let status = if plane == ExecutionPlane::LoopbackPlaintext && status.running {
+            let status = if discloses_loopback_port(plane, status.running) {
                 status.with_loopback_port(host.ide_loopback_port(&root, device_id).await)
             } else {
                 status
@@ -1477,9 +1488,87 @@ pub(super) async fn dispatch(
     result
 }
 
+/// Whether a workbench status may carry its host loopback port.
+///
+/// Only a running workbench, and only to a caller on this machine's loopback
+/// plaintext plane: that caller can reach the port, and the plane is decided
+/// by the listener the request arrived on, not by anything the caller claims.
+fn discloses_loopback_port(plane: ExecutionPlane, running: bool) -> bool {
+    running && plane == ExecutionPlane::LoopbackPlaintext
+}
+
+/// A Pro IDE lifecycle failure as an RPC error whose `code` is the failure's
+/// own stable code (`CODESERVER_*`), so a remote client maps it to a message
+/// and a next step instead of showing a host-side English chain.
+///
+/// The status says whether repeating the request can help: a missing build,
+/// an invalid root or a cancelled download will fail the same way again.
+fn codeserver_rpc_error(message: String) -> (StatusCode, Json<RpcError>) {
+    use crate::codeserver::error_code::CodeServerErrorCode as Code;
+    let Some(code) = Code::of(&message) else {
+        return RpcError::service_unavailable(message);
+    };
+    let (status, retryable) = match code {
+        Code::UnsupportedPlatform => (StatusCode::NOT_IMPLEMENTED, false),
+        Code::RootInvalid => (StatusCode::BAD_REQUEST, false),
+        Code::NotRunning => (StatusCode::NOT_FOUND, false),
+        Code::DownloadCancelled => (StatusCode::CONFLICT, false),
+        Code::UpgradeRequired => (StatusCode::UPGRADE_REQUIRED, false),
+        // A person has to answer on the host first; repeating it now changes nothing.
+        Code::RelayGrantRequired => (StatusCode::PRECONDITION_REQUIRED, false),
+        Code::DownloadFailed
+        | Code::ChecksumMismatch
+        | Code::ArchiveInvalid
+        | Code::InstallFailed
+        | Code::SpawnFailed
+        | Code::HealthTimeout => (StatusCode::SERVICE_UNAVAILABLE, true),
+    };
+    let error = RpcError::new(code.as_str(), message);
+    (
+        status,
+        Json(if retryable { error.retryable() } else { error }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_plane_is_what_discloses_the_workbench_port() {
+        assert!(discloses_loopback_port(
+            ExecutionPlane::LoopbackPlaintext,
+            true
+        ));
+        assert!(!discloses_loopback_port(
+            ExecutionPlane::LoopbackPlaintext,
+            false
+        ));
+        assert!(!discloses_loopback_port(ExecutionPlane::Network, true));
+        assert!(!discloses_loopback_port(ExecutionPlane::Network, false));
+    }
+
+    #[test]
+    fn codeserver_failures_keep_their_code_across_the_rpc_boundary() {
+        let (status, Json(error)) =
+            codeserver_rpc_error("CODESERVER_HEALTH_TIMEOUT: port 1 did not answer".into());
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "CODESERVER_HEALTH_TIMEOUT");
+        assert!(error.retryable);
+        assert_eq!(
+            error.message,
+            "CODESERVER_HEALTH_TIMEOUT: port 1 did not answer"
+        );
+
+        let (status, Json(error)) =
+            codeserver_rpc_error("CODESERVER_UNSUPPORTED_PLATFORM: windows".into());
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert!(!error.retryable);
+
+        let (status, Json(error)) = codeserver_rpc_error("socket closed".into());
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "service_unavailable");
+    }
 
     #[test]
     fn command_family_is_non_empty_and_unique() {

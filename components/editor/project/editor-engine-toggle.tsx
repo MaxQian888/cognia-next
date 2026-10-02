@@ -15,6 +15,7 @@ import {
   PuzzleIcon,
   ShieldCheckIcon,
   SquareCodeIcon,
+  UnplugIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -24,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Surface } from "@/components/surface/surface"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { useCodeServerBrokerProgress } from "@/hooks/codeserver/use-code-server-broker-progress"
+import { useCodeServerBrokerStatus } from "@/hooks/codeserver/use-code-server-broker-status"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { isTauri } from "@/lib/tauri"
@@ -110,11 +112,10 @@ export function EditorEngineToggle({
       .openInLocalVsCode(projectRoot)
       .catch((cause) => toast.error(t("proIde.localVsCodeFailed", { error: String(cause) })))
 
-  // Driving a remote host means the workbench on screen belongs to that host.
-  // The app-to-editor direction reaches it now, but the reverse does not: the
-  // extension reports editor changes as host-process events, and no request
-  // carries an event back. `CodeServerPane` keeps those two consumers gated.
-  // This is where the user is told, next to the switch that put them here.
+  // Driving a remote host means the workbench on screen belongs to that host:
+  // its files, settings and extension live there, and its editor events reach
+  // this app through the companion event stream. This is where the user is
+  // told, next to the switch that put them here.
   const remoteWorkbench = useRemoteHostActive() && value === "codeserver" && proIdeSupported
 
   // What the agent is waiting on inside VS Code. Shown here rather than over
@@ -125,6 +126,13 @@ export function EditorEngineToggle({
     projectRoot
   )
   const [currentOperation] = brokerOperations
+  // The workbench keeps running when its broker cannot; say so here, or the
+  // Cognia features inside VS Code just silently do nothing.
+  const brokerStatus = useCodeServerBrokerStatus(
+    value === "codeserver" && proIdeSupported && proIdeProfile === "managed",
+    projectRoot
+  )
+  const brokerOffReason = brokerStatus && !brokerStatus.enabled ? brokerStatus.reason : undefined
 
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-1.5", className)}>
@@ -222,6 +230,30 @@ export function EditorEngineToggle({
             </TooltipTrigger>
             <TooltipContent className="max-w-sm">
               {t("proIde.remoteWorkbenchTooltip")}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : null}
+
+      {brokerOffReason ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Surface asChild layer="raised" radius="pill">
+                <span
+                  className="inline-flex h-7 items-center gap-1 border border-warning/40 bg-warning/10 px-2 text-xs text-muted-foreground"
+                  data-testid="pro-ide-broker-disabled"
+                  data-reason={brokerOffReason}
+                  tabIndex={0}
+                  aria-label={t(`proIde.brokerDisabled.reason.${brokerOffReason}`)}
+                >
+                  <UnplugIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
+                  <span className={labelClassName}>{t("proIde.brokerDisabled.label")}</span>
+                </span>
+              </Surface>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-sm">
+              {t(`proIde.brokerDisabled.reason.${brokerOffReason}`)}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

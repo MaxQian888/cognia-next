@@ -27,6 +27,10 @@ const sources = (over = {}) => ({
   }),
   serverImage:
     "COPY --from=b /work/sidecar/codeserver-agent-ext/cognia-managed-broker.vsix.sha256 /opt/x",
+  errorCodeRs:
+    'Self::NotRunning => "CODESERVER_NOT_RUNNING",\nSelf::HealthTimeout => "CODESERVER_HEALTH_TIMEOUT",',
+  errorCodeTs:
+    'export const HOST_ERROR_CODES = [\n  "CODESERVER_NOT_RUNNING",\n  "CODESERVER_HEALTH_TIMEOUT",\n] as const',
   ...over,
 })
 
@@ -132,4 +136,22 @@ test("catches a bundle that ships the broker without its digest", () => {
   assert.equal(problems.length, 2)
   assert.match(problems[0], /does not ship cognia-managed-broker\.vsix\.sha256/)
   assert.match(problems[1], /server image does not copy/)
+})
+
+test("catches an error code only one side knows", () => {
+  const problems = auditProIdeConstants(
+    sources({
+      errorCodeTs:
+        'export const HOST_ERROR_CODES = [\n  "CODESERVER_NOT_RUNNING",\n  "CODESERVER_GONE",\n] as const',
+    })
+  )
+  assert.equal(problems.length, 2)
+  assert.match(problems[0], /lacks CODESERVER_HEALTH_TIMEOUT/)
+  assert.match(problems[1], /lists CODESERVER_GONE/)
+})
+
+test("reports a moved error-code declaration", () => {
+  const problems = auditProIdeConstants(sources({ errorCodeTs: "export const CODES = []" }))
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /HOST_ERROR_CODES is missing/)
 })

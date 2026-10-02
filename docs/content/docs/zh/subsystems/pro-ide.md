@@ -46,18 +46,25 @@ agent↔IDE 这条路径不会被一个与它毫无关系的远程访问开关�
 ## 代码位置
 
 ```
+crates/cognia-codeserver/src/
+  process.rs         # 启动 / 守护桌面实例，中继准入
+  remote.rs          # headless 主机的实例与 /ide/relay 入口
+  download.rs        # 拉取并校验固定版本的 code-server 发行包
+  agent_channel.rs   # 回环 broker 通道 ↔ 托管扩展
+  error_code.rs      # CODESERVER_* 生命周期失败代码
+  relay_table.rs     # relay id → (root, 进程 generation, 已准入设备)
+  relay_grants.rs    # 桌面所有者按设备、按项目给出的批准
+
 src-tauri/src/codeserver/
-  process.rs         # 启动 / 守护 code-server 实例
-  download.rs        # 拉取 code-server 发行包
-  webview.rs         # 内嵌 webview 宿主
-  agent_channel.rs   # 回环 TCP 控制通道 ↔ 伴生扩展
   commands.rs        # Tauri 命令面
-  PHASE2_AGENT_DRIVE.md   # Phase 2 agent↔IDE 设计说明
+  webview.rs         # 内嵌 webview 宿主
+  desktop_host.rs    # 用本机实例响应 /ide/relay
 
 lib/codeserver/
   client.ts              # 渲染端通道客户端
   pane-manager.ts        # 应用布局内的编辑器面板
   open-file-queue.ts     # 实例就绪前收到的打开请求
+  error-messages.ts      # CODESERVER_* 代码 → 翻译后的说明与下一步
   locale.ts              # 显示语言 ↔ argv.json
   theme/vscode-chrome-map.ts   # 应用调色板 → VS Code Theme Colors
   theme/build-settings.ts      # 产出实例读取的 settings.json

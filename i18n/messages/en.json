@@ -29364,6 +29364,15 @@
     "previewOpenHint": "Open Preview",
     "previewTab": "{name} — preview tab, double-click to keep it open",
     "proIde": {
+      "brokerDisabled": {
+        "label": "Agent drive off",
+        "reason": {
+          "admin-disabled": "Your administrator turned off Cognia's managed IDE features. VS Code works normally, but Cognia can't drive it or send its context to chat.",
+          "install-failed": "The Cognia extension couldn't be installed in VS Code, so Cognia can't drive it or send its context to chat. Restart the Pro IDE to try again.",
+          "protocol-incompatible": "The Cognia extension in VS Code is from a different version of Cognia and can't connect. Restart the Pro IDE to reinstall the matching one.",
+          "registration-failed": "Cognia couldn't create the connection key for this VS Code, so it can't drive it or send its context to chat. Restart the Pro IDE to try again."
+        }
+      },
       "brokerIssue": {
         "credential-replayed": "Cognia's Pro IDE connection key was used by something else in this workspace, so Cognia revoked it and issued a new one. If you didn't expect this, check what is running in the VS Code terminals and tasks.",
         "install-failed": "The Cognia extension for VS Code failed its integrity check or couldn't be installed. VS Code is running, but Cognia can't drive the editor or send its context to chat. Restart the Pro IDE to try again.",
@@ -29387,21 +29396,97 @@
       },
       "checkingTooltip": "Checking whether Pro IDE is available…",
       "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
+      "downloadProgressLabel": "Download progress for VS Code (code-server)",
       "downloading": "Downloading VS Code… {percent}%",
       "errorTitle": "Couldn't start VS Code",
+      "errors": {
+        "archiveInvalid": {
+          "hint": "Try again. If your disk is nearly full, free up some space first.",
+          "message": "The downloaded VS Code package couldn't be unpacked."
+        },
+        "checksumMismatch": {
+          "hint": "Try again. If it keeps happening, something on your network may be altering downloads.",
+          "message": "The VS Code download didn't match its published fingerprint, so it was discarded."
+        },
+        "downloadCancelled": {
+          "hint": "Nothing was installed. Start it again whenever you're ready.",
+          "message": "The VS Code download was cancelled."
+        },
+        "downloadFailed": {
+          "hint": "Check your network or proxy settings, then try again.",
+          "message": "Couldn't download VS Code."
+        },
+        "healthTimeout": {
+          "hint": "Try again. A busy computer can need a second attempt.",
+          "message": "VS Code started but didn't respond in time."
+        },
+        "installFailed": {
+          "hint": "Make sure the app data folder is writable and has free space, then try again.",
+          "message": "Couldn't prepare VS Code's files on this computer."
+        },
+        "notRunning": {
+          "hint": "Start it again.",
+          "message": "VS Code isn't running for this project anymore."
+        },
+        "openSuperseded": {
+          "hint": "Try again to open the current workspace.",
+          "message": "The workspace host changed or the editor was stopped."
+        },
+        "profileChanged": {
+          "hint": "Try again to open your selected profile.",
+          "message": "Another editor changed this workspace's extension profile."
+        },
+        "relayGrantRequired": {
+          "hint": "Approve the request on the host computer, then try again.",
+          "message": "The host computer hasn't let this device into this project's VS Code yet."
+        },
+        "rootInvalid": {
+          "hint": "Reopen the project from its current location.",
+          "message": "This project's folder no longer exists, or isn't a folder."
+        },
+        "spawnFailed": {
+          "hint": "Try again. If it keeps failing, reinstall Pro IDE from Settings.",
+          "message": "VS Code couldn't be started."
+        },
+        "unknown": {
+          "hint": "Try again. The details below can help if you report the problem.",
+          "message": "Something went wrong while starting VS Code."
+        },
+        "unresponsive": {
+          "hint": "Try again to start a fresh copy.",
+          "message": "VS Code stopped responding."
+        },
+        "unsupportedPlatform": {
+          "hint": "Use the built-in editor, or open the project in your own VS Code.",
+          "message": "VS Code (code-server) has no build for this computer's system."
+        },
+        "upgradeRequired": {
+          "hint": "Update Cognia on the host computer, then try again.",
+          "message": "The host computer doesn't have the VS Code version this app needs."
+        }
+      },
       "languageRestart": "Restarting the Pro IDE to apply the new display language…",
       "languageUnavailable": "The Pro IDE has no translation for {locale}; its interface stays in English.",
       "localVsCodeFailed": "Couldn't open your local VS Code: {error}",
       "openFileFailed": "Couldn't open the file in VS Code: {error}",
       "openLocalVsCode": "Open in VS Code",
-      "openSuperseded": "The workspace host changed or the editor was stopped. Retry to open the current workspace.",
-      "profileChanged": "Another editor changed this workspace’s extension profile. Retry to open your selected profile.",
       "profileLabel": "Extension profile",
       "profileManaged": "Managed",
       "profileManagedTooltip": "Pinned built-ins, the Cognia broker, and signed generated proxies. Agent drive, chat context, and plugin IDE capabilities all need this profile.",
       "profileNative": "Extensions",
       "profileNativeTooltip": "Your Open VSX extensions, in a separate process with its own settings and extension directory. It never receives Cognia broker credentials, so agent drive and plugin IDE capabilities are unavailable here.",
       "profileSwitchRestarts": "Switching profile starts a separate VS Code. Open editors and terminals stay in the other profile.",
+      "relayGrant": {
+        "approve": "Allow",
+        "deny": "Don't allow",
+        "description": "{device} wants to open the project “{project}” in VS Code on this computer.",
+        "failed": "This request expired or was already answered. Ask the device to try again.",
+        "folderLabel": "Folder:",
+        "lasting": "Allowing lasts until you revoke it in Settings → Pro IDE.",
+        "more": "{count, plural, one {# more request is} other {# more requests are}} waiting.",
+        "risk": "VS Code here runs without a password and with full terminals, so the device can run any command in this project as you.",
+        "title": "Allow a paired device into VS Code?"
+      },
       "remoteWorkbenchLabel": "Remote workbench",
       "remoteWorkbenchTooltip": "The editor runs on the selected host. File operations, settings, workspace panels and Managed profile editor-to-chat actions use the paired host connection.",
       "retry": "Retry",
@@ -32009,7 +32094,6 @@
       "latestUpdate": "Latest update",
       "loadMore": "Load more incidents",
       "loadMoreError": "Older incidents could not be loaded.",
-      "loadOlder": "Look for older incidents",
       "loadingMore": "Loading…",
       "noMore": "No older incidents.",
       "pastEmpty": "No past incidents recorded.",
@@ -44976,6 +45060,7 @@
       "download": "Download now",
       "downloadCancelled": "Download cancelled. The partial archive was removed.",
       "downloadDone": "code-server {version} installed.",
+      "downloadProgressLabel": "Download progress for VS Code (code-server)",
       "failed": "Failed: {error}",
       "host": {
         "boundTo": "Bound to {root}",
@@ -44993,6 +45078,14 @@
       "location": "Location",
       "notInstalled": "Not installed",
       "reclaimable": "Reclaimable",
+      "relayGrantsDescription": "Paired devices you let into a project's VS Code on this computer. They can run commands there as you.",
+      "relayGrantsEmpty": "No paired device can open VS Code on this computer.",
+      "relayGrantsGrantedAt": "Allowed {date}",
+      "relayGrantsRevoke": "Revoke",
+      "relayGrantsRevokeFailed": "Couldn't revoke access: {error}",
+      "relayGrantsRevokeLabel": "Revoke VS Code access for {device}",
+      "relayGrantsRevoked": "Access revoked. The device's open VS Code session closes within a few seconds.",
+      "relayGrantsTitle": "Devices allowed into VS Code",
       "runningFor": "Serving {root}",
       "runningLabel": "Running",
       "runningNone": "Not running",

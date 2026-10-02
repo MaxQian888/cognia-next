@@ -24,7 +24,9 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
+use super::agent_channel::BrokerStatus;
 use super::download::CODE_SERVER_VERSION;
+use super::error_code::{coded, CodeServerErrorCode};
 use super::profile::{IdeProfile, ProfilePaths};
 
 pub const CODE_SERVER_BINARY_ENV: &str = "COGNIA_CODE_SERVER_BIN";
@@ -43,6 +45,10 @@ pub struct RemoteCodeServerStatus {
     pub version: String,
     pub profile: Option<IdeProfile>,
     pub relay_path: Option<String>,
+    /// Whether agent drive is available in this workbench (managed profile
+    /// only). The workbench itself runs either way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker: Option<BrokerStatus>,
 }
 
 impl RemoteCodeServerStatus {
@@ -110,9 +116,9 @@ impl RemoteCodeServerState {
         profile: IdeProfile,
         device_id: &str,
     ) -> Result<RemoteCodeServerStatus, String> {
-        if !super::managed_platform_enabled() && profile == IdeProfile::Managed {
-            return Err("IDE_PLATFORM_DISABLED".to_string());
-        }
+        // The managed-IDE kill switch withholds the broker, not the workbench,
+        // exactly as on the desktop: `broker_enabled` below is false, and the
+        // status says why.
         let canonical = canonicalize_workspace(root)?;
         if let Some(status) = self.authorize_live(&canonical, profile, device_id).await {
             return Ok(status);
@@ -126,19 +132,29 @@ impl RemoteCodeServerState {
         // Opposite profiles are never allowed against one workspace at once.
         self.stop(&canonical).await;
         super::download::resolve_platform().map_err(|_| {
-            "unsupported_platform: managed Pro IDE requires Linux/macOS amd64/arm64"
+            coded(
+                CodeServerErrorCode::UnsupportedPlatform,
+                "managed Pro IDE requires Linux/macOS amd64/arm64",
+            )
         })?;
         let binary = resolve_preloaded_binary(&self.data_dir)?;
         verify_pinned_binary(&binary).await?;
 
         let code_server_root = self.data_dir.join("code-server");
-        super::profile::migrate_legacy_profile_state(&code_server_root)?;
-        super::profile::sync_portable_preferences_once(&code_server_root, profile)?;
+        super::profile::migrate_legacy_profile_state(&code_server_root)
+            .and_then(|()| {
+                super::profile::sync_portable_preferences_once(&code_server_root, profile)
+            })
+            .map_err(|error| coded(CodeServerErrorCode::InstallFailed, error))?;
         let paths = ProfilePaths::new(&code_server_root, profile);
-        std::fs::create_dir_all(&paths.user_data_dir)
-            .map_err(|error| format!("create {}: {error}", paths.user_data_dir.display()))?;
-        std::fs::create_dir_all(&paths.extensions_dir)
-            .map_err(|error| format!("create {}: {error}", paths.extensions_dir.display()))?;
+        for dir in [&paths.user_data_dir, &paths.extensions_dir] {
+            std::fs::create_dir_all(dir).map_err(|error| {
+                coded(
+                    CodeServerErrorCode::InstallFailed,
+                    format!("create {}: {error}", dir.display()),
+                )
+            })?;
+        }
 
         let mut broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
         let mut broker_issue = None;
@@ -170,7 +186,8 @@ impl RemoteCodeServerState {
             .await;
         }
 
-        let port = reserve_loopback_port()?;
+        let port = reserve_loopback_port()
+            .map_err(|error| coded(CodeServerErrorCode::SpawnFailed, error))?;
         let relay_id = Uuid::new_v4().simple().to_string();
         let args = code_server_args(&canonical, port, &paths, profile);
         let mut envs = Vec::new();
@@ -229,7 +246,7 @@ impl RemoteCodeServerState {
             self.stop(&canonical).await;
             return Err(error);
         }
-        Ok(running_status(profile, &relay_id))
+        Ok(running_status(profile, &relay_id, &canonical))
     }
 
     pub fn build_proxy(
@@ -348,7 +365,11 @@ impl RemoteCodeServerState {
         if !instance.allowed_devices.contains(device_id) {
             return Ok(stopped_status());
         }
-        Ok(running_status(instance.profile, &instance.relay_id))
+        Ok(running_status(
+            instance.profile,
+            &instance.relay_id,
+            &canonical,
+        ))
     }
 
     /// The workbench's loopback port for `root`, or `None` when nothing is
@@ -410,16 +431,27 @@ impl RemoteCodeServerState {
         let canonical = canonicalize_workspace(root)?;
         let mut instances = self.instances.lock().await;
         let Some(instance) = instances.get_mut(&canonical) else {
-            return Err("code-server is not running for this project root".to_string());
+            return Err(coded(
+                CodeServerErrorCode::NotRunning,
+                "no code-server for this project root",
+            ));
         };
         if !instance.is_alive() {
             instance.retire();
             instances.remove(&canonical);
             super::agent_channel::global().deregister(&canonical);
-            return Err("code-server exited for this project root".to_string());
+            return Err(coded(
+                CodeServerErrorCode::NotRunning,
+                "code-server exited for this project root",
+            ));
         }
         if !instance.allowed_devices.contains(device_id) {
-            return Err("code-server is not running for this project root".to_string());
+            // Indistinguishable from "not running" on purpose: a device that
+            // may not drive this workbench learns nothing about it.
+            return Err(coded(
+                CodeServerErrorCode::NotRunning,
+                "no code-server for this project root",
+            ));
         }
         Ok(canonical)
     }
@@ -643,10 +675,14 @@ impl RemoteCodeServerState {
             return None;
         }
         instance.allowed_devices.insert(device_id.to_string());
-        Some(running_status(instance.profile, &instance.relay_id))
+        Some(running_status(
+            instance.profile,
+            &instance.relay_id,
+            canonical,
+        ))
     }
 
-    async fn relay_port(&self, relay_id: &str, device_id: &str) -> Option<u16> {
+    pub(crate) async fn relay_port(&self, relay_id: &str, device_id: &str) -> Option<u16> {
         let mut instances = self.instances.lock().await;
         for instance in instances.values_mut() {
             if instance.relay_id == relay_id
@@ -664,34 +700,41 @@ impl RemoteCodeServerState {
 ///
 /// Withholding is the default and the callers opt out, not in: see
 /// [`RemoteCodeServerStatus::with_loopback_port`].
-fn running_status(profile: IdeProfile, relay_id: &str) -> RemoteCodeServerStatus {
+fn running_status(profile: IdeProfile, relay_id: &str, root: &str) -> RemoteCodeServerStatus {
     RemoteCodeServerStatus {
         running: true,
         port: None,
         version: CODE_SERVER_VERSION.to_string(),
         profile: Some(profile),
-        relay_path: Some(format!("/ide/relay/{relay_id}/")),
+        relay_path: Some(super::relay_table::relay_path(relay_id)),
+        broker: super::agent_channel::global().broker_status(root, profile),
     }
 }
 
 /// The status a **desktop**-hosted workbench reports across the companion
 /// boundary.
 ///
-/// `relay_path` is `None`, and that is a fact rather than an omission. The
-/// `/ide/relay/{id}` mount is served by [`relay_request`], which resolves the
-/// upstream port through `crate::headless::headless_services()`. A desktop host
-/// has no such registry, so there is no front-door path to its workbench and
-/// naming one would hand the caller a 404 dressed up as a URL. A caller on the
-/// loopback plaintext plane still receives the real port, through
-/// `DispatchHost::ide_loopback_port` — that is how a browser running on this
-/// same machine embeds the workbench directly.
-pub fn desktop_running_status(profile: IdeProfile) -> RemoteCodeServerStatus {
+/// `relay_path` is present only for a device the desktop's owner approved for
+/// this project and that `ensure` admitted (`CodeServerState::admit_relay`);
+/// [`relay_request`] then resolves it through the desktop's own host adapter.
+/// A caller on the loopback plaintext plane gets no relay: it receives the
+/// real port through `DispatchHost::ide_loopback_port` and embeds the
+/// workbench directly.
+pub fn desktop_running_status(
+    profile: IdeProfile,
+    root: &str,
+    relay_path: Option<String>,
+) -> RemoteCodeServerStatus {
     RemoteCodeServerStatus {
         running: true,
         port: None,
         version: CODE_SERVER_VERSION.to_string(),
         profile: Some(profile),
-        relay_path: None,
+        relay_path,
+        broker: super::agent_channel::global().broker_status(
+            &canonicalize_workspace(root).unwrap_or_else(|_| root.to_string()),
+            profile,
+        ),
     }
 }
 
@@ -702,15 +745,19 @@ pub fn stopped_status() -> RemoteCodeServerStatus {
         version: CODE_SERVER_VERSION.to_string(),
         profile: None,
         relay_path: None,
+        broker: None,
     }
 }
 
 fn canonicalize_workspace(root: &str) -> Result<String, String> {
     let canonical = Path::new(root)
         .canonicalize()
-        .map_err(|error| format!("resolve project root {root}: {error}"))?;
+        .map_err(|error| coded(CodeServerErrorCode::RootInvalid, format!("{root}: {error}")))?;
     if !canonical.is_dir() {
-        return Err(format!("project root is not a directory: {root}"));
+        return Err(coded(
+            CodeServerErrorCode::RootInvalid,
+            format!("{root} is not a directory"),
+        ));
     }
     Ok(canonical.to_string_lossy().into_owned())
 }
@@ -747,13 +794,13 @@ fn resolve_preloaded_binary(data_dir: &Path) -> Result<String, String> {
         });
     let canonical = path.canonicalize().map_err(|_| {
         format!(
-            "REMOTE_CODE_SERVER_UPGRADE_REQUIRED: preload code-server {CODE_SERVER_VERSION} at {} or set {CODE_SERVER_BINARY_ENV}",
+            "CODESERVER_UPGRADE_REQUIRED: preload code-server {CODE_SERVER_VERSION} at {} or set {CODE_SERVER_BINARY_ENV}",
             path.display()
         )
     })?;
     if !canonical.is_file() {
         return Err(format!(
-            "REMOTE_CODE_SERVER_UPGRADE_REQUIRED: {} is not a code-server executable",
+            "CODESERVER_UPGRADE_REQUIRED: {} is not a code-server executable",
             canonical.display()
         ));
     }
@@ -770,8 +817,18 @@ async fn verify_pinned_binary(binary: &str) -> Result<(), String> {
             .output(),
     )
     .await
-    .map_err(|_| "REMOTE_CODE_SERVER_VERSION_CHECK_TIMEOUT".to_string())?
-    .map_err(|error| format!("REMOTE_CODE_SERVER_VERSION_CHECK_FAILED: {error}"))?;
+    .map_err(|_| {
+        coded(
+            CodeServerErrorCode::UpgradeRequired,
+            "`code-server --version` timed out",
+        )
+    })?
+    .map_err(|error| {
+        coded(
+            CodeServerErrorCode::UpgradeRequired,
+            format!("`code-server --version` failed: {error}"),
+        )
+    })?;
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
@@ -779,7 +836,7 @@ async fn verify_pinned_binary(binary: &str) -> Result<(), String> {
     );
     if !output.status.success() || !version_output_matches(&text) {
         return Err(format!(
-            "REMOTE_CODE_SERVER_UPGRADE_REQUIRED: expected code-server {CODE_SERVER_VERSION} / Code 1.128.0, found {}",
+            "CODESERVER_UPGRADE_REQUIRED: expected code-server {CODE_SERVER_VERSION} / Code 1.128.0, found {}",
             text.trim()
         ));
     }
@@ -851,7 +908,7 @@ fn spawn_code_server(
     }
     command
         .spawn()
-        .map_err(|error| format!("spawn remote code-server: {error}"))
+        .map_err(|error| coded(CodeServerErrorCode::SpawnFailed, error))
 }
 
 async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
@@ -867,9 +924,9 @@ async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
             return Ok(());
         }
         if Instant::now() >= deadline {
-            return Err(format!(
-                "remote code-server did not become healthy within {}s",
-                budget.as_secs()
+            return Err(coded(
+                CodeServerErrorCode::HealthTimeout,
+                format!("port {port} did not answer within {}s", budget.as_secs()),
             ));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -1138,16 +1195,17 @@ async fn relay_request(relay_id: String, tail: String, request: Request) -> Resp
         .get::<cognia_companion_security::principal::DeviceContext>()
         .map(|context| context.device_id.clone())
         .unwrap_or_default();
-    let Some(remote) = crate::host::HOST
-        .try_get()
-        .and_then(|host| host.remote_state())
-    else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "headless IDE unavailable").into_response();
+    let Some(host) = crate::host::HOST.try_get() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "managed IDE host unavailable",
+        )
+            .into_response();
     };
-    if !crate::host::device_can_control(&device_id) {
+    if !host.device_can_control(&device_id) {
         return (StatusCode::FORBIDDEN, "remote control grant required").into_response();
     }
-    let Some(port) = remote.relay_port(&relay_id, &device_id).await else {
+    let Some(port) = host.relay_port(&relay_id, &device_id).await else {
         return (StatusCode::NOT_FOUND, "managed IDE relay unavailable").into_response();
     };
     if let Some(ws) = ws {
@@ -1179,7 +1237,7 @@ async fn relay_request(relay_id: String, tail: String, request: Request) -> Resp
         }
         return upgrade
             .on_upgrade(move |socket| {
-                relay_websocket(socket, upstream, requested_protocol, device_id)
+                relay_websocket(socket, upstream, requested_protocol, relay_id, device_id)
             })
             .into_response();
     }
@@ -1235,6 +1293,7 @@ async fn relay_websocket(
     mut downstream: WebSocket,
     upstream_url: String,
     requested_protocol: Option<String>,
+    relay_id: String,
     device_id: String,
 ) {
     let Ok(mut request) = upstream_url.into_client_request() else {
@@ -1259,7 +1318,10 @@ async fn relay_websocket(
         }
         tokio::select! {
             _ = authorization_tick.tick() => {
-                if !crate::host::device_can_control(&device_id) { break; }
+                // Revoking Remote Control, the owner's per-project approval, or
+                // replacing the instance all close a live session, not just
+                // the next request.
+                if !relay_still_authorized(&relay_id, &device_id).await { break; }
             }
             message = downstream.recv() => {
                 let Some(Ok(message)) = message else { break };
@@ -1275,6 +1337,13 @@ async fn relay_websocket(
     }
     let _ = upstream_tx.close().await;
     let _ = downstream.close().await;
+}
+
+async fn relay_still_authorized(relay_id: &str, device_id: &str) -> bool {
+    let Some(host) = crate::host::HOST.try_get() else {
+        return false;
+    };
+    host.device_can_control(device_id) && host.relay_port(relay_id, device_id).await.is_some()
 }
 
 fn filtered_headers(headers: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
@@ -1339,13 +1408,13 @@ mod tests {
         // The port is only meaningful to a process on this machine, and only
         // the RPC boundary knows whether the caller is one. `running_status`
         // therefore never carries it, and disclosure is a visible second step.
-        let status = running_status(IdeProfile::Managed, "relay-1");
+        let status = running_status(IdeProfile::Managed, "relay-1", "/w");
         assert!(status.running);
         assert_eq!(status.port, None);
         assert_eq!(status.relay_path.as_deref(), Some("/ide/relay/relay-1/"));
 
         let disclosed =
-            running_status(IdeProfile::Managed, "relay-1").with_loopback_port(Some(41234));
+            running_status(IdeProfile::Managed, "relay-1", "/w").with_loopback_port(Some(41234));
         assert_eq!(disclosed.port, Some(41234));
         // The relay stays: a same-machine browser prefers the port, but the
         // desktop app on that host still reaches the workbench the usual way.
@@ -1354,7 +1423,7 @@ mod tests {
         // Granting "no port" is not the same as never asking, and must not
         // resurrect a stale one.
         assert_eq!(
-            running_status(IdeProfile::Managed, "relay-1")
+            running_status(IdeProfile::Managed, "relay-1", "/w")
                 .with_loopback_port(Some(1))
                 .with_loopback_port(None)
                 .port,
@@ -1476,7 +1545,7 @@ mod tests {
 
     #[test]
     fn relay_status_never_exposes_the_loopback_port() {
-        let status = running_status(IdeProfile::Managed, "opaque");
+        let status = running_status(IdeProfile::Managed, "opaque", "/w");
         let value = serde_json::to_value(status).unwrap();
         assert_eq!(value["relayPath"], "/ide/relay/opaque/");
         assert!(value["port"].is_null());

@@ -12,7 +12,7 @@ use crate::subscription::provider::ProviderId;
 
 /// Resolve resources before any subsystem can spawn a sidecar.
 pub(crate) fn sidecar_location(app: &App) {
-    crate::codeserver::install_host();
+    crate::codeserver::install_host(app.handle());
     let resource_dir = app.path().resource_dir().ok();
     let force_checkout =
         cfg!(feature = "agent-debug") && std::env::var_os("COGNIA_AGENT_DEBUG").is_some();

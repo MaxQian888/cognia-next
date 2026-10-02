@@ -5,9 +5,8 @@
 import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { RotateCwIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { CodeServerErrorNotice } from "./code-server-error-notice"
 import { CodeServerWebFrame } from "./code-server-web-frame"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
@@ -106,7 +105,7 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
         if (cancelled) return
         if (next.profile && next.profile !== profile) {
           setPhase("error")
-          setError(t("proIde.profileChanged"))
+          setError("CODESERVER_PROFILE_CHANGED")
           return
         }
         if (!next.running) {
@@ -169,20 +168,8 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
 
   if (phase === "error") {
     return (
-      <div
-        className="flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center"
-        data-testid="code-server-web-error"
-      >
-        <p className="text-sm font-medium">{t("proIde.errorTitle")}</p>
-        {error ? (
-          <p className="text-xs text-muted-foreground">
-            {error.includes("CODESERVER_OPEN_SUPERSEDED") ? t("proIde.openSuperseded") : error}
-          </p>
-        ) : null}
-        <Button size="sm" variant="outline" onClick={retry}>
-          <RotateCwIcon className="size-3.5" />
-          {t("proIde.retry")}
-        </Button>
+      <div className="flex h-full w-full items-center justify-center p-6">
+        <CodeServerErrorNotice error={error} onRetry={retry} data-testid="code-server-web-error" />
       </div>
     )
   }

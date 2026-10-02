@@ -17,6 +17,7 @@
 //!      tarball's leading `code-server-<ver>-<os>-<arch>/` component) and
 //!      chmod +x the launcher on unix.
 
+use crate::error_code::{coded, CodeServerErrorCode};
 #[cfg(any(feature = "tauri-host", test))]
 use ::anyhow::Context;
 use ::anyhow::{anyhow, Result};
@@ -111,18 +112,22 @@ pub fn resolve_platform() -> Result<(&'static str, &'static str)> {
         "linux" => "linux",
         "macos" => "macos",
         other => {
-            return Err(anyhow!(
-                "unsupported_platform: code-server has no standalone binary for {other}; the Pro IDE mode is desktop macOS/Linux only"
-            ))
+            return Err(anyhow!(coded(
+                CodeServerErrorCode::UnsupportedPlatform,
+                format!(
+                    "code-server has no standalone binary for {other}; the Pro IDE mode is desktop macOS/Linux only"
+                )
+            )))
         }
     };
     let arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
         other => {
-            return Err(anyhow!(
-                "unsupported_platform: unsupported arch for code-server: {other}"
-            ))
+            return Err(anyhow!(coded(
+                CodeServerErrorCode::UnsupportedPlatform,
+                format!("unsupported arch for code-server: {other}")
+            )))
         }
     };
     Ok((os, arch))
@@ -373,12 +378,21 @@ pub async fn ensure_code_server(
         });
     }
 
-    let expected = expected_sha256(os, arch)
-        .ok_or_else(|| anyhow!("no pinned checksum for code-server {os}-{arch}"))?;
+    let expected = expected_sha256(os, arch).ok_or_else(|| {
+        anyhow!(coded(
+            CodeServerErrorCode::UnsupportedPlatform,
+            format!("no pinned checksum for code-server {os}-{arch}")
+        ))
+    })?;
     let url = download_url(os, arch);
 
     let root = code_server_root(app)?;
-    std::fs::create_dir_all(&root).context("create code-server root")?;
+    std::fs::create_dir_all(&root).with_context(|| {
+        coded(
+            CodeServerErrorCode::InstallFailed,
+            format!("create {}", root.display()),
+        )
+    })?;
     let partial = root.join(format!("{CODE_SERVER_VERSION}-{os}-{arch}.tar.gz.partial"));
 
     // 1. Stream to the .partial file, hashing as we go.
@@ -398,8 +412,9 @@ pub async fn ensure_code_server(
             let _ = std::fs::remove_file(&partial);
             if err.is::<DownloadCancelled>() {
                 emit_progress(app, "cancelled", 0, 0, "Download cancelled");
+                return Err(err).context(CodeServerErrorCode::DownloadCancelled.as_str());
             }
-            return Err(err).with_context(|| format!("download {url}"));
+            return Err(err).with_context(|| coded(CodeServerErrorCode::DownloadFailed, url));
         }
     };
 
@@ -407,9 +422,10 @@ pub async fn ensure_code_server(
     emit_progress(app, "verifying", 0, 0, "Verifying download…");
     if actual != expected {
         let _ = std::fs::remove_file(&partial);
-        return Err(anyhow!(
-            "code-server checksum mismatch: expected {expected}, got {actual}"
-        ));
+        return Err(anyhow!(coded(
+            CodeServerErrorCode::ChecksumMismatch,
+            format!("expected {expected}, got {actual}")
+        )));
     }
 
     // 3. Extract into a fresh install dir (remove a half-baked prior attempt).
@@ -417,18 +433,34 @@ pub async fn ensure_code_server(
     if install_dir.exists() {
         std::fs::remove_dir_all(&install_dir).ok();
     }
-    extract_tar_gz_strip1(&partial, &install_dir).context("extract code-server")?;
+    extract_tar_gz_strip1(&partial, &install_dir).with_context(|| {
+        coded(
+            CodeServerErrorCode::ArchiveInvalid,
+            format!("extract into {}", install_dir.display()),
+        )
+    })?;
     let _ = std::fs::remove_file(&partial);
 
     if !binary.exists() {
-        return Err(anyhow!("extracted archive did not contain bin/code-server"));
+        return Err(anyhow!(coded(
+            CodeServerErrorCode::ArchiveInvalid,
+            "extracted archive did not contain bin/code-server"
+        )));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&binary)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&binary, perms)?;
+        let mark_executable = || -> std::io::Result<()> {
+            let mut perms = std::fs::metadata(&binary)?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&binary, perms)
+        };
+        mark_executable().with_context(|| {
+            coded(
+                CodeServerErrorCode::InstallFailed,
+                format!("mark {} executable", binary.display()),
+            )
+        })?;
     }
 
     emit_progress(app, "done", 0, 0, "Installed");

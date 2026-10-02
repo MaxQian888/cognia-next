@@ -2787,7 +2787,7 @@
         "docs/content/docs/en/subsystems/managed-ide-extension-platform/index.mdx",
         "docs/content/docs/zh/subsystems/managed-ide-extension-platform/index.mdx"
       ],
-      "reason": "plugins/pro-ide-fixture/plugin.json is registered by lib/plugin/core/browser-builtin-registry.ts and covered by builtin-manifest-shape.test.ts under ADR-0156. Its contributed capability belongs to managed-ide-extension-platform."
+      "reason": "plugins/pro-ide-fixture/plugin.json is deliberately NOT in lib/plugin/core/browser-builtin-registry.ts: plugins/builtin-registry-coverage.test.ts lists it under INTENTIONALLY_UNBUNDLED, because the proxy/broker chain it proves needs the embedded code-server and so can never activate in a browser or mobile shell. Its contributed capability belongs to managed-ide-extension-platform."
     },
     {
       "id": "plugin:prompt-templates",

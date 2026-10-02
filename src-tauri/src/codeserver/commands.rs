@@ -258,6 +258,7 @@ pub async fn codeserver_ensure(
         port: Some(port),
         version: download::CODE_SERVER_VERSION.to_string(),
         profile: Some(profile),
+        broker: state.broker_status(&root, profile),
     })
 }
 
@@ -273,6 +274,9 @@ pub async fn codeserver_status(
         port,
         version: download::CODE_SERVER_VERSION.to_string(),
         profile,
+        broker: profile
+            .filter(|_| running)
+            .and_then(|profile| state.broker_status(&root, profile)),
     })
 }
 
@@ -385,6 +389,48 @@ pub async fn codeserver_stop(
     root: String,
 ) -> Result<bool, String> {
     Ok(state.stop(&root).await)
+}
+
+/// Paired devices waiting for the owner to let them into a project's Pro IDE.
+///
+/// Desktop-only (`target: client`, internal transport): approving is the
+/// owner's act at this machine, never something a paired device can do for
+/// itself over the companion.
+#[tauri::command]
+pub fn codeserver_relay_grant_pending(
+    state: State<'_, CodeServerState>,
+) -> Vec<super::relay_grants::PendingRelayGrant> {
+    state.pending_relay_grants()
+}
+
+/// Answer one of those asks. Approving persists a grant for that device and
+/// project until it is revoked.
+#[tauri::command]
+pub fn codeserver_relay_grant_respond(
+    state: State<'_, CodeServerState>,
+    id: String,
+    approve: bool,
+) -> Result<Option<super::relay_grants::RelayGrant>, String> {
+    state.respond_relay_grant(&id, approve)
+}
+
+/// Every standing approval, for Settings → Pro IDE.
+#[tauri::command]
+pub fn codeserver_relay_grants(
+    state: State<'_, CodeServerState>,
+) -> Vec<super::relay_grants::RelayGrant> {
+    state.relay_grants()
+}
+
+/// Withdraw one approval. The device's open relay into that workbench closes
+/// within two seconds.
+#[tauri::command]
+pub fn codeserver_relay_grant_revoke(
+    state: State<'_, CodeServerState>,
+    device_id: String,
+    root: String,
+) -> Result<bool, String> {
+    state.revoke_relay_grant(&device_id, &root)
 }
 
 /// Stop every running code-server (global "shut down Pro IDE" / kill switch).

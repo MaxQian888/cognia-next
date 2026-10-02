@@ -13,9 +13,21 @@ description: "Ownership, layout and theming rules for the embedded code-server e
 > The current design uses isolated managed/native profiles, JSON-RPC 2.0 with
 > challenge authentication and capability negotiation, signed generated proxy
 > VSIX packages, and a separate scoped binary content channel. The `0.2.x`
-> newline bridge is compatibility-only for one release. Decisions about native
-> webview ownership, pane handoff, theming, and process visibility remain in
-> force.
+> newline bridge has since been removed: a peer that does not open with a
+> `Content-Length` header is refused as protocol-incompatible. Decisions about
+> native webview ownership, pane handoff, theming, and process visibility
+> remain in force.
+>
+> **2026-10-02 amendment:** a desktop host now relays its workbench to a paired
+> device the way a headless host does, through `/ide/relay/{id}`, which extends
+> decision 6 off this machine. Remote Control is not enough on its own: the
+> desktop's owner approves each `(device, project)` pair once, at the desktop,
+> and can revoke it in Settings → Pro IDE. Relay ids are bound to one
+> code-server process, so a respawn retires them. A caller on the loopback
+> plane (a browser on this machine) still embeds the workbench directly and
+> needs no approval. Lifecycle failures now carry stable `CODESERVER_*` codes
+> that the panes translate, and a workbench running without its broker says
+> why (kill switch, failed install, incompatible extension) on both hosts.
 
 ## Context
 
@@ -199,5 +211,10 @@ are native processes on the same host.
 - **Multi-user machine exposure**, per decision 6.
 - **`components/ui/progress.tsx` never forwards `value` to the Radix root**, so
   every `<Progress>` in the app reports itself as indeterminate to assistive
-  tech. Pre-existing and repo-wide; the download bar renders correctly but is not
-  announced.
+  tech. Pre-existing and repo-wide. The Pro IDE download bars are now labelled,
+  so they are announced by name, but not by percentage.
+- **The relay serves a Cognia desktop client, not a phone or a browser.** Every
+  relayed request needs the device's bearer token and a fresh DPoP proof, which
+  only the desktop client's pinned local proxy attaches. An iframe or a phone
+  webview cannot, so those surfaces still say the workbench must be opened on
+  the host. This holds for headless and desktop hosts alike.

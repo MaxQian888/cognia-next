@@ -396,7 +396,7 @@ it("leaves ready when the watchdog reports this instance died", async () => {
   act(() => exitedEvent({ root: ROOT, port: 43117 }))
 
   expect(result.current.phase).toBe("error")
-  expect(result.current.error).toContain(ROOT)
+  expect(result.current.error).toBe(`CODESERVER_UNRESPONSIVE: ${ROOT}`)
 })
 
 it("recovers onto the replacement instance when retried after a watchdog exit", async () => {

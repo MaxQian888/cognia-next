@@ -12,8 +12,17 @@ description: "内嵌 code-server 编辑器的所有权、布局与主题规则�
 > [托管 IDE 扩展平台](../subsystems/managed-ide-extension-platform)替代。
 > 当前实现采用 managed/native 隔离 profile、带 challenge 认证与 capability
 > negotiation 的 JSON-RPC 2.0、签名生成代理 VSIX，以及独立的 scoped binary
-> content channel。`0.2.x` newline bridge 只保留一个发布周期用于兼容。原 ADR
-> 关于原生 webview 所有权、pane handoff、主题与进程可见性的决定继续有效。
+> content channel。`0.2.x` newline bridge 现已移除：不以 `Content-Length`
+> header 开头的对端会被视为协议不兼容而拒绝。原 ADR 关于原生 webview 所有权、
+> pane handoff、主题与进程可见性的决定继续有效。
+>
+> **2026-10-02 修订：** 桌面主机现在像 headless 主机一样，通过 `/ide/relay/{id}`
+> 把工作台中继给已配对设备，这把决策 6 的信任延伸到了本机之外。仅有 Remote
+> Control 并不够：桌面的所有者需要在桌面上为每个“设备 × 项目”批准一次，并可在
+> 设置 → Pro IDE 中撤销。relay id 绑定到单个 code-server 进程，进程重启即作废。
+> 位于 loopback 平面的调用方（本机上的浏览器）仍直接嵌入工作台，无需批准。生命周期
+> 失败现在带有稳定的 `CODESERVER_*` 代码并由面板翻译；工作台在没有 broker 的情况下
+> 运行时，两种主机都会说明原因（kill switch、安装失败、扩展不兼容）。
 
 ## 背景
 
@@ -137,10 +146,9 @@ VS Code 重度依赖的 WebSocket 升级。工作量真实、失效模式微妙�
 **独立操作系统窗口而非内嵌 pane。** 能绕开决策 4 的全部原生叠加层约束，但放弃了
 "编辑器与 agent 并排在同一个工作区"这个前提。
 
-**伴生扩展 + loopback WebSocket** 实现毫秒级 open/reveal。设计见
-`src-tauri/src/codeserver/PHASE2_AGENT_DRIVE.md`，若将来确有需要，形态依然正确。
-暂缓原因：它主要要解决的进程风暴风险已由合流队列
-（`lib/codeserver/open-file-queue.ts`）处理，剩余收益只是单次跳转的延迟。
+**伴生扩展 + loopback WebSocket。** 已由托管 broker 取代。实际实现的传输是
+loopback TCP 上带 `Content-Length` framing 的 JSON-RPC；两端都是同一主机上的原生
+进程，因此省去了 WebSocket 握手。
 
 ## 后果
 
@@ -164,5 +172,9 @@ VS Code 重度依赖的 WebSocket 升级。工作量真实、失效模式微妙�
   对比 catalog/schema、重生成 fixture 并执行完整 E2E matrix。
 - **多用户机器的暴露面**，见决策 6。
 - **`components/ui/progress.tsx` 从未把 `value` 转发给 Radix root**，因此 App 里
-  每一个 `<Progress>` 对辅助技术都自称"不确定进度"。这是既有的、全仓范围的问题；
-  下载进度条视觉正常，但不会被播报。
+  每一个 `<Progress>` 对辅助技术都自称"不确定进度"。这是既有的、全仓范围的问题。
+  Pro IDE 的下载进度条现已带标签，会按名称播报，但不会播报百分比。
+- **中继服务的是 Cognia 桌面客户端，而不是手机或浏览器。** 每个中继请求都需要设备的
+  bearer token 和新的 DPoP proof，只有桌面客户端固定的本地代理会附加它们。iframe 或
+  手机 webview 做不到，因此这些界面仍会提示必须在主机上打开工作台。headless 与桌面
+  主机都是如此。

@@ -126,27 +126,52 @@ impl DispatchHost {
     /// it could call them; the dispatcher then said no. Branching them the way
     /// the read verbs above already branch closes that.
     ///
-    /// The two hosts differ in more than plumbing and the return value says so.
-    /// A headless instance is device-scoped and reachable through the
-    /// `/ide/relay/{id}` front door, so its status carries a `relayPath`. A
-    /// desktop instance is neither: the relay resolves its upstream port from
-    /// `headless_services()`, which a desktop process does not have. So the
-    /// desktop status is honest about `relayPath: null` and a caller reaches
-    /// the workbench only from this machine, over the loopback plane, through
-    /// [`Self::ide_loopback_port`].
+    /// Both hosts hand a paired device the `/ide/relay/{id}` front door. On a
+    /// headless host the instance is device-scoped already. On the desktop the
+    /// workbench runs with `--auth none` and full terminals for its owner, so
+    /// relaying it off the machine needs the owner's approval for this device
+    /// and this project: without one, the desktop is asked
+    /// ([`crate::codeserver::relay_grants::CODESERVER_RELAY_GRANT_EVENT`]) and
+    /// the caller is told to wait (`CODESERVER_RELAY_GRANT_REQUIRED`).
+    ///
+    /// `via_relay` is false for a caller on this machine's loopback plane: it
+    /// reaches the workbench directly through [`Self::ide_loopback_port`], so
+    /// it needs neither a relay id nor an approval.
     pub async fn ide_ensure(
         &self,
         root: &str,
         profile: crate::codeserver::profile::IdeProfile,
         device_id: &str,
+        via_relay: bool,
     ) -> Result<crate::codeserver::remote::RemoteCodeServerStatus, String> {
         match self {
             Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::codeserver::CodeServerState>()
-                    .ensure_profile(app, root, profile)
-                    .await?;
-                Ok(crate::codeserver::remote::desktop_running_status(profile))
+                use tauri::{Emitter, Manager};
+                let state = app.state::<crate::codeserver::CodeServerState>();
+                if via_relay && !state.relay_granted(device_id, root) {
+                    let ask = state.request_relay_grant(device_id, root)?;
+                    if let Err(error) = app.emit(
+                        crate::codeserver::relay_grants::CODESERVER_RELAY_GRANT_EVENT,
+                        &ask,
+                    ) {
+                        log::warn!("emit Pro IDE relay approval request: {error}");
+                    }
+                    return Err(crate::codeserver::error_code::coded(
+                        crate::codeserver::error_code::CodeServerErrorCode::RelayGrantRequired,
+                        "approve this device for this project on the host computer",
+                    ));
+                }
+                state.ensure_profile(app, root, profile).await?;
+                let relay_path = if via_relay {
+                    Some(crate::codeserver::relay_table::relay_path(
+                        &state.admit_relay(root, device_id).await?,
+                    ))
+                } else {
+                    None
+                };
+                Ok(crate::codeserver::remote::desktop_running_status(
+                    profile, root, relay_path,
+                ))
             }
             Self::Headless(services) => services.code_server.ensure(root, profile, device_id).await,
         }
@@ -174,9 +199,16 @@ impl DispatchHost {
                 // the arm's decision, made against `ExecutionPlane`, not this
                 // seam's — same rule the headless side encodes by keeping
                 // `loopback_port` a separate question from `status`.
+                let state = app.state::<crate::codeserver::CodeServerState>();
                 Ok(match (running, profile) {
                     (true, Some(profile)) => {
-                        crate::codeserver::remote::desktop_running_status(profile)
+                        // Only a device the owner approved, and that `ensure`
+                        // admitted, learns the way in.
+                        let relay_path = state
+                            .relay_id_for(root, device_id)
+                            .await
+                            .map(|id| crate::codeserver::relay_table::relay_path(&id));
+                        crate::codeserver::remote::desktop_running_status(profile, root, relay_path)
                     }
                     _ => crate::codeserver::remote::stopped_status(),
                 })

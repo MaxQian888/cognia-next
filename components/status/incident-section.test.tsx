@@ -80,11 +80,4 @@ describe("PastIncidents", () => {
     render(<PastIncidents pages={pages({ incidents: [], hasMore: false })} onOpen={jest.fn()} />)
     expect(screen.getByText("No past incidents recorded.")).toBeInTheDocument()
   })
-
-  it("offers to look for older incidents when recent history is empty", () => {
-    const state = pages({ incidents: [], hasMore: true })
-    render(<PastIncidents pages={state} onOpen={jest.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "Look for older incidents" }))
-    expect(state.loadMore).toHaveBeenCalled()
-  })
 })

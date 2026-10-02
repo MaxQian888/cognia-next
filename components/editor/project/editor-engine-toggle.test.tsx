@@ -23,6 +23,15 @@ jest.mock("@/hooks/codeserver/use-code-server-broker-progress", () => ({
   },
 }))
 
+let mockBrokerStatus: { enabled: boolean; reason?: string } | null = null
+const mockBrokerStatusHook = jest.fn()
+jest.mock("@/hooks/codeserver/use-code-server-broker-status", () => ({
+  useCodeServerBrokerStatus: (enabled: boolean, root: string) => {
+    mockBrokerStatusHook(enabled, root)
+    return enabled ? mockBrokerStatus : null
+  },
+}))
+
 let mockIsTauri = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
 jest.mock("@/lib/codeserver/client", () => ({
@@ -386,5 +395,39 @@ describe("agent operations in VS Code", () => {
     expect(screen.getByTestId("pro-ide-broker-progress")).not.toHaveTextContent(
       "proIde.brokerProgress.more"
     )
+  })
+})
+
+describe("a managed workbench running without its broker", () => {
+  beforeEach(() => {
+    mockBrokerStatus = null
+    mockBrokerStatusHook.mockClear()
+  })
+
+  it("asks only for the managed Pro IDE", () => {
+    renderToggle({ value: "codeserver", proIdeProfile: "native" })
+    expect(mockBrokerStatusHook).toHaveBeenLastCalledWith(false, "/work/proj")
+    renderToggle({ value: "codeserver" })
+    expect(mockBrokerStatusHook).toHaveBeenLastCalledWith(true, "/work/proj")
+  })
+
+  it.each(["admin-disabled", "install-failed", "registration-failed", "protocol-incompatible"])(
+    "says agent drive is off and why (%s)",
+    (reason) => {
+      mockBrokerStatus = { enabled: false, reason }
+      renderToggle({ value: "codeserver" })
+      const chip = screen.getByTestId("pro-ide-broker-disabled")
+      expect(chip).toHaveAttribute("data-reason", reason)
+      expect(chip).toHaveAttribute("aria-label", `proIde.brokerDisabled.reason.${reason}`)
+      expect(chip).toHaveTextContent("proIde.brokerDisabled.label")
+    }
+  )
+
+  it("stays quiet while the broker serves, or before anything is known", () => {
+    renderToggle({ value: "codeserver" })
+    expect(screen.queryByTestId("pro-ide-broker-disabled")).toBeNull()
+    mockBrokerStatus = { enabled: true }
+    renderToggle({ value: "codeserver" })
+    expect(screen.queryByTestId("pro-ide-broker-disabled")).toBeNull()
   })
 })

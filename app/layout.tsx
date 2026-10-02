@@ -88,6 +88,7 @@ import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
 import { ComposerReferenceHost } from "@/components/chat/composer-reference-host"
 import { HostConsentPrompt } from "@/components/host-consent/host-consent-prompt"
+import { CodeServerRelayGrantPrompt } from "@/components/editor/project/code-server-relay-grant-prompt"
 import { ThreadHandoffInboundPromptProvider } from "@/components/thread-handoff/thread-handoff-inbound-prompt"
 import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
@@ -485,6 +486,11 @@ export default async function RootLayout({
                                  * interactive approver it has. Renders null unless
                                  * the host says this device may answer. */}
                                 <HostConsentPrompt />
+                                {/* A paired device asking to open this desktop's
+                                 * Pro IDE workbench, which runs with full
+                                 * terminals. Desktop-only (renders null
+                                 * elsewhere): the owner answers at this machine. */}
+                                <CodeServerRelayGrantPrompt />
                                 <ThreadHandoffInboundPromptProvider />
                                 {/* Single consumer for every HITL approval gate in
                                  * `usePendingGatesStore` — ADR-0022 team gates

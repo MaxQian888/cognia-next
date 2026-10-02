@@ -46,18 +46,25 @@ a remote-access toggle it has nothing to do with.
 ## Where it lives
 
 ```
+crates/cognia-codeserver/src/
+  process.rs         # spawn / supervise the desktop instance, relay admission
+  remote.rs          # the headless host's instances and the /ide/relay front door
+  download.rs        # fetch + verify the pinned code-server distribution
+  agent_channel.rs   # loopback broker channel ↔ the managed extension
+  error_code.rs      # CODESERVER_* lifecycle failure codes
+  relay_table.rs     # relay id → (root, process generation, admitted devices)
+  relay_grants.rs    # the desktop owner's per-device, per-project approvals
+
 src-tauri/src/codeserver/
-  process.rs         # spawn / supervise the code-server instance
-  download.rs        # fetch the code-server distribution
-  webview.rs         # the embedded webview host
-  agent_channel.rs   # loopback TCP control channel ↔ companion extension
   commands.rs        # the Tauri command surface
-  PHASE2_AGENT_DRIVE.md   # the Phase 2 agent↔IDE design note
+  webview.rs         # the embedded webview host
+  desktop_host.rs    # serves /ide/relay from this desktop's instances
 
 lib/codeserver/
   client.ts              # renderer-side channel client
   pane-manager.ts        # the editor pane inside the app layout
   open-file-queue.ts     # opens requested before the instance is ready
+  error-messages.ts      # CODESERVER_* code → translated message + next step
   locale.ts              # display language ↔ argv.json
   theme/vscode-chrome-map.ts   # app palette → VS Code Theme Colors
   theme/build-settings.ts      # emits the settings.json the instance reads

@@ -667,6 +667,18 @@
     "codeserver_read_user_settings": {
       "to": "codeserver.read_user_settings"
     },
+    "codeserver_relay_grant_pending": {
+      "to": "codeserver.relay_grant.pending"
+    },
+    "codeserver_relay_grant_respond": {
+      "to": "codeserver.relay_grant.respond"
+    },
+    "codeserver_relay_grant_revoke": {
+      "to": "codeserver.relay_grant.revoke"
+    },
+    "codeserver_relay_grants": {
+      "to": "codeserver.relay_grant.list"
+    },
     "codeserver_remote_relay_ensure": {
       "to": "codeserver.remote_relay.ensure"
     },

@@ -1668,6 +1668,10 @@ pub fn run() {
             browser::passwords::browser_credential_fill,
             // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
             codeserver::commands::codeserver_supported,
+            codeserver::commands::codeserver_relay_grant_pending,
+            codeserver::commands::codeserver_relay_grant_respond,
+            codeserver::commands::codeserver_relay_grant_revoke,
+            codeserver::commands::codeserver_relay_grants,
             codeserver::commands::codeserver_remote_relay_ensure,
             codeserver::commands::codeserver_remote_relay_stop,
             codeserver::commands::codeserver_build_proxy,
