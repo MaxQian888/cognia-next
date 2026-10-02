@@ -19,7 +19,13 @@ import { cn } from "@/lib/utils"
 import { EvidenceList } from "./evidence-list"
 import { HistoryStrip } from "./history-strip"
 import { LatencyPanel } from "./latency-panel"
-import { ConfidenceBadge, StatusLabel, usePercentLabel } from "./status-labels"
+import {
+  ConfidenceBadge,
+  STALE_STYLE,
+  STATUS_STYLES,
+  StatusLabel,
+  usePercentLabel,
+} from "./status-labels"
 import { formatUtcDateTime } from "./status-format"
 
 export function ComponentRow({
@@ -27,7 +33,6 @@ export function ComponentRow({
   range,
   probes,
   stale,
-  isLast,
 }: {
   component: ComponentSnapshot
   /** The range the snapshot (and so this history) was generated for. */
@@ -35,7 +40,6 @@ export function ComponentRow({
   probes: readonly ProbeSummary[]
   /** The snapshot is no longer current: statuses lose their colour. */
   stale: boolean
-  isLast: boolean
 }) {
   const t = useTranslations("publicStatus")
   const locale = useLocale()
@@ -43,26 +47,26 @@ export function ComponentRow({
   const [open, setOpen] = useState(false)
   const name = t(`components.${component.id}.name`)
   const availability = component.availability
+  const dot = stale ? STALE_STYLE.dot : STATUS_STYLES[component.status].dot
 
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn("border-t", isLast && "border-b")}
-      data-testid={`component-row-${component.id}`}
-    >
-      <article aria-labelledby={`component-${component.id}-name`} className="p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    <Collapsible open={open} onOpenChange={setOpen} data-testid={`component-row-${component.id}`}>
+      <article aria-labelledby={`component-${component.id}-name`} className="p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
           <div className="min-w-0">
-            <h3 id={`component-${component.id}-name`} className="font-medium tracking-tight">
+            <h3
+              id={`component-${component.id}-name`}
+              className="flex items-center gap-2.5 font-semibold tracking-tight"
+            >
+              <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
               {name}
             </h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-pretty text-muted-foreground">
               {t(`components.${component.id}.description`)}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <StatusLabel status={component.status} stale={stale} />
+            <StatusLabel status={component.status} stale={stale} pill />
             <ConfidenceBadge confidence={component.confidence} />
             {component.inMaintenance ? (
               <Badge variant="outline" className="font-normal text-sky-700 dark:text-sky-300">
@@ -73,6 +77,7 @@ export function ComponentRow({
               <Button
                 variant="ghost"
                 size="icon-sm"
+                className="text-muted-foreground"
                 aria-label={t(open ? "details.hide" : "details.show", { component: name })}
               >
                 <ChevronDownIcon
@@ -89,14 +94,14 @@ export function ComponentRow({
 
         <div className="mt-5">
           <HistoryStrip buckets={component.history} range={range} name={name} />
-          <div className="mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="font-mono tabular-nums" data-testid="component-availability">
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="tabular-nums" data-testid="component-availability">
               {t("history.summary", {
                 availability: percent(availability.observedAvailability),
                 coverage: percent(availability.coverage),
               })}
             </span>
-            <span className="font-mono tabular-nums">
+            <span className="tabular-nums">
               {component.latestEvidenceAt
                 ? t("details.latestEvidence", {
                     time: formatUtcDateTime(component.latestEvidenceAt, locale),
@@ -108,7 +113,7 @@ export function ComponentRow({
       </article>
 
       <CollapsibleContent>
-        <div className="grid gap-8 border-t bg-muted/15 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,1fr)]">
+        <div className="grid gap-8 border-t bg-muted/30 p-5 sm:p-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,1fr)]">
           <div className="min-w-0 space-y-6">
             <div>
               <h4 className="text-sm font-medium">{t("details.phaseTitle")}</h4>

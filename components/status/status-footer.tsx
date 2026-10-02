@@ -33,8 +33,8 @@ export function StatusFooter({
   const feeds = capabilities?.feeds === true
 
   return (
-    <footer className="py-14 md:py-20">
-      <div className="relative overflow-hidden border-y bg-foreground px-0 py-10 text-background md:py-14">
+    <footer className="pb-10 md:pb-14">
+      <div className="relative overflow-hidden rounded-3xl bg-foreground py-10 text-background shadow-sm md:py-14">
         <div
           aria-hidden
           className="absolute right-0 bottom-0 size-80 translate-x-1/3 translate-y-1/3 rounded-full bg-[radial-gradient(circle,color-mix(in_oklch,var(--chart-2)_38%,transparent),transparent_68%)] blur-2xl"
@@ -59,14 +59,14 @@ export function StatusFooter({
         </div>
       </div>
 
-      <div className="grid gap-8 py-8 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="mt-6 grid gap-8 rounded-2xl border bg-card p-5 shadow-xs sm:p-6 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="max-w-3xl space-y-3 text-sm leading-6 text-muted-foreground">
           <h2 className="font-medium text-foreground">{t("footer.boundariesTitle")}</h2>
           <p data-testid="status-boundaries">{t("footer.boundaries")}</p>
           <p>{t("footer.measurement")}</p>
         </div>
-        <nav aria-label={t("footer.links")} className="text-sm">
-          <ul className="space-y-2">
+        <nav aria-label={t("footer.links")} className="text-sm md:border-l md:pl-8">
+          <ul className="space-y-2.5">
             {feeds ? (
               <>
                 <li className="flex items-center gap-2">
@@ -106,7 +106,15 @@ export function StatusFooter({
           </ul>
         </nav>
       </div>
-      <p className="border-t pt-6 text-xs text-muted-foreground">{t("brand")}</p>
+      <p className="mt-6 flex items-center gap-2 px-1 text-xs text-muted-foreground">
+        <span
+          aria-hidden
+          className="grid size-5 place-items-center rounded-md bg-foreground text-[10px] font-semibold text-background"
+        >
+          {t("brandMark")}
+        </span>
+        {t("brand")}
+      </p>
     </footer>
   )
 }

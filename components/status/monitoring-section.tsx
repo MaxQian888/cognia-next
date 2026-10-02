@@ -10,7 +10,7 @@
  */
 
 import { useLocale, useTranslations } from "next-intl"
-import { RadarIcon } from "lucide-react"
+import { EyeIcon, RadarIcon, ServerIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -21,8 +21,30 @@ import {
 } from "@/lib/status/public-status"
 import { cn } from "@/lib/utils"
 
-import { MonitoringLabel, SectionHeading } from "./status-labels"
+import {
+  IconTile,
+  MonitoringLabel,
+  PanelEmpty,
+  SectionHeading,
+  StatusPanel,
+  type IconTone,
+} from "./status-labels"
 import { formatUtcDateTime } from "./status-format"
+
+const HEALTH_DOT: Record<ProbeHealth, string> = {
+  healthy: "bg-emerald-500",
+  stale: "bg-amber-500",
+  error: "bg-rose-600",
+  disabled: "bg-muted-foreground/45",
+  unknown: "bg-muted-foreground/45",
+}
+
+const MONITORING_TILE: Record<MonitoringStatus, IconTone> = {
+  healthy: "success",
+  limited: "warning",
+  degraded: "danger",
+  unknown: "neutral",
+}
 
 const HEALTH_TONE: Record<ProbeHealth, string> = {
   healthy: "text-emerald-700 dark:text-emerald-300",
@@ -49,7 +71,7 @@ export function MonitoringSection({
     <section
       id="monitoring"
       aria-labelledby="monitoring-title"
-      className="scroll-mt-24 border-t py-14 md:py-20"
+      className="scroll-mt-24 pb-12 md:pb-16"
     >
       <SectionHeading
         id="monitoring-title"
@@ -57,75 +79,107 @@ export function MonitoringSection({
         title={t("monitoring.title")}
         description={t("monitoring.description")}
       />
-      <div className="mt-6 flex flex-wrap items-center gap-3 text-sm">
-        <MonitoringLabel status={monitoringStatus} />
-        <span className="text-muted-foreground">
-          {t(`monitoring.statusHints.${monitoringStatus}`)}
-        </span>
-      </div>
-      <p
-        className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground"
-        data-testid="monitoring-coverage"
-      >
-        {t("monitoring.coverage", { count: active.length })}
-      </p>
+
+      <StatusPanel className="mt-6">
+        <div className="flex items-start gap-4 p-5 sm:p-6">
+          <IconTile icon={EyeIcon} tone={MONITORING_TILE[monitoringStatus]} />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <MonitoringLabel status={monitoringStatus} />
+              <span className="text-muted-foreground">
+                {t(`monitoring.statusHints.${monitoringStatus}`)}
+              </span>
+            </div>
+            <p
+              className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground"
+              data-testid="monitoring-coverage"
+            >
+              {t("monitoring.coverage", { count: active.length })}
+            </p>
+          </div>
+        </div>
+      </StatusPanel>
 
       {probes.length === 0 ? (
-        <p className="mt-8 border-y py-6 text-sm text-muted-foreground">{t("monitoring.empty")}</p>
+        <StatusPanel className="mt-4">
+          <PanelEmpty icon={ServerIcon} title={t("monitoring.empty")} />
+        </StatusPanel>
       ) : (
-        <ul className="mt-8 grid gap-4 md:grid-cols-2">
+        <ul className="mt-4 grid gap-4 md:grid-cols-2">
           {probes.map((probe) => (
-            <li key={probe.id} className="min-w-0 rounded-lg border p-4" data-testid="probe-card">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium">{pickLocalized(probe.label, locale)}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {probe.location
-                      ? pickLocalized(probe.location, locale)
-                      : t("monitoring.locationUnknown")}
-                    {probe.provider ? (
-                      <span className="block text-xs">
-                        {t("monitoring.provider", { provider: probe.provider })}
-                      </span>
-                    ) : null}
-                  </p>
+            <li key={probe.id} className="min-w-0" data-testid="probe-card">
+              <StatusPanel className="flex h-full flex-col">
+                <div className="flex items-start justify-between gap-3 p-5">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <IconTile icon={ServerIcon} />
+                    <div className="min-w-0">
+                      <p className="font-semibold tracking-tight">
+                        {pickLocalized(probe.label, locale)}
+                      </p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {probe.location
+                          ? pickLocalized(probe.location, locale)
+                          : t("monitoring.locationUnknown")}
+                        {probe.provider ? (
+                          <span className="block text-xs">
+                            {t("monitoring.provider", { provider: probe.provider })}
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={cn(
+                      "inline-flex shrink-0 items-center gap-1.5 text-sm font-medium",
+                      HEALTH_TONE[probe.health]
+                    )}
+                  >
+                    <span
+                      className={cn("size-2 rounded-full", HEALTH_DOT[probe.health])}
+                      aria-hidden
+                    />
+                    {t(`probeHealth.${probe.health}`)}
+                  </span>
                 </div>
-                <span className={cn("text-sm font-medium", HEALTH_TONE[probe.health])}>
-                  {t(`probeHealth.${probe.health}`)}
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                <Badge variant="outline" className="font-normal">
-                  {t(`sources.${probe.source}`)}
-                </Badge>
-                {probe.reference ? (
-                  <Badge variant="secondary" className="font-normal">
-                    {t("monitoring.reference")}
-                  </Badge>
-                ) : null}
-              </div>
-              <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-                {probe.profiles.map((profile) => (
-                  <li key={profile.id}>
-                    {t("monitoring.cadence", {
-                      profile: t(`profiles.${profile.id}`),
-                      seconds: profile.cadenceSeconds,
-                    })}
-                    {profile.simulatedOrigin ? (
-                      <span className="block">{t("evidence.simulatedOrigin")}</span>
+                <div className="flex-1 pb-4">
+                  <div className="flex flex-wrap gap-1.5 px-5">
+                    <Badge variant="outline" className="font-normal">
+                      {t(`sources.${probe.source}`)}
+                    </Badge>
+                    {probe.reference ? (
+                      <Badge variant="secondary" className="font-normal">
+                        {t("monitoring.reference")}
+                      </Badge>
                     ) : null}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-3 grid gap-0.5 font-mono text-xs text-muted-foreground tabular-nums">
-                <span>{t("monitoring.lastAttempt", { time: time(probe.lastAttemptAt) })}</span>
-                <span>{t("monitoring.lastSuccess", { time: time(probe.lastSuccessAt) })}</span>
-              </p>
-              {probe.reason ? (
-                <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
-                  {t(`reasons.${probe.reason}`)}
+                  </div>
+                  <ul className="mx-5 mt-4 divide-y rounded-xl border text-sm">
+                    {probe.profiles.map((profile) => (
+                      <li key={profile.id} className="px-3.5 py-2.5">
+                        <span className="font-medium">
+                          {t("monitoring.cadence", {
+                            profile: t(`profiles.${profile.id}`),
+                            seconds: profile.cadenceSeconds,
+                          })}
+                        </span>
+                        {profile.simulatedOrigin ? (
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {t("evidence.simulatedOrigin")}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {probe.reason ? (
+                    <p className="mx-5 mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                      {t(`reasons.${probe.reason}`)}
+                    </p>
+                  ) : null}
+                </div>
+                <p className="grid gap-1 border-t bg-muted/30 px-5 py-3 text-xs text-muted-foreground tabular-nums sm:grid-cols-2">
+                  <span>{t("monitoring.lastAttempt", { time: time(probe.lastAttemptAt) })}</span>
+                  <span>{t("monitoring.lastSuccess", { time: time(probe.lastSuccessAt) })}</span>
                 </p>
-              ) : null}
+              </StatusPanel>
             </li>
           ))}
         </ul>

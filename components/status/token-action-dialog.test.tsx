@@ -118,7 +118,7 @@ describe("TokenActionDialog", () => {
     render(<TokenActionDialog runtime={primary} token={current} />)
     expect(screen.getByTestId("token-conflict")).toHaveTextContent("changed elsewhere")
     fireEvent.click(screen.getByRole("checkbox", { name: "Signaling HTTP" }))
-    fireEvent.change(screen.getByLabelText("Email language"), { target: { value: "zh-CN" } })
+    fireEvent.click(screen.getByRole("radio", { name: "简体中文" }))
     fireEvent.click(screen.getByRole("button", { name: "Save preferences" }))
     expect(current.savePreferences).toHaveBeenCalledWith({
       locale: "zh-CN",

@@ -113,7 +113,7 @@ export function HistoryStrip({ buckets, range, name, compact = false, testId }: 
         role="group"
         aria-label={t("history.groupLabel", { name, range: t(`ranges.${range}`) })}
         aria-describedby={hintId}
-        className="grid gap-px sm:gap-0.5"
+        className="grid gap-[2px] sm:gap-[3px]"
         style={{ gridTemplateColumns: `repeat(${buckets.length}, minmax(0, 1fr))` }}
         onKeyDown={onKeyDown}
         onFocus={() => setFocusWithin(true)}
@@ -147,8 +147,8 @@ export function HistoryStrip({ buckets, range, name, compact = false, testId }: 
               onMouseEnter={() => setActive(index)}
               onClick={() => setActive(index)}
               className={cn(
-                "min-w-0 rounded-[2px] transition-opacity outline-none hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
-                compact ? "h-5" : "h-7",
+                "min-w-0 rounded-[3px] transition-[opacity,transform] outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+                compact ? "h-5" : "h-8",
                 STATUS_STYLES[bucket.status].dot,
                 bucket.partial && "opacity-60 ring-1 ring-foreground/30 ring-inset",
                 index === activeIndex && "ring-2 ring-foreground/60"

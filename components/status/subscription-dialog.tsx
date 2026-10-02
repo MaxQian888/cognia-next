@@ -18,6 +18,7 @@
 
 import { useId, useState, type FormEvent } from "react"
 import { useLocale, useTranslations } from "next-intl"
+import { BellRingIcon, MailCheckIcon, MailIcon, ShieldCheckIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -29,9 +30,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Label } from "@/components/ui/label"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Spinner } from "@/components/ui/spinner"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useSubscribe } from "@/hooks/status/use-subscription-actions"
 import {
   COMPONENT_IDS,
@@ -43,6 +45,7 @@ import {
   type StatusRuntime,
 } from "@/lib/status/public-status"
 
+import { IconTile } from "./status-labels"
 import { StatusExternalLink } from "./status-link"
 
 /** Deliberately loose: the server owns normalisation and validation. */
@@ -74,36 +77,49 @@ export function SubscriptionPreferenceFields({
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor={`${baseId}-locale`}>{t("subscribe.locale")}</Label>
-        <NativeSelect
-          id={`${baseId}-locale`}
+        <Label id={`${baseId}-locale`}>{t("subscribe.locale")}</Label>
+        <ToggleGroup
+          type="single"
+          variant="outline"
           value={locale}
           disabled={disabled}
-          onChange={(event) => onLocaleChange(normalizeStatusLocale(event.target.value))}
+          aria-labelledby={`${baseId}-locale`}
+          className="w-full"
+          onValueChange={(next) => {
+            if (next) onLocaleChange(normalizeStatusLocale(next))
+          }}
         >
           {locales.map((option) => (
-            <NativeSelectOption key={option} value={option}>
+            <ToggleGroupItem
+              key={option}
+              value={option}
+              className="flex-1 data-[state=on]:bg-foreground data-[state=on]:text-background"
+            >
               {t(`locales.${option}`)}
-            </NativeSelectOption>
+            </ToggleGroupItem>
           ))}
-        </NativeSelect>
+        </ToggleGroup>
       </div>
       <fieldset className="space-y-2" disabled={disabled}>
         <legend className="text-sm font-medium">{t("subscribe.componentsLabel")}</legend>
         <p className="text-xs text-muted-foreground">{t("subscribe.componentsHint")}</p>
-        {COMPONENT_IDS.map((id) => (
-          <div key={id} className="flex items-center gap-2">
-            <Checkbox
-              id={`${baseId}-${id}`}
-              checked={componentIds.includes(id)}
-              disabled={disabled}
-              onCheckedChange={(checked) => toggle(id, checked === true)}
-            />
-            <Label htmlFor={`${baseId}-${id}`} className="font-normal">
+        <div className="grid gap-2 pt-1">
+          {COMPONENT_IDS.map((id) => (
+            <Label
+              key={id}
+              htmlFor={`${baseId}-${id}`}
+              className="flex cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-3 font-normal transition-colors hover:bg-muted/40 has-[[data-state=checked]]:border-foreground/30 has-[[data-state=checked]]:bg-muted/50"
+            >
+              <Checkbox
+                id={`${baseId}-${id}`}
+                checked={componentIds.includes(id)}
+                disabled={disabled}
+                onCheckedChange={(checked) => toggle(id, checked === true)}
+              />
               {t(`components.${id}.name`)}
             </Label>
-          </div>
-        ))}
+          ))}
+        </div>
       </fieldset>
     </>
   )
@@ -155,14 +171,23 @@ export function SubscriptionDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent showCloseButton={false} data-testid="subscription-dialog">
-        <DialogHeader>
-          <DialogTitle>{t("subscribe.title")}</DialogTitle>
-          <DialogDescription>{t("subscribe.description")}</DialogDescription>
-        </DialogHeader>
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[90dvh] overflow-y-auto sm:max-w-md"
+        data-testid="subscription-dialog"
+      >
+        {state.phase === "pending" ? null : (
+          <DialogHeader className="gap-3">
+            <IconTile icon={BellRingIcon} size="lg" className="mx-auto sm:mx-0" />
+            <div className="space-y-1.5">
+              <DialogTitle className="text-xl">{t("subscribe.title")}</DialogTitle>
+              <DialogDescription>{t("subscribe.description")}</DialogDescription>
+            </div>
+          </DialogHeader>
+        )}
 
         {mirror ? (
-          <div className="space-y-4 text-sm">
+          <div className="space-y-4 rounded-xl border bg-muted/30 p-4 text-sm">
             <p>{t("subscribe.mirrorDescription")}</p>
             <StatusExternalLink
               href={runtime.primaryPageUrl}
@@ -173,17 +198,28 @@ export function SubscriptionDialog({
             </StatusExternalLink>
           </div>
         ) : !emailAvailable ? (
-          <p className="text-sm" role="status" data-testid="subscription-disabled">
+          <p
+            className="rounded-xl border bg-muted/30 p-4 text-sm leading-6"
+            role="status"
+            data-testid="subscription-disabled"
+          >
             {t("subscribe.disabled")}
           </p>
         ) : state.phase === "pending" ? (
           <div
             role="status"
-            className="space-y-2 rounded-lg border p-4"
+            className="flex flex-col items-center px-2 pt-4 pb-2 text-center"
             data-testid="subscription-pending"
           >
-            <p className="font-medium">{t("subscribe.pendingTitle")}</p>
-            <p className="text-sm text-muted-foreground">{t("subscribe.pending")}</p>
+            <IconTile icon={MailCheckIcon} tone="success" size="lg" />
+            {/* The dialog keeps an accessible name while the form is hidden. */}
+            <DialogTitle className="mt-4 text-xl">{t("subscribe.pendingTitle")}</DialogTitle>
+            <DialogDescription className="mt-2 max-w-sm leading-6">
+              {t("subscribe.pending")}
+            </DialogDescription>
+            <p className="mt-4 rounded-xl bg-muted/50 px-4 py-2.5 text-xs leading-5 text-muted-foreground">
+              {t("subscribe.pendingHint")}
+            </p>
           </div>
         ) : (
           <form
@@ -194,18 +230,23 @@ export function SubscriptionDialog({
           >
             <div className="space-y-2">
               <Label htmlFor={emailId}>{t("subscribe.email")}</Label>
-              <Input
-                id={emailId}
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                disabled={submitting}
-                aria-invalid={emailError || undefined}
-                aria-describedby={emailError ? `${emailId}-error` : undefined}
-                placeholder={t("subscribe.emailPlaceholder")}
-                onChange={(event) => setEmail(event.target.value)}
-              />
+              <InputGroup className="h-10">
+                <InputGroupAddon>
+                  <MailIcon aria-hidden />
+                </InputGroupAddon>
+                <InputGroupInput
+                  id={emailId}
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  disabled={submitting}
+                  aria-invalid={emailError || undefined}
+                  aria-describedby={emailError ? `${emailId}-error` : undefined}
+                  placeholder={t("subscribe.emailPlaceholder")}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </InputGroup>
               {emailError ? (
                 <p
                   id={`${emailId}-error`}
@@ -224,27 +265,31 @@ export function SubscriptionDialog({
               locales={locales}
               disabled={submitting}
             />
-            <p className="text-xs leading-5 text-muted-foreground">{t("subscribe.consent")}</p>
+            <p className="flex gap-2.5 rounded-xl bg-muted/50 px-3.5 py-3 text-xs leading-5 text-muted-foreground">
+              <ShieldCheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span>{t("subscribe.consent")}</span>
+            </p>
             {submitting ? (
-              <p role="status" className="text-sm text-muted-foreground">
+              <p role="status" className="sr-only">
                 {t("subscribe.submitting")}
               </p>
             ) : null}
             {state.phase === "error" ? (
               <p
                 role="alert"
-                className="rounded-lg border border-rose-500/25 bg-rose-500/10 p-3 text-sm text-rose-800 dark:text-rose-200"
+                className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-sm text-rose-800 dark:text-rose-200"
                 data-testid="subscription-error"
                 data-kind={state.kind}
               >
                 {t(`subscribe.errors.${subscribeErrorKey(state.kind)}`)}
               </p>
             ) : null}
-            <DialogFooter>
+            <DialogFooter className="gap-2 pt-1">
               <Button type="button" variant="outline" onClick={() => close(false)}>
                 {t("actions.close")}
               </Button>
               <Button type="submit" disabled={submitting}>
+                {submitting ? <Spinner /> : null}
                 {submitting ? t("subscribe.submitting") : t("subscribe.submit")}
               </Button>
             </DialogFooter>
@@ -253,7 +298,12 @@ export function SubscriptionDialog({
 
         {mirror || !emailAvailable || state.phase === "pending" ? (
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => close(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              className={state.phase === "pending" ? "w-full sm:w-full" : undefined}
+              onClick={() => close(false)}
+            >
               {t("actions.close")}
             </Button>
           </DialogFooter>

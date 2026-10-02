@@ -134,6 +134,7 @@
   },
   "incidents": {
     "activeEmpty": "No active incidents.",
+    "activeEmptyDescription": "The official relay is running without any known incident.",
     "activeTitle": "Active incidents",
     "components": "Affects: {components}",
     "correction": "Correction to an earlier update",
@@ -149,6 +150,7 @@
     "loadingMore": "Loading…",
     "noMore": "No older incidents.",
     "pastEmpty": "No past incidents recorded.",
+    "pastEmptyDescription": "Resolved incidents appear here with their full timeline of updates.",
     "pastTitle": "Incident history",
     "predecessor": "Open the earlier incident this follows",
     "resolvedAt": "Resolved {time}",
@@ -181,6 +183,7 @@
   "maintenance": {
     "components": "Affects: {components}",
     "empty": "No maintenance scheduled.",
+    "emptyDescription": "Planned work on the relay is announced here ahead of time.",
     "excluded": "Minutes inside this window are excluded from maintenance-adjusted availability.",
     "localWindow": "Your time: {start} – {end}",
     "states": {
@@ -336,6 +339,7 @@
     "mirrorDescription": "This read-only mirror cannot start subscriptions. Subscribe on the primary status page.",
     "openPrimary": "Subscribe on the primary page",
     "pending": "If this address can be subscribed, a confirmation link is on its way. The link expires in 24 hours, and nothing is sent until you confirm.",
+    "pendingHint": "Nothing arrived? Check your spam folder. The link stays valid for 24 hours.",
     "pendingTitle": "Check your inbox",
     "submit": "Send confirmation link",
     "submitting": "Sending…",

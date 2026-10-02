@@ -10,7 +10,7 @@
  * green cannot pass for a current one.
  */
 
-import type { ComponentType } from "react"
+import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
   CheckCircle2Icon,
@@ -81,7 +81,7 @@ export const STATUS_STYLES: Record<CellStatus, StatusStyle> = {
     icon: CircleHelpIcon,
   },
   no_data: {
-    dot: "bg-transparent border border-dashed border-muted-foreground/50",
+    dot: "bg-transparent border border-dashed border-muted-foreground/30",
     soft: "bg-transparent ring-border",
     text: "text-muted-foreground",
     icon: CircleDashedIcon,
@@ -110,10 +110,13 @@ export const LEGEND_ORDER: CellStatus[] = [
 export function StatusLabel({
   status,
   stale = false,
+  pill = false,
   className,
 }: {
   status: CellStatus
   stale?: boolean
+  /** Tinted, rounded pill (component rows, incidents) instead of bare text. */
+  pill?: boolean
   className?: string
 }) {
   const t = useTranslations("publicStatus")
@@ -122,7 +125,13 @@ export function StatusLabel({
   const word = t(`statuses.${status}`)
   return (
     <span
-      className={cn("inline-flex items-center gap-1.5 text-xs font-medium", style.text, className)}
+      className={cn(
+        "inline-flex items-center gap-1.5 text-xs font-medium",
+        pill && "rounded-full px-2.5 py-1 ring-1 ring-inset",
+        pill && style.soft,
+        style.text,
+        className
+      )}
       data-status={status}
       data-stale={stale || undefined}
     >
@@ -187,23 +196,107 @@ export function SectionHeading({
   icon: Icon,
   title,
   description,
+  action,
 }: {
   id?: string
   icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>
   title: string
   description?: string
+  /** Right-aligned control or summary (wraps below on narrow screens). */
+  action?: ReactNode
 }) {
   return (
-    <div className="flex max-w-3xl items-start gap-3">
-      <span className="mt-1 text-muted-foreground">
-        <Icon className="size-5" aria-hidden />
-      </span>
-      <div className="min-w-0">
-        <h2 id={id} className="text-2xl font-semibold tracking-tight md:text-3xl">
-          {title}
-        </h2>
+    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+      <div className="flex max-w-3xl min-w-0 items-start gap-3.5">
+        <IconTile icon={Icon} />
+        <div className="min-w-0">
+          <h2 id={id} className="text-xl font-semibold tracking-tight md:text-2xl">
+            {title}
+          </h2>
+          {description ? (
+            <p className="mt-1 text-sm leading-6 text-pretty text-muted-foreground">
+              {description}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      {action ? <div className="min-w-0">{action}</div> : null}
+    </div>
+  )
+}
+
+export type IconTone = "neutral" | "success" | "info" | "warning" | "danger"
+
+const ICON_TONES: Record<IconTone, string> = {
+  neutral: "border-border bg-muted/60 text-muted-foreground",
+  success: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  info: "border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  warning: "border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+  danger: "border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+}
+
+/** Square icon tile used by section headings, dialogs and empty states. */
+export function IconTile({
+  icon: Icon,
+  tone = "neutral",
+  size = "md",
+  className,
+}: {
+  icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>
+  tone?: IconTone
+  size?: "md" | "lg"
+  className?: string
+}) {
+  return (
+    <span
+      aria-hidden
+      data-tone={tone}
+      className={cn(
+        "grid shrink-0 place-items-center border",
+        size === "lg" ? "size-12 rounded-2xl" : "size-9 rounded-xl",
+        ICON_TONES[tone],
+        className
+      )}
+    >
+      <Icon className={size === "lg" ? "size-5" : "size-4"} aria-hidden />
+    </span>
+  )
+}
+
+/** The card every page section sits in. */
+export function StatusPanel({ className, children, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-xs",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** Empty state inside a panel: icon tile, the empty sentence and context. */
+export function PanelEmpty({
+  icon,
+  tone = "neutral",
+  title,
+  description,
+}: {
+  icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>
+  tone?: IconTone
+  title: string
+  description?: string
+}) {
+  return (
+    <div className="flex items-start gap-4 p-5 sm:p-6">
+      <IconTile icon={icon} tone={tone} />
+      <div className="min-w-0 pt-0.5">
+        <p className="text-sm font-medium">{title}</p>
         {description ? (
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
         ) : null}
       </div>
     </div>

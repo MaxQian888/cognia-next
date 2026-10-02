@@ -49,11 +49,11 @@ export function IncidentDetailDialog({ state }: { state: IncidentDetailState }) 
     >
       <DialogContent
         showCloseButton={false}
-        className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"
+        className="max-h-[88dvh] overflow-y-auto sm:max-w-2xl"
         data-testid="incident-dialog"
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+        <DialogHeader className="gap-3">
+          <DialogTitle className="text-xl text-balance">{title}</DialogTitle>
           <DialogDescription asChild>
             <div>
               {state.status === "loading" ? (
@@ -69,7 +69,7 @@ export function IncidentDetailDialog({ state }: { state: IncidentDetailState }) 
                 </span>
               ) : detail ? (
                 <span className="flex flex-wrap items-center gap-2">
-                  <StatusLabel status={detail.impact} />
+                  <StatusLabel status={detail.impact} pill />
                   <Badge variant="outline" className="font-normal">
                     {t(`incidentStates.${detail.state}`)}
                   </Badge>
@@ -88,24 +88,26 @@ export function IncidentDetailDialog({ state }: { state: IncidentDetailState }) 
         ) : null}
 
         {detail ? (
-          <div className="space-y-5">
-            {detail.componentIds.length > 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {t("incidents.components", { components: components(detail.componentIds) })}
-              </p>
-            ) : null}
-            <p className="grid gap-0.5 font-mono text-xs text-muted-foreground tabular-nums">
-              <span>
-                {t("incidents.startedAt", { time: formatUtcDateTime(detail.startedAt, locale) })}
-              </span>
-              {detail.resolvedAt ? (
-                <span>
-                  {t("incidents.resolvedAt", {
-                    time: formatUtcDateTime(detail.resolvedAt, locale),
-                  })}
-                </span>
+          <div className="space-y-6">
+            <div className="space-y-1.5 rounded-xl border bg-muted/30 px-4 py-3">
+              {detail.componentIds.length > 0 ? (
+                <p className="text-sm">
+                  {t("incidents.components", { components: components(detail.componentIds) })}
+                </p>
               ) : null}
-            </p>
+              <p className="grid gap-0.5 text-xs text-muted-foreground tabular-nums">
+                <span>
+                  {t("incidents.startedAt", { time: formatUtcDateTime(detail.startedAt, locale) })}
+                </span>
+                {detail.resolvedAt ? (
+                  <span>
+                    {t("incidents.resolvedAt", {
+                      time: formatUtcDateTime(detail.resolvedAt, locale),
+                    })}
+                  </span>
+                ) : null}
+              </p>
+            </div>
             {detail.predecessorId ? (
               <Button
                 variant="link"
@@ -145,7 +147,7 @@ export function IncidentDetailDialog({ state }: { state: IncidentDetailState }) 
                         </span>
                         <time
                           dateTime={update.at}
-                          className="font-mono text-xs text-muted-foreground tabular-nums"
+                          className="text-xs text-muted-foreground tabular-nums"
                         >
                           {formatUtcDateTime(update.at, locale)}
                         </time>
@@ -158,7 +160,7 @@ export function IncidentDetailDialog({ state }: { state: IncidentDetailState }) 
                           {t("incidents.correction")}
                         </p>
                       ) : null}
-                      <p className="mt-2 text-sm leading-6 whitespace-pre-line text-muted-foreground">
+                      <p className="mt-2 rounded-xl bg-muted/40 px-3.5 py-2.5 text-sm leading-6 whitespace-pre-line">
                         {pickLocalized(update.message, locale)}
                       </p>
                     </div>

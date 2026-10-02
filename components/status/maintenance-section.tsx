@@ -10,7 +10,7 @@
  */
 
 import { useLocale, useTranslations } from "next-intl"
-import { CalendarClockIcon, WrenchIcon } from "lucide-react"
+import { CalendarCheck2Icon, CalendarClockIcon, WrenchIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -20,7 +20,7 @@ import {
   type MaintenanceView,
 } from "@/lib/status/public-status"
 
-import { SectionHeading } from "./status-labels"
+import { IconTile, PanelEmpty, SectionHeading, StatusPanel } from "./status-labels"
 import { formatList, formatLocalDateTime, formatUtcDateTimeBare } from "./status-format"
 
 export const VISIBLE_MAINTENANCE_STATES: readonly MaintenanceState[] = [
@@ -57,67 +57,81 @@ export function MaintenanceSection({ maintenance }: { maintenance: readonly Main
         icon={CalendarClockIcon}
         title={t("maintenance.title")}
       />
-      <div className="mt-8">
+      <div className="mt-6 space-y-4">
         {windows.length === 0 ? (
-          <p className="border-y py-8 text-sm text-muted-foreground">{t("maintenance.empty")}</p>
+          <StatusPanel>
+            <PanelEmpty
+              icon={CalendarCheck2Icon}
+              tone="info"
+              title={t("maintenance.empty")}
+              description={t("maintenance.emptyDescription")}
+            />
+          </StatusPanel>
         ) : (
           windows.map((entry) => {
             const latest = sortIncidentUpdatesNewestFirst(entry.updates).find(
               (update) => update.message !== null
             )
             return (
-              <article
+              <StatusPanel
                 key={entry.id}
-                className="border-y py-6"
-                aria-label={pickLocalized(entry.title, locale)}
-                data-testid="maintenance-window"
+                className="relative before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-sky-500"
               >
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 text-sky-700 dark:text-sky-300">
-                    <WrenchIcon className="size-4" aria-hidden />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-medium">{pickLocalized(entry.title, locale)}</h3>
-                      <Badge variant="outline" className="font-normal">
-                        {t(`maintenance.states.${entry.state}`)}
-                      </Badge>
+                <article
+                  className="p-5 sm:p-6"
+                  aria-label={pickLocalized(entry.title, locale)}
+                  data-testid="maintenance-window"
+                >
+                  <div className="flex items-start gap-3.5">
+                    <IconTile icon={WrenchIcon} tone="info" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="font-semibold tracking-tight">
+                          {pickLocalized(entry.title, locale)}
+                        </h3>
+                        <Badge
+                          variant="outline"
+                          className="border-sky-500/30 bg-sky-500/10 font-normal text-sky-700 dark:text-sky-300"
+                        >
+                          {t(`maintenance.states.${entry.state}`)}
+                        </Badge>
+                      </div>
+                      <p className="mt-1.5 text-sm leading-6 whitespace-pre-line text-muted-foreground">
+                        {pickLocalized(entry.description, locale)}
+                      </p>
+                      {entry.componentIds.length > 0 ? (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {t("maintenance.components", {
+                            components: components(entry.componentIds),
+                          })}
+                        </p>
+                      ) : null}
+                      {latest?.message ? (
+                        <p className="mt-3 rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm leading-6 whitespace-pre-line">
+                          {pickLocalized(latest.message, locale)}
+                        </p>
+                      ) : null}
                     </div>
-                    <p className="mt-2 text-sm leading-6 whitespace-pre-line text-muted-foreground">
-                      {pickLocalized(entry.description, locale)}
-                    </p>
-                    {entry.componentIds.length > 0 ? (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {t("maintenance.components", {
-                          components: components(entry.componentIds),
-                        })}
-                      </p>
-                    ) : null}
-                    {latest?.message ? (
-                      <p className="mt-2 text-sm leading-6 whitespace-pre-line">
-                        {pickLocalized(latest.message, locale)}
-                      </p>
+                  </div>
+                  <div className="mt-4 grid gap-1 rounded-xl border bg-muted/30 px-3.5 py-3 text-xs text-muted-foreground tabular-nums">
+                    <span className="font-medium text-foreground" data-testid="maintenance-utc">
+                      {t("maintenance.utcWindow", {
+                        start: formatUtcDateTimeBare(entry.startsAt, locale),
+                        end: formatUtcDateTimeBare(entry.endsAt, locale),
+                      })}
+                    </span>
+                    <span>
+                      {t("maintenance.localWindow", {
+                        start: formatLocalDateTime(entry.startsAt, locale),
+                        end: formatLocalDateTime(entry.endsAt, locale),
+                      })}
+                    </span>
+                    {entry.excludeFromAvailability ? (
+                      <span className="mt-1">{t("maintenance.excluded")}</span>
                     ) : null}
                   </div>
-                </div>
-                <div className="mt-5 grid gap-1 border-t pt-4 font-mono text-xs text-muted-foreground tabular-nums">
-                  <span data-testid="maintenance-utc">
-                    {t("maintenance.utcWindow", {
-                      start: formatUtcDateTimeBare(entry.startsAt, locale),
-                      end: formatUtcDateTimeBare(entry.endsAt, locale),
-                    })}
-                  </span>
-                  <span>
-                    {t("maintenance.localWindow", {
-                      start: formatLocalDateTime(entry.startsAt, locale),
-                      end: formatLocalDateTime(entry.endsAt, locale),
-                    })}
-                  </span>
-                  {entry.excludeFromAvailability ? (
-                    <span className="font-sans">{t("maintenance.excluded")}</span>
-                  ) : null}
-                </div>
-              </article>
+                </article>
+              </StatusPanel>
             )
           })
         )}

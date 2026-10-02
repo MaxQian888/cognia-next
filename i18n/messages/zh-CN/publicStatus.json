@@ -134,6 +134,7 @@
   },
   "incidents": {
     "activeEmpty": "当前没有进行中的事件。",
+    "activeEmptyDescription": "官方托管中继目前没有已知事件，运行正常。",
     "activeTitle": "进行中的事件",
     "components": "影响范围：{components}",
     "correction": "对先前更新的更正",
@@ -149,6 +150,7 @@
     "loadingMore": "正在加载…",
     "noMore": "没有更早的事件了。",
     "pastEmpty": "暂无历史事件记录。",
+    "pastEmptyDescription": "已解决的事件会连同完整的进展时间线显示在这里。",
     "pastTitle": "事件历史",
     "predecessor": "查看此事件延续的上一个事件",
     "resolvedAt": "解决于 {time}",
@@ -181,6 +183,7 @@
   "maintenance": {
     "components": "影响范围：{components}",
     "empty": "暂无计划维护。",
+    "emptyDescription": "计划内的中继维护会提前在这里公布。",
     "excluded": "该时间窗内的分钟数不计入扣除维护后的可用性。",
     "localWindow": "你的当地时间：{start} – {end}",
     "states": {
@@ -336,6 +339,7 @@
     "mirrorDescription": "只读镜像无法发起订阅，请在主状态页面订阅。",
     "openPrimary": "前往主页面订阅",
     "pending": "如果该地址可以订阅，确认链接已在发送途中。链接 24 小时内有效，确认前不会发送任何邮件。",
+    "pendingHint": "没有收到？请检查垃圾邮件文件夹。链接 24 小时内有效。",
     "pendingTitle": "请查收邮件",
     "submit": "发送确认链接",
     "submitting": "正在发送…",

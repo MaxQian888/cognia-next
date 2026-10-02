@@ -33,7 +33,7 @@ import { MaintenanceSection } from "./maintenance-section"
 import { MonitoringSection } from "./monitoring-section"
 import { StatusFooter } from "./status-footer"
 import { StatusHero } from "./status-hero"
-import { SectionHeading } from "./status-labels"
+import { SectionHeading, StatusPanel } from "./status-labels"
 import { MirrorNotice, RefreshErrorBanner } from "./status-notices"
 import { SubscriptionDialog } from "./subscription-dialog"
 import { TokenActionDialog } from "./token-action-dialog"
@@ -176,7 +176,7 @@ function LiveStatusPage({ runtime }: { runtime: StatusRuntime }) {
           <section
             id="components"
             aria-labelledby="components-title"
-            className="scroll-mt-24 py-14 md:py-20"
+            className="scroll-mt-24 py-12 md:py-16"
           >
             <SectionHeading
               id="components-title"
@@ -184,24 +184,25 @@ function LiveStatusPage({ runtime }: { runtime: StatusRuntime }) {
               title={t("sections.componentsTitle")}
               description={t("sections.componentsDescription")}
             />
-            <div className="mt-10">
-              {snapshot.components.map((component, index) => (
-                <ComponentRow
-                  key={component.id}
-                  component={component}
-                  range={snapshot.range}
-                  probes={snapshot.probes}
-                  stale={stale}
-                  isLast={index === snapshot.components.length - 1}
-                />
-              ))}
-            </div>
-            <div className="mt-4">
-              <HistoryLegend />
-            </div>
+            <StatusPanel className="mt-8">
+              <div className="divide-y">
+                {snapshot.components.map((component) => (
+                  <ComponentRow
+                    key={component.id}
+                    component={component}
+                    range={snapshot.range}
+                    probes={snapshot.probes}
+                    stale={stale}
+                  />
+                ))}
+              </div>
+              <div className="border-t bg-muted/30 px-5 py-3.5 sm:px-6">
+                <HistoryLegend />
+              </div>
+            </StatusPanel>
           </section>
 
-          <section className="grid grid-cols-1 gap-10 border-t py-14 md:grid-cols-12 md:py-20">
+          <section className="grid grid-cols-1 gap-6 pb-12 md:grid-cols-12 md:pb-16 lg:gap-8">
             <div className="min-w-0 md:col-span-7">
               <ActiveIncidents incidents={snapshot.activeIncidents} onOpen={detail.open} />
             </div>

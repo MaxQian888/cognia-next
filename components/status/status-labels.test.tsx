@@ -2,6 +2,9 @@ import { render, renderHook, screen } from "@testing-library/react"
 
 import {
   ConfidenceBadge,
+  IconTile,
+  PanelEmpty,
+  StatusPanel,
   LEGEND_ORDER,
   MonitoringLabel,
   SectionHeading,
@@ -56,5 +59,36 @@ describe("status labels", () => {
     render(<SectionHeading id="x" icon={() => null} title="Title" description="Text" />)
     expect(screen.getByRole("heading", { name: "Title" })).toHaveAttribute("id", "x")
     expect(screen.getByText("Text")).toBeInTheDocument()
+  })
+
+  it("draws a pill label with the status tint and keeps the text", () => {
+    render(<StatusLabel status="degraded" pill />)
+    const label = screen.getByText("Degraded")
+    expect(label.className).toMatch(/rounded-full/)
+    expect(label.className).toContain(STATUS_STYLES.degraded.soft.split(" ")[0])
+  })
+
+  it("renders a panel, a decorative icon tile and an empty state", () => {
+    render(
+      <StatusPanel data-testid="panel">
+        <PanelEmpty icon={() => null} tone="success" title="Nothing here" description="Why" />
+      </StatusPanel>
+    )
+    expect(screen.getByTestId("panel").className).toMatch(/rounded-2xl/)
+    expect(screen.getByText("Nothing here")).toBeInTheDocument()
+    expect(screen.getByText("Why")).toBeInTheDocument()
+    const tile = document.querySelector('[data-tone="success"]')
+    expect(tile).toHaveAttribute("aria-hidden", "true")
+  })
+
+  it("sizes icon tiles", () => {
+    render(<IconTile icon={() => null} size="lg" tone="danger" />)
+    const tile = document.querySelector('[data-tone="danger"]')
+    expect(tile?.className).toMatch(/size-12/)
+  })
+
+  it("renders a heading action beside the title", () => {
+    render(<SectionHeading icon={() => null} title="T" action={<button>Act</button>} />)
+    expect(screen.getByRole("button", { name: "Act" })).toBeInTheDocument()
   })
 })

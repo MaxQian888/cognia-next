@@ -51,9 +51,9 @@ describe("SubscriptionDialog", () => {
     fireEvent.change(within(dialog).getByLabelText("Email address"), {
       target: { value: "ops@example.com" },
     })
-    fireEvent.change(within(dialog).getByLabelText("Email language"), {
-      target: { value: "zh-CN" },
-    })
+    // Language is a labelled two-option segmented control.
+    expect(within(dialog).getByRole("radiogroup", { name: "Email language" })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("radio", { name: "简体中文" }))
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Relay data lane" }))
     fireEvent.click(within(dialog).getByRole("button", { name: "Send confirmation link" }))
     expect(within(dialog).getByRole("status")).toHaveTextContent("Sending…")
