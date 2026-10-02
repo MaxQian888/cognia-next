@@ -244,7 +244,13 @@ export function PastIncidents({
         >
           {pages.hasMore ? (
             <Button variant="outline" size="sm" onClick={pages.loadMore} disabled={pages.loading}>
-              {pages.loading ? t("incidents.loadingMore") : t("incidents.loadMore")}
+              {pages.loading
+                ? t("incidents.loadingMore")
+                : // The snapshot only carries recent history; older pages may
+                  // still exist, so an empty list asks rather than "loads more".
+                  pages.incidents.length === 0
+                  ? t("incidents.loadOlder")
+                  : t("incidents.loadMore")}
             </Button>
           ) : (
             <span className="text-xs text-muted-foreground" data-testid="incidents-exhausted">

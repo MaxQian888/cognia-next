@@ -32009,6 +32009,7 @@
       "latestUpdate": "Latest update",
       "loadMore": "Load more incidents",
       "loadMoreError": "Older incidents could not be loaded.",
+      "loadOlder": "Look for older incidents",
       "loadingMore": "Loading…",
       "noMore": "No older incidents.",
       "pastEmpty": "No past incidents recorded.",
