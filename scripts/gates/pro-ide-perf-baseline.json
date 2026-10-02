@@ -1,0 +1,10 @@
+{
+  "darwin-arm64": {
+    "codeServer": "4.128.0",
+    "coldReadinessMs": 5604,
+    "idleRssMb": 716,
+    "emptyRpcP95Ms": 3.25,
+    "relayOverheadP95Ms": 3.03,
+    "eventLoss": 0
+  }
+}

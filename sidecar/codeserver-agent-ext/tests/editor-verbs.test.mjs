@@ -233,6 +233,31 @@ describe("showDiff", () => {
   })
 })
 
+describe("restartManagedExtensionHost", () => {
+  const restartWith = async (available) => {
+    const executed = []
+    const vscode = fakeVscode()
+    vscode.commands = {
+      getCommands: async () => available,
+      executeCommand: async (command) => executed.push(command),
+    }
+    await verbsFor(vscode).dispatch("restartManagedExtensionHost", {})
+    return executed
+  }
+
+  test("restarts the extension host where the workbench can", async () => {
+    assert.deepEqual(await restartWith(["workbench.action.restartExtensionHost"]), [
+      "workbench.action.restartExtensionHost",
+    ])
+  })
+
+  test("reloads code-server's web workbench, which has no restart command", async () => {
+    assert.deepEqual(await restartWith(["workbench.action.reloadWindow"]), [
+      "workbench.action.reloadWindow",
+    ])
+  })
+})
+
 describe("workspaceSnapshot and the proxy handshake", () => {
   test("hands a snapshot to its sink and refuses a non-object", async () => {
     const received = []
@@ -267,5 +292,60 @@ describe("workspaceSnapshot and the proxy handshake", () => {
       dispatch("managedProxyHandshake", { ...params, manifestHash: "sha256:other" }),
       /IDE_PROXY_HANDSHAKE_MISMATCH: manifestHash/
     )
+  })
+
+  test("waits for VS Code to discover a just-installed proxy, then gives up in bounded time", async () => {
+    const descriptor = {
+      pluginVersion: "1.0.0",
+      manifestHash: "sha256:m",
+      catalogHash: "sha256:c",
+      platformVersion: "1.0.0",
+    }
+    const vscode = fakeVscode()
+    const listeners = new Set()
+    const changed = {
+      fire: () => [...listeners].forEach((listener) => listener()),
+      event: (listener) => {
+        listeners.add(listener)
+        return { dispose: () => listeners.delete(listener) }
+      },
+    }
+    let installed = false
+    vscode.extensions = {
+      getExtension: () =>
+        installed ? { isActive: true, packageJSON: { cogniaManaged: descriptor } } : undefined,
+      onDidChange: changed.event,
+    }
+    const params = { pluginId: "acme.tools", ...descriptor }
+    const { dispatch } = verbsFor(vscode, {
+      getProxyRegistration: () => ({}),
+      proxyDiscoveryTimeoutMs: 1_000,
+    })
+    const pending = dispatch("managedProxyHandshake", params)
+    changed.fire()
+    installed = true
+    changed.fire()
+    assert.equal((await pending).pluginVersion, "1.0.0")
+
+    installed = false
+    const quick = verbsFor(vscode, {
+      getProxyRegistration: () => ({}),
+      proxyDiscoveryTimeoutMs: 20,
+    })
+    await assert.rejects(
+      quick.dispatch("managedProxyHandshake", params),
+      /IDE_PROXY_EXTENSION_NOT_DISCOVERED: acme.tools/
+    )
+
+    const controller = new AbortController()
+    const cancelled = verbsFor(vscode, { getProxyRegistration: () => ({}) }).dispatch(
+      "managedProxyHandshake",
+      params,
+      { signal: controller.signal }
+    )
+    controller.abort()
+    await assert.rejects(cancelled, (error) => error.name === "RequestCancelledError")
+    // Every wait let go of its listener.
+    assert.equal(listeners.size, 0)
   })
 })

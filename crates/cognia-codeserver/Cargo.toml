@@ -10,6 +10,14 @@ publish.workspace = true
 [features]
 default = []
 tauri-host = ["dep:tauri"]
+# The broker host for the real-binary E2E (`src/bin/codeserver_e2e_host.rs`).
+# Test tooling only: no shipped binary enables it.
+e2e-host = ["tokio/io-std"]
+
+[[bin]]
+name = "codeserver-e2e-host"
+path = "src/bin/codeserver_e2e_host.rs"
+required-features = ["e2e-host"]
 
 [dependencies]
 cognia-core = { path = "../cognia-core" }

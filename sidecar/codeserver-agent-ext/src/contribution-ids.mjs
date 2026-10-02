@@ -50,11 +50,25 @@ export function collectContributionIds(contributions = {}) {
   return ids
 }
 
+/**
+ * The namespace a managed id must start with. Language model tools get an
+ * underscore namespace because VS Code drops a tool whose name does not match
+ * `/^[\w-]+$/`; mirrors `toolNamespacePrefix` in `lib/plugin/ide/manifest.ts`
+ * and `tool_namespace_prefix` in the Rust proxy compiler.
+ *
+ * `kind` is a contribution kind (`languageModelTool`) or a provider kind
+ * (`language-model-tool`).
+ */
+export function managedIdPrefix(pluginId, kind) {
+  return kind === "languageModelTool" || kind === "language-model-tool"
+    ? `cognia_${pluginId.replace(/\./g, "_")}_`
+    : `cognia.${pluginId}.`
+}
+
 export function assertManagedContributionIds(pluginId, contributions) {
-  const prefix = `cognia.${pluginId}.`
   const seen = new Set()
   for (const entry of collectContributionIds(contributions)) {
-    if (!entry.id.startsWith(prefix)) {
+    if (!entry.id.startsWith(managedIdPrefix(pluginId, entry.kind))) {
       throw compatibilityError("IDE_PROXY_ID_OUTSIDE_NAMESPACE", `${entry.kind}:${entry.id}`)
     }
     const key = `${entry.kind}\0${entry.id}`

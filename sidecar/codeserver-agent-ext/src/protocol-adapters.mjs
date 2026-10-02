@@ -6,6 +6,8 @@
  * broker to a supervised process owned by the Cognia runtime.
  */
 
+import { createLspConverters } from "./lsp-converters.mjs"
+import { probe } from "./test-probe.mjs"
 import { createHash } from "node:crypto"
 import { realpath, readFile, stat } from "node:fs/promises"
 import { dirname, isAbsolute, relative } from "node:path"
@@ -30,16 +32,60 @@ export async function registerManagedProtocols(vscode, descriptor, broker) {
   return combine(vscode, ...registrations)
 }
 
+/**
+ * Which server capability each VS Code registration needs. The client tells
+ * the server `dynamicRegistration: false`, so the capabilities `initialize`
+ * returned are the whole truth: a feature the server did not claim is never
+ * registered, and VS Code never sends it a request it would refuse.
+ */
+const LSP_FEATURE_CAPABILITY = {
+  registerCompletionItemProvider: "completionProvider",
+  registerHoverProvider: "hoverProvider",
+  registerDeclarationProvider: "declarationProvider",
+  registerDefinitionProvider: "definitionProvider",
+  registerTypeDefinitionProvider: "typeDefinitionProvider",
+  registerImplementationProvider: "implementationProvider",
+  registerReferenceProvider: "referencesProvider",
+  registerDocumentHighlightProvider: "documentHighlightProvider",
+  registerDocumentSymbolProvider: "documentSymbolProvider",
+  registerCodeActionsProvider: "codeActionProvider",
+  registerCodeLensProvider: "codeLensProvider",
+  registerDocumentLinkProvider: "documentLinkProvider",
+  registerColorProvider: "colorProvider",
+  registerDocumentFormattingEditProvider: "documentFormattingProvider",
+  registerDocumentRangeFormattingEditProvider: "documentRangeFormattingProvider",
+  registerOnTypeFormattingEditProvider: "documentOnTypeFormattingProvider",
+  registerRenameProvider: "renameProvider",
+  registerFoldingRangeProvider: "foldingRangeProvider",
+  registerSelectionRangeProvider: "selectionRangeProvider",
+  registerSignatureHelpProvider: "signatureHelpProvider",
+  registerInlineValuesProvider: "inlineValueProvider",
+  registerInlayHintsProvider: "inlayHintProvider",
+  registerLinkedEditingRangeProvider: "linkedEditingRangeProvider",
+  registerCallHierarchyProvider: "callHierarchyProvider",
+  registerTypeHierarchyProvider: "typeHierarchyProvider",
+  registerWorkspaceSymbolProvider: "workspaceSymbolProvider",
+}
+
+/** Whether a server capability is claimed: `true` or an options object. */
+const claims = (capabilities, name) => {
+  const value = capabilities[name]
+  return value !== undefined && value !== null && value !== false
+}
+
 async function registerLsp(vscode, server, broker) {
   // Monaco owns a separate `monaco` consumer. Never share process state,
   // document versions, or cancellation IDs with the Pro IDE projection.
   const consumerId = "pro-ide"
   const started = await broker.startProtocol("lsp", server, consumerId)
   const ticket = started.capabilityTicket
+  // A host too old to report capabilities gets every feature, as before.
+  const capabilities = started.connection?.capabilities
   const selector = (server.languages?.length ? server.languages : ["*"]).map((language) => ({
     language,
     scheme: "file",
   }))
+  const convert = createLspConverters(vscode)
   const request = (method, payload, token) =>
     broker.requestProtocol("lsp", server, ticket, method, payload, token, consumerId)
   const registrations = []
@@ -53,131 +99,191 @@ async function registerLsp(vscode, server, broker) {
   }
   const progress = createWorkDoneProgress(vscode, request)
   const register = (method, implementation, ...args) => {
+    const capability = LSP_FEATURE_CAPABILITY[method]
+    if (capabilities && capability && !claims(capabilities, capability)) return
     if (typeof vscode.languages?.[method] !== "function") {
       throw compatibilityError("IDE_CODE_API_UNAVAILABLE", `Code 1.128 languages.${method}`)
     }
     registrations.push(vscode.languages[method](selector, implementation, ...args))
   }
+  const textDocument = (document) => ({ textDocument: { uri: document.uri.toString() } })
   const documentPosition = (document, position) => ({
-    textDocument: { uri: document.uri.toString() },
-    position: plain(position),
+    ...textDocument(document),
+    position: convert.toPosition(position),
   })
+  const reviveEdit = (edit) => reviveWorkspaceEdit(vscode, edit)
+  const triggers = (name, field) => {
+    const value = capabilities?.[name]?.[field]
+    return Array.isArray(value) ? value : []
+  }
 
-  register("registerCompletionItemProvider", {
-    provideCompletionItems: (document, position, context, token) =>
-      request(
-        "textDocument/completion",
-        { ...documentPosition(document, position), context: plain(context) },
-        token
-      ),
-    resolveCompletionItem: (item, token) => request("completionItem/resolve", plain(item), token),
-  })
+  register(
+    "registerCompletionItemProvider",
+    {
+      provideCompletionItems: (document, position, token, context) =>
+        request(
+          "textDocument/completion",
+          {
+            ...documentPosition(document, position),
+            context: convert.toCompletionContext(context),
+          },
+          token
+        ).then(convert.completion),
+      ...(capabilities?.completionProvider?.resolveProvider !== false
+        ? {
+            resolveCompletionItem: async (item, token) => {
+              const original = convert.originOf(item)
+              if (!original) return item
+              const resolved = await request("completionItem/resolve", original, token)
+              return resolved ? convert.completionItem(resolved) : item
+            },
+          }
+        : {}),
+    },
+    ...triggers("completionProvider", "triggerCharacters")
+  )
   register("registerHoverProvider", {
     provideHover: (document, position, token) =>
-      request("textDocument/hover", documentPosition(document, position), token),
+      request("textDocument/hover", documentPosition(document, position), token).then(
+        convert.hover
+      ),
   })
-  register("registerDeclarationProvider", {
-    provideDeclaration: (document, position, token) =>
-      request("textDocument/declaration", documentPosition(document, position), token),
-  })
-  register("registerDefinitionProvider", {
-    provideDefinition: (document, position, token) =>
-      request("textDocument/definition", documentPosition(document, position), token),
-  })
-  register("registerTypeDefinitionProvider", {
-    provideTypeDefinition: (document, position, token) =>
-      request("textDocument/typeDefinition", documentPosition(document, position), token),
-  })
-  register("registerImplementationProvider", {
-    provideImplementation: (document, position, token) =>
-      request("textDocument/implementation", documentPosition(document, position), token),
-  })
+  for (const [method, provide, lspMethod] of [
+    ["registerDeclarationProvider", "provideDeclaration", "textDocument/declaration"],
+    ["registerDefinitionProvider", "provideDefinition", "textDocument/definition"],
+    ["registerTypeDefinitionProvider", "provideTypeDefinition", "textDocument/typeDefinition"],
+    ["registerImplementationProvider", "provideImplementation", "textDocument/implementation"],
+  ]) {
+    register(method, {
+      [provide]: (document, position, token) =>
+        request(lspMethod, documentPosition(document, position), token).then(convert.definition),
+    })
+  }
   register("registerReferenceProvider", {
     provideReferences: (document, position, context, token) =>
       request(
         "textDocument/references",
-        { ...documentPosition(document, position), context: plain(context) },
+        {
+          ...documentPosition(document, position),
+          context: { includeDeclaration: context?.includeDeclaration === true },
+        },
         token
-      ),
+      ).then(convert.locations),
   })
   register("registerDocumentHighlightProvider", {
     provideDocumentHighlights: (document, position, token) =>
-      request("textDocument/documentHighlight", documentPosition(document, position), token),
+      request("textDocument/documentHighlight", documentPosition(document, position), token).then(
+        convert.documentHighlights
+      ),
   })
   register("registerDocumentSymbolProvider", {
     provideDocumentSymbols: (document, token) =>
-      request(
-        "textDocument/documentSymbol",
-        { textDocument: { uri: document.uri.toString() } },
-        token
+      request("textDocument/documentSymbol", textDocument(document), token).then(
+        convert.documentSymbols
       ),
   })
-  register("registerCodeActionsProvider", {
-    provideCodeActions: (document, range, context, token) =>
-      request(
-        "textDocument/codeAction",
-        {
-          textDocument: { uri: document.uri.toString() },
-          range: plain(range),
-          context: plain(context),
-        },
-        token
-      ),
-    resolveCodeAction: (action, token) => request("codeAction/resolve", plain(action), token),
-  })
+  register(
+    "registerCodeActionsProvider",
+    {
+      provideCodeActions: (document, range, context, token) =>
+        request(
+          "textDocument/codeAction",
+          {
+            ...textDocument(document),
+            range: convert.toRange(range),
+            context: convert.toCodeActionContext(context),
+          },
+          token
+        ).then((value) => convert.codeActions(value, reviveEdit)),
+      ...(capabilities?.codeActionProvider?.resolveProvider
+        ? {
+            resolveCodeAction: async (action, token) => {
+              const original = convert.originOf(action)
+              if (!original) return action
+              const resolved = await request("codeAction/resolve", original, token)
+              return resolved ? convert.applyCodeAction(action, resolved, reviveEdit) : action
+            },
+          }
+        : {}),
+    },
+    Array.isArray(capabilities?.codeActionProvider?.codeActionKinds)
+      ? {
+          providedCodeActionKinds: capabilities.codeActionProvider.codeActionKinds.map((kind) =>
+            vscode.CodeActionKind.Empty.append(kind)
+          ),
+        }
+      : undefined
+  )
   register("registerCodeLensProvider", {
     onDidChangeCodeLenses: refresh.codeLens.event,
     provideCodeLenses: (document, token) =>
-      request("textDocument/codeLens", { textDocument: { uri: document.uri.toString() } }, token),
-    resolveCodeLens: (lens, token) => request("codeLens/resolve", plain(lens), token),
+      request("textDocument/codeLens", textDocument(document), token).then(convert.codeLenses),
+    ...(capabilities?.codeLensProvider?.resolveProvider !== false
+      ? {
+          resolveCodeLens: async (lens, token) => {
+            const original = convert.originOf(lens)
+            if (!original || lens.command) return lens
+            const resolved = await request("codeLens/resolve", original, token)
+            if (resolved?.command) lens.command = convert.command(resolved.command)
+            return lens
+          },
+        }
+      : {}),
   })
   register("registerDocumentLinkProvider", {
     provideDocumentLinks: (document, token) =>
-      request(
-        "textDocument/documentLink",
-        { textDocument: { uri: document.uri.toString() } },
-        token
+      request("textDocument/documentLink", textDocument(document), token).then(
+        convert.documentLinks
       ),
-    resolveDocumentLink: (link, token) => request("documentLink/resolve", plain(link), token),
+    ...(capabilities?.documentLinkProvider?.resolveProvider
+      ? {
+          resolveDocumentLink: async (link, token) => {
+            const original = convert.originOf(link)
+            if (!original) return link
+            const resolved = await request("documentLink/resolve", original, token)
+            return resolved ? convert.documentLink(resolved) : link
+          },
+        }
+      : {}),
   })
   register("registerColorProvider", {
     provideDocumentColors: (document, token) =>
-      request(
-        "textDocument/documentColor",
-        { textDocument: { uri: document.uri.toString() } },
-        token
+      request("textDocument/documentColor", textDocument(document), token).then(
+        convert.colorInformation
       ),
     provideColorPresentations: (color, context, token) =>
       request(
         "textDocument/colorPresentation",
         {
-          textDocument: { uri: context.document.uri.toString() },
-          color: plain(color),
-          range: plain(context.range),
+          ...textDocument(context.document),
+          color: { red: color.red, green: color.green, blue: color.blue, alpha: color.alpha },
+          range: convert.toRange(context.range),
         },
         token
-      ),
+      ).then(convert.colorPresentations),
   })
+  const formattingOptions = (options) => ({ ...plain(options) })
   register("registerDocumentFormattingEditProvider", {
     provideDocumentFormattingEdits: (document, options, token) =>
       request(
         "textDocument/formatting",
-        { textDocument: { uri: document.uri.toString() }, options: plain(options) },
+        { ...textDocument(document), options: formattingOptions(options) },
         token
-      ),
+      ).then(convert.textEdits),
   })
   register("registerDocumentRangeFormattingEditProvider", {
     provideDocumentRangeFormattingEdits: (document, range, options, token) =>
       request(
         "textDocument/rangeFormatting",
         {
-          textDocument: { uri: document.uri.toString() },
-          range: plain(range),
-          options: plain(options),
+          ...textDocument(document),
+          range: convert.toRange(range),
+          options: formattingOptions(options),
         },
         token
-      ),
+      ).then(convert.textEdits),
   })
+  const onType = capabilities?.documentOnTypeFormattingProvider
   register(
     "registerOnTypeFormattingEditProvider",
     {
@@ -187,12 +293,13 @@ async function registerLsp(vscode, server, broker) {
           {
             ...documentPosition(document, position),
             ch: character,
-            options: plain(options),
+            options: formattingOptions(options),
           },
           token
-        ),
+        ).then(convert.textEdits),
     },
-    "\n"
+    onType?.firstTriggerCharacter ?? "\n",
+    ...(Array.isArray(onType?.moreTriggerCharacter) ? onType.moreTriggerCharacter : [])
   )
   register("registerRenameProvider", {
     provideRenameEdits: (document, position, newName, token) =>
@@ -200,29 +307,30 @@ async function registerLsp(vscode, server, broker) {
         "textDocument/rename",
         { ...documentPosition(document, position), newName },
         token
-      ).then((edit) => reviveWorkspaceEdit(vscode, edit)),
-    prepareRename: (document, position, token) =>
-      request("textDocument/prepareRename", documentPosition(document, position), token),
+      ).then(reviveEdit),
+    ...(!capabilities || capabilities.renameProvider?.prepareProvider
+      ? {
+          prepareRename: (document, position, token) =>
+            request("textDocument/prepareRename", documentPosition(document, position), token).then(
+              convert.prepareRename
+            ),
+        }
+      : {}),
   })
   register("registerFoldingRangeProvider", {
     onDidChangeFoldingRanges: refresh.foldingRange.event,
     provideFoldingRanges: (document, _context, token) =>
-      request(
-        "textDocument/foldingRange",
-        { textDocument: { uri: document.uri.toString() } },
-        token
+      request("textDocument/foldingRange", textDocument(document), token).then(
+        convert.foldingRanges
       ),
   })
   register("registerSelectionRangeProvider", {
     provideSelectionRanges: (document, positions, token) =>
       request(
         "textDocument/selectionRange",
-        {
-          textDocument: { uri: document.uri.toString() },
-          positions: plain(positions),
-        },
+        { ...textDocument(document), positions: positions.map(convert.toPosition) },
         token
-      ),
+      ).then(convert.selectionRanges),
   })
   register(
     "registerSignatureHelpProvider",
@@ -230,11 +338,17 @@ async function registerLsp(vscode, server, broker) {
       provideSignatureHelp: (document, position, token, context) =>
         request(
           "textDocument/signatureHelp",
-          { ...documentPosition(document, position), context: plain(context) },
+          {
+            ...documentPosition(document, position),
+            context: convert.toSignatureHelpContext(context),
+          },
           token
-        ),
+        ).then(convert.signatureHelp),
     },
-    { triggerCharacters: [], retriggerCharacters: [] }
+    {
+      triggerCharacters: triggers("signatureHelpProvider", "triggerCharacters"),
+      retriggerCharacters: triggers("signatureHelpProvider", "retriggerCharacters"),
+    }
   )
   register("registerInlineValuesProvider", {
     onDidChangeInlineValues: refresh.inlineValue.event,
@@ -242,49 +356,85 @@ async function registerLsp(vscode, server, broker) {
       request(
         "textDocument/inlineValue",
         {
-          textDocument: { uri: document.uri.toString() },
-          range: plain(range),
-          context: plain(context),
+          ...textDocument(document),
+          range: convert.toRange(range),
+          context: convert.toInlineValueContext(context),
         },
         token
-      ),
+      ).then(convert.inlineValues),
   })
   register("registerInlayHintsProvider", {
     onDidChangeInlayHints: refresh.inlayHint.event,
     provideInlayHints: (document, range, token) =>
       request(
         "textDocument/inlayHint",
-        { textDocument: { uri: document.uri.toString() }, range: plain(range) },
+        { ...textDocument(document), range: convert.toRange(range) },
         token
-      ),
-    resolveInlayHint: (hint, token) => request("inlayHint/resolve", plain(hint), token),
+      ).then(convert.inlayHints),
+    ...(capabilities?.inlayHintProvider?.resolveProvider
+      ? {
+          resolveInlayHint: async (hint, token) => {
+            const original = convert.originOf(hint)
+            if (!original) return hint
+            const resolved = await request("inlayHint/resolve", original, token)
+            return resolved ? convert.inlayHint(resolved) : hint
+          },
+        }
+      : {}),
   })
   register("registerLinkedEditingRangeProvider", {
     provideLinkedEditingRanges: (document, position, token) =>
-      request("textDocument/linkedEditingRange", documentPosition(document, position), token),
+      request("textDocument/linkedEditingRange", documentPosition(document, position), token).then(
+        convert.linkedEditingRanges
+      ),
   })
   register("registerCallHierarchyProvider", {
     prepareCallHierarchy: (document, position, token) =>
-      request("textDocument/prepareCallHierarchy", documentPosition(document, position), token),
+      request(
+        "textDocument/prepareCallHierarchy",
+        documentPosition(document, position),
+        token
+      ).then(convert.callHierarchyItems),
     provideCallHierarchyIncomingCalls: (item, token) =>
-      request("callHierarchy/incomingCalls", { item: plain(item) }, token),
+      request("callHierarchy/incomingCalls", { item: convert.toHierarchyItem(item) }, token).then(
+        convert.incomingCalls
+      ),
     provideCallHierarchyOutgoingCalls: (item, token) =>
-      request("callHierarchy/outgoingCalls", { item: plain(item) }, token),
+      request("callHierarchy/outgoingCalls", { item: convert.toHierarchyItem(item) }, token).then(
+        convert.outgoingCalls
+      ),
   })
   register("registerTypeHierarchyProvider", {
     prepareTypeHierarchy: (document, position, token) =>
-      request("textDocument/prepareTypeHierarchy", documentPosition(document, position), token),
+      request(
+        "textDocument/prepareTypeHierarchy",
+        documentPosition(document, position),
+        token
+      ).then(convert.typeHierarchyItems),
     provideTypeHierarchySupertypes: (item, token) =>
-      request("typeHierarchy/supertypes", { item: plain(item) }, token),
+      request("typeHierarchy/supertypes", { item: convert.toHierarchyItem(item) }, token).then(
+        convert.typeHierarchyItems
+      ),
     provideTypeHierarchySubtypes: (item, token) =>
-      request("typeHierarchy/subtypes", { item: plain(item) }, token),
+      request("typeHierarchy/subtypes", { item: convert.toHierarchyItem(item) }, token).then(
+        convert.typeHierarchyItems
+      ),
   })
   register("registerWorkspaceSymbolProvider", {
-    provideWorkspaceSymbols: (query, token) => request("workspace/symbol", { query }, token),
-    resolveWorkspaceSymbol: (symbol, token) =>
-      request("workspaceSymbol/resolve", plain(symbol), token),
+    provideWorkspaceSymbols: (query, token) =>
+      request("workspace/symbol", { query }, token).then(convert.workspaceSymbols),
+    ...(capabilities?.workspaceSymbolProvider?.resolveProvider
+      ? {
+          resolveWorkspaceSymbol: async (symbol, token) => {
+            const original = convert.originOf(symbol)
+            if (!original) return symbol
+            const resolved = await request("workspaceSymbol/resolve", original, token)
+            return resolved ? convert.symbolInformation(resolved) : symbol
+          },
+        }
+      : {}),
   })
-  const semanticTokens = started.connection?.capabilities?.semanticTokensProvider
+  const semanticTokens = capabilities?.semanticTokensProvider
   const legend = semanticTokens?.legend
   if (Array.isArray(legend?.tokenTypes) && Array.isArray(legend?.tokenModifiers)) {
     const codeLegend = new vscode.SemanticTokensLegend(legend.tokenTypes, legend.tokenModifiers)
@@ -294,20 +444,15 @@ async function registerLsp(vscode, server, broker) {
         {
           onDidChangeSemanticTokens: refresh.semanticTokens.event,
           provideDocumentSemanticTokens: (document, token) =>
-            request(
-              "textDocument/semanticTokens/full",
-              { textDocument: { uri: document.uri.toString() } },
-              token
-            ).then((value) => reviveSemanticTokens(vscode, value)),
+            request("textDocument/semanticTokens/full", textDocument(document), token).then(
+              (value) => reviveSemanticTokens(vscode, value)
+            ),
           ...(typeof semanticTokens.full === "object" && semanticTokens.full.delta
             ? {
                 provideDocumentSemanticTokensEdits: (document, previousResultId, token) =>
                   request(
                     "textDocument/semanticTokens/full/delta",
-                    {
-                      textDocument: { uri: document.uri.toString() },
-                      previousResultId,
-                    },
+                    { ...textDocument(document), previousResultId },
                     token
                   ).then((value) => reviveSemanticTokens(vscode, value)),
               }
@@ -324,10 +469,7 @@ async function registerLsp(vscode, server, broker) {
           provideDocumentRangeSemanticTokens: (document, range, token) =>
             request(
               "textDocument/semanticTokens/range",
-              {
-                textDocument: { uri: document.uri.toString() },
-                range: plain(range),
-              },
+              { ...textDocument(document), range: convert.toRange(range) },
               token
             ).then((value) => reviveSemanticTokens(vscode, value)),
         },
@@ -335,32 +477,33 @@ async function registerLsp(vscode, server, broker) {
       )
     }
   }
-  if (started.connection?.capabilities?.diagnosticProvider) {
-    register("registerDiagnosticProvider", {
-      onDidChangeDiagnostics: refresh.diagnostic.event,
-      provideDiagnostics: (document, previousResultId, token) =>
-        request(
-          "textDocument/diagnostic",
-          {
-            textDocument: { uri: document.uri.toString() },
-            previousResultId,
-          },
-          token
-        ),
-    })
-  }
 
   const diagnostics = vscode.languages.createDiagnosticCollection(server.id)
   registrations.push(diagnostics)
+  // Pull diagnostics. VS Code's stable API has no pull-diagnostic provider, so
+  // the client pulls (as VS Code's own language client does) on open, change
+  // and `workspace/diagnostic/refresh`, into the same collection pushes use.
+  const pull = claims(capabilities ?? {}, "diagnosticProvider")
+    ? createDiagnosticPuller({
+        vscode,
+        convert,
+        request,
+        diagnostics,
+        server: capabilities.diagnosticProvider,
+      })
+    : null
+  if (pull)
+    registrations.push(
+      pull,
+      refresh.diagnostic.event(() => pull.refreshAll())
+    )
   registrations.push(
     broker.onEvent((message) => {
       if (message?.providerId !== server.id || message?.consumerId !== consumerId) return
       if (message.event === "diagnostics" && typeof message.payload?.uri === "string") {
         diagnostics.set(
           vscode.Uri.parse(message.payload.uri),
-          (message.payload.diagnostics ?? []).map((diagnostic) =>
-            reviveDiagnostic(vscode, diagnostic)
-          )
+          (message.payload.diagnostics ?? []).map(convert.diagnostic)
         )
         return
       }
@@ -405,6 +548,7 @@ async function registerLsp(vscode, server, broker) {
       },
       consumerId
     )
+    pull?.document(document)
   }
   const change = async (document) => {
     if (!matches(document)) return
@@ -421,10 +565,12 @@ async function registerLsp(vscode, server, broker) {
       },
       consumerId
     )
+    pull?.changed(document)
   }
   const close = async (document) => {
     const uri = document.uri.toString()
     if (!opened.delete(uri)) return
+    pull?.forget(document)
     await broker.documentProtocol("lsp", server, ticket, { operation: "close", uri }, consumerId)
   }
   await Promise.all(vscode.workspace.textDocuments.map(open))
@@ -439,6 +585,102 @@ async function registerLsp(vscode, server, broker) {
       for (const registration of registrations.splice(0).reverse()) registration.dispose()
       progress.dispose()
       void broker.stopProtocol("lsp", server, ticket, consumerId)
+    },
+  }
+}
+
+/** How long a burst of edits settles before the next diagnostic pull. */
+export const DIAGNOSTIC_PULL_DEBOUNCE_MS = 250
+
+/**
+ * The client half of LSP pull diagnostics for the documents it has opened.
+ *
+ * Each pull sends the last `resultId` the server gave for that document, so
+ * an `unchanged` report keeps what is shown. A server with
+ * `interFileDependencies` has every open document re-pulled when one changes.
+ */
+export function createDiagnosticPuller({
+  vscode,
+  convert,
+  request,
+  diagnostics,
+  server,
+  debounceMs = DIAGNOSTIC_PULL_DEBOUNCE_MS,
+}) {
+  const documents = new Map()
+  const resultIds = new Map()
+  const timers = new Map()
+  let disposed = false
+
+  async function pullNow(document) {
+    const uri = document.uri.toString()
+    if (disposed || !documents.has(uri)) return
+    let report
+    try {
+      report = await request("textDocument/diagnostic", {
+        textDocument: { uri },
+        ...(server?.identifier ? { identifier: server.identifier } : {}),
+        ...(resultIds.has(uri) ? { previousResultId: resultIds.get(uri) } : {}),
+      })
+    } catch {
+      // A failed pull keeps what is shown; the next change pulls again.
+      return
+    }
+    if (disposed || !documents.has(uri) || !report) return
+    if (report.resultId) resultIds.set(uri, report.resultId)
+    if (report.kind === "full") {
+      diagnostics.set(document.uri, (report.items ?? []).map(convert.diagnostic))
+    }
+    for (const [related, entry] of Object.entries(report.relatedDocuments ?? {})) {
+      if (entry?.kind === "full") {
+        diagnostics.set(vscode.Uri.parse(related), (entry.items ?? []).map(convert.diagnostic))
+      }
+      if (entry?.resultId) resultIds.set(related, entry.resultId)
+    }
+  }
+
+  function schedule(document) {
+    const uri = document.uri.toString()
+    clearTimeout(timers.get(uri))
+    timers.set(
+      uri,
+      setTimeout(() => {
+        timers.delete(uri)
+        void pullNow(document)
+      }, debounceMs)
+    )
+  }
+
+  return {
+    /** A document was opened: pull at once. */
+    document(document) {
+      documents.set(document.uri.toString(), document)
+      return pullNow(document)
+    },
+    /** A document changed: pull it (or every open one) once edits settle. */
+    changed(document) {
+      if (server?.interFileDependencies) {
+        for (const entry of documents.values()) schedule(entry)
+      } else {
+        schedule(document)
+      }
+    },
+    forget(document) {
+      const uri = document.uri.toString()
+      documents.delete(uri)
+      resultIds.delete(uri)
+      clearTimeout(timers.get(uri))
+      timers.delete(uri)
+      diagnostics.delete?.(document.uri)
+    },
+    /** `workspace/diagnostic/refresh`: the server wants everything pulled again. */
+    refreshAll() {
+      return Promise.all([...documents.values()].map(pullNow))
+    },
+    dispose() {
+      disposed = true
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
     },
   }
 }
@@ -564,7 +806,7 @@ async function registerMcp(vscode, server, broker) {
   }
   let active
   const consumerId = "pro-ide"
-  const registration = vscode.lm.registerMcpServerDefinitionProvider(server.id, {
+  const definitions = {
     async provideMcpServerDefinitions() {
       active ??= await broker.startProtocol("mcp", server, consumerId)
       const endpoint = active.connection?.endpoint
@@ -586,7 +828,9 @@ async function registerMcp(vscode, server, broker) {
     resolveMcpServerDefinition(definition) {
       return definition
     },
-  })
+  }
+  const registration = vscode.lm.registerMcpServerDefinitionProvider(server.id, definitions)
+  probe.track("mcpProvider", server.id, definitions)
   return {
     dispose() {
       registration.dispose()
@@ -959,18 +1203,6 @@ function reviveWorkspaceEdit(vscode, value) {
     }
   }
   return edit
-}
-
-function reviveDiagnostic(vscode, value) {
-  const diagnostic = new vscode.Diagnostic(
-    reviveRange(vscode, value.range),
-    String(value.message ?? ""),
-    value.severity
-  )
-  diagnostic.code = value.code
-  diagnostic.source = value.source
-  diagnostic.tags = value.tags
-  return diagnostic
 }
 
 function reviveRange(vscode, value) {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import JSZip from "jszip"
-import { assertManagedContributionIds } from "./contribution-ids.mjs"
+import { assertManagedContributionIds, managedIdPrefix } from "./contribution-ids.mjs"
 
 const FIXED_ZIP_DATE = new Date("1980-01-01T00:00:00.000Z")
 
@@ -112,10 +112,9 @@ function validateInput(input) {
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(input.pluginVersion ?? "")) {
     throw new Error(`IDE_PROXY_VERSION_INVALID: ${String(input.pluginVersion)}`)
   }
-  const prefix = `cognia.${input.pluginId}.`
   assertManagedContributionIds(input.pluginId, input.contributions)
   for (const provider of input.providers ?? []) {
-    if (!provider.id?.startsWith(prefix)) {
+    if (!provider.id?.startsWith(managedIdPrefix(input.pluginId, provider.kind))) {
       throw new Error(`IDE_PROXY_ID_OUTSIDE_NAMESPACE: ${String(provider.id)}`)
     }
   }

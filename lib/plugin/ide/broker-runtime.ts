@@ -197,6 +197,18 @@ export interface ManagedIdeBrokerDependencies {
   ): Promise<void>
   secretDelete(pluginId: string, scope: ManagedIdeStateScope, key: string): Promise<void>
   secretKeys(pluginId: string, scope: ManagedIdeStateScope): Promise<string[]>
+  /** Send a provider event to the extension host (`codeserver_broker_notify`). */
+  notify(
+    root: string,
+    generation: number,
+    params: {
+      pluginId: string
+      providerId: string
+      invocationId?: string
+      event: string
+      payload?: unknown
+    }
+  ): Promise<void>
   expectedHostId: string
   now(): number
 }
@@ -947,7 +959,7 @@ export class ManagedIdeBrokerRuntime {
         `Managed IDE ${declared.kind}:${input.event}`
       )
     }
-    await codeServerClient.notifyBroker(input.request.root, input.request.generation, {
+    await this.dependencies.notify(input.request.root, input.request.generation, {
       pluginId: input.params.pluginId,
       providerId: input.params.providerId,
       invocationId: input.params.invocationId,
@@ -999,7 +1011,7 @@ export class ManagedIdeBrokerRuntime {
     ) {
       throw brokerError(-32003, "IDE_PERMISSION_DENIED", provider.permission)
     }
-    await codeServerClient.notifyBroker(input.root, generation, {
+    await this.dependencies.notify(input.root, generation, {
       pluginId: input.pluginId,
       providerId: input.providerId,
       event: input.event,
@@ -1294,6 +1306,7 @@ export function createManagedIdeBrokerDependencies(): ManagedIdeBrokerDependenci
   const protocols = new ManagedProtocolRuntime()
   return {
     expectedHostId: "local",
+    notify: (root, generation, params) => codeServerClient.notifyBroker(root, generation, params),
     getPlugin: (pluginId) => usePluginStore.getState().plugins[pluginId],
     isWorkspaceTrusted,
     validatePaths: (root, paths) => codeServerClient.validateBrokerPaths(root, paths),

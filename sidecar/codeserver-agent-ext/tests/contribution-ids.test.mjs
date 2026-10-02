@@ -5,6 +5,7 @@ import {
   assertManagedContributionIds,
   collectContributionIds,
   findOccupiedContributionIds,
+  managedIdPrefix,
 } from "../src/contribution-ids.mjs"
 
 test("collects stable global ids across declarative contribution families", () => {
@@ -13,13 +14,13 @@ test("collects stable global ids across declarative contribution families", () =
       commands: [{ command: "cognia.acme.run" }],
       views: { explorer: [{ id: "cognia.acme.results" }] },
       customEditors: [{ viewType: "cognia.acme.editor" }],
-      languageModelTools: [{ name: "cognia.acme.inspect" }],
+      languageModelTools: [{ name: "cognia_acme_inspect" }],
     }),
     [
       { kind: "command", id: "cognia.acme.run" },
       { kind: "view", id: "cognia.acme.results" },
       { kind: "customEditor", id: "cognia.acme.editor" },
-      { kind: "languageModelTool", id: "cognia.acme.inspect" },
+      { kind: "languageModelTool", id: "cognia_acme_inspect" },
     ]
   )
 })
@@ -67,5 +68,21 @@ test("activation reports ids occupied by another extension", () => {
       "cognia-managed.proxy-acme"
     ),
     [{ kind: "command", id: "cognia.acme.run", extensionId: "native.other" }]
+  )
+})
+
+test("language model tools take the underscore namespace VS Code accepts", () => {
+  assert.equal(managedIdPrefix("acme.tools", "command"), "cognia.acme.tools.")
+  assert.equal(managedIdPrefix("acme.tools", "languageModelTool"), "cognia_acme_tools_")
+  assert.equal(managedIdPrefix("acme.tools", "language-model-tool"), "cognia_acme_tools_")
+  assert.doesNotThrow(() =>
+    assertManagedContributionIds("acme", { languageModelTools: [{ name: "cognia_acme_inspect" }] })
+  )
+  assert.throws(
+    () =>
+      assertManagedContributionIds("acme", {
+        languageModelTools: [{ name: "cognia.acme.inspect" }],
+      }),
+    /IDE_PROXY_ID_OUTSIDE_NAMESPACE/
   )
 })

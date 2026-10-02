@@ -67,9 +67,14 @@ export type PluginIdeProviderKind =
   | "mcp-server-definition"
 
 export interface PluginIdeProviderDeclaration {
-  /** Plugin-local id. The compiler emits `cognia.<pluginId>.<id>`. */
+  /**
+   * Plugin-local id. The compiler emits `cognia.<pluginId>.<id>`, except for a
+   * `language-model-tool`, which becomes `cognia_<pluginId>_<id>` (VS Code
+   * accepts only `[\w-]` in tool names).
+   */
   id: string
   kind: PluginIdeProviderKind
+  /** A VS Code document selector. The plugin's own language ids are namespaced. */
   selector?: unknown
   /** Exported handler name in the plugin's single Cognia business runtime. */
   handler: string
@@ -103,6 +108,7 @@ export interface PluginIdeProtocolServer {
    * are accepted; stdio MCP servers receive a platform-owned loopback relay.
    */
   endpoint?: string
+  /** Language ids the server serves. The plugin's own languages are namespaced. */
   languages?: string[]
   initializationOptions?: unknown
 }

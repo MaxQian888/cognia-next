@@ -5,6 +5,9 @@
  * invokes the single Cognia-owned runtime through the managed broker.
  */
 
+import { managedIdPrefix } from "./contribution-ids.mjs"
+import { probe } from "./test-probe.mjs"
+
 export const PROVIDER_ADAPTER_KINDS = Object.freeze([
   "command",
   "completion",
@@ -501,6 +504,7 @@ const ADAPTERS = {
         view.webview.onDidReceiveMessage((message) =>
           invoke(broker, provider, "message", [message])
         )
+        probe.record("webview", { viewType: provider.id, htmlLength: view.webview.html.length })
       },
     })
   },
@@ -519,6 +523,11 @@ const ADAPTERS = {
           panel.webview.onDidReceiveMessage((message) =>
             invoke(broker, provider, "message", [document, message])
           )
+          probe.record("customEditor", {
+            viewType: provider.id,
+            uri: document.uri.toString(),
+            htmlLength: panel.webview.html.length,
+          })
         },
       },
       provider.metadata?.options
@@ -564,16 +573,7 @@ const ADAPTERS = {
       resolveTask: (...args) => invoke(broker, provider, "resolve", args, cancellationToken(args)),
     })
   },
-  "source-control": async (vscode, provider, broker) => {
-    requireApi(vscode.scm, "createSourceControl", provider)
-    const scm = vscode.scm.createSourceControl(
-      provider.id,
-      String(provider.metadata?.label ?? provider.id),
-      provider.metadata?.rootUri ? reviveValue(provider.metadata.rootUri, provider) : undefined
-    )
-    await invoke(broker, provider, "initialize", [])
-    return scm
-  },
+  "source-control": (vscode, provider, broker) => registerSourceControl(vscode, provider, broker),
   "debug-configuration": async (vscode, provider, broker) => {
     requireApi(vscode.debug, "registerDebugConfigurationProvider", provider)
     return vscode.debug.registerDebugConfigurationProvider(
@@ -647,12 +647,15 @@ const ADAPTERS = {
       controller.createRunProfile(
         profile.label,
         vscode.TestRunProfileKind[profile.kind] ?? vscode.TestRunProfileKind.Run,
-        (request, token) => invoke(broker, provider, "run", [request], token),
+        (request, token) => runTests(vscode, controller, provider, broker, profile, request, token),
         profile.isDefault === true,
         profile.tag ? new vscode.TestTag(profile.tag) : undefined,
         profile.supportsContinuousRun === true
       )
     }
+    // Populate the root now: VS Code only asks once its Testing view opens, so
+    // until then "Run All" (and every run profile) found nothing to run.
+    await controller.resolveHandler(undefined)
     return controller
   },
   "notebook-serializer": async (vscode, provider, broker) => {
@@ -660,10 +663,12 @@ const ADAPTERS = {
     return vscode.workspace.registerNotebookSerializer(
       requiredMetadata(provider, "notebookType"),
       {
-        deserializeNotebook: (content, token) =>
-          invoke(broker, provider, "deserialize", [content], token),
+        deserializeNotebook: async (content, token) =>
+          toNotebookData(vscode, await invoke(broker, provider, "deserialize", [content], token)),
         serializeNotebook: (data, token) =>
-          invoke(broker, provider, "serialize", [data], token).then(ensureBytes),
+          invoke(broker, provider, "serialize", [notebookDataSummary(data)], token).then(
+            ensureBytes
+          ),
       },
       provider.metadata?.options
     )
@@ -677,9 +682,40 @@ const ADAPTERS = {
     )
     controller.supportedLanguages = provider.metadata?.supportedLanguages
     controller.supportsExecutionOrder = provider.metadata?.supportsExecutionOrder === true
-    controller.executeHandler = (cells, notebook) =>
-      invoke(broker, provider, "execute", [cells, notebook])
-    controller.interruptHandler = (notebook) => invoke(broker, provider, "interrupt", [notebook])
+    let executionOrder = 0
+    controller.executeHandler = async (cells, notebook) => {
+      for (const cell of cells) {
+        const execution = controller.createNotebookCellExecution(cell)
+        if (controller.supportsExecutionOrder) execution.executionOrder = ++executionOrder
+        execution.start(Date.now())
+        let success = false
+        try {
+          const result = await invoke(
+            broker,
+            provider,
+            "execute",
+            [
+              notebookCellSummary(cell),
+              { uri: notebook?.uri, notebookType: notebook?.notebookType },
+            ],
+            execution.token
+          )
+          await execution.replaceOutput(
+            (result?.outputs ?? []).map((output) => toNotebookOutput(vscode, output))
+          )
+          success = result?.success !== false
+        } catch (error) {
+          await execution.replaceOutput([
+            new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.error(error)]),
+          ])
+        } finally {
+          execution.end(success, Date.now())
+        }
+        if (execution.token?.isCancellationRequested) break
+      }
+    }
+    controller.interruptHandler = (notebook) =>
+      invoke(broker, provider, "interrupt", [{ uri: notebook?.uri }])
     return controller
   },
   "notebook-cell-status-bar": async (vscode, provider, broker) => {
@@ -728,7 +764,7 @@ const ADAPTERS = {
   },
   "chat-participant": async (vscode, provider, broker) => {
     requireApi(vscode.chat, "createChatParticipant", provider)
-    return vscode.chat.createChatParticipant(
+    const participant = vscode.chat.createChatParticipant(
       provider.id,
       async (request, context, stream, token) => {
         const result = await invokeStreaming(
@@ -746,6 +782,8 @@ const ADAPTERS = {
         return result?.result
       }
     )
+    probe.track("chatParticipant", provider.id, participant)
+    return participant
   },
   "language-model-chat-provider": async (vscode, provider, broker) => {
     requireApi(vscode.lm, "registerLanguageModelChatProvider", provider)
@@ -758,7 +796,7 @@ const ADAPTERS = {
           broker,
           provider,
           "provideLanguageModelChatResponse",
-          [model, messages, options],
+          [model, toLanguageModelMessages(messages), options],
           token,
           {
             stream: (event) => {
@@ -772,14 +810,31 @@ const ADAPTERS = {
         }
       },
       provideTokenCount: (model, text, token) =>
-        invoke(broker, provider, "provideTokenCount", [model, text], token),
+        invoke(
+          broker,
+          provider,
+          "provideTokenCount",
+          [model, typeof text === "string" ? text : toLanguageModelMessage(text)],
+          token
+        ),
     })
   },
   "language-model-tool": async (vscode, provider, broker) => {
     requireApi(vscode.lm, "registerTool", provider)
     return vscode.lm.registerTool(provider.id, {
-      invoke: (...args) =>
-        invokeStreaming(vscode, broker, provider, "invoke", args, cancellationToken(args), {}),
+      invoke: async (...args) =>
+        toLanguageModelToolResult(
+          vscode,
+          await invokeStreaming(
+            vscode,
+            broker,
+            provider,
+            "invoke",
+            args,
+            cancellationToken(args),
+            {}
+          )
+        ),
       prepareInvocation: (...args) =>
         invoke(broker, provider, "prepare", args, cancellationToken(args)),
     })
@@ -787,13 +842,21 @@ const ADAPTERS = {
   "mcp-server-definition": async (vscode, provider, broker) => {
     requireApi(vscode.lm, "registerMcpServerDefinitionProvider", provider)
     const emitter = new vscode.EventEmitter()
-    const registration = vscode.lm.registerMcpServerDefinitionProvider(provider.id, {
+    // VS Code accepts only its own definition classes, not their JSON shape.
+    const toDefinition = (value) => toMcpServerDefinition(vscode, value)
+    const definitions = {
       onDidChangeMcpServerDefinitions: emitter.event,
-      provideMcpServerDefinitions: (...args) =>
-        invoke(broker, provider, "provide", args, cancellationToken(args)),
-      resolveMcpServerDefinition: (...args) =>
-        invoke(broker, provider, "resolve", args, cancellationToken(args)),
-    })
+      provideMcpServerDefinitions: async (...args) =>
+        ((await invoke(broker, provider, "provide", args, cancellationToken(args))) ?? []).map(
+          toDefinition
+        ),
+      resolveMcpServerDefinition: async (...args) => {
+        const resolved = await invoke(broker, provider, "resolve", args, cancellationToken(args))
+        return resolved == null ? resolved : toDefinition(resolved)
+      },
+    }
+    const registration = vscode.lm.registerMcpServerDefinitionProvider(provider.id, definitions)
+    probe.track("mcpProvider", provider.id, definitions)
     const events = providerEvents(broker, provider, {
       definitionsChanged: () => emitter.fire(),
     })
@@ -801,13 +864,43 @@ const ADAPTERS = {
   },
 }
 
+/**
+ * `{ label, uri, headers?, version? }` → McpHttpServerDefinition;
+ * `{ label, command, args?, env?, version? }` → McpStdioServerDefinition.
+ */
+function toMcpServerDefinition(vscode, value) {
+  if (value instanceof vscode.McpHttpServerDefinition) return value
+  if (value instanceof vscode.McpStdioServerDefinition) return value
+  if (value?.uri) {
+    return new vscode.McpHttpServerDefinition(
+      String(value.label),
+      toUri(vscode, value.uri),
+      value.headers ?? {},
+      value.version
+    )
+  }
+  if (typeof value?.command === "string") {
+    return new vscode.McpStdioServerDefinition(
+      String(value.label),
+      value.command,
+      value.args ?? [],
+      value.env ?? {},
+      value.version
+    )
+  }
+  throw compatibilityError(
+    "IDE_MCP_DEFINITION_INVALID",
+    "An MCP server definition needs a uri (HTTP) or a command (stdio)"
+  )
+}
+
 function validateDescriptor(descriptor) {
   if (!descriptor || typeof descriptor.pluginId !== "string") {
     throw compatibilityError("IDE_PROXY_DESCRIPTOR_INVALID", "pluginId is required")
   }
-  const prefix = `cognia.${descriptor.pluginId}.`
   const seen = new Set()
   for (const provider of descriptor.providers ?? []) {
+    const prefix = managedIdPrefix(descriptor.pluginId, provider.kind)
     if (!provider.id?.startsWith(prefix)) {
       throw compatibilityError(
         "IDE_PROXY_ID_OUTSIDE_NAMESPACE",
@@ -964,11 +1057,15 @@ async function reviveBrokerValue(value, broker, provider) {
     }
     return broker.readContent(provider, value)
   }
+  // `$type` survives: in a plugin's result it is the plugin naming a VS Code
+  // type (a language model part, say), which the adapter then constructs.
+  // Stripping it made every typed part unrevivable.
   return Object.fromEntries(
     await Promise.all(
-      Object.entries(value)
-        .filter(([key]) => key !== "$type")
-        .map(async ([key, entry]) => [key, await reviveBrokerValue(entry, broker, provider)])
+      Object.entries(value).map(async ([key, entry]) => [
+        key,
+        await reviveBrokerValue(entry, broker, provider),
+      ])
     )
   )
 }
@@ -996,7 +1093,276 @@ function reviveRange(vscode, value) {
 
 function ensureBytes(value) {
   if (value instanceof Uint8Array) return value
+  // Text formats (most notebooks) come back as a string rather than a handle.
+  if (typeof value === "string") return new TextEncoder().encode(value)
   throw compatibilityError("IDE_BINARY_RESULT_INVALID", "Expected redeemed content bytes")
+}
+
+function toUri(vscode, value) {
+  if (!value) return undefined
+  if (value instanceof vscode.Uri) return value
+  if (typeof value === "string") return vscode.Uri.parse(value)
+  if (typeof value === "object" && typeof value.scheme === "string") {
+    return vscode.Uri.from({
+      scheme: value.scheme,
+      authority: value.authority ?? "",
+      path: value.path ?? "",
+      query: value.query ?? "",
+      fragment: value.fragment ?? "",
+    })
+  }
+  throw compatibilityError("IDE_URI_INVALID", "Expected a URI string or components")
+}
+
+/**
+ * A plugin's source control, as VS Code's SCM view shows it.
+ *
+ * Operations the plugin handler receives: `initialize`, `status` (returns
+ * `{ groups: [{ id, label, hideWhenEmpty?, resources: [{ uri, tooltip?,
+ * strikeThrough?, faded?, contextValue?, command? }] }], count? }`),
+ * `originalResource` (`uri` → the base version's URI, for quick diff), and
+ * `commit` (`message`). Status is re-read after initialize, after a commit,
+ * when files under the root change, and when the plugin sends `changed`.
+ */
+async function registerSourceControl(vscode, provider, broker) {
+  requireApi(vscode.scm, "createSourceControl", provider)
+  const rootUri = toUri(vscode, provider.metadata?.rootUri)
+  const scm = vscode.scm.createSourceControl(
+    provider.id,
+    String(provider.metadata?.label ?? provider.id),
+    rootUri
+  )
+  const disposables = [scm]
+  const groups = new Map()
+  let refreshing = null
+  let again = false
+
+  const refresh = async () => {
+    if (refreshing) {
+      again = true
+      return refreshing
+    }
+    refreshing = (async () => {
+      do {
+        again = false
+        const state = (await invoke(broker, provider, "status", [])) ?? {}
+        const seen = new Set()
+        let total = 0
+        for (const definition of state.groups ?? []) {
+          seen.add(definition.id)
+          let group = groups.get(definition.id)
+          if (!group) {
+            group = scm.createResourceGroup(
+              definition.id,
+              String(definition.label ?? definition.id)
+            )
+            groups.set(definition.id, group)
+          }
+          group.label = String(definition.label ?? definition.id)
+          group.hideWhenEmpty = definition.hideWhenEmpty === true
+          group.resourceStates = (definition.resources ?? []).map((resource) => ({
+            resourceUri: toUri(vscode, resource.uri),
+            decorations: {
+              strikeThrough: resource.strikeThrough === true,
+              faded: resource.faded === true,
+              tooltip: resource.tooltip,
+            },
+            contextValue: resource.contextValue,
+            command: resource.command,
+          }))
+          total += group.resourceStates.length
+        }
+        for (const [id, group] of groups) {
+          if (!seen.has(id)) {
+            group.dispose()
+            groups.delete(id)
+          }
+        }
+        scm.count = typeof state.count === "number" ? state.count : total
+      } while (again)
+    })().finally(() => {
+      refreshing = null
+    })
+    return refreshing
+  }
+
+  scm.quickDiffProvider = {
+    provideOriginalResource: async (uri, token) =>
+      toUri(vscode, await invoke(broker, provider, "originalResource", [uri], token)),
+  }
+  scm.inputBox.placeholder = String(provider.metadata?.inputPlaceholder ?? "")
+  const acceptCommand = `${provider.id}.acceptInput`
+  disposables.push(
+    vscode.commands.registerCommand(acceptCommand, async () => {
+      const message = scm.inputBox.value
+      await invoke(broker, provider, "commit", [message])
+      scm.inputBox.value = ""
+      await refresh()
+    })
+  )
+  scm.acceptInputCommand = {
+    command: acceptCommand,
+    title: String(provider.metadata?.acceptInputTitle ?? "Commit"),
+  }
+
+  probe.track("sourceControl", provider.id, { scm, groups })
+
+  if (rootUri && typeof vscode.workspace?.createFileSystemWatcher === "function") {
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(rootUri, "**/*")
+    )
+    let timer
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => void refresh().catch(() => {}), 300)
+    }
+    disposables.push(
+      watcher,
+      watcher.onDidChange(schedule),
+      watcher.onDidCreate(schedule),
+      watcher.onDidDelete(schedule),
+      { dispose: () => clearTimeout(timer) }
+    )
+  }
+  disposables.push(providerEvents(broker, provider, { changed: () => refresh() }), {
+    dispose: () => groups.forEach((group) => group.dispose()),
+  })
+
+  await invoke(broker, provider, "initialize", [])
+  await refresh()
+  return combine(vscode, ...disposables.reverse())
+}
+
+function collectTestItems(controller, request) {
+  const items = []
+  const visit = (item) => {
+    if (request.exclude?.includes(item)) return
+    items.push(item)
+    item.children?.forEach(visit)
+  }
+  if (request.include?.length) request.include.forEach(visit)
+  else controller.items.forEach(visit)
+  return items
+}
+
+/**
+ * Run tests through the plugin and report every outcome to VS Code.
+ *
+ * The handler receives `run` with `{ profile, include: [ids], exclude: [ids] }`
+ * and returns `{ results: [{ id, state: "passed" | "failed" | "skipped" |
+ * "errored", durationMs?, message? }], output? }`. A test it says nothing
+ * about is reported skipped, so a run always ends with every item settled.
+ */
+async function runTests(vscode, controller, provider, broker, profile, request, token) {
+  const run = controller.createTestRun(request, profile.label, true)
+  const items = collectTestItems(controller, request)
+  const byId = new Map(items.map((item) => [item.id, item]))
+  for (const item of items) run.enqueued(item)
+  const settled = new Set()
+  try {
+    for (const item of items) run.started(item)
+    const result = await invoke(
+      broker,
+      provider,
+      "run",
+      [
+        {
+          profile: profile.label,
+          include: request.include?.map((item) => item.id),
+          exclude: request.exclude?.map((item) => item.id),
+        },
+      ],
+      token
+    )
+    if (typeof result?.output === "string" && result.output) {
+      run.appendOutput(result.output.replace(/\r?\n/g, "\r\n"))
+    }
+    for (const outcome of result?.results ?? []) {
+      const item = byId.get(outcome.id)
+      if (!item) continue
+      settled.add(item.id)
+      const message = outcome.message ? new vscode.TestMessage(String(outcome.message)) : undefined
+      if (outcome.state === "passed") run.passed(item, outcome.durationMs)
+      else if (outcome.state === "failed")
+        run.failed(item, message ?? new vscode.TestMessage(""), outcome.durationMs)
+      else if (outcome.state === "errored")
+        run.errored(item, message ?? new vscode.TestMessage(""), outcome.durationMs)
+      else run.skipped(item)
+    }
+  } catch (error) {
+    const message = new vscode.TestMessage(String(error?.message ?? error))
+    for (const item of items) {
+      if (!settled.has(item.id)) {
+        settled.add(item.id)
+        run.errored(item, message)
+      }
+    }
+  } finally {
+    const skipped = items.filter((item) => !settled.has(item.id))
+    for (const item of skipped) run.skipped(item)
+    run.end()
+    probe.record("testRun", {
+      controllerId: provider.id,
+      settled: [...settled],
+      skipped: skipped.map((item) => item.id),
+    })
+  }
+}
+
+/** What a notebook handler sees of a cell: enough to run it, nothing live. */
+function notebookCellSummary(cell) {
+  return {
+    index: cell.index,
+    kind: cell.kind === 1 ? "markup" : "code",
+    languageId: cell.document?.languageId,
+    source: typeof cell.document?.getText === "function" ? cell.document.getText() : "",
+    metadata: cell.metadata,
+  }
+}
+
+function notebookDataSummary(data) {
+  return {
+    metadata: data?.metadata,
+    cells: (data?.cells ?? []).map((cell) => ({
+      kind: cell.kind === 1 ? "markup" : "code",
+      languageId: cell.languageId,
+      value: cell.value,
+      metadata: cell.metadata,
+      outputs: (cell.outputs ?? []).map((output) => ({
+        items: (output.items ?? []).map((item) => ({
+          mime: item.mime,
+          text: new TextDecoder().decode(item.data),
+        })),
+      })),
+    })),
+  }
+}
+
+/** `{ cells: [{ kind, value, languageId, outputs?, metadata? }], metadata? }` → NotebookData. */
+function toNotebookData(vscode, value) {
+  const cells = (value?.cells ?? []).map((cell) => {
+    const data = new vscode.NotebookCellData(
+      cell.kind === "markup" ? vscode.NotebookCellKind.Markup : vscode.NotebookCellKind.Code,
+      String(cell.value ?? ""),
+      String(cell.languageId ?? (cell.kind === "markup" ? "markdown" : "plaintext"))
+    )
+    if (cell.metadata) data.metadata = cell.metadata
+    if (cell.outputs) data.outputs = cell.outputs.map((output) => toNotebookOutput(vscode, output))
+    return data
+  })
+  const notebook = new vscode.NotebookData(cells)
+  if (value?.metadata) notebook.metadata = value.metadata
+  return notebook
+}
+
+/** `{ items: [{ mime, text } | { mime, data }], metadata? }` → NotebookCellOutput. */
+function toNotebookOutput(vscode, output) {
+  const items = (output?.items ?? []).map((item) =>
+    typeof item.text === "string"
+      ? vscode.NotebookCellOutputItem.text(item.text, item.mime ?? "text/plain")
+      : new vscode.NotebookCellOutputItem(ensureBytes(item.data), String(item.mime))
+  )
+  return new vscode.NotebookCellOutput(items, output?.metadata)
 }
 
 function combine(vscode, ...disposables) {
@@ -1182,6 +1548,76 @@ function boundedJson(value) {
 
 function localize(vscode, message, ...args) {
   return typeof vscode.l10n?.t === "function" ? vscode.l10n.t(message, ...args) : message
+}
+
+/**
+ * A tool's answer as VS Code requires it: `LanguageModelToolResult` of typed
+ * parts. A plain string becomes one text part.
+ */
+function toLanguageModelToolResult(vscode, value) {
+  if (value instanceof vscode.LanguageModelToolResult) return value
+  const parts =
+    typeof value === "string"
+      ? [{ $type: "LanguageModelTextPart", value }]
+      : Array.isArray(value?.content)
+        ? value.content
+        : []
+  return new vscode.LanguageModelToolResult(
+    parts.map((part) =>
+      typeof part === "string"
+        ? new vscode.LanguageModelTextPart(part)
+        : reviveLanguageModelPart(vscode, part)
+    )
+  )
+}
+
+const LANGUAGE_MODEL_ROLES = { 1: "user", 2: "assistant", 3: "system" }
+
+/**
+ * A request's messages as the plugin reads them: `{ role, name, content }` with
+ * typed parts, the same `$type`s a response streams back.
+ *
+ * Written out by hand because `LanguageModelChatMessage` keeps its parts behind
+ * a `content` getter over a private field: the generic serializer copies own
+ * fields, so it sent `_content` and a part without its type.
+ */
+export function toLanguageModelMessages(messages) {
+  return [...(messages ?? [])].map(toLanguageModelMessage)
+}
+
+export function toLanguageModelMessage(message) {
+  const content =
+    typeof message?.content === "string" ? [message.content] : [...(message?.content ?? [])]
+  return {
+    role: LANGUAGE_MODEL_ROLES[message?.role] ?? String(message?.role ?? "user"),
+    ...(message?.name ? { name: message.name } : {}),
+    content: content.map(toLanguageModelPart),
+  }
+}
+
+function toLanguageModelPart(part) {
+  if (typeof part === "string") return { $type: "LanguageModelTextPart", value: part }
+  if (typeof part?.callId === "string" && typeof part.name === "string") {
+    return {
+      $type: "LanguageModelToolCallPart",
+      callId: part.callId,
+      name: part.name,
+      input: part.input,
+    }
+  }
+  if (typeof part?.callId === "string") {
+    return {
+      $type: "LanguageModelToolResultPart",
+      callId: part.callId,
+      content: [...(part.content ?? [])].map(toLanguageModelPart),
+    }
+  }
+  if (part?.data instanceof Uint8Array) {
+    return { $type: "LanguageModelDataPart", mimeType: part.mimeType, data: part.data }
+  }
+  if (typeof part?.value === "string") return { $type: "LanguageModelTextPart", value: part.value }
+  // A prompt-tsx part (or a part type newer than this adapter): its value as is.
+  return { $type: "LanguageModelPromptTsxPart", value: part?.value ?? part }
 }
 
 function reviveLanguageModelPart(vscode, value) {

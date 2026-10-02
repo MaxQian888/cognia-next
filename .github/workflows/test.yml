@@ -879,6 +879,82 @@ jobs:
       - name: Run live sidecar tests (real host + SDK subprocess, mock server)
         run: pnpm sidecar:test:live
 
+  # The managed Pro IDE against a real code-server: every claimed family
+  # (LSP, DAP, MCP, SCM, tests, notebooks, webviews/custom editors, Chat)
+  # round-trips through the production broker, and the run is measured
+  # against the performance gates. scripts/test/run-pro-ide-e2e.mjs downloads
+  # the pinned tarball and checks it against the digest download.rs pins.
+  pro-ide-e2e:
+    needs: jest-plan
+    if: fromJSON(needs.jest-plan.outputs.impacts).proIde
+    name: Pro IDE E2E (real code-server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
+          workspaces: ". -> target"
+          cache-on-failure: true
+
+      # Keyed by the pin itself: a version or digest bump re-downloads.
+      - name: Cache pinned code-server
+        uses: actions/cache@v6
+        with:
+          path: target/code-server
+          key: code-server-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/cognia-codeserver/src/download.rs') }}
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # No Linux perf baseline is committed yet: the regression gates report
+      # "skip" and only the absolute p95 gates fail the job. Record one from
+      # this job's pro-ide-perf artifact with `--write-baseline`, then drop
+      # --allow-missing-baseline here.
+      - name: Run the Pro IDE E2E and performance gates
+        run: node scripts/test/run-pro-ide-e2e.mjs --perf -- --allow-missing-baseline
+
+      - name: Upload performance result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pro-ide-perf
+          path: target/pro-ide-perf.json
+          if-no-files-found: ignore
+
   build:
     needs: jest-plan
     if: fromJSON(needs.jest-plan.outputs.impacts).productionBuild

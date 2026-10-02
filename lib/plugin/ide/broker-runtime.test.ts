@@ -1849,6 +1849,7 @@ function dependencies(
     secretDelete: async () => undefined,
     secretKeys: async () => [],
     expectedHostId: "local",
+    notify: (root, generation, params) => codeServerClient.notifyBroker(root, generation, params),
     now: () => 1_000,
     ...overrides,
   }

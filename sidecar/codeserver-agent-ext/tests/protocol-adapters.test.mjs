@@ -6,7 +6,11 @@ import { join } from "node:path"
 import { test } from "node:test"
 import { pathToFileURL } from "node:url"
 
-import { applyLspWorkspaceEdit, registerManagedProtocols } from "../src/protocol-adapters.mjs"
+import {
+  applyLspWorkspaceEdit,
+  createDiagnosticPuller,
+  registerManagedProtocols,
+} from "../src/protocol-adapters.mjs"
 
 function disposable() {
   return { dispose() {} }
@@ -130,6 +134,118 @@ test("LSP declarations start a Cognia-owned session and register native Code pro
   assert.ok(registered.some((entry) => entry.method === "registerCallHierarchyProvider"))
   assert.equal(starts[0][2], "pro-ide")
   registration.dispose()
+})
+
+test("LSP registers only what the server claimed, with the server's trigger characters", async () => {
+  const { vscode, registered } = fakeVscode()
+  const requests = []
+  vscode.Position = class {
+    constructor(line, character) {
+      Object.assign(this, { line, character })
+    }
+  }
+  vscode.Hover = class {
+    constructor(contents, range) {
+      Object.assign(this, { contents, range })
+    }
+  }
+  vscode.MarkdownString = class {
+    constructor(value) {
+      this.value = value
+    }
+  }
+  const registration = await registerManagedProtocols(
+    vscode,
+    {
+      protocols: {
+        lsp: [{ id: "cognia.acme.language", executable: "server", transport: "stdio" }],
+        dap: [],
+        mcp: [],
+      },
+    },
+    {
+      startProtocol: async () => ({
+        capabilityTicket: "ticket",
+        connection: {
+          capabilities: {
+            hoverProvider: true,
+            completionProvider: { triggerCharacters: [".", ":"], resolveProvider: false },
+            renameProvider: false,
+          },
+        },
+      }),
+      requestProtocol: async (_family, _server, _ticket, method, payload) => {
+        requests.push([method, payload])
+        return { contents: { kind: "markdown", value: "**hi**" } }
+      },
+      documentProtocol: async () => null,
+      stopProtocol: async () => null,
+      onEvent: () => disposable(),
+    }
+  )
+  assert.deepEqual(
+    registered.map((entry) => entry.method),
+    ["registerCompletionItemProvider", "registerHoverProvider"]
+  )
+  const [completion, hover] = registered
+  assert.deepEqual(completion.args.slice(2), [".", ":"])
+  assert.equal(completion.args[1].resolveCompletionItem, undefined)
+  const answer = await hover.args[1].provideHover(
+    { uri: { toString: () => "file:///a.ts" } },
+    { line: 1, character: 2 },
+    {}
+  )
+  // A VS Code Hover, not the raw LSP JSON VS Code would silently drop.
+  assert.equal(answer.contents[0].value, "**hi**")
+  assert.deepEqual(requests.at(-1), [
+    "textDocument/hover",
+    { textDocument: { uri: "file:///a.ts" }, position: { line: 1, character: 2 } },
+  ])
+  registration.dispose()
+})
+
+test("pull diagnostics: pulled on open and after edits settle, unchanged keeps what is shown", async () => {
+  const shown = new Map()
+  const collection = {
+    set: (uri, items) => shown.set(uri.toString(), items),
+    delete: (uri) => shown.delete(uri.toString()),
+  }
+  const reports = [
+    { kind: "full", resultId: "1", items: [{ message: "one" }] },
+    { kind: "unchanged", resultId: "1" },
+    { kind: "full", resultId: "2", items: [] },
+  ]
+  const sent = []
+  const puller = createDiagnosticPuller({
+    vscode: { Uri: { parse: (value) => ({ toString: () => value }) } },
+    convert: { diagnostic: (value) => value.message },
+    request: async (method, params) => {
+      sent.push([method, params])
+      return reports.shift()
+    },
+    diagnostics: collection,
+    server: { identifier: "acme" },
+    debounceMs: 5,
+  })
+  const document = { uri: { toString: () => "file:///a.ts" } }
+  await puller.document(document)
+  assert.deepEqual(shown.get("file:///a.ts"), ["one"])
+  puller.changed(document)
+  puller.changed(document)
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  // Two edits, one pull, carrying the last result id; `unchanged` kept "one".
+  assert.equal(sent.length, 2)
+  assert.deepEqual(sent[1][1], {
+    textDocument: { uri: "file:///a.ts" },
+    identifier: "acme",
+    previousResultId: "1",
+  })
+  assert.deepEqual(shown.get("file:///a.ts"), ["one"])
+  await puller.refreshAll()
+  assert.deepEqual(shown.get("file:///a.ts"), [])
+  puller.forget(document)
+  assert.equal(shown.has("file:///a.ts"), false)
+  puller.dispose()
 })
 
 test("LSP semantic-token capabilities are projected with the server legend", async () => {

@@ -127,9 +127,10 @@ function bridgeFor(host, bootstrap, overrides = {}) {
 }
 
 async function until(condition, label = "condition") {
-  for (let i = 0; i < 200; i += 1) {
+  // Generous: real sockets under a loaded test run, and the happy path exits early.
+  for (let i = 0; i < 500; i += 1) {
     if (condition()) return
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    await new Promise((resolve) => setTimeout(resolve, 10))
   }
   throw new Error(`timed out waiting for ${label}`)
 }
@@ -176,6 +177,44 @@ describe("handshake and reconnect", () => {
     const attempts = host.connections.length
     await new Promise((resolve) => setTimeout(resolve, 60))
     assert.equal(host.connections.length, attempts)
+  })
+})
+
+describe("whenReady", () => {
+  test("waits for the hello a proxy activating at startup would otherwise race", async () => {
+    const host = await startHost({ bootstrap })
+    hosts.push(host)
+    const bridge = bridgeFor(host, bootstrap)
+    const ready = bridge.whenReady(5_000)
+    // Not started yet: a request now is refused, which is the race.
+    await assert.rejects(bridge.request("cognia/state/keys", {}), /not ready/)
+    bridge.start()
+    await ready
+    assert.equal(bridge.connected, true)
+    // Already connected: at once.
+    await bridge.whenReady(1)
+  })
+
+  test("gives up after its timeout, on dispose, and on a protocol refusal", async () => {
+    const host = await startHost({ bootstrap })
+    hosts.push(host)
+    const idle = bridgeFor(host, bootstrap)
+    await assert.rejects(idle.whenReady(20), /did not connect within 20 ms/)
+    const disposed = bridgeFor(host, bootstrap)
+    const pending = disposed.whenReady(5_000)
+    disposed.dispose()
+    await assert.rejects(pending, /disposed/)
+    await assert.rejects(disposed.whenReady(5_000), /disposed/)
+
+    const refusing = await startHost({
+      bootstrap,
+      refuseHello: { code: -32001, message: "IDE_BROKER_PROTOCOL_INCOMPATIBLE" },
+    })
+    hosts.push(refusing)
+    const refused = bridgeFor(refusing, bootstrap)
+    const waiting = refused.whenReady(5_000)
+    refused.start()
+    await assert.rejects(waiting, /IDE_BROKER_PROTOCOL_INCOMPATIBLE/)
   })
 })
 

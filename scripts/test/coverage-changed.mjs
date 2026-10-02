@@ -246,6 +246,11 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
         /^(?:sidecar|packages|lib\/companion|tests\/conformance|scripts\/certify|scripts\/build)\//
       ),
     postgres: globalRust || any(/^crates\/(?:cognia-collab-server|cognia-tenant-auth)\//),
+    // The real-binary Pro IDE E2E: slow (it starts code-server and Chromium),
+    // so only the pathway it exercises triggers it; the full run covers the rest.
+    proIde: any(
+      /^(?:crates\/cognia-codeserver\/|sidecar\/(?:codeserver-agent-ext|vscode-ext-host)\/|lib\/codeserver\/|lib\/plugin\/ide\/|plugins\/pro-ide-fixture\/|scripts\/gates\/(?:check-pro-ide-perf|pro-ide-perf-baseline)|scripts\/test\/run-pro-ide-e2e)/
+    ),
     // diagnostic-server has an independent Cargo.lock; root graph edits do not
     // change its dependencies, while toolchain/compiler config changes do.
     diagnostic: any(/^(?:services\/diagnostic-server\/|\.cargo\/|rust-toolchain(?:\.toml)?$)/),

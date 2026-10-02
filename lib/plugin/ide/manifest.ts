@@ -90,8 +90,20 @@ export function normalizeIdeManifest(
       diagnostic.field
     )
   }
+  // Before namespacing: `namespaceContributions` rewrites the ids in place.
+  const ownLanguages = new Map(
+    (validatedContributions.languages ?? []).map((entry) => [
+      entry.id,
+      namespaceId(pluginId, entry.id),
+    ])
+  )
   const contributions = namespaceContributions(pluginId, validatedContributions)
-  const providers = normalizeProviders(pluginId, source.targets, source.providers ?? [])
+  const providers = normalizeProviders(pluginId, source.targets, source.providers ?? []).map(
+    (provider) =>
+      provider.selector === undefined
+        ? provider
+        : { ...provider, selector: rewriteSelectorLanguages(provider.selector, ownLanguages) }
+  )
   const executables = source.executables?.map((entry) => structuredClone(entry)) ?? []
   validateExecutables(executables)
   const executableIds = new Set(executables.map((entry) => entry.id))
@@ -104,6 +116,9 @@ export function normalizeIdeManifest(
     const seenProtocolIds = new Set<string>()
     for (const server of servers) {
       server.id = namespaceId(pluginId, server.id)
+      if (Array.isArray(server.languages)) {
+        server.languages = server.languages.map((id: string) => ownLanguages.get(id) ?? id)
+      }
       if (seenProtocolIds.has(server.id)) {
         throw new IdeManifestError(
           "IDE_PROTOCOL_ID_CONFLICT",
@@ -430,7 +445,10 @@ function normalizeProviders(
         `ide.providers[${index}].kind`
       )
     }
-    const id = namespaceId(pluginId, provider.id)
+    const id =
+      provider.kind === "language-model-tool"
+        ? namespaceToolName(pluginId, provider.id)
+        : namespaceId(pluginId, provider.id)
     if (seen.has(id)) {
       throw new IdeManifestError(
         "IDE_PROVIDER_ID_CONFLICT",
@@ -526,6 +544,27 @@ function isSafeRelativePath(path: string): boolean {
   if (!path || path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) return false
   const segments = path.replaceAll("\\", "/").split("/")
   return segments.every((segment) => segment !== ".." && segment !== "")
+}
+
+/**
+ * A document selector with the plugin's own languages renamed to their
+ * namespaced ids. The plugin writes `cognia-fixture`; VS Code only knows
+ * `cognia.<pluginId>.cognia-fixture`, so an unrewritten selector never
+ * matches a file of the plugin's own language. Built-in ids (`typescript`)
+ * are left as they are.
+ */
+function rewriteSelectorLanguages(selector: unknown, ownLanguages: Map<string, string>): unknown {
+  if (typeof selector === "string") return ownLanguages.get(selector) ?? selector
+  if (Array.isArray(selector)) {
+    return selector.map((entry) => rewriteSelectorLanguages(entry, ownLanguages))
+  }
+  if (selector && typeof selector === "object" && "language" in selector) {
+    const language = (selector as { language?: unknown }).language
+    return typeof language === "string"
+      ? { ...selector, language: ownLanguages.get(language) ?? language }
+      : selector
+  }
+  return selector
 }
 
 function namespaceContributions(
@@ -733,7 +772,7 @@ function namespaceContributions(
   )
   contributions.languageModelTools = contributions.languageModelTools?.map((entry) => ({
     ...entry,
-    name: namespaceId(pluginId, entry.name),
+    name: namespaceToolName(pluginId, entry.name),
   }))
   if (contributions.chatParticipants) {
     contributions.chatParticipants = contributions.chatParticipants.map((entry) => ({
@@ -755,6 +794,41 @@ function rewriteActivationReference(event: string, commands: Map<string, string>
   return event.startsWith(prefix)
     ? `${prefix}${commands.get(event.slice(prefix.length)) ?? event.slice(prefix.length)}`
     : event
+}
+
+/** Longest tool name model APIs accept as a function name. */
+export const MAX_TOOL_NAME_LENGTH = 64
+
+/**
+ * The namespace prefix of a plugin's language model tools.
+ *
+ * Tools cannot use the dotted `cognia.<plugin>.` namespace: VS Code drops a
+ * `languageModelTools` contribution whose name does not match `/^[\w-]+$/`,
+ * and `vscode.lm.registerTool` then fails with "was not contributed". Dots in
+ * the plugin id become underscores; two plugins that differ only there are
+ * caught by the broker's occupied-id check at activation.
+ */
+export function toolNamespacePrefix(pluginId: string): string {
+  return `cognia_${pluginId.replace(/\./g, "_")}_`
+}
+
+export function namespaceToolName(pluginId: string, localName: string): string {
+  const prefix = toolNamespacePrefix(pluginId)
+  if (localName.startsWith(prefix)) return localName
+  if (!/^[A-Za-z0-9][\w-]*$/.test(localName)) {
+    throw new IdeManifestError(
+      "IDE_CONTRIBUTION_ID_INVALID",
+      `Language model tool name may only contain letters, digits, "_" and "-": ${localName}`
+    )
+  }
+  const name = `${prefix}${localName}`
+  if (name.length > MAX_TOOL_NAME_LENGTH) {
+    throw new IdeManifestError(
+      "IDE_CONTRIBUTION_ID_INVALID",
+      `Language model tool name is longer than ${MAX_TOOL_NAME_LENGTH} characters once namespaced: ${name}`
+    )
+  }
+  return name
 }
 
 export function namespaceId(pluginId: string, localId: string): string {

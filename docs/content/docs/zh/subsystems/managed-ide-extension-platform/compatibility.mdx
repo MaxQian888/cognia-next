@@ -30,5 +30,14 @@ webview/custom editor 与 Chat E2E。
 150 MiB；本地空 broker RPC p95 不超过 30 ms；远程 relay 排除物理 RTT 的额外开销
 p95 不超过 75 ms；声明容量内 control/lifecycle event 零丢失。
 
+真实二进制 E2E（`pnpm test:pro-ide:e2e`）通过真实 code-server 跑通上述每个家族，
+并在同一次运行中测量：cold readiness、host 进程树的 idle RSS、200 次空 broker
+RPC、100 次 relay 与直连请求的对比，以及 200 个 lifecycle event 的突发（在
+companion event bus 256 的 broadcast 容量内），要求全部按序到达。
+`pnpm audit:pro-ide-perf` 将该次运行与所在平台已提交的基线
+（`scripts/gates/pro-ide-perf-baseline.json`）比较；用 `--write-baseline` 记录
+基线。CI 在改动该链路的 PR 和每晚全量运行中执行两者。在提交 Linux 基线之前，
+CI 只强制绝对门禁，两项回归门禁报告为 skipped。
+
 远程 telemetry 必须 opt-in 且只含聚合数据。源码、路径、prompt、参数、环境、
 secret 与 content handle 永不进入 telemetry。

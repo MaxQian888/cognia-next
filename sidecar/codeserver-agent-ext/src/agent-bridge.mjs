@@ -95,6 +95,46 @@ export class AgentBridge {
     this.credential = null
     this.handshake = null
     this.incompatible = false
+    this.readyWaiters = new Set()
+  }
+
+  /**
+   * Resolve once the broker has negotiated, at once if it already has.
+   *
+   * A proxy extension activates at startup alongside the broker, often before
+   * the broker's connection is up; a request sent then is refused, and VS Code
+   * never retries a failed activation. Rejects after `timeoutMs`, or when the
+   * bridge is disposed or the host refuses this broker's protocol.
+   */
+  whenReady(timeoutMs) {
+    if (this.socket && this.negotiated) return Promise.resolve()
+    if (this.disposed) return Promise.reject(new Error("Managed IDE broker disposed"))
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve: () => {
+          clearTimeout(timer)
+          this.readyWaiters.delete(waiter)
+          resolve()
+        },
+        reject: (error) => {
+          clearTimeout(timer)
+          this.readyWaiters.delete(waiter)
+          reject(error)
+        },
+      }
+      const timer = setTimeout(
+        () => waiter.reject(new Error(`Managed IDE broker did not connect within ${timeoutMs} ms`)),
+        timeoutMs
+      )
+      this.readyWaiters.add(waiter)
+    })
+  }
+
+  settleReadyWaiters(error) {
+    for (const waiter of [...this.readyWaiters]) {
+      if (error) waiter.reject(error)
+      else waiter.resolve()
+    }
   }
 
   start() {
@@ -108,6 +148,7 @@ export class AgentBridge {
     for (const timer of this.coalesceTimers.values()) clearTimeout(timer)
     this.coalesceTimers.clear()
     this.failPending("Managed IDE broker disposed")
+    this.settleReadyWaiters(new Error("Managed IDE broker disposed"))
     for (const controller of this.inflight.values()) controller.abort()
     this.inflight.clear()
     this.notificationListeners.clear()
@@ -308,7 +349,13 @@ export class AgentBridge {
     if (this.handshake && this.credential === this.handshake.credential) {
       this.credential = null
     }
-    if (error?.code === PROTOCOL_INCOMPATIBLE_CODE) this.incompatible = true
+    if (error?.code === PROTOCOL_INCOMPATIBLE_CODE) {
+      this.incompatible = true
+      // It will not retry, so nothing waiting for it should either.
+      this.settleReadyWaiters(
+        new Error("IDE_BROKER_PROTOCOL_INCOMPATIBLE: the host refused this broker")
+      )
+    }
     this.socket?.destroy()
   }
 
@@ -355,6 +402,7 @@ export class AgentBridge {
         return
       }
       this.notifyConnectionChange(true)
+      this.settleReadyWaiters(null)
       return
     }
     if (message.id === null && message.error) {

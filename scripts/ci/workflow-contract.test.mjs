@@ -951,3 +951,17 @@ test("PRs and branch pushes plan incrementally; schedule, tags and new refs run 
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("the Pro IDE E2E runs on its own impact against the pinned code-server", async () => {
+  const { jobs } = parse(await readWorkflow("test.yml"))
+  const job = jobs["pro-ide-e2e"]
+  assert.equal(job.needs, "jest-plan")
+  assert.equal(job.if, "fromJSON(needs.jest-plan.outputs.impacts).proIde")
+  const cache = job.steps.find((step) => step.name === "Cache pinned code-server")
+  assert.equal(cache.with.path, "target/code-server")
+  assert.match(cache.with.key, /hashFiles\('crates\/cognia-codeserver\/src\/download\.rs'\)/)
+  const run = job.steps.find((step) => step.name === "Run the Pro IDE E2E and performance gates")
+  assert.match(run.run, /scripts\/test\/run-pro-ide-e2e\.mjs --perf/)
+  const upload = job.steps.find((step) => step.name === "Upload performance result")
+  assert.equal(upload.if, "always()")
+})

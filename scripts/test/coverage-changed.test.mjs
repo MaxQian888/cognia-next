@@ -103,6 +103,30 @@ test("committed planning follows surviving importers of a moved module in a real
   }
 })
 
+test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
+  for (const file of [
+    "crates/cognia-codeserver/src/proxy.rs",
+    "sidecar/codeserver-agent-ext/src/extension.mjs",
+    "sidecar/vscode-ext-host/src/host.ts",
+    "lib/codeserver/client.ts",
+    "lib/plugin/ide/broker-runtime.ts",
+    "plugins/pro-ide-fixture/plugin.json",
+    "scripts/gates/check-pro-ide-perf.mjs",
+    "scripts/gates/pro-ide-perf-baseline.json",
+    "scripts/test/run-pro-ide-e2e.mjs",
+  ]) {
+    assert.equal(classifyCiImpact([file]).proIde, true, file)
+  }
+  for (const file of [
+    "components/chat/message.tsx",
+    "crates/cognia-git/src/lib.rs",
+    "package.json",
+  ]) {
+    assert.equal(classifyCiImpact([file]).proIde, false, file)
+  }
+  assert.equal(classifyCiImpact([], "full").proIde, true)
+})
+
 test("CI impact distinguishes an ordinary UI edit from native and independent workspace work", () => {
   const ui = classifyCiImpact(["components/chat/message.tsx"])
   assert.equal(ui.frontend, true)

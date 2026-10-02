@@ -351,12 +351,19 @@ fn validate_request(request: &ProxyBuildRequest) -> Result<(), String> {
         return Err("IDE_MANIFEST_HASH_INVALID".to_string());
     }
     let prefix = format!("cognia.{}.", request.plugin_id);
-    validate_contribution_ids(&request.contributions, &prefix)?;
+    let tool_prefix = tool_namespace_prefix(&request.plugin_id);
+    validate_contribution_ids(&request.contributions, &prefix, &tool_prefix)?;
     for provider in &request.providers {
+        let expected =
+            if provider.get("kind").and_then(Value::as_str) == Some("language-model-tool") {
+                &tool_prefix
+            } else {
+                &prefix
+            };
         if !provider
             .get("id")
             .and_then(Value::as_str)
-            .is_some_and(|id| id.starts_with(&prefix))
+            .is_some_and(|id| id.starts_with(expected.as_str()))
         {
             return Err("IDE_PROXY_ID_OUTSIDE_NAMESPACE".to_string());
         }
@@ -534,7 +541,19 @@ fn stage_executable_resources(
     Ok(artifacts)
 }
 
-fn validate_contribution_ids(contributions: &Value, prefix: &str) -> Result<(), String> {
+/// The namespace of a plugin's language model tools. VS Code drops a tool
+/// whose name does not match `/^[\w-]+$/`, so tools cannot use the dotted
+/// `cognia.<plugin>.` namespace; mirrors `toolNamespacePrefix` in
+/// `lib/plugin/ide/manifest.ts`.
+fn tool_namespace_prefix(plugin_id: &str) -> String {
+    format!("cognia_{}_", plugin_id.replace('.', "_"))
+}
+
+fn validate_contribution_ids(
+    contributions: &Value,
+    prefix: &str,
+    tool_prefix: &str,
+) -> Result<(), String> {
     let mut ids = Vec::new();
     let mut add_array = |kind: &'static str, field: &str, id_field: &str| {
         for entry in contributions
@@ -635,7 +654,12 @@ fn validate_contribution_ids(contributions: &Value, prefix: &str) -> Result<(), 
 
     let mut seen = HashSet::new();
     for (kind, id) in ids {
-        if !id.starts_with(prefix) {
+        let expected = if kind == "languageModelTool" {
+            tool_prefix
+        } else {
+            prefix
+        };
+        if !id.starts_with(expected) {
             return Err(format!("IDE_PROXY_ID_OUTSIDE_NAMESPACE: {kind}:{id}"));
         }
         if !seen.insert((kind, id)) {
@@ -1313,24 +1337,36 @@ mod tests {
             "views": {
                 "cognia.acme.container": [{ "id": "cognia.acme.results" }]
             },
-            "languageModelTools": [{ "name": "cognia.acme.inspect" }]
+            "languageModelTools": [{ "name": "cognia_acme_inspect" }]
         });
-        validate_contribution_ids(&valid, "cognia.acme.").unwrap();
+        validate_contribution_ids(&valid, "cognia.acme.", "cognia_acme_").unwrap();
+        // A tool in the dotted namespace is one VS Code would silently drop.
+        let dotted_tool = json!({ "languageModelTools": [{ "name": "cognia.acme.inspect" }] });
+        assert!(
+            validate_contribution_ids(&dotted_tool, "cognia.acme.", "cognia_acme_")
+                .unwrap_err()
+                .starts_with("IDE_PROXY_ID_OUTSIDE_NAMESPACE")
+        );
+        assert_eq!(tool_namespace_prefix("acme.tools"), "cognia_acme_tools_");
         let invalid = json!({
             "customEditors": [{ "viewType": "native.editor" }]
         });
-        assert!(validate_contribution_ids(&invalid, "cognia.acme.")
-            .unwrap_err()
-            .starts_with("IDE_PROXY_ID_OUTSIDE_NAMESPACE"));
+        assert!(
+            validate_contribution_ids(&invalid, "cognia.acme.", "cognia_acme_")
+                .unwrap_err()
+                .starts_with("IDE_PROXY_ID_OUTSIDE_NAMESPACE")
+        );
         let duplicate = json!({
             "commands": [
                 { "command": "cognia.acme.run" },
                 { "command": "cognia.acme.run" }
             ]
         });
-        assert!(validate_contribution_ids(&duplicate, "cognia.acme.")
-            .unwrap_err()
-            .starts_with("IDE_PROXY_ID_DUPLICATE"));
+        assert!(
+            validate_contribution_ids(&duplicate, "cognia.acme.", "cognia_acme_")
+                .unwrap_err()
+                .starts_with("IDE_PROXY_ID_DUPLICATE")
+        );
     }
 }
 #[test]

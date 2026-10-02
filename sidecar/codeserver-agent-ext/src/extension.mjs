@@ -25,6 +25,8 @@ import {
 import { ContentHandleClient } from "./content-handles.mjs"
 import { findOccupiedContributionIds } from "./contribution-ids.mjs"
 import { PROPOSED_SCHEME, createEditorVerbs } from "./editor-verbs.mjs"
+import { proxyApi } from "./proxy-api.mjs"
+import { createTestProbe, probe } from "./test-probe.mjs"
 import { WorkspacePanel } from "./workspace-panel.mjs"
 
 /**
@@ -61,8 +63,13 @@ let bridge = null
 let contentHandles = null
 const proxyRegistrations = new Map()
 
-async function registerProxy(context, descriptor) {
+/** How long a proxy activating at startup waits for the broker to connect. */
+const PROXY_BRIDGE_READY_TIMEOUT_MS = 30_000
+
+async function registerProxy(context, descriptor, proxyVscode) {
   if (!bridge) throw new Error("Managed IDE broker is not active")
+  await bridge.whenReady(PROXY_BRIDGE_READY_TIMEOUT_MS)
+  const api = proxyApi(proxyVscode, vscode)
   if (descriptor.platformVersion !== "1.0.0") {
     throw new Error("IDE_PLATFORM_VERSION_MISMATCH")
   }
@@ -92,7 +99,7 @@ async function registerProxy(context, descriptor) {
   const { registerManagedProviders } = await import("./provider-adapters.mjs")
   let providerRegistration
   try {
-    providerRegistration = await registerManagedProviders(vscode, runtimeDescriptor, {
+    providerRegistration = await registerManagedProviders(api, runtimeDescriptor, {
       managedStorage,
       onEvent: (listener) =>
         bridge.onNotification((message) => {
@@ -173,7 +180,7 @@ async function registerProxy(context, descriptor) {
       protocolId: server.id,
       ...extra,
     })
-    protocolRegistration = await registerManagedProtocols(vscode, runtimeDescriptor, {
+    protocolRegistration = await registerManagedProtocols(api, runtimeDescriptor, {
       onEvent: (listener) =>
         bridge.onNotification((message) => {
           if (message?.pluginId === runtimeDescriptor.pluginId) listener(message)
@@ -261,6 +268,10 @@ export function activate(context) {
   editorVerbs = createEditorVerbs(vscode, {
     onSnapshot: applySnapshot,
     getProxyRegistration: (pluginId) => proxyRegistrations.get(pluginId),
+    // `null` unless the host was started for the real-binary E2E.
+    testProbe: createTestProbe(vscode, probe, {
+      emit: (name, payload) => bridge?.emit(name, () => payload, { coalesce: false }) ?? false,
+    }),
   })
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(
@@ -416,7 +427,8 @@ export function activate(context) {
   )
 
   return {
-    registerProxy: (proxyContext, descriptor) => registerProxy(proxyContext, descriptor),
+    registerProxy: (proxyContext, descriptor, proxyVscode) =>
+      registerProxy(proxyContext, descriptor, proxyVscode),
   }
 }
 

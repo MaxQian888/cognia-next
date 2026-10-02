@@ -33,13 +33,61 @@ function throwIfAborted(signal) {
 const NO_PROGRESS = () => {}
 
 /**
+ * How long the handshake waits for VS Code to discover a proxy that was just
+ * installed. The host installs the package and asks at once, while the
+ * workbench picks the new extension up from disk a moment later; failing at
+ * once would force an extension-host restart for nothing. Under the host's
+ * 30 s handshake deadline, so a proxy that never appears still fails in time
+ * for the restart fallback.
+ */
+export const PROXY_DISCOVERY_TIMEOUT_MS = 15_000
+
+const RESTART_EXTENSION_HOST_COMMAND = "workbench.action.restartExtensionHost"
+const RELOAD_WINDOW_COMMAND = "workbench.action.reloadWindow"
+
+/** Resolve with extension `id` once VS Code knows it, or `undefined` after `timeoutMs`. */
+function waitForExtension(vscode, id, signal, timeoutMs) {
+  const present = vscode.extensions.getExtension(id)
+  if (present || typeof vscode.extensions.onDidChange !== "function") {
+    return Promise.resolve(present)
+  }
+  return new Promise((resolve, reject) => {
+    const finish = (settle) => {
+      clearTimeout(timer)
+      listener.dispose()
+      signal?.removeEventListener?.("abort", onAbort)
+      settle()
+    }
+    const onAbort = () => finish(() => reject(new RequestCancelledError()))
+    const listener = vscode.extensions.onDidChange(() => {
+      const extension = vscode.extensions.getExtension(id)
+      if (extension) finish(() => resolve(extension))
+    })
+    const timer = setTimeout(() => finish(() => resolve(undefined)), timeoutMs)
+    signal?.addEventListener?.("abort", onAbort, { once: true })
+  })
+}
+
+/**
  * Build the verb dispatcher.
  *
  * - `onSnapshot(params)` receives a pushed workspace snapshot.
  * - `getProxyRegistration(pluginId)` returns the live registration a proxy
  *   extension made through `registerProxy`, for the activation handshake.
+ * - `testProbe` is the real-binary E2E's `testProbe` verb (see
+ *   `test-probe.mjs`), or `null`, in which case the verb does not exist.
+ * - `proxyDiscoveryTimeoutMs` bounds the handshake's wait for a just-installed
+ *   proxy (see `PROXY_DISCOVERY_TIMEOUT_MS`).
  */
-export function createEditorVerbs(vscode, { onSnapshot, getProxyRegistration }) {
+export function createEditorVerbs(
+  vscode,
+  {
+    onSnapshot,
+    getProxyRegistration,
+    testProbe = null,
+    proxyDiscoveryTimeoutMs = PROXY_DISCOVERY_TIMEOUT_MS,
+  }
+) {
   /**
    * In-memory store backing the `showDiff` right-hand side.
    *
@@ -325,7 +373,12 @@ export function createEditorVerbs(vscode, { onSnapshot, getProxyRegistration }) 
         .toLowerCase()
         .replace(/[^a-z0-9-]+/g, "-")
         .replace(/^-|-$/g, "")}`
-      const extension = vscode.extensions.getExtension(`cognia-managed.${extensionName}`)
+      const extension = await waitForExtension(
+        vscode,
+        `cognia-managed.${extensionName}`,
+        signal,
+        proxyDiscoveryTimeoutMs
+      )
       if (!extension) throw new Error(`IDE_PROXY_EXTENSION_NOT_DISCOVERED: ${pluginId}`)
       if (!extension.isActive) await extension.activate()
       throwIfAborted(signal)
@@ -361,13 +414,35 @@ export function createEditorVerbs(vscode, { onSnapshot, getProxyRegistration }) 
     }
   }
 
+  /**
+   * Restart the extension host so a just-installed or removed proxy takes
+   * effect. Only desktop VS Code registers `workbench.action.restartExtensionHost`;
+   * code-server's web workbench has no such command, and for a remote
+   * workbench VS Code itself reloads the window instead, which brings up a new
+   * remote extension host. The reply rarely arrives either way: this host is
+   * the one going away.
+   */
   async function restartManagedExtensionHost(_params, { signal }) {
     throwIfAborted(signal)
-    await vscode.commands.executeCommand("workbench.action.restartExtensionHost")
+    const commands = await vscode.commands.getCommands(true)
+    await vscode.commands.executeCommand(
+      commands.includes(RESTART_EXTENSION_HOST_COMMAND)
+        ? RESTART_EXTENSION_HOST_COMMAND
+        : RELOAD_WINDOW_COMMAND
+    )
     return null
   }
 
+  // The cheapest round trip there is: the empty-RPC latency gate measures it.
+  async function ping() {
+    return {}
+  }
+
   const verbs = {
+    ping,
+    ...(testProbe
+      ? { testProbe: (params, { signal }) => (throwIfAborted(signal), testProbe(params)) }
+      : {}),
     openFile,
     applyEdit,
     readActive,

@@ -78,6 +78,12 @@ export interface ManagedProtocolRuntimeDependencies {
   readSetting(path: string): unknown
 }
 
+interface SessionConnection {
+  endpoint?: string
+  headers?: Record<string, string>
+  capabilities?: unknown
+}
+
 interface Session {
   family: ManagedProtocolFamily
   ownerId: string
@@ -86,6 +92,12 @@ interface Session {
   generation: number
   pluginId: string
   consumerId?: string
+  /**
+   * What the start returned, handed to every later start of the same session:
+   * an extension host that reconnects registers its features from the LSP
+   * capabilities and dials the MCP endpoint again.
+   */
+  connection?: SessionConnection
 }
 
 export class ManagedProtocolRuntime {
@@ -104,14 +116,17 @@ export class ManagedProtocolRuntime {
 
   async start(input: ManagedProtocolStart): Promise<{
     sessionId: string
-    connection?: { endpoint?: string; headers?: Record<string, string>; capabilities?: unknown }
+    connection?: SessionConnection
   }> {
     await this.dependencies.ensureHost()
     const command = await this.resolveExecutable(input)
     const sessionId = sessionKey(input)
     const ownerId = `managed-pro:${input.pluginId}:${input.root}${input.consumerId ? `:${input.consumerId}` : ""}`
     await this.stopOlderGenerations(input.root, input.pluginId, input.generation)
-    if (this.sessions.has(sessionId)) return { sessionId }
+    const running = this.sessions.get(sessionId)
+    if (running) {
+      return { sessionId, ...(running.connection ? { connection: running.connection } : {}) }
+    }
     let connection:
       | {
           state?: unknown
@@ -186,6 +201,13 @@ export class ManagedProtocolRuntime {
         memoryLimitMb: input.executable.memoryLimitMb,
       })) as typeof connection
     }
+    const sessionConnection: SessionConnection | undefined = connection
+      ? {
+          endpoint: connection.endpoint,
+          headers: connection.headers,
+          capabilities: connection.capabilities,
+        }
+      : undefined
     this.sessions.set(sessionId, {
       family: input.family,
       ownerId,
@@ -194,19 +216,9 @@ export class ManagedProtocolRuntime {
       generation: input.generation,
       pluginId: input.pluginId,
       consumerId: input.consumerId,
+      connection: sessionConnection,
     })
-    return {
-      sessionId,
-      ...(connection
-        ? {
-            connection: {
-              endpoint: connection.endpoint,
-              headers: connection.headers,
-              capabilities: connection.capabilities,
-            },
-          }
-        : {}),
-    }
+    return { sessionId, ...(sessionConnection ? { connection: sessionConnection } : {}) }
   }
 
   async request(input: ManagedProtocolRequest): Promise<unknown> {

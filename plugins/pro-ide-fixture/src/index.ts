@@ -1,87 +1,237 @@
 /**
- * Pro IDE contribution fixture (ADR-0088 Phase 3).
+ * Pro IDE contribution fixture (ADR-0088).
  *
- * This plugin exists to prove one thing that unit tests structurally cannot: the
- * managed Pro IDE pathway works end to end. That chain is
+ * The managed Pro IDE pathway — manifest.ide → normalizeIdeManifest → signed
+ * proxy VSIX → broker handshake → provider round-trip — is roughly 150k lines
+ * of Rust, TypeScript and JavaScript whose layers each have unit tests. This
+ * plugin is what the real-binary E2E (`lib/plugin/ide/real-code-server.e2e.test.ts`)
+ * drives through a real code-server to prove the whole works, one family at a
+ * time: every family the platform claims for a stable release has one trivial
+ * provider here, and a family that does not round-trip fails the E2E.
  *
- *   manifest.ide
- *     → normalizeIdeManifest        (lib/plugin/ide/manifest)
- *     → buildProxy + ed25519 sign   (src-tauri/.../proxy.rs)
- *     → --install-extension         (src-tauri/.../process.rs)
- *     → broker hello + catalog hash (src-tauri/.../agent_channel.rs)
- *     → contribution render         (the generated proxy's package.json)
- *     → provider round-trip         (sidecar/codeserver-agent-ext/provider-adapters)
- *     → this file
+ * Every handler is called as `handler(operation, ...args)`: the broker runtime
+ * passes the adapter's operation name first, then the serialized VS Code
+ * arguments. Answers are deterministic and name what they were asked about, so
+ * a value coming back proves the request genuinely crossed the broker.
  *
- * — roughly 150k of Rust, TypeScript and JavaScript that, before this fixture,
- * had no first-party consumer at all. Every layer had its own unit tests and the
- * whole never ran.
- *
- * `code-lens` is the chosen provider because one lens proves both directions in
- * a single visible artifact: the editor pulls lenses from the plugin runtime,
- * and clicking one invokes the plugin's contributed *command* back. A `hover`
- * would have been cheaper and proved half as much.
- *
- * Deliberately trivial otherwise. It is a fixture, not a feature: it ships no
- * product surface, so it can be changed freely when the pathway changes, which
- * is exactly the property a regression harness needs.
+ * It is a fixture, not a feature: it ships no product surface and can change
+ * freely when the pathway changes, which is what a regression harness needs.
+ * The protocol families (language server, debug adapter, MCP server) are the
+ * three self-contained scripts under `servers/`.
  */
 
-/**
- * The command id as the EDITOR knows it.
- *
- * Contributions are declared plugin-locally (`"ping"`) and the proxy compiler
- * namespaces them to `cognia.<pluginId>.<local>`; a lens has to point at the
- * namespaced form, because by the time VS Code resolves the click the local
- * name no longer exists. Pre-prefixing the manifest entry instead produced
- * `cognia.<id>.<id>.ping` — a command that renders and then does nothing.
- */
-export const FIXTURE_PING_COMMAND = "cognia.cognia-pro-ide-fixture.ping"
+/** A plugin-local id as VS Code knows it: the proxy compiler namespaces them. */
+export const FIXTURE_NAMESPACE = "cognia.cognia-pro-ide-fixture"
+export const FIXTURE_PING_COMMAND = `${FIXTURE_NAMESPACE}.ping`
 
-/** Shape the broker hands a `code-lens` provider. */
-export interface FixtureLensRequest {
-  /** Absolute path of the document the editor is asking about. */
+/** How the broker serializes a `vscode.Uri` (its `toJSON` form). */
+interface SerializedUri {
+  scheme: string
   path: string
-  /** Total line count, so the fixture can prove it received real document state. */
-  lineCount: number
 }
 
-/** One lens, in the shape `provider-adapters.mjs` maps onto `vscode.CodeLens`. */
-export interface FixtureLens {
-  range: { startLine: number; startColumn: number; endLine: number; endColumn: number }
-  command: { command: string; title: string; arguments?: unknown[] }
+/** How the broker serializes a `vscode.TextDocument`. */
+interface SerializedDocument {
+  uri: SerializedUri
+  languageId: string
+  version: number
+}
+
+const basename = (path: string) => path.split(/[/\\]/).pop() ?? path
+
+/** The `command` provider: the lens click lands here. */
+export function ping(
+  _operation: string,
+  argument?: { path?: string }
+): { ok: true; path: string | null } {
+  return { ok: true, path: argument?.path ?? null }
 }
 
 /**
- * Annotate the first line of every file with one lens.
+ * One lens on the first line of every file, titled with the file's name.
  *
- * Always exactly one, at a fixed position: a fixture that produced lenses
- * conditionally would make a broken round-trip and an empty result look
- * identical, and "no lens appeared" is the failure this is here to catch.
- *
- * The title echoes the request back so the round-trip is visible in the editor
- * rather than only in a log — if the lens says the right filename and line
- * count, the document state genuinely crossed the broker.
+ * Always exactly one: a fixture that produced lenses conditionally would make
+ * a broken round trip and an empty result look identical.
  */
-export function provideFixtureLenses(request: FixtureLensRequest): FixtureLens[] {
-  const name = request.path.split(/[/\\]/).pop() ?? request.path
+export function provideFixtureLenses(operation: string, document: SerializedDocument) {
+  if (operation === "resolve") return document
+  const path = document?.uri?.path ?? ""
   return [
     {
-      range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1 },
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
       command: {
         command: FIXTURE_PING_COMMAND,
-        title: `Cognia fixture: ${name} (${request.lineCount} lines)`,
-        arguments: [{ path: request.path }],
+        title: `Cognia fixture: ${basename(path)}`,
+        arguments: [{ path }],
       },
     },
   ]
 }
 
-/** Handler for the contributed command; returns what the click carried. */
-export function ping(argument?: { path?: string }): { ok: true; path: string | null } {
-  return { ok: true, path: argument?.path ?? null }
+export const FIXTURE_CHANGED_URI = "file:///cognia-fixture/changed.txt"
+
+/** Source control with one changed file and a commit that echoes its message. */
+export function sourceControl(operation: string, ...args: unknown[]) {
+  switch (operation) {
+    case "initialize":
+      return null
+    case "status":
+      return {
+        groups: [
+          {
+            id: "changes",
+            label: "Changes",
+            resources: [{ uri: FIXTURE_CHANGED_URI, tooltip: "Modified" }],
+          },
+        ],
+      }
+    case "originalResource":
+      return "cognia-fixture-base:///changed.txt"
+    case "commit":
+      return { committed: String(args[0] ?? "") }
+    default:
+      throw new Error(`unexpected source-control operation ${operation}`)
+  }
+}
+
+export const FIXTURE_TESTS = [
+  { id: "fixture.adds", label: "adds" },
+  { id: "fixture.fails", label: "fails" },
+  { id: "fixture.unreported", label: "unreported" },
+]
+
+/**
+ * Three tests: one passes, one fails, one the run says nothing about (which the
+ * adapter must still settle, as skipped).
+ */
+export function testController(operation: string, item?: { id?: string } | null) {
+  if (operation === "resolve") return item ? [] : FIXTURE_TESTS
+  if (operation === "run") {
+    return {
+      results: [
+        { id: "fixture.adds", state: "passed", durationMs: 1 },
+        { id: "fixture.fails", state: "failed", message: "fixture failure" },
+      ],
+      output: "ran 2 fixture tests\n",
+    }
+  }
+  throw new Error(`unexpected test-controller operation ${operation}`)
+}
+
+interface NotebookCellJson {
+  kind: "code" | "markup"
+  value: string
+  languageId?: string
+}
+
+/** `.cfxnb` files are JSON: `{ cells: [{ kind, value, languageId }] }`. */
+export function notebookSerializer(
+  operation: string,
+  input: Uint8Array | { cells?: NotebookCellJson[] }
+) {
+  if (operation === "deserialize") {
+    const text = input instanceof Uint8Array ? new TextDecoder().decode(input) : ""
+    const parsed = text.trim() ? (JSON.parse(text) as { cells?: NotebookCellJson[] }) : {}
+    return { cells: parsed.cells ?? [] }
+  }
+  if (operation === "serialize") {
+    const cells = (input as { cells?: NotebookCellJson[] }).cells ?? []
+    return JSON.stringify({
+      cells: cells.map(({ kind, value, languageId }) => ({ kind, value, languageId })),
+    })
+  }
+  throw new Error(`unexpected notebook-serializer operation ${operation}`)
+}
+
+/** A kernel that "runs" a cell by echoing its source as plain text. */
+export function notebookKernel(operation: string, cell?: { source?: string }) {
+  if (operation === "interrupt") return null
+  if (operation === "execute") {
+    return {
+      outputs: [{ items: [{ mime: "text/plain", text: `fixture ran: ${cell?.source ?? ""}` }] }],
+    }
+  }
+  throw new Error(`unexpected notebook-controller operation ${operation}`)
+}
+
+const page = (body: string) =>
+  `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'"></head><body>${body}</body></html>`
+
+export function webviewView(operation: string) {
+  if (operation === "resolve") return { html: page("<p>Cognia fixture view</p>") }
+  return null
+}
+
+export function customEditor(operation: string, document?: SerializedDocument) {
+  if (operation === "resolve") {
+    return { html: page(`<p>Cognia fixture editor: ${basename(document?.uri?.path ?? "")}</p>`) }
+  }
+  return null
+}
+
+export function chatParticipant(operation: string) {
+  if (operation !== "request") throw new Error(`unexpected chat operation ${operation}`)
+  return { stream: [{ method: "markdown", arguments: ["Cognia fixture reply"] }], result: {} }
+}
+
+export const FIXTURE_MODEL = {
+  id: "fixture-model",
+  name: "Cognia Fixture Model",
+  family: "fixture",
+  version: "1.0.0",
+  maxInputTokens: 1000,
+  maxOutputTokens: 100,
+  capabilities: {},
+}
+
+/** A model that answers every request with the last message's text, reversed. */
+export function languageModel(operation: string, ...args: unknown[]) {
+  switch (operation) {
+    case "provideLanguageModelChatInformation":
+      return [FIXTURE_MODEL]
+    case "provideLanguageModelChatResponse": {
+      const messages = (args[1] ?? []) as Array<{ content?: Array<{ value?: string }> }>
+      const last =
+        messages
+          .at(-1)
+          ?.content?.map((part) => part.value ?? "")
+          .join("") ?? ""
+      return {
+        stream: [
+          {
+            $type: "LanguageModelTextPart",
+            value: `fixture model: ${[...last].reverse().join("")}`,
+          },
+        ],
+      }
+    }
+    case "provideTokenCount":
+      return String(args[1] ?? "").length
+    default:
+      throw new Error(`unexpected language model operation ${operation}`)
+  }
+}
+
+export function languageModelTool(operation: string, options?: { input?: { text?: string } }) {
+  if (operation === "prepare") return null
+  if (operation === "invoke") {
+    return { content: [{ $type: "LanguageModelTextPart", value: `tool: ${options?.input?.text}` }] }
+  }
+  throw new Error(`unexpected tool operation ${operation}`)
 }
 
 /** The plugin runtime resolves provider handlers off this default export. */
-const fixture = { provideFixtureLenses, ping }
+const fixture = {
+  ping,
+  provideFixtureLenses,
+  sourceControl,
+  testController,
+  notebookSerializer,
+  notebookKernel,
+  webviewView,
+  customEditor,
+  chatParticipant,
+  languageModel,
+  languageModelTool,
+}
 export default fixture

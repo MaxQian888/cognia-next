@@ -34,8 +34,11 @@ conformance fixtures 与代理 contribution metadata。任何未分类 stable
 contribution/provider 都会使生成失败。旧 `vscode*` 作者字段只兼容一个 major，
 并产生字段级弃用诊断；SDK 只输出 `manifest.ide`。
 
-全局 ID 重写为 `cognia.<pluginId>.*`。重复、保留或被外部占用的 ID 会拒绝整次
-activation transaction。静态资源必须是规范化的插件相对路径，插件不能提供
+全局 ID 重写为 `cognia.<pluginId>.*`。Language model tool 例外：VS Code 会丢弃
+名称不匹配 `/^[\w-]+$/` 的 tool，因此名为 `inspect` 的 tool 变为
+`cognia_<pluginId>_inspect`（插件 ID 中的 `.` 替换为 `_`）。tool 名只能包含字母、
+数字、`_` 和 `-`，加上 namespace 后不得超过 64 个字符（模型 API 对函数名的上限）。
+重复、保留或被外部占用的 ID 会拒绝整次 activation transaction。静态资源必须是规范化的插件相对路径，插件不能提供
 extension entrypoint。
 
 代理 VSIX 确定性且内容寻址。Ed25519 签名 descriptor 绑定 plugin id/version、
@@ -48,3 +51,33 @@ marker 而非 artifact cache 为准。
 decoration、webview/custom editor、terminal/task/SCM、debug/test/notebook/comment、
 authentication、URI/storage、Chat participant、language-model tool、MCP definition
 以及锁定 catalog 中的全部稳定 contribution family。
+
+## Provider handler
+
+每个 provider 指向插件唯一 Cognia runtime 中导出的 `handler`。broker 以
+`handler(operation, ...args)` 调用它：先是 operation，然后是序列化为 JSON 的
+VS Code 参数（`Uri` 为其组成部分，`TextDocument` 为
+`{ uri, languageId, version, isDirty }`，字节为 content handle）。返回值同样
+以 JSON 返回，由 broker 转换为 VS Code 值。
+
+| 家族 | Operation |
+| --- | --- |
+| 语言特性（hover、completion、code lens、link、inlay hint 等） | `provide`；VS Code 延迟解析的特性另有 `resolve` |
+| `call-hierarchy` / `type-hierarchy` | `prepare`，然后 `incoming`/`outgoing` 或 `supertypes`/`subtypes` |
+| `source-control` | `initialize`；`status` 返回 `{ groups: [{ id, label, resources: [{ uri, tooltip }] }] }`；`originalResource` 给出 quick diff 基线；`commit` 收到输入框文本 |
+| `test-controller` | `resolve`（无 item 时为根测试）与 `run`（参数 `{ profile, include, exclude }`）；返回 `{ results: [{ id, state, message?, durationMs? }], output? }`，本次运行未提及的已包含测试记为 skipped |
+| `notebook-serializer` | `deserialize`（字节）返回 `{ cells }`；`serialize` 收到 `{ cells }` 并返回文件文本 |
+| `notebook-controller` | 每个 cell 一次 `execute`，返回 `{ outputs: [{ items: [{ mime, text }] }] }`；`interrupt` |
+| `webview-view` / `custom-editor` | `resolve` 返回 `{ html }`，必须带 Content-Security-Policy；页面消息走 `message` |
+| `chat-participant` | `request` 返回 `{ stream: [{ method, arguments }], result }` |
+| `language-model-chat-provider` | `provideLanguageModelChatInformation`、`provideLanguageModelChatResponse`（消息为 `{ role, name?, content: [带类型的 part] }`；以 `{ stream: [{ $type: "LanguageModelTextPart", value }] }` 应答）、`provideTokenCount` |
+| `language-model-tool` | `prepare`、`invoke`（返回 `{ content: [带类型的 part] }`） |
+| `file-system` | `stat`、`readDirectory`、`readFile`、`writeFile`、`createDirectory`、`delete`、`rename`、`copy` |
+
+selector 或 language server 若引用插件自己的语言，会被指向其 namespace 后的 ID；
+`typescript` 等内置 ID 保持不变。language server 只获得其 `initialize`
+capabilities 声明的 VS Code 特性，并使用它自己的 trigger character。
+
+`plugins/pro-ide-fixture` 为上表每个家族各声明一个 provider，是这些形状的参考
+实现。`pnpm test:pro-ide:e2e` 通过真实 code-server 驱动它，
+`pnpm audit:pro-ide-perf` 用该次运行检查性能门禁。

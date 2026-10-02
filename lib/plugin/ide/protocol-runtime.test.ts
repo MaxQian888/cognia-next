@@ -401,8 +401,15 @@ describe("ManagedProtocolRuntime", () => {
     await expect(runtime.start(startInput)).resolves.toMatchObject({
       connection: { capabilities: { hoverProvider: true } },
     })
+    // A reconnecting extension host gets the capabilities again: it registers
+    // its features from them.
     await expect(runtime.start(startInput)).resolves.toEqual({
       sessionId: expect.stringContaining("cognia.acme.language"),
+      connection: {
+        endpoint: undefined,
+        headers: undefined,
+        capabilities: { hoverProvider: true },
+      },
     })
     expect(start).toHaveBeenCalledTimes(1)
     expect(notify).toHaveBeenCalledWith(

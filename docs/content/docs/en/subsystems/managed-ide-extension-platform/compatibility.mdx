@@ -32,5 +32,16 @@ idle RSS regression at most 20% and 150 MiB; local empty broker RPC p95 at most
 30 ms; remote relay overhead excluding physical RTT p95 at most 75 ms; and no
 control/lifecycle event loss within declared capacity.
 
+The real-binary E2E (`pnpm test:pro-ide:e2e`) runs every family above through
+a real code-server and measures one run: cold readiness, the idle RSS of the
+host's process tree, 200 empty broker RPCs, 100 relayed versus direct
+requests, and a burst of 200 lifecycle events (within the companion event
+bus's broadcast capacity of 256) that must all arrive, in order.
+`pnpm audit:pro-ide-perf` compares the run with the committed baseline for its
+platform (`scripts/gates/pro-ide-perf-baseline.json`); record one with
+`--write-baseline`. CI runs both on PRs that touch the pathway and on the
+nightly full run. Until a Linux baseline is recorded there, CI enforces the
+absolute gates and reports the two regression gates as skipped.
+
 Remote telemetry is opt-in and aggregate-only. Source, paths, prompts,
 arguments, environments, secrets, and content handles never enter telemetry.

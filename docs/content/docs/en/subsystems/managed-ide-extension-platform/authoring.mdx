@@ -36,8 +36,13 @@ metadata. An unclassified stable contribution or provider fails generation.
 Legacy `vscode*` author fields are normalized with field-level deprecation
 diagnostics for one major; generated SDK output uses only `manifest.ide`.
 
-Global IDs are rewritten to `cognia.<pluginId>.*`. Duplicate, reserved, or
-externally occupied IDs reject the entire activation transaction. Static
+Global IDs are rewritten to `cognia.<pluginId>.*`. Language model tools are
+the exception: VS Code drops a tool whose name does not match `/^[\w-]+$/`, so
+a tool named `inspect` becomes `cognia_<pluginId>_inspect` (dots in the plugin
+id become `_`). A tool name may contain only letters, digits, `_` and `-`, and
+must stay within 64 characters once namespaced, the limit model APIs put on
+function names. Duplicate, reserved, or externally occupied IDs reject the
+entire activation transaction. Static
 assets are canonical plugin-relative files. A plugin cannot provide an
 extension entrypoint.
 
@@ -53,3 +58,36 @@ views, trees, status, decorations, webviews and custom editors; terminals,
 tasks, SCM, debug, tests, notebooks and comments; authentication, URI handling
 and storage; Chat participants, language-model tools, MCP definitions, and the
 stable contribution families in the locked catalog.
+
+## Provider handlers
+
+Every provider names an exported `handler` of the plugin's single Cognia
+runtime. The broker calls it as `handler(operation, ...args)`: the operation
+first, then the VS Code arguments serialized to JSON (a `Uri` as its
+components, a `TextDocument` as `{ uri, languageId, version, isDirty }`, bytes
+as a content handle). Answers come back the same way and the broker turns them
+into VS Code values.
+
+| Family | Operations |
+| --- | --- |
+| Language features (hover, completion, code lens, links, inlay hints, …) | `provide`, and `resolve` where VS Code resolves lazily |
+| `call-hierarchy` / `type-hierarchy` | `prepare`, then `incoming`/`outgoing` or `supertypes`/`subtypes` |
+| `source-control` | `initialize`; `status` returns `{ groups: [{ id, label, resources: [{ uri, tooltip }] }] }`; `originalResource` gives the quick-diff base; `commit` receives the input box text |
+| `test-controller` | `resolve` (no item: the root tests) and `run` with `{ profile, include, exclude }`; return `{ results: [{ id, state, message?, durationMs? }], output? }`, and every included test the run does not mention settles as skipped |
+| `notebook-serializer` | `deserialize` (bytes) returns `{ cells }`; `serialize` receives `{ cells }` and returns the file's text |
+| `notebook-controller` | `execute` per cell returns `{ outputs: [{ items: [{ mime, text }] }] }`; `interrupt` |
+| `webview-view` / `custom-editor` | `resolve` returns `{ html }`, which must carry a Content-Security-Policy; `message` for posts from the page |
+| `chat-participant` | `request` returns `{ stream: [{ method, arguments }], result }` |
+| `language-model-chat-provider` | `provideLanguageModelChatInformation`, `provideLanguageModelChatResponse` (messages arrive as `{ role, name?, content: [typed parts] }`; answer with `{ stream: [{ $type: "LanguageModelTextPart", value }] }`), `provideTokenCount` |
+| `language-model-tool` | `prepare`, `invoke` returning `{ content: [typed parts] }` |
+| `file-system` | `stat`, `readDirectory`, `readFile`, `writeFile`, `createDirectory`, `delete`, `rename`, `copy` |
+
+A selector or a language server that names one of the plugin's own languages
+is pointed at its namespaced id; a built-in id such as `typescript` is kept.
+A language server gets exactly the VS Code features it claims in its
+`initialize` capabilities, with its own trigger characters.
+
+`plugins/pro-ide-fixture` declares one provider of every family above and is
+the reference for these shapes. `pnpm test:pro-ide:e2e` drives it through a
+real code-server, and `pnpm audit:pro-ide-perf` checks that run against the
+performance gates.

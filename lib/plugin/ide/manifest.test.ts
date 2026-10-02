@@ -1,5 +1,11 @@
 import type { PluginIdeManifest } from "@/types/plugin/plugin-ide"
-import { IdeManifestError, normalizeIdeManifest } from "./manifest"
+import {
+  IdeManifestError,
+  MAX_TOOL_NAME_LENGTH,
+  namespaceToolName,
+  normalizeIdeManifest,
+  toolNamespacePrefix,
+} from "./manifest"
 
 const base = (overrides: Partial<PluginIdeManifest> = {}): PluginIdeManifest => ({
   schemaVersion: 1,
@@ -278,7 +284,73 @@ describe("normalizeIdeManifest", () => {
     expect(result.authentication?.[0]?.id).toBe("cognia.acme.auth")
     expect(result.mcpServerDefinitionProviders?.[0]?.id).toBe("cognia.acme.mcp")
     expect(result.languageModelChatProviders?.[0]?.vendor).toBe("cognia.acme.models")
-    expect(result.languageModelTools?.[0]?.name).toBe("cognia.acme.inspect")
+    // VS Code drops a tool whose name does not match /^[\w-]+$/, so tools
+    // take an underscore namespace instead of the dotted one.
+    expect(result.languageModelTools?.[0]?.name).toBe("cognia_acme_inspect")
+  })
+
+  it("points selectors and language servers at the plugin's own languages, not built-ins", () => {
+    const { manifest } = normalizeIdeManifest("acme", {
+      ide: base({
+        contributions: { languages: [{ id: "acme-lang", extensions: [".acme"] }] },
+        providers: [
+          {
+            id: "lens",
+            kind: "code-lens",
+            handler: "lens",
+            selector: [{ language: "acme-lang" }, "typescript"],
+          },
+          { id: "hover", kind: "hover", handler: "hover", selector: "acme-lang" },
+        ],
+        executables: [
+          {
+            id: "server",
+            source: { kind: "registered-tool", tool: "acme-ls" },
+          },
+        ],
+        protocols: {
+          lsp: [
+            {
+              id: "ls",
+              executable: "server",
+              transport: "stdio",
+              languages: ["acme-lang", "typescript"],
+            },
+          ],
+        },
+      }),
+    })
+    expect(manifest.providers.map((provider) => provider.selector)).toEqual([
+      [{ language: "cognia.acme.acme-lang" }, "typescript"],
+      "cognia.acme.acme-lang",
+    ])
+    expect(manifest.protocols.lsp[0]?.languages).toEqual(["cognia.acme.acme-lang", "typescript"])
+  })
+
+  it("gives tool providers the tool namespace, and refuses names VS Code or a model would", () => {
+    const tool = (name: string, pluginId = "acme.tools") =>
+      normalizeIdeManifest(pluginId, {
+        ide: base({
+          providers: [{ id: name, kind: "language-model-tool", handler: "tool" }],
+          contributions: {
+            languageModelTools: [{ name, displayName: "T", modelDescription: "T" }],
+          },
+        }),
+      }).manifest
+    const normalized = tool("inspect")
+    expect(normalized.providers[0]?.id).toBe("cognia_acme_tools_inspect")
+    expect(normalized.contributions.languageModelTools?.[0]?.name).toBe("cognia_acme_tools_inspect")
+    expect(toolNamespacePrefix("acme.tools")).toBe("cognia_acme_tools_")
+    expect(namespaceToolName("acme.tools", "cognia_acme_tools_inspect")).toBe(
+      "cognia_acme_tools_inspect"
+    )
+    expect(() => tool("has.dot")).toThrow(/must match pattern/)
+    expect(() =>
+      normalizeIdeManifest("acme.tools", {
+        ide: base({ providers: [{ id: "has.dot", kind: "language-model-tool", handler: "t" }] }),
+      })
+    ).toThrow(/may only contain/)
+    expect(() => tool("x".repeat(MAX_TOOL_NAME_LENGTH))).toThrow(/longer than 64/)
   })
 
   it("rejects an unclassified contribution instead of silently passing it through", () => {

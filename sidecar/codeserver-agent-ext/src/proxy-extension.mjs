@@ -17,7 +17,9 @@ export async function activate(context) {
   if (!broker || typeof broker.registerProxy !== "function") {
     throw new Error("IDE_BROKER_API_INCOMPATIBLE")
   }
-  return broker.registerProxy(context, descriptor)
+  // Our own API instance: VS Code ties some registrations (a debugger's adapter
+  // factory) to the extension that contributes them, which is this one.
+  return broker.registerProxy(context, descriptor, vscode)
 }
 
 export function deactivate() {}
