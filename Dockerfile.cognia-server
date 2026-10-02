@@ -286,6 +286,7 @@ COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
 # therefore needs this pure-JS runtime closure beside claude-host.mjs.
 COPY --from=brain-builder /work/sidecar/webclone/node_modules /app/brain/sidecar/node_modules
 COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-managed-broker.vsix /opt/cognia/codeserver-agent-ext/cognia-managed-broker.vsix
+COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-managed-broker.vsix.sha256 /opt/cognia/codeserver-agent-ext/cognia-managed-broker.vsix.sha256
 COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
 COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
 # Smoke stub agent (ADR-0059 D6): admitted by SpawnPolicy ONLY when

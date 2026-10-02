@@ -12,6 +12,7 @@
 // result on first spawn.
 
 import { build } from "esbuild"
+import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -80,7 +81,16 @@ const parts = [
   { name: "extension/dist/proxy.js", data: readFileSync(join(dist, "proxy.js")) },
 ]
 
-writeFileSync(vsixPath, buildZip(parts))
+const archive = buildZip(parts)
+writeFileSync(vsixPath, archive)
+// The host refuses to install a broker whose bytes do not match this digest
+// (`verify_broker_vsix` in crates/cognia-codeserver/src/process.rs), and keys
+// its reinstall marker on it, so a rebuilt extension always reaches users.
+// `sha256sum` layout, so the file can be checked by hand too.
+writeFileSync(
+  `${vsixPath}.sha256`,
+  `${createHash("sha256").update(archive).digest("hex")}  ${vsixName}\n`
+)
 
 console.log(`built ${vsixName}`)
 

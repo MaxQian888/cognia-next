@@ -4,17 +4,26 @@
 // on-disk write as an undo-able edit, and read the active-editor context back.
 //
 // Dormant unless launched by Cognia: `activate` returns immediately when the
-// `COGNIA_CS_AGENT_PORT` / `COGNIA_CS_AGENT_TOKEN` env vars are absent, so the
-// extension is inert in any other code-server.
+// `COGNIA_CS_AGENT_PORT` / `COGNIA_CS_AGENT_CREDENTIAL_FILE` env vars are
+// absent, so the extension is inert in any other code-server. The environment
+// never carries the broker secret itself; see `broker-credential.mjs`.
 
 import * as net from "node:net"
-import { createHmac, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import * as vscode from "vscode"
 import { ContentHandleClient } from "./content-handles.mjs"
 import { WorkspacePanel } from "./workspace-panel.mjs"
 import { findOccupiedContributionIds } from "./contribution-ids.mjs"
 import {
+  challengeProof,
+  contentBearer,
+  newClientNonce,
+  nextSessionCredential,
+  readBootstrapCredential,
+} from "./broker-credential.mjs"
+import {
   ContentLengthDecoder,
+  PROTOCOL_INCOMPATIBLE_CODE,
   brokerChallengeRequest,
   brokerHelloRequest,
   errorResponse,
@@ -26,12 +35,7 @@ import {
 import {
   diagnosticSeverityName,
   editReflectionAction,
-  eventFrame,
-  helloFrame,
   notificationKind,
-  parseRequest,
-  responseFrame,
-  splitFrames,
   toZeroBased,
 } from "./protocol.mjs"
 
@@ -66,14 +70,20 @@ const IDE_CATALOG_HASH = "sha256:53cf23036ed2e14693f284778d7f2b0cd7cd5802ee63bb4
  * Owns the single TCP connection back to the app and dispatches inbound request
  * frames to the editor handlers. Reconnects with a fixed backoff so a transient
  * app-side restart doesn't leave the bridge dead.
+ *
+ * Credentials: the first connection authenticates with the bootstrap read from
+ * the credential file; every successful hello replaces the held credential with
+ * a session derived from it. A credential the host refuses is dropped, and the
+ * next attempt reads a fresh bootstrap file (the host re-mints one whenever no
+ * extension host is connected).
  */
 class AgentBridge {
-  constructor(port, token, protocolMode) {
+  constructor(port, credentialFile, { hostId, workspace }) {
     this.port = port
-    this.token = token
-    this.protocolMode = protocolMode
+    this.credentialFile = credentialFile
+    this.hostId = hostId
+    this.workspace = workspace
     this.socket = null
-    this.buffer = ""
     this.decoder = new ContentLengthDecoder()
     this.disposed = false
     this.reconnectTimer = null
@@ -83,10 +93,13 @@ class AgentBridge {
     this.notificationListeners = new Set()
     this.nextRequestId = 1
     this.negotiated = null
+    this.credential = null
+    this.handshake = null
+    this.incompatible = false
   }
 
   start() {
-    this.connect()
+    void this.connect()
   }
 
   dispose() {
@@ -99,6 +112,13 @@ class AgentBridge {
     this.notificationListeners.clear()
     this.socket?.destroy()
     this.socket = null
+    this.credential = null
+  }
+
+  /** Bearer for the content endpoint, derived from the live session. */
+  contentBearer() {
+    if (!this.negotiated || this.credential?.kind !== "session") return null
+    return contentBearer(this.credential.tokenId, this.credential.secret)
   }
 
   /**
@@ -115,7 +135,7 @@ class AgentBridge {
       name,
       setTimeout(() => {
         this.coalesceTimers.delete(name)
-        if (this.disposed || !this.socket) return
+        if (this.disposed || !this.socket || !this.negotiated) return
         try {
           this.writeEvent(name, payloadFn())
         } catch {
@@ -125,31 +145,37 @@ class AgentBridge {
     )
   }
 
-  connect() {
-    if (this.disposed) return
+  async connect() {
+    if (this.disposed || this.incompatible) return
+    if (!this.credential) {
+      try {
+        this.credential = await readBootstrapCredential(this.credentialFile)
+      } catch {
+        this.scheduleReconnect()
+        return
+      }
+      if (this.disposed) return
+    }
+    const credential = this.credential
     const socket = net.createConnection({ host: "127.0.0.1", port: this.port }, () => {
-      this.buffer = ""
       this.decoder = new ContentLengthDecoder()
       this.negotiated = null
-      if (this.protocolMode === "jsonrpc") {
-        const credential = splitBrokerCredential(this.token)
-        if (!credential) {
-          socket.destroy()
-          return
-        }
-        this.credential = credential
-        socket.write(serializeContentLength(brokerChallengeRequest(credential.tokenId)))
-      } else {
-        socket.write(helloFrame(this.token))
-      }
+      this.handshake = { credential, clientNonce: newClientNonce(), challenge: null }
+      socket.write(
+        serializeContentLength(
+          brokerChallengeRequest(credential.tokenId, this.handshake.clientNonce)
+        )
+      )
     })
-    if (this.protocolMode === "legacy") socket.setEncoding("utf8")
     socket.on("data", (chunk) => this.onData(chunk))
     // Errors surface as a `close`; swallow so an unhandled 'error' can't crash
     // the extension host.
     socket.on("error", () => {})
     socket.on("close", () => {
-      if (this.socket === socket) this.socket = null
+      if (this.socket !== socket) return
+      this.socket = null
+      this.negotiated = null
+      this.handshake = null
       this.failPending("Managed IDE broker disconnected")
       this.scheduleReconnect()
     })
@@ -157,56 +183,30 @@ class AgentBridge {
   }
 
   scheduleReconnect() {
-    if (this.disposed || this.reconnectTimer) return
+    if (this.disposed || this.incompatible || this.reconnectTimer) return
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.connect()
+      void this.connect()
     }, RECONNECT_DELAY_MS)
   }
 
   onData(chunk) {
-    if (this.protocolMode === "jsonrpc") {
-      let messages
-      try {
-        messages = this.decoder.push(chunk)
-      } catch {
-        this.socket?.destroy()
-        return
-      }
-      for (const message of messages) void this.handleJsonRpc(message)
+    let messages
+    try {
+      messages = this.decoder.push(chunk)
+    } catch {
+      this.socket?.destroy()
       return
     }
-    const { lines, rest } = splitFrames(this.buffer + chunk)
-    this.buffer = rest
-    for (const line of lines) void this.handleLine(line)
-  }
-
-  async handleLine(line) {
-    const req = parseRequest(line)
-    if (!req) return
-    try {
-      const result = await dispatch(req.method, req.params)
-      this.socket?.write(responseFrame(req.id, { ok: true, result }))
-    } catch (error) {
-      this.socket?.write(
-        responseFrame(req.id, { ok: false, error: String(error?.message ?? error) })
-      )
-    }
+    for (const message of messages) void this.handleJsonRpc(message)
   }
 
   writeEvent(name, payload) {
     if (!this.socket) return
-    if (this.protocolMode === "jsonrpc") {
-      this.socket.write(serializeContentLength(eventNotification(name, payload)))
-    } else {
-      this.socket.write(eventFrame(name, payload))
-    }
+    this.socket.write(serializeContentLength(eventNotification(name, payload)))
   }
 
   request(method, params, options = {}) {
-    if (this.protocolMode !== "jsonrpc") {
-      return Promise.reject(new Error("LEGACY_CAPABILITY_UNSUPPORTED: provider callbacks"))
-    }
     if (!this.socket || !this.negotiated) {
       return Promise.reject(new Error("Managed IDE broker is not ready"))
     }
@@ -237,7 +237,7 @@ class AgentBridge {
   }
 
   notify(method, params) {
-    if (this.protocolMode !== "jsonrpc" || !this.socket) return
+    if (!this.socket || !this.negotiated) return
     this.socket.write(serializeContentLength({ jsonrpc: "2.0", method, params }))
   }
 
@@ -256,42 +256,65 @@ class AgentBridge {
     this.pending.clear()
   }
 
+  /**
+   * The host refused the credential this handshake presented. Drop it so the
+   * next attempt reads a fresh bootstrap; a protocol refusal stops reconnecting
+   * altogether, since no credential would change the answer.
+   */
+  rejectHandshake(error) {
+    if (this.handshake && this.credential === this.handshake.credential) {
+      this.credential = null
+    }
+    if (error?.code === PROTOCOL_INCOMPATIBLE_CODE) this.incompatible = true
+    this.socket?.destroy()
+  }
+
   async handleJsonRpc(message) {
     if (!message || message.jsonrpc !== "2.0") return
     if (message.id === "challenge" && ("result" in message || "error" in message)) {
-      if (message.error || typeof message.result?.challenge !== "string" || !this.credential) {
-        this.socket?.destroy()
+      const handshake = this.handshake
+      if (message.error || typeof message.result?.challenge !== "string" || !handshake) {
+        this.rejectHandshake(message.error)
         return
       }
-      const proof = createHmac("sha256", this.credential.secret)
-        .update(message.result.challenge)
-        .digest("hex")
+      handshake.challenge = message.result.challenge
       this.socket?.write(
         serializeContentLength(
           brokerHelloRequest({
-            tokenId: this.credential.tokenId,
-            proof,
-            catalogHash: process.env.COGNIA_CS_CATALOG_HASH ?? IDE_CATALOG_HASH,
-            hostId: process.env.COGNIA_CS_HOST_ID ?? "local",
-            workspace: process.env.COGNIA_CS_WORKSPACE ?? "",
+            tokenId: handshake.credential.tokenId,
+            proof: challengeProof(handshake.credential.secret, handshake.challenge),
+            catalogHash: IDE_CATALOG_HASH,
+            hostId: this.hostId,
+            workspace: this.workspace,
           })
         )
       )
       return
     }
     if (message.id === "hello" && ("result" in message || "error" in message)) {
-      if (message.error) {
-        this.socket?.destroy()
-      } else {
-        try {
-          this.negotiated = validateNegotiatedHello(
-            message.result,
-            process.env.COGNIA_CS_CATALOG_HASH ?? IDE_CATALOG_HASH
-          )
-        } catch {
-          this.socket?.destroy()
-        }
+      const handshake = this.handshake
+      if (message.error || !handshake?.challenge) {
+        this.rejectHandshake(message.error)
+        return
       }
+      try {
+        const negotiated = validateNegotiatedHello(message.result, IDE_CATALOG_HASH)
+        this.credential = nextSessionCredential(
+          handshake.credential,
+          handshake.challenge,
+          handshake.clientNonce,
+          negotiated.sessionId
+        )
+        this.negotiated = negotiated
+        this.handshake = null
+      } catch {
+        this.rejectHandshake(null)
+      }
+      return
+    }
+    if (message.id === null && message.error) {
+      // An unaddressed refusal: the host could not even parse our framing.
+      this.rejectHandshake(message.error)
       return
     }
     if (message.id !== undefined && ("result" in message || "error" in message)) {
@@ -309,6 +332,7 @@ class AgentBridge {
       }
       return
     }
+    if (!this.negotiated) return
     if (message.method === "$/cancelRequest") {
       const id = message.params?.id
       this.inflight.get(id)?.abort()
@@ -351,15 +375,6 @@ class AgentBridge {
     } finally {
       this.inflight.delete(message.id)
     }
-  }
-}
-
-function splitBrokerCredential(value) {
-  const separator = value.indexOf(".")
-  if (separator <= 0 || separator === value.length - 1) return null
-  return {
-    tokenId: value.slice(0, separator),
-    secret: value.slice(separator + 1),
   }
 }
 
@@ -986,16 +1001,13 @@ async function registerProxy(context, descriptor) {
 
 export function activate(context) {
   const portRaw = process.env.COGNIA_CS_AGENT_PORT
-  const token = process.env.COGNIA_CS_AGENT_TOKEN
+  const credentialFile = process.env.COGNIA_CS_AGENT_CREDENTIAL_FILE
   // Not launched by Cognia — stay completely dormant.
-  if (!portRaw || !token) return undefined
+  if (!portRaw || !credentialFile) return undefined
   const port = Number(portRaw)
   if (!Number.isInteger(port) || port <= 0) return undefined
-  const protocolMode = process.env.COGNIA_CS_BROKER_PROTOCOL === "1" ? "jsonrpc" : "legacy"
   const contentPort = Number(process.env.COGNIA_CS_CONTENT_PORT)
-  if (protocolMode === "jsonrpc" && (!Number.isInteger(contentPort) || contentPort <= 0)) {
-    return undefined
-  }
+  if (!Number.isInteger(contentPort) || contentPort <= 0) return undefined
 
   proposedEmitter = new vscode.EventEmitter()
   context.subscriptions.push(
@@ -1006,11 +1018,15 @@ export function activate(context) {
     })
   )
 
-  bridge = new AgentBridge(port, token, protocolMode)
-  contentHandles =
-    protocolMode === "jsonrpc"
-      ? new ContentHandleClient({ port: contentPort, credential: token })
-      : null
+  bridge = new AgentBridge(port, credentialFile, {
+    hostId: process.env.COGNIA_CS_HOST_ID ?? "local",
+    workspace: process.env.COGNIA_CS_WORKSPACE ?? "",
+  })
+  const liveBridge = bridge
+  contentHandles = new ContentHandleClient({
+    port: contentPort,
+    credential: () => liveBridge.contentBearer(),
+  })
   bridge.start()
 
   // Push editor state instead of making the app poll for it. Every handler reports

@@ -184,6 +184,7 @@ sidecar/cognia-mcp.mjs
 # walk. It was committed until the packaging became deterministic; a zip that
 # restamped every entry's mtime meant each rebuild was a 34 KB binary diff.
 sidecar/codeserver-agent-ext/cognia-managed-broker.vsix
+sidecar/codeserver-agent-ext/cognia-managed-broker.vsix.sha256
 # Root-only scratch screenshots. Anchored: unanchored, these matched at any
 # depth and silently swallowed web/public/og/workflows-{en,zh}.png, whose paths
 # web/lib/metadata.ts still advertises as og:image.

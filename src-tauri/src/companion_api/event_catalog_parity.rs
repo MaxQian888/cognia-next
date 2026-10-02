@@ -48,6 +48,10 @@ mod tests {
                 crate::codeserver::agent_channel::CODESERVER_BROKER_NOTIFICATION_EVENT,
             ),
             (
+                "codeserver://broker-issue",
+                crate::codeserver::agent_channel::CODESERVER_BROKER_ISSUE_EVENT,
+            ),
+            (
                 "session-import://changed",
                 crate::session_import_watch::SESSION_CHANGED_EVENT,
             ),

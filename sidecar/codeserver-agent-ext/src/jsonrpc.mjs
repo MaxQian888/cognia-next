@@ -1,4 +1,9 @@
 export const JSON_RPC_VERSION = "2.0"
+/** Every broker protocol version this extension speaks, one per major. */
+export const SUPPORTED_PROTOCOL_VERSIONS = Object.freeze(["1.0"])
+export const CODE_API_VERSION = "1.128.0"
+/** JSON-RPC error code the host uses for an incompatible protocol or catalog. */
+export const PROTOCOL_INCOMPATIBLE_CODE = -32001
 export const MAX_FRAME_BYTES = 1024 * 1024
 export const MAX_HEADER_BYTES = 8 * 1024
 
@@ -105,16 +110,16 @@ export function eventNotification(name, payload) {
   return notificationMessage("cognia/event", { name, payload: payload ?? null })
 }
 
-export function brokerChallengeRequest(tokenId) {
-  return requestMessage("challenge", "cognia/auth/challenge", { tokenId })
+export function brokerChallengeRequest(tokenId, clientNonce) {
+  return requestMessage("challenge", "cognia/auth/challenge", { tokenId, clientNonce })
 }
 
 export function brokerHelloRequest({ tokenId, proof, catalogHash, hostId, workspace }) {
   return requestMessage("hello", "cognia/hello", {
     tokenId,
     proof,
-    protocolVersions: ["1.0", "0.2"],
-    codeApiVersion: "1.128.0",
+    protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
+    codeApiVersion: CODE_API_VERSION,
     catalogHash,
     hostId,
     workspace,
@@ -132,8 +137,10 @@ export function validateNegotiatedHello(result, expectedCatalogHash) {
   const requiredCapabilities = ["structured-errors", "content-handles", "contribution-transactions"]
   if (
     !result ||
-    result.protocolVersion !== "1.0" ||
-    result.codeApiVersion !== "1.128.0" ||
+    !SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion) ||
+    typeof result.sessionId !== "string" ||
+    result.sessionId.length === 0 ||
+    result.codeApiVersion !== CODE_API_VERSION ||
     result.catalogHash !== expectedCatalogHash ||
     !Number.isSafeInteger(result.generation) ||
     result.generation <= 0 ||

@@ -7,7 +7,12 @@ export class ContentHandleClient {
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error("IDE_CONTENT_PORT_INVALID")
     }
-    if (typeof credential !== "string" || credential.length === 0) {
+    // A function is read per request: the bearer derives from the broker
+    // session, which rotates on every reconnect.
+    if (
+      typeof credential !== "function" &&
+      (typeof credential !== "string" || credential.length === 0)
+    ) {
       throw new Error("IDE_CONTENT_CREDENTIAL_INVALID")
     }
     if (typeof fetchImpl !== "function") {
@@ -46,8 +51,12 @@ export class ContentHandleClient {
   }
 
   headers(provider, extra = {}) {
+    const credential = typeof this.credential === "function" ? this.credential() : this.credential
+    if (typeof credential !== "string" || credential.length === 0) {
+      throw new Error("IDE_CONTENT_CREDENTIAL_UNAVAILABLE: the broker is not connected")
+    }
     return {
-      authorization: `Bearer ${this.credential}`,
+      authorization: `Bearer ${credential}`,
       "x-cognia-plugin-id": provider.pluginId,
       "x-cognia-provider-id": provider.id,
       ...(provider.permission ? { "x-cognia-permission": provider.permission } : {}),

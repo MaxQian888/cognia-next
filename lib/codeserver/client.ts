@@ -222,12 +222,34 @@ export interface CodeServerBrokerNotification {
   params: unknown
 }
 
+/**
+ * A broker problem the IDE surfaces instead of failing silently. Mirrors
+ * `BrokerIssue` in `crates/cognia-codeserver/src/agent_channel.rs`.
+ *
+ * - `protocol-incompatible`: the extension and host share no protocol major.
+ * - `install-failed`: the bundled broker failed its integrity check or install.
+ * - `registration-failed`: the broker's credential file could not be written.
+ * - `credential-replayed`: the single-use credential was used by two parties,
+ *   so the host closed every connection, revoked the session and issued a new one.
+ *
+ * The first three start the workbench without the broker (agent drive off).
+ */
+export type CodeServerBrokerIssue =
+  "protocol-incompatible" | "install-failed" | "registration-failed" | "credential-replayed"
+
+/** `codeserver://broker-issue`: a {@link CodeServerBrokerIssue} for `root`. */
+export interface CodeServerBrokerIssueEvent {
+  root: string
+  issue: CodeServerBrokerIssue
+}
+
 export const CODESERVER_EVENTS = {
   downloadProgress: "codeserver://download-progress",
   instanceExited: "codeserver://instance-exited",
   editorEvent: "codeserver://editor-event",
   brokerRequest: "codeserver://broker-request",
   brokerNotification: "codeserver://broker-notification",
+  brokerIssue: "codeserver://broker-issue",
 } as const
 
 let remoteLifecycleRevision = 0

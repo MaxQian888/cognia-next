@@ -10,9 +10,13 @@
  *   - **Catalog hash.** The broker refuses a handshake whose `catalogHash` does
  *     not match, so a stale copy disables every managed plugin proxy with a log
  *     line nobody reads.
- *   - **Extension version.** The host skips the side-load when its install
- *     marker already records the declared version, so an extension bumped
- *     without the Rust constant never reaches a machine that has the old one.
+ *   - **Extension version.** The host's install marker records the declared
+ *     version (plus the build's digest), so a manifest and Rust constant that
+ *     disagree describe two different builds of one extension.
+ *   - **Broker digest wiring.** The host refuses to install a broker `.vsix`
+ *     without the `.sha256` the build writes beside it. If the build stops
+ *     writing it, or a bundle (Tauri resources, the server image) stops
+ *     shipping it, the broker silently never installs.
  *   - **Broker extension id.** The proxy generator stamps it into every
  *     generated VSIX's `extensionDependencies`; a mismatch means the proxy
  *     activates before the broker it depends on.
@@ -32,7 +36,12 @@ const FILES = {
   process: "crates/cognia-codeserver/src/process.rs",
   extManifest: "sidecar/codeserver-agent-ext/package.json",
   proxy: "crates/cognia-codeserver/src/proxy.rs",
+  extBuild: "sidecar/codeserver-agent-ext/build.mjs",
+  tauriConf: "src-tauri/tauri.conf.json",
+  serverImage: "Dockerfile.cognia-server",
 }
+
+const BROKER_VSIX = "cognia-managed-broker.vsix"
 
 const read = (key) => readFileSync(join(REPO_ROOT, FILES[key]), "utf8")
 
@@ -116,6 +125,23 @@ export function auditProIdeConstants(sources) {
     problems.push(
       `${FILES.proxy}: BROKER_EXTENSION_ID is ${proxyId}, the manifest declares ${expectedId}`
     )
+  }
+
+  // ── Broker digest: written by the build, shipped by every bundle ─────────
+  if (!/\$\{vsixPath\}\.sha256/.test(sources.extBuild)) {
+    problems.push(
+      `${FILES.extBuild}: no longer writes ${BROKER_VSIX}.sha256 — the host refuses a broker without it`
+    )
+  }
+  const resources = JSON.parse(sources.tauriConf)?.bundle?.resources ?? []
+  const resourceList = Array.isArray(resources) ? resources : Object.keys(resources)
+  for (const suffix of [BROKER_VSIX, `${BROKER_VSIX}.sha256`]) {
+    if (!resourceList.some((entry) => entry.endsWith(`codeserver-agent-ext/${suffix}`))) {
+      problems.push(`${FILES.tauriConf}: bundle.resources does not ship ${suffix}`)
+    }
+  }
+  if (!sources.serverImage.includes(`codeserver-agent-ext/${BROKER_VSIX}.sha256`)) {
+    problems.push(`${FILES.serverImage}: the server image does not copy ${BROKER_VSIX}.sha256`)
   }
 
   return problems

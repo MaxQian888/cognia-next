@@ -1,8 +1,8 @@
 {
   "name": "cognia-managed-broker",
   "displayName": "Cognia Managed IDE Broker",
-  "description": "Capability-negotiated JSON-RPC broker for Cognia's managed Pro IDE profile, with one-release legacy bridge compatibility.",
-  "version": "1.1.0",
+  "description": "Capability-negotiated JSON-RPC broker for Cognia's managed Pro IDE profile.",
+  "version": "1.2.0",
   "publisher": "cognia",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE",

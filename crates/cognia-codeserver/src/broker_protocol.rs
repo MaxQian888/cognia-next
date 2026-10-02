@@ -1,24 +1,46 @@
 //! Framing and version negotiation for the managed code-server broker.
 //!
-//! Protocol v1 is JSON-RPC 2.0 carried in LSP-style `Content-Length` frames.
-//! The legacy newline protocol remains in `agent_channel` for one compatibility
-//! cycle; keeping its parser separate prevents accidental feature leakage.
+//! The broker speaks JSON-RPC 2.0 carried in LSP-style `Content-Length` frames.
+//! Protocol versions are `major.minor`. The hello offers every version the
+//! extension speaks and the host answers with the highest major both sides
+//! share ([`negotiate_protocol`]); minor differences within a major are carried
+//! by capabilities, never by version comparisons.
 
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
 
 pub(crate) const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_HEADER_BYTES: usize = 8 * 1024;
-pub(crate) const CURRENT_PROTOCOL_VERSION: &str = "1.0";
-pub(crate) const PREVIOUS_PROTOCOL_VERSION: &str = "0.2";
+/// Every protocol version this host can serve, one entry per major.
+pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["1.0"];
 pub(crate) const CODE_API_VERSION: &str = "1.128.0";
 pub(crate) const DEFAULT_CATALOG_HASH: &str =
     "sha256:53cf23036ed2e14693f284778d7f2b0cd7cd5802ee63bb42c573063f40f86fb3";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProtocolMode {
-    Legacy,
-    JsonRpc,
+/// Pick the protocol version for a hello: the host's version for the highest
+/// major that both `client` and `supported` name. Unparsable entries are
+/// ignored. `None` means the two sides share no major.
+///
+/// Production passes [`SUPPORTED_PROTOCOL_VERSIONS`]; the two-major release
+/// gate exercises this same function with a wider set.
+pub(crate) fn negotiate_protocol(client: &[&str], supported: &[&str]) -> Option<String> {
+    let client_majors = client
+        .iter()
+        .filter_map(|version| parse_version(version).map(|(major, _)| major))
+        .collect::<Vec<_>>();
+    supported
+        .iter()
+        .filter_map(|version| parse_version(version).map(|(major, _)| (major, *version)))
+        .filter(|(major, _)| client_majors.contains(major))
+        .max_by_key(|(major, _)| *major)
+        .map(|(_, version)| version.to_string())
+}
+
+fn parse_version(version: &str) -> Option<(u32, u32)> {
+    let (major, minor) = version.split_once('.')?;
+    let major = major.parse::<u32>().ok()?;
+    let minor = minor.parse::<u32>().ok()?;
+    (major > 0).then_some((major, minor))
 }
 
 pub(crate) fn encode_content_length(value: &Value) -> Result<Vec<u8>, String> {
@@ -78,12 +100,13 @@ where
         .map_err(|error| format!("invalid JSON-RPC body: {error}"))
 }
 
-pub(crate) fn detect_protocol(prefix: &[u8]) -> ProtocolMode {
-    if prefix.starts_with(b"Content-Length:") || prefix.starts_with(b"content-length:") {
-        ProtocolMode::JsonRpc
-    } else {
-        ProtocolMode::Legacy
-    }
+/// Whether the first bytes a peer sent open a `Content-Length` header. Only
+/// the bytes already buffered are inspected, so a short prefix of the header
+/// name is accepted and the frame reader decides.
+pub(crate) fn is_content_length_prefix(prefix: &[u8]) -> bool {
+    const HEADER: &[u8] = b"content-length:";
+    let compared = prefix.len().min(HEADER.len());
+    prefix[..compared].eq_ignore_ascii_case(&HEADER[..compared])
 }
 
 fn parse_content_length(header: &str) -> Result<usize, String> {
@@ -114,15 +137,61 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn protocol_detection_is_explicit() {
+    fn only_content_length_framing_is_accepted() {
+        assert!(is_content_length_prefix(b"Content-Length: 2\r\n\r\n{}"));
+        assert!(is_content_length_prefix(b"content-length: 2"));
+        assert!(is_content_length_prefix(b"Cont"));
+        assert!(!is_content_length_prefix(br#"{"type":"hello"}"#));
+        assert!(!is_content_length_prefix(b"GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn negotiation_picks_the_highest_shared_major() {
         assert_eq!(
-            detect_protocol(b"Content-Length: 2\r\n\r\n{}"),
-            ProtocolMode::JsonRpc
+            negotiate_protocol(&["1.0"], SUPPORTED_PROTOCOL_VERSIONS).as_deref(),
+            Some("1.0")
+        );
+        // Minor differences inside a major still negotiate; capabilities carry them.
+        assert_eq!(
+            negotiate_protocol(&["1.3"], SUPPORTED_PROTOCOL_VERSIONS).as_deref(),
+            Some("1.0")
         );
         assert_eq!(
-            detect_protocol(br#"{"type":"hello"}"#),
-            ProtocolMode::Legacy
+            negotiate_protocol(&["0.2"], SUPPORTED_PROTOCOL_VERSIONS),
+            None
         );
+        assert_eq!(
+            negotiate_protocol(&["2.0"], SUPPORTED_PROTOCOL_VERSIONS),
+            None
+        );
+        assert_eq!(
+            negotiate_protocol(&["garbage", ""], SUPPORTED_PROTOCOL_VERSIONS),
+            None
+        );
+    }
+
+    /// The release gate: a host serving two majors negotiates with old and new
+    /// clients alike, and prefers the newer major when both are offered.
+    #[test]
+    fn two_major_negotiation_serves_old_and_new_clients() {
+        let supported = &["1.0", "2.1"];
+        assert_eq!(
+            negotiate_protocol(&["1.0"], supported).as_deref(),
+            Some("1.0")
+        );
+        assert_eq!(
+            negotiate_protocol(&["2.0"], supported).as_deref(),
+            Some("2.1")
+        );
+        assert_eq!(
+            negotiate_protocol(&["1.0", "2.0"], supported).as_deref(),
+            Some("2.1")
+        );
+        assert_eq!(
+            negotiate_protocol(&["2.0", "1.0"], supported).as_deref(),
+            Some("2.1")
+        );
+        assert_eq!(negotiate_protocol(&["3.0"], supported), None);
     }
 
     #[test]

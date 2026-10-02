@@ -14,6 +14,7 @@
 pub mod agent_channel;
 mod broker_protocol;
 pub mod content_bridge;
+mod credential;
 pub mod download;
 pub mod host;
 pub mod process;

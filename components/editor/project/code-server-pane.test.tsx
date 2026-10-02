@@ -4,7 +4,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
-jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn(), warning: jest.fn() } }))
 jest.mock("@/hooks/codeserver/use-code-server-settings-sync", () => ({
   useCodeServerSettingsSync: jest.fn(),
 }))
@@ -16,6 +16,14 @@ jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
 }))
 jest.mock("@/hooks/codeserver/use-code-server-chat-bridge", () => ({
   useCodeServerChatBridge: jest.fn(),
+}))
+type BrokerIssueHandler = (event: { root: string; issue: string }) => void
+const brokerIssues: { enabled?: boolean; onIssue?: BrokerIssueHandler } = {}
+jest.mock("@/hooks/codeserver/use-code-server-broker-issues", () => ({
+  useCodeServerBrokerIssues: (enabled: boolean, _root: string, onIssue: BrokerIssueHandler) => {
+    brokerIssues.enabled = enabled
+    brokerIssues.onIssue = onIssue
+  },
 }))
 // Whether this shell is driving another Cognia host. The app-to-editor half of
 // Pro IDE is `target: "client"`, so it stays on THIS machine while the
@@ -283,6 +291,31 @@ it("surfaces a toast and calls onRevoked when the shared pane is revoked", () =>
 
   expect(toast.info).toHaveBeenCalledWith("proIde.revokedToMonaco")
   expect(onRevoked).toHaveBeenCalled()
+})
+
+it("warns when the broker credential tripwire fires for the managed profile", async () => {
+  const { toast } = await import("sonner")
+  render(<CodeServerPane root="/work/proj" ownerId="dock" onRevoked={jest.fn()} />)
+  expect(brokerIssues.enabled).toBe(true)
+  act(() => brokerIssues.onIssue?.({ root: "/work/proj", issue: "credential-replayed" }))
+  expect(toast.warning).toHaveBeenCalledWith("proIde.brokerIssue.credential-replayed", {
+    duration: 15_000,
+  })
+})
+
+it.each(["install-failed", "registration-failed", "protocol-incompatible"])(
+  "explains why agent drive is off when the broker reports %s",
+  async (issue) => {
+    const { toast } = await import("sonner")
+    render(<CodeServerPane root="/work/proj" ownerId="dock" onRevoked={jest.fn()} />)
+    act(() => brokerIssues.onIssue?.({ root: "/work/proj", issue }))
+    expect(toast.error).toHaveBeenCalledWith(`proIde.brokerIssue.${issue}`)
+  }
+)
+
+it("does not watch broker issues in the native profile, which has no broker", () => {
+  render(<CodeServerPane root="/work/proj" ownerId="dock" profile="native" onRevoked={jest.fn()} />)
+  expect(brokerIssues.enabled).toBe(false)
 })
 
 it("always renders the reserved region the webview is positioned over", () => {

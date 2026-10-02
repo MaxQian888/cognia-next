@@ -16,6 +16,17 @@ const sources = (over = {}) => ({
     name: "cognia-managed-broker",
   }),
   proxy: 'const BROKER_EXTENSION_ID: &str = "cognia.cognia-managed-broker";',
+  extBuild: "writeFileSync(`${vsixPath}.sha256`, digest)",
+  tauriConf: JSON.stringify({
+    bundle: {
+      resources: [
+        "../sidecar/codeserver-agent-ext/cognia-managed-broker.vsix",
+        "../sidecar/codeserver-agent-ext/cognia-managed-broker.vsix.sha256",
+      ],
+    },
+  }),
+  serverImage:
+    "COPY --from=b /work/sidecar/codeserver-agent-ext/cognia-managed-broker.vsix.sha256 /opt/x",
   ...over,
 })
 
@@ -101,4 +112,24 @@ test("reports every drift at once rather than the first", () => {
     })
   )
   assert.equal(problems.length, 2)
+})
+
+test("catches a build that stopped writing the broker digest", () => {
+  const problems = auditProIdeConstants(sources({ extBuild: "writeFileSync(vsixPath, archive)" }))
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /no longer writes cognia-managed-broker\.vsix\.sha256/)
+})
+
+test("catches a bundle that ships the broker without its digest", () => {
+  const problems = auditProIdeConstants(
+    sources({
+      tauriConf: JSON.stringify({
+        bundle: { resources: ["../sidecar/codeserver-agent-ext/cognia-managed-broker.vsix"] },
+      }),
+      serverImage: "COPY nothing",
+    })
+  )
+  assert.equal(problems.length, 2)
+  assert.match(problems[0], /does not ship cognia-managed-broker\.vsix\.sha256/)
+  assert.match(problems[1], /server image does not copy/)
 })

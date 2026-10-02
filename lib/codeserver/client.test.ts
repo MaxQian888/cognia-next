@@ -230,6 +230,7 @@ it("exposes the backend event names", () => {
   expect(CODESERVER_EVENTS.instanceExited).toBe("codeserver://instance-exited")
   expect(CODESERVER_EVENTS.brokerRequest).toBe("codeserver://broker-request")
   expect(CODESERVER_EVENTS.brokerNotification).toBe("codeserver://broker-notification")
+  expect(CODESERVER_EVENTS.brokerIssue).toBe("codeserver://broker-issue")
 })
 
 it("validates broker paths on the IDE host", () => {

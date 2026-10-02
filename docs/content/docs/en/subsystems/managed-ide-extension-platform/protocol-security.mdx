@@ -7,17 +7,31 @@ description: Broker negotiation, callback authorization, storage, content handle
 
 Protocol 1.0 is JSON-RPC 2.0 over loopback TCP with `Content-Length` framing.
 Frames, headers, queues, handles, in-flight requests, and deadlines are
-bounded. Challenge/HMAC authentication proves possession of a per-instance
-secret without placing it in the hello. The hello negotiates protocol major,
-Code API version, catalog hash, host, canonical workspace, and capabilities.
+bounded. The hello negotiates protocol major, Code API version, catalog hash,
+host, canonical workspace, and capabilities.
+
+The broker secret never enters code-server's environment, which every terminal,
+task and language server inherits ([ADR-0212](../../adr/0212-the-broker-credential-is-a-file-not-an-environment)).
+The host writes a single-use bootstrap credential to a `0600` file in a private
+directory outside the user-data dir and puts only its path in
+`COGNIA_CS_AGENT_CREDENTIAL_FILE`; the extension reads and unlinks it.
+Challenge/HMAC authentication proves possession without sending the secret, and
+both sides then derive a session key from the secret and the two handshake
+nonces. Reconnects prove the session, which rotates on every hello. The content
+endpoint's bearer is derived from the session and compared in constant time.
+Whenever no extension host is connected the host re-mints the bootstrap file;
+a bootstrap presented again while its first user is still connected closes
+every connection for the workspace, re-mints, and warns the user.
 
 Each connection has a monotonic generation. Disconnect fails all pending
 requests. Responses, cancellation, progress, events, content handles, and
 tickets from an old generation are rejected. Reconnect rebuilds registrations,
-subscriptions, and snapshots only; actions are never replayed. Protocol majors
-1 and its predecessor are supported through negotiation. The legacy `0.2.x`
-newline bridge remains compatibility-only for one release and reports new
-capabilities as unsupported.
+subscriptions, and snapshots only; actions are never replayed. The hello offers
+every version the extension speaks and the host answers with the highest major
+both share; minor differences ride on capabilities. A peer with no shared major,
+or one that does not open with a `Content-Length` header (the retired `0.2.x`
+newline bridge included), is answered with `IDE_BROKER_PROTOCOL_INCOMPATIBLE`
+and closed, and the IDE status records why.
 
 Large or binary values use one-shot 30-second content handles bound to root,
 generation, plugin, provider, permission, and direction. Bytes move through a

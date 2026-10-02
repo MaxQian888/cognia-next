@@ -193,16 +193,28 @@ impl CodeServerState {
         // Side-load the managed-broker extension (best-effort, once per version) BEFORE
         // the child starts so it activates on this launch. A missing/failed install
         // only degrades the Pro IDE agent-drive features, never the spawn itself.
-        let broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
+        let mut broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
+        let mut broker_issue = None;
         if broker_enabled {
-            install_broker_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
-            install_managed_proxy_extensions(
-                app,
-                &info.binary_path,
-                &extensions_dir,
-                &user_data_dir,
-            )
-            .await;
+            match install_broker_extension(&info.binary_path, &extensions_dir, &user_data_dir).await
+            {
+                Ok(()) => {
+                    install_managed_proxy_extensions(
+                        app,
+                        &info.binary_path,
+                        &extensions_dir,
+                        &user_data_dir,
+                    )
+                    .await;
+                }
+                Err(error) => {
+                    // The workbench still starts; only the broker is withheld,
+                    // and the status says why.
+                    log::warn!("code-server managed broker unavailable: {error}");
+                    broker_enabled = false;
+                    broker_issue = Some(super::agent_channel::BrokerIssue::InstallFailed);
+                }
+            }
         }
 
         // Same deal for the display-language pack: VS Code ships English only, so a
@@ -219,30 +231,37 @@ impl CodeServerState {
         }
 
         // Register this instance with the agent control channel BEFORE spawn so the
-        // agent-channel port + per-instance token can be injected into the child's
-        // env — the companion extension reads them on activate to dial back. Any
-        // failure after this must deregister so a leaked token can't address a dead
-        // editor.
+        // agent-channel port and the bootstrap credential file's path can be injected
+        // into the child's env — the companion extension reads them on activate to
+        // dial back. Any failure after this must deregister so nothing the old
+        // registration minted can address a dead editor.
         let mut agent_envs = Vec::new();
+        let channel = super::agent_channel::global();
+        // Hand over the app handle before the extension can connect (so the very
+        // first pushed editor event has somewhere to go) and before any broker
+        // issue below is recorded, which is also a renderer event.
+        channel.attach_app(app);
         if broker_enabled {
-            let channel = super::agent_channel::global();
-            // Hand over the app handle before the extension can connect, so the very
-            // first pushed editor event has somewhere to go.
-            channel.attach_app(app);
-            let (agent_port, agent_token) = channel.register_instance(&canonical).await?;
-            let content_port = channel.content_port().await?;
-            agent_envs.extend([
-                ("COGNIA_CS_AGENT_PORT", agent_port.to_string()),
-                ("COGNIA_CS_AGENT_TOKEN", agent_token),
-                ("COGNIA_CS_CONTENT_PORT", content_port.to_string()),
-                ("COGNIA_CS_BROKER_PROTOCOL", "1".to_string()),
-                (
-                    "COGNIA_CS_CATALOG_HASH",
-                    super::broker_protocol::DEFAULT_CATALOG_HASH.to_string(),
-                ),
-                ("COGNIA_CS_HOST_ID", "local".to_string()),
-                ("COGNIA_CS_WORKSPACE", canonical.clone()),
-            ]);
+            match channel.register_instance(&canonical).await {
+                Ok(registration) => {
+                    agent_envs.extend(broker_child_env(&registration, "local", &canonical));
+                }
+                Err(error) => {
+                    // The workbench still starts; only the broker is withheld.
+                    log::warn!("code-server managed broker registration failed: {error}");
+                    broker_enabled = false;
+                    channel.deregister(&canonical);
+                    channel.record_issue(
+                        &canonical,
+                        super::agent_channel::BrokerIssue::RegistrationFailed,
+                    );
+                }
+            }
+        } else {
+            channel.deregister(&canonical);
+            if let Some(issue) = broker_issue {
+                channel.record_issue(&canonical, issue);
+            }
         }
 
         let child = match spawn_child(&info.binary_path, &args, &agent_envs) {
@@ -675,9 +694,7 @@ async fn activate_managed_proxy(
             .await;
         if handshake.is_err() {
             if let Some(generation) = generation {
-                let _ = channel
-                    .send(root, "restartManagedExtensionHost", json!({}))
-                    .await;
+                let _ = channel.restart_extension_host(root).await;
                 if channel
                     .wait_for_new_generation(root, generation, Duration::from_secs(30))
                     .await
@@ -703,9 +720,10 @@ async fn restart_managed_extension_hosts(
         let generation = channel
             .connection_generation(root)
             .ok_or_else(|| format!("{root}: managed extension host is disconnected"))?;
-        let _ = channel
-            .send(root, "restartManagedExtensionHost", json!({}))
-            .await;
+        channel
+            .restart_extension_host(root)
+            .await
+            .map_err(|error| format!("{root}: {error}"))?;
         channel
             .wait_for_new_generation(root, generation, Duration::from_secs(30))
             .await
@@ -984,7 +1002,31 @@ pub(super) fn open_file_args(
     ]
 }
 
-fn session_socket_dir() -> PathBuf {
+/// The environment a broker-enabled code-server child receives. Ports, host
+/// id, workspace and the bootstrap credential file's *path* only: the secret
+/// stays in the file so terminals, tasks and language servers that inherit
+/// this environment never see it (see `credential.rs`).
+pub(crate) fn broker_child_env(
+    registration: &super::agent_channel::BrokerRegistration,
+    host_id: &str,
+    canonical_root: &str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("COGNIA_CS_AGENT_PORT", registration.port.to_string()),
+        (
+            super::credential::CREDENTIAL_FILE_ENV,
+            registration.credential_file.to_string_lossy().into_owned(),
+        ),
+        (
+            "COGNIA_CS_CONTENT_PORT",
+            registration.content_port.to_string(),
+        ),
+        ("COGNIA_CS_HOST_ID", host_id.to_string()),
+        ("COGNIA_CS_WORKSPACE", canonical_root.to_string()),
+    ]
+}
+
+pub(crate) fn session_socket_dir() -> PathBuf {
     #[cfg(unix)]
     {
         // SAFETY: geteuid only reads the current process identity.
@@ -1008,6 +1050,12 @@ pub(super) fn prepare_session_socket_dir() -> Result<(), String> {
     prepare_session_socket_dir_at(&session_socket_dir())
 }
 
+/// Create `directory` as a `0700` directory owned by this user, or verify an
+/// existing one is. Shared by the session socket and broker credential dirs.
+pub(crate) fn prepare_private_dir(directory: &Path) -> Result<(), String> {
+    prepare_session_socket_dir_at(directory)
+}
+
 fn prepare_session_socket_dir_at(directory: &Path) -> Result<(), String> {
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
@@ -1018,12 +1066,20 @@ fn prepare_session_socket_dir_at(directory: &Path) -> Result<(), String> {
     match builder.create(directory) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(format!("create code-server socket directory: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "create private directory {}: {error}",
+                directory.display()
+            ))
+        }
     }
     let metadata = std::fs::symlink_metadata(directory)
-        .map_err(|error| format!("inspect code-server socket directory: {error}"))?;
+        .map_err(|error| format!("inspect private directory {}: {error}", directory.display()))?;
     if !metadata.is_dir() {
-        return Err("code-server socket directory must be a private directory".to_string());
+        return Err(format!(
+            "{} must be a private directory, not a link or file",
+            directory.display()
+        ));
     }
     #[cfg(unix)]
     {
@@ -1032,10 +1088,10 @@ fn prepare_session_socket_dir_at(directory: &Path) -> Result<(), String> {
         if metadata.uid() != unsafe { libc::geteuid() }
             || metadata.permissions().mode() & 0o077 != 0
         {
-            return Err(
-                "code-server socket directory must be owned by this user with mode 0700"
-                    .to_string(),
-            );
+            return Err(format!(
+                "{} must be owned by this user with mode 0700",
+                directory.display()
+            ));
         }
     }
     Ok(())
@@ -1089,60 +1145,101 @@ fn pick_free_loopback_port() -> Result<u16, String> {
 }
 
 /// Version of the bundled managed-broker extension. Bump in lockstep with
-/// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
-/// reinstall (the marker below stores the installed version).
+/// `sidecar/codeserver-agent-ext/package.json` `version`.
 /// `pnpm audit:pro-ide-constants` fails when the two drift.
-#[cfg(any(feature = "tauri-host", test))]
-const BROKER_EXT_VERSION: &str = "1.1.0";
+pub(crate) const BROKER_EXT_VERSION: &str = "1.2.0";
 /// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
-#[cfg(feature = "tauri-host")]
-const BROKER_EXT_VSIX: &str = "cognia-managed-broker.vsix";
+pub(crate) const BROKER_EXT_VSIX: &str = "cognia-managed-broker.vsix";
 
-/// Whether a stored install-marker value means the current extension version is
-/// already installed (so the reinstall can be skipped). Pure, so the version-gate
-/// contract is unit-tested without spawning code-server.
-#[cfg(any(feature = "tauri-host", test))]
-fn broker_ext_install_up_to_date(marker: Option<&str>) -> bool {
-    marker == Some(BROKER_EXT_VERSION)
+/// Check the bundled broker `.vsix` against the SHA-256 the build wrote beside
+/// it (`<vsix>.sha256`) and return the digest.
+///
+/// The build is deterministic (`vsix-zip.mjs` pins timestamps and part order),
+/// so the digest is a property of the source tree. A mismatch means the file
+/// shipped with the app was altered or truncated after the build, and it is
+/// refused rather than installed into the managed profile.
+pub(crate) fn verify_broker_vsix(vsix: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(vsix).map_err(|error| {
+        format!(
+            "IDE_BROKER_INSTALL_FAILED: read {}: {error}",
+            vsix.display()
+        )
+    })?;
+    let expected_path = broker_digest_path(vsix);
+    let expected = std::fs::read_to_string(&expected_path).map_err(|error| {
+        format!(
+            "IDE_BROKER_INSTALL_FAILED: read {}: {error}",
+            expected_path.display()
+        )
+    })?;
+    let expected = expected
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let actual = hex::encode(Sha256::digest(&bytes));
+    if expected != actual {
+        return Err(format!(
+            "IDE_BROKER_INSTALL_FAILED: {} does not match its recorded digest",
+            vsix.display()
+        ));
+    }
+    Ok(actual)
 }
 
-/// Side-load the Cognia managed-broker extension into `extensions_dir`, at most once
-/// per version. Best-effort: a missing vsix or a failed install only degrades the
-/// Pro IDE agent-drive features (open/reveal falls back to the CLI, edits to a disk
-/// reload) — it must never block a code-server spawn, so every failure just logs.
+fn broker_digest_path(vsix: &Path) -> PathBuf {
+    let mut name = vsix.as_os_str().to_os_string();
+    name.push(".sha256");
+    PathBuf::from(name)
+}
+
+/// The install-marker value for a verified broker build: version and content
+/// digest, so a rebuilt extension reinstalls even if nobody bumped the version.
+pub(crate) fn broker_install_marker(digest: &str) -> String {
+    format!("{BROKER_EXT_VERSION}+{digest}")
+}
+
+/// Whether a stored install-marker value means this exact broker build is
+/// already installed (so the reinstall can be skipped). Pure, so the gate is
+/// unit-tested without spawning code-server.
+pub(crate) fn broker_ext_install_up_to_date(marker: Option<&str>, digest: &str) -> bool {
+    marker.map(str::trim) == Some(broker_install_marker(digest).as_str())
+}
+
+/// Side-load the Cognia managed-broker extension into `extensions_dir`, at most
+/// once per verified build.
+///
+/// A failure here is returned, not swallowed: the caller starts the workbench
+/// without the broker and records [`super::agent_channel::BrokerIssue::InstallFailed`]
+/// so the IDE status says why agent drive is unavailable.
 #[cfg(feature = "tauri-host")]
 async fn install_broker_extension(
-    _app: &tauri::AppHandle,
     binary: &str,
     extensions_dir: &Path,
     user_data_dir: &Path,
-) {
-    let marker = extensions_dir.join(".cognia-managed-broker-version");
-    // Async I/O on the runtime thread (this runs under `ensure`'s operation_lock);
-    // matches the spawn_blocking-avoidance the sibling settings commands use.
-    let existing = tokio::fs::read_to_string(&marker).await.ok();
-    if broker_ext_install_up_to_date(existing.as_deref()) {
-        return;
-    }
-    let vsix = match cognia_sidecar::directory() {
-        Ok(dir) => dir.join("codeserver-agent-ext").join(BROKER_EXT_VSIX),
-        Err(e) => {
-            log::warn!("code-server managed broker: sidecar dir unresolved: {e}");
-            return;
-        }
+) -> Result<(), String> {
+    let vsix = cognia_sidecar::directory()
+        .map_err(|e| format!("IDE_BROKER_INSTALL_FAILED: sidecar dir unresolved: {e}"))?
+        .join("codeserver-agent-ext")
+        .join(BROKER_EXT_VSIX);
+    let digest = {
+        let vsix = vsix.clone();
+        tokio::task::spawn_blocking(move || verify_broker_vsix(&vsix))
+            .await
+            .map_err(|error| format!("IDE_BROKER_INSTALL_FAILED: verify task: {error}"))??
     };
-    if !vsix.exists() {
-        log::warn!(
-            "code-server managed broker: vsix not found at {} (Pro IDE agent-drive disabled)",
-            vsix.display()
-        );
-        return;
+    let marker = extensions_dir.join(".cognia-managed-broker-version");
+    let existing = tokio::fs::read_to_string(&marker).await.ok();
+    if broker_ext_install_up_to_date(existing.as_deref(), &digest) {
+        return Ok(());
     }
 
     let mut command = Command::new(binary);
     command
         .arg("--install-extension")
         .arg(&vsix)
+        .arg("--force")
         .arg("--extensions-dir")
         .arg(extensions_dir)
         .arg("--user-data-dir")
@@ -1152,19 +1249,19 @@ async fn install_broker_extension(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    match tokio::time::timeout(Duration::from_secs(60), command.output()).await {
-        Ok(Ok(output)) if output.status.success() => {
-            if let Err(e) = tokio::fs::write(&marker, BROKER_EXT_VERSION).await {
-                log::warn!("code-server managed broker: write install marker: {e}");
-            }
-        }
-        Ok(Ok(output)) => log::warn!(
-            "code-server managed broker install failed: {}",
+    let output = tokio::time::timeout(Duration::from_secs(60), command.output())
+        .await
+        .map_err(|_| "IDE_BROKER_INSTALL_FAILED: install timed out".to_string())?
+        .map_err(|e| format!("IDE_BROKER_INSTALL_FAILED: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "IDE_BROKER_INSTALL_FAILED: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ),
-        Ok(Err(e)) => log::warn!("code-server managed broker install: {e}"),
-        Err(_) => log::warn!("code-server managed broker install timed out"),
+        ));
     }
+    tokio::fs::write(&marker, broker_install_marker(&digest))
+        .await
+        .map_err(|e| format!("IDE_BROKER_INSTALL_FAILED: write install marker: {e}"))
 }
 
 /// Install every locally generated proxy that still passes signature and
@@ -1652,11 +1749,67 @@ mod tests {
     }
 
     #[test]
-    fn broker_ext_marker_gates_reinstall_on_version() {
-        // Same version → skip; different or absent marker → (re)install.
-        assert!(broker_ext_install_up_to_date(Some(BROKER_EXT_VERSION)));
-        assert!(!broker_ext_install_up_to_date(Some("0.0.1")));
-        assert!(!broker_ext_install_up_to_date(None));
+    fn the_child_environment_carries_a_credential_path_never_a_secret() {
+        let registration = super::super::agent_channel::BrokerRegistration {
+            port: 4100,
+            content_port: 4101,
+            credential_file: PathBuf::from("/tmp/cgncs-501/broker/abc.cred"),
+        };
+        let env = broker_child_env(&registration, "local", "/work/proj");
+        let names: Vec<&str> = env.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names,
+            [
+                "COGNIA_CS_AGENT_PORT",
+                "COGNIA_CS_AGENT_CREDENTIAL_FILE",
+                "COGNIA_CS_CONTENT_PORT",
+                "COGNIA_CS_HOST_ID",
+                "COGNIA_CS_WORKSPACE",
+            ]
+        );
+        assert!(!names.contains(&"COGNIA_CS_AGENT_TOKEN"));
+        assert!(env.contains(&(
+            "COGNIA_CS_AGENT_CREDENTIAL_FILE",
+            "/tmp/cgncs-501/broker/abc.cred".to_string()
+        )));
+    }
+
+    #[test]
+    fn broker_ext_marker_gates_reinstall_on_version_and_digest() {
+        let current = broker_install_marker("abc");
+        assert!(broker_ext_install_up_to_date(Some(&current), "abc"));
+        assert!(broker_ext_install_up_to_date(
+            Some(&format!("{current}\n")),
+            "abc"
+        ));
+        // A rebuilt extension reinstalls even at the same version.
+        assert!(!broker_ext_install_up_to_date(Some(&current), "def"));
+        // Markers from the version-only era always reinstall.
+        assert!(!broker_ext_install_up_to_date(
+            Some(BROKER_EXT_VERSION),
+            "abc"
+        ));
+        assert!(!broker_ext_install_up_to_date(None, "abc"));
+    }
+
+    #[test]
+    fn the_bundled_broker_is_refused_when_its_digest_does_not_match() {
+        use sha2::{Digest, Sha256};
+        let temp = tempfile::tempdir().unwrap();
+        let vsix = temp.path().join(BROKER_EXT_VSIX);
+        std::fs::write(&vsix, b"vsix bytes").unwrap();
+        let digest = hex::encode(Sha256::digest(b"vsix bytes"));
+        let sidecar = temp.path().join(format!("{BROKER_EXT_VSIX}.sha256"));
+
+        assert!(verify_broker_vsix(&vsix)
+            .unwrap_err()
+            .starts_with("IDE_BROKER_INSTALL_FAILED"));
+        std::fs::write(&sidecar, format!("{digest}  {BROKER_EXT_VSIX}\n")).unwrap();
+        assert_eq!(verify_broker_vsix(&vsix).unwrap(), digest);
+        std::fs::write(&vsix, b"tampered").unwrap();
+        assert!(verify_broker_vsix(&vsix)
+            .unwrap_err()
+            .contains("does not match"));
     }
 
     #[test]

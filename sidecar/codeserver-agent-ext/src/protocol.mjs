@@ -1,75 +1,9 @@
-// Pure wire-protocol helpers for the Cognia agent bridge extension.
+// Pure editor-verb helpers for the Cognia agent bridge extension.
 //
-// Kept free of the `vscode` API so the framing/parsing logic is unit-testable
-// with `node --test` (see `tests/protocol.test.mjs`). The transport is
-// newline-delimited JSON over a loopback TCP socket — one JSON object per line
-// — matching `src-tauri/src/codeserver/agent_channel.rs`.
-
-/**
- * Split a receive buffer into complete lines, returning the leftover partial
- * line so the caller can prepend it to the next chunk. Blank lines are dropped.
- */
-export function splitFrames(buffer) {
-  const lines = []
-  let rest = buffer
-  let nl
-  while ((nl = rest.indexOf("\n")) >= 0) {
-    const line = rest.slice(0, nl).trim()
-    rest = rest.slice(nl + 1)
-    if (line) lines.push(line)
-  }
-  return { lines, rest }
-}
-
-/**
- * Parse a request line. Returns `null` for anything that is not a well-formed
- * `req` frame, so a malformed or hostile line is ignored rather than throwing.
- */
-export function parseRequest(line) {
-  let frame
-  try {
-    frame = JSON.parse(line)
-  } catch {
-    return null
-  }
-  if (
-    !frame ||
-    frame.type !== "req" ||
-    typeof frame.id !== "number" ||
-    typeof frame.method !== "string"
-  ) {
-    return null
-  }
-  return { id: frame.id, method: frame.method, params: frame.params ?? {} }
-}
-
-/** The one-time authentication frame sent right after connecting. */
-export function helloFrame(token) {
-  return JSON.stringify({ type: "hello", token }) + "\n"
-}
-
-/**
- * Build an unsolicited event frame (extension → app, no correlation id).
- *
- * The request/response pair only lets the app *ask*, which forces it to poll for
- * "what is the user looking at now". Events invert that: the extension reports
- * editor changes as they happen, and the app's active-editor subscribers refresh
- * off the signal instead of on a timer.
- */
-export function eventFrame(name, payload) {
-  return JSON.stringify({ type: "evt", name, payload: payload ?? null }) + "\n"
-}
-
-/**
- * Build a response frame correlated to a request `id`. `outcome` is either
- * `{ ok: true, result }` or `{ ok: false, error }`.
- */
-export function responseFrame(id, outcome) {
-  const frame = outcome.ok
-    ? { type: "res", id, ok: true, result: outcome.result ?? null }
-    : { type: "res", id, ok: false, error: outcome.error ?? "error" }
-  return JSON.stringify(frame) + "\n"
-}
+// Kept free of the `vscode` API so the decisions are unit-testable with
+// `node --test` (see `tests/protocol.test.mjs`). Framing lives in
+// `jsonrpc.mjs`; the wire protocol is JSON-RPC 2.0 with `Content-Length`
+// framing, matching `crates/cognia-codeserver/src/agent_channel.rs`.
 
 /**
  * Convert an incoming 1-based line/column (editor-UI convention, matching the

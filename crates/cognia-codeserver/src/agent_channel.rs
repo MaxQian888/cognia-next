@@ -14,52 +14,62 @@
 //! # Transport
 //!
 //! JSON-RPC 2.0 with LSP-style `Content-Length` framing over a loopback TCP socket
-//! (`127.0.0.1`). The legacy newline protocol remains available for one release
-//! cycle and exposes only its original editor-control surface.
+//! (`127.0.0.1`). The protocol major is negotiated in the hello
+//! ([`super::broker_protocol::negotiate_protocol`]). Anything that does not open
+//! with a `Content-Length` header (the retired newline protocol included) is
+//! answered with `IDE_BROKER_PROTOCOL_INCOMPATIBLE` and closed.
 //!
 //! # Topology
 //!
 //! There is exactly ONE loopback TCP server per app (lazily bound to `127.0.0.1:0`).
-//! Each spawned code-server instance is `register`ed here, minting a per-instance
-//! CSPRNG token mapped to that instance's canonical project root. The token + the
-//! port are injected into the code-server child's environment (`process.rs`); the
-//! companion extension reads them, connects, and sends a `hello { token }` line. The
-//! server maps the token back to the root and stores the connection, so
+//! Each spawned code-server instance is `register`ed here, which writes a
+//! single-use bootstrap credential file for that instance's canonical project
+//! root (see [`super::credential`]). Only the file's *path* and the port go into
+//! the code-server child's environment (`process.rs`, `remote.rs`); the companion
+//! extension reads and unlinks the file, connects, and authenticates. The server
+//! maps the credential back to the root and stores the connection, so
 //! [`AgentChannel::send`] can address a request "to the editor serving root X".
 //!
-//! # Wire protocol (one JSON object per line)
+//! # Handshake
 //!
 //! ```text
-//! // extension → app, once on connect
-//! { "type": "hello", "token": "<per-instance>" }
-//! // app → extension
-//! { "type": "req", "id": 1, "method": "openFile",
-//!   "params": { "path": "/abs/file.ts", "line": 42, "column": 1 } }
-//! // extension → app
-//! { "type": "res", "id": 1, "ok": true, "result": { … } }
-//! { "type": "res", "id": 1, "ok": false, "error": "…" }
-//! // extension → app, unsolicited
-//! { "type": "evt", "name": "activeEditorChanged", "payload": { … } }
+//! ext → app  cognia/auth/challenge { tokenId, clientNonce }
+//! app → ext  { challenge }                       // the server nonce
+//! ext → app  cognia/hello { tokenId, proof = HMAC(secret, challenge), protocolVersions, … }
+//! app → ext  { protocolVersion, generation, sessionId, capabilities, … }
 //! ```
 //!
-//! The envelope is method-generic: `openFile`, `applyEdit`, `readActive`, `saveAll`,
-//! `showDiff`, `revealInExplorer`, `runInTerminal` and `notify` all ride the same
-//! frames, so new editor-control methods slot in without a protocol change.
+//! `tokenId` names either the instance's unconsumed bootstrap credential or its
+//! current session. A successful hello consumes a bootstrap, and both sides
+//! derive the next session key from the presented secret and the two nonces, so
+//! the key itself never crosses the wire. Reconnects present the session; every
+//! successful hello rotates it.
 //!
-//! `evt` is the reverse direction and carries no id: the extension reports editor
-//! changes as they happen (active editor, selection, save, diagnostics) and the app
-//! re-reads off the signal instead of polling `readActive` on a timer. Events are
-//! re-emitted to the renderer as [`CODESERVER_EDITOR_EVENT`].
+//! The newest authenticated connection for a root replaces the previous one,
+//! and the replaced socket is closed. Replacement therefore needs proof of the
+//! current session or of a bootstrap the host minted itself (initial spawn, an
+//! extension-host restart, or a re-mint after the last connection dropped).
 //!
-//! # Auth
+//! A bootstrap proven again while the connection that consumed it is still
+//! alive means two parties read the same file. That trips the instance: every
+//! connection for the root is closed, the session is revoked, a fresh bootstrap
+//! is minted, and [`CODESERVER_BROKER_ISSUE_EVENT`] tells the renderer. A
+//! session reconnect withdraws any unused bootstrap (other than one minted for
+//! a restart the app is driving), so no valid credential file sits beside a
+//! live connection.
 //!
-//! Loopback-source check + a per-instance shared token. The token is only ever placed
-//! in the (loopback-only) code-server child's env, so possessing it proves the caller
-//! is that instance's extension. Mirrors the fleet-token pattern rather than the
-//! heavier device-JWT the companion server uses.
+//! # Messages
+//!
+//! The editor verbs (`openFile`, `applyEdit`, `readActive`, `saveAll`, `showDiff`,
+//! `revealInExplorer`, `runInTerminal`, `notify`, `workspaceSnapshot`) are app →
+//! extension requests. The extension reports editor changes as `cognia/event`
+//! notifications, re-emitted to the renderer as [`CODESERVER_EDITOR_EVENT`], and
+//! forwards generated-proxy callbacks as requests the renderer answers through
+//! [`AgentChannel::respond`].
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -76,13 +86,16 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, OnceCell};
+use tokio::sync::{mpsc, oneshot, Notify, OnceCell};
 use uuid::Uuid;
 
 use super::broker_protocol::{
-    detect_protocol, encode_content_length, read_content_length_value, ProtocolMode,
-    CODE_API_VERSION, CURRENT_PROTOCOL_VERSION, DEFAULT_CATALOG_HASH, MAX_FRAME_BYTES,
-    PREVIOUS_PROTOCOL_VERSION,
+    encode_content_length, is_content_length_prefix, negotiate_protocol, read_content_length_value,
+    CODE_API_VERSION, DEFAULT_CATALOG_HASH, SUPPORTED_PROTOCOL_VERSIONS,
+};
+use super::credential::{
+    content_bearer, credential_file_path, derive_session_key, remove_credential_file,
+    secrets_equal, write_credential_file, BootstrapCredential,
 };
 
 /// How long a `send` waits for the extension to answer before giving up. The
@@ -98,7 +111,20 @@ const CONTENT_HANDLE_TTL: Duration = Duration::from_secs(30);
 const MAX_CONTENT_HANDLE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CONTENT_HANDLE_COUNT: usize = 128;
 const MAX_CONTENT_STORE_BYTES: usize = 128 * 1024 * 1024;
-type AuthenticationSuccess = (String, Option<Value>, Vec<String>);
+/// How often the channel checks that every disconnected instance still has a
+/// bootstrap credential file to find.
+const CREDENTIAL_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(5);
+/// A bootstrap whose file vanished is only re-minted once it is this old, so an
+/// extension that has read the file and is mid-handshake is not raced.
+const BOOTSTRAP_REMINT_GRACE: Duration = Duration::from_secs(10);
+/// Bounds on the extension's handshake nonce.
+const MIN_CLIENT_NONCE_LEN: usize = 16;
+const MAX_CLIENT_NONCE_LEN: usize = 256;
+/// How long an unauthenticated socket may take to complete the handshake.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// JSON-RPC error code for a client whose framing or protocol major the host
+/// cannot speak.
+const PROTOCOL_INCOMPATIBLE_CODE: i64 = -32001;
 type AuthenticationFailure = (Option<Value>, i64, String);
 const BROKER_CAPABILITIES: &[&str] = &[
     "cancel",
@@ -114,32 +140,11 @@ pub const CODESERVER_EDITOR_EVENT: &str = "codeserver://editor-event";
 pub const CODESERVER_BROKER_REQUEST_EVENT: &str = "codeserver://broker-request";
 /// Renderer event carrying a cancellation or other one-way broker notification.
 pub const CODESERVER_BROKER_NOTIFICATION_EVENT: &str = "codeserver://broker-notification";
+/// Renderer event raised when the broker for a workspace hits a problem the
+/// user should hear about (see [`BrokerIssue`]).
+pub const CODESERVER_BROKER_ISSUE_EVENT: &str = "codeserver://broker-issue";
 
-// ── Wire frames ──────────────────────────────────────────────────────────────
-
-/// A frame received from the companion extension.
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum InboundFrame {
-    /// First frame on connect; authenticates the socket against a minted token.
-    Hello { token: String },
-    /// Response correlated to a prior [`OutboundFrame::Req`] by `id`.
-    Res {
-        id: u64,
-        #[serde(default)]
-        ok: bool,
-        #[serde(default)]
-        result: Option<Value>,
-        #[serde(default)]
-        error: Option<String>,
-    },
-    /// Unsolicited editor-state change. No id — nothing correlates to it.
-    Evt {
-        name: String,
-        #[serde(default)]
-        payload: Option<Value>,
-    },
-}
+// ── Renderer payloads ────────────────────────────────────────────────────────
 
 /// Payload of [`CODESERVER_EDITOR_EVENT`]. `root` is the canonical project root the
 /// reporting instance serves, so a renderer hosting two panes can tell them apart.
@@ -186,15 +191,38 @@ pub struct ContentHandle {
     pub expires_at_ms: u64,
 }
 
-/// A frame sent to the companion extension.
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum OutboundFrame {
-    Req {
-        id: u64,
-        method: String,
-        params: Value,
-    },
+/// Payload of [`CODESERVER_BROKER_ISSUE_EVENT`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeServerBrokerIssueEvent {
+    pub root: String,
+    pub issue: BrokerIssue,
+}
+
+/// A broker-level problem the IDE surfaces instead of failing silently. Each
+/// one is emitted as [`CODESERVER_BROKER_ISSUE_EVENT`] when recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrokerIssue {
+    /// The extension offered no protocol major this host speaks.
+    ProtocolIncompatible,
+    /// The bundled broker extension could not be verified or installed.
+    InstallFailed,
+    /// The broker's credential file could not be written, so the workbench
+    /// started without the broker.
+    RegistrationFailed,
+    /// A bootstrap credential was presented twice while its first user was live.
+    CredentialReplayed,
+}
+
+/// What [`AgentChannel::register_instance_for_host`] hands the spawn path.
+#[derive(Debug, Clone)]
+pub struct BrokerRegistration {
+    pub port: u16,
+    pub content_port: u16,
+    /// Path of the bootstrap credential file. Goes into the child's environment
+    /// under [`super::credential::CREDENTIAL_FILE_ENV`]; the secret does not.
+    pub credential_file: PathBuf,
 }
 
 // ── Channel state ────────────────────────────────────────────────────────────
@@ -203,8 +231,10 @@ enum OutboundFrame {
 /// id so a stale close only evicts its own entry (not a fresher reconnect).
 struct Conn {
     conn_id: u64,
-    mode: ProtocolMode,
     tx: mpsc::Sender<Vec<u8>>,
+    /// Wakes the connection task so a replaced or revoked socket is actually
+    /// closed rather than left to notice on its next inbound frame.
+    close: Arc<Notify>,
 }
 
 struct PendingRequest {
@@ -215,17 +245,83 @@ struct PendingRequest {
 
 #[derive(Default)]
 struct Registry {
-    /// Per-instance opaque token id → root and HMAC secret.
-    tokens: HashMap<String, BrokerCredential>,
+    /// canonical project root → credential state of the instance serving it.
+    instances: HashMap<String, InstanceAuth>,
     /// canonical project root → live extension connection.
     conns: HashMap<String, Conn>,
+    /// canonical project root → the last broker problem worth surfacing.
+    issues: HashMap<String, BrokerIssue>,
+}
+
+/// Credential state for one registered instance. See the module docs.
+struct InstanceAuth {
+    host_id: String,
+    credential_file: PathBuf,
+    /// The bootstrap waiting to be consumed, if any.
+    bootstrap: Option<PendingBootstrap>,
+    /// The bootstrap the current session came from, and the connection that
+    /// consumed it. Presenting it again while that connection lives trips the
+    /// instance.
+    consumed: Option<ConsumedBootstrap>,
+    session: Option<SessionCredential>,
+}
+
+struct PendingBootstrap {
+    credential: BootstrapCredential,
+    minted: Instant,
+    /// Minted for an extension-host restart the app is driving. It must
+    /// survive the old host's session reconnects until the new host uses it;
+    /// any other bootstrap is withdrawn as soon as a session reconnects, so no
+    /// unused credential sits on disk next to a live connection.
+    for_restart: bool,
+}
+
+impl PendingBootstrap {
+    fn new(credential: BootstrapCredential, for_restart: bool) -> Self {
+        Self {
+            credential,
+            minted: Instant::now(),
+            for_restart,
+        }
+    }
+}
+
+struct ConsumedBootstrap {
+    token_id: String,
+    secret: String,
+    conn_id: u64,
 }
 
 #[derive(Clone)]
-struct BrokerCredential {
+struct SessionCredential {
+    session_id: String,
+    key: [u8; 32],
+}
+
+/// The credential a challenge named, resolved to the secret the proof must use.
+#[derive(Clone)]
+struct ChallengeScope {
     root: String,
-    secret: String,
     host_id: String,
+    token_id: String,
+    kind: CredentialKind,
+    secret: Vec<u8>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CredentialKind {
+    Bootstrap,
+    Session,
+    /// A consumed bootstrap presented again while its consumer is connected.
+    /// Still challenged, so only a holder of the secret can trip the instance.
+    Replayed,
+}
+
+/// Outcome of a successful handshake once committed to the registry.
+struct CommittedConnection {
+    conn_id: u64,
+    session_id: String,
+    close: Arc<Notify>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -246,10 +342,15 @@ struct ContentRecord {
     bytes: Vec<u8>,
 }
 
-/// Sole owner of the loopback agent-control WS. See the module docs.
+/// Sole owner of the loopback agent-control socket. See the module docs.
 pub struct AgentChannel {
     port: OnceCell<u16>,
     content_port: OnceCell<u16>,
+    credential_dir: PathBuf,
+    /// Serializes credential-file writes and removals with the registry state
+    /// they mirror, so the file on disk always names the bootstrap the
+    /// registry holds. Always taken before `registry`, never while holding it.
+    credential_files: Mutex<()>,
     registry: Mutex<Registry>,
     content: Mutex<HashMap<String, ContentRecord>>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
@@ -267,9 +368,15 @@ pub struct AgentChannel {
 
 impl AgentChannel {
     fn new() -> Self {
+        Self::with_credential_dir(super::credential::default_credential_dir())
+    }
+
+    fn with_credential_dir(credential_dir: PathBuf) -> Self {
         Self {
             port: OnceCell::new(),
             content_port: OnceCell::new(),
+            credential_dir,
+            credential_files: Mutex::new(()),
             registry: Mutex::new(Registry::default()),
             content: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
@@ -281,51 +388,107 @@ impl AgentChannel {
         }
     }
 
-    /// Register a freshly-spawned code-server instance: (re)mint its token and
-    /// return `(ws_port, token)` for injection into the child's spawn env. Starts
-    /// the loopback WS server on first call.
-    ///
-    /// A prior registration for the same root is dropped first — a respawn must
-    /// invalidate the dead instance's token and connection so a leaked old token
-    /// can never address the new editor.
-    pub async fn register_instance(self: &Arc<Self>, root: &str) -> Result<(u16, String), String> {
+    /// Register a freshly-spawned local code-server instance. See
+    /// [`Self::register_instance_for_host`].
+    pub async fn register_instance(
+        self: &Arc<Self>,
+        root: &str,
+    ) -> Result<BrokerRegistration, String> {
         self.register_instance_for_host(root, "local").await
     }
 
-    /// Register an instance owned by a specific Cognia host. The host id is
-    /// authenticated during the JSON-RPC hello and prevents a credential
-    /// copied from another paired host from attaching to this generation.
+    /// Register an instance owned by a specific Cognia host: write its first
+    /// bootstrap credential file and return what the spawn path injects. Starts
+    /// the loopback servers on first call.
+    ///
+    /// A prior registration for the same root is dropped first — a respawn must
+    /// invalidate the dead instance's credentials and connection so nothing the
+    /// old instance held can address the new editor. The host id is
+    /// authenticated during the hello, so a credential copied from another
+    /// paired host cannot attach to this one.
     pub async fn register_instance_for_host(
         self: &Arc<Self>,
         root: &str,
         host_id: &str,
-    ) -> Result<(u16, String), String> {
+    ) -> Result<BrokerRegistration, String> {
         let port = self.ensure_server().await?;
-        self.ensure_content_server().await?;
-        let token_id = Uuid::new_v4().to_string();
-        let token_secret = Uuid::new_v4().to_string();
-        let replaced_conn = {
-            let mut reg = self.lock_registry();
-            reg.tokens.retain(|_, grant| grant.root != root);
-            let replaced = reg.conns.remove(root).map(|conn| conn.conn_id);
-            reg.tokens.insert(
-                token_id.clone(),
-                BrokerCredential {
-                    root: root.to_string(),
-                    secret: token_secret.clone(),
-                    host_id: host_id.to_string(),
-                },
-            );
+        let content_port = self.ensure_content_server().await?;
+        let credential_file = credential_file_path(&self.credential_dir, root, host_id);
+        let bootstrap = BootstrapCredential::mint();
+        let replaced = {
+            let _files = self.lock_credential_files();
+            write_credential_file(&credential_file, &bootstrap)?;
+            let (replaced, stale_file) = {
+                let mut reg = self.lock_registry();
+                reg.issues.remove(root);
+                let replaced = reg.conns.remove(root);
+                let stale_file = reg
+                    .instances
+                    .get(root)
+                    .map(|previous| previous.credential_file.clone())
+                    .filter(|previous| *previous != credential_file);
+                reg.instances.insert(
+                    root.to_string(),
+                    InstanceAuth {
+                        host_id: host_id.to_string(),
+                        credential_file: credential_file.clone(),
+                        bootstrap: Some(PendingBootstrap::new(bootstrap, false)),
+                        consumed: None,
+                        session: None,
+                    },
+                );
+                (replaced, stale_file)
+            };
+            if let Some(path) = stale_file {
+                remove_credential_file(&path);
+            }
             replaced
         };
-        if let Some(conn_id) = replaced_conn {
+        if let Some(conn) = replaced {
+            conn.close.notify_one();
             self.fail_pending_for_connection(
                 root,
-                conn_id,
+                conn.conn_id,
                 "Pro IDE extension instance was replaced",
             );
         }
-        Ok((port, format!("{token_id}.{token_secret}")))
+        Ok(BrokerRegistration {
+            port,
+            content_port,
+            credential_file,
+        })
+    }
+
+    /// Mint a fresh bootstrap for an extension host the app is about to
+    /// restart. The live connection stays up until the new host replaces it.
+    pub fn prepare_extension_host_restart(&self, root: &str) -> Result<(), String> {
+        self.remint_bootstrap(root, true)
+    }
+
+    /// Restart the extension host serving `root`, minting the bootstrap the
+    /// new host will authenticate with first. The old host is torn down while
+    /// it handles the request, so its reply rarely arrives and is not awaited
+    /// for success; callers wait for the next generation instead.
+    pub async fn restart_extension_host(&self, root: &str) -> Result<(), String> {
+        self.prepare_extension_host_restart(root)?;
+        let _ = self
+            .send(root, "restartManagedExtensionHost", serde_json::json!({}))
+            .await;
+        Ok(())
+    }
+
+    /// Record a broker problem for `root` and tell the renderer. The spawn
+    /// paths use this for install and registration failures; the channel uses
+    /// it for protocol refusals and the replay tripwire. Cleared by the next
+    /// successful handshake or registration.
+    pub fn record_issue(&self, root: &str, issue: BrokerIssue) {
+        self.lock_registry().issues.insert(root.to_string(), issue);
+        if let Ok(payload) = serde_json::to_value(CodeServerBrokerIssueEvent {
+            root: root.to_string(),
+            issue,
+        }) {
+            self.emit_renderer(CODESERVER_BROKER_ISSUE_EVENT, payload);
+        }
     }
 
     pub async fn content_port(self: &Arc<Self>) -> Result<u16, String> {
@@ -429,18 +592,26 @@ impl AgentChannel {
         }
     }
 
-    /// Forget an instance (explicit stop / kill-switch): drop its token(s) and any
-    /// live connection. Idempotent.
+    /// Forget an instance (explicit stop / kill-switch): drop its credentials,
+    /// its credential file and any live connection. Idempotent.
     pub fn deregister(&self, root: &str) {
-        let removed_conn = {
+        let (removed_conn, credential_file) = {
             let mut reg = self.lock_registry();
-            reg.tokens.retain(|_, grant| grant.root != root);
-            reg.conns.remove(root).map(|conn| conn.conn_id)
+            reg.issues.remove(root);
+            let instance = reg.instances.remove(root);
+            (
+                reg.conns.remove(root),
+                instance.map(|instance| instance.credential_file),
+            )
         };
-        if let Some(conn_id) = removed_conn {
+        if let Some(path) = credential_file {
+            remove_credential_file(&path);
+        }
+        if let Some(conn) = removed_conn {
+            conn.close.notify_one();
             self.fail_pending_for_connection(
                 root,
-                conn_id,
+                conn.conn_id,
                 "Pro IDE extension instance was deregistered",
             );
         }
@@ -450,11 +621,11 @@ impl AgentChannel {
     /// when no extension is connected for that root (caller degrades to the CLI /
     /// disk-reload path) or the request times out.
     pub async fn send(&self, root: &str, method: &str, params: Value) -> Result<Value, String> {
-        let (tx, conn_id, mode) = {
+        let (tx, conn_id) = {
             let reg = self.lock_registry();
             reg.conns
                 .get(root)
-                .map(|conn| (conn.tx.clone(), conn.conn_id, conn.mode))
+                .map(|conn| (conn.tx.clone(), conn.conn_id))
                 .ok_or_else(|| "Pro IDE extension is not connected for this project".to_string())?
         };
 
@@ -469,24 +640,17 @@ impl AgentChannel {
             },
         );
 
-        let bytes = match mode {
-            ProtocolMode::Legacy => {
-                let frame = OutboundFrame::Req {
-                    id,
-                    method: method.to_string(),
-                    params,
-                };
-                let mut bytes =
-                    serde_json::to_vec(&frame).map_err(|e| format!("encode request: {e}"))?;
-                bytes.push(b'\n');
-                bytes
+        let bytes = match encode_content_length(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        })) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.lock_pending().remove(&id);
+                return Err(error);
             }
-            ProtocolMode::JsonRpc => encode_content_length(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": method,
-                "params": params,
-            }))?,
         };
 
         let outcome = tokio::time::timeout(AGENT_REQUEST_TIMEOUT, async {
@@ -528,9 +692,6 @@ impl AgentChannel {
             if conn.conn_id != generation {
                 return Err("stale Pro IDE broker connection generation".to_string());
             }
-            if conn.mode != ProtocolMode::JsonRpc {
-                return Err("legacy Pro IDE bridge does not support provider callbacks".to_string());
-            }
             conn.tx.clone()
         };
         let response = match error {
@@ -568,9 +729,6 @@ impl AgentChannel {
             if conn.conn_id != generation {
                 return Err("stale Pro IDE broker connection generation".to_string());
             }
-            if conn.mode != ProtocolMode::JsonRpc {
-                return Err("legacy Pro IDE bridge does not support provider events".to_string());
-            }
             conn.tx.clone()
         };
         let bytes = encode_content_length(&serde_json::json!({
@@ -585,9 +743,10 @@ impl AgentChannel {
 
     // ── internals ────────────────────────────────────────────────────────────
 
-    /// Bind the loopback WS server once and return its port. Subsequent calls
+    /// Bind the loopback server once and return its port. Subsequent calls
     /// return the cached port. Requires a tokio runtime (always present under the
-    /// Tauri async runtime that spawns code-server).
+    /// Tauri async runtime that spawns code-server). Also starts the credential
+    /// maintenance tick (see [`Self::maintain_credentials`]).
     async fn ensure_server(self: &Arc<Self>) -> Result<u16, String> {
         let port = self
             .port
@@ -598,6 +757,18 @@ impl AgentChannel {
                 let addr = listener
                     .local_addr()
                     .map_err(|e| format!("read agent channel port: {e}"))?;
+                let maintained = Arc::downgrade(self);
+                tokio::spawn(async move {
+                    let mut tick = tokio::time::interval(CREDENTIAL_MAINTENANCE_INTERVAL);
+                    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    loop {
+                        tick.tick().await;
+                        let Some(channel) = maintained.upgrade() else {
+                            break;
+                        };
+                        channel.maintain_credentials();
+                    }
+                });
                 let channel = Arc::clone(self);
                 tokio::spawn(async move {
                     loop {
@@ -648,27 +819,327 @@ impl AgentChannel {
         Ok(*port)
     }
 
-    /// Resolve the root a token was minted for. Returns `None` for an unknown or
-    /// revoked token.
-    fn credential_for_id(&self, token_id: &str) -> Option<BrokerCredential> {
-        self.lock_registry().tokens.get(token_id).cloned()
+    /// Resolve a challenge's `tokenId` to the credential it names.
+    ///
+    /// A consumed bootstrap whose consumer is still connected resolves as
+    /// [`CredentialKind::Replayed`]: it is challenged like any other, and only
+    /// a correct proof trips the instance (see [`Self::commit_authentication`]),
+    /// so knowing a token id alone cannot disconnect the IDE. One whose
+    /// consumer is gone is merely refused.
+    fn resolve_challenge(&self, token_id: &str) -> Result<ChallengeScope, String> {
+        let reg = self.lock_registry();
+        for (root, instance) in &reg.instances {
+            let scope = |kind, token_id: &str, secret: &[u8]| ChallengeScope {
+                root: root.clone(),
+                host_id: instance.host_id.clone(),
+                token_id: token_id.to_string(),
+                kind,
+                secret: secret.to_vec(),
+            };
+            if let Some(pending) = &instance.bootstrap {
+                if pending.credential.token_id == token_id {
+                    return Ok(scope(
+                        CredentialKind::Bootstrap,
+                        &pending.credential.token_id,
+                        pending.credential.secret.as_bytes(),
+                    ));
+                }
+            }
+            if let Some(session) = &instance.session {
+                if session.session_id == token_id {
+                    return Ok(scope(
+                        CredentialKind::Session,
+                        &session.session_id,
+                        &session.key,
+                    ));
+                }
+            }
+            if let Some(consumed) = &instance.consumed {
+                if consumed.token_id == token_id {
+                    let consumer_live = reg
+                        .conns
+                        .get(root)
+                        .is_some_and(|conn| conn.conn_id == consumed.conn_id);
+                    if consumer_live {
+                        return Ok(scope(
+                            CredentialKind::Replayed,
+                            &consumed.token_id,
+                            consumed.secret.as_bytes(),
+                        ));
+                    }
+                    return Err("broker credential was already used".to_string());
+                }
+            }
+        }
+        Err("invalid broker token id".to_string())
     }
 
-    fn root_for_legacy_token(&self, token: &str) -> Option<String> {
-        let (token_id, secret) = token.split_once('.')?;
-        let credential = self.credential_for_id(token_id)?;
-        (credential.secret == secret).then_some(credential.root)
+    /// Publish an authenticated connection: consume or rotate the credential it
+    /// presented, derive the next session, and replace any previous connection.
+    ///
+    /// Re-checks under the registry lock that the credential is still the one
+    /// the challenge resolved, so a re-mint or trip that raced the handshake
+    /// wins. A proven bootstrap that a live connection already consumed — a
+    /// replay, or the loser of two parties racing one file — trips the
+    /// instance instead of connecting.
+    fn commit_authentication(
+        &self,
+        scope: &ChallengeScope,
+        server_nonce: &str,
+        client_nonce: &str,
+        tx: mpsc::Sender<Vec<u8>>,
+    ) -> Result<CommittedConnection, String> {
+        enum Outcome {
+            Committed {
+                replaced: Option<Conn>,
+                withdrawn_bootstrap: bool,
+            },
+            Trip,
+            Revoked,
+        }
+        let key = derive_session_key(&scope.secret, server_nonce, client_nonce);
+        let session = SessionCredential {
+            session_id: Uuid::new_v4().to_string(),
+            key,
+        };
+        let close = Arc::new(Notify::new());
+        let conn_id = self.next_conn_id.fetch_add(1, Ordering::Relaxed);
+        let outcome = {
+            let mut reg = self.lock_registry();
+            let consumer_live = |reg: &Registry, consumed: &ConsumedBootstrap| {
+                reg.conns
+                    .get(&scope.root)
+                    .is_some_and(|conn| conn.conn_id == consumed.conn_id)
+            };
+            match reg.instances.get(&scope.root) {
+                None => Outcome::Revoked,
+                Some(instance) if instance.host_id != scope.host_id => Outcome::Revoked,
+                Some(instance) => {
+                    let replayed = instance.consumed.as_ref().is_some_and(|consumed| {
+                        consumed.token_id == scope.token_id
+                            && secrets_equal(consumed.secret.as_bytes(), &scope.secret)
+                            && consumer_live(&reg, consumed)
+                    });
+                    let still_current = match scope.kind {
+                        CredentialKind::Bootstrap => {
+                            instance.bootstrap.as_ref().is_some_and(|pending| {
+                                pending.credential.token_id == scope.token_id
+                                    && secrets_equal(
+                                        pending.credential.secret.as_bytes(),
+                                        &scope.secret,
+                                    )
+                            })
+                        }
+                        CredentialKind::Session => {
+                            instance.session.as_ref().is_some_and(|current| {
+                                current.session_id == scope.token_id
+                                    && secrets_equal(&current.key, &scope.secret)
+                            })
+                        }
+                        CredentialKind::Replayed => false,
+                    };
+                    if replayed && scope.kind != CredentialKind::Session {
+                        Outcome::Trip
+                    } else if !still_current {
+                        Outcome::Revoked
+                    } else {
+                        let instance = reg
+                            .instances
+                            .get_mut(&scope.root)
+                            .expect("instance was looked up above");
+                        let mut withdrawn_bootstrap = false;
+                        match scope.kind {
+                            CredentialKind::Bootstrap => {
+                                instance.bootstrap = None;
+                                instance.consumed = Some(ConsumedBootstrap {
+                                    token_id: scope.token_id.clone(),
+                                    secret: String::from_utf8_lossy(&scope.secret).into_owned(),
+                                    conn_id,
+                                });
+                                withdrawn_bootstrap = true;
+                            }
+                            CredentialKind::Session => {
+                                // A reconnect proved the session: an unused
+                                // reconnect bootstrap must not stay valid on
+                                // disk next to this live connection.
+                                if instance
+                                    .bootstrap
+                                    .as_ref()
+                                    .is_some_and(|pending| !pending.for_restart)
+                                {
+                                    instance.bootstrap = None;
+                                    withdrawn_bootstrap = true;
+                                }
+                                if let Some(consumed) = instance.consumed.as_mut() {
+                                    consumed.conn_id = conn_id;
+                                }
+                            }
+                            CredentialKind::Replayed => unreachable!("replays never commit"),
+                        }
+                        instance.session = Some(session.clone());
+                        reg.issues.remove(&scope.root);
+                        let replaced = reg.conns.insert(
+                            scope.root.clone(),
+                            Conn {
+                                conn_id,
+                                tx,
+                                close: Arc::clone(&close),
+                            },
+                        );
+                        Outcome::Committed {
+                            replaced,
+                            withdrawn_bootstrap,
+                        }
+                    }
+                }
+            }
+        };
+        match outcome {
+            Outcome::Trip => {
+                self.trip(&scope.root, BrokerIssue::CredentialReplayed);
+                Err("broker credential was already used".to_string())
+            }
+            Outcome::Revoked => Err("broker credential was revoked".to_string()),
+            Outcome::Committed {
+                replaced,
+                withdrawn_bootstrap,
+            } => {
+                if withdrawn_bootstrap {
+                    self.remove_withdrawn_credential_file(&scope.root);
+                }
+                if let Some(previous) = replaced {
+                    previous.close.notify_one();
+                    self.fail_pending_for_connection(
+                        &scope.root,
+                        previous.conn_id,
+                        "Pro IDE extension connection was replaced",
+                    );
+                }
+                Ok(CommittedConnection {
+                    conn_id,
+                    session_id: session.session_id,
+                    close,
+                })
+            }
+        }
     }
 
-    fn current_scope_for_token(&self, token: &str) -> Option<(String, u64)> {
-        let root = self.root_for_legacy_token(token)?;
-        let generation = self
-            .lock_registry()
-            .conns
-            .get(&root)
-            .filter(|connection| connection.mode == ProtocolMode::JsonRpc)
-            .map(|connection| connection.conn_id)?;
-        Some((root, generation))
+    /// Remove `root`'s credential file once the registry no longer holds a
+    /// bootstrap for it. Re-checked under the file lock: a re-mint that landed
+    /// in between owns the file now and keeps it.
+    fn remove_withdrawn_credential_file(&self, root: &str) {
+        let _files = self.lock_credential_files();
+        let path = {
+            let reg = self.lock_registry();
+            reg.instances
+                .get(root)
+                .filter(|instance| instance.bootstrap.is_none())
+                .map(|instance| instance.credential_file.clone())
+        };
+        if let Some(path) = path {
+            remove_credential_file(&path);
+        }
+    }
+
+    /// Two parties held one bootstrap: close every connection for `root`,
+    /// revoke its session, mint a fresh bootstrap and tell the renderer.
+    fn trip(&self, root: &str, reason: BrokerIssue) {
+        let removed = {
+            let _files = self.lock_credential_files();
+            let (removed, credential) = {
+                let mut reg = self.lock_registry();
+                let removed = reg.conns.remove(root);
+                let credential = reg.instances.get_mut(root).map(|instance| {
+                    let bootstrap = BootstrapCredential::mint();
+                    instance.session = None;
+                    instance.consumed = None;
+                    instance.bootstrap = Some(PendingBootstrap::new(bootstrap.clone(), false));
+                    (instance.credential_file.clone(), bootstrap)
+                });
+                (removed, credential)
+            };
+            if let Some((path, bootstrap)) = credential {
+                if let Err(error) = write_credential_file(&path, &bootstrap) {
+                    log::warn!("codeserver broker: re-mint after replay failed: {error}");
+                }
+            }
+            removed
+        };
+        if let Some(conn) = removed {
+            conn.close.notify_one();
+            self.fail_pending_for_connection(
+                root,
+                conn.conn_id,
+                "Pro IDE broker credential was replayed",
+            );
+        }
+        log::warn!(
+            "codeserver broker: bootstrap credential for {root} was presented twice; instance revoked"
+        );
+        self.record_issue(root, reason);
+    }
+
+    /// Replace `root`'s bootstrap with a fresh one and rewrite its file.
+    fn remint_bootstrap(&self, root: &str, for_restart: bool) -> Result<(), String> {
+        let bootstrap = BootstrapCredential::mint();
+        let _files = self.lock_credential_files();
+        let path = {
+            let mut reg = self.lock_registry();
+            let instance = reg
+                .instances
+                .get_mut(root)
+                .ok_or_else(|| "Pro IDE instance is not registered".to_string())?;
+            instance.bootstrap = Some(PendingBootstrap::new(bootstrap.clone(), for_restart));
+            instance.credential_file.clone()
+        };
+        write_credential_file(&path, &bootstrap)
+    }
+
+    /// Keep a bootstrap file on disk for every instance with no live
+    /// connection, so an extension host restart nobody told us about (a
+    /// browser reload, a crash after reading the file) can still connect.
+    fn maintain_credentials(&self) {
+        let candidates: Vec<(String, PathBuf)> = {
+            let reg = self.lock_registry();
+            reg.instances
+                .iter()
+                .filter(|(root, instance)| {
+                    !reg.conns.contains_key(*root)
+                        && instance.bootstrap.as_ref().is_none_or(|pending| {
+                            pending.minted.elapsed() >= BOOTSTRAP_REMINT_GRACE
+                        })
+                })
+                .map(|(root, instance)| (root.clone(), instance.credential_file.clone()))
+                .collect()
+        };
+        for (root, path) in candidates {
+            if path.exists() {
+                continue;
+            }
+            if let Err(error) = self.remint_bootstrap(&root, false) {
+                log::warn!("codeserver broker: re-mint for {root} failed: {error}");
+            }
+        }
+    }
+
+    /// Resolve a content-endpoint bearer (`<sessionId>.<HMAC(session, "content")>`)
+    /// to the root and generation of the live connection it belongs to.
+    fn current_scope_for_bearer(&self, bearer: &str) -> Option<(String, u64)> {
+        let (session_id, presented) = bearer.split_once('.')?;
+        let reg = self.lock_registry();
+        reg.instances.iter().find_map(|(root, instance)| {
+            let session = instance.session.as_ref()?;
+            if !secrets_equal(session.session_id.as_bytes(), session_id.as_bytes()) {
+                return None;
+            }
+            let expected = content_bearer(&session.key);
+            if !secrets_equal(expected.as_bytes(), presented.as_bytes()) {
+                return None;
+            }
+            reg.conns
+                .get(root)
+                .map(|connection| (root.clone(), connection.conn_id))
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -770,28 +1241,12 @@ impl AgentChannel {
         Ok(record.bytes)
     }
 
-    /// Attach a connection's outbound queue to `root`, returning the connection id
-    /// so [`Self::detach_conn`] can avoid evicting a newer reconnect.
-    fn attach_conn(&self, root: &str, mode: ProtocolMode, tx: mpsc::Sender<Vec<u8>>) -> u64 {
-        let conn_id = self.next_conn_id.fetch_add(1, Ordering::Relaxed);
-        let replaced = self
-            .lock_registry()
-            .conns
-            .insert(root.to_string(), Conn { conn_id, mode, tx });
-        if let Some(previous) = replaced {
-            self.fail_pending_for_connection(
-                root,
-                previous.conn_id,
-                "Pro IDE extension connection was replaced",
-            );
-        }
-        conn_id
-    }
-
     /// Drop `root`'s connection only if it is still the one identified by
-    /// `conn_id` (a later reconnect for the same root must survive this one's close).
+    /// `conn_id` (a later reconnect for the same root must survive this one's
+    /// close). Losing the live connection re-mints a bootstrap so whatever
+    /// extension host comes next can find a credential file.
     fn detach_conn(&self, root: &str, conn_id: u64) {
-        let removed = {
+        let (removed, needs_bootstrap) = {
             let mut reg = self.lock_registry();
             if reg
                 .conns
@@ -799,13 +1254,26 @@ impl AgentChannel {
                 .is_some_and(|conn| conn.conn_id == conn_id)
             {
                 reg.conns.remove(root);
-                true
+                // A fresh bootstrap (one minted for a restart the new host may
+                // already be reading) stays; replacing it would fail that host.
+                let needs_bootstrap = reg.instances.get(root).is_some_and(|instance| {
+                    instance
+                        .bootstrap
+                        .as_ref()
+                        .is_none_or(|pending| pending.minted.elapsed() >= BOOTSTRAP_REMINT_GRACE)
+                });
+                (true, needs_bootstrap)
             } else {
-                false
+                (false, false)
             }
         };
         if removed {
             self.fail_pending_for_connection(root, conn_id, "Pro IDE extension connection closed");
+        }
+        if needs_bootstrap {
+            if let Err(error) = self.remint_bootstrap(root, false) {
+                log::warn!("codeserver broker: re-mint after disconnect failed: {error}");
+            }
         }
     }
 
@@ -851,21 +1319,29 @@ impl AgentChannel {
     /// handle yet, no listener, a closing window) is superseded by the next one and
     /// is never worth failing the connection over.
     fn forward_event(&self, root: &str, name: String, payload: Option<Value>) {
-        #[cfg(feature = "tauri-host")]
-        use tauri::Emitter as _;
         let event = CodeServerEditorEvent {
             root: root.to_string(),
             name,
             payload: payload.unwrap_or(Value::Null),
         };
+        if let Ok(value) = serde_json::to_value(event) {
+            self.emit_renderer(CODESERVER_EDITOR_EVENT, value);
+        }
+    }
+
+    /// Best-effort fan-out of a renderer event to the Tauri app and the
+    /// headless companion event stream, whichever are attached.
+    fn emit_renderer(&self, event: &str, value: Value) {
         #[cfg(feature = "tauri-host")]
-        let app = {
-            let slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
-            slot.clone()
-        };
-        #[cfg(feature = "tauri-host")]
-        if let Some(app) = app {
-            let _ = app.emit(CODESERVER_EDITOR_EVENT, event.clone());
+        {
+            use tauri::Emitter as _;
+            let app = {
+                let slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
+                slot.clone()
+            };
+            if let Some(app) = app {
+                let _ = app.emit(event, value.clone());
+            }
         }
         if let Some(bus) = self
             .event_bus
@@ -873,9 +1349,7 @@ impl AgentChannel {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
         {
-            if let Ok(value) = serde_json::to_value(event) {
-                bus.publish(CODESERVER_EDITOR_EVENT.to_string(), value);
-            }
+            bus.publish(event.to_string(), value);
         }
     }
 
@@ -955,6 +1429,12 @@ impl AgentChannel {
             .map_err(|error| format!("serialize broker notification: {error}"))?;
         bus.publish(CODESERVER_BROKER_NOTIFICATION_EVENT.to_string(), value);
         Ok(())
+    }
+
+    fn lock_credential_files(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.credential_files
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
     }
 
     fn lock_registry(&self) -> std::sync::MutexGuard<'_, Registry> {
@@ -1096,7 +1576,7 @@ async fn upload_content(
 ) -> Result<Json<ContentHandle>, (StatusCode, String)> {
     let credential = bearer_credential(&headers)?;
     let (root, generation) = channel
-        .current_scope_for_token(credential)
+        .current_scope_for_bearer(credential)
         .ok_or_else(|| unauthorized("invalid or disconnected broker credential"))?;
     let plugin_id = required_content_header(&headers, "x-cognia-plugin-id")?;
     let provider_id = required_content_header(&headers, "x-cognia-provider-id")?;
@@ -1128,7 +1608,7 @@ async fn download_content(
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
     let credential = bearer_credential(&headers)?;
     let (root, generation) = channel
-        .current_scope_for_token(credential)
+        .current_scope_for_bearer(credential)
         .ok_or_else(|| unauthorized("invalid or disconnected broker credential"))?;
     let plugin_id = required_content_header(&headers, "x-cognia-plugin-id")?;
     let provider_id = required_content_header(&headers, "x-cognia-provider-id")?;
@@ -1208,71 +1688,90 @@ fn is_loopback(addr: &SocketAddr) -> bool {
     addr.ip().is_loopback()
 }
 
-/// One task per extension connection. Protocol v1 uses JSON-RPC 2.0
-/// `Content-Length` frames; the newline protocol is accepted for one compatibility
-/// cycle. The first frame always authenticates and negotiates before the
-/// connection is published to callers.
+/// One task per extension connection. The first frames must complete the
+/// challenge/hello handshake before the connection is published to callers.
 async fn handle_conn(stream: TcpStream, channel: Arc<AgentChannel>) {
     if !stream.peer_addr().map(|a| is_loopback(&a)).unwrap_or(false) {
         return;
     }
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
-    let mode = match reader.fill_buf().await {
-        Ok(prefix) if !prefix.is_empty() => detect_protocol(prefix),
-        _ => return,
-    };
-    let first = match read_wire_value(&mut reader, mode).await {
-        Ok(Some(value)) => value,
-        Ok(None) | Err(_) => return,
-    };
-
-    let authentication = match mode {
-        ProtocolMode::Legacy => authenticate_first_frame(&channel, mode, first),
-        ProtocolMode::JsonRpc => {
-            authenticate_jsonrpc_handshake(&channel, &mut reader, &mut write_half, first).await
-        }
-    };
-    let (root, hello_id, negotiated_capabilities) = match authentication {
-        Ok(authenticated) => authenticated,
-        Err((id, code, message)) => {
-            if mode == ProtocolMode::JsonRpc {
-                let response = jsonrpc_error(id.unwrap_or(Value::Null), code, &message, None);
-                if let Ok(bytes) = encode_content_length(&response) {
-                    let _ = write_half.write_all(&bytes).await;
-                }
+    let prefix = tokio::time::timeout(HANDSHAKE_TIMEOUT, reader.fill_buf()).await;
+    match prefix.unwrap_or(Ok(&[])) {
+        Ok([]) => return,
+        Ok(prefix) if !is_content_length_prefix(prefix) => {
+            // The retired newline bridge (or anything else that is not a
+            // `Content-Length` frame). Say so in a frame a current client can
+            // read, then close; the unauthenticated peer has no root to blame.
+            log::warn!("codeserver broker: refused a connection that is not Content-Length framed");
+            let response = jsonrpc_error(
+                Value::Null,
+                PROTOCOL_INCOMPATIBLE_CODE,
+                "IDE_BROKER_PROTOCOL_INCOMPATIBLE: the broker speaks JSON-RPC with Content-Length framing",
+                Some(serde_json::json!({ "supportedVersions": SUPPORTED_PROTOCOL_VERSIONS })),
+            );
+            if let Ok(bytes) = encode_content_length(&response) {
+                let _ = write_half.write_all(&bytes).await;
             }
             return;
         }
-    };
+        Ok(_) => {}
+        Err(_) => return,
+    }
+    let first =
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_content_length_value(&mut reader)).await
+        {
+            Ok(Ok(Some(value))) => value,
+            _ => return,
+        };
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_CHANNEL_CAPACITY);
-    let conn_id = channel.attach_conn(&root, mode, outbound_tx.clone());
-    if mode == ProtocolMode::JsonRpc {
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": hello_id.unwrap_or(Value::String("hello".to_string())),
-            "result": {
-                "protocolVersion": CURRENT_PROTOCOL_VERSION,
-                "previousProtocolVersion": PREVIOUS_PROTOCOL_VERSION,
-                "codeApiVersion": CODE_API_VERSION,
-                "catalogHash": DEFAULT_CATALOG_HASH,
-                "generation": conn_id,
-                "capabilities": negotiated_capabilities
+    let authentication = match tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        authenticate_jsonrpc_handshake(&channel, &mut reader, &mut write_half, first, outbound_tx),
+    )
+    .await
+    {
+        Ok(authentication) => authentication,
+        Err(_) => Err((None, -32600, "broker handshake timed out".to_string())),
+    };
+    let authenticated = match authentication {
+        Ok(authenticated) => authenticated,
+        Err((id, code, message)) => {
+            let response = jsonrpc_error(id.unwrap_or(Value::Null), code, &message, None);
+            if let Ok(bytes) = encode_content_length(&response) {
+                let _ = write_half.write_all(&bytes).await;
             }
-        });
-        let Ok(bytes) = encode_content_length(&response) else {
-            channel.detach_conn(&root, conn_id);
-            return;
-        };
-        if write_half.write_all(&bytes).await.is_err() {
-            channel.detach_conn(&root, conn_id);
             return;
         }
+    };
+    let root = authenticated.root;
+    let conn_id = authenticated.connection.conn_id;
+    let close = authenticated.connection.close;
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": authenticated.hello_id,
+        "result": {
+            "protocolVersion": authenticated.protocol_version,
+            "codeApiVersion": CODE_API_VERSION,
+            "catalogHash": DEFAULT_CATALOG_HASH,
+            "generation": conn_id,
+            "sessionId": authenticated.connection.session_id,
+            "capabilities": authenticated.capabilities,
+        }
+    });
+    let Ok(bytes) = encode_content_length(&response) else {
+        channel.detach_conn(&root, conn_id);
+        return;
+    };
+    if write_half.write_all(&bytes).await.is_err() {
+        channel.detach_conn(&root, conn_id);
+        return;
     }
 
     loop {
         tokio::select! {
+            () = close.notified() => break,
             frame = outbound_rx.recv() => {
                 match frame {
                     Some(bytes) => {
@@ -1283,7 +1782,7 @@ async fn handle_conn(stream: TcpStream, channel: Arc<AgentChannel>) {
                     None => break,
                 }
             }
-            incoming = read_wire_value(&mut reader, mode) => {
+            incoming = read_content_length_value(&mut reader) => {
                 let value = match incoming {
                     Ok(Some(value)) => value,
                     Ok(None) | Err(_) => break,
@@ -1291,76 +1790,24 @@ async fn handle_conn(stream: TcpStream, channel: Arc<AgentChannel>) {
                 if !channel.is_current_connection(&root, conn_id) {
                     break;
                 }
-                if let Err(reason) = handle_authenticated_frame(
-                    &channel,
-                    &root,
-                    conn_id,
-                    mode,
-                    value,
-                ) {
+                if let Err(reason) = handle_authenticated_frame(&channel, &root, conn_id, value) {
                     log::warn!("codeserver broker frame rejected: {reason}");
                 }
             }
         }
     }
 
+    let _ = write_half.shutdown().await;
     channel.detach_conn(&root, conn_id);
 }
 
-async fn read_wire_value<R>(reader: &mut R, mode: ProtocolMode) -> Result<Option<Value>, String>
-where
-    R: tokio::io::AsyncBufRead + Unpin,
-{
-    match mode {
-        ProtocolMode::JsonRpc => read_content_length_value(reader).await,
-        ProtocolMode::Legacy => loop {
-            let mut line = String::new();
-            let read = reader
-                .read_line(&mut line)
-                .await
-                .map_err(|error| format!("read legacy broker frame: {error}"))?;
-            if read == 0 {
-                return Ok(None);
-            }
-            if line.len() > MAX_FRAME_BYTES {
-                return Err(format!(
-                    "legacy broker frame exceeds {MAX_FRAME_BYTES} bytes"
-                ));
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            return serde_json::from_str(trimmed)
-                .map(Some)
-                .map_err(|error| format!("invalid legacy broker frame: {error}"));
-        },
-    }
-}
-
-fn authenticate_first_frame(
-    channel: &AgentChannel,
-    mode: ProtocolMode,
-    value: Value,
-) -> Result<AuthenticationSuccess, AuthenticationFailure> {
-    match mode {
-        ProtocolMode::Legacy => {
-            let frame = serde_json::from_value::<InboundFrame>(value)
-                .map_err(|error| (None, -32600, format!("invalid legacy hello: {error}")))?;
-            let InboundFrame::Hello { token } = frame else {
-                return Err((None, -32002, "authentication required".to_string()));
-            };
-            channel
-                .root_for_legacy_token(&token)
-                .map(|root| (root, None, Vec::new()))
-                .ok_or_else(|| (None, -32002, "invalid broker token".to_string()))
-        }
-        ProtocolMode::JsonRpc => Err((
-            value.get("id").cloned(),
-            -32600,
-            "JSON-RPC requires challenge authentication".to_string(),
-        )),
-    }
+/// A connection that completed the handshake and is now published.
+struct AuthenticatedConnection {
+    root: String,
+    hello_id: Value,
+    protocol_version: String,
+    capabilities: Vec<String>,
+    connection: CommittedConnection,
 }
 
 async fn authenticate_jsonrpc_handshake<R, W>(
@@ -1368,7 +1815,8 @@ async fn authenticate_jsonrpc_handshake<R, W>(
     reader: &mut R,
     writer: &mut W,
     challenge_request: Value,
-) -> Result<AuthenticationSuccess, AuthenticationFailure>
+    outbound_tx: mpsc::Sender<Vec<u8>>,
+) -> Result<AuthenticatedConnection, AuthenticationFailure>
 where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -1384,9 +1832,8 @@ where
             "first request must be cognia/auth/challenge".to_string(),
         ));
     }
-    let token_id = challenge_request
-        .get("params")
-        .and_then(Value::as_object)
+    let params = challenge_request.get("params").and_then(Value::as_object);
+    let token_id = params
         .and_then(|params| params.get("tokenId"))
         .and_then(Value::as_str)
         .ok_or_else(|| {
@@ -1396,14 +1843,24 @@ where
                 "challenge tokenId is required".to_string(),
             )
         })?;
-    let credential = channel.credential_for_id(token_id).ok_or_else(|| {
-        (
-            challenge_id.clone(),
-            -32002,
-            "invalid broker token id".to_string(),
-        )
-    })?;
-    let challenge = Uuid::new_v4().to_string();
+    let client_nonce = params
+        .and_then(|params| params.get("clientNonce"))
+        .and_then(Value::as_str)
+        .filter(|nonce| (MIN_CLIENT_NONCE_LEN..=MAX_CLIENT_NONCE_LEN).contains(&nonce.len()))
+        .ok_or_else(|| {
+            (
+                challenge_id.clone(),
+                -32602,
+                format!(
+                    "challenge clientNonce must be {MIN_CLIENT_NONCE_LEN}..={MAX_CLIENT_NONCE_LEN} characters"
+                ),
+            )
+        })?
+        .to_string();
+    let scope = channel
+        .resolve_challenge(token_id)
+        .map_err(|message| (challenge_id.clone(), -32002, message))?;
+    let challenge = random_nonce();
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": challenge_id,
@@ -1419,16 +1876,31 @@ where
         .await
         .map_err(|message| (None, -32600, message))?
         .ok_or_else(|| (None, -32600, "connection closed before hello".to_string()))?;
-    authenticate_jsonrpc_hello(channel, hello, token_id, &credential, &challenge)
+    let negotiated = validate_jsonrpc_hello(channel, &hello, &scope, &challenge)?;
+    let hello_id = hello.get("id").cloned().unwrap_or(Value::Null);
+    let connection = channel
+        .commit_authentication(&scope, &challenge, &client_nonce, outbound_tx)
+        .map_err(|message| (Some(hello_id.clone()), -32002, message))?;
+    Ok(AuthenticatedConnection {
+        root: scope.root,
+        hello_id,
+        protocol_version: negotiated.protocol_version,
+        capabilities: negotiated.capabilities,
+        connection,
+    })
 }
 
-fn authenticate_jsonrpc_hello(
+struct NegotiatedHello {
+    protocol_version: String,
+    capabilities: Vec<String>,
+}
+
+fn validate_jsonrpc_hello(
     channel: &AgentChannel,
-    value: Value,
-    token_id: &str,
-    challenged_credential: &BrokerCredential,
+    value: &Value,
+    scope: &ChallengeScope,
     challenge: &str,
-) -> Result<AuthenticationSuccess, AuthenticationFailure> {
+) -> Result<NegotiatedHello, AuthenticationFailure> {
     let id = value.get("id").cloned();
     if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
         || value.get("method").and_then(Value::as_str) != Some("cognia/hello")
@@ -1444,28 +1916,14 @@ fn authenticate_jsonrpc_hello(
         .get("params")
         .and_then(Value::as_object)
         .ok_or_else(|| (id.clone(), -32602, "hello params are required".to_string()))?;
-    if params.get("tokenId").and_then(Value::as_str) != Some(token_id) {
+    if params.get("tokenId").and_then(Value::as_str) != Some(scope.token_id.as_str()) {
         return Err((id, -32002, "hello token id changed".to_string()));
     }
-    let current = channel
-        .credential_for_id(token_id)
-        .filter(|current| {
-            current.root == challenged_credential.root
-                && current.secret == challenged_credential.secret
-                && current.host_id == challenged_credential.host_id
-        })
-        .ok_or_else(|| {
-            (
-                id.clone(),
-                -32002,
-                "broker credential was revoked".to_string(),
-            )
-        })?;
     let proof = params
         .get("proof")
         .and_then(Value::as_str)
         .ok_or_else(|| (id.clone(), -32602, "hello proof is required".to_string()))?;
-    verify_challenge_proof(&current.secret, challenge, proof)
+    verify_challenge_proof(&scope.secret, challenge, proof)
         .map_err(|message| (id.clone(), -32002, message))?;
 
     let versions = params
@@ -1477,34 +1935,36 @@ fn authenticate_jsonrpc_hello(
                 -32602,
                 "protocolVersions are required".to_string(),
             )
-        })?;
-    if !versions
+        })?
         .iter()
-        .any(|version| version.as_str() == Some(CURRENT_PROTOCOL_VERSION))
-    {
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let Some(protocol_version) = negotiate_protocol(&versions, SUPPORTED_PROTOCOL_VERSIONS) else {
+        channel.record_issue(&scope.root, BrokerIssue::ProtocolIncompatible);
         return Err((
             id,
-            -32001,
+            PROTOCOL_INCOMPATIBLE_CODE,
             format!(
-                "no compatible broker protocol; host supports {CURRENT_PROTOCOL_VERSION} and {PREVIOUS_PROTOCOL_VERSION}"
+                "IDE_BROKER_PROTOCOL_INCOMPATIBLE: host supports {}",
+                SUPPORTED_PROTOCOL_VERSIONS.join(", ")
             ),
         ));
-    }
+    };
     if params.get("codeApiVersion").and_then(Value::as_str) != Some(CODE_API_VERSION) {
         return Err((
             id,
-            -32001,
+            PROTOCOL_INCOMPATIBLE_CODE,
             format!("code API mismatch; expected {CODE_API_VERSION}"),
         ));
     }
     if params.get("catalogHash").and_then(Value::as_str) != Some(DEFAULT_CATALOG_HASH) {
         return Err((
             id,
-            -32001,
+            PROTOCOL_INCOMPATIBLE_CODE,
             format!("capability catalog mismatch; expected {DEFAULT_CATALOG_HASH}"),
         ));
     }
-    if params.get("hostId").and_then(Value::as_str) != Some(current.host_id.as_str()) {
+    if params.get("hostId").and_then(Value::as_str) != Some(scope.host_id.as_str()) {
         return Err((
             id,
             -32002,
@@ -1521,7 +1981,7 @@ fn authenticate_jsonrpc_hello(
         .map(str::to_string)
         .collect::<Vec<_>>();
     if let Some(workspace) = params.get("workspace").and_then(Value::as_str) {
-        if !workspace.is_empty() && workspace != current.root {
+        if !workspace.is_empty() && workspace != scope.root {
             return Err((
                 id,
                 -32002,
@@ -1529,120 +1989,99 @@ fn authenticate_jsonrpc_hello(
             ));
         }
     }
-    Ok((current.root, id, capabilities))
+    Ok(NegotiatedHello {
+        protocol_version,
+        capabilities,
+    })
 }
 
-fn verify_challenge_proof(secret: &str, challenge: &str, proof: &str) -> Result<(), String> {
+fn verify_challenge_proof(secret: &[u8], challenge: &str, proof: &str) -> Result<(), String> {
     let proof = hex::decode(proof).map_err(|_| "invalid broker challenge proof".to_string())?;
-    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes())
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret)
         .map_err(|_| "invalid broker challenge secret".to_string())?;
     mac.update(challenge.as_bytes());
     mac.verify_slice(&proof)
         .map_err(|_| "invalid broker challenge proof".to_string())
 }
 
+fn random_nonce() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::fill(&mut bytes);
+    hex::encode(bytes)
+}
+
 fn handle_authenticated_frame(
     channel: &AgentChannel,
     root: &str,
     conn_id: u64,
-    mode: ProtocolMode,
     value: Value,
 ) -> Result<(), String> {
-    match mode {
-        ProtocolMode::Legacy => {
-            let frame = serde_json::from_value::<InboundFrame>(value)
-                .map_err(|error| format!("invalid legacy frame: {error}"))?;
-            match frame {
-                InboundFrame::Hello { .. } => Ok(()),
-                InboundFrame::Res {
-                    id,
-                    ok,
-                    result,
-                    error,
-                } => {
-                    let outcome = if ok {
-                        Ok(result.unwrap_or(Value::Null))
-                    } else {
-                        Err(error.unwrap_or_else(|| "Pro IDE extension error".to_string()))
-                    };
-                    channel.resolve(root, conn_id, id, outcome);
-                    Ok(())
-                }
-                InboundFrame::Evt { name, payload } => {
-                    channel.forward_event(root, name, payload);
-                    Ok(())
-                }
-            }
-        }
-        ProtocolMode::JsonRpc => {
-            if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-                return Err("missing jsonrpc 2.0 marker".to_string());
-            }
-            if let Some(method) = value.get("method").and_then(Value::as_str) {
-                match method {
-                    "cognia/event" => {
-                        let params = value.get("params").and_then(Value::as_object);
-                        let name = params
-                            .and_then(|params| params.get("name"))
-                            .and_then(Value::as_str)
-                            .ok_or_else(|| "event name is required".to_string())?;
-                        let payload = params.and_then(|params| params.get("payload")).cloned();
-                        channel.forward_event(root, name.to_string(), payload);
-                        return Ok(());
-                    }
-                    "$/progress" => {
-                        channel.forward_event(
-                            root,
-                            "brokerProgress".to_string(),
-                            value.get("params").cloned(),
-                        );
-                        return Ok(());
-                    }
-                    "cognia/provider/cancel"
-                    | "cognia/provider/approvalResponse"
-                    | "cognia/protocol/cancel" => {
-                        if value.get("id").is_some() {
-                            return Err("broker control message must be a notification".to_string());
-                        }
-                        return channel.forward_broker_notification(
-                            root,
-                            conn_id,
-                            method.to_string(),
-                            value.get("params").cloned().unwrap_or(Value::Null),
-                        );
-                    }
-                    _ => {
-                        let id = value
-                            .get("id")
-                            .cloned()
-                            .ok_or_else(|| format!("unsupported broker notification: {method}"))?;
-                        return channel.forward_broker_request(
-                            root,
-                            conn_id,
-                            id,
-                            method.to_string(),
-                            value.get("params").cloned().unwrap_or(Value::Null),
-                        );
-                    }
-                }
-            }
-            if let Some(id) = value.get("id").and_then(Value::as_u64) {
-                let outcome = if let Some(error) = value.get("error") {
-                    let code = error.get("code").and_then(Value::as_i64).unwrap_or(-32603);
-                    let message = error
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Pro IDE extension error");
-                    Err(format!("JSON-RPC {code}: {message}"))
-                } else {
-                    Ok(value.get("result").cloned().unwrap_or(Value::Null))
-                };
-                channel.resolve(root, conn_id, id, outcome);
+    if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return Err("missing jsonrpc 2.0 marker".to_string());
+    }
+    if let Some(method) = value.get("method").and_then(Value::as_str) {
+        match method {
+            "cognia/event" => {
+                let params = value.get("params").and_then(Value::as_object);
+                let name = params
+                    .and_then(|params| params.get("name"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "event name is required".to_string())?;
+                let payload = params.and_then(|params| params.get("payload")).cloned();
+                channel.forward_event(root, name.to_string(), payload);
                 return Ok(());
             }
-            Err("JSON-RPC frame has neither response nor method".to_string())
+            "$/progress" => {
+                channel.forward_event(
+                    root,
+                    "brokerProgress".to_string(),
+                    value.get("params").cloned(),
+                );
+                return Ok(());
+            }
+            "cognia/provider/cancel"
+            | "cognia/provider/approvalResponse"
+            | "cognia/protocol/cancel" => {
+                if value.get("id").is_some() {
+                    return Err("broker control message must be a notification".to_string());
+                }
+                return channel.forward_broker_notification(
+                    root,
+                    conn_id,
+                    method.to_string(),
+                    value.get("params").cloned().unwrap_or(Value::Null),
+                );
+            }
+            _ => {
+                let id = value
+                    .get("id")
+                    .cloned()
+                    .ok_or_else(|| format!("unsupported broker notification: {method}"))?;
+                return channel.forward_broker_request(
+                    root,
+                    conn_id,
+                    id,
+                    method.to_string(),
+                    value.get("params").cloned().unwrap_or(Value::Null),
+                );
+            }
         }
     }
+    if let Some(id) = value.get("id").and_then(Value::as_u64) {
+        let outcome = if let Some(error) = value.get("error") {
+            let code = error.get("code").and_then(Value::as_i64).unwrap_or(-32603);
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Pro IDE extension error");
+            Err(format!("JSON-RPC {code}: {message}"))
+        } else {
+            Ok(value.get("result").cloned().unwrap_or(Value::Null))
+        };
+        channel.resolve(root, conn_id, id, outcome);
+        return Ok(());
+    }
+    Err("JSON-RPC frame has neither response nor method".to_string())
 }
 
 fn jsonrpc_error(id: Value, code: i64, message: &str, data: Option<Value>) -> Value {
@@ -1662,77 +2101,148 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::path::Path;
 
     fn is_connected(channel: &AgentChannel, root: &str) -> bool {
         channel.lock_registry().conns.contains_key(root)
     }
 
-    fn insert_credential(channel: &AgentChannel, token_id: &str, secret: &str, root: &str) {
-        channel.lock_registry().tokens.insert(
-            token_id.to_string(),
-            BrokerCredential {
-                root: root.to_string(),
-                secret: secret.to_string(),
-                host_id: "local".to_string(),
-            },
-        );
+    /// A channel whose credential files land in a private temp dir.
+    fn test_channel() -> (Arc<AgentChannel>, tempfile::TempDir) {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("cgncs").join("broker");
+        (Arc::new(AgentChannel::with_credential_dir(dir)), temp)
     }
 
-    fn split_credential(value: &str) -> (&str, &str) {
-        value.split_once('.').expect("generated broker credential")
+    fn read_bootstrap(path: &Path) -> BootstrapCredential {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
     }
 
-    fn challenge_proof(secret: &str, challenge: &str) -> String {
-        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
+    fn challenge_proof(secret: &[u8], challenge: &str) -> String {
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret).unwrap();
         mac.update(challenge.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
 
-    #[test]
-    fn hello_frame_parses() {
-        let frame: InboundFrame =
-            serde_json::from_str(r#"{"type":"hello","token":"abc-123"}"#).unwrap();
-        match frame {
-            InboundFrame::Hello { token } => assert_eq!(token, "abc-123"),
-            _ => panic!("expected hello"),
+    /// Attach a connection the way a completed handshake does, without a socket.
+    fn attach(channel: &AgentChannel, root: &str) -> (u64, mpsc::Receiver<Vec<u8>>) {
+        let scope = channel
+            .resolve_challenge(&current_bootstrap(channel, root).token_id)
+            .unwrap();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
+        let committed = channel
+            .commit_authentication(&scope, "server-nonce", "client-nonce-0000", tx)
+            .unwrap();
+        (committed.conn_id, rx)
+    }
+
+    fn current_bootstrap(channel: &AgentChannel, root: &str) -> BootstrapCredential {
+        channel.lock_registry().instances[root]
+            .bootstrap
+            .as_ref()
+            .unwrap()
+            .credential
+            .clone()
+    }
+
+    fn has_bootstrap(channel: &AgentChannel, root: &str) -> bool {
+        channel.lock_registry().instances[root].bootstrap.is_some()
+    }
+
+    fn issue_of(channel: &AgentChannel, root: &str) -> Option<BrokerIssue> {
+        channel.lock_registry().issues.get(root).copied()
+    }
+
+    /// Age `root`'s pending bootstrap past the re-mint grace period.
+    fn age_bootstrap(channel: &AgentChannel, root: &str) {
+        if let Some(pending) = channel
+            .lock_registry()
+            .instances
+            .get_mut(root)
+            .unwrap()
+            .bootstrap
+            .as_mut()
+        {
+            pending.minted = Instant::now() - BOOTSTRAP_REMINT_GRACE;
         }
     }
 
-    #[test]
-    fn res_frame_parses_success_and_failure() {
-        let ok: InboundFrame =
-            serde_json::from_str(r#"{"type":"res","id":7,"ok":true,"result":{"path":"/a"}}"#)
+    struct Client {
+        reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
+        writer: tokio::net::tcp::OwnedWriteHalf,
+    }
+
+    impl Client {
+        async fn connect(port: u16) -> Self {
+            let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let (read_half, writer) = stream.into_split();
+            Self {
+                reader: BufReader::new(read_half),
+                writer,
+            }
+        }
+
+        async fn write(&mut self, value: Value) {
+            self.writer
+                .write_all(&encode_content_length(&value).unwrap())
+                .await
                 .unwrap();
-        match ok {
-            InboundFrame::Res {
-                id,
-                ok,
-                result,
-                error,
-            } => {
-                assert_eq!(id, 7);
-                assert!(ok);
-                assert_eq!(result.unwrap()["path"], "/a");
-                assert!(error.is_none());
-            }
-            _ => panic!("expected res"),
         }
 
-        let err: InboundFrame =
-            serde_json::from_str(r#"{"type":"res","id":8,"ok":false,"error":"nope"}"#).unwrap();
-        match err {
-            InboundFrame::Res { id, ok, error, .. } => {
-                assert_eq!(id, 8);
-                assert!(!ok);
-                assert_eq!(error.as_deref(), Some("nope"));
-            }
-            _ => panic!("expected res"),
+        async fn read(&mut self) -> Option<Value> {
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                read_content_length_value(&mut self.reader),
+            )
+            .await
+            .expect("broker frame timed out")
+            .unwrap()
+        }
+
+        /// Run the challenge/hello handshake and return the hello reply.
+        async fn handshake(&mut self, token_id: &str, secret: &[u8], versions: &[&str]) -> Value {
+            self.write(json!({
+                "jsonrpc": "2.0",
+                "id": "challenge",
+                "method": "cognia/auth/challenge",
+                "params": { "tokenId": token_id, "clientNonce": "client-nonce-0001" }
+            }))
+            .await;
+            let reply = self.read().await.unwrap();
+            let Some(challenge) = reply["result"]["challenge"].as_str() else {
+                return reply;
+            };
+            let challenge = challenge.to_string();
+            self.write(json!({
+                "jsonrpc": "2.0",
+                "id": "hello",
+                "method": "cognia/hello",
+                "params": {
+                    "tokenId": token_id,
+                    "proof": challenge_proof(secret, &challenge),
+                    "protocolVersions": versions,
+                    "codeApiVersion": CODE_API_VERSION,
+                    "catalogHash": DEFAULT_CATALOG_HASH,
+                    "hostId": "local",
+                    "workspace": "",
+                    "capabilities": ["cancel", "structured-errors"]
+                }
+            }))
+            .await;
+            let mut hello = self.read().await.unwrap();
+            hello["challenge"] = json!(challenge);
+            hello
         }
     }
 
-    #[test]
-    fn unknown_frame_type_is_rejected() {
-        assert!(serde_json::from_str::<InboundFrame>(r#"{"type":"bogus"}"#).is_err());
+    async fn wait_until(mut condition: impl FnMut() -> bool) {
+        for _ in 0..200 {
+            if condition() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("condition never became true");
     }
 
     #[test]
@@ -1749,62 +2259,14 @@ mod tests {
                 "decision": "allow"
             }
         });
-        let error = handle_authenticated_frame(
-            &channel,
-            "/work/project",
-            7,
-            ProtocolMode::JsonRpc,
-            frame.clone(),
-        )
-        .unwrap_err();
+        let error =
+            handle_authenticated_frame(&channel, "/work/project", 7, frame.clone()).unwrap_err();
         assert_eq!(error, "Cognia broker runtime is not attached");
 
         let mut request = frame;
         request["id"] = json!(1);
-        let error = handle_authenticated_frame(
-            &channel,
-            "/work/project",
-            7,
-            ProtocolMode::JsonRpc,
-            request,
-        )
-        .unwrap_err();
+        let error = handle_authenticated_frame(&channel, "/work/project", 7, request).unwrap_err();
         assert_eq!(error, "broker control message must be a notification");
-    }
-
-    #[test]
-    fn evt_frame_parses_with_and_without_a_payload() {
-        let with: InboundFrame = serde_json::from_str(
-            r#"{"type":"evt","name":"activeEditorChanged","payload":{"path":"/a.ts"}}"#,
-        )
-        .unwrap();
-        match with {
-            InboundFrame::Evt { name, payload } => {
-                assert_eq!(name, "activeEditorChanged");
-                assert_eq!(payload.unwrap()["path"], "/a.ts");
-            }
-            _ => panic!("expected evt"),
-        }
-
-        // No payload is legal — some events are pure signals.
-        let without: InboundFrame =
-            serde_json::from_str(r#"{"type":"evt","name":"documentSaved"}"#).unwrap();
-        match without {
-            InboundFrame::Evt { name, payload } => {
-                assert_eq!(name, "documentSaved");
-                assert!(payload.is_none());
-            }
-            _ => panic!("expected evt"),
-        }
-    }
-
-    #[test]
-    fn evt_frame_carries_no_request_id_to_correlate() {
-        // Proves the event path can never consume a pending request: the frame has
-        // no id to match one with.
-        let raw = r#"{"type":"evt","name":"x","payload":null,"id":7}"#;
-        let frame: InboundFrame = serde_json::from_str(raw).unwrap();
-        assert!(matches!(frame, InboundFrame::Evt { .. }));
     }
 
     #[test]
@@ -1816,96 +2278,409 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unauthenticated_socket_cannot_inject_editor_events() {
-        // An event the renderer trusts as "the editor said so" must come from a
-        // socket that proved it is that editor.
-        let channel = Arc::new(AgentChannel::new());
-        let (port, _token) = channel.register_instance("/work/evt").await.unwrap();
+    async fn registration_writes_a_bootstrap_file_and_never_returns_the_secret() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/a").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        assert_eq!(current_bootstrap(&channel, "/work/a"), bootstrap);
+        let rendered = format!("{registration:?}");
+        assert!(!rendered.contains(&bootstrap.secret));
+    }
 
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    #[tokio::test]
+    async fn a_newline_framed_peer_is_told_the_protocol_is_incompatible() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/legacy").await.unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", registration.port))
+            .await
+            .unwrap();
         stream
-            .write_all(b"{\"type\":\"evt\",\"name\":\"activeEditorChanged\"}\n")
+            .write_all(b"{\"type\":\"hello\",\"token\":\"anything\"}\n")
             .await
             .unwrap();
-
-        // The server drops the connection on an unauthenticated evt, so the read half
-        // reaches EOF instead of staying open.
-        let mut lines = BufReader::new(stream).lines();
-        let next = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
-            .await
-            .expect("connection should have been closed promptly")
-            .unwrap();
-        assert!(next.is_none());
-        assert!(!is_connected(&channel, "/work/evt"));
+        let mut reader = BufReader::new(stream);
+        let reply = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_content_length_value(&mut reader),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert_eq!(reply["error"]["code"], PROTOCOL_INCOMPATIBLE_CODE);
+        assert!(reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("IDE_BROKER_PROTOCOL_INCOMPATIBLE"));
+        assert!(!is_connected(&channel, "/work/legacy"));
     }
 
-    #[test]
-    fn req_frame_serializes_to_the_documented_shape() {
-        let frame = OutboundFrame::Req {
-            id: 3,
-            method: "openFile".to_string(),
-            params: json!({ "path": "/x.ts", "line": 4 }),
-        };
-        let value: Value = serde_json::from_str(&serde_json::to_string(&frame).unwrap()).unwrap();
-        assert_eq!(value["type"], "req");
-        assert_eq!(value["id"], 3);
-        assert_eq!(value["method"], "openFile");
-        assert_eq!(value["params"]["path"], "/x.ts");
-        assert_eq!(value["params"]["line"], 4);
-    }
-
-    #[test]
-    fn register_instance_mints_a_token_mapped_to_the_root() {
-        // Exercise the token-registry logic directly (no server bind): register a
-        // token by hand, mirroring what `register_instance` does after the WS port
-        // is known.
-        let channel = AgentChannel::new();
-        insert_credential(&channel, "tok-1", "secret", "/work/a");
+    #[tokio::test]
+    async fn bootstrap_handshake_negotiates_and_correlates_a_request() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/rpc").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut client = Client::connect(registration.port).await;
+        let hello = client
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        assert_eq!(hello["id"], "hello");
+        assert_eq!(hello["result"]["protocolVersion"], "1.0");
+        assert!(hello["result"]["generation"].as_u64().unwrap() > 0);
+        assert!(hello["result"]["sessionId"].is_string());
         assert_eq!(
-            channel.root_for_legacy_token("tok-1.secret").as_deref(),
-            Some("/work/a")
+            hello["result"]["capabilities"],
+            json!(["cancel", "structured-errors"])
         );
-        assert_eq!(channel.root_for_legacy_token("tok-1.forged"), None);
-        assert_eq!(channel.root_for_legacy_token("missing.secret"), None);
+
+        let request = {
+            let channel = Arc::clone(&channel);
+            tokio::spawn(async move { channel.send("/work/rpc", "readActive", json!({})).await })
+        };
+        let outbound = client.read().await.unwrap();
+        assert_eq!(outbound["method"], "readActive");
+        let id = outbound["id"].as_u64().unwrap();
+        client
+            .write(json!({ "jsonrpc": "2.0", "id": id, "result": { "path": "/a.ts" } }))
+            .await;
+        assert_eq!(request.await.unwrap().unwrap()["path"], "/a.ts");
+    }
+
+    #[tokio::test]
+    async fn a_hello_with_no_shared_major_is_refused_and_recorded() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/old").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut client = Client::connect(registration.port).await;
+        let reply = client
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["0.2"])
+            .await;
+        assert_eq!(reply["error"]["code"], PROTOCOL_INCOMPATIBLE_CODE);
+        assert_eq!(
+            issue_of(&channel, "/work/old"),
+            Some(BrokerIssue::ProtocolIncompatible)
+        );
+        assert!(!is_connected(&channel, "/work/old"));
+        // A failed hello does not consume the bootstrap.
+        assert_eq!(current_bootstrap(&channel, "/work/old"), bootstrap);
+    }
+
+    #[tokio::test]
+    async fn a_bootstrap_is_single_use_and_reconnects_use_the_derived_session() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/session").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut first = Client::connect(registration.port).await;
+        let hello = first
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        let session_id = hello["result"]["sessionId"].as_str().unwrap().to_string();
+        let challenge = hello["challenge"].as_str().unwrap().to_string();
+        let session_key =
+            derive_session_key(bootstrap.secret.as_bytes(), &challenge, "client-nonce-0001");
+        drop(first);
+        wait_until(|| !is_connected(&channel, "/work/session")).await;
+
+        // The consumed bootstrap no longer authenticates (its consumer is gone,
+        // so this is a plain refusal rather than a trip).
+        let mut replay = Client::connect(registration.port).await;
+        let refused = replay
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        assert_eq!(refused["error"]["code"], -32002);
+        assert_eq!(issue_of(&channel, "/work/session"), None);
+
+        // The disconnect re-minted a bootstrap file for whoever comes next…
+        wait_until(|| registration.credential_file.exists()).await;
+        assert!(has_bootstrap(&channel, "/work/session"));
+
+        // …but the derived session reconnects, rotates, and withdraws it, so no
+        // unused credential sits on disk beside the live connection.
+        let mut second = Client::connect(registration.port).await;
+        let rehello = second.handshake(&session_id, &session_key, &["1.0"]).await;
+        assert_eq!(rehello["result"]["protocolVersion"], "1.0");
+        assert_ne!(rehello["result"]["sessionId"].as_str().unwrap(), session_id);
+        wait_until(|| is_connected(&channel, "/work/session")).await;
+        assert!(!has_bootstrap(&channel, "/work/session"));
+        assert!(!registration.credential_file.exists());
+    }
+
+    #[tokio::test]
+    async fn losing_the_connection_re_mints_a_bootstrap_file() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/remint").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        // The extension unlinks the file as soon as it has read it.
+        std::fs::remove_file(&registration.credential_file).unwrap();
+        let mut client = Client::connect(registration.port).await;
+        client
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        wait_until(|| is_connected(&channel, "/work/remint")).await;
+        assert!(!registration.credential_file.exists());
+
+        drop(client);
+        wait_until(|| registration.credential_file.exists()).await;
+        let reminted = read_bootstrap(&registration.credential_file);
+        assert_ne!(reminted, bootstrap);
+        assert_eq!(current_bootstrap(&channel, "/work/remint"), reminted);
+    }
+
+    #[tokio::test]
+    async fn replaying_a_bootstrap_while_its_consumer_is_live_trips_the_instance() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/trip").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut legitimate = Client::connect(registration.port).await;
+        legitimate
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        wait_until(|| is_connected(&channel, "/work/trip")).await;
+
+        let mut thief = Client::connect(registration.port).await;
+        let refused = thief
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        assert_eq!(refused["error"]["code"], -32002);
+        assert_eq!(
+            issue_of(&channel, "/work/trip"),
+            Some(BrokerIssue::CredentialReplayed)
+        );
+        // Every connection for the root is closed and the session is revoked…
+        assert!(!is_connected(&channel, "/work/trip"));
+        assert!(legitimate.read().await.is_none());
+        assert!(channel.lock_registry().instances["/work/trip"]
+            .session
+            .is_none());
+        // …and a fresh bootstrap is waiting on disk.
+        let reminted = read_bootstrap(&registration.credential_file);
+        assert_ne!(reminted.token_id, bootstrap.token_id);
+    }
+
+    #[tokio::test]
+    async fn a_host_driven_restart_bootstrap_replaces_the_live_connection() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/restart").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut old_host = Client::connect(registration.port).await;
+        old_host
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        wait_until(|| is_connected(&channel, "/work/restart")).await;
+        let old_generation = channel.connection_generation("/work/restart").unwrap();
+
+        channel
+            .prepare_extension_host_restart("/work/restart")
+            .unwrap();
+        let fresh = read_bootstrap(&registration.credential_file);
+        let mut new_host = Client::connect(registration.port).await;
+        let hello = new_host
+            .handshake(&fresh.token_id, fresh.secret.as_bytes(), &["1.0"])
+            .await;
+        assert!(hello["result"]["generation"].as_u64().unwrap() > old_generation);
+        // The replaced socket is closed, not left to notice on its next frame.
+        assert!(old_host.read().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_session_reconnect_without_proof_cannot_take_over() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/takeover").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut legitimate = Client::connect(registration.port).await;
+        let hello = legitimate
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        let session_id = hello["result"]["sessionId"].as_str().unwrap().to_string();
+        let generation = channel.connection_generation("/work/takeover").unwrap();
+
+        // Knowing the session id (it is not secret) without the key fails.
+        let mut intruder = Client::connect(registration.port).await;
+        let refused = intruder
+            .handshake(&session_id, b"guessed-session-key", &["1.0"])
+            .await;
+        assert_eq!(refused["error"]["code"], -32002);
+        assert_eq!(
+            channel.connection_generation("/work/takeover"),
+            Some(generation)
+        );
+    }
+
+    #[tokio::test]
+    async fn content_bearers_are_derived_from_the_live_session() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/content").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut client = Client::connect(registration.port).await;
+        let hello = client
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        let session_id = hello["result"]["sessionId"].as_str().unwrap();
+        let challenge = hello["challenge"].as_str().unwrap();
+        let key = derive_session_key(bootstrap.secret.as_bytes(), challenge, "client-nonce-0001");
+        let bearer = format!("{session_id}.{}", content_bearer(&key));
+        let generation = channel.connection_generation("/work/content").unwrap();
+        assert_eq!(
+            channel.current_scope_for_bearer(&bearer),
+            Some(("/work/content".to_string(), generation))
+        );
+        // The raw bootstrap no longer works as a bearer, and neither does a
+        // bearer for the right session with the wrong MAC.
+        assert_eq!(
+            channel
+                .current_scope_for_bearer(&format!("{}.{}", bootstrap.token_id, bootstrap.secret)),
+            None
+        );
+        assert_eq!(
+            channel.current_scope_for_bearer(&format!("{session_id}.{}", "0".repeat(64))),
+            None
+        );
+        drop(client);
+        wait_until(|| !is_connected(&channel, "/work/content")).await;
+        assert_eq!(channel.current_scope_for_bearer(&bearer), None);
+    }
+
+    #[tokio::test]
+    async fn maintenance_re_mints_a_vanished_bootstrap_after_the_grace_period() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/maintain").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        std::fs::remove_file(&registration.credential_file).unwrap();
+        // Inside the grace period an extension may be mid-handshake: leave it.
+        channel.maintain_credentials();
+        assert!(!registration.credential_file.exists());
+
+        age_bootstrap(&channel, "/work/maintain");
+        channel.maintain_credentials();
+        let reminted = read_bootstrap(&registration.credential_file);
+        assert_ne!(reminted, bootstrap);
+    }
+
+    #[tokio::test]
+    async fn two_parties_racing_one_bootstrap_trip_the_instance() {
+        // Both challenge before either hello commits: the loser must not be a
+        // silent refusal that strands the real extension.
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/race").await.unwrap();
+        let bootstrap = current_bootstrap(&channel, "/work/race");
+        let first = channel.resolve_challenge(&bootstrap.token_id).unwrap();
+        let second = channel.resolve_challenge(&bootstrap.token_id).unwrap();
+        let (tx1, _rx1) = mpsc::channel::<Vec<u8>>(1);
+        let (tx2, _rx2) = mpsc::channel::<Vec<u8>>(1);
+        channel
+            .commit_authentication(&first, "server-nonce", "client-nonce-0000", tx1)
+            .unwrap();
+        assert_eq!(
+            channel
+                .commit_authentication(&second, "server-nonce-2", "client-nonce-0001", tx2)
+                .err()
+                .as_deref(),
+            Some("broker credential was already used")
+        );
+        assert_eq!(
+            issue_of(&channel, "/work/race"),
+            Some(BrokerIssue::CredentialReplayed)
+        );
+        assert!(!is_connected(&channel, "/work/race"));
+        assert_ne!(current_bootstrap(&channel, "/work/race"), bootstrap);
+    }
+
+    #[tokio::test]
+    async fn a_replayed_token_id_without_the_secret_does_not_trip() {
+        // The token id alone (no proof) must not be able to disconnect the IDE.
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/noproof").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut legitimate = Client::connect(registration.port).await;
+        legitimate
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        wait_until(|| is_connected(&channel, "/work/noproof")).await;
+
+        let mut guesser = Client::connect(registration.port).await;
+        let refused = guesser
+            .handshake(&bootstrap.token_id, b"not-the-secret", &["1.0"])
+            .await;
+        assert_eq!(refused["error"]["code"], -32002);
+        assert_eq!(issue_of(&channel, "/work/noproof"), None);
+        assert!(is_connected(&channel, "/work/noproof"));
+    }
+
+    #[tokio::test]
+    async fn a_restart_bootstrap_survives_the_old_host_reconnecting() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/keep").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut old_host = Client::connect(registration.port).await;
+        let hello = old_host
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
+        let session_id = hello["result"]["sessionId"].as_str().unwrap().to_string();
+        let key = derive_session_key(
+            bootstrap.secret.as_bytes(),
+            hello["challenge"].as_str().unwrap(),
+            "client-nonce-0001",
+        );
+        channel
+            .prepare_extension_host_restart("/work/keep")
+            .unwrap();
+        let fresh = read_bootstrap(&registration.credential_file);
+
+        // The old host blips and reconnects with its session before going away.
+        let mut reconnect = Client::connect(registration.port).await;
+        reconnect.handshake(&session_id, &key, &["1.0"]).await;
+        assert_eq!(current_bootstrap(&channel, "/work/keep"), fresh);
+        assert!(registration.credential_file.exists());
+    }
+
+    #[tokio::test]
+    async fn a_disconnect_keeps_a_fresh_restart_bootstrap() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/fresh").await.unwrap();
+        let (generation, _rx) = attach(&channel, "/work/fresh");
+        channel
+            .prepare_extension_host_restart("/work/fresh")
+            .unwrap();
+        let fresh = current_bootstrap(&channel, "/work/fresh");
+        // The old host's socket closes after the new host may have read the
+        // file: replacing the bootstrap now would fail the new host.
+        channel.detach_conn("/work/fresh", generation);
+        assert_eq!(current_bootstrap(&channel, "/work/fresh"), fresh);
     }
 
     #[test]
     fn challenge_proofs_are_hmac_bound_and_constant_time_verified() {
-        let proof = challenge_proof("secret", "nonce");
-        verify_challenge_proof("secret", "nonce", &proof).unwrap();
-        assert!(verify_challenge_proof("secret", "other", &proof).is_err());
-        assert!(verify_challenge_proof("forged", "nonce", &proof).is_err());
-        assert!(verify_challenge_proof("secret", "nonce", "not-hex").is_err());
+        let proof = challenge_proof(b"secret", "nonce");
+        verify_challenge_proof(b"secret", "nonce", &proof).unwrap();
+        assert!(verify_challenge_proof(b"secret", "other", &proof).is_err());
+        assert!(verify_challenge_proof(b"forged", "nonce", &proof).is_err());
+        assert!(verify_challenge_proof(b"secret", "nonce", "not-hex").is_err());
     }
 
-    #[test]
-    fn deregister_drops_tokens_and_conns_for_a_root() {
-        let channel = AgentChannel::new();
-        insert_credential(&channel, "tok-a", "secret-a", "/work/a");
-        insert_credential(&channel, "tok-b", "secret-b", "/work/b");
-        // Attach a fake connection for /work/a.
-        let (tx, _rx) = mpsc::channel::<Vec<u8>>(1);
-        channel.attach_conn("/work/a", ProtocolMode::Legacy, tx);
+    #[tokio::test]
+    async fn deregister_drops_credentials_files_and_conns_for_a_root() {
+        let (channel, _temp) = test_channel();
+        let a = channel.register_instance("/work/a").await.unwrap();
+        let b = channel.register_instance("/work/b").await.unwrap();
+        let _conn = attach(&channel, "/work/a");
         assert!(is_connected(&channel, "/work/a"));
 
         channel.deregister("/work/a");
-        assert_eq!(channel.root_for_legacy_token("tok-a.secret-a"), None);
         assert!(!is_connected(&channel, "/work/a"));
+        assert!(!a.credential_file.exists());
+        assert!(!channel.lock_registry().instances.contains_key("/work/a"));
         // Unrelated root untouched.
-        assert_eq!(
-            channel.root_for_legacy_token("tok-b.secret-b").as_deref(),
-            Some("/work/b")
-        );
+        assert!(b.credential_file.exists());
+        assert!(channel.lock_registry().instances.contains_key("/work/b"));
     }
 
-    #[test]
-    fn detach_conn_only_evicts_the_matching_connection() {
-        let channel = AgentChannel::new();
-        let (tx1, _rx1) = mpsc::channel::<Vec<u8>>(1);
-        let first = channel.attach_conn("/work/a", ProtocolMode::Legacy, tx1);
-        // A reconnect replaces the entry with a fresh conn id.
-        let (tx2, _rx2) = mpsc::channel::<Vec<u8>>(1);
-        let second = channel.attach_conn("/work/a", ProtocolMode::Legacy, tx2);
+    #[tokio::test]
+    async fn detach_conn_only_evicts_the_matching_connection() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/a").await.unwrap();
+        let (first, _rx1) = attach(&channel, "/work/a");
+        channel.prepare_extension_host_restart("/work/a").unwrap();
+        let (second, _rx2) = attach(&channel, "/work/a");
         assert_ne!(first, second);
 
         // The stale first connection closing must NOT evict the live second one.
@@ -1919,9 +2694,9 @@ mod tests {
 
     #[tokio::test]
     async fn waits_for_a_strictly_new_extension_host_generation() {
-        let channel = Arc::new(AgentChannel::new());
-        let (first_tx, _first_rx) = mpsc::channel::<Vec<u8>>(1);
-        let first = channel.attach_conn("/work/reload", ProtocolMode::JsonRpc, first_tx);
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/reload").await.unwrap();
+        let (first, _first_rx) = attach(&channel, "/work/reload");
         let waiter = {
             let channel = Arc::clone(&channel);
             tokio::spawn(async move {
@@ -1930,8 +2705,10 @@ mod tests {
                     .await
             })
         };
-        let (second_tx, _second_rx) = mpsc::channel::<Vec<u8>>(1);
-        let second = channel.attach_conn("/work/reload", ProtocolMode::JsonRpc, second_tx);
+        channel
+            .prepare_extension_host_restart("/work/reload")
+            .unwrap();
+        let (second, _second_rx) = attach(&channel, "/work/reload");
         assert!(second > first);
         assert_eq!(waiter.await.unwrap().unwrap(), second);
     }
@@ -1962,11 +2739,11 @@ mod tests {
         channel.resolve("/work/a", 7, 999, Ok(Value::Null));
     }
 
-    #[test]
-    fn content_handles_are_scoped_integrity_checked_and_one_shot() {
-        let channel = AgentChannel::new();
-        let (tx, _rx) = mpsc::channel::<Vec<u8>>(1);
-        let generation = channel.attach_conn("/work/a", ProtocolMode::JsonRpc, tx);
+    #[tokio::test]
+    async fn content_handles_are_scoped_integrity_checked_and_one_shot() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/a").await.unwrap();
+        let (generation, _rx) = attach(&channel, "/work/a");
         let handle = channel
             .insert_content(
                 "/work/a",
@@ -2042,203 +2819,95 @@ mod tests {
         )));
     }
 
-    /// End-to-end over a real loopback socket: bind the server, connect a stand-in
-    /// "extension", authenticate with `hello`, then prove a `send` request reaches
-    /// the socket and its response is correlated back to the caller.
     #[tokio::test]
-    async fn tcp_round_trip_delivers_a_request_and_returns_its_response() {
-        let channel = Arc::new(AgentChannel::new());
-        let (port, token) = channel.register_instance("/work/rt").await.unwrap();
+    async fn a_response_from_an_unauthenticated_socket_cannot_consume_a_request() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/auth").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut legitimate = Client::connect(registration.port).await;
+        legitimate
+            .handshake(&bootstrap.token_id, bootstrap.secret.as_bytes(), &["1.0"])
+            .await;
 
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        stream
-            .write_all(format!("{{\"type\":\"hello\",\"token\":\"{token}\"}}\n").as_bytes())
+        let request = {
+            let channel = Arc::clone(&channel);
+            tokio::spawn(async move { channel.send("/work/auth", "readActive", json!({})).await })
+        };
+        let id = legitimate.read().await.unwrap()["id"].as_u64().unwrap();
+
+        let mut unauthenticated = Client::connect(registration.port).await;
+        unauthenticated
+            .write(json!({ "jsonrpc": "2.0", "id": id, "result": "forged" }))
+            .await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!request.is_finished());
+
+        legitimate
+            .write(json!({ "jsonrpc": "2.0", "id": id, "result": "real" }))
+            .await;
+        assert_eq!(request.await.unwrap().unwrap(), json!("real"));
+    }
+
+    #[tokio::test]
+    async fn malformed_and_oversized_frames_close_the_connection() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/frames").await.unwrap();
+
+        let mut malformed = TcpStream::connect(("127.0.0.1", registration.port))
             .await
             .unwrap();
+        malformed
+            .write_all(b"Content-Length: 5\r\n\r\n{nope")
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(malformed);
+        let eof = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_content_length_value(&mut reader),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(eof, Ok(None)));
 
-        // Wait until the server has bound this connection to the root.
-        for _ in 0..100 {
-            if is_connected(&channel, "/work/rt") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        assert!(is_connected(&channel, "/work/rt"));
-
-        // Fire the request from the app side; the stand-in extension answers below.
-        let client = Arc::clone(&channel);
-        let request = tokio::spawn(async move {
-            client
-                .send("/work/rt", "openFile", json!({ "path": "/a.ts" }))
-                .await
-        });
-
-        let (read_half, mut write_half) = stream.into_split();
-        let mut lines = BufReader::new(read_half).lines();
-        let line = lines.next_line().await.unwrap().unwrap();
-        let frame: Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(frame["type"], "req");
-        assert_eq!(frame["method"], "openFile");
-        assert_eq!(frame["params"]["path"], "/a.ts");
-        let id = frame["id"].as_u64().unwrap();
-        write_half
+        let mut oversized = TcpStream::connect(("127.0.0.1", registration.port))
+            .await
+            .unwrap();
+        oversized
             .write_all(
                 format!(
-                    "{{\"type\":\"res\",\"id\":{id},\"ok\":true,\"result\":{{\"opened\":true}}}}\n"
+                    "Content-Length: {}\r\n\r\n",
+                    super::super::broker_protocol::MAX_FRAME_BYTES + 1
                 )
                 .as_bytes(),
             )
             .await
             .unwrap();
-
-        let result = request.await.unwrap().unwrap();
-        assert_eq!(result["opened"], true);
+        let mut reader = BufReader::new(oversized);
+        let eof = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_content_length_value(&mut reader),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(eof, Ok(None)));
+        assert!(!is_connected(&channel, "/work/frames"));
     }
 
     #[tokio::test]
-    async fn jsonrpc_round_trip_negotiates_and_correlates_a_request() {
-        let channel = Arc::new(AgentChannel::new());
-        let (port, token) = channel.register_instance("/work/rpc").await.unwrap();
-        let (token_id, secret) = split_credential(&token);
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        let challenge_request = json!({
-            "jsonrpc": "2.0",
-            "id": "challenge",
-            "method": "cognia/auth/challenge",
-            "params": { "tokenId": token_id }
-        });
-        stream
-            .write_all(&encode_content_length(&challenge_request).unwrap())
-            .await
-            .unwrap();
-
-        let (read_half, mut write_half) = stream.into_split();
-        let mut reader = BufReader::new(read_half);
-        let challenge_response = read_content_length_value(&mut reader)
-            .await
-            .unwrap()
-            .unwrap();
-        let challenge = challenge_response["result"]["challenge"].as_str().unwrap();
-        let hello = json!({
-            "jsonrpc": "2.0",
-            "id": "hello",
-            "method": "cognia/hello",
-            "params": {
-                "tokenId": token_id,
-                "proof": challenge_proof(secret, challenge),
-                "protocolVersions": ["1.0", "0.2"],
-                "codeApiVersion": "1.128.0",
-                "catalogHash": DEFAULT_CATALOG_HASH,
-                "hostId": "local",
-                "workspace": "/work/rpc",
-                "capabilities": ["cancel", "structured-errors"]
-            }
-        });
-        write_half
-            .write_all(&encode_content_length(&hello).unwrap())
-            .await
-            .unwrap();
-
-        let negotiated = read_content_length_value(&mut reader)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(negotiated["id"], "hello");
-        assert_eq!(negotiated["result"]["protocolVersion"], "1.0");
-        let generation = negotiated["result"]["generation"].as_u64().unwrap();
-        assert!(generation > 0);
-
-        let client = Arc::clone(&channel);
-        let request =
-            tokio::spawn(async move { client.send("/work/rpc", "readActive", json!({})).await });
-        let outbound = read_content_length_value(&mut reader)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(outbound["jsonrpc"], "2.0");
-        assert_eq!(outbound["method"], "readActive");
-        let id = outbound["id"].as_u64().unwrap();
-        write_half
-            .write_all(
-                &encode_content_length(&json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": { "path": "/a.ts" }
-                }))
-                .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(request.await.unwrap().unwrap()["path"], "/a.ts");
-    }
-
-    #[tokio::test]
-    async fn response_before_hello_cannot_consume_an_authenticated_request() {
-        let channel = Arc::new(AgentChannel::new());
-        let (port, token) = channel.register_instance("/work/auth").await.unwrap();
-
-        let mut legitimate = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        legitimate
-            .write_all(format!("{{\"type\":\"hello\",\"token\":\"{token}\"}}\n").as_bytes())
-            .await
-            .unwrap();
-        for _ in 0..100 {
-            if is_connected(&channel, "/work/auth") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-
-        let client = Arc::clone(&channel);
-        let request =
-            tokio::spawn(async move { client.send("/work/auth", "readActive", json!({})).await });
-        let (read_half, mut legitimate_write) = legitimate.into_split();
-        let mut lines = BufReader::new(read_half).lines();
-        let line = tokio::time::timeout(Duration::from_secs(1), lines.next_line())
-            .await
-            .expect("authenticated request frame timed out")
-            .unwrap()
-            .unwrap();
-        let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
-            .as_u64()
-            .unwrap();
-
-        let mut unauthenticated = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        unauthenticated
-            .write_all(
-                format!("{{\"type\":\"res\",\"id\":{id},\"ok\":true,\"result\":\"forged\"}}\n")
-                    .as_bytes(),
-            )
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert!(!request.is_finished());
-
-        legitimate_write
-            .write_all(
-                format!("{{\"type\":\"res\",\"id\":{id},\"ok\":true,\"result\":\"real\"}}\n")
-                    .as_bytes(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(request.await.unwrap().unwrap(), json!("real"));
-    }
-
-    /// A connection presenting an unknown token is refused: the server never binds
-    /// it, so a subsequent `send` for that root still reports "not connected".
-    #[tokio::test]
-    async fn tcp_connection_with_a_bad_token_is_refused() {
-        let channel = Arc::new(AgentChannel::new());
-        let (port, _token) = channel.register_instance("/work/bad").await.unwrap();
-
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        stream
-            .write_all(b"{\"type\":\"hello\",\"token\":\"not-a-real-token\"}\n")
-            .await
-            .unwrap();
-
-        // Give the server a beat to process (and reject) the hello.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!is_connected(&channel, "/work/bad"));
+    async fn a_challenge_without_a_client_nonce_is_refused() {
+        let (channel, _temp) = test_channel();
+        let registration = channel.register_instance("/work/nonce").await.unwrap();
+        let bootstrap = read_bootstrap(&registration.credential_file);
+        let mut client = Client::connect(registration.port).await;
+        client
+            .write(json!({
+                "jsonrpc": "2.0",
+                "id": "challenge",
+                "method": "cognia/auth/challenge",
+                "params": { "tokenId": bootstrap.token_id }
+            }))
+            .await;
+        let reply = client.read().await.unwrap();
+        assert_eq!(reply["error"]["code"], -32602);
     }
 }

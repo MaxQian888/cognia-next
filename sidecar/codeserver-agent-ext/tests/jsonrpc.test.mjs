@@ -82,11 +82,11 @@ test("JSON-RPC helpers emit standard requests, results, and structured errors", 
 })
 
 test("broker hello advertises the pinned API and capability catalog", () => {
-  assert.deepEqual(brokerChallengeRequest("token-id"), {
+  assert.deepEqual(brokerChallengeRequest("token-id", "client-nonce"), {
     jsonrpc: "2.0",
     id: "challenge",
     method: "cognia/auth/challenge",
-    params: { tokenId: "token-id" },
+    params: { tokenId: "token-id", clientNonce: "client-nonce" },
   })
   assert.deepEqual(
     brokerHelloRequest({
@@ -103,7 +103,7 @@ test("broker hello advertises the pinned API and capability catalog", () => {
       params: {
         tokenId: "token-id",
         proof: "proof",
-        protocolVersions: ["1.0", "0.2"],
+        protocolVersions: ["1.0"],
         codeApiVersion: "1.128.0",
         catalogHash: "sha256:catalog",
         hostId: "local",
@@ -120,18 +120,26 @@ test("broker hello advertises the pinned API and capability catalog", () => {
   )
 })
 
-test("negotiated hello requires pinned versions and mandatory capabilities", () => {
+test("negotiated hello requires a supported major, a session and mandatory capabilities", () => {
   const result = {
     protocolVersion: "1.0",
     codeApiVersion: "1.128.0",
     catalogHash: "sha256:catalog",
     generation: 3,
+    sessionId: "session-1",
     capabilities: ["structured-errors", "content-handles", "contribution-transactions"],
   }
   assert.equal(validateNegotiatedHello(result, "sha256:catalog").generation, 3)
-  assert.throws(
-    () =>
-      validateNegotiatedHello({ ...result, capabilities: ["structured-errors"] }, "sha256:catalog"),
-    /IDE_BROKER_NEGOTIATION_INVALID/
-  )
+  for (const broken of [
+    { ...result, capabilities: ["structured-errors"] },
+    { ...result, protocolVersion: "0.2" },
+    { ...result, protocolVersion: "2.0" },
+    { ...result, sessionId: "" },
+    { ...result, sessionId: undefined },
+  ]) {
+    assert.throws(
+      () => validateNegotiatedHello(broken, "sha256:catalog"),
+      /IDE_BROKER_NEGOTIATION_INVALID/
+    )
+  }
 })

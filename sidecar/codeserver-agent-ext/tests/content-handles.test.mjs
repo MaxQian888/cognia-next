@@ -73,3 +73,29 @@ test("fails closed on altered content", async () => {
     /IDE_CONTENT_HANDLE_INTEGRITY_FAILED/
   )
 })
+
+test("reads a rotating bearer per request and refuses while disconnected", async () => {
+  const bytes = Uint8Array.from([7])
+  let bearer = "session-1.mac-1"
+  const seen = []
+  const client = new ContentHandleClient({
+    port: 4312,
+    credential: () => bearer,
+    fetchImpl: async (_url, init) => {
+      seen.push(init.headers.authorization)
+      return new Response(JSON.stringify(handle(bytes)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    },
+  })
+  const provider = { pluginId: "acme", id: "cognia.acme.fs" }
+  await client.upload(provider, bytes)
+  bearer = "session-2.mac-2"
+  await client.upload(provider, bytes)
+  assert.deepEqual(seen, ["Bearer session-1.mac-1", "Bearer session-2.mac-2"])
+
+  bearer = null
+  await assert.rejects(client.upload(provider, bytes), /IDE_CONTENT_CREDENTIAL_UNAVAILABLE/)
+  assert.equal(seen.length, 2)
+})

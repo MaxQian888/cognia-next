@@ -66,6 +66,12 @@
   "overwriteExternalConfirmCount": "{count} files changed on disk since you opened them. Overwrite the external changes with your drafts?",
   "previewTab": "{name} — preview tab, double-click to keep it open",
   "proIde": {
+    "brokerIssue": {
+      "credential-replayed": "Cognia's Pro IDE connection key was used by something else in this workspace, so Cognia revoked it and issued a new one. If you didn't expect this, check what is running in the VS Code terminals and tasks.",
+      "install-failed": "The Cognia extension for VS Code failed its integrity check or couldn't be installed. VS Code is running, but Cognia can't drive the editor or send its context to chat. Restart the Pro IDE to try again.",
+      "protocol-incompatible": "The Cognia extension in VS Code is from a different version of Cognia and can't connect. VS Code is running, but Cognia can't drive the editor. Restart the Pro IDE to reinstall the matching extension.",
+      "registration-failed": "Cognia couldn't create the Pro IDE connection key. VS Code is running, but Cognia can't drive the editor or send its context to chat. Restart the Pro IDE to try again."
+    },
     "cancelDownload": "Cancel",
     "chatPrompts": {
       "explain": "Please explain this code.",

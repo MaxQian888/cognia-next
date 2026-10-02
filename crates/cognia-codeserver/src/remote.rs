@@ -140,9 +140,16 @@ impl RemoteCodeServerState {
         std::fs::create_dir_all(&paths.extensions_dir)
             .map_err(|error| format!("create {}: {error}", paths.extensions_dir.display()))?;
 
-        let broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
+        let mut broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
+        let mut broker_issue = None;
         if broker_enabled {
-            install_managed_extensions(&binary, &self.data_dir, &paths).await;
+            if let Err(error) = install_managed_extensions(&binary, &self.data_dir, &paths).await {
+                log::warn!(
+                    "remote managed broker unavailable; base IDE remains available: {error}"
+                );
+                broker_enabled = false;
+                broker_issue = Some(super::agent_channel::BrokerIssue::InstallFailed);
+            }
         }
         // The renderer persists display language before ensure/restart. Headless
         // must prepare the same language pack as the desktop before VS Code starts.
@@ -167,26 +174,35 @@ impl RemoteCodeServerState {
         let relay_id = Uuid::new_v4().simple().to_string();
         let args = code_server_args(&canonical, port, &paths, profile);
         let mut envs = Vec::new();
+        if !broker_enabled {
+            let channel = super::agent_channel::global();
+            channel.deregister(&canonical);
+            if let Some(issue) = broker_issue {
+                channel.record_issue(&canonical, issue);
+            }
+        }
         if broker_enabled {
             let channel = super::agent_channel::global();
-            let (broker_port, broker_token) = channel
+            match channel
                 .register_instance_for_host(&canonical, &self.host_id)
-                .await?;
-            let content_port = channel.content_port().await.inspect_err(|_| {
-                channel.deregister(&canonical);
-            })?;
-            envs.extend([
-                ("COGNIA_CS_AGENT_PORT", broker_port.to_string()),
-                ("COGNIA_CS_AGENT_TOKEN", broker_token),
-                ("COGNIA_CS_CONTENT_PORT", content_port.to_string()),
-                ("COGNIA_CS_BROKER_PROTOCOL", "1".to_string()),
-                (
-                    "COGNIA_CS_CATALOG_HASH",
-                    super::broker_protocol::DEFAULT_CATALOG_HASH.to_string(),
-                ),
-                ("COGNIA_CS_HOST_ID", self.host_id.clone()),
-                ("COGNIA_CS_WORKSPACE", canonical.clone()),
-            ]);
+                .await
+            {
+                Ok(registration) => envs.extend(super::process::broker_child_env(
+                    &registration,
+                    &self.host_id,
+                    &canonical,
+                )),
+                Err(error) => {
+                    // The workbench still starts; only the broker is withheld.
+                    log::warn!("remote managed broker registration failed: {error}");
+                    broker_enabled = false;
+                    channel.deregister(&canonical);
+                    channel.record_issue(
+                        &canonical,
+                        super::agent_channel::BrokerIssue::RegistrationFailed,
+                    );
+                }
+            }
         }
 
         let child = spawn_code_server(&binary, &args, &envs).inspect_err(|_error| {
@@ -860,17 +876,30 @@ async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
     }
 }
 
-async fn install_managed_extensions(binary: &str, data_dir: &Path, paths: &ProfilePaths) {
+/// Install the verified broker and every selected proxy. Returns the broker's
+/// own outcome: a failure there leaves the base IDE available but withholds
+/// the broker, and the caller records why.
+async fn install_managed_extensions(
+    binary: &str,
+    data_dir: &Path,
+    paths: &ProfilePaths,
+) -> Result<(), String> {
     let broker = broker_vsix_path(data_dir);
-    if broker.is_file() {
-        if let Err(error) = install_vsix(binary, &broker, paths).await {
-            log::warn!("remote managed broker install failed; base IDE remains available: {error}");
-        }
-    } else {
-        log::warn!(
-            "remote managed broker missing at {}; base IDE remains available",
-            broker.display()
-        );
+    let digest = {
+        let broker = broker.clone();
+        tokio::task::spawn_blocking(move || super::process::verify_broker_vsix(&broker))
+            .await
+            .map_err(|error| format!("IDE_BROKER_INSTALL_FAILED: verify task: {error}"))??
+    };
+    let marker = paths.extensions_dir.join(".cognia-managed-broker-version");
+    let installed = tokio::fs::read_to_string(&marker).await.ok();
+    if !super::process::broker_ext_install_up_to_date(installed.as_deref(), &digest) {
+        install_vsix(binary, &broker, paths)
+            .await
+            .map_err(|error| format!("IDE_BROKER_INSTALL_FAILED: {error}"))?;
+        tokio::fs::write(&marker, super::process::broker_install_marker(&digest))
+            .await
+            .map_err(|error| format!("IDE_BROKER_INSTALL_FAILED: write install marker: {error}"))?;
     }
     let cache_root = data_dir.join("code-server");
     match super::proxy::list_artifacts_at_root(&cache_root) {
@@ -891,6 +920,7 @@ async fn install_managed_extensions(binary: &str, data_dir: &Path, paths: &Profi
         }
         Err(error) => log::warn!("remote managed proxy discovery failed: {error}"),
     }
+    Ok(())
 }
 
 async fn install_remote_proxy(
@@ -987,9 +1017,7 @@ async fn activate_remote_proxy(
             .await;
         if handshake.is_err() {
             if let Some(generation) = generation {
-                let _ = channel
-                    .send(root, "restartManagedExtensionHost", json!({}))
-                    .await;
+                let _ = channel.restart_extension_host(root).await;
                 if channel
                     .wait_for_new_generation(root, generation, Duration::from_secs(30))
                     .await
@@ -1014,9 +1042,10 @@ async fn restart_remote_extension_hosts(
         let generation = channel
             .connection_generation(root)
             .ok_or_else(|| format!("{root}: managed extension host is disconnected"))?;
-        let _ = channel
-            .send(root, "restartManagedExtensionHost", json!({}))
-            .await;
+        channel
+            .restart_extension_host(root)
+            .await
+            .map_err(|error| format!("{root}: {error}"))?;
         channel
             .wait_for_new_generation(root, generation, Duration::from_secs(30))
             .await
@@ -1047,7 +1076,7 @@ fn broker_vsix_path(data_dir: &Path) -> PathBuf {
             data_dir
                 .join("sidecar")
                 .join("codeserver-agent-ext")
-                .join("cognia-managed-broker.vsix")
+                .join(super::process::BROKER_EXT_VSIX)
         })
 }
 

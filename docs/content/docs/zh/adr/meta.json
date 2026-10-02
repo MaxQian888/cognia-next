@@ -205,6 +205,7 @@
     "0207-a-collaboration-event-reaches-people-who-are-not-in-the-room",
     "0208-edits-to-different-fields-merge",
     "0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs",
-    "0211-public-status-measures-the-relay-it-names"
+    "0211-public-status-measures-the-relay-it-names",
+    "0212-the-broker-credential-is-a-file-not-an-environment"
   ]
 }

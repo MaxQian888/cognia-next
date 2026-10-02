@@ -12,6 +12,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { useCodeServerBrokerIssues } from "@/hooks/codeserver/use-code-server-broker-issues"
 import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
 import { useCodeServerWorkspaceSync } from "@/hooks/codeserver/use-code-server-workspace-sync"
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
@@ -19,7 +20,11 @@ import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-loca
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
 import { useCodeServerProjectOpener } from "@/hooks/codeserver/use-code-server-project-opener"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
-import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
+import {
+  type CodeServerBrokerIssueEvent,
+  type CodeServerProfile,
+  codeServerClient,
+} from "@/lib/codeserver/client"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
 // Re-exported where it has always lived: `joinProjectPath` moved next to the
 // opener registration so the browser pane could share it, and every existing
@@ -122,6 +127,18 @@ export function CodeServerPane({
   // re-push as soon as it is. Ungated on host, because the snapshot rides the
   // same execution-targeted command as the rest of the agent drive.
   useCodeServerWorkspaceSync(phase === "ready" && profile === "managed", root)
+  // Broker problems used to be a log line. A replayed credential is a warning
+  // the user can act on (something in this workbench read it); the others say
+  // why agent drive is off while the workbench itself keeps running.
+  const handleBrokerIssue = useCallback(
+    ({ issue }: CodeServerBrokerIssueEvent) => {
+      const message = t(`proIde.brokerIssue.${issue}`)
+      if (issue === "credential-replayed") toast.warning(message, { duration: 15_000 })
+      else toast.error(message)
+    },
+    [t]
+  )
+  useCodeServerBrokerIssues(profile === "managed", root, handleBrokerIssue)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.

@@ -31,6 +31,7 @@ ed25519-dalek.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
 hex.workspace = true
+hkdf = "0.13"
 hmac.workspace = true
 log.workspace = true
 once_cell.workspace = true

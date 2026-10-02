@@ -1,72 +1,22 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import {
+import * as protocol from "../src/protocol.mjs"
+
+const {
   diagnosticSeverityName,
   editReflectionAction,
-  eventFrame,
-  helloFrame,
   notificationKind,
-  parseRequest,
-  responseFrame,
   shouldReflectEdit,
-  splitFrames,
   toZeroBased,
-} from "../src/protocol.mjs"
+} = protocol
 
-test("splitFrames returns complete lines and keeps the trailing partial", () => {
-  const { lines, rest } = splitFrames('{"a":1}\n{"b":2}\n{"c":')
-  assert.deepEqual(lines, ['{"a":1}', '{"b":2}'])
-  assert.equal(rest, '{"c":')
-})
-
-test("splitFrames drops blank lines and trims", () => {
-  const { lines, rest } = splitFrames("  x  \n\n y \n")
-  assert.deepEqual(lines, ["x", "y"])
-  assert.equal(rest, "")
-})
-
-test("parseRequest accepts a well-formed req and defaults params", () => {
-  assert.deepEqual(parseRequest('{"type":"req","id":5,"method":"openFile"}'), {
-    id: 5,
-    method: "openFile",
-    params: {},
-  })
-  assert.deepEqual(
-    parseRequest('{"type":"req","id":6,"method":"openFile","params":{"path":"/a"}}'),
-    { id: 6, method: "openFile", params: { path: "/a" } }
-  )
-})
-
-test("parseRequest rejects malformed, non-req, or ill-typed frames", () => {
-  assert.equal(parseRequest("not json"), null)
-  assert.equal(parseRequest('{"type":"res","id":1}'), null)
-  assert.equal(parseRequest('{"type":"req","method":"x"}'), null) // no id
-  assert.equal(parseRequest('{"type":"req","id":"1","method":"x"}'), null) // id not a number
-  assert.equal(parseRequest('{"type":"req","id":1}'), null) // no method
-})
-
-test("helloFrame is newline-terminated JSON carrying the token", () => {
-  const frame = helloFrame("tok-1")
-  assert.ok(frame.endsWith("\n"))
-  assert.deepEqual(JSON.parse(frame), { type: "hello", token: "tok-1" })
-})
-
-test("responseFrame encodes success and failure", () => {
-  assert.deepEqual(JSON.parse(responseFrame(3, { ok: true, result: { opened: true } })), {
-    type: "res",
-    id: 3,
-    ok: true,
-    result: { opened: true },
-  })
-  assert.deepEqual(JSON.parse(responseFrame(4, { ok: false, error: "boom" })), {
-    type: "res",
-    id: 4,
-    ok: false,
-    error: "boom",
-  })
-  // A success with no result defaults to null (not undefined, which JSON drops).
-  assert.equal(JSON.parse(responseFrame(5, { ok: true })).result, null)
+test("the retired newline framing helpers are gone", () => {
+  // The host refuses anything that is not Content-Length framed; a leftover
+  // newline encoder here would only build frames nobody accepts.
+  for (const name of ["splitFrames", "parseRequest", "helloFrame", "eventFrame", "responseFrame"]) {
+    assert.equal(name in protocol, false, name)
+  }
 })
 
 test("toZeroBased converts 1-based positions and guards non-numbers", () => {
@@ -100,40 +50,6 @@ test("diagnosticSeverityName maps VS Code severities and defaults to info", () =
   assert.equal(diagnosticSeverityName(2), "info")
   assert.equal(diagnosticSeverityName(3), "hint")
   assert.equal(diagnosticSeverityName(99), "info")
-})
-
-test("eventFrame is newline-terminated JSON with no correlation id", () => {
-  const frame = eventFrame("activeEditorChanged", { path: "/a.ts" })
-  assert.ok(frame.endsWith("\n"))
-  const parsed = JSON.parse(frame)
-  assert.deepEqual(parsed, {
-    type: "evt",
-    name: "activeEditorChanged",
-    payload: { path: "/a.ts" },
-  })
-  // No id: an event must never be able to satisfy a pending request.
-  assert.equal("id" in parsed, false)
-})
-
-test("eventFrame normalises a missing payload to null", () => {
-  // undefined would be dropped by JSON.stringify, leaving the key absent and the
-  // Rust `Option<Value>` unable to distinguish it from a malformed frame.
-  assert.equal(JSON.parse(eventFrame("documentSaved")).payload, null)
-  assert.equal(JSON.parse(eventFrame("documentSaved", undefined)).payload, null)
-})
-
-test("eventFrame survives a round-trip through splitFrames", () => {
-  const { lines, rest } = splitFrames(eventFrame("a", { n: 1 }) + eventFrame("b", { n: 2 }))
-  assert.equal(rest, "")
-  assert.deepEqual(
-    lines.map((l) => JSON.parse(l).name),
-    ["a", "b"]
-  )
-})
-
-test("parseRequest ignores an event frame", () => {
-  // The two directions share a socket; a request parser must not claim events.
-  assert.equal(parseRequest(eventFrame("activeEditorChanged", {}).trim()), null)
 })
 
 test("notificationKind narrows to what the editor can show", () => {

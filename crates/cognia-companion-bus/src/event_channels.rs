@@ -507,6 +507,13 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         tauri_forwarded: true,
         note: "IDE broker notification addressed to the renderer",
     },
+    EventChannelSpec {
+        pattern: "codeserver://broker-issue",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "IDE broker problem (install, protocol, credential tripwire); workspace root and an issue code",
+    },
     // Plugin runtime.
     EventChannelSpec {
         pattern: "plugin:python",
