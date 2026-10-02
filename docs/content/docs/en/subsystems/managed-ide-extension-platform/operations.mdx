@@ -74,9 +74,45 @@ managed `keybindings.json` belongs to you outright. Re-running it on every
 launch would hand the native profile the last word on the keys both allowlists
 name, and would delete the rest.
 
-Dev Mode uses the same catalog and authorization path and adds schema
-diagnostics, resource watching, temporary proxy rebuilds, RPC inspection,
-permission simulation, and local development signing.
+## Dev Mode
+
+Dev Mode lives in Plugin DevTools → Managed IDE Dev Mode, on the desktop. The
+switch is the host's (`plugin_managed_ide_dev_mode_set`): off by default,
+never saved, and gone when the app quits. It uses the same catalog and
+authorization path as normal operation and adds:
+
+- **RPC inspection.** The agent channel records every frame it exchanges with
+  an editor in a 2,000-entry ring: direction, kind, method, id, generation,
+  plugin, size, round-trip time and error code. Payloads keep only their shape
+  (keys, lengths, leaf types) unless you opt into values, which the panel runs
+  through `@cognia/redact` before showing. Nothing is recorded while Dev Mode
+  is off, and switching it off empties the trace.
+- **Permission simulation.** Decide one permission for one plugin, for the
+  session: Allow and Deny answer without asking, Ask always prompts. The
+  broker's authorization path consults it only while Dev Mode is on. A plugin
+  with a simulation in force is badged in the plugin list and in the trace.
+- **Schema diagnostics.** Each registered plugin folder shows its
+  `manifest.ide` problems, from the locked JSON Schema and from normalization,
+  re-checked when a file in the folder changes.
+- **Resource watching and temporary proxy rebuilds.** With Watch plugin
+  folders on, an edit in a registered folder reinstalls the plugin from it and
+  reloads it. During Dev Mode a local plugin's proxy is activated as a
+  temporary build: no activation marker is written, so a restart still gets
+  the committed proxy, and switching Dev Mode off restores it (or removes the
+  proxy of a plugin that never had one committed).
+- **Local development signing.** There is no development key. A plugin
+  installed from a folder registered in the panel gets a `local-dev`
+  verification receipt, minted by the host only while Dev Mode is on and only
+  for registered folders. The signature check accepts it only after asking the
+  host that Dev Mode is still on, the frontend trust prompt still applies, and
+  proxies are still signed with the host's `managed-signing.key`, which the
+  host uses only for plugins it holds a receipt for. Switching Dev Mode off
+  forgets the folders, the host stops honouring `local-dev` receipts, and the
+  plugins trusted that way are disabled.
+
+No install can bring its own receipt: every installer discards a
+`.cognia-verification.json` found in the content it copies before writing the
+one its own verification earned.
 
 For an unavailable contribution:
 

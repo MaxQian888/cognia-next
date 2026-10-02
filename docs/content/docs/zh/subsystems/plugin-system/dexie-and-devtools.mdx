@@ -225,6 +225,11 @@ flowchart TD
 它们连同各自的 Tauri 命令一起被删除了。底下那个文件监听器是真的，现在由
 `file-watch.ts` 驱动。
 
+托管 IDE 开发模式后来以不同的方式重建了：开关是宿主标志
+（`cognia_plugin_runtime::managed_ide_dev`），卡片挂载在本面板
+（`components/plugins/devtools/managed-ide/`），并且它把守的是真实路径（broker
+通信记录、授权路径、回执校验与 proxy 激活）。见托管 IDE 运维页面的“Dev Mode”。
+
 ---
 
 ## 陷阱

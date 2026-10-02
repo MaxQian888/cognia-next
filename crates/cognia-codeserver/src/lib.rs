@@ -13,6 +13,7 @@
 
 pub mod agent_channel;
 mod broker_protocol;
+pub mod broker_trace;
 pub mod content_bridge;
 mod credential;
 pub mod download;

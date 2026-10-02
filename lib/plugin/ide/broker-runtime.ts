@@ -17,6 +17,7 @@ import type {
 } from "@/types/plugin/plugin-ide"
 
 import { IDE_CAPABILITY_CATALOG, IDE_PROVIDER_CATALOG } from "./catalog"
+import { isDevModeActive, isPluginSimulated, simulatedDecision } from "./dev-mode"
 import { normalizeIdeManifest } from "./manifest"
 import {
   ManagedProtocolRuntime,
@@ -32,12 +33,22 @@ const MAX_READ_CONCURRENCY = 8
 const MAX_RPC_TRACES = 500
 const MAX_AGENT_EVENT_QUEUE = 256
 
+/**
+ * How the renderer handled one broker request, recorded only while Managed IDE
+ * Dev Mode is on. The host's frame trace (`codeserver_broker_trace`) shows the
+ * wire; this adds what only the renderer knows: the plugin, provider and
+ * operation, and whether a simulated permission was in force. The two join on
+ * root, generation and request id.
+ */
 export interface ManagedIdeRpcTrace {
   timestamp: number
   durationMs: number
   method: string
   root: string
   generation: number
+  requestId: string
+  /** A Dev Mode permission simulation applied to this plugin. */
+  simulated: boolean
   pluginId?: string
   providerId?: string
   operation?: string
@@ -47,13 +58,6 @@ export interface ManagedIdeRpcTrace {
 }
 
 const rpcTraces: ManagedIdeRpcTrace[] = []
-let permissionSimulator:
-  | ((input: {
-      pluginId: string
-      permission: PluginPermission
-      reason: string
-    }) => boolean | undefined)
-  | undefined
 
 export function getManagedIdeRpcTraces(): ManagedIdeRpcTrace[] {
   return rpcTraces.map((trace) => ({ ...trace }))
@@ -61,21 +65,6 @@ export function getManagedIdeRpcTraces(): ManagedIdeRpcTrace[] {
 
 export function clearManagedIdeRpcTraces(): void {
   rpcTraces.length = 0
-}
-
-export function setManagedIdePermissionSimulator(
-  simulator:
-    | ((input: {
-        pluginId: string
-        permission: PluginPermission
-        reason: string
-      }) => boolean | undefined)
-    | undefined
-): void {
-  if (process.env.NODE_ENV === "production" && simulator) {
-    throw brokerError(-32003, "IDE_PERMISSION_SIMULATION_PRODUCTION_FORBIDDEN")
-  }
-  permissionSimulator = simulator
 }
 
 const CONTEXTUAL_PERMISSIONS = new Set<PluginPermission>([
@@ -1030,6 +1019,7 @@ export class ManagedIdeBrokerRuntime {
     outcome: ManagedIdeRpcTrace["outcome"],
     error?: unknown
   ): void {
+    if (!isDevModeActive()) return
     const params =
       request.params && typeof request.params === "object"
         ? (request.params as Record<string, unknown>)
@@ -1041,6 +1031,8 @@ export class ManagedIdeBrokerRuntime {
       method: request.method,
       root: request.root,
       generation: request.generation,
+      requestId: String(request.id),
+      simulated: typeof params.pluginId === "string" && isPluginSimulated(params.pluginId),
       ...(typeof params.pluginId === "string" ? { pluginId: params.pluginId } : {}),
       ...(typeof params.providerId === "string" ? { providerId: params.providerId } : {}),
       ...(typeof params.operation === "string" ? { operation: params.operation } : {}),
@@ -1332,14 +1324,28 @@ export function createManagedIdeBrokerDependencies(): ManagedIdeBrokerDependenci
         )
       ),
     async authorize(pluginId, permission, reason) {
-      const simulated = permissionSimulator?.({ pluginId, permission, reason })
-      if (simulated !== undefined) return simulated
+      // Dev Mode permission simulation: `allow` and `deny` decide outright,
+      // `ask` puts the question to the user even for a permission that would
+      // not normally prompt. Off, `simulatedDecision` is always undefined.
+      const simulated = simulatedDecision(pluginId, permission)
+      if (simulated === "allow") return true
+      if (simulated === "deny") return false
+      if (simulated === "ask") {
+        return getPluginConsentBroker().request({ pluginId, permission, reason })
+      }
       const guard = getPermissionGuard()
       guard.require(pluginId, permission, reason)
       if (!CONTEXTUAL_PERMISSIONS.has(permission)) return true
       return getPluginConsentBroker().request({ pluginId, permission, reason })
     },
     requirePermission(pluginId, permission, reason) {
+      // A synchronous check cannot ask, so a simulated `ask` falls through to
+      // the real guard here.
+      const simulated = simulatedDecision(pluginId, permission)
+      if (simulated === "allow") return
+      if (simulated === "deny") {
+        throw brokerError(-32003, "IDE_PERMISSION_DENIED", `${pluginId}: ${permission} (simulated)`)
+      }
       getPermissionGuard().require(pluginId, permission, reason)
     },
     invoke: (pluginId, handler, args) =>

@@ -155,6 +155,17 @@ jest.mock("@/lib/plugin/package/github-source", () => ({
   })),
 }))
 
+const mockDevMode = { active: false }
+jest.mock("@/lib/plugin/ide/dev-mode", () => ({
+  isDevModeActive: () => mockDevMode.active,
+  isPluginSimulated: () => false,
+  simulatedDecision: () => undefined,
+}))
+const mockProxies = {
+  prepareManagedIdeProxy: jest.fn(async () => null),
+  activateTemporaryManagedIdeProxy: jest.fn(async () => null),
+}
+jest.mock("@/lib/plugin/ide/proxy-manager", () => mockProxies)
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
   applyWasmCapabilityGrant: jest.fn(
     async (decision: { grantedPermissions?: string[]; grantedPreopens?: string[] }) => ({
@@ -4191,6 +4202,56 @@ describe("PluginManager", () => {
         severity: "error",
       })
       expect(diagnostics[0].message).toContain("inherited from tauri compatibility")
+    })
+  })
+
+  describe("managed IDE proxy on activation", () => {
+    const proIdePlugin = (source: Plugin["source"]): Plugin => ({
+      manifest: {
+        ...createManifest("ide-tools"),
+        ide: { schemaVersion: 1, targets: ["pro-ide"] },
+      } as Plugin["manifest"],
+      status: "loaded",
+      source,
+      path: "/plugins/ide-tools",
+      config: {},
+    })
+
+    async function enable(source: Plugin["source"]) {
+      const store = {
+        plugins: { "ide-tools": proIdePlugin(source) } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("ide-tools", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+      await manager.enablePlugin("ide-tools")
+    }
+
+    afterEach(() => {
+      mockDevMode.active = false
+      mockProxies.prepareManagedIdeProxy.mockClear()
+      mockProxies.activateTemporaryManagedIdeProxy.mockClear()
+    })
+
+    it("commits the proxy normally", async () => {
+      await enable("local")
+      expect(mockProxies.prepareManagedIdeProxy).toHaveBeenCalledTimes(1)
+      expect(mockProxies.activateTemporaryManagedIdeProxy).not.toHaveBeenCalled()
+    })
+
+    it("activates a local plugin's proxy as temporary during Dev Mode, and only a local one", async () => {
+      mockDevMode.active = true
+      await enable("local")
+      expect(mockProxies.activateTemporaryManagedIdeProxy).toHaveBeenCalledTimes(1)
+      expect(mockProxies.prepareManagedIdeProxy).not.toHaveBeenCalled()
+      await enable("marketplace")
+      expect(mockProxies.prepareManagedIdeProxy).toHaveBeenCalledTimes(1)
     })
   })
 

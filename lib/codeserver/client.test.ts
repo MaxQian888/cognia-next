@@ -462,3 +462,16 @@ it("manages the owner's relay approvals through the desktop-local commands", asy
   })
   expect(CODESERVER_EVENTS.relayGrantRequested).toBe("codeserver://relay-grant-requested")
 })
+
+it("reads and configures the Dev Mode broker trace through desktop-local commands", async () => {
+  call.mockResolvedValueOnce([])
+  await expect(codeServerClient.brokerTrace()).resolves.toEqual([])
+  expect(call).toHaveBeenLastCalledWith("codeserver_broker_trace", { since: null, root: null })
+  await codeServerClient.brokerTrace(41, "/w")
+  expect(call).toHaveBeenLastCalledWith("codeserver_broker_trace", { since: 41, root: "/w" })
+  await codeServerClient.configureBrokerTrace(true)
+  expect(call).toHaveBeenLastCalledWith("codeserver_broker_trace_configure", {
+    includePayloads: true,
+  })
+  expect(CODESERVER_EVENTS.brokerTrace).toBe("codeserver://broker-trace")
+})

@@ -68,7 +68,12 @@ export interface SignatureConfig {
  * integrity check (e.g. a local/dev install).
  */
 export interface PluginVerificationReceipt {
-  verifiedVia: "signature" | "checksum"
+  /**
+   * `local-dev`: installed from a folder registered during Managed IDE Dev
+   * Mode. It vouches only while Dev Mode is on (the host stops returning it
+   * when it is off, and this verifier asks again before accepting it).
+   */
+  verifiedVia: "signature" | "checksum" | "local-dev"
   version: string
   verifiedAt: string
 }
@@ -190,6 +195,23 @@ export class PluginSignatureVerifier {
       const receipt = await this.readVerificationReceipt(pluginPath)
       if (receipt?.verifiedVia === "signature") {
         return this.createResult(pluginPath, true, undefined, warnings)
+      }
+      // Managed IDE Dev Mode's local development signing: a receipt the host
+      // minted for a registered dev folder, honoured only after asking the
+      // host that Dev Mode is still on. Never cached (only refusals are).
+      if (receipt?.verifiedVia === "local-dev") {
+        const { readDevModeStatus } = await import("@/lib/plugin/ide/dev-mode")
+        const status = await readDevModeStatus().catch(() => ({ enabled: false }))
+        if (status.enabled) {
+          warnings.push("Trusted for this Managed IDE Dev Mode session (local development)")
+          return this.createResult(pluginPath, true, undefined, warnings)
+        }
+        return this.createResult(
+          pluginPath,
+          false,
+          "Installed for local development, and Managed IDE Dev Mode is off",
+          warnings
+        )
       }
       const reason = receipt
         ? `Signature required but the install was only verified via ${receipt.verifiedVia}`

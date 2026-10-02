@@ -302,7 +302,37 @@ export const CODESERVER_EVENTS = {
   brokerIssue: "codeserver://broker-issue",
   /** A paired device asks this desktop's owner to open a project's Pro IDE. */
   relayGrantRequested: "codeserver://relay-grant-requested",
+  /** One recorded broker frame, while Managed IDE Dev Mode is on. */
+  brokerTrace: "codeserver://broker-trace",
 } as const
+
+/**
+ * Mirror of `cognia_codeserver::broker_trace::TraceEntry`: one frame the
+ * agent channel exchanged with an editor, recorded only during Dev Mode.
+ * `payload` is the payload's shape (keys, lengths, leaf types) unless the
+ * session opted into values, which the panel redacts before showing.
+ */
+export interface CodeServerBrokerTraceEntry {
+  seq: number
+  atMs: number
+  root: string
+  generation: number
+  direction: "outbound" | "inbound"
+  kind: "request" | "response" | "notification" | "event"
+  method: string | null
+  id: string | null
+  pluginId: string | null
+  bytes: number
+  durationMs: number | null
+  errorCode: number | null
+  payload: unknown
+}
+
+/** Mirror of `cognia_codeserver::broker_trace::TraceMode`. */
+export interface CodeServerBrokerTraceMode {
+  enabled: boolean
+  includePayloads: boolean
+}
 
 /** Mirror of `codeserver::relay_grants::PendingRelayGrant`. */
 export interface CodeServerRelayGrantRequest {
@@ -410,6 +440,26 @@ export const codeServerClient = {
   /** Withdraw one approval; that device's open session closes within seconds. */
   relayGrantRevoke: (deviceId: string, root: string) =>
     transport.call<boolean>("codeserver_relay_grant_revoke", { deviceId, root }),
+  /**
+   * Managed IDE Dev Mode: frames recorded after `since`, optionally for one
+   * project. Empty unless Dev Mode is on. Desktop-local, like Dev Mode.
+   */
+  brokerTrace: (since?: number, root?: string) =>
+    transport.call<CodeServerBrokerTraceEntry[]>("codeserver_broker_trace", {
+      since: since ?? null,
+      root: root ?? null,
+    }),
+  /** Keep payload values in the trace instead of shapes. Refused outside Dev Mode. */
+  configureBrokerTrace: (includePayloads: boolean) =>
+    transport.call<CodeServerBrokerTraceMode>("codeserver_broker_trace_configure", {
+      includePayloads,
+    }),
+  /**
+   * Managed IDE Dev Mode: activate a rebuilt proxy live without committing it.
+   * The committed proxy comes back when Dev Mode ends. Refused outside Dev Mode.
+   */
+  activateProxyTemporary: (artifact: CodeServerProxyArtifact) =>
+    transport.call<boolean>("codeserver_activate_proxy_temporary", { artifact }),
   /** Generate and locally sign a managed proxy from normalized manifest IR. */
   buildProxy: (request: CodeServerProxyBuildRequest) =>
     transport.call<CodeServerProxyArtifact>("codeserver_build_proxy", { request }),

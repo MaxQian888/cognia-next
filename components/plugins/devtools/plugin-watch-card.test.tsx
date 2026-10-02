@@ -15,6 +15,11 @@ jest.mock("@/lib/plugin/devtools/file-watch", () => {
 
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
+const mockDevMode = { folders: [] as Array<{ path: string; pluginId: string }> }
+jest.mock("@/hooks/plugins/use-managed-ide-dev-mode", () => ({
+  useManagedIdeDevMode: () => mockDevMode,
+}))
+
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
@@ -72,7 +77,46 @@ beforeEach(() => {
   mockToastError.mockReset()
   stopHandle.mockClear()
   mockStart.mockReset().mockResolvedValue({ watchedPluginIds: ["ok"], stop: stopHandle })
+  mockDevMode.folders = []
   seed()
+})
+
+describe("PluginWatchCard with Managed IDE Dev Mode folders", () => {
+  it("can watch a registered plugin folder even with no eligible installed plugin", () => {
+    seed(plugin({ id: "built", type: "wasm" }))
+    mockDevMode.folders = [{ path: "/dev/acme", pluginId: "acme" }]
+    renderCard()
+    expect(screen.queryByTestId("plugin-watch-empty")).not.toBeInTheDocument()
+    expect(screen.getByRole("switch")).toBeEnabled()
+  })
+
+  it("restarts the watch when the folder set changes while watching", async () => {
+    seed(plugin({ id: "ok" }))
+    const view = renderCard()
+    await userEvent.click(screen.getByRole("switch"))
+    await waitFor(() => expect(mockStart).toHaveBeenCalledTimes(1))
+    mockDevMode.folders = [{ path: "/dev/acme", pluginId: "acme" }]
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <PluginWatchCard />
+      </NextIntlClientProvider>
+    )
+    await waitFor(() => expect(mockStart).toHaveBeenCalledTimes(2))
+    expect(stopHandle).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not start watching on a folder change while switched off", async () => {
+    seed(plugin({ id: "ok" }))
+    const view = renderCard()
+    mockDevMode.folders = [{ path: "/dev/acme", pluginId: "acme" }]
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <PluginWatchCard />
+      </NextIntlClientProvider>
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mockStart).not.toHaveBeenCalled()
+  })
 })
 
 describe("PluginWatchCard", () => {

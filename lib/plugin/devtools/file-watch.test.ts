@@ -70,6 +70,8 @@ function harness(reload?: PluginFileWatchDependencies["reload"]): Harness {
         reloads.push({ pluginId, attempt })
         return { ok: true, pluginId } as never
       }),
+    devFolders: () => [],
+    syncDevFolder: async () => undefined,
     record: (entry) => {
       recorded.push(entry)
     },
@@ -186,6 +188,56 @@ describe("startPluginFileWatch", () => {
     expect(h.started).toEqual([])
     await handle.stop()
     expect(h.stopped).toBe(0)
+  })
+
+  it("watches a Dev Mode folder instead of the install, and syncs it before reloading", async () => {
+    const h = harness()
+    const order: string[] = []
+    h.deps.devFolders = () => [{ path: "/dev/acme", pluginId: "acme" }]
+    h.deps.syncDevFolder = async (path) => {
+      order.push(`sync ${path}`)
+    }
+    const reload = h.deps.reload
+    h.deps.reload = async (pluginId, attempt, sessionId) => {
+      order.push(`reload ${pluginId}`)
+      return reload(pluginId, attempt, sessionId)
+    }
+    const handle = await startPluginFileWatch(
+      [plugin({ id: "acme", path: "/plugins/acme" }), plugin({ id: "ok" })],
+      h.deps
+    )
+    expect(h.started).toEqual([["/dev/acme", "/plugins/ok"]])
+    expect(handle.watchedPluginIds).toEqual(["acme", "ok"])
+    // The install changing (the sync writing it) is not a reason to reload.
+    h.emit({ type: "modify", path: "/plugins/acme/index.js", timestamp: 1 })
+    h.emit({ type: "modify", path: "/dev/acme/index.js", timestamp: 2 })
+    await flush()
+    expect(order).toEqual(["sync /dev/acme", "reload acme"])
+    // An installed-only plugin reloads without a sync.
+    h.emit({ type: "modify", path: "/plugins/ok/index.js", timestamp: 3 })
+    await flush()
+    expect(order).toEqual(["sync /dev/acme", "reload acme", "reload ok"])
+    await handle.stop()
+  })
+
+  it("records a failed sync as a failed reload, without reloading stale files", async () => {
+    const h = harness()
+    h.deps.devFolders = () => [{ path: "/dev/acme", pluginId: "acme" }]
+    h.deps.syncDevFolder = async () => {
+      throw new Error("plugin.json is invalid")
+    }
+    const handle = await startPluginFileWatch([], h.deps)
+    h.emit({ type: "modify", path: "/dev/acme/plugin.json", timestamp: 1 })
+    await flush()
+    expect(h.reloads).toEqual([])
+    expect(h.recorded.at(-1)).toEqual(
+      expect.objectContaining({
+        pluginId: "acme",
+        status: "failed",
+        note: "plugin.json is invalid",
+      })
+    )
+    await handle.stop()
   })
 
   it("debounces a burst of saves into one reload", async () => {

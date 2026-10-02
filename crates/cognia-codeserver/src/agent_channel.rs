@@ -89,6 +89,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Notify, OnceCell};
 use uuid::Uuid;
 
+use super::broker_trace::{id_text, BrokerTrace, TraceDirection, TraceFrame, TraceKind};
+pub use super::broker_trace::{TraceEntry, TraceMode, CODESERVER_BROKER_TRACE_EVENT};
+
 use super::broker_protocol::{
     capability, encode_content_length, extension_request_deadlines, host_request_deadline,
     is_content_length_prefix, negotiate_protocol, read_content_length_value, BROKER_CAPABILITIES,
@@ -412,6 +415,8 @@ pub struct AgentChannel {
     /// Headless companion equivalent of `app`: broker callbacks are published
     /// onto the authenticated companion event stream and answered through RPC.
     event_bus: Mutex<Option<Arc<cognia_companion_bus::event_bus::EventBus>>>,
+    /// Dev Mode's frame trace; records nothing until a host turns it on.
+    trace: BrokerTrace,
 }
 
 impl AgentChannel {
@@ -433,7 +438,71 @@ impl AgentChannel {
             #[cfg(feature = "tauri-host")]
             app: Mutex::new(None),
             event_bus: Mutex::new(None),
+            trace: BrokerTrace::default(),
         }
+    }
+
+    /// Start or stop recording the broker trace. The host calls this when
+    /// Managed IDE Dev Mode is switched; off also forgets what was recorded.
+    pub fn set_trace_mode(&self, mode: TraceMode) {
+        self.trace.set_mode(mode);
+    }
+
+    pub fn trace_mode(&self) -> TraceMode {
+        self.trace.mode()
+    }
+
+    /// Recorded frames after `since`, optionally for one project root.
+    pub fn trace_entries(&self, since: Option<u64>, root: Option<&str>) -> Vec<TraceEntry> {
+        self.trace.entries(since, root)
+    }
+
+    /// Record a frame and, if it was recorded, publish it to the renderer.
+    fn trace(&self, frame: TraceFrame<'_>) {
+        if let Some(entry) = self.trace.record(frame) {
+            if let Ok(value) = serde_json::to_value(&entry) {
+                self.emit_renderer(CODESERVER_BROKER_TRACE_EVENT, value);
+            }
+        }
+    }
+
+    /// Record a frame the editor sent. Measured only while tracing, since it
+    /// re-serializes the frame to know its size.
+    fn trace_inbound(&self, root: &str, conn_id: u64, value: &Value) {
+        if !self.trace.mode().enabled {
+            return;
+        }
+        let method = value.get("method").and_then(Value::as_str);
+        let id = value.get("id").and_then(id_text);
+        let params = value.get("params");
+        let (kind, label) = match (method, &id) {
+            (Some("cognia/event"), _) => (
+                TraceKind::Event,
+                params
+                    .and_then(|params| params.get("name"))
+                    .and_then(Value::as_str),
+            ),
+            (Some(method), Some(_)) => (TraceKind::Request, Some(method)),
+            (Some(method), None) => (TraceKind::Notification, Some(method)),
+            (None, _) => (TraceKind::Response, None),
+        };
+        self.trace(TraceFrame {
+            root,
+            generation: conn_id,
+            direction: TraceDirection::Inbound,
+            kind,
+            method: label,
+            id,
+            bytes: serde_json::to_vec(value).map_or(0, |bytes| bytes.len()),
+            duration_ms: None,
+            error_code: value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(Value::as_i64),
+            payload: params
+                .or_else(|| value.get("result"))
+                .or_else(|| value.get("error")),
+        });
     }
 
     /// Register a freshly-spawned local code-server instance. See
@@ -725,6 +794,18 @@ impl AgentChannel {
                 return Err(error);
             }
         };
+        self.trace(TraceFrame {
+            root,
+            generation: conn_id,
+            direction: TraceDirection::Outbound,
+            kind: TraceKind::Request,
+            method: Some(method),
+            id: Some(id.to_string()),
+            bytes: bytes.len(),
+            duration_ms: None,
+            error_code: None,
+            payload: Some(&params),
+        });
 
         let started = tokio::time::Instant::now();
         let step = host_request_deadline(method);
@@ -756,11 +837,24 @@ impl AgentChannel {
             None => {
                 self.lock_pending().remove(&id);
                 if supports(capability::CANCEL) {
+                    let params = serde_json::json!({ "id": id });
                     if let Ok(cancel) = encode_content_length(&serde_json::json!({
                         "jsonrpc": "2.0",
                         "method": "$/cancelRequest",
-                        "params": { "id": id },
+                        "params": params,
                     })) {
+                        self.trace(TraceFrame {
+                            root,
+                            generation: conn_id,
+                            direction: TraceDirection::Outbound,
+                            kind: TraceKind::Notification,
+                            method: Some("$/cancelRequest"),
+                            id: None,
+                            bytes: cancel.len(),
+                            duration_ms: None,
+                            error_code: None,
+                            payload: Some(&params),
+                        });
                         // Best effort: a full queue means the editor is not
                         // reading, and the request is already forgotten here.
                         let _ = tx.try_send(cancel);
@@ -834,6 +928,21 @@ impl AgentChannel {
             }),
         };
         let bytes = encode_content_length(&response)?;
+        self.trace(TraceFrame {
+            root,
+            generation,
+            direction: TraceDirection::Outbound,
+            kind: TraceKind::Response,
+            method: None,
+            id: id_text(&id),
+            bytes: bytes.len(),
+            duration_ms: None,
+            error_code: response
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(Value::as_i64),
+            payload: response.get("result").or_else(|| response.get("error")),
+        });
         tx.send(bytes)
             .await
             .map_err(|_| "Pro IDE extension connection closed".to_string())
@@ -863,6 +972,18 @@ impl AgentChannel {
             "method": "cognia/provider/event",
             "params": params,
         }))?;
+        self.trace(TraceFrame {
+            root,
+            generation,
+            direction: TraceDirection::Outbound,
+            kind: TraceKind::Notification,
+            method: Some("cognia/provider/event"),
+            id: None,
+            bytes: bytes.len(),
+            duration_ms: None,
+            error_code: None,
+            payload: Some(&params),
+        });
         tx.send(bytes)
             .await
             .map_err(|_| "Pro IDE extension connection closed".to_string())
@@ -2155,6 +2276,7 @@ fn handle_authenticated_frame(
     if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return Err("missing jsonrpc 2.0 marker".to_string());
     }
+    channel.trace_inbound(root, conn_id, &value);
     if let Some(method) = value.get("method").and_then(Value::as_str) {
         match method {
             "cognia/event" => {
@@ -2321,6 +2443,89 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn dev_mode_traces_both_directions_and_nothing_while_off() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/trace").await.unwrap();
+        let (generation, mut rx) = attach(&channel, "/work/trace");
+
+        // Off: frames flow, nothing is kept.
+        handle_authenticated_frame(
+            &channel,
+            "/work/trace",
+            generation,
+            json!({ "jsonrpc": "2.0", "method": "cognia/event", "params": { "name": "saved" } }),
+        )
+        .unwrap();
+        assert!(channel.trace_entries(None, None).is_empty());
+
+        channel.set_trace_mode(TraceMode {
+            enabled: true,
+            include_payloads: false,
+        });
+        let sender = Arc::clone(&channel);
+        let request = tokio::spawn(async move {
+            sender
+                .send(
+                    "/work/trace",
+                    "openFile",
+                    json!({ "path": "/work/trace/a.ts" }),
+                )
+                .await
+        });
+        let sent = next_frame(&mut rx).await;
+        handle_authenticated_frame(
+            &channel,
+            "/work/trace",
+            generation,
+            json!({ "jsonrpc": "2.0", "id": sent["id"], "result": { "opened": true } }),
+        )
+        .unwrap();
+        request.await.unwrap().unwrap();
+        handle_authenticated_frame(
+            &channel,
+            "/work/trace",
+            generation,
+            json!({ "jsonrpc": "2.0", "method": "cognia/event", "params": { "name": "saved" } }),
+        )
+        .unwrap();
+
+        let entries = channel.trace_entries(None, Some("/work/trace"));
+        let summary: Vec<_> = entries
+            .iter()
+            .map(|entry| (entry.direction, entry.kind, entry.method.clone()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (
+                    TraceDirection::Outbound,
+                    TraceKind::Request,
+                    Some("openFile".into())
+                ),
+                (
+                    TraceDirection::Inbound,
+                    TraceKind::Response,
+                    Some("openFile".into())
+                ),
+                (
+                    TraceDirection::Inbound,
+                    TraceKind::Event,
+                    Some("saved".into())
+                ),
+            ]
+        );
+        // Redacted by default: the path is gone, its shape stays.
+        assert_eq!(entries[0].payload, Some(json!({ "path": "string(16)" })));
+        assert!(entries[1].duration_ms.is_some());
+        assert!(entries
+            .iter()
+            .all(|entry| entry.generation == generation && entry.bytes > 0));
+
+        channel.set_trace_mode(TraceMode::default());
+        assert!(channel.trace_entries(None, None).is_empty());
     }
 
     fn current_bootstrap(channel: &AgentChannel, root: &str) -> BootstrapCredential {

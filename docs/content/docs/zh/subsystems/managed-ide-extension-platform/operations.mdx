@@ -56,8 +56,33 @@ state、secret、trust decision 与 ticket 不复制。
 设置所有，`keybindings.json` 完全归你。每次启动都重跑，会让 native profile 对两个
 allowlist 共有的键拥有最终发言权，并抹掉其余内容。
 
-Dev Mode 复用相同 catalog 与授权路径，并增加 schema diagnostics、资源监听、临时
-proxy rebuild、RPC inspection、permission simulation 与本地开发签名。
+## Dev Mode
+
+Dev Mode 位于桌面端的插件 DevTools → 托管 IDE 开发模式。开关由宿主持有
+（`plugin_managed_ide_dev_mode_set`）：默认关闭、从不保存，退出应用即失效。它复用
+常规运行时的 catalog 与授权路径，并增加：
+
+- **RPC inspection。** agent channel 把与编辑器交换的每一帧记录在 2,000 条的环形
+  缓冲中：方向、类型、方法、id、generation、插件、大小、往返耗时与错误码。载荷默认
+  只保留结构（键、长度、叶子类型）；选择保留内容后，面板在显示前用 `@cognia/redact`
+  脱敏。Dev Mode 关闭时不记录任何内容，关闭开关会清空记录。
+- **Permission simulation。** 在本次会话中为某个插件决定某项权限：“允许”和“拒绝”
+  直接作答，“询问”总是弹出确认。broker 授权路径只在 Dev Mode 打开时参考它。存在模拟
+  的插件会在插件列表与通信记录中带有标记。
+- **Schema diagnostics。** 每个已登记的插件文件夹都会显示其 `manifest.ide` 的问题
+  （来自锁定的 JSON Schema 与 normalization），文件夹内文件变化时重新检查。
+- **资源监听与临时 proxy rebuild。** 打开“监视插件文件夹”后，已登记文件夹中的修改
+  会从该文件夹重新安装插件并重新加载。Dev Mode 期间，本地插件的 proxy 以临时构建激活：
+  不写 activation marker，因此重启仍使用已提交的 proxy；关闭 Dev Mode 时恢复已提交的
+  proxy（从未提交过的插件则移除其 proxy）。
+- **本地开发签名。** 不存在开发密钥。从面板中登记的文件夹安装的插件会获得
+  `local-dev` 校验回执，宿主只在 Dev Mode 打开且文件夹已登记时签发。签名校验在接受它
+  之前会先向宿主确认 Dev Mode 仍然打开，前端信任确认照常生效；proxy 仍由宿主的
+  `managed-signing.key` 签名，且宿主只为持有回执的插件签名。关闭 Dev Mode 会忘记这些
+  文件夹，宿主不再承认 `local-dev` 回执，并停用以此方式受信任的插件。
+
+任何安装都不能自带回执：每个安装器在写入自身校验所得的回执前，都会丢弃所复制内容中的
+`.cognia-verification.json`。
 
 Contribution 不可用时：
 

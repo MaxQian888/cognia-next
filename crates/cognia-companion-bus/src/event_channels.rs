@@ -515,6 +515,14 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "IDE broker problem (install, protocol, credential tripwire); workspace root and an issue code",
     },
     EventChannelSpec {
+        pattern: "codeserver://broker-trace",
+        audience: ChannelAudience::ServiceOnly,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "Managed IDE Dev Mode broker trace: one recorded frame (direction, method, \
+               id, timing, size, payload shape or, when opted in, values). Never to paired devices",
+    },
+    EventChannelSpec {
         pattern: "codeserver://relay-grant-requested",
         audience: ChannelAudience::Any,
         default_on: false,

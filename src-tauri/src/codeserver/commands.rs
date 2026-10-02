@@ -233,6 +233,26 @@ pub async fn codeserver_activate_proxy(
     state.install_proxy_artifact(&app, &artifact).await
 }
 
+/// Managed IDE Dev Mode: activate a rebuilt proxy live without committing it.
+/// The committed proxy comes back when Dev Mode ends (see
+/// `desktop_host::follow_dev_mode`). Refused outside Dev Mode.
+#[tauri::command]
+pub async fn codeserver_activate_proxy_temporary(
+    app: tauri::AppHandle,
+    state: State<'_, CodeServerState>,
+    artifact: ProxyArtifact,
+) -> Result<bool, String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    if !crate::plugin_api::managed_ide_dev::DevModeState::global().enabled() {
+        return Err(
+            "MANAGED_IDE_DEV_MODE_OFF: temporary proxies exist only during Dev Mode".to_string(),
+        );
+    }
+    state.install_temporary_proxy_artifact(&app, &artifact).await
+}
+
 /// List locally signed proxy artifacts that pass hash/signature verification.
 #[tauri::command]
 pub async fn codeserver_list_proxies(app: tauri::AppHandle) -> Result<Vec<ProxyArtifact>, String> {
@@ -431,6 +451,39 @@ pub fn codeserver_relay_grant_revoke(
     root: String,
 ) -> Result<bool, String> {
     state.revoke_relay_grant(&device_id, &root)
+}
+
+/// Managed IDE Dev Mode: broker frames recorded after `since` (all when
+/// absent), optionally for one project. Empty while Dev Mode is off, which
+/// records nothing.
+///
+/// Desktop-only (`target: client`, internal transport), like Dev Mode itself.
+#[tauri::command]
+pub fn codeserver_broker_trace(
+    since: Option<u64>,
+    root: Option<String>,
+) -> Vec<super::agent_channel::TraceEntry> {
+    super::agent_channel::global().trace_entries(since, root.as_deref())
+}
+
+/// Keep payload values in the broker trace instead of their shape (the
+/// renderer redacts them before display). Refused while Dev Mode is off; it
+/// resets to shapes only whenever Dev Mode is switched.
+#[tauri::command]
+pub fn codeserver_broker_trace_configure(
+    include_payloads: bool,
+) -> Result<super::agent_channel::TraceMode, String> {
+    if !crate::plugin_api::managed_ide_dev::DevModeState::global().enabled() {
+        return Err(
+            "MANAGED_IDE_DEV_MODE_OFF: turn on Dev Mode to configure the broker trace".into(),
+        );
+    }
+    let mode = super::agent_channel::TraceMode {
+        enabled: true,
+        include_payloads,
+    };
+    super::agent_channel::global().set_trace_mode(mode);
+    Ok(mode)
 }
 
 /// Stop every running code-server (global "shut down Pro IDE" / kill switch).

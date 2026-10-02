@@ -251,7 +251,8 @@
         "broker": {
           "children": {
             "content": {},
-            "path": {}
+            "path": {},
+            "trace": {}
           }
         },
         "disk_usage": {},
@@ -267,8 +268,11 @@
         "language_pack": {},
         "local_vscode": {},
         "proxy": {},
+        "relay_grant": {},
+        "relay_grant_request": {},
         "remote_relay": {},
-        "runtime_args": {}
+        "runtime_args": {},
+        "temporary_proxy": {}
       }
     },
     "codex": {
@@ -854,6 +858,8 @@
         "js_callback": {},
         "keypair": {},
         "local_manifest": {},
+        "managed_ide_dev_mode": {},
+        "managed_ide_dev_path": {},
         "marketplace": {
           "children": {
             "version": {}

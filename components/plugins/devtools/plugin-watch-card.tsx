@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { PluginEmptyState } from "@/components/plugins/_shared/plugin-empty-state"
 import { Surface } from "@/components/surface/surface"
+import { useManagedIdeDevMode } from "@/hooks/plugins/use-managed-ide-dev-mode"
 import { isTauri } from "@/lib/tauri"
 import {
   startPluginFileWatch,
@@ -38,6 +39,15 @@ export function PluginWatchCard({ className }: { className?: string }) {
   const [enabled, setEnabled] = useState(false)
   const [watchedIds, setWatchedIds] = useState<string[]>([])
   const handleRef = useRef<PluginFileWatchHandle | null>(null)
+  const enabledRef = useRef(false)
+  // Read through a ref so the restart below depends on the folder set alone.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
+  // Managed IDE Dev Mode plugin folders are watched too (see file-watch.ts).
+  const { folders } = useManagedIdeDevMode()
+  const folderKey = folders.map((folder) => `${folder.pluginId}\0${folder.path}`).join("\n")
 
   const rows = useMemo(
     () =>
@@ -66,6 +76,7 @@ export function PluginWatchCard({ className }: { className?: string }) {
   const toggle = useCallback(
     async (next: boolean) => {
       setEnabled(next)
+      enabledRef.current = next
       if (!next) {
         setWatchedIds([])
         await stop()
@@ -77,6 +88,7 @@ export function PluginWatchCard({ className }: { className?: string }) {
         setWatchedIds(handle.watchedPluginIds)
       } catch (error) {
         setEnabled(false)
+        enabledRef.current = false
         setWatchedIds([])
         toast.error(
           t("startFailed", { message: error instanceof Error ? error.message : String(error) })
@@ -85,6 +97,36 @@ export function PluginWatchCard({ className }: { className?: string }) {
     },
     [stop, t]
   )
+
+  // A Dev Mode folder registered or removed while watching changes what must
+  // be watched, so the watch restarts with the new set. Keyed on the folder
+  // set alone: plugin-store writes do not churn the native watcher.
+  useEffect(() => {
+    if (!enabledRef.current) return
+    let cancelled = false
+    void (async () => {
+      await stop()
+      if (cancelled || !enabledRef.current) return
+      try {
+        const handle = await startPluginFileWatch(Object.values(usePluginStore.getState().plugins))
+        if (cancelled) {
+          await handle.stop()
+          return
+        }
+        handleRef.current = handle
+        setWatchedIds(handle.watchedPluginIds)
+      } catch (error) {
+        toast.error(
+          tRef.current("startFailed", {
+            message: error instanceof Error ? error.message : String(error),
+          })
+        )
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [folderKey, stop])
 
   // Releasing the native watcher is the whole point of unmount cleanup here:
   // the Rust side holds a `notify` watcher until it is told to stop.
@@ -117,7 +159,7 @@ export function PluginWatchCard({ className }: { className?: string }) {
               id="plugin-watch-toggle"
               checked={enabled}
               onCheckedChange={(next) => void toggle(next)}
-              disabled={!desktop || eligible.length === 0}
+              disabled={!desktop || (eligible.length === 0 && folders.length === 0)}
               aria-label={t("toggleLabel")}
             />
           </div>
@@ -127,7 +169,7 @@ export function PluginWatchCard({ className }: { className?: string }) {
           <p className="text-xs text-muted-foreground" data-testid="plugin-watch-desktop-only">
             {t("desktopOnly")}
           </p>
-        ) : eligible.length === 0 ? (
+        ) : eligible.length === 0 && folders.length === 0 ? (
           <PluginEmptyState
             icon={<EyeIcon className="size-5" />}
             hint={t("empty")}

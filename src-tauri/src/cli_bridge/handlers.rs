@@ -1108,7 +1108,12 @@ fn install_inner_blocking(
     let (manifest, plugin_id) = read_manifest_from_zip(&bytes)?;
     validate_expected_plugin_id(expected_plugin_id, &plugin_id)?;
     let target_dir = plugin_state.plugin_dir(&plugin_id);
-    replace_directory_atomically(&target_dir, |staging| extract_zip_into(&bytes, staging))?;
+    replace_directory_atomically(&target_dir, |staging| {
+        extract_zip_into(&bytes, staging)?;
+        // A bundle cannot vouch for itself.
+        cognia_plugin_runtime::marketplace::discard_supplied_receipt(staging)?;
+        Ok(())
+    })?;
 
     register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
     log::info!("cli_bridge installed {plugin_id} from {}", bundle.display());
@@ -1254,8 +1259,14 @@ fn install_from_directory_blocking<P: tauri::Runtime>(
 
     let plugin_state = app_handle.state::<PluginRuntimeState>();
     let target_dir = plugin_state.plugin_dir(&plugin_id);
+    let version = manifest
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     replace_directory_atomically(&target_dir, |staging| {
         copy_dir_recursive(scratch.path(), staging)?;
+        receipt_for_directory_install(staging, &source, &version)?;
         Ok(())
     })?;
 
@@ -1265,6 +1276,18 @@ fn install_from_directory_blocking<P: tauri::Runtime>(
         source.display()
     );
     Ok((plugin_id, vec![]))
+}
+
+/// The receipt a directory install leaves: never one the folder carried, and
+/// a `local-dev` one only for a folder registered during Managed IDE Dev Mode.
+fn receipt_for_directory_install(
+    staging: &Path,
+    source: &Path,
+    version: &str,
+) -> std::io::Result<bool> {
+    cognia_plugin_runtime::marketplace::discard_supplied_receipt(staging)?;
+    cognia_plugin_runtime::managed_ide_dev::DevModeState::global()
+        .mint_local_dev_receipt(staging, source, version)
 }
 
 /// Populate a sibling staging directory, then replace the live install with
@@ -2040,6 +2063,36 @@ mod tests {
         );
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn a_directory_install_drops_the_folder_receipt_and_mints_local_dev_only_when_registered() {
+        use cognia_plugin_runtime::managed_ide_dev::{DevModeState, LOCAL_DEV_VERIFICATION};
+        let workspace = tempfile::tempdir().unwrap();
+        let source = workspace.path().join("acme");
+        std::fs::create_dir_all(&source).unwrap();
+        let staging = tempfile::tempdir().unwrap();
+        let receipt = staging.path().join(".cognia-verification.json");
+        std::fs::write(
+            &receipt,
+            r#"{"verifiedVia":"signature","version":"1","verifiedAt":"x"}"#,
+        )
+        .unwrap();
+
+        // Dev Mode off (the default): the folder's own receipt is dropped and
+        // nothing replaces it.
+        assert!(!receipt_for_directory_install(staging.path(), &source, "1.0.0").unwrap());
+        assert!(!receipt.exists());
+
+        let dev_mode = DevModeState::global();
+        dev_mode.set_enabled(true);
+        dev_mode.register_dev_path(workspace.path()).unwrap();
+        let minted = receipt_for_directory_install(staging.path(), &source, "1.0.0");
+        dev_mode.set_enabled(false);
+        assert!(minted.unwrap());
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+        assert_eq!(written["verifiedVia"], LOCAL_DEV_VERIFICATION);
     }
 
     #[test]

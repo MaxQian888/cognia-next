@@ -47,6 +47,89 @@
     "services": "Services",
     "state": "Generation and state"
   },
+  "managedIde": {
+    "title": "Managed IDE Dev Mode",
+    "description": "Inspect the Pro IDE broker, simulate permissions, and develop Pro IDE plugins from their folders. It lasts until you switch it off or quit, and nothing here is saved.",
+    "toggleLabel": "Managed IDE Dev Mode",
+    "desktopOnly": "Dev Mode works with this desktop's own Pro IDE.",
+    "off": "Off. Switch it on to record the broker trace, simulate permissions, and trust plugin folders.",
+    "enterFailed": "Could not turn on Dev Mode: {message}",
+    "leaveFailed": "Could not turn off Dev Mode: {message}",
+    "leftDisabled": "{count, plural, one {Disabled # plugin that was} other {Disabled # plugins that were}} trusted only for this Dev Mode session",
+    "leftFailed": "Could not disable {pluginId}: {error}",
+    "tabs": {
+      "trace": "Broker trace",
+      "simulation": "Permissions",
+      "folders": "Plugin folders"
+    },
+    "trace": {
+      "payloadsLabel": "Keep payload values",
+      "payloadsHint": "Off, only the shape of each payload is kept. On, values are kept too, and redacted before they are shown here.",
+      "configureFailed": "Could not change payload recording: {message}",
+      "filterPlaceholder": "Filter by method or plugin",
+      "filterLabel": "Filter the broker trace",
+      "empty": "No broker traffic yet. Open the Pro IDE and use a plugin.",
+      "noMatch": "Nothing matches the filter.",
+      "loadFailed": "Could not read the trace: {message}",
+      "columns": {
+        "time": "Time",
+        "direction": "Direction",
+        "kind": "Kind",
+        "method": "Method",
+        "plugin": "Plugin",
+        "duration": "Duration",
+        "size": "Size",
+        "error": "Error"
+      },
+      "direction": {
+        "outbound": "To editor",
+        "inbound": "From editor"
+      },
+      "kind": {
+        "request": "Request",
+        "response": "Response",
+        "notification": "Notification",
+        "event": "Event"
+      },
+      "simulated": "Simulated",
+      "durationMs": "{value} ms",
+      "bytes": "{value} B",
+      "payload": "Payload",
+      "noPayload": "No payload"
+    },
+    "simulation": {
+      "intro": "Decide a permission for one plugin, for this Dev Mode session only. Allow and Deny answer without asking; Ask always asks.",
+      "plugin": "Plugin",
+      "permission": "Permission",
+      "decision": "Decision",
+      "pluginPlaceholder": "Choose a plugin",
+      "permissionPlaceholder": "Choose a permission",
+      "decisions": {
+        "allow": "Allow",
+        "deny": "Deny",
+        "ask": "Ask"
+      },
+      "apply": "Simulate",
+      "remove": "Stop simulating {permission} for {pluginId}",
+      "empty": "No permission is simulated.",
+      "noPlugins": "No installed plugin targets the Pro IDE.",
+      "simulated": "Simulated"
+    },
+    "folders": {
+      "intro": "Plugins installed from these folders are trusted while Dev Mode is on (local development signing). With Watch plugin folders on, an edit reinstalls the plugin and reloads it with a temporary Pro IDE proxy.",
+      "add": "Add plugin folder",
+      "pickerTitle": "Choose a plugin folder",
+      "remove": "Remove {path}",
+      "empty": "No plugin folder is registered.",
+      "addFailed": "Could not add the folder: {message}",
+      "recheck": "Check again",
+      "valid": "manifest.ide is valid",
+      "noIde": "No managed IDE section",
+      "unreadable": "Could not read plugin.json: {message}",
+      "warnings": "Warnings",
+      "problems": "{count, plural, one {# problem} other {# problems}}"
+    }
+  },
   "validator": {
     "description": "Validate a plugin.json against the host schema without installing.",
     "errorsHeading": "Errors",

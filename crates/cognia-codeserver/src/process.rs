@@ -8,7 +8,7 @@
 //! `CodeServerState` is a Tauri managed state; its children are `kill_on_drop`,
 //! so app exit tears them down even without an explicit stop.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -139,11 +139,27 @@ pub struct CodeServerState {
     /// desktop shell attaches the file (see [`Self::attach_relay_grants`]);
     /// until then nothing is granted.
     grants: std::sync::Mutex<Option<RelayGrantStore>>,
+    /// Managed IDE Dev Mode: plugin id → sha256 of a proxy installed without
+    /// becoming the committed one (no activation marker). Each is replaced by
+    /// its committed proxy when Dev Mode ends. A sync mutex: never held
+    /// across an await.
+    temporary_proxies: std::sync::Mutex<BTreeMap<String, String>>,
 }
 
 impl CodeServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn lock_temporary_proxies(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, String>> {
+        self.temporary_proxies
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Plugins running a Dev Mode proxy instead of their committed one.
+    pub fn temporary_proxies(&self) -> BTreeMap<String, String> {
+        self.lock_temporary_proxies().clone()
     }
 
     fn lock_relays(&self) -> std::sync::MutexGuard<'_, RelayTable> {
@@ -629,7 +645,176 @@ impl CodeServerState {
                 artifact.plugin_id
             ));
         }
+        // Committed now: a Dev Mode build of it no longer needs undoing.
+        self.lock_temporary_proxies().remove(&artifact.plugin_id);
         Ok(true)
+    }
+
+    /// The managed instances a proxy goes into, and their shared install dirs.
+    #[cfg(feature = "tauri-host")]
+    async fn managed_proxy_targets(&self) -> Option<(Vec<String>, String, PathBuf, PathBuf)> {
+        let mut map = self.instances.lock().await;
+        let targets = map
+            .iter_mut()
+            .filter_map(|(root, instance)| {
+                // `is_reusable` polls the child (`try_wait`), hence `iter_mut`.
+                (instance.profile == IdeProfile::Managed && instance.is_reusable()).then(|| {
+                    (
+                        root.clone(),
+                        instance.binary_path.clone(),
+                        instance.extensions_dir.clone(),
+                        instance.user_data_dir.clone(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let (_, binary, extensions_dir, user_data_dir) = targets.first()?.clone();
+        let roots = targets.into_iter().map(|(root, ..)| root).collect();
+        Some((roots, binary, extensions_dir, user_data_dir))
+    }
+
+    /// Managed IDE Dev Mode: install `artifact` into every running managed
+    /// instance and activate it live, without making it the committed proxy.
+    /// No activation marker is written, so a restart or a new instance still
+    /// gets the committed one, and [`Self::restore_committed_proxies`] puts it
+    /// back when Dev Mode ends. A failed handshake restores at once.
+    #[cfg(feature = "tauri-host")]
+    pub async fn install_temporary_proxy_artifact(
+        &self,
+        app: &tauri::AppHandle,
+        artifact: &super::proxy::ProxyArtifact,
+    ) -> Result<bool, String> {
+        super::proxy::verify_artifact(app, artifact)?;
+        let _guard = self.operation_lock.lock().await;
+        let Some((roots, binary, extensions_dir, user_data_dir)) =
+            self.managed_proxy_targets().await
+        else {
+            return Ok(false);
+        };
+        install_managed_proxy_package(
+            &binary,
+            &extensions_dir,
+            &user_data_dir,
+            artifact,
+            ProxyInstall::Temporary,
+        )
+        .await?;
+        self.lock_temporary_proxies()
+            .insert(artifact.plugin_id.clone(), artifact.sha256.clone());
+        let channel = super::agent_channel::global();
+        if let Err(error) = activate_managed_proxy(&channel, &roots, artifact).await {
+            let restored = self
+                .restore_one_committed_proxy(
+                    app,
+                    &roots,
+                    &binary,
+                    &extensions_dir,
+                    &user_data_dir,
+                    &artifact.plugin_id,
+                )
+                .await;
+            return Err(match restored {
+                Ok(()) => format!(
+                    "temporary proxy {} handshake failed and the committed proxy was restored: {error}",
+                    artifact.plugin_id
+                ),
+                Err(restore) => format!(
+                    "temporary proxy {} handshake failed ({error}); restoring the committed proxy failed: {restore}",
+                    artifact.plugin_id
+                ),
+            });
+        }
+        Ok(true)
+    }
+
+    /// Put the committed proxy back for every plugin running a Dev Mode build,
+    /// or remove the proxy of a plugin that never had one committed. Returns
+    /// the plugins it restored. Called when Dev Mode is switched off.
+    #[cfg(feature = "tauri-host")]
+    pub async fn restore_committed_proxies(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> Result<Vec<String>, String> {
+        let _guard = self.operation_lock.lock().await;
+        let pending: Vec<String> = self.lock_temporary_proxies().keys().cloned().collect();
+        if pending.is_empty() {
+            return Ok(pending);
+        }
+        let Some((roots, binary, extensions_dir, user_data_dir)) =
+            self.managed_proxy_targets().await
+        else {
+            // Nothing running: the next instance installs committed proxies only.
+            self.lock_temporary_proxies().clear();
+            return Ok(pending);
+        };
+        let mut failures = Vec::new();
+        for plugin_id in &pending {
+            if let Err(error) = self
+                .restore_one_committed_proxy(
+                    app,
+                    &roots,
+                    &binary,
+                    &extensions_dir,
+                    &user_data_dir,
+                    plugin_id,
+                )
+                .await
+            {
+                failures.push(format!("{plugin_id}: {error}"));
+            }
+        }
+        if failures.is_empty() {
+            Ok(pending)
+        } else {
+            Err(format!(
+                "restoring committed proxies failed: {}",
+                failures.join("; ")
+            ))
+        }
+    }
+
+    #[cfg(feature = "tauri-host")]
+    async fn restore_one_committed_proxy(
+        &self,
+        app: &tauri::AppHandle,
+        roots: &[String],
+        binary: &str,
+        extensions_dir: &Path,
+        user_data_dir: &Path,
+        plugin_id: &str,
+    ) -> Result<(), String> {
+        self.lock_temporary_proxies().remove(plugin_id);
+        let marker = managed_proxy_marker(extensions_dir, plugin_id);
+        let committed_sha = tokio::fs::read_to_string(&marker).await.ok();
+        let committed = match committed_sha {
+            Some(sha) => {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || super::proxy::list_artifacts(&app))
+                    .await
+                    .map_err(|error| format!("list committed proxies task: {error}"))??
+                    .into_iter()
+                    .find(|candidate| candidate.sha256 == sha.trim())
+            }
+            None => None,
+        };
+        let channel = super::agent_channel::global();
+        match committed {
+            Some(artifact) => {
+                install_managed_proxy_package(
+                    binary,
+                    extensions_dir,
+                    user_data_dir,
+                    &artifact,
+                    ProxyInstall::Restore,
+                )
+                .await?;
+                restart_and_verify_proxies(&channel, roots, &artifact).await
+            }
+            None => {
+                uninstall_managed_proxy(binary, extensions_dir, user_data_dir, plugin_id).await?;
+                restart_managed_extension_hosts(&channel, roots).await
+            }
+        }
     }
 
     /// Stop all children and reclaim code-server files as one serialized
@@ -1518,8 +1703,44 @@ async fn install_one_managed_proxy(
     user_data_dir: &Path,
     artifact: &super::proxy::ProxyArtifact,
 ) -> Result<(), String> {
+    install_managed_proxy_package(
+        binary,
+        extensions_dir,
+        user_data_dir,
+        artifact,
+        ProxyInstall::Commit,
+    )
+    .await
+}
+
+/// How a proxy package goes into a managed profile.
+#[cfg(any(feature = "tauri-host", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProxyInstall {
+    /// The normal path: install unless the marker already names this build,
+    /// then record it as the committed proxy.
+    Commit,
+    /// A Dev Mode build: always install, never touch the marker.
+    Temporary,
+    /// Put the committed build back over a Dev Mode one: always install (the
+    /// marker already names it, but the files on disk are the Dev Mode
+    /// build's), never touch the marker.
+    Restore,
+}
+
+#[cfg(any(feature = "tauri-host", test))]
+async fn install_managed_proxy_package(
+    binary: &str,
+    extensions_dir: &Path,
+    user_data_dir: &Path,
+    artifact: &super::proxy::ProxyArtifact,
+    mode: ProxyInstall,
+) -> Result<(), String> {
     let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
-    if tokio::fs::read_to_string(&marker).await.ok().as_deref() == Some(artifact.sha256.as_str()) {
+    if mode == ProxyInstall::Commit
+        && tokio::fs::read_to_string(&marker).await.ok().as_deref()
+            == Some(artifact.sha256.as_str())
+    {
         return Ok(());
     }
     let mut command = Command::new(binary);
@@ -1545,6 +1766,9 @@ async fn install_one_managed_proxy(
             artifact.plugin_id,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
+    }
+    if mode != ProxyInstall::Commit {
+        return Ok(());
     }
     tokio::fs::write(&marker, &artifact.sha256)
         .await
@@ -2015,6 +2239,68 @@ mod tests {
         assert!(verify_broker_vsix(&vsix)
             .unwrap_err()
             .contains("does not match"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dev_mode_installs_leave_the_committed_marker_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("installs.log");
+        let binary = dir.path().join("code-server");
+        std::fs::write(
+            &binary,
+            format!("#!/bin/sh\necho \"$2\" >> {}\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let extensions = dir.path().join("extensions");
+        std::fs::create_dir_all(&extensions).unwrap();
+        let artifact = |sha: &str| super::super::proxy::ProxyArtifact {
+            plugin_id: "acme".into(),
+            plugin_version: "1.0.0".into(),
+            manifest_hash: "sha256:m".into(),
+            catalog_hash: "sha256:c".into(),
+            platform_version: "1.0.0".into(),
+            sha256: sha.into(),
+            signature: String::new(),
+            public_key: String::new(),
+            vsix_path: format!("/proxies/{sha}.vsix"),
+            executables: Vec::new(),
+        };
+        let binary = binary.to_string_lossy().into_owned();
+        let marker = managed_proxy_marker(&extensions, "acme");
+        let install = |sha: &'static str, mode| {
+            let binary = binary.clone();
+            let extensions = extensions.clone();
+            let artifact = artifact(sha);
+            async move {
+                install_managed_proxy_package(&binary, &extensions, &extensions, &artifact, mode)
+                    .await
+            }
+        };
+
+        install("committed", ProxyInstall::Commit).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "committed");
+        // Already committed: nothing to install.
+        install("committed", ProxyInstall::Commit).await.unwrap();
+        install("dev-build", ProxyInstall::Temporary).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "committed");
+        // The marker names the committed build, but the dev build is on disk:
+        // restoring installs regardless.
+        install("committed", ProxyInstall::Restore).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "committed");
+        assert_eq!(
+            std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            vec![
+                "/proxies/committed.vsix",
+                "/proxies/dev-build.vsix",
+                "/proxies/committed.vsix"
+            ]
+        );
     }
 
     #[test]

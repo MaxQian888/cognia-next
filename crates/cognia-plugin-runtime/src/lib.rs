@@ -39,6 +39,7 @@ pub mod fs_watcher;
 pub mod generated_files;
 pub mod github;
 pub mod lifecycle;
+pub mod managed_ide_dev;
 pub mod marketplace;
 /// OS notifications through the Tauri plugin; `tauri-host` only (ADR-0196).
 #[cfg(feature = "tauri-host")]

@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { getAllContributions } from "@/lib/plugin/contracts/capability-contributions"
 import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+import { PluginSimulatedBadge } from "./_shared/plugin-simulated-badge"
 import { PluginActivationProgress } from "./plugin-activation-progress"
 import { PluginCompatibilityBadge } from "./_shared/plugin-compatibility-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
@@ -175,6 +176,7 @@ export const PluginCard = memo(function PluginCard({
             {plugin.source}
           </Badge>
           <PluginSignatureBadge state={signatureState} compact />
+          <PluginSimulatedBadge pluginId={plugin.id} />
           {permissionCount > 0 && (
             <span className="flex items-center gap-1 whitespace-nowrap">
               <ShieldCheckIcon className="size-3 shrink-0" />

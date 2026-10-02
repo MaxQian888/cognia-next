@@ -19,6 +19,13 @@ jest.mock("next-intl", () => ({
   },
 }))
 
+const mockSimulated = new Set<string>()
+jest.mock("@/lib/plugin/ide/dev-mode", () => ({
+  subscribeDevMode: () => () => undefined,
+  devModeVersion: () => 0,
+  isPluginSimulated: (pluginId: string) => mockSimulated.has(pluginId),
+}))
+
 import { PluginCard } from "./plugin-card"
 
 const baseRow: PluginRow = {
@@ -50,6 +57,16 @@ const callbacks = () => ({
 })
 
 describe("PluginCard", () => {
+  it("marks a plugin whose permissions Managed IDE Dev Mode is simulating", () => {
+    const cb = callbacks()
+    const { rerender } = render(<PluginCard plugin={baseRow} selected={false} {...cb} />)
+    expect(screen.queryByTestId("plugin-simulated-badge-plugin_test")).toBeNull()
+    mockSimulated.add("plugin_test")
+    rerender(<PluginCard plugin={{ ...baseRow }} selected={false} {...cb} />)
+    expect(screen.getByTestId("plugin-simulated-badge-plugin_test")).toHaveTextContent("simulated")
+    mockSimulated.clear()
+  })
+
   it("renders core metadata", () => {
     const cb = callbacks()
     render(<PluginCard plugin={baseRow} selected={false} {...cb} />)

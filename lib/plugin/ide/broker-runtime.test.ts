@@ -17,6 +17,14 @@ import {
 } from "./broker-runtime"
 import { normalizeIdeManifest } from "./manifest"
 
+// Dev Mode is the host's switch; here it is a flag the traces can be checked under.
+let devModeOn = true
+jest.mock("./dev-mode", () => ({
+  isDevModeActive: () => devModeOn,
+  isPluginSimulated: (pluginId: string) => devModeOn && pluginId === "simulated.plugin",
+  simulatedDecision: () => undefined,
+}))
+
 const ROOT = "/work/project"
 
 describe("ManagedIdeBrokerRuntime", () => {
@@ -50,9 +58,24 @@ describe("ManagedIdeBrokerRuntime", () => {
         providerId: "cognia.acme.tools.hover",
         operation: "provide",
         outcome: "success",
+        requestId: "proxy:1",
+        simulated: false,
       }),
     ])
     expect(JSON.stringify(getManagedIdeRpcTraces())).not.toContain("main.ts")
+  })
+
+  it("records the renderer trace only while Dev Mode is on", async () => {
+    clearManagedIdeRpcTraces()
+    const plugin = makePlugin("editor:read")
+    const runtime = new ManagedIdeBrokerRuntime(dependencies(plugin))
+    devModeOn = false
+    try {
+      await runtime.dispatch(await request(plugin))
+      expect(getManagedIdeRpcTraces()).toEqual([])
+    } finally {
+      devModeOn = true
+    }
   })
 
   it("fails closed for disabled plugins, untrusted workspaces and forged providers", async () => {

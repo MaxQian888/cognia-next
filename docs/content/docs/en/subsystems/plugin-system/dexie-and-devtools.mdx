@@ -238,6 +238,12 @@ built a `new Function` from a user string.
 They were removed along with their Tauri commands. The file watcher underneath
 was real, and is what `file-watch.ts` now drives.
 
+Managed IDE Dev Mode has since been built again, differently: the switch is a
+host flag (`cognia_plugin_runtime::managed_ide_dev`), the card is mounted in
+this pane (`components/plugins/devtools/managed-ide/`), and it gates real paths
+(the broker trace, the authorization path, receipt verification and proxy
+activation). See the managed IDE operations page, "Dev Mode".
+
 ---
 
 ## Gotchas

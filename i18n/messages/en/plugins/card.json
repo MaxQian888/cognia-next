@@ -17,6 +17,8 @@
     "wasm-runtime-unavailable": "WASM runtime unavailable, desktop only"
   },
   "selectAria": "Select {name}",
+  "simulated": "Permissions simulated",
+  "simulatedTitle": "Managed IDE Dev Mode is deciding some of this plugin's permissions for this session",
   "status": {
     "disabled": "Disabled",
     "enabled": "Enabled",

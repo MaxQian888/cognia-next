@@ -256,6 +256,26 @@ describe("PluginSignatureVerifier", () => {
       expect(result.reason).toContain("checksum")
     })
 
+    it("accepts a local-dev receipt only after the host says Dev Mode is on, and never caches it", async () => {
+      isTauriMock.mockReturnValue(true)
+      let devMode = true
+      invokeMock.mockImplementation(async (command: string) =>
+        command === "plugin_read_verification"
+          ? { verifiedVia: "local-dev", version: "0.1.0", verifiedAt: "2026-10-03T00:00:00.000Z" }
+          : { enabled: devMode, devPaths: [] }
+      )
+      verifier.setConfig({ requireSignatures: true, cacheVerifications: true })
+      const accepted = await verifier.verify("/plugins/acme.dev")
+      expect(accepted.valid).toBe(true)
+      expect(invokeMock).toHaveBeenCalledWith("plugin_managed_ide_dev_mode_status", undefined)
+      expect(verifier.getCachedVerification("/plugins/acme.dev")).toBeUndefined()
+
+      devMode = false
+      const refused = await verifier.verify("/plugins/acme.dev")
+      expect(refused.valid).toBe(false)
+      expect(refused.reason).toContain("Managed IDE Dev Mode is off")
+    })
+
     it("rejects under require-signatures when no receipt exists", async () => {
       isTauriMock.mockReturnValue(true)
       invokeMock.mockResolvedValue(null)

@@ -26901,6 +26901,8 @@
         "wasm-runtime-unavailable": "WASM runtime unavailable, desktop only"
       },
       "selectAria": "Select {name}",
+      "simulated": "Permissions simulated",
+      "simulatedTitle": "Managed IDE Dev Mode is deciding some of this plugin's permissions for this session",
       "status": {
         "disabled": "Disabled",
         "enabled": "Enabled",
@@ -27865,6 +27867,89 @@
         "plugin": "Plugin",
         "services": "Services",
         "state": "Generation and state"
+      },
+      "managedIde": {
+        "description": "Inspect the Pro IDE broker, simulate permissions, and develop Pro IDE plugins from their folders. It lasts until you switch it off or quit, and nothing here is saved.",
+        "desktopOnly": "Dev Mode works with this desktop's own Pro IDE.",
+        "enterFailed": "Could not turn on Dev Mode: {message}",
+        "folders": {
+          "add": "Add plugin folder",
+          "addFailed": "Could not add the folder: {message}",
+          "empty": "No plugin folder is registered.",
+          "intro": "Plugins installed from these folders are trusted while Dev Mode is on (local development signing). With Watch plugin folders on, an edit reinstalls the plugin and reloads it with a temporary Pro IDE proxy.",
+          "noIde": "No managed IDE section",
+          "pickerTitle": "Choose a plugin folder",
+          "problems": "{count, plural, one {# problem} other {# problems}}",
+          "recheck": "Check again",
+          "remove": "Remove {path}",
+          "unreadable": "Could not read plugin.json: {message}",
+          "valid": "manifest.ide is valid",
+          "warnings": "Warnings"
+        },
+        "leaveFailed": "Could not turn off Dev Mode: {message}",
+        "leftDisabled": "{count, plural, one {Disabled # plugin that was} other {Disabled # plugins that were}} trusted only for this Dev Mode session",
+        "leftFailed": "Could not disable {pluginId}: {error}",
+        "off": "Off. Switch it on to record the broker trace, simulate permissions, and trust plugin folders.",
+        "simulation": {
+          "apply": "Simulate",
+          "decision": "Decision",
+          "decisions": {
+            "allow": "Allow",
+            "ask": "Ask",
+            "deny": "Deny"
+          },
+          "empty": "No permission is simulated.",
+          "intro": "Decide a permission for one plugin, for this Dev Mode session only. Allow and Deny answer without asking; Ask always asks.",
+          "noPlugins": "No installed plugin targets the Pro IDE.",
+          "permission": "Permission",
+          "permissionPlaceholder": "Choose a permission",
+          "plugin": "Plugin",
+          "pluginPlaceholder": "Choose a plugin",
+          "remove": "Stop simulating {permission} for {pluginId}",
+          "simulated": "Simulated"
+        },
+        "tabs": {
+          "folders": "Plugin folders",
+          "simulation": "Permissions",
+          "trace": "Broker trace"
+        },
+        "title": "Managed IDE Dev Mode",
+        "toggleLabel": "Managed IDE Dev Mode",
+        "trace": {
+          "bytes": "{value} B",
+          "columns": {
+            "direction": "Direction",
+            "duration": "Duration",
+            "error": "Error",
+            "kind": "Kind",
+            "method": "Method",
+            "plugin": "Plugin",
+            "size": "Size",
+            "time": "Time"
+          },
+          "configureFailed": "Could not change payload recording: {message}",
+          "direction": {
+            "inbound": "From editor",
+            "outbound": "To editor"
+          },
+          "durationMs": "{value} ms",
+          "empty": "No broker traffic yet. Open the Pro IDE and use a plugin.",
+          "filterLabel": "Filter the broker trace",
+          "filterPlaceholder": "Filter by method or plugin",
+          "kind": {
+            "event": "Event",
+            "notification": "Notification",
+            "request": "Request",
+            "response": "Response"
+          },
+          "loadFailed": "Could not read the trace: {message}",
+          "noMatch": "Nothing matches the filter.",
+          "noPayload": "No payload",
+          "payload": "Payload",
+          "payloadsHint": "Off, only the shape of each payload is kept. On, values are kept too, and redacted before they are shown here.",
+          "payloadsLabel": "Keep payload values",
+          "simulated": "Simulated"
+        }
       },
       "validator": {
         "description": "Validate a plugin.json against the host schema without installing.",

@@ -90,6 +90,20 @@ pub struct VerificationReceipt {
     pub verified_at: String,
 }
 
+/// Remove a receipt the installed content brought with it.
+///
+/// A receipt says how the HOST verified an install, so a plugin can never
+/// author its own: every installer that copies plugin content calls this
+/// before it (maybe) writes the receipt its verification earned. Without it a
+/// folder or archive shipping `{"verifiedVia":"signature"}` would satisfy a
+/// signature-required policy unsigned.
+pub fn discard_supplied_receipt(plugin_root: &Path) -> std::io::Result<()> {
+    match fs::remove_file(plugin_root.join(VERIFICATION_RECEIPT_FILE)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 // Serializes the short canonical-directory swap and its ownership bookkeeping.
 // Extraction and staging run outside this lock.
 pub(crate) static INSTALL_COMMIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -460,7 +474,11 @@ pub(crate) fn read_verification_receipt(
 ) -> Option<VerificationReceipt> {
     let path = state.plugin_dir(plugin_id).join(VERIFICATION_RECEIPT_FILE);
     let raw = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+    let receipt: VerificationReceipt = serde_json::from_str(&raw).ok()?;
+    // A `local-dev` receipt vouches only while Managed IDE Dev Mode is on.
+    crate::managed_ide_dev::DevModeState::global()
+        .accepts_receipt(&receipt)
+        .then_some(receipt)
 }
 
 #[cfg(feature = "tauri-host")]
@@ -741,6 +759,7 @@ fn prepare_archive_package(
     copy_plugin_tree(&plugin_root, destination).map_err(PluginError::Internal)?;
     crate::contract::validate_existing_manifest_paths(destination, &manifest_value)
         .map_err(PluginError::Internal)?;
+    discard_supplied_receipt(destination)?;
     if let Some(verified_via) = integrity.verified_via() {
         let receipt = VerificationReceipt {
             verified_via: verified_via.to_string(),
@@ -1819,6 +1838,34 @@ mod tests {
             }
             .verified_via(),
             Some("signature")
+        );
+    }
+
+    #[test]
+    fn an_archive_cannot_bring_its_own_receipt() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let manifest = br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#;
+        let forged =
+            br#"{"verifiedVia":"signature","version":"1.0.0","verifiedAt":"2026-01-01T00:00:00Z"}"#;
+        let archive = make_tar_gz(&[
+            ("demo.market/plugin.json", manifest),
+            ("demo.market/index.js", b"export default {}"),
+            ("demo.market/.cognia-verification.json", forged),
+        ]);
+        // No integrity material: the host verified nothing, so no receipt.
+        install_archive_into_plugin_dir(
+            &state,
+            "demo.market",
+            "1.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+        assert!(read_verification_receipt(&state, "demo.market").is_none());
+        assert!(
+            discard_supplied_receipt(tmp.path()).is_ok(),
+            "absent is fine"
         );
     }
 

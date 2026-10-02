@@ -95,6 +95,42 @@ pub fn install_host(app: &AppHandle) {
         relays: AppRelayPorts(app.clone()),
         companion: CompanionCodeServerHost,
     }));
+    follow_dev_mode(app.clone());
+}
+
+/// Tie the codeserver side of Managed IDE Dev Mode to its switch, which lives
+/// in the plugin runtime: record the broker trace exactly while it is on
+/// (payload values start off on every switch), and when it goes off, put the
+/// committed proxy back for every plugin running a Dev Mode build.
+fn follow_dev_mode(app: AppHandle) {
+    use crate::plugin_api::managed_ide_dev::DevModeState;
+    let dev_mode = DevModeState::global();
+    let trace = |enabled: bool| {
+        super::agent_channel::global().set_trace_mode(super::agent_channel::TraceMode {
+            enabled,
+            include_payloads: false,
+        });
+    };
+    dev_mode.on_change(move |enabled| {
+        trace(enabled);
+        if !enabled {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                match app
+                    .state::<CodeServerState>()
+                    .restore_committed_proxies(&app)
+                    .await
+                {
+                    Ok(restored) if !restored.is_empty() => {
+                        log::info!("Dev Mode ended: restored committed proxies for {restored:?}")
+                    }
+                    Ok(_) => {}
+                    Err(error) => log::warn!("Dev Mode ended: {error}"),
+                }
+            });
+        }
+    });
+    trace(dev_mode.enabled());
 }
 
 #[cfg(test)]

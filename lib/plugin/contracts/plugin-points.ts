@@ -118,6 +118,9 @@ export interface PluginPointDiagnostic {
     | "plugin.dependency.version-mismatch"
     | "plugin.dependency.cycle"
     | "plugin.dependency.optional-degraded"
+    // A Pro IDE plugin got no managed proxy because the host holds no
+    // verification receipt for its install (ADR-0088 local development signing).
+    | "plugin.ide.proxy-receipt-required"
   severity: "warning" | "error"
   message: string
   pointKind: PluginPointKind

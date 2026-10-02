@@ -48,6 +48,13 @@ jest.mock("@/stores/account/account-store", () => ({
 jest.mock("@/lib/plugin/agent-sdk/dispatch", () => ({
   dispatchSubagent: jest.fn(async () => ({ runId: "run-1" })),
 }))
+jest.mock("@/lib/platform/detect", () => ({ isTauri: () => true }))
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: jest.fn(async (_command: string, args?: { enabled?: boolean }) => ({
+    enabled: args?.enabled ?? false,
+    devPaths: [],
+  })),
+}))
 jest.mock("./protocol-runtime", () => ({
   ManagedProtocolRuntime: jest.fn().mockImplementation(() => ({
     start: jest.fn(async () => ({ sessionId: "session" })),
@@ -73,8 +80,8 @@ import {
   attachManagedIdeBroker,
   createManagedIdeBrokerDependencies,
   ManagedIdeBrokerRuntime,
-  setManagedIdePermissionSimulator,
 } from "./broker-runtime"
+import { resetDevModeForTests, setDevModeEnabled, setSimulatedPermission } from "./dev-mode"
 import { ManagedProtocolRuntime } from "./protocol-runtime"
 
 describe("managed IDE broker default dependencies", () => {
@@ -82,7 +89,7 @@ describe("managed IDE broker default dependencies", () => {
 
   afterEach(() => {
     jest.clearAllMocks()
-    setManagedIdePermissionSimulator(undefined)
+    resetDevModeForTests()
     if (originalAccountId === undefined) {
       delete process.env.COGNIA_ACCOUNT_ID
     } else {
@@ -202,14 +209,26 @@ describe("managed IDE broker default dependencies", () => {
     expect(usePluginStore.getState).toHaveBeenCalled()
   })
 
-  it("honors permission simulation and resolves the configured account partition", async () => {
+  it("honors Dev Mode permission simulation and resolves the configured account partition", async () => {
     const dependencies = createManagedIdeBrokerDependencies()
-    setManagedIdePermissionSimulator(({ permission }) =>
-      permission === "process:spawn" ? false : undefined
-    )
+    await setDevModeEnabled(true)
+    setSimulatedPermission("acme.tools", "process:spawn", "deny")
+    setSimulatedPermission("acme.tools", "editor:read", "allow")
+    setSimulatedPermission("acme.tools", "debug:control", "ask")
     await expect(
       dependencies.authorize("acme.tools", "process:spawn", "start server")
     ).resolves.toBe(false)
+    await expect(dependencies.authorize("acme.tools", "editor:read", "hover")).resolves.toBe(true)
+    expect(getPermissionGuard).not.toHaveBeenCalled()
+    // `ask` puts the question to the user, even for a non-contextual permission.
+    await expect(dependencies.authorize("acme.tools", "debug:control", "launch")).resolves.toBe(
+      true
+    )
+    expect(getPluginConsentBroker).toHaveBeenCalledTimes(1)
+    expect(() => dependencies.requirePermission("acme.tools", "process:spawn", "x")).toThrow(
+      "IDE_PERMISSION_DENIED"
+    )
+    dependencies.requirePermission("acme.tools", "editor:read", "x")
     expect(getPermissionGuard).not.toHaveBeenCalled()
 
     process.env.COGNIA_ACCOUNT_ID = "environment-account"
@@ -220,15 +239,18 @@ describe("managed IDE broker default dependencies", () => {
     expect(dependencies.getUserId()).toBe("local-default")
   })
 
-  it("forbids permission simulation in production", () => {
-    const nodeEnv = jest.replaceProperty(process.env, "NODE_ENV", "production")
-    try {
-      expect(() => setManagedIdePermissionSimulator(() => true)).toThrow(
-        "IDE_PERMISSION_SIMULATION_PRODUCTION_FORBIDDEN"
-      )
-    } finally {
-      nodeEnv.restore()
-    }
+  it("simulates nothing outside Dev Mode, and forgets simulations when it ends", async () => {
+    const dependencies = createManagedIdeBrokerDependencies()
+    expect(() => setSimulatedPermission("acme.tools", "process:spawn", "deny")).toThrow(
+      "MANAGED_IDE_DEV_MODE_OFF"
+    )
+    await setDevModeEnabled(true)
+    setSimulatedPermission("acme.tools", "process:spawn", "deny")
+    await setDevModeEnabled(false)
+    await expect(
+      dependencies.authorize("acme.tools", "process:spawn", "start server")
+    ).resolves.toBe(true)
+    expect(getPermissionGuard).toHaveBeenCalled()
   })
 
   it("adapts Tauri broker events and releases listeners", async () => {

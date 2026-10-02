@@ -16,6 +16,10 @@ jest.mock("./plugin-watch-card", () => ({
   PluginWatchCard: () => <div data-testid="plugin-watch-card-stub" />,
 }))
 
+jest.mock("./managed-ide/managed-ide-dev-mode-card", () => ({
+  ManagedIdeDevModeCard: () => <div data-testid="managed-ide-dev-mode-card-stub" />,
+}))
+
 import { PluginDevtoolsPane } from "./plugin-devtools-pane"
 
 describe("PluginDevtoolsPane", () => {
@@ -36,5 +40,12 @@ describe("PluginDevtoolsPane", () => {
   it("mounts the file-watch control", () => {
     render(<PluginDevtoolsPane />)
     expect(screen.getByTestId("plugin-watch-card-stub")).toBeInTheDocument()
+  })
+
+  // Managed IDE Dev Mode has no other mount: without this card the host
+  // switch, the broker trace and permission simulation are unreachable.
+  it("mounts the Managed IDE Dev Mode card", () => {
+    render(<PluginDevtoolsPane />)
+    expect(screen.getByTestId("managed-ide-dev-mode-card-stub")).toBeInTheDocument()
   })
 })

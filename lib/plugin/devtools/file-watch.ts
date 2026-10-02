@@ -19,6 +19,12 @@
  * artifact, so reloading would re-activate the same bytes and look like a
  * hot reload that changed nothing. Those runtimes need `cognia plugin dev`,
  * which builds and installs before asking for the reload.
+ *
+ * During Managed IDE Dev Mode it also watches the plugin folders registered
+ * there, in place of those plugins' installed copies: an edit in the folder
+ * first reinstalls the plugin from it (`syncDevFolder`, which also renews its
+ * `local-dev` receipt), then reloads it, and the reload activates a temporary
+ * Pro IDE proxy rather than committing one.
  */
 
 import type { Plugin } from "@/types/plugin"
@@ -27,6 +33,7 @@ import {
   pluginDevReload,
   type PluginDevReloadResult,
 } from "@/lib/cli-bridge/handlers/plugin-dev-reload"
+import { devFolders } from "@/lib/plugin/ide/dev-mode"
 import { recordHotReloadEvent } from "@/stores/plugin-runtime/hot-reload-history-store"
 import { loggers } from "../core/logger"
 
@@ -84,6 +91,8 @@ export function watchEligibility(
 interface WatchedRoot {
   pluginId: string
   root: string
+  /** A Dev Mode plugin folder, synced into the install before each reload. */
+  devFolder?: boolean
 }
 
 /**
@@ -123,6 +132,10 @@ export interface PluginFileWatchDependencies {
     handler: (payload: PluginFileChangePayload) => void
   ) => Promise<() => void>
   reload: (pluginId: string, attempt: number, sessionId: string) => Promise<PluginDevReloadResult>
+  /** Managed IDE Dev Mode plugin folders (empty outside Dev Mode). */
+  devFolders: () => Array<{ path: string; pluginId: string }>
+  /** Reinstall a plugin from its Dev Mode folder, ahead of its reload. */
+  syncDevFolder: (path: string) => Promise<void>
   record: typeof recordHotReloadEvent
   now: () => number
   debounceMs: number
@@ -145,8 +158,17 @@ export async function startPluginFileWatch(
   overrides: Partial<PluginFileWatchDependencies> = {}
 ): Promise<PluginFileWatchHandle> {
   const deps = { ...defaultDependencies(), ...overrides }
-  const roots: WatchedRoot[] = []
+  const folders = deps.isDesktop() ? deps.devFolders() : []
+  // A plugin with a Dev Mode folder is watched there, not in its install:
+  // syncing writes the install, which must not trigger a second reload.
+  const fromFolder = new Set(folders.map((folder) => folder.pluginId))
+  const roots: WatchedRoot[] = folders.map((folder) => ({
+    pluginId: folder.pluginId,
+    root: folder.path,
+    devFolder: true,
+  }))
   for (const plugin of plugins) {
+    if (fromFolder.has(plugin.manifest.id)) continue
     if (!watchEligibility(plugin, deps.isDesktop()).watchable) continue
     if (!plugin.path) continue
     roots.push({ pluginId: plugin.manifest.id, root: plugin.path })
@@ -190,6 +212,8 @@ export async function startPluginFileWatch(
       timestamp: deps.now(),
     })
     try {
+      const folder = roots.find((entry) => entry.pluginId === pluginId && entry.devFolder)
+      if (folder) await deps.syncDevFolder(folder.root)
       const result = await deps.reload(pluginId, attempt, deps.sessionId)
       deps.record({
         pluginId,
@@ -261,6 +285,12 @@ function defaultDependencies(): PluginFileWatchDependencies {
         artifactRevision: `local-fs:${Date.now()}`,
         activate: true,
       }),
+    devFolders,
+    syncDevFolder: async (path) => {
+      const { installPluginFromDirectory } =
+        await import("@/lib/plugin/local/install-from-directory")
+      await installPluginFromDirectory(path)
+    },
     record: recordHotReloadEvent,
     now: () => Date.now(),
     debounceMs: DEFAULT_DEBOUNCE_MS,

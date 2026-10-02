@@ -47,6 +47,89 @@
     "services": "服务",
     "state": "Generation 与状态"
   },
+  "managedIde": {
+    "title": "托管 IDE 开发模式",
+    "description": "查看 Pro IDE broker 的通信、模拟权限决定，并直接从插件文件夹开发 Pro IDE 插件。开关保持到你关闭或退出应用，这里的内容都不会保存。",
+    "toggleLabel": "托管 IDE 开发模式",
+    "desktopOnly": "开发模式作用于本机桌面端自带的 Pro IDE。",
+    "off": "已关闭。打开后会记录 broker 通信、允许模拟权限，并信任已登记的插件文件夹。",
+    "enterFailed": "无法打开开发模式：{message}",
+    "leaveFailed": "无法关闭开发模式：{message}",
+    "leftDisabled": "已停用 {count} 个仅在本次开发模式中受信任的插件",
+    "leftFailed": "无法停用 {pluginId}：{error}",
+    "tabs": {
+      "trace": "Broker 通信",
+      "simulation": "权限",
+      "folders": "插件文件夹"
+    },
+    "trace": {
+      "payloadsLabel": "保留载荷内容",
+      "payloadsHint": "关闭时只保留每个载荷的结构；打开后也保留具体内容，并在显示前脱敏。",
+      "configureFailed": "无法更改载荷记录方式：{message}",
+      "filterPlaceholder": "按方法或插件筛选",
+      "filterLabel": "筛选 broker 通信",
+      "empty": "还没有 broker 通信。打开 Pro IDE 并使用一个插件。",
+      "noMatch": "没有符合筛选条件的记录。",
+      "loadFailed": "无法读取通信记录：{message}",
+      "columns": {
+        "time": "时间",
+        "direction": "方向",
+        "kind": "类型",
+        "method": "方法",
+        "plugin": "插件",
+        "duration": "耗时",
+        "size": "大小",
+        "error": "错误"
+      },
+      "direction": {
+        "outbound": "发往编辑器",
+        "inbound": "来自编辑器"
+      },
+      "kind": {
+        "request": "请求",
+        "response": "响应",
+        "notification": "通知",
+        "event": "事件"
+      },
+      "simulated": "模拟",
+      "durationMs": "{value} 毫秒",
+      "bytes": "{value} 字节",
+      "payload": "载荷",
+      "noPayload": "无载荷"
+    },
+    "simulation": {
+      "intro": "只在本次开发模式中，为某个插件决定某项权限。“允许”和“拒绝”直接作答，“询问”总是弹出确认。",
+      "plugin": "插件",
+      "permission": "权限",
+      "decision": "决定",
+      "pluginPlaceholder": "选择插件",
+      "permissionPlaceholder": "选择权限",
+      "decisions": {
+        "allow": "允许",
+        "deny": "拒绝",
+        "ask": "询问"
+      },
+      "apply": "模拟",
+      "remove": "停止为 {pluginId} 模拟 {permission}",
+      "empty": "没有正在模拟的权限。",
+      "noPlugins": "没有已安装的插件面向 Pro IDE。",
+      "simulated": "模拟"
+    },
+    "folders": {
+      "intro": "开发模式打开期间，从这些文件夹安装的插件受信任（本地开发签名）。打开“监视插件文件夹”后，修改会重新安装插件，并用临时 Pro IDE 代理重新加载。",
+      "add": "添加插件文件夹",
+      "pickerTitle": "选择插件文件夹",
+      "remove": "移除 {path}",
+      "empty": "尚未登记插件文件夹。",
+      "addFailed": "无法添加文件夹：{message}",
+      "recheck": "重新检查",
+      "valid": "manifest.ide 有效",
+      "noIde": "没有托管 IDE 配置",
+      "unreadable": "无法读取 plugin.json：{message}",
+      "warnings": "警告",
+      "problems": "{count} 个问题"
+    }
+  },
   "validator": {
     "description": "在不安装的前提下，校验 plugin.json 是否符合宿主 schema。",
     "errorsHeading": "错误",

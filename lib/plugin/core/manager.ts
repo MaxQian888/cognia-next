@@ -5595,8 +5595,15 @@ export class PluginManager {
 
     if (!plugin || !context) return
     if (plugin.manifest.ide?.targets.includes("pro-ide")) {
-      const { prepareManagedIdeProxy } = await import("@/lib/plugin/ide/proxy-manager")
-      await prepareManagedIdeProxy(plugin)
+      const proxies = await import("@/lib/plugin/ide/proxy-manager")
+      const { isDevModeActive } = await import("@/lib/plugin/ide/dev-mode")
+      // Managed IDE Dev Mode: a local plugin's proxy goes in as a temporary
+      // build, and its committed proxy comes back when Dev Mode ends.
+      if (isDevModeActive() && (plugin.source === "local" || plugin.source === "dev")) {
+        await proxies.activateTemporaryManagedIdeProxy(plugin)
+      } else {
+        await proxies.prepareManagedIdeProxy(plugin)
+      }
     }
 
     // Note: Tool implementations are provided by the plugin's activate function

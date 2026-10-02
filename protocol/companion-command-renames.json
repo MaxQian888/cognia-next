@@ -571,6 +571,9 @@
     "codeserver_activate_proxy": {
       "to": "codeserver.proxy.activate"
     },
+    "codeserver_activate_proxy_temporary": {
+      "to": "codeserver.temporary_proxy.activate"
+    },
     "codeserver_agent_apply_edit": {
       "to": "codeserver.agent.edit.apply"
     },
@@ -609,6 +612,12 @@
     },
     "codeserver_broker_respond": {
       "to": "codeserver.broker.respond"
+    },
+    "codeserver_broker_trace": {
+      "to": "codeserver.broker.trace.read"
+    },
+    "codeserver_broker_trace_configure": {
+      "to": "codeserver.broker.trace.configure"
     },
     "codeserver_broker_validate_paths": {
       "to": "codeserver.broker.path.validate"
@@ -668,7 +677,7 @@
       "to": "codeserver.read_user_settings"
     },
     "codeserver_relay_grant_pending": {
-      "to": "codeserver.relay_grant.pending"
+      "to": "codeserver.relay_grant_request.snapshot"
     },
     "codeserver_relay_grant_respond": {
       "to": "codeserver.relay_grant.respond"
@@ -677,7 +686,7 @@
       "to": "codeserver.relay_grant.revoke"
     },
     "codeserver_relay_grants": {
-      "to": "codeserver.relay_grant.list"
+      "to": "codeserver.relay_grant.snapshot"
     },
     "codeserver_remote_relay_ensure": {
       "to": "codeserver.remote_relay.ensure"
@@ -2397,6 +2406,18 @@
     },
     "plugin_load_vscode": {
       "to": "plugin.vscode.load"
+    },
+    "plugin_managed_ide_dev_mode_set": {
+      "to": "plugin.managed_ide_dev_mode.set"
+    },
+    "plugin_managed_ide_dev_mode_status": {
+      "to": "plugin.managed_ide_dev_mode.status"
+    },
+    "plugin_managed_ide_dev_path_register": {
+      "to": "plugin.managed_ide_dev_path.register"
+    },
+    "plugin_managed_ide_dev_path_unregister": {
+      "to": "plugin.managed_ide_dev_path.unregister"
     },
     "plugin_marketplace_versions": {
       "to": "plugin.marketplace.version.list"

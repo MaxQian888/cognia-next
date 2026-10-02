@@ -10,6 +10,7 @@
 // anything, so any change that drops one of them puts it back to blank.
 
 import { HotReloadDiagnostics } from "./hot-reload-diagnostics"
+import { ManagedIdeDevModeCard } from "./managed-ide/managed-ide-dev-mode-card"
 import { PluginWatchCard } from "./plugin-watch-card"
 import { PluginDevSessionWorkbench } from "./plugin-dev-session-workbench"
 
@@ -22,6 +23,7 @@ export function PluginDevtoolsPane() {
           <PluginWatchCard />
           <HotReloadDiagnostics />
         </div>
+        <ManagedIdeDevModeCard />
       </div>
     </div>
   )
