@@ -10,6 +10,7 @@ import {
   collectHtmlRefs,
   collectLocalLinks,
   collectScriptRefs,
+  crawlLocales,
   isRootPageFile,
   locateStatusHtml,
   normalizeStaticRef,
@@ -141,4 +142,10 @@ test("buildStatusSite copies only the status closure and writes a manifest", asy
     rmSync(out, { recursive: true, force: true })
     rmSync(dest, { recursive: true, force: true })
   }
+})
+
+test("crawlLocales covers every app locale so each lazily loaded catalog chunk ships", async () => {
+  // A zh-CN browser loads the zh-CN catalog chunk; crawling only the default
+  // locale shipped a status site that failed to load its language pack.
+  assert.deepEqual(await crawlLocales(), ["en", "zh-CN"])
 })

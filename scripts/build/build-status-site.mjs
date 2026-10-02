@@ -13,8 +13,9 @@
  *   2. Runtime closure: a headless Chromium loads the page from a local
  *      server over `out/` with schema-valid fixture data (`lib/status/
  *      fixtures.ts`), exercises every button, range, dialog and the incident
- *      deep link, and records each asset request — catching lazily loaded
- *      chunks the static scan cannot name.
+ *      deep link, once per app locale (`i18n/config.ts`), and records each
+ *      asset request — catching lazily loaded chunks the static scan cannot
+ *      name, such as each locale's message catalog.
  *
  * Output layout (consumed by `[assets]` in services/status-server/worker/
  * wrangler.toml and by the mirror's assetsDir):
@@ -183,12 +184,13 @@ export function locateStatusHtml(outDir) {
   throw new Error(`no exported status page in ${outDir} (expected status.html or status/index.html)`)
 }
 
-async function loadFixtures() {
+/** Bundle a repo TypeScript module with esbuild and import it (fixtures, locale list). */
+async function importTsModule(...segments) {
   const esbuild = await import("esbuild")
-  const dir = mkdtempSync(path.join(tmpdir(), "status-fixtures-"))
-  const outfile = path.join(dir, "fixtures.mjs")
+  const dir = mkdtempSync(path.join(tmpdir(), "status-build-"))
+  const outfile = path.join(dir, "module.mjs")
   await esbuild.build({
-    entryPoints: [path.join(REPO_ROOT, "lib", "status", "fixtures.ts")],
+    entryPoints: [path.join(REPO_ROOT, ...segments)],
     bundle: true,
     format: "esm",
     platform: "node",
@@ -200,6 +202,20 @@ async function loadFixtures() {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+const loadFixtures = () => importTsModule("lib", "status", "fixtures.ts")
+
+/**
+ * Browser locales to crawl with: one per app locale. The page picks its
+ * message catalog from `navigator.languages` and loads it with a dynamic
+ * import (`i18n/messages.ts`), so each locale's catalog chunk is only
+ * requested by a browser in that locale.
+ */
+export async function crawlLocales() {
+  const { locales } = await importTsModule("i18n", "config.ts")
+  if (!Array.isArray(locales) || locales.length === 0) throw new Error("i18n/config.ts exports no locales")
+  return [...locales]
 }
 
 /** Local server over `out/` that mimics the status Worker's routing and API. */
@@ -258,6 +274,7 @@ function startCrawlServer(outDir, statusHtml, fixtures, requested) {
 export async function crawlStatusPage(outDir, statusHtml) {
   const { chromium } = await import("@playwright/test")
   const fixtures = await loadFixtures()
+  const locales = await crawlLocales()
   const requested = new Set()
   const server = await startCrawlServer(outDir, statusHtml, fixtures, requested)
   const { port } = server.address()
@@ -270,27 +287,37 @@ export async function crawlStatusPage(outDir, statusHtml) {
   // make are never attributed to the page.
   const pageRequests = new Set()
   try {
-    for (const viewport of [
-      { width: 1280, height: 900 },
-      { width: 390, height: 844 },
-    ]) {
-      const context = await browser.newContext({ viewport })
-      const page = await context.newPage()
-      page.on("request", (request) => pageRequests.add(new URL(request.url()).pathname))
-      page.on("pageerror", (error) => errors.push(String(error)))
-      await page.goto(`${base}/status/`, { waitUntil: "networkidle" })
-      // Click every control once; dialogs are dismissed with Escape.
-      const controls = await page.locator("main button, main [role=radio], main [role=tab], header button").all()
-      for (const control of controls) {
-        if (!(await control.isVisible().catch(() => false))) continue
-        await control.click({ timeout: 2_000 }).catch(() => {})
-        await page.waitForTimeout(150)
-        await page.keyboard.press("Escape").catch(() => {})
+    for (const locale of locales) {
+      for (const viewport of [
+        { width: 1280, height: 900 },
+        { width: 390, height: 844 },
+      ]) {
+        const context = await browser.newContext({ viewport, locale })
+        const page = await context.newPage()
+        page.on("request", (request) => pageRequests.add(new URL(request.url()).pathname))
+        page.on("pageerror", (error) => errors.push(`[${locale}] ${String(error)}`))
+        // A chunk the page needs but the export lacks would 404 in production
+        // too (the page then shows its "failed to load" state).
+        page.on("response", (response) => {
+          const pathname = new URL(response.url()).pathname
+          if (response.status() >= 400 && pathname.startsWith("/_next/")) {
+            errors.push(`[${locale}] ${response.status()} ${pathname}`)
+          }
+        })
+        await page.goto(`${base}/status/`, { waitUntil: "networkidle" })
+        // Click every control once; dialogs are dismissed with Escape.
+        const controls = await page.locator("main button, main [role=radio], main [role=tab], header button").all()
+        for (const control of controls) {
+          if (!(await control.isVisible().catch(() => false))) continue
+          await control.click({ timeout: 2_000 }).catch(() => {})
+          await page.waitForTimeout(150)
+          await page.keyboard.press("Escape").catch(() => {})
+        }
+        await page.goto(`${base}/status/?incident=${fixtures.FIXTURE_ACTIVE_INCIDENT.id}`, { waitUntil: "networkidle" })
+        await page.goto(`${base}/status/#action=manage&token=${"a".repeat(43)}`, { waitUntil: "networkidle" })
+        await page.waitForTimeout(300)
+        await context.close()
       }
-      await page.goto(`${base}/status/?incident=${fixtures.FIXTURE_ACTIVE_INCIDENT.id}`, { waitUntil: "networkidle" })
-      await page.goto(`${base}/status/#action=manage&token=${"a".repeat(43)}`, { waitUntil: "networkidle" })
-      await page.waitForTimeout(300)
-      await context.close()
     }
   } finally {
     await browser.close()
