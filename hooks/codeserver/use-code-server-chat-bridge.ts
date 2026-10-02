@@ -4,7 +4,12 @@ import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 
-import { CODESERVER_EVENTS, type CodeServerEditorEvent } from "@/lib/codeserver/client"
+import { buildProblemsContextSelection } from "@/components/editor/project/file-chat-context"
+import {
+  CODESERVER_EVENTS,
+  type CodeServerDiagnosticsHandoff,
+  type CodeServerEditorEvent,
+} from "@/lib/codeserver/client"
 import { startNewSession } from "@/lib/chat/start-session"
 import { onTauriEvent } from "@/lib/tauri/events"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
@@ -52,13 +57,15 @@ const ACTION_PROMPT_KEYS: Record<string, string | undefined> = {
 }
 
 /**
- * Bridges the code-server companion extension's "send to chat" context-menu
- * commands into the app's chat context pipeline.
+ * Bridges the code-server companion extension's "send to chat" commands into
+ * the app's chat context pipeline.
  *
- * Listens for `chatContextRequested` events pushed by the extension's command
- * handlers, stages a {@link FileSelectionRef} into the chat store, optionally
- * pre-fills the composer with an action-specific prompt, and navigates to the
- * chat page.
+ * Listens for `chatContextRequested` (the context-menu actions) and
+ * `diagnosticsHandoffRequested` ("Send Problems to Cognia") events pushed by
+ * the extension's command handlers, stages {@link FileSelectionRef}s into the
+ * chat store, pre-fills the composer where the action implies a prompt, and
+ * navigates to the chat page. Problems are staged one chip per file, built by
+ * the same `buildProblemsContextSelection` the Monaco Problems panel uses.
  *
  * Follows the same staging pattern as `SelectionToolbarInitializer`: create a
  * context selection, stage an intent, then route the user to the composer.
@@ -91,12 +98,15 @@ export function useCodeServerChatBridge(enabled: boolean, root?: string): void {
     void onTauriEvent<CodeServerEditorEvent>(CODESERVER_EVENTS.editorEvent, (event) => {
       if (cancelled) return
       if (root !== undefined && event.root !== root) return
-      if (event.name !== "chatContextRequested") return
-
-      const payload = event.payload as unknown as ChatContextPayload | null
-      if (!payload) return
-
-      void stageContext(payload, tRef.current).then(() => {
+      let staged: Promise<void> | null = null
+      if (event.name === "chatContextRequested") {
+        const payload = event.payload as unknown as ChatContextPayload | null
+        if (payload) staged = stageContext(payload, tRef.current)
+      } else if (event.name === "diagnosticsHandoffRequested") {
+        const payload = event.payload as unknown as CodeServerDiagnosticsHandoff | null
+        if (payload && payload.files.length > 0) staged = stageDiagnostics(payload, tRef.current)
+      }
+      void staged?.then(() => {
         if (!cancelled) router.push("/")
       })
     }).then((fn) => {
@@ -111,13 +121,50 @@ export function useCodeServerChatBridge(enabled: boolean, root?: string): void {
   }, [enabled, root, router])
 }
 
+async function stagingSessionId(): Promise<string> {
+  return useChatStore.getState().activeSessionId ?? (await startNewSession()).id
+}
+
+/**
+ * Stage every file's problems as its own chip and ask for a fix. The extension
+ * sends errors and warnings only, already 1-based.
+ */
+async function stageDiagnostics(
+  payload: CodeServerDiagnosticsHandoff,
+  t: (key: string) => string
+): Promise<void> {
+  const sessionId = await stagingSessionId()
+  for (const file of payload.files) {
+    const selection = buildProblemsContextSelection({
+      relPath: file.relativePath,
+      markers: file.diagnostics.map((diagnostic) => ({
+        message: diagnostic.message,
+        kind: diagnostic.severity,
+        startLineNumber: diagnostic.line,
+        startColumn: diagnostic.column,
+        endLineNumber: diagnostic.line,
+        endColumn: diagnostic.column,
+      })),
+    })
+    const alreadyStaged = useChatStore
+      .getState()
+      .contextSelections.some(
+        (s) =>
+          s.kind === "file" && s.relPath === selection.relPath && s.snapshot === selection.snapshot
+      )
+    if (!alreadyStaged) useChatStore.getState().addContextSelection(selection)
+  }
+  useComposerIntentStore.getState().stage(sessionId, {
+    candidateId: `codeserver-problems-${payload.total}-${payload.files.length}`,
+    prompt: t("chatPrompts.fixProblems"),
+  })
+}
+
 async function stageContext(
   payload: ChatContextPayload,
   t: (key: string) => string
 ): Promise<void> {
-  const chat = useChatStore.getState()
-  const current = chat.activeSessionId
-  const sessionId = current ?? (await startNewSession()).id
+  const sessionId = await stagingSessionId()
 
   // Build the FileSelectionRef from the extension payload
   const selection: FileSelectionRef = {

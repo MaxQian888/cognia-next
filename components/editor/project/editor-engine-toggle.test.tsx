@@ -13,6 +13,16 @@ jest.mock("@/hooks/use-host-profile", () => ({
   useRemoteHostActive: () => mockRemoteHostActive,
 }))
 
+// What the agent is waiting on inside VS Code, and whether the toggle asked.
+let mockBrokerOperations: Array<Record<string, unknown>> = []
+const mockBrokerProgress = jest.fn()
+jest.mock("@/hooks/codeserver/use-code-server-broker-progress", () => ({
+  useCodeServerBrokerProgress: (enabled: boolean, root: string) => {
+    mockBrokerProgress(enabled, root)
+    return enabled ? mockBrokerOperations : []
+  },
+}))
+
 let mockIsTauri = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
 jest.mock("@/lib/codeserver/client", () => ({
@@ -325,5 +335,56 @@ describe("profile switch warning", () => {
     renderToggle({ value: "codeserver", proIdeProfile: "native" })
     fireEvent.click(screen.getByTestId("pro-ide-profile-native"))
     expect(toasts.info).not.toHaveBeenCalled()
+  })
+})
+
+describe("agent operations in VS Code", () => {
+  beforeEach(() => {
+    mockBrokerOperations = []
+    mockBrokerProgress.mockClear()
+  })
+
+  it("listens only while the managed Pro IDE is the live engine", () => {
+    renderToggle({ value: "monaco" })
+    expect(mockBrokerProgress).toHaveBeenLastCalledWith(false, "/work/proj")
+    renderToggle({ value: "codeserver", proIdeProfile: "native" })
+    expect(mockBrokerProgress).toHaveBeenLastCalledWith(false, "/work/proj")
+    renderToggle({ value: "codeserver", proIdeSupport: "unsupported" })
+    expect(mockBrokerProgress).toHaveBeenLastCalledWith(false, "/work/proj")
+    renderToggle({ value: "codeserver" })
+    expect(mockBrokerProgress).toHaveBeenLastCalledWith(true, "/work/proj")
+  })
+
+  it("shows nothing when the agent is not waiting on the editor", () => {
+    renderToggle({ value: "codeserver" })
+    expect(screen.queryByTestId("pro-ide-broker-progress")).toBeNull()
+  })
+
+  it("names the latest operation with its percentage and counts the rest", () => {
+    mockBrokerOperations = [
+      { kind: "report", operation: "saveAll", done: 1, total: 4, percentage: 25 },
+      { kind: "begin", operation: "applyEdit", path: "/work/proj/a.ts" },
+    ]
+    renderToggle({ value: "codeserver" })
+    const chip = screen.getByTestId("pro-ide-broker-progress")
+    expect(chip).toHaveAttribute("role", "status")
+    expect(chip).toHaveAttribute("aria-label", "proIde.brokerProgress.label")
+    expect(chip).toHaveTextContent("proIde.brokerProgress.saveAll")
+    expect(screen.getByTestId("pro-ide-broker-progress-percent")).toHaveTextContent(
+      "proIde.brokerProgress.percent"
+    )
+    expect(chip).toHaveTextContent("proIde.brokerProgress.more")
+  })
+
+  it("omits the percentage an operation did not report", () => {
+    mockBrokerOperations = [{ kind: "begin", operation: "managedProxyHandshake", pluginId: "acme" }]
+    renderToggle({ value: "codeserver" })
+    expect(screen.getByTestId("pro-ide-broker-progress")).toHaveTextContent(
+      "proIde.brokerProgress.managedProxyHandshake"
+    )
+    expect(screen.queryByTestId("pro-ide-broker-progress-percent")).toBeNull()
+    expect(screen.getByTestId("pro-ide-broker-progress")).not.toHaveTextContent(
+      "proIde.brokerProgress.more"
+    )
   })
 })

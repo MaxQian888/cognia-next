@@ -33,6 +33,20 @@ or one that does not open with a `Content-Length` header (the retired `0.2.x`
 newline bridge included), is answered with `IDE_BROKER_PROTOCOL_INCOMPATIBLE`
 and closed, and the IDE status records why.
 
+Optional behaviour is negotiated per connection, and the host never assumes a
+capability the hello did not list. With `cancel`, either side withdraws a
+request with the `$/cancelRequest` notification: a host request past its
+deadline is withdrawn rather than left running in the editor, and an extension
+request withdrawn mid-flight aborts the provider or protocol invocation it
+started (pending approvals included). With `progress`, the extension reports
+`$/progress` keyed by the request id for long verbs (applying an edit, saving
+every file, activating a plugin's proxy); each report renews that request's
+deadline, by at most two minutes in total, and the app shows the operation next
+to the engine switch. The hello reply carries the host's per-method deadlines
+(`requestDeadlinesMs`) so both sides time out on the same clock. Activating a
+plugin's proxy requires `contribution-transactions`; without it the host
+refuses rather than activating half a contribution set.
+
 Large or binary values use one-shot 30-second content handles bound to root,
 generation, plugin, provider, permission, and direction. Bytes move through a
 separate authenticated loopback endpoint; credentials never appear in URLs.

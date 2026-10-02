@@ -28,6 +28,15 @@ capability 表达。没有共同 major 的对端，或不以 `Content-Length` he
 （包括已退役的 `0.2.x` newline bridge），会收到 `IDE_BROKER_PROTOCOL_INCOMPATIBLE`
 并被关闭，IDE 状态会记录原因。
 
+可选行为按连接协商，宿主从不假设 hello 未列出的 capability。协商了 `cancel` 时，
+任一方都可用 `$/cancelRequest` notification 撤回请求：超过 deadline 的宿主请求会被
+撤回，而不是留在编辑器里继续执行；扩展中途撤回的请求会中止它发起的 provider 或协议
+调用（包括等待中的审批）。协商了 `progress` 时，扩展为耗时 verb（应用编辑、保存全部
+文件、激活插件 proxy）发送以请求 id 为 token 的 `$/progress`；每次报告都会续期该请求
+的 deadline，累计最多两分钟，应用会在引擎切换旁显示该操作。hello 回复携带宿主的
+按方法 deadline（`requestDeadlinesMs`），双方按同一时钟超时。激活插件 proxy 需要
+`contribution-transactions`；缺少时宿主直接拒绝，而不是只激活一半 contribution。
+
 大对象和二进制使用 30 秒、单次兑换的 content handle，同时绑定 root、
 generation、plugin、provider、permission 与方向。字节经独立认证 loopback
 endpoint 传输，凭据不进入 URL。

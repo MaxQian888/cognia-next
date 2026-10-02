@@ -204,7 +204,42 @@ export interface CodeServerEditorEvent {
     | "documentSaved"
     | "diagnosticsChanged"
     | "chatContextRequested"
+    /** "Send Problems to Cognia": payload is a {@link CodeServerDiagnosticsHandoff}. */
+    | "diagnosticsHandoffRequested"
+    /** A workspace-panel row was clicked: payload is a {@link CodeServerWorkspaceRow}. */
+    | "workspaceRowActivated"
+    /** The extension (re)connected; push it a fresh workspace snapshot. */
+    | "bridgeConnected"
+    /** A long editor verb reported progress: payload is a {@link CodeServerBrokerProgress}. */
+    | "brokerProgress"
   payload: { path?: string | null; empty?: boolean; count?: number } | null
+}
+
+/** Payload of `diagnosticsHandoffRequested`: errors and warnings, 1-based. */
+export interface CodeServerDiagnosticsHandoff {
+  total: number
+  files: Array<{
+    path: string
+    relativePath: string
+    diagnostics: Array<{ message: string; severity: string; line: number; column: number }>
+  }>
+}
+
+/** An editor verb that reports progress over the broker. */
+export type CodeServerProgressOperation = "applyEdit" | "saveAll" | "managedProxyHandshake"
+
+/** Payload of `brokerProgress`: one `$/progress` report for a host request. */
+export interface CodeServerBrokerProgress {
+  token: number | string
+  value: {
+    kind: "begin" | "report" | "end"
+    operation: CodeServerProgressOperation
+    percentage?: number
+    done?: number
+    total?: number
+    path?: string
+    pluginId?: string
+  }
 }
 
 export interface CodeServerBrokerRequest {

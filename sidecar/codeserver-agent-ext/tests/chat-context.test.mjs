@@ -1,247 +1,169 @@
 import assert from "node:assert/strict"
-import { test, describe, beforeEach } from "node:test"
+import { describe, test } from "node:test"
 
-// Minimal VS Code API mock for the chat-context functions
-const mockSelection = {
-  isEmpty: false,
-  start: { line: 9, character: 0 },
-  end: { line: 14, character: 19 },
+import {
+  MAX_CHAT_SNAPSHOT_CHARS,
+  captureChatContext,
+  captureDiagnosticsContext,
+  captureFileContext,
+} from "../src/chat-context.mjs"
+
+// The real capture functions, run against a fake `vscode` they receive as a
+// parameter — the previous suite re-implemented them inline and tested the copy.
+
+function range(startLine, startCharacter, endLine, endCharacter) {
+  return {
+    start: { line: startLine, character: startCharacter },
+    end: { line: endLine, character: endCharacter },
+  }
 }
 
-const mockEmptySelection = {
-  isEmpty: true,
-  start: { line: 5, character: 0 },
-  end: { line: 5, character: 0 },
+function selection(startLine, startCharacter, endLine, endCharacter) {
+  const r = range(startLine, startCharacter, endLine, endCharacter)
+  const isEmpty = startLine === endLine && startCharacter === endCharacter
+  const within = (line) => line >= startLine && line <= endLine
+  return {
+    ...r,
+    isEmpty,
+    contains: (other) => within(other.start.line) && within(other.end.line),
+    intersection: (other) =>
+      other.start.line <= endLine && other.end.line >= startLine ? other : undefined,
+  }
 }
 
-const mockDocument = {
-  uri: { scheme: "file", fsPath: "/work/proj/src/index.ts" },
-  languageId: "typescript",
-  getText: (range) => (range ? "const x = 1;\nreturn x" : "full file text"),
-}
+const fileUri = (fsPath) => ({ scheme: "file", fsPath })
 
-const mockUntitledDocument = {
-  uri: { scheme: "untitled", fsPath: "" },
-  languageId: "typescript",
-  getText: () => "",
-}
-
-const mockDiagnostics = [
-  {
-    message: "unused variable",
-    severity: 1, // Warning
-    range: {
-      start: { line: 10, character: 0 },
-      end: { line: 10, character: 5 },
+function fakeVscode({ editor = null, diagnostics = [], allDiagnostics = [] } = {}) {
+  return {
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    window: { activeTextEditor: editor },
+    workspace: {
+      asRelativePath: (uri) => uri.fsPath.replace("/work/proj/", ""),
     },
-  },
-  {
-    message: "type error",
-    severity: 0, // Error
-    range: {
-      start: { line: 12, character: 0 },
-      end: { line: 12, character: 10 },
+    languages: {
+      getDiagnostics: (uri) => (uri ? diagnostics : allDiagnostics),
     },
-  },
-  {
-    // Outside selection — should not be included
-    message: "far away issue",
-    severity: 0,
-    range: {
-      start: { line: 50, character: 0 },
-      end: { line: 50, character: 5 },
+  }
+}
+
+function editorWith(sel, text = "const x = 1;\nreturn x") {
+  return {
+    selection: sel,
+    document: {
+      uri: fileUri("/work/proj/src/index.ts"),
+      languageId: "typescript",
+      getText: (r) => (r ? text : "full file text"),
     },
-  },
+  }
+}
+
+const diagnostics = [
+  { message: "unused variable", severity: 1, range: range(10, 0, 10, 5) },
+  { message: "type error", severity: 0, range: range(12, 0, 12, 10) },
+  { message: "far away issue", severity: 0, range: range(50, 0, 50, 5) },
 ]
 
-// Mock vscode global — must be set before importing the module under test.
-// We extract the functions from extension.mjs by re-exporting them for testing.
-// Since the extension doesn't export captureChatContext/captureFileContext directly,
-// we test through the command dispatch: verify the bridge.emit calls.
-
-describe("chat context capture logic", () => {
-  // The functions under test are not directly exported from extension.mjs.
-  // We test them implicitly through the behavior: the captureChatContext function
-  // is exercised here in a standalone implementation that mirrors the extension.
-
-  // We test the pure logic of captureChatContext:
-  function captureChatContext(action, { activeEditor, getDiagnostics, asRelativePath }) {
-    if (!activeEditor || activeEditor.document.uri.scheme !== "file") return null
-
-    const doc = activeEditor.document
-    const sel = activeEditor.selection
-    const hasSelection = !sel.isEmpty
-
-    let selectedText = hasSelection ? doc.getText(sel) : null
-    let truncated = false
-    if (selectedText && selectedText.length > 20_000) {
-      selectedText = selectedText.slice(0, 20_000)
-      truncated = true
+describe("captureChatContext", () => {
+  test("returns null with no active editor or a non-file editor", () => {
+    assert.equal(captureChatContext(fakeVscode(), "explain"), null)
+    const untitled = {
+      selection: selection(0, 0, 0, 0),
+      document: { uri: { scheme: "untitled", fsPath: "" }, languageId: "ts", getText: () => "" },
     }
+    assert.equal(captureChatContext(fakeVscode({ editor: untitled }), "explain"), null)
+  })
 
-    const allDiags = getDiagnostics(doc.uri)
-    const severityName = (s) =>
-      s === 0 ? "error" : s === 1 ? "warning" : s === 2 ? "info" : "hint"
+  test("captures a 1-based selection, its text and the diagnostics inside it", () => {
+    const vscode = fakeVscode({ editor: editorWith(selection(9, 0, 14, 19)), diagnostics })
+    assert.deepEqual(captureChatContext(vscode, "explain"), {
+      action: "explain",
+      path: "/work/proj/src/index.ts",
+      relativePath: "src/index.ts",
+      language: "typescript",
+      selection: { startLine: 10, startColumn: 1, endLine: 15, endColumn: 20 },
+      selectedText: "const x = 1;\nreturn x",
+      truncated: false,
+      diagnostics: [
+        { message: "unused variable", severity: "warning", line: 11 },
+        { message: "type error", severity: "error", line: 13 },
+      ],
+    })
+  })
 
-    return {
-      action,
-      path: doc.uri.fsPath,
-      relativePath: asRelativePath(doc.uri),
-      language: doc.languageId,
-      selection: hasSelection
-        ? {
-            startLine: sel.start.line + 1,
-            startColumn: sel.start.character + 1,
-            endLine: sel.end.line + 1,
-            endColumn: sel.end.character + 1,
-          }
-        : null,
-      selectedText,
-      truncated,
-      diagnostics: hasSelection
-        ? allDiags
-            .filter((d) => {
-              const dStart = d.range.start.line
-              const dEnd = d.range.end.line
-              return dStart >= sel.start.line && dEnd <= sel.end.line
-            })
-            .map((d) => ({
-              message: d.message,
-              severity: severityName(d.severity),
-              line: d.range.start.line + 1,
-            }))
-        : [],
-    }
-  }
+  test("an empty selection carries no text and no diagnostics", () => {
+    const vscode = fakeVscode({ editor: editorWith(selection(5, 0, 5, 0)), diagnostics })
+    const ctx = captureChatContext(vscode, "addFile")
+    assert.equal(ctx.selection, null)
+    assert.equal(ctx.selectedText, null)
+    assert.deepEqual(ctx.diagnostics, [])
+  })
 
-  function captureFileContext(uri, asRelativePath) {
-    if (!uri || uri.scheme !== "file") return null
-    return {
+  test("truncates a selection past the snapshot limit and says so", () => {
+    const long = "x".repeat(MAX_CHAT_SNAPSHOT_CHARS + 10)
+    const vscode = fakeVscode({ editor: editorWith(selection(0, 0, 3, 0), long) })
+    const ctx = captureChatContext(vscode, "review")
+    assert.equal(ctx.selectedText.length, MAX_CHAT_SNAPSHOT_CHARS)
+    assert.equal(ctx.truncated, true)
+  })
+})
+
+describe("captureFileContext", () => {
+  test("captures a file URI without selection data", () => {
+    assert.deepEqual(captureFileContext(fakeVscode(), fileUri("/work/proj/src/utils.ts")), {
       action: "addFile",
-      path: uri.fsPath,
-      relativePath: asRelativePath(uri),
+      path: "/work/proj/src/utils.ts",
+      relativePath: "src/utils.ts",
       language: null,
       selection: null,
       selectedText: null,
       truncated: false,
       diagnostics: [],
-    }
-  }
-
-  const asRelativePath = (uri) => uri.fsPath.replace("/work/proj/", "")
-  const getDiagnostics = () => mockDiagnostics
-
-  test("returns null when no active editor", () => {
-    const result = captureChatContext("explain", {
-      activeEditor: null,
-      getDiagnostics,
-      asRelativePath,
     })
-    assert.equal(result, null)
   })
 
-  test("returns null for non-file scheme editors", () => {
-    const result = captureChatContext("explain", {
-      activeEditor: { document: mockUntitledDocument, selection: mockSelection },
-      getDiagnostics,
-      asRelativePath,
+  test("ignores non-file URIs", () => {
+    assert.equal(captureFileContext(fakeVscode(), { scheme: "git", fsPath: "/x" }), null)
+    assert.equal(captureFileContext(fakeVscode(), null), null)
+  })
+})
+
+describe("captureDiagnosticsContext", () => {
+  test("hands over errors and warnings with 1-based positions", () => {
+    const vscode = fakeVscode({
+      allDiagnostics: [
+        [
+          fileUri("/work/proj/a.ts"),
+          [
+            { message: "first line", severity: 0, range: range(0, 0, 0, 1) },
+            { message: "tenth line", severity: 1, range: range(9, 4, 9, 6) },
+            { message: "a hint", severity: 3, range: range(2, 0, 2, 1) },
+          ],
+        ],
+        [fileUri("/work/proj/b.ts"), [{ message: "info", severity: 2, range: range(1, 0, 1, 1) }]],
+      ],
     })
-    assert.equal(result, null)
-  })
-
-  test("captures correct structure with selection", () => {
-    const result = captureChatContext("explain", {
-      activeEditor: { document: mockDocument, selection: mockSelection },
-      getDiagnostics,
-      asRelativePath,
+    assert.deepEqual(captureDiagnosticsContext(vscode), {
+      total: 2,
+      files: [
+        {
+          path: "/work/proj/a.ts",
+          relativePath: "a.ts",
+          diagnostics: [
+            { message: "first line", severity: "error", line: 1, column: 1 },
+            // A 0-based line 9 is line 10 to a person; the old capture said 9.
+            { message: "tenth line", severity: "warning", line: 10, column: 5 },
+          ],
+        },
+      ],
     })
+  })
 
-    assert.equal(result.action, "explain")
-    assert.equal(result.path, "/work/proj/src/index.ts")
-    assert.equal(result.relativePath, "src/index.ts")
-    assert.equal(result.language, "typescript")
-    assert.deepEqual(result.selection, {
-      startLine: 10,
-      startColumn: 1,
-      endLine: 15,
-      endColumn: 20,
+  test("returns null when nothing worth sending is reported", () => {
+    const vscode = fakeVscode({
+      allDiagnostics: [
+        [fileUri("/work/proj/a.ts"), [{ message: "h", severity: 3, range: range(0, 0, 0, 1) }]],
+      ],
     })
-    assert.equal(result.selectedText, "const x = 1;\nreturn x")
-    assert.equal(result.truncated, false)
-  })
-
-  test("captures action type correctly", () => {
-    for (const action of ["addSelection", "addFile", "explain", "fix", "review", "custom"]) {
-      const result = captureChatContext(action, {
-        activeEditor: { document: mockDocument, selection: mockSelection },
-        getDiagnostics,
-        asRelativePath,
-      })
-      assert.equal(result.action, action)
-    }
-  })
-
-  test("includes only diagnostics within selection range", () => {
-    const result = captureChatContext("fix", {
-      activeEditor: { document: mockDocument, selection: mockSelection },
-      getDiagnostics,
-      asRelativePath,
-    })
-
-    // mockSelection is lines 9-14 (0-based); diagnostics at lines 10 and 12 are inside,
-    // the one at line 50 is outside.
-    assert.equal(result.diagnostics.length, 2)
-    assert.equal(result.diagnostics[0].message, "unused variable")
-    assert.equal(result.diagnostics[0].severity, "warning")
-    assert.equal(result.diagnostics[0].line, 11) // 1-based
-    assert.equal(result.diagnostics[1].message, "type error")
-    assert.equal(result.diagnostics[1].severity, "error")
-  })
-
-  test("returns empty diagnostics when no selection", () => {
-    const result = captureChatContext("addFile", {
-      activeEditor: { document: mockDocument, selection: mockEmptySelection },
-      getDiagnostics,
-      asRelativePath,
-    })
-
-    assert.deepEqual(result.diagnostics, [])
-    assert.equal(result.selectedText, null)
-    assert.equal(result.selection, null)
-  })
-
-  test("truncates very long selections", () => {
-    const longText = "x".repeat(25_000)
-    const longDoc = {
-      ...mockDocument,
-      getText: () => longText,
-    }
-    const result = captureChatContext("addSelection", {
-      activeEditor: { document: longDoc, selection: mockSelection },
-      getDiagnostics,
-      asRelativePath,
-    })
-
-    assert.equal(result.truncated, true)
-    assert.equal(result.selectedText.length, 20_000)
-  })
-
-  test("captureFileContext returns correct structure", () => {
-    const uri = { scheme: "file", fsPath: "/work/proj/src/utils.ts" }
-    const result = captureFileContext(uri, asRelativePath)
-
-    assert.equal(result.action, "addFile")
-    assert.equal(result.path, "/work/proj/src/utils.ts")
-    assert.equal(result.relativePath, "src/utils.ts")
-    assert.equal(result.language, null)
-    assert.equal(result.selection, null)
-    assert.equal(result.selectedText, null)
-    assert.equal(result.truncated, false)
-    assert.deepEqual(result.diagnostics, [])
-  })
-
-  test("captureFileContext returns null for non-file URI", () => {
-    assert.equal(captureFileContext(null, asRelativePath), null)
-    assert.equal(captureFileContext({ scheme: "untitled", fsPath: "" }, asRelativePath), null)
+    assert.equal(captureDiagnosticsContext(vscode), null)
   })
 })

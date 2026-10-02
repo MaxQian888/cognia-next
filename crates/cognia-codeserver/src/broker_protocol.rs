@@ -6,6 +6,8 @@
 //! share ([`negotiate_protocol`]); minor differences within a major are carried
 //! by capabilities, never by version comparisons.
 
+use std::time::Duration;
+
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
 
@@ -16,6 +18,58 @@ pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["1.0"];
 pub(crate) const CODE_API_VERSION: &str = "1.128.0";
 pub(crate) const DEFAULT_CATALOG_HASH: &str =
     "sha256:53cf23036ed2e14693f284778d7f2b0cd7cd5802ee63bb42c573063f40f86fb3";
+
+/// Capability names. A connection only gets the behaviour a capability names
+/// when both sides offered it in the hello.
+pub(crate) mod capability {
+    /// `$/cancelRequest` in both directions: a request that outlives its
+    /// deadline is withdrawn, not just forgotten.
+    pub const CANCEL: &str = "cancel";
+    /// `$/progress` from the extension against a host request id. Each report
+    /// renews that request's deadline (up to [`super::MAX_PROGRESS_EXTENSION`])
+    /// and is forwarded to the renderer.
+    pub const PROGRESS: &str = "progress";
+    pub const STRUCTURED_ERRORS: &str = "structured-errors";
+    pub const CONTENT_HANDLES: &str = "content-handles";
+    /// The managed-proxy activation transaction: `managedProxyHandshake`, and
+    /// `restartManagedExtensionHost` to roll an activation forward or back.
+    /// Proxy activation is refused on a connection without it.
+    pub const CONTRIBUTION_TRANSACTIONS: &str = "contribution-transactions";
+}
+
+/// Every capability this host implements, in hello order.
+pub(crate) const BROKER_CAPABILITIES: &[&str] = &[
+    capability::CANCEL,
+    capability::PROGRESS,
+    capability::STRUCTURED_ERRORS,
+    capability::CONTENT_HANDLES,
+    capability::CONTRIBUTION_TRANSACTIONS,
+];
+
+/// How long the host waits for the extension to answer `method` before it
+/// gives up (and, with [`capability::CANCEL`], withdraws the request). Verbs
+/// that only move focus are short; verbs that write or save get longer;
+/// activating a proxy extension can take a while on a cold extension host.
+pub(crate) fn host_request_deadline(method: &str) -> Duration {
+    match method {
+        "applyEdit" | "saveAll" | "showDiff" | "runInTerminal" => Duration::from_secs(15),
+        "managedProxyHandshake" => Duration::from_secs(30),
+        _ => Duration::from_secs(5),
+    }
+}
+
+/// The furthest progress reports can push a host request past its start.
+pub(crate) const MAX_PROGRESS_EXTENSION: Duration = Duration::from_secs(120);
+
+/// How long the extension waits for the host to answer each of its requests,
+/// sent in the hello reply so the two sides never disagree. Starting a
+/// protocol server spawns a process, so it gets longer than the rest.
+pub(crate) fn extension_request_deadlines() -> Value {
+    serde_json::json!({
+        "default": 30_000,
+        "cognia/protocol/start": 60_000,
+    })
+}
 
 /// Pick the protocol version for a hello: the host's version for the highest
 /// major that both `client` and `supported` name. Unparsable entries are
@@ -143,6 +197,23 @@ mod tests {
         assert!(is_content_length_prefix(b"Cont"));
         assert!(!is_content_length_prefix(br#"{"type":"hello"}"#));
         assert!(!is_content_length_prefix(b"GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn deadlines_are_longer_for_verbs_that_write_or_activate() {
+        assert_eq!(host_request_deadline("openFile"), Duration::from_secs(5));
+        assert_eq!(host_request_deadline("readActive"), Duration::from_secs(5));
+        assert_eq!(host_request_deadline("saveAll"), Duration::from_secs(15));
+        assert_eq!(host_request_deadline("applyEdit"), Duration::from_secs(15));
+        assert_eq!(
+            host_request_deadline("managedProxyHandshake"),
+            Duration::from_secs(30)
+        );
+        assert_eq!(host_request_deadline("unknownVerb"), Duration::from_secs(5));
+        assert!(MAX_PROGRESS_EXTENSION > host_request_deadline("managedProxyHandshake"));
+        let extension = extension_request_deadlines();
+        assert_eq!(extension["default"], 30_000);
+        assert_eq!(extension["cognia/protocol/start"], 60_000);
     }
 
     #[test]

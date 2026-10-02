@@ -72,10 +72,19 @@
       "protocol-incompatible": "VS Code 中的 Cognia 扩展来自不同版本的 Cognia，无法连接。VS Code 仍在运行，但 Cognia 无法驱动编辑器。重启 Pro IDE 以重新安装匹配的扩展。",
       "registration-failed": "Cognia 无法创建 Pro IDE 连接密钥。VS Code 仍在运行，但 Cognia 无法驱动编辑器，也无法把编辑器上下文发送到聊天。重启 Pro IDE 以重试。"
     },
+    "brokerProgress": {
+      "applyEdit": "正在应用智能体的编辑",
+      "label": "智能体正在等待 VS Code",
+      "managedProxyHandshake": "正在 VS Code 中激活插件",
+      "more": "另有 {count} 项",
+      "percent": "{percent}%",
+      "saveAll": "正在保存文件"
+    },
     "cancelDownload": "取消",
     "chatPrompts": {
       "explain": "请解释这段代码。",
       "fix": "请修复这段代码中的问题。",
+      "fixProblems": "请修复这些问题。",
       "review": "请审查这段代码，找出潜在的缺陷和可以改进的地方。"
     },
     "checkingTooltip": "正在检查 Pro IDE 是否可用…",
@@ -114,7 +123,8 @@
         "needs-host-browser": "工作台正在主机上运行，但这个浏览器够不着它。它监听的是那台机器的回环端口，而唯一能跨网络的那条路会对每个请求校验设备身份，内嵌框架做不到。请在那台机器的桌面应用里打开，或者在主机本机的浏览器里打开。",
         "not-running": "这个工作区还没有正在运行的工作台。"
       }
-    }
+    },
+    "workspaceRowMissing": "Cognia 中已找不到“{label}”，它可能已被删除或已完成。"
   },
   "proIdeChatBridge": {
     "explain": "请解释这段代码。",

@@ -4,7 +4,12 @@ import { useEffect, useRef, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 
 import { useClientLiveQuery } from "@/hooks/data"
-import { codeServerClient, type CodeServerWorkspaceSnapshot } from "@/lib/codeserver/client"
+import {
+  CODESERVER_EVENTS,
+  codeServerClient,
+  type CodeServerEditorEvent,
+  type CodeServerWorkspaceSnapshot,
+} from "@/lib/codeserver/client"
 import { buildWorkspaceSnapshot } from "@/lib/codeserver/workspace-snapshot"
 import type {
   WorkspaceIssueInput,
@@ -21,6 +26,8 @@ import {
   subscribeActiveRemoteTransport,
 } from "@/lib/tauri/transport-routing"
 import { onTransportChange, transport } from "@/lib/tauri/transport-instance"
+import { onTauriEvent } from "@/lib/tauri/events"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 const snapshotTransport = () => getActiveRemoteTransport() ?? transport
 function subscribeSnapshotTransport(notify: () => void) {
@@ -125,8 +132,9 @@ function createSnapshotPublisher() {
       running = false
       if (!disposed && !timer) {
         if (pending) void drain()
-        // There is no extension-generation notification in the current
-        // protocol. A bounded full replay also repairs an unnoticed restart.
+        // The extension announces a (re)connect as `bridgeConnected`, which
+        // replays at once; this bounded replay is the backstop for an
+        // announcement lost in transit.
         else if (latest && available()) schedule(60_000)
       }
     }
@@ -148,6 +156,8 @@ function createSnapshotPublisher() {
   document.addEventListener("visibilitychange", onVisibility)
 
   return {
+    /** Push the latest snapshot again now, e.g. to an extension that just reconnected. */
+    replay,
     update(root: string, snapshot: CodeServerWorkspaceSnapshot | null) {
       if (!snapshot) {
         epoch += 1
@@ -193,8 +203,9 @@ function createSnapshotPublisher() {
  *
  * The live queries do the change detection: `useClientLiveQuery` re-runs on any
  * write to the tables it touched, so a new issue, a plan step completing, or a
- * run settling all re-push. A low-frequency full replay repairs extension
- * restarts that the current protocol cannot announce.
+ * run settling all re-push. An extension that (re)connects says so with
+ * `bridgeConnected` and gets the snapshot at once, instead of showing "not
+ * connected" until the next periodic replay.
  */
 export function useCodeServerWorkspaceSync(enabled: boolean, root: string): void {
   const t = useTranslations("proIdePanel")
@@ -220,6 +231,23 @@ export function useCodeServerWorkspaceSync(enabled: boolean, root: string): void
       publisher.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!enabled || !root) return
+    let cancelled = false
+    let unlisten: (() => void) | null = null
+    void onTauriEvent<CodeServerEditorEvent>(CODESERVER_EVENTS.editorEvent, (event) => {
+      if (cancelled || event.root !== root || event.name !== "bridgeConnected") return
+      publisher.current?.replay()
+    }).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+    return () => {
+      cancelled = true
+      safeUnlisten(unlisten)
+    }
+  }, [enabled, root])
 
   useEffect(() => {
     if (!enabled || !root) {

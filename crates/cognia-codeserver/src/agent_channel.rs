@@ -90,18 +90,14 @@ use tokio::sync::{mpsc, oneshot, Notify, OnceCell};
 use uuid::Uuid;
 
 use super::broker_protocol::{
-    encode_content_length, is_content_length_prefix, negotiate_protocol, read_content_length_value,
-    CODE_API_VERSION, DEFAULT_CATALOG_HASH, SUPPORTED_PROTOCOL_VERSIONS,
+    capability, encode_content_length, extension_request_deadlines, host_request_deadline,
+    is_content_length_prefix, negotiate_protocol, read_content_length_value, BROKER_CAPABILITIES,
+    CODE_API_VERSION, DEFAULT_CATALOG_HASH, MAX_PROGRESS_EXTENSION, SUPPORTED_PROTOCOL_VERSIONS,
 };
 use super::credential::{
     content_bearer, credential_file_path, derive_session_key, remove_credential_file,
     secrets_equal, write_credential_file, BootstrapCredential,
 };
-
-/// How long a `send` waits for the extension to answer before giving up. The
-/// caller (frontend bridge / agent tool) degrades gracefully on timeout — the
-/// CLI open path and the disk-reload edit path remain available.
-const AGENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Depth of a connection's outbound frame queue. Frames are tiny and infrequent
 /// (one per agent editor action), so a small bound is plenty and still applies
@@ -126,13 +122,6 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// cannot speak.
 const PROTOCOL_INCOMPATIBLE_CODE: i64 = -32001;
 type AuthenticationFailure = (Option<Value>, i64, String);
-const BROKER_CAPABILITIES: &[&str] = &[
-    "cancel",
-    "progress",
-    "structured-errors",
-    "content-handles",
-    "contribution-transactions",
-];
 
 /// Renderer event carrying an editor change pushed by the companion extension.
 pub const CODESERVER_EDITOR_EVENT: &str = "codeserver://editor-event";
@@ -232,6 +221,8 @@ pub struct BrokerRegistration {
 struct Conn {
     conn_id: u64,
     tx: mpsc::Sender<Vec<u8>>,
+    /// Capabilities both sides offered in the hello.
+    capabilities: Vec<String>,
     /// Wakes the connection task so a replaced or revoked socket is actually
     /// closed rather than left to notice on its next inbound frame.
     close: Arc<Notify>,
@@ -241,6 +232,9 @@ struct PendingRequest {
     root: String,
     conn_id: u64,
     responder: oneshot::Sender<Result<Value, String>>,
+    /// Woken by a `$/progress` report for this request, which renews its
+    /// deadline on a connection that negotiated [`capability::PROGRESS`].
+    progress: Arc<Notify>,
 }
 
 #[derive(Default)]
@@ -620,23 +614,42 @@ impl AgentChannel {
     /// Send `method` to the editor serving `root` and await its response. Errors
     /// when no extension is connected for that root (caller degrades to the CLI /
     /// disk-reload path) or the request times out.
+    ///
+    /// The deadline comes from [`host_request_deadline`]. On a connection that
+    /// negotiated [`capability::PROGRESS`], each progress report for this
+    /// request renews it, up to [`MAX_PROGRESS_EXTENSION`] after the start. On
+    /// one that negotiated [`capability::CANCEL`], a request that times out is
+    /// withdrawn with `$/cancelRequest` so the editor stops working on it.
     pub async fn send(&self, root: &str, method: &str, params: Value) -> Result<Value, String> {
-        let (tx, conn_id) = {
+        let (tx, conn_id, capabilities) = {
             let reg = self.lock_registry();
             reg.conns
                 .get(root)
-                .map(|conn| (conn.tx.clone(), conn.conn_id))
+                .map(|conn| (conn.tx.clone(), conn.conn_id, conn.capabilities.clone()))
                 .ok_or_else(|| "Pro IDE extension is not connected for this project".to_string())?
         };
+        if method == "managedProxyHandshake"
+            && !capabilities
+                .iter()
+                .any(|cap| cap == capability::CONTRIBUTION_TRANSACTIONS)
+        {
+            return Err(
+                "IDE_CONTRIBUTION_TRANSACTIONS_UNSUPPORTED: the connected broker did not negotiate proxy activation"
+                    .to_string(),
+            );
+        }
+        let supports = |name: &str| capabilities.iter().any(|cap| cap == name);
 
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
-        let (response_tx, response_rx) = oneshot::channel();
+        let (response_tx, mut response_rx) = oneshot::channel();
+        let progress = Arc::new(Notify::new());
         self.lock_pending().insert(
             id,
             PendingRequest {
                 root: root.to_string(),
                 conn_id,
                 responder: response_tx,
+                progress: Arc::clone(&progress),
             },
         );
 
@@ -653,21 +666,75 @@ impl AgentChannel {
             }
         };
 
-        let outcome = tokio::time::timeout(AGENT_REQUEST_TIMEOUT, async {
-            tx.send(bytes)
-                .await
-                .map_err(|_| "Pro IDE extension connection closed".to_string())?;
-            response_rx
-                .await
-                .map_err(|_| "Pro IDE extension dropped the request".to_string())?
-        })
+        let started = tokio::time::Instant::now();
+        let step = host_request_deadline(method);
+        let ceiling = started + MAX_PROGRESS_EXTENSION;
+        let mut deadline = started + step;
+        let outcome = async {
+            match tokio::time::timeout_at(deadline, tx.send(bytes)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => return Some(Err("Pro IDE extension connection closed".to_string())),
+                Err(_) => return None,
+            }
+            loop {
+                tokio::select! {
+                    response = &mut response_rx => {
+                        return Some(response.unwrap_or_else(|_| {
+                            Err("Pro IDE extension dropped the request".to_string())
+                        }));
+                    }
+                    () = progress.notified(), if supports(capability::PROGRESS) => {
+                        deadline = (tokio::time::Instant::now() + step).min(ceiling);
+                    }
+                    () = tokio::time::sleep_until(deadline) => return None,
+                }
+            }
+        }
         .await;
         match outcome {
-            Ok(result) => result,
-            Err(_) => {
+            Some(result) => result,
+            None => {
                 self.lock_pending().remove(&id);
-                Err("Pro IDE extension request timed out".to_string())
+                if supports(capability::CANCEL) {
+                    if let Ok(cancel) = encode_content_length(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "$/cancelRequest",
+                        "params": { "id": id },
+                    })) {
+                        // Best effort: a full queue means the editor is not
+                        // reading, and the request is already forgotten here.
+                        let _ = tx.try_send(cancel);
+                    }
+                }
+                Err(format!("Pro IDE extension request timed out: {method}"))
             }
+        }
+    }
+
+    /// Whether the live connection for `root` negotiated `name`.
+    pub fn connection_supports(&self, root: &str, name: &str) -> bool {
+        self.lock_registry()
+            .conns
+            .get(root)
+            .is_some_and(|conn| conn.capabilities.iter().any(|cap| cap == name))
+    }
+
+    /// Renew the deadline of a pending request the extension reported progress
+    /// on. Only the connection the request was sent on can renew it.
+    fn renew_pending(&self, root: &str, conn_id: u64, token: &Value) -> bool {
+        let Some(id) = token
+            .as_u64()
+            .or_else(|| token.as_str().and_then(|text| text.parse().ok()))
+        else {
+            return false;
+        };
+        let pending = self.lock_pending();
+        match pending.get(&id) {
+            Some(request) if request.root == root && request.conn_id == conn_id => {
+                request.progress.notify_one();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -888,6 +955,7 @@ impl AgentChannel {
         server_nonce: &str,
         client_nonce: &str,
         tx: mpsc::Sender<Vec<u8>>,
+        capabilities: Vec<String>,
     ) -> Result<CommittedConnection, String> {
         enum Outcome {
             Committed {
@@ -983,6 +1051,7 @@ impl AgentChannel {
                             Conn {
                                 conn_id,
                                 tx,
+                                capabilities,
                                 close: Arc::clone(&close),
                             },
                         );
@@ -1758,6 +1827,7 @@ async fn handle_conn(stream: TcpStream, channel: Arc<AgentChannel>) {
             "generation": conn_id,
             "sessionId": authenticated.connection.session_id,
             "capabilities": authenticated.capabilities,
+            "requestDeadlinesMs": extension_request_deadlines(),
         }
     });
     let Ok(bytes) = encode_content_length(&response) else {
@@ -1879,7 +1949,13 @@ where
     let negotiated = validate_jsonrpc_hello(channel, &hello, &scope, &challenge)?;
     let hello_id = hello.get("id").cloned().unwrap_or(Value::Null);
     let connection = channel
-        .commit_authentication(&scope, &challenge, &client_nonce, outbound_tx)
+        .commit_authentication(
+            &scope,
+            &challenge,
+            &client_nonce,
+            outbound_tx,
+            negotiated.capabilities.clone(),
+        )
         .map_err(|message| (Some(hello_id.clone()), -32002, message))?;
     Ok(AuthenticatedConnection {
         root: scope.root,
@@ -2032,12 +2108,32 @@ fn handle_authenticated_frame(
                 return Ok(());
             }
             "$/progress" => {
-                channel.forward_event(
-                    root,
-                    "brokerProgress".to_string(),
-                    value.get("params").cloned(),
-                );
+                if !channel.connection_supports(root, capability::PROGRESS) {
+                    return Err("progress was not negotiated on this connection".to_string());
+                }
+                let params = value.get("params").cloned().unwrap_or(Value::Null);
+                let token = params.get("token").cloned().unwrap_or(Value::Null);
+                if !channel.renew_pending(root, conn_id, &token) {
+                    return Err(
+                        "progress for a request this connection is not answering".to_string()
+                    );
+                }
+                channel.forward_event(root, "brokerProgress".to_string(), Some(params));
                 return Ok(());
+            }
+            "$/cancelRequest" => {
+                if !channel.connection_supports(root, capability::CANCEL) {
+                    return Err("cancellation was not negotiated on this connection".to_string());
+                }
+                if value.get("id").is_some() {
+                    return Err("$/cancelRequest must be a notification".to_string());
+                }
+                return channel.forward_broker_notification(
+                    root,
+                    conn_id,
+                    method.to_string(),
+                    value.get("params").cloned().unwrap_or(Value::Null),
+                );
             }
             "cognia/provider/cancel"
             | "cognia/provider/approvalResponse"
@@ -2124,16 +2220,47 @@ mod tests {
         hex::encode(mac.finalize().into_bytes())
     }
 
+    fn all_caps() -> Vec<String> {
+        BROKER_CAPABILITIES
+            .iter()
+            .map(|cap| cap.to_string())
+            .collect()
+    }
+
     /// Attach a connection the way a completed handshake does, without a socket.
     fn attach(channel: &AgentChannel, root: &str) -> (u64, mpsc::Receiver<Vec<u8>>) {
+        attach_with(channel, root, all_caps())
+    }
+
+    fn attach_with(
+        channel: &AgentChannel,
+        root: &str,
+        capabilities: Vec<String>,
+    ) -> (u64, mpsc::Receiver<Vec<u8>>) {
         let scope = channel
             .resolve_challenge(&current_bootstrap(channel, root).token_id)
             .unwrap();
         let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
         let committed = channel
-            .commit_authentication(&scope, "server-nonce", "client-nonce-0000", tx)
+            .commit_authentication(
+                &scope,
+                "server-nonce",
+                "client-nonce-0000",
+                tx,
+                capabilities,
+            )
             .unwrap();
         (committed.conn_id, rx)
+    }
+
+    /// Decode the next frame a test connection's outbound queue received.
+    async fn next_frame(rx: &mut mpsc::Receiver<Vec<u8>>) -> Value {
+        let bytes = rx.recv().await.expect("an outbound frame");
+        let mut reader = BufReader::new(bytes.as_slice());
+        read_content_length_value(&mut reader)
+            .await
+            .unwrap()
+            .unwrap()
     }
 
     fn current_bootstrap(channel: &AgentChannel, root: &str) -> BootstrapCredential {
@@ -2332,6 +2459,7 @@ mod tests {
             hello["result"]["capabilities"],
             json!(["cancel", "structured-errors"])
         );
+        assert_eq!(hello["result"]["requestDeadlinesMs"]["default"], 30_000);
 
         let request = {
             let channel = Arc::clone(&channel);
@@ -2568,11 +2696,17 @@ mod tests {
         let (tx1, _rx1) = mpsc::channel::<Vec<u8>>(1);
         let (tx2, _rx2) = mpsc::channel::<Vec<u8>>(1);
         channel
-            .commit_authentication(&first, "server-nonce", "client-nonce-0000", tx1)
+            .commit_authentication(&first, "server-nonce", "client-nonce-0000", tx1, all_caps())
             .unwrap();
         assert_eq!(
             channel
-                .commit_authentication(&second, "server-nonce-2", "client-nonce-0001", tx2)
+                .commit_authentication(
+                    &second,
+                    "server-nonce-2",
+                    "client-nonce-0001",
+                    tx2,
+                    all_caps(),
+                )
                 .err()
                 .as_deref(),
             Some("broker credential was already used")
@@ -2646,6 +2780,144 @@ mod tests {
         // file: replacing the bootstrap now would fail the new host.
         channel.detach_conn("/work/fresh", generation);
         assert_eq!(current_bootstrap(&channel, "/work/fresh"), fresh);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_timed_out_request_is_withdrawn_when_cancel_was_negotiated() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/cancel").await.unwrap();
+        let (_generation, mut rx) = attach(&channel, "/work/cancel");
+        let request = {
+            let channel = Arc::clone(&channel);
+            tokio::spawn(async move { channel.send("/work/cancel", "openFile", json!({})).await })
+        };
+        let sent = next_frame(&mut rx).await;
+        tokio::time::advance(host_request_deadline("openFile") + Duration::from_millis(1)).await;
+        let error = request.await.unwrap().unwrap_err();
+        assert!(error.contains("timed out: openFile"));
+        let cancel = next_frame(&mut rx).await;
+        assert_eq!(cancel["method"], "$/cancelRequest");
+        assert_eq!(cancel["params"]["id"], sent["id"]);
+        assert!(cancel.get("id").is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_cancel_is_sent_on_a_connection_that_did_not_negotiate_it() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/nocancel").await.unwrap();
+        let (_generation, mut rx) =
+            attach_with(&channel, "/work/nocancel", vec!["structured-errors".into()]);
+        let request = {
+            let channel = Arc::clone(&channel);
+            tokio::spawn(async move { channel.send("/work/nocancel", "openFile", json!({})).await })
+        };
+        next_frame(&mut rx).await;
+        tokio::time::advance(host_request_deadline("openFile") + Duration::from_millis(1)).await;
+        assert!(request.await.unwrap().is_err());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn progress_renews_a_deadline_up_to_the_ceiling() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/progress").await.unwrap();
+        let (generation, mut rx) = attach(&channel, "/work/progress");
+        let request = {
+            let channel = Arc::clone(&channel);
+            tokio::spawn(async move { channel.send("/work/progress", "saveAll", json!({})).await })
+        };
+        let id = next_frame(&mut rx).await["id"].as_u64().unwrap();
+        let step = host_request_deadline("saveAll");
+        let report = |token: Value| {
+            json!({
+                "jsonrpc": "2.0",
+                "method": "$/progress",
+                "params": { "token": token, "value": { "kind": "report", "operation": "saveAll" } }
+            })
+        };
+        // Report twice, each time just before the deadline: still pending.
+        for _ in 0..2 {
+            tokio::time::advance(step - Duration::from_millis(10)).await;
+            handle_authenticated_frame(&channel, "/work/progress", generation, report(json!(id)))
+                .unwrap();
+            tokio::task::yield_now().await;
+        }
+        assert!(!request.is_finished());
+        // A token for nobody's request is refused rather than renewing anything.
+        assert!(handle_authenticated_frame(
+            &channel,
+            "/work/progress",
+            generation,
+            report(json!(9999))
+        )
+        .is_err());
+        // Keep reporting: the ceiling still ends the request.
+        for _ in 0..20 {
+            tokio::time::advance(step - Duration::from_millis(10)).await;
+            let _ = handle_authenticated_frame(
+                &channel,
+                "/work/progress",
+                generation,
+                report(json!(id.to_string())),
+            );
+            tokio::task::yield_now().await;
+        }
+        let error = request.await.unwrap().unwrap_err();
+        assert!(error.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn progress_and_cancel_frames_need_their_capability() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/caps").await.unwrap();
+        let (generation, _rx) = attach_with(&channel, "/work/caps", vec![]);
+        let progress =
+            json!({ "jsonrpc": "2.0", "method": "$/progress", "params": { "token": 1 } });
+        assert!(
+            handle_authenticated_frame(&channel, "/work/caps", generation, progress)
+                .unwrap_err()
+                .contains("not negotiated")
+        );
+        let cancel =
+            json!({ "jsonrpc": "2.0", "method": "$/cancelRequest", "params": { "id": "proxy:1" } });
+        assert!(
+            handle_authenticated_frame(&channel, "/work/caps", generation, cancel)
+                .unwrap_err()
+                .contains("not negotiated")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_extension_cancel_reaches_the_broker_runtime() {
+        let (channel, _temp) = test_channel();
+        let bus = cognia_companion_bus::event_bus::EventBus::new();
+        channel.attach_event_bus(Arc::clone(&bus));
+        channel.register_instance("/work/xcancel").await.unwrap();
+        let (generation, _rx) = attach(&channel, "/work/xcancel");
+        let mut receiver = match bus.subscribe(None, 0) {
+            cognia_companion_bus::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
+            _ => panic!("subscribe"),
+        };
+        let cancel =
+            json!({ "jsonrpc": "2.0", "method": "$/cancelRequest", "params": { "id": "proxy:7" } });
+        handle_authenticated_frame(&channel, "/work/xcancel", generation, cancel).unwrap();
+        let frame = receiver.recv().await.unwrap();
+        assert_eq!(frame.event_type, CODESERVER_BROKER_NOTIFICATION_EVENT);
+        assert_eq!(frame.payload["method"], "$/cancelRequest");
+        assert_eq!(frame.payload["params"]["id"], "proxy:7");
+        assert_eq!(frame.payload["generation"], generation);
+    }
+
+    #[tokio::test]
+    async fn proxy_activation_needs_contribution_transactions() {
+        let (channel, _temp) = test_channel();
+        channel.register_instance("/work/tx").await.unwrap();
+        attach_with(&channel, "/work/tx", vec!["cancel".into()]);
+        let error = channel
+            .send("/work/tx", "managedProxyHandshake", json!({}))
+            .await
+            .unwrap_err();
+        assert!(error.starts_with("IDE_CONTRIBUTION_TRANSACTIONS_UNSUPPORTED"));
     }
 
     #[test]
@@ -2723,6 +2995,7 @@ mod tests {
                 root: "/work/a".to_string(),
                 conn_id: 7,
                 responder: tx,
+                progress: Arc::new(Notify::new()),
             },
         );
 

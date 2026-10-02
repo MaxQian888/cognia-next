@@ -658,6 +658,43 @@ describe("ManagedIdeBrokerRuntime", () => {
     ).toBe(false)
   })
 
+  it("stops the invocation a timed-out extension request started", async () => {
+    const plugin = makePlugin("editor:read")
+    const invoke = jest.fn(() => new Promise<unknown>(() => undefined))
+    const runtime = new ManagedIdeBrokerRuntime(dependencies(plugin, { invoke }))
+    const pending = runtime.dispatch(await request(plugin, 7))
+    while (invoke.mock.calls.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    // The wrong request id, or the same id from another generation, stops nothing.
+    for (const [generation, id] of [
+      [7, "proxy:2"],
+      [6, "proxy:1"],
+    ] as const) {
+      expect(
+        runtime.cancel({ root: ROOT, generation, method: "$/cancelRequest", params: { id } })
+      ).toBe(false)
+    }
+    expect(
+      runtime.cancel({
+        root: ROOT,
+        generation: 7,
+        method: "$/cancelRequest",
+        params: { id: "proxy:1" },
+      })
+    ).toBe(true)
+    await expect(pending).rejects.toThrow("IDE_REQUEST_CANCELLED")
+    // Settled requests are forgotten, so a late cancel is a no-op.
+    expect(
+      runtime.cancel({
+        root: ROOT,
+        generation: 7,
+        method: "$/cancelRequest",
+        params: { id: "proxy:1" },
+      })
+    ).toBe(false)
+  })
+
   it("streams agent events and resolves native IDE tool approvals on the exact invocation", async () => {
     const plugin = makePlugin("editor:read")
     plugin.manifest.permissions = ["editor:read", "agent:control"]
@@ -1027,6 +1064,66 @@ describe("ManagedIdeBrokerRuntime", () => {
     )
     resolvePending(null)
     await expect(pending).rejects.toThrow("IDE_PROTOCOL_CANCELLED")
+  })
+
+  it("stops a protocol request the extension withdrew", async () => {
+    const plugin = makeProtocolPlugin()
+    const protocolRequest = jest.fn(() => new Promise<unknown>(() => undefined))
+    const protocolCancel = jest.fn(async () => true)
+    const runtime = new ManagedIdeBrokerRuntime(
+      dependencies(plugin, {
+        protocolStart: async () => ({ sessionId: "session" }),
+        protocolRequest,
+        protocolCancel,
+      })
+    )
+    const manifest = normalizeIdeManifest(plugin.manifest.id, plugin.manifest).manifest
+    const common = {
+      pluginId: plugin.manifest.id,
+      pluginVersion: plugin.manifest.version,
+      manifestHash: await hashIdeManifest(manifest),
+      catalogHash: IDE_CAPABILITY_CATALOG.catalogHash,
+      hostId: "local",
+      workspaceRoot: ROOT,
+      workspaceTrusted: true,
+      family: "lsp",
+      protocolId: "cognia.acme.tools.language",
+    }
+    const started = (await runtime.dispatch({
+      root: ROOT,
+      generation: 3,
+      id: "start",
+      method: "cognia/protocol/start",
+      params: { ...common, invocationId: "protocol-start" },
+    })) as { capabilityTicket: string }
+    const pending = runtime.dispatch({
+      root: ROOT,
+      generation: 3,
+      id: "proxy:9",
+      method: "cognia/protocol/request",
+      params: {
+        ...common,
+        invocationId: "protocol-9",
+        capabilityTicket: started.capabilityTicket,
+        method: "textDocument/hover",
+        payload: {},
+      },
+    })
+    for (let index = 0; index < 20 && protocolRequest.mock.calls.length < 1; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(
+      runtime.cancel({
+        root: ROOT,
+        generation: 3,
+        method: "$/cancelRequest",
+        params: { id: "proxy:9" },
+      })
+    ).toBe(true)
+    expect(protocolCancel).toHaveBeenCalledWith(
+      expect.objectContaining({ invocationId: "protocol-9" })
+    )
+    await expect(pending).rejects.toThrow("IDE_REQUEST_CANCELLED")
   })
 
   it("fails and cancels pending protocol requests when the broker disconnects", async () => {

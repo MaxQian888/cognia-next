@@ -11,6 +11,7 @@ import {
   CodeIcon,
   ExternalLinkIcon,
   InfoIcon,
+  Loader2Icon,
   PuzzleIcon,
   ShieldCheckIcon,
   SquareCodeIcon,
@@ -22,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Surface } from "@/components/surface/surface"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
+import { useCodeServerBrokerProgress } from "@/hooks/codeserver/use-code-server-broker-progress"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { isTauri } from "@/lib/tauri"
@@ -114,6 +116,15 @@ export function EditorEngineToggle({
   // carries an event back. `CodeServerPane` keeps those two consumers gated.
   // This is where the user is told, next to the switch that put them here.
   const remoteWorkbench = useRemoteHostActive() && value === "codeserver" && proIdeSupported
+
+  // What the agent is waiting on inside VS Code. Shown here rather than over
+  // the pane because the desktop workbench is a native webview that paints
+  // above any DOM laid over its region. Only the managed profile has a broker.
+  const brokerOperations = useCodeServerBrokerProgress(
+    value === "codeserver" && proIdeSupported && proIdeProfile === "managed",
+    projectRoot
+  )
+  const [currentOperation] = brokerOperations
 
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-1.5", className)}>
@@ -214,6 +225,34 @@ export function EditorEngineToggle({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
+      ) : null}
+
+      {currentOperation ? (
+        <Surface asChild layer="raised" radius="pill">
+          <span
+            role="status"
+            aria-live="polite"
+            aria-label={t("proIde.brokerProgress.label")}
+            title={iconOnlyTitle(t(`proIde.brokerProgress.${currentOperation.operation}`))}
+            className="inline-flex h-7 min-w-0 items-center gap-1 border px-2 text-xs text-muted-foreground"
+            data-testid="pro-ide-broker-progress"
+          >
+            <Loader2Icon className="size-3.5 shrink-0 animate-spin" aria-hidden />
+            <span className={cn("truncate", labelClassName)}>
+              {t(`proIde.brokerProgress.${currentOperation.operation}`)}
+            </span>
+            {typeof currentOperation.percentage === "number" ? (
+              <span className="tabular-nums" data-testid="pro-ide-broker-progress-percent">
+                {t("proIde.brokerProgress.percent", { percent: currentOperation.percentage })}
+              </span>
+            ) : null}
+            {brokerOperations.length > 1 ? (
+              <span className={labelClassName}>
+                {t("proIde.brokerProgress.more", { count: brokerOperations.length - 1 })}
+              </span>
+            ) : null}
+          </span>
+        </Surface>
       ) : null}
 
       {/* The two profiles are separate processes with separate extension and

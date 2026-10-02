@@ -58,6 +58,7 @@ cognia-companion = { path = "../cognia-companion", features = ["test-support"] }
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 tempfile.workspace = true
 tower = { workspace = true, features = ["util"] }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

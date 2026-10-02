@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
-import { buildNlsContent } from "./build-vscode-nls.mjs"
+import { buildL10nBundleContent, buildNlsContent } from "./build-vscode-nls.mjs"
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const EXT_DIR = join(ROOT, "sidecar", "codeserver-agent-ext")
@@ -74,4 +74,25 @@ test("the checked-in artifacts match the source", () => {
 
 test("a missing locale source fails loudly", () => {
   assert.throws(() => buildNlsContent("de"), /missing/)
+})
+
+test("the zh-CN runtime bundle translates every panel string the extension shows", () => {
+  const bundle = JSON.parse(buildL10nBundleContent("zh-CN"))
+  for (const key of [
+    "panel.disconnected",
+    "panel.noCustomActions",
+    "panel.chooseAction",
+    "panel.noDiagnostics",
+  ]) {
+    // Keyed by the English text the extension passes to `vscode.l10n.t`.
+    assert.equal(bundle[en[key]], zh[key], key)
+  }
+  assert.equal(
+    Object.keys(bundle).length,
+    Object.keys(en).filter((key) => key.startsWith("panel.")).length
+  )
+})
+
+test("the manifest points VS Code at the generated l10n directory", () => {
+  assert.equal(manifest.l10n, "./l10n")
 })

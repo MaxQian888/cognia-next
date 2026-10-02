@@ -342,3 +342,84 @@ it("does not route after the hook has been torn down", async () => {
 
   expect(push).not.toHaveBeenCalled()
 })
+
+describe("Send Problems to Cognia", () => {
+  const handoff = (files: unknown[]): CodeServerEditorEvent => ({
+    root: "/work/proj",
+    name: "diagnosticsHandoffRequested",
+    payload: { total: 3, files } as unknown as CodeServerEditorEvent["payload"],
+  })
+
+  it("stages one problems chip per file and asks for a fix", async () => {
+    renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
+    await flush()
+
+    emit(
+      handoff([
+        {
+          path: "/work/proj/a.ts",
+          relativePath: "a.ts",
+          diagnostics: [
+            { message: "type error", severity: "error", line: 10, column: 3 },
+            { message: "unused", severity: "warning", line: 2, column: 1 },
+          ],
+        },
+        {
+          path: "/work/proj/b.ts",
+          relativePath: "b.ts",
+          diagnostics: [{ message: "bad", severity: "error", line: 1, column: 1 }],
+        },
+      ])
+    )
+    await flush()
+
+    expect(addContextSelection).toHaveBeenCalledTimes(2)
+    expect(addContextSelection).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        kind: "file",
+        relPath: "a.ts",
+        title: "a.ts (2)",
+        snapshot: "a.ts — 2 problems\n10:3 error: type error\n2:1 warning: unused",
+      })
+    )
+    expect(stage).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ prompt: "Please fix these problems." })
+    )
+    expect(push).toHaveBeenCalledWith("/")
+  })
+
+  it("does not restage a file whose identical problems are already staged", async () => {
+    mockChatState.contextSelections = [
+      {
+        kind: "file",
+        relPath: "b.ts",
+        snapshot: "b.ts — 1 problems\n1:1 error: bad",
+      } as (typeof mockChatState.contextSelections)[number],
+    ]
+    renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
+    await flush()
+    emit(
+      handoff([
+        {
+          path: "/work/proj/b.ts",
+          relativePath: "b.ts",
+          diagnostics: [{ message: "bad", severity: "error", line: 1, column: 1 }],
+        },
+      ])
+    )
+    await flush()
+    expect(addContextSelection).not.toHaveBeenCalled()
+    expect(stage).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores an empty handoff", async () => {
+    renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
+    await flush()
+    emit(handoff([]))
+    await flush()
+    expect(stage).not.toHaveBeenCalled()
+    expect(push).not.toHaveBeenCalled()
+  })
+})

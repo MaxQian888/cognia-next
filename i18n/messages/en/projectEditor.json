@@ -72,10 +72,19 @@
       "protocol-incompatible": "The Cognia extension in VS Code is from a different version of Cognia and can't connect. VS Code is running, but Cognia can't drive the editor. Restart the Pro IDE to reinstall the matching extension.",
       "registration-failed": "Cognia couldn't create the Pro IDE connection key. VS Code is running, but Cognia can't drive the editor or send its context to chat. Restart the Pro IDE to try again."
     },
+    "brokerProgress": {
+      "applyEdit": "Applying agent edit",
+      "label": "The agent is waiting on VS Code",
+      "managedProxyHandshake": "Activating plugin in VS Code",
+      "more": "+{count} more",
+      "percent": "{percent}%",
+      "saveAll": "Saving files"
+    },
     "cancelDownload": "Cancel",
     "chatPrompts": {
       "explain": "Please explain this code.",
       "fix": "Please fix the issues in this code.",
+      "fixProblems": "Please fix these problems.",
       "review": "Please review this code for potential bugs and improvements."
     },
     "checkingTooltip": "Checking whether Pro IDE is available…",
@@ -114,7 +123,8 @@
         "needs-host-browser": "The workbench is running on the host, but this browser cannot reach it. It answers on a loopback port on that machine, and the only route across the network authenticates the device on every request, which an embedded frame cannot do. Open it from the desktop app on that machine, or from a browser running on the host.",
         "not-running": "No workbench is running for this workspace yet."
       }
-    }
+    },
+    "workspaceRowMissing": "“{label}” is no longer in Cognia. It may have been deleted or completed."
   },
   "proIdeChatBridge": {
     "explain": "Please explain this code.",

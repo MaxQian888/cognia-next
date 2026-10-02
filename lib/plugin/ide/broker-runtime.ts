@@ -300,6 +300,12 @@ export class ManagedIdeBrokerRuntime {
   private readonly protocolTickets = new Map<string, { scope: string; expiresAt: number }>()
   private readonly inflight = new Map<string, InflightInvocation>()
   private readonly inflightProtocols = new Map<string, InflightProtocolInvocation>()
+  /**
+   * JSON-RPC request id → the invocation it started, so a generic
+   * `$/cancelRequest` from the extension (its request deadline passed) can
+   * stop the same work a `cognia/provider/cancel` would.
+   */
+  private readonly requestInvocations = new Map<string, string>()
   private readonly scheduler = new ProviderScheduler(MAX_READ_CONCURRENCY)
 
   constructor(
@@ -308,6 +314,14 @@ export class ManagedIdeBrokerRuntime {
 
   async dispatch(request: CodeServerBrokerRequest): Promise<unknown> {
     const startedAt = this.dependencies.now()
+    const requestKey = this.requestKey(request.root, request.generation, request.id)
+    const invocationId = invocationIdOf(request.params)
+    if (invocationId !== null) {
+      this.requestInvocations.set(
+        requestKey,
+        this.invocationKey(request.root, request.generation, invocationId)
+      )
+    }
     try {
       const result = await this.dispatchInner(request)
       this.recordTrace(request, startedAt, "success")
@@ -315,6 +329,8 @@ export class ManagedIdeBrokerRuntime {
     } catch (error) {
       this.recordTrace(request, startedAt, "error", error)
       throw error
+    } finally {
+      this.requestInvocations.delete(requestKey)
     }
   }
 
@@ -744,6 +760,9 @@ export class ManagedIdeBrokerRuntime {
 
   cancel(notification: CodeServerBrokerNotification): boolean {
     if (this.generations.get(notification.root) !== notification.generation) return false
+    if (notification.method === "$/cancelRequest") {
+      return this.cancelRequest(notification)
+    }
     if (notification.method === "cognia/protocol/cancel") {
       const params = validateProtocolCancellationParams(notification.params)
       const invocation = this.inflightProtocols.get(
@@ -1023,6 +1042,45 @@ export class ManagedIdeBrokerRuntime {
 
   private invocationKey(root: string, generation: number, invocationId: string): string {
     return `${root}\0${generation}\0${invocationId}`
+  }
+
+  private requestKey(root: string, generation: number, id: string | number): string {
+    return `${root}\0${generation}\0${typeof id}:${String(id)}`
+  }
+
+  /**
+   * The extension withdrew one of its requests (its deadline passed). Stop the
+   * provider or protocol invocation it started; requests that start nothing
+   * cancellable (state and secret reads) simply finish and are discarded.
+   */
+  private cancelRequest(notification: CodeServerBrokerNotification): boolean {
+    const id = (notification.params as { id?: unknown } | null)?.id
+    if (typeof id !== "string" && typeof id !== "number") return false
+    const invocationKey = this.requestInvocations.get(
+      this.requestKey(notification.root, notification.generation, id)
+    )
+    if (!invocationKey) return false
+    const error = brokerError(-32800, "IDE_REQUEST_CANCELLED", String(id))
+    const invocation = this.inflight.get(invocationKey)
+    if (invocation) {
+      invocation.controller.abort(error)
+      this.rejectApprovals(invocation, error)
+      return true
+    }
+    const protocol = this.inflightProtocols.get(invocationKey)
+    if (protocol) {
+      protocol.controller.abort(error)
+      void this.dependencies.protocolCancel({
+        root: protocol.root,
+        generation: protocol.generation,
+        pluginId: protocol.pluginId,
+        protocolId: protocol.protocolId,
+        consumerId: protocol.consumerId,
+        invocationId: protocol.invocationId,
+      })
+      return true
+    }
+    return false
   }
 
   private acceptGeneration(root: string, generation: number): void {
@@ -1435,6 +1493,12 @@ function validateManagedIdeStateParams(method: string, value: unknown): ManagedI
     }
   }
   return params as ManagedIdeStateParams
+}
+
+function invocationIdOf(params: unknown): string | null {
+  if (!params || typeof params !== "object") return null
+  const value = (params as { invocationId?: unknown }).invocationId
+  return typeof value === "string" && value.length > 0 ? value : null
 }
 
 function validateCancellationParams(

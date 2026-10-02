@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useCodeServerBrokerIssues } from "@/hooks/codeserver/use-code-server-broker-issues"
 import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
+import { useCodeServerWorkspaceNavigation } from "@/hooks/codeserver/use-code-server-workspace-navigation"
 import { useCodeServerWorkspaceSync } from "@/hooks/codeserver/use-code-server-workspace-sync"
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
@@ -127,6 +128,8 @@ export function CodeServerPane({
   // re-push as soon as it is. Ungated on host, because the snapshot rides the
   // same execution-targeted command as the rest of the agent drive.
   useCodeServerWorkspaceSync(phase === "ready" && profile === "managed", root)
+  // …and the way back: a plan, run or issue clicked in that side bar opens here.
+  useCodeServerWorkspaceNavigation(phase === "ready" && profile === "managed", root)
   // Broker problems used to be a log line. A replayed credential is a warning
   // the user can act on (something in this workbench read it); the others say
   // why agent drive is off while the workbench itself keeps running.

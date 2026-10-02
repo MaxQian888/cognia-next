@@ -11,6 +11,7 @@ const mockLocaleSync = jest.fn()
 const mockWorkspaceSync = jest.fn()
 const mockEditorEvents = jest.fn()
 const mockChatBridge = jest.fn()
+const mockWorkspaceNavigation = jest.fn()
 const resolveEndpoint = jest.fn()
 const useCodeServerProjectOpener = jest.fn()
 
@@ -22,6 +23,9 @@ jest.mock("@/hooks/codeserver/use-code-server-locale-sync", () => ({
 }))
 jest.mock("@/hooks/codeserver/use-code-server-workspace-sync", () => ({
   useCodeServerWorkspaceSync: (...args: unknown[]) => mockWorkspaceSync(...args),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-workspace-navigation", () => ({
+  useCodeServerWorkspaceNavigation: (...args: unknown[]) => mockWorkspaceNavigation(...args),
 }))
 jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
   useCodeServerEditorEvents: (...args: unknown[]) => mockEditorEvents(...args),
@@ -231,6 +235,7 @@ it("wires settings, language, workspace and editor events for a managed web pane
   )
   expect(mockEditorEvents).toHaveBeenLastCalledWith(true, "/repo")
   expect(mockChatBridge).toHaveBeenLastCalledWith(true, "/repo")
+  expect(mockWorkspaceNavigation).toHaveBeenLastCalledWith(true, "/repo")
 })
 
 it("keeps broker hooks disabled for the native extension profile", async () => {
@@ -239,6 +244,7 @@ it("keeps broker hooks disabled for the native extension profile", async () => {
   expect(mockWorkspaceSync).toHaveBeenLastCalledWith(false, "/repo")
   expect(mockEditorEvents).toHaveBeenLastCalledWith(false, "/repo")
   expect(mockChatBridge).toHaveBeenLastCalledWith(false, "/repo")
+  expect(mockWorkspaceNavigation).toHaveBeenLastCalledWith(false, "/repo")
 })
 
 it("fails closed when the host identity cannot be resolved and re-resolves on retry", async () => {

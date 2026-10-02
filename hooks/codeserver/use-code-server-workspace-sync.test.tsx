@@ -31,7 +31,17 @@ jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
 
 const push = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/codeserver/client", () => ({
+  CODESERVER_EVENTS: { editorEvent: "codeserver://editor-event" },
   codeServerClient: { pushWorkspaceSnapshot: (...a: unknown[]) => push(...a) },
+}))
+let mockEditorEventHandlers: ((event: { root: string; name: string }) => void)[] = []
+jest.mock("@/lib/tauri/events", () => ({
+  onTauriEvent: (_name: string, handler: (event: { root: string; name: string }) => void) => {
+    mockEditorEventHandlers.push(handler)
+    return Promise.resolve(() => {
+      mockEditorEventHandlers = mockEditorEventHandlers.filter((entry) => entry !== handler)
+    })
+  },
 }))
 
 let mockHost: object | null = null
@@ -73,6 +83,7 @@ const issue = (over: Record<string, unknown> = {}) => ({
 })
 
 beforeEach(() => {
+  mockEditorEventHandlers = []
   push.mockReset().mockResolvedValue(undefined)
   mockHost = null
   mockTransport = {}
@@ -88,6 +99,25 @@ it("pushes a snapshot once the pane is ready", () => {
   const [root, snapshot] = push.mock.calls[0]!
   expect(root).toBe("/repo")
   expect(snapshot.groups.map((g: { id: string }) => g.id)).toEqual(["issues", "plans", "runs"])
+})
+
+it("pushes the unchanged snapshot again as soon as the extension reconnects", async () => {
+  renderHook(() => useCodeServerWorkspaceSync(true, "/repo"))
+  await act(async () => {})
+  expect(push).toHaveBeenCalledTimes(1)
+
+  // Another workspace's reconnect, or another event, changes nothing.
+  for (const handler of mockEditorEventHandlers) {
+    handler({ root: "/other", name: "bridgeConnected" })
+    handler({ root: "/repo", name: "activeEditorChanged" })
+  }
+  await act(async () => {})
+  expect(push).toHaveBeenCalledTimes(1)
+
+  for (const handler of mockEditorEventHandlers) handler({ root: "/repo", name: "bridgeConnected" })
+  await act(async () => {})
+  expect(push).toHaveBeenCalledTimes(2)
+  expect(push.mock.calls[1]![1]).toEqual(push.mock.calls[0]![1])
 })
 
 it("stays silent until the workbench is ready", () => {

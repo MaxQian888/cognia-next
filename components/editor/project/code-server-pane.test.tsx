@@ -17,6 +17,9 @@ jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
 jest.mock("@/hooks/codeserver/use-code-server-chat-bridge", () => ({
   useCodeServerChatBridge: jest.fn(),
 }))
+jest.mock("@/hooks/codeserver/use-code-server-workspace-navigation", () => ({
+  useCodeServerWorkspaceNavigation: jest.fn(),
+}))
 type BrokerIssueHandler = (event: { root: string; issue: string }) => void
 const brokerIssues: { enabled?: boolean; onIssue?: BrokerIssueHandler } = {}
 jest.mock("@/hooks/codeserver/use-code-server-broker-issues", () => ({
@@ -73,6 +76,7 @@ jest.mock("@/lib/codeserver/client", () => ({
     notify: (...args: unknown[]) => notify(...args),
     pushWorkspaceSnapshot: (...args: unknown[]) => pushWorkspaceSnapshot(...args),
   },
+  CODESERVER_EVENTS: { editorEvent: "codeserver://editor-event" },
 }))
 // The debounce/single-flight policy has its own suite; here it is a pass-through
 // so the wiring assertions stay deterministic.
@@ -113,6 +117,7 @@ import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-se
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
 import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
+import { useCodeServerWorkspaceNavigation } from "@/hooks/codeserver/use-code-server-workspace-navigation"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
 import { CodeServerPane, joinProjectPath } from "./code-server-pane"
 
@@ -541,12 +546,14 @@ describe("<CodeServerPane /> against a remote host", () => {
   const localeSync = useCodeServerLocaleSync as jest.Mock
   const editorEvents = useCodeServerEditorEvents as jest.Mock
   const chatBridge = useCodeServerChatBridge as jest.Mock
+  const workspaceNavigation = useCodeServerWorkspaceNavigation as jest.Mock
 
   beforeEach(() => {
     settingsSync.mockClear()
     localeSync.mockClear()
     editorEvents.mockClear()
     chatBridge.mockClear()
+    workspaceNavigation.mockClear()
     registeredOpener = undefined
   })
 
@@ -562,6 +569,7 @@ describe("<CodeServerPane /> against a remote host", () => {
     expect(localeSync.mock.calls[0][0]).toBe(true)
     expect(editorEvents).toHaveBeenCalledWith(true, "/repo")
     expect(chatBridge).toHaveBeenCalledWith(true, "/repo")
+    expect(workspaceNavigation).toHaveBeenCalledWith(true, "/repo")
     expect(registeredOpener).toBeDefined()
   })
 

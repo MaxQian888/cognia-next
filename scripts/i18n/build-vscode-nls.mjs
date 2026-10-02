@@ -16,10 +16,16 @@
  * visible seam in the Pro IDE. One source, `i18n/messages/<locale>/proIde.json`,
  * now feeds both the extension manifest and the app.
  *
+ * The `panel.*` strings the extension shows itself (before the app has pushed
+ * a snapshot, or while disconnected) also need a runtime localization, which
+ * VS Code reads from `l10n/bundle.l10n.<locale>.json` keyed by the English
+ * text. Those bundles are generated from the same source; the extension looks
+ * up `vscode.l10n.t(<English text from package.nls.json>)`.
+ *
  * Runs as part of `pnpm i18n:build`; `--check` reports drift without writing,
  * which is what the gate uses.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -54,20 +60,58 @@ function flatten(value, prefix = "", out = {}) {
   return out
 }
 
-export function buildNlsContent(locale, messagesDir = MESSAGES_DIR) {
+function readFlat(locale, messagesDir) {
   const source = join(messagesDir, locale, "proIde.json")
   if (!existsSync(source)) throw new Error(`missing ${source}`)
-  const flat = flatten(JSON.parse(readFileSync(source, "utf8")))
-  const sorted = Object.fromEntries(Object.entries(flat).sort(([a], [b]) => (a < b ? -1 : 1)))
-  return `${JSON.stringify(sorted, null, 2)}\n`
+  return flatten(JSON.parse(readFileSync(source, "utf8")))
 }
+
+const sortedJson = (record) =>
+  `${JSON.stringify(
+    Object.fromEntries(Object.entries(record).sort(([a], [b]) => (a < b ? -1 : 1))),
+    null,
+    2
+  )}\n`
+
+export function buildNlsContent(locale, messagesDir = MESSAGES_DIR) {
+  return sortedJson(readFlat(locale, messagesDir))
+}
+
+/**
+ * Runtime l10n bundle for `locale`: English `panel.*` text → that locale's
+ * text. Keyed by the English string because that is what `vscode.l10n.t`
+ * receives. Two English strings that collide would make one translation
+ * unreachable, so a collision is an error, not a silent overwrite.
+ */
+export function buildL10nBundleContent(locale, messagesDir = MESSAGES_DIR) {
+  const english = readFlat("en", messagesDir)
+  const localized = readFlat(locale, messagesDir)
+  const bundle = {}
+  for (const [key, source] of Object.entries(english)) {
+    if (!key.startsWith("panel.")) continue
+    const translated = localized[key]
+    if (typeof translated !== "string") throw new Error(`${locale} is missing ${key}`)
+    if (Object.hasOwn(bundle, source) && bundle[source] !== translated) {
+      throw new Error(`two panel strings share the English text ${JSON.stringify(source)}`)
+    }
+    bundle[source] = translated
+  }
+  return sortedJson(bundle)
+}
+
+/** Runtime l10n bundles: VS Code locale tag → app locale. English needs none. */
+const L10N_BUNDLES = [["zh-CN", join("l10n", "bundle.l10n.zh-cn.json")]]
 
 function main(argv) {
   const check = argv.includes("--check")
   let drift = 0
-  for (const [locale, filename] of LOCALE_FILES) {
+  const artifacts = [
+    ...LOCALE_FILES.map(([locale, filename]) => [filename, () => buildNlsContent(locale)]),
+    ...L10N_BUNDLES.map(([locale, filename]) => [filename, () => buildL10nBundleContent(locale)]),
+  ]
+  for (const [filename, build] of artifacts) {
     const target = join(EXT_DIR, filename)
-    const next = buildNlsContent(locale)
+    const next = build()
     if (check) {
       const current = existsSync(target) ? readFileSync(target, "utf8") : ""
       if (current === next) process.stdout.write(`ok    ${target}\n`)
@@ -77,6 +121,7 @@ function main(argv) {
       }
       continue
     }
+    mkdirSync(dirname(target), { recursive: true })
     writeFileSync(target, next)
     process.stdout.write(`build ${target}\n`)
   }

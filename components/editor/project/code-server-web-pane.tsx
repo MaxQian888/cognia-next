@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { CodeServerWebFrame } from "./code-server-web-frame"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
+import { useCodeServerWorkspaceNavigation } from "@/hooks/codeserver/use-code-server-workspace-navigation"
 import { useCodeServerWorkspaceSync } from "@/hooks/codeserver/use-code-server-workspace-sync"
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
 import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
@@ -162,6 +163,7 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
     profile
   )
   useCodeServerWorkspaceSync(managed, root)
+  useCodeServerWorkspaceNavigation(managed, root)
   useCodeServerEditorEvents(managed, root)
   useCodeServerChatBridge(managed, root)
 
