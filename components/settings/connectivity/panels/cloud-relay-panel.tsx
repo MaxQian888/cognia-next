@@ -5,9 +5,11 @@
  *
  * One sentence first: can a device away from this network reach this Host,
  * and by which route. Then the proof for the relay (a live probe of the
- * rendezvous), the relay's own configuration, the tunnel, and the overlay
- * network. The relay leads because since ADR-0170 it is the route that works
- * from anywhere with nothing installed. The tunnel is the older answer and
+ * rendezvous), a link to the public status page of the official relay (a
+ * link only: it fetches nothing and never gates configuration), the relay's
+ * own configuration, the tunnel, and the overlay network. The relay leads
+ * because since ADR-0170 it is the route that works from anywhere with
+ * nothing installed. The tunnel is the older answer and
  * stays for hosts that want a public HTTPS name. The overlay network is the
  * third-party answer for a Host that must not be on the public internet at
  * all. Sign-in comes before the collaboration server on purpose: the plane
@@ -24,6 +26,7 @@ import { useRemoteAccess } from "@/hooks/connectivity/use-remote-access"
 import { MeshBlock } from "../blocks/mesh-block"
 import { RelayCheckBlock } from "../blocks/relay-check-block"
 import { RemoteAccessSummary } from "../blocks/remote-access-summary"
+import { StatusPageLinkBlock } from "../blocks/status-page-link-block"
 import { TunnelBlock } from "../blocks/tunnel-block"
 
 export function CloudRelayPanel() {
@@ -37,6 +40,7 @@ export function CloudRelayPanel() {
         mesh={access.mesh}
       />
       <RelayCheckBlock relay={access.relay} />
+      <StatusPageLinkBlock signalingUrl={access.relay.signalingUrl} />
       <WebRtcCard />
       <TunnelBlock />
       <MeshBlock mesh={access.mesh} />

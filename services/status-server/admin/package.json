@@ -1,0 +1,23 @@
+{
+  "name": "cognia-status-admin",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "description": "Operator CLI for the Cognia public signaling status service (incidents, maintenance, probes, delivery).",
+  "type": "module",
+  "bin": {
+    "cognia-status-admin": "./dist/cognia-status-admin.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "esbuild": "0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "4.1.11"
+  }
+}

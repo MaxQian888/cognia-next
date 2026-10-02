@@ -1,0 +1,43 @@
+# Caddy terminates TLS for the independent mirror hostname and proxies to the
+# mirror process. The hostname's DNS must NOT be proxied by Cloudflare (grey
+# cloud / a different DNS provider), or the mirror is not independent.
+#
+# Replace status-mirror.example.org with the real mirror hostname.
+
+{
+	email ops@example.org
+}
+
+status-mirror.example.org {
+	encode zstd gzip
+
+	# The mirror sets CSP, nosniff, referrer-policy and frame headers itself;
+	# HSTS belongs to the TLS terminator.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Only the read surface exists; everything else is answered by the mirror
+	# (405 for writes, JSON 404 for unknown API paths).
+	reverse_proxy 127.0.0.1:8080 {
+		header_up -X-Forwarded-For
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 15s
+		}
+	}
+
+	log {
+		output file /var/log/caddy/status-mirror.access.log
+		# Do not keep client IPs in the mirror's access log.
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip delete
+				request>client_ip delete
+				request>headers>X-Forwarded-For delete
+			}
+		}
+	}
+}

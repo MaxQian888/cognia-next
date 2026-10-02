@@ -141,6 +141,9 @@ const baseTestPathIgnorePatterns = [
   "/share-server/",
   // This Worker uses its own Vitest pool with the Cloudflare runtime too.
   "/services/update-server/worker/",
+  // The status service (Worker, external probe, operator CLI) is three
+  // standalone Vitest packages with their own lockfiles.
+  "/services/status-server/",
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",

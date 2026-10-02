@@ -1,0 +1,13 @@
+{
+  "apiBase": "https://status.cognia.cn/api/status/v1",
+  "probeId": "ext-1",
+  "alertWebhook": "https://alerts.example.invalid/hooks/cognia-status",
+  "mirror": {
+    "enabled": true,
+    "dataDir": "/var/lib/cognia-status-mirror/data",
+    "assetsDir": "/srv/cognia-status-mirror/current",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "syncIntervalSeconds": 300
+  }
+}

@@ -4,10 +4,12 @@
   "accountLocked": "本地账号已锁定。网关密钥归属于账号，解锁之前无法使用或创建任何密钥。",
   "add": "添加",
   "allowlist": "IP 白名单",
+  "allowlistAddRangeAria": "将 {range} 加入 IP 白名单",
   "allowlistEmpty": "白名单为空，所有连接都会被拒绝——包括本机。",
   "allowlistHelp": "只有这些 IPv4 地址（CIDR）可以连接。默认仅回环；接入局域网设备需放宽。",
   "allowlistInvalid": "请输入 IPv4 地址或 CIDR 网段，例如 192.168.1.0/24。",
   "allowlistPlaceholder": "192.168.1.0/24",
+  "allowlistRestoreLoopback": "允许本机（{entry}）",
   "anthropicSnippet": "Anthropic 客户端（Claude Code）",
   "authNote": "用 API 密钥作为凭据——Authorization: Bearer '<key>' 或 x-api-key: '<key>'。",
   "autoStrategy": "虚拟模型 auto · 当前策略 {strategy}",
@@ -41,10 +43,14 @@
   "colStream": "流式",
   "colTime": "时间",
   "colTokens": "Token",
-  "concurrencyHeading": "上游保护",
-  "concurrencyHelp": "为被限流的账号降温、停用已失效账号，并限制并发，避免突发流量触发上游账号的风控。",
+  "concurrencyHeading": "并发限制",
+  "concurrencyHelp": "按密钥和上游账号限制并发，避免突发流量触发上游账号的风控。",
   "concurrencyWait": "排队等待（毫秒）",
   "concurrencyWaitHelp": "请求在被 429 拒绝前，最多等待多久以获得空闲并发槽。0 = 立即拒绝。",
+  "configLoadFailed": "在读取到已保存的配置之前，此面板不会显示或允许编辑，以免编辑时用默认值覆盖已保存的配置。",
+  "configLoadFailedTitle": "无法加载网关设置",
+  "configLoading": "正在加载网关设置…",
+  "configRetry": "重试",
   "connectHeading": "接入外部工具",
   "connectHelp": "把任意 OpenAI / Anthropic 兼容客户端的 base URL 指向网关，设置下面其中一个环境变量即可。",
   "connectLanNote": "在局域网内的其他设备上，请把 127.0.0.1 换成本机的局域网地址。",
@@ -76,7 +82,8 @@
   "copyKey": "复制密钥",
   "costUnknown": "—",
   "createKey": "创建密钥",
-  "createKeyHelp": "密钥仅在创建后显示一次。Run API 权限可在创建后通过编辑表单授予。",
+  "createKeyHelp": "密钥仅在创建后显示一次。Run API 权限可在此处授予，也可稍后通过编辑表单授予。",
+  "createScopesFailed": "密钥已创建，但未能授予其 Run API 权限：{error}。请在该密钥的编辑表单中重新授予。",
   "customApplied": "已应用自定义网关设置",
   "customHeading": "自定义配置",
   "customHelp": "以 JSON 或 YAML 编辑并验证完整的网关配置。",
@@ -139,9 +146,13 @@
   "keyScopes": "Run API 权限",
   "keyScopesHelp": "该密钥在 Router + Fusion Run API 上可以做什么。没有任何权限的密钥在聊天端点上照常工作，只是 /v1/runs 会拒绝它。",
   "keyScopesNone": "无（仅转发）",
-  "keysEmpty": "暂无密钥。创建一把以认证外部工具。",
+  "keyViewLogs": "查看该密钥的请求",
+  "keyViewLogsAria": "{usage} — 查看使用 {name} 发出的请求",
+  "keysEmpty": "暂无密钥 — 填写上方表单创建第一把。",
   "keysHeading": "API 密钥",
   "keysHelp": "为每个外部工具签发一把作用域密钥。每把可限制可用模型、设定有效期与独立限流，并可单独停用或删除。",
+  "keysLoadFailed": "无法读取 API 密钥",
+  "keysLoading": "正在加载 API 密钥…",
   "keysLockedEmpty": "解锁本地账号后即可查看和管理其密钥。",
   "lanAllowlistLoopbackOnly": "监听器已绑定到局域网，但白名单只允许本机。请添加如 192.168.1.0/24 的网段，其他设备才能连接。",
   "lanWarning": "开启局域网绑定会把网关暴露到本地网络。请收紧 IP 白名单并为每个密钥设定作用域——只有白名单内、且持有效密钥的 IP 才能通过。",
@@ -155,10 +166,14 @@
   "localRoutingLegacy": "正在使用旧版快照路由。",
   "logAttempts": "{count} 次尝试",
   "logClearFailed": "无法清空日志",
+  "logClearFilters": "清除筛选",
   "logCleared": "日志已清空",
   "logDecisionId": "决策",
   "logDistribution": "分配方式",
   "logEmpty": "暂无请求。",
+  "logEmptyFiltered": "没有符合筛选条件的请求",
+  "logEmptyFilteredHelp": "放宽或清除筛选条件以查看更多日志。",
+  "logEmptyHelp": "外部工具一旦调用网关，请求就会出现在这里。",
   "logExport": "导出",
   "logExportCsv": "导出为 CSV",
   "logExportFailed": "无法导出日志",
@@ -232,13 +247,14 @@
         "label": "路由票据"
       },
       "upstream": {
-        "description": "并发、冷却与字段剥离",
+        "description": "暂停账号、冷却、并发与字段剥离",
         "label": "上游保护"
       }
     },
     "mobileTrigger": "面板",
     "title": "网关设置"
   },
+  "newKey": "新建密钥",
   "newKeyHeading": "密钥已创建",
   "newKeyReveal": "请立即复制此密钥——出于安全考虑它只显示这一次。",
   "openaiSnippet": "OpenAI 客户端",
@@ -292,11 +308,37 @@
   "selfCheckRun": "运行自检",
   "selfCheckSummary": "{total, number} 个候选中 {ok, number} 个有响应",
   "serverHeading": "服务器",
+  "setup": {
+    "description": "三步即可让外部工具经由 Cognia 路由。每一步都会根据网关上报的状态自动完成。",
+    "done": "已完成",
+    "progress": "已完成 {done}/{total}",
+    "stepConnectAction": "查看接入片段",
+    "stepKeyAction": "创建密钥",
+    "stepKeyLocked": "请先解锁本地账户再创建密钥。",
+    "stepStartAction": "启动网关",
+    "stepStartBlocked": "创建密钥后可用 — 没有密钥时监听器无法启动。",
+    "steps": {
+      "connect": {
+        "help": "使用下方片段将客户端指向网关。收到第一条请求后即完成。",
+        "title": "接入工具"
+      },
+      "key": {
+        "help": "外部工具使用网关密钥认证，建议每个工具一把。",
+        "title": "创建 API 密钥"
+      },
+      "start": {
+        "help": "运行本地 HTTP 监听器，让工具可以访问。",
+        "title": "启动网关"
+      }
+    },
+    "title": "快速开始"
+  },
   "snapshotGeneratedAt": "{time}发布",
   "snapshotLabel": "路由快照",
   "snapshotNone": "尚未发布任何路由快照。",
   "statAliases": "别名",
   "statCalls": "已处理请求",
+  "statCallsOpenLog": "打开请求日志",
   "statLastCall": "最近请求",
   "statNever": "从未",
   "statProviders": "供应商",
@@ -312,6 +354,8 @@
   "summaryCost": "预估费用",
   "summaryErrorsHint": "{errors, number} 次错误 · {rate}",
   "summaryRequests": "请求数",
+  "summaryScope": "以下 {count, number} 条请求的汇总。",
+  "summaryScopeFiltered": "符合筛选条件的 {count, number} 条请求的汇总。",
   "summaryTokens": "Token（入/出）",
   "tickets": {
     "activeHeading": "活跃票据",
@@ -354,7 +398,7 @@
     "yes": "允许"
   },
   "timeoutsHeading": "超时",
-  "timeoutsHelp": "网关等待上游建立连接和返回响应的时长。",
+  "timeoutsHelp": "网关等待上游建立连接、返回响应以及保持流式输出的时长。",
   "title": "入站网关",
   "verifySnippet": "检查连接"
 }

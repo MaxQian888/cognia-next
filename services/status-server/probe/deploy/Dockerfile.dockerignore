@@ -1,0 +1,3 @@
+# BuildKit reads <Dockerfile>.dockerignore: send only the bundle as context.
+*
+!dist/cognia-status-probe.mjs

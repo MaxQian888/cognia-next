@@ -11,8 +11,9 @@ jest.mock("@/components/status/public-status-page", () => ({
 jest.mock("next-intl/server", () => ({
   getTranslations: async () => (key: string) =>
     ({
-      title: "Cognia System Status",
-      description: "Current availability, service performance, and incident history for Cognia.",
+      title: "Cognia Relay Status",
+      description:
+        "Live availability, incidents and maintenance for the official Cognia signaling relay.",
     })[key],
 }))
 
@@ -21,8 +22,9 @@ import StatusPage, { generateMetadata } from "./page"
 describe("status route", () => {
   it("exports dedicated public metadata", async () => {
     await expect(generateMetadata()).resolves.toMatchObject({
-      title: "Cognia System Status",
-      description: "Current availability, service performance, and incident history for Cognia.",
+      title: "Cognia Relay Status",
+      description:
+        "Live availability, incidents and maintenance for the official Cognia signaling relay.",
     })
   })
 

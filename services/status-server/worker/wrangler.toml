@@ -1,0 +1,165 @@
+# Cloudflare Worker for the Cognia public signaling status service.
+#
+# Plan: docs/plans/2026-10-02-signaling-public-status-implementation.md
+#
+# Dev:     pnpm dev                  (local D1, no account needed)
+# Test:    pnpm test                 (miniflare + local D1 with all migrations)
+# Build:   pnpm build                (dry-run bundle into dist/)
+# Deploy:  pnpm migrate && pnpm deploy
+#
+# A separate Worker from cognia-signaling on purpose: monitoring, D1 and mail
+# must never share a failure domain or attack surface with relay admission.
+# This Worker only observes the relay through its PUBLIC route.
+#
+# One-time provisioning by the operator (production; repeat with
+# `--env staging` and the `-staging` names for staging):
+#   wrangler d1 create cognia-status --location apac   # paste database_id below
+#   wrangler d1 migrations apply cognia-status --remote
+#   wrangler secret put PROBE_SECRETS            # {"<keyId>":"<base64url>"}
+#   wrangler secret put SUBSCRIBER_HMAC_KEYS     # {"<keyId>":"<base64url>"}
+#   wrangler secret put SUBSCRIBER_ENC_KEYS      # {"<keyId>":"<base64url 32B>"}
+#   wrangler secret put IP_BUCKET_SECRET
+#   wrangler secret put OPERATOR_ALERT_WEBHOOK   # optional
+# Then build the status-only assets (scripts/build/build-status-site.mjs)
+# into ./assets before `wrangler deploy`.
+name = "cognia-status"
+main = "src/index.ts"
+compatibility_date = "2026-08-20"
+# Cron probes must reach the relay through its public route, never a
+# same-account shortcut, or they would not measure what users reach.
+compatibility_flags = ["global_fetch_strictly_public"]
+
+routes = [{ pattern = "status.cognia.cn", custom_domain = true }]
+# workers.dev must not offer an alternate unprotected admin surface; the
+# admin handler also refuses any request without a valid Access JWT.
+workers_dev = false
+preview_urls = false
+
+[triggers]
+# Every minute: reference probe, aggregation, reconciliation, delivery.
+crons = ["* * * * *"]
+
+[assets]
+directory = "./assets"
+binding = "ASSETS"
+# The Worker decides which paths may reach assets (only the status export),
+# and answers unknown API paths with JSON 404 rather than HTML.
+run_worker_first = true
+not_found_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cognia-status"
+database_id = "ab11901a-bfde-4859-be5f-1bd1b923d2a1"
+migrations_dir = "migrations"
+
+[vars]
+STATUS_ENV = "production"
+PUBLIC_ORIGIN = "https://status.cognia.cn"
+PUBLIC_PAGE_URL = "https://status.cognia.cn/status/"
+MIRROR_URL = ""
+SIGNALING_URL = "wss://signaling.cognia.cn/signaling"
+CLOUDFLARE_PROBE_ID = "cf-cron"
+# Exact Origins the signaling Worker allows (its SIGNALING_ALLOWED_ORIGINS).
+PROBE_ORIGIN_PROFILES = '{"web":"https://cognia.cn","ios":"capacitor://localhost","android":"https://localhost"}'
+# Activation order (plan §12): live page first, then automation, then mail.
+FEATURE_INCIDENT_AUTOMATION = "off"
+FEATURE_EMAIL = "off"
+MAIL_FROM = "status@cognia.cn"
+MAIL_FROM_NAME = "Cognia Status"
+SUBSCRIBE_ALLOWED_ORIGINS = "https://status.cognia.cn"
+SUBSCRIBE_IP_LIMIT_PER_10MIN = "5"
+SUBSCRIBE_GLOBAL_CONFIRMATIONS_PER_HOUR = "100"
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
+ADMIN_EMAILS = ""
+SUBSCRIBER_HMAC_KEY_ID = "h1"
+SUBSCRIBER_ENC_KEY_ID = "e1"
+SERVICE_VERSION = "0.1.0"
+BUILD_SHA = ""
+
+# Cloudflare Email Sending (Workers Paid, beta). Uncomment once the sender
+# domain is onboarded in the dashboard, then set FEATURE_EMAIL = "on".
+# [[send_email]]
+# name = "EMAIL"
+
+[observability]
+enabled = true
+
+# ── Staging ──────────────────────────────────────────────────────────────────
+# Named envs inherit nothing: every binding and var is repeated. No custom
+# domain; staging is reached on workers.dev only, and its admin surface still
+# requires its own Access audience.
+[env.staging]
+name = "cognia-status-staging"
+routes = []
+workers_dev = true
+
+[env.staging.triggers]
+crons = ["* * * * *"]
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "cognia-status-staging"
+database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[env.staging.vars]
+STATUS_ENV = "staging"
+PUBLIC_ORIGIN = "https://cognia-status-staging.workers.dev"
+PUBLIC_PAGE_URL = "https://cognia-status-staging.workers.dev/status/"
+MIRROR_URL = ""
+SIGNALING_URL = "wss://signaling.cognia.cn/signaling"
+CLOUDFLARE_PROBE_ID = "cf-cron"
+PROBE_ORIGIN_PROFILES = '{"web":"https://cognia.cn","ios":"capacitor://localhost","android":"https://localhost"}'
+FEATURE_INCIDENT_AUTOMATION = "off"
+FEATURE_EMAIL = "off"
+MAIL_FROM = "status@cognia.cn"
+MAIL_FROM_NAME = "Cognia Status (staging)"
+SUBSCRIBE_ALLOWED_ORIGINS = ""
+SUBSCRIBE_IP_LIMIT_PER_10MIN = "5"
+SUBSCRIBE_GLOBAL_CONFIRMATIONS_PER_HOUR = "20"
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
+ADMIN_EMAILS = ""
+SUBSCRIBER_HMAC_KEY_ID = "h1"
+SUBSCRIBER_ENC_KEY_ID = "e1"
+SERVICE_VERSION = "0.1.0"
+BUILD_SHA = ""
+
+# ── Test (vitest-pool-workers only) ──────────────────────────────────────────
+[env.test]
+name = "cognia-status-test"
+routes = []
+
+[env.test.triggers]
+crons = []
+
+[[env.test.d1_databases]]
+binding = "DB"
+database_name = "cognia-status-test"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[env.test.vars]
+STATUS_ENV = "development"
+PUBLIC_ORIGIN = "https://status.test"
+PUBLIC_PAGE_URL = "https://status.test/status/"
+MIRROR_URL = "https://mirror.test/status/"
+SIGNALING_URL = "wss://signaling.test/signaling"
+CLOUDFLARE_PROBE_ID = "cf-cron"
+PROBE_ORIGIN_PROFILES = '{"web":"https://cognia.cn","ios":"capacitor://localhost","android":"https://localhost"}'
+FEATURE_INCIDENT_AUTOMATION = "on"
+FEATURE_EMAIL = "on"
+MAIL_FROM = "status@cognia.test"
+MAIL_FROM_NAME = "Cognia Status"
+SUBSCRIBE_ALLOWED_ORIGINS = "https://status.test"
+SUBSCRIBE_IP_LIMIT_PER_10MIN = "5"
+SUBSCRIBE_GLOBAL_CONFIRMATIONS_PER_HOUR = "100"
+ACCESS_TEAM_DOMAIN = "https://cognia-test.cloudflareaccess.com"
+ACCESS_AUD = "test-access-aud"
+ADMIN_EMAILS = "operator@cognia.test"
+SUBSCRIBER_HMAC_KEY_ID = "h1"
+SUBSCRIBER_ENC_KEY_ID = "e1"
+SERVICE_VERSION = "0.1.0-test"
+BUILD_SHA = "testsha"

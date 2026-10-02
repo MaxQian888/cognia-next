@@ -31845,142 +31845,396 @@
     "xaiDescription": "Grok 3、Grok 3 Mini"
   },
   "publicStatus": {
-    "activeIncidents": {
-      "empty": "当前没有事故",
-      "title": "当前事故"
-    },
-    "availability": {
-      "dayLabel": "{component} 在 {date}：{status}，可用率 {uptime}%",
-      "from": "90 天前",
-      "legend": "可用性历史图例",
-      "today": "今天",
-      "uptime": "可用率 {value}%"
+    "actions": {
+      "close": "关闭",
+      "reload": "重新加载页面",
+      "retry": "重试"
     },
     "brand": "Cognia",
     "brandMark": "C",
     "components": {
-      "agentRuntime": {
-        "description": "智能体执行、工具编排和托管工作负载。",
-        "name": "智能体运行时"
+      "relayData": {
+        "description": "两个测试端通过中继的显式数据通道互发应用数据，并校验双向都完整到达。",
+        "name": "中继数据通道",
+        "phase": "数据延迟：从通过数据通道发出测试数据，到另一端收到并校验通过为止。"
       },
-      "artifactStorage": {
-        "description": "持久化产物、快照和生成文件。",
-        "name": "产物存储"
+      "signalingAuth": {
+        "description": "两个测试端通过 WebSocket 认证进入信令房间并互发一条信令。",
+        "name": "认证信令",
+        "phase": "认证延迟：从建立 WebSocket 连接，到两端都完成测试房间认证为止。"
       },
-      "controlPlane": {
-        "description": "身份认证、配置和服务集群协调。",
-        "name": "控制平面"
-      },
-      "realtimeGateway": {
-        "description": "实时会话、事件投递和在线状态。",
-        "name": "实时网关"
-      },
-      "webApp": {
-        "description": "Cognia Web 体验和静态应用分发。",
-        "name": "Web 应用"
+      "signalingHttp": {
+        "description": "信令主机通过 HTTPS 返回有效的 Cognia 健康检查响应。",
+        "name": "信令 HTTP",
+        "phase": "HTTP 延迟：通过 HTTPS 收到完整健康检查响应所用的时间。"
       }
     },
+    "confidence": {
+      "corroborated": "多方印证",
+      "corroboratedHint": "不止一个独立观测点得出一致结果。",
+      "none": "无证据",
+      "noneHint": "没有任何观测点对这项检查有新鲜数据。",
+      "single_witness": "单一观测点",
+      "single_witnessHint": "只有基准观测点有新鲜数据，结果尚未得到独立印证。"
+    },
     "details": {
-      "hide": "收起 {component} 的详情",
-      "lastChecked": "上次检查于 {date}",
-      "latency": "24 小时响应时间",
-      "latencyValue": "{value} 毫秒",
-      "regions": "区域健康状态",
-      "show": "查看 {component} 的详情"
+      "evidenceTitle": "各观测点的证据",
+      "hide": "收起{component}的详情",
+      "latestEvidence": "最新证据 {time}",
+      "noEvidenceYet": "暂无证据",
+      "phaseTitle": "延迟的测量范围",
+      "show": "查看{component}的详情"
+    },
+    "error": {
+      "bannerDescription": "当前显示的是 {time} 收到的最后一份数据，正在自动重试。",
+      "bannerTitle": "状态刷新失败",
+      "kinds": {
+        "http": "状态服务返回了错误。",
+        "invalid": "状态服务返回的内容无法被本页面解析。",
+        "network": "无法连接到状态服务。",
+        "timeout": "状态服务未在规定时间内响应。",
+        "unsupported": "状态服务使用了本页面无法识别的新数据格式，请重新加载以获取最新页面。"
+      },
+      "noSnapshotDescription": "尚未收到任何状态数据，因此当前状态未知。",
+      "noSnapshotTitle": "状态数据不可用"
+    },
+    "evidence": {
+      "checkedAt": "检查于 {time}",
+      "consecutiveFailures": "连续失败 {count} 次",
+      "empty": "还没有观测点报告这项检查的证据。",
+      "fresh": "新鲜",
+      "neverChecked": "尚未检查",
+      "reference": "基准",
+      "simulatedOrigin": "模拟客户端 Origin 请求头，并非真实设备",
+      "stale": "已过期"
+    },
+    "feeds": {
+      "atom": "Atom 订阅源",
+      "rss": "RSS 订阅源"
     },
     "footer": {
-      "description": "当 Cognia 服务状态发生变化时，及时获得清晰通知。",
-      "eyebrow": "及时掌握动态",
-      "legal": "此原型展示的是确定性预览数据，并不代表实时基础设施状态。",
-      "title": "在工作流受到影响前了解情况。"
+      "boundaries": "本页面报告的是 Cognia 官方托管中继：HTTPS 可达性、认证信令和中继数据通道，由上方列出的观测点测量。它不涵盖自建中继、点对点直连或 TURN 连通性、你自己的主机，也不涵盖移动运营商网络。",
+      "boundariesTitle": "本页面涵盖的范围",
+      "description": "在事件发生、更新或解决，以及计划维护时收到邮件通知。",
+      "eyebrow": "及时了解",
+      "links": "状态链接",
+      "measurement": "可用性来自探针的实测结果，并始终与覆盖率一起展示，不代表服务等级协议（SLA）。",
+      "mirror": "只读镜像",
+      "primary": "主状态页面",
+      "title": "中继状态一有变化，你就会知道。"
+    },
+    "freshness": {
+      "stale": "数据已过时",
+      "staleDescription": "这份数据已超过 {minutes} 分钟，服务状态可能已经发生变化。",
+      "uncertain": "无法确定数据新鲜度",
+      "uncertainDescription": "你的设备时钟与状态服务器不一致，无法判断这份数据的时效。"
     },
     "hero": {
-      "description": "透明呈现 Cognia Cloud 的可用性、服务性能和事故响应进展。",
-      "eyebrow": "当前平台健康状态",
-      "lastUpdated": "更新于 {date}",
-      "title": "清晰呈现基础设施状态。",
-      "uptimeLabel": "90 天平台可用率",
-      "uptimeValue": "{value}%"
+      "availability": "实测可用性",
+      "coverage": "覆盖率",
+      "coverageHint": "预期检查中得出通过或失败结果的比例。",
+      "description": "由真实协议探针实时测量的 Cognia 官方信令中继状态。",
+      "excluded": "已排除 {count} 分钟维护时间：{value}",
+      "eyebrow": "官方托管中继",
+      "generatedAt": "生成于 {time}",
+      "lastUpdatedHours": "{count} 小时前更新",
+      "lastUpdatedMinutes": "{count} 分钟前更新",
+      "lastUpdatedNever": "尚未收到数据",
+      "lastUpdatedSeconds": "刚刚更新",
+      "monitoring": "监测",
+      "noData": "无数据",
+      "percent": "{value}%",
+      "rangeFor": "最近 {range}",
+      "staleOverall": "最后报告：{status}",
+      "title": "中继状态，以实测为准。"
     },
     "history": {
-      "duration": "{minutes} 分钟",
-      "title": "事故历史"
+      "cell": "{period}：{status}。预期 {expected} 次检查中，通过 {pass} 次，失败 {fail} 次，无结果 {unknown} 次。可用性 {availability}，覆盖率 {coverage}。",
+      "cellExcluded": "其中 {count} 分钟因维护被排除。",
+      "cellPartial": "该时段尚未结束。",
+      "groupLabel": "{name}历史记录，{range}",
+      "legend": "历史记录图例",
+      "now": "现在",
+      "overallName": "全部组件",
+      "partial": "未完整时段",
+      "rangeSelector": "历史范围",
+      "rangeStart": {
+        "24h": "24 小时前",
+        "30d": "30 天前",
+        "7d": "7 天前",
+        "90d": "90 天前"
+      },
+      "selectHint": "使用方向键在各时段之间切换。",
+      "summary": "可用性 {availability} · 覆盖率 {coverage}"
+    },
+    "impacts": {
+      "degraded": "性能下降",
+      "major_outage": "严重故障",
+      "partial_outage": "部分故障"
     },
     "incidentStates": {
       "identified": "已定位",
       "investigating": "调查中",
-      "monitoring": "监控中",
+      "monitoring": "观察中",
       "resolved": "已解决"
     },
     "incidents": {
-      "apacRuntimeLatency": {
-        "description": "亚太地区的智能体任务启动时间可能比平时更长，运行中的任务不受影响。",
-        "title": "亚太地区任务启动延迟升高",
-        "updates": {
-          "identified": "已定位到亚太调度池容量不均衡，流量现已重新分配。",
-          "investigating": "我们正在调查亚太地区新智能体运行时任务的排队时间升高问题。",
-          "monitoring": "队列延迟已恢复到预期范围，我们正在持续监控恢复情况。"
-        }
+      "activeEmpty": "当前没有进行中的事件。",
+      "activeTitle": "进行中的事件",
+      "components": "影响范围：{components}",
+      "correction": "对先前更新的更正",
+      "detailError": "无法加载该事件。",
+      "detailInvalid": "该事件链接无效。",
+      "detailLoading": "正在加载事件…",
+      "detailNotFound": "找不到该事件。链接可能有误，或事件已被移除。",
+      "detailTitle": "事件详情",
+      "duration": "{minutes} 分钟",
+      "latestUpdate": "最新进展",
+      "loadMore": "加载更多事件",
+      "loadMoreError": "无法加载更早的事件。",
+      "loadingMore": "正在加载…",
+      "noMore": "没有更早的事件了。",
+      "pastEmpty": "暂无历史事件记录。",
+      "pastTitle": "事件历史",
+      "predecessor": "查看此事件延续的上一个事件",
+      "resolvedAt": "解决于 {time}",
+      "source": {
+        "automated": "由监测系统自动创建",
+        "manual": "由运维人员发布"
       },
-      "realtimeDisconnects": {
-        "description": "边缘路由调整后，部分实时会话发生了短暂重连。",
-        "title": "实时连接间歇性中断"
-      },
-      "storageReadErrors": {
-        "description": "存储流量重新路由期间，部分产物读取请求返回错误。",
-        "title": "产物读取错误率升高"
-      }
+      "startedAt": "开始于 {time}",
+      "updatedAt": "更新于 {time}",
+      "updatesTitle": "进展",
+      "viewDetails": "查看详情",
+      "viewDetailsFor": "查看详情：{title}"
+    },
+    "latency": {
+      "chartLabel": "{component}延迟，各时段的 p50 与 p95",
+      "empty": "该时段成功样本不足，无法显示延迟。",
+      "gaps": "{gaps, plural, =0 {所有时段的样本都充足。} other {有 # 个时段样本不足，以空缺显示。}}",
+      "minSamples": "只有成功样本不少于 {min} 个的时段才会显示百分位。失败的尝试不计时，以空缺显示。",
+      "p50": "p50（中位数）",
+      "p95": "p95",
+      "summary": "基于 {count} 个成功样本：中位数 {p50} 毫秒，p95 {p95} 毫秒。",
+      "title": "延迟",
+      "value": "{value} 毫秒",
+      "window": "{start} – {end} UTC"
+    },
+    "locales": {
+      "en": "English",
+      "zh-CN": "简体中文"
     },
     "maintenance": {
-      "controlPlaneDatabase": {
-        "description": "计划执行滚动数据库升级，现有会话将保持连接。",
-        "title": "控制平面数据库维护"
+      "components": "影响范围：{components}",
+      "empty": "暂无计划维护。",
+      "excluded": "该时间窗内的分钟数不计入扣除维护后的可用性。",
+      "localWindow": "你的当地时间：{start} – {end}",
+      "states": {
+        "awaiting_confirmation": "等待确认",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "in_progress": "进行中",
+        "scheduled": "已计划"
       },
       "title": "计划维护",
-      "window": "{start}–{end}"
+      "utcWindow": "{start} – {end} UTC"
     },
     "metadata": {
-      "description": "查看 Cognia 当前可用性、服务性能和事故历史。",
-      "title": "Cognia 系统状态"
+      "description": "Cognia 官方信令中继的实时可用性、事件与维护信息。",
+      "title": "Cognia 中继状态"
+    },
+    "mirror": {
+      "description": "这是状态页面的独立托管只读副本，数据可能滞后或已过时。订阅和邮件中的链接只能在主页面使用。",
+      "openPrimary": "打开主状态页面",
+      "title": "只读镜像，数据可能已过时"
+    },
+    "monitoring": {
+      "cadence": "{profile}，每 {seconds} 秒",
+      "coverage": "{count, plural, =0 {目前没有观测位置。} other {目前从 # 个位置观测。}}这不代表全球范围或移动网络下的可用性。",
+      "description": "由谁、在哪里测量中继，以及最近一次测量的时间。",
+      "empty": "尚未接入任何观测点，因此目前没有进行测量。",
+      "lastAttempt": "最近尝试 {time}",
+      "lastSuccess": "最近成功 {time}",
+      "locationUnknown": "未声明位置",
+      "never": "从未",
+      "provider": "托管于 {provider}",
+      "reference": "基准观测点",
+      "singleObserver": "单一观测点",
+      "statusHints": {
+        "degraded": "基准观测点未正常上报。",
+        "healthy": "多个独立观测点正在上报。",
+        "limited": "只有一个观测点在上报，结果未经独立印证。",
+        "unknown": "没有观测点在上报。"
+      },
+      "statuses": {
+        "degraded": "降级",
+        "healthy": "正常",
+        "limited": "受限",
+        "unknown": "未知"
+      },
+      "title": "监测"
     },
     "nav": {
-      "history": "事故历史",
-      "services": "服务健康状态",
-      "subscribe": "订阅状态更新",
+      "components": "组件",
+      "history": "事件",
+      "monitoring": "监测",
+      "subscribe": "订阅",
       "systemStatus": "系统状态"
     },
-    "previewData": "预览数据",
-    "regions": {
-      "asiaPacific": "亚太地区",
-      "europe": "欧洲",
-      "northAmerica": "北美"
+    "probeHealth": {
+      "disabled": "已停用",
+      "error": "出错",
+      "healthy": "正常",
+      "stale": "已过期",
+      "unknown": "未知"
     },
-    "serviceHealth": {
-      "description": "查看支撑 Cognia Cloud 的各项服务的可用性和延迟。",
-      "title": "服务健康状态"
+    "profiles": {
+      "android": "Android",
+      "ios": "iOS",
+      "native": "原生",
+      "web": "Web"
+    },
+    "ranges": {
+      "24h": "24 小时",
+      "30d": "30 天",
+      "7d": "7 天",
+      "90d": "90 天"
+    },
+    "rangesShort": {
+      "24h": "24 小时",
+      "30d": "30 天",
+      "7d": "7 天",
+      "90d": "90 天"
+    },
+    "reasons": {
+      "auth_rejected": "认证被拒绝",
+      "auth_timeout": "认证超时",
+      "connect_error": "连接失败",
+      "dependency_failed": "前置检查失败，已跳过",
+      "dns_error": "DNS 解析失败",
+      "http_status": "HTTP 状态码异常",
+      "missing": "未收到结果",
+      "origin_rejected": "Origin 被拒绝",
+      "overlap_skipped": "上一轮仍在运行，已跳过",
+      "peer_timeout": "对端未响应",
+      "protocol_mismatch": "协议版本不匹配",
+      "relay_mismatch": "中继数据不一致",
+      "relay_timeout": "中继数据超时",
+      "runner_error": "探针运行出错",
+      "schema_mismatch": "健康检查响应异常",
+      "stale": "结果已过时",
+      "timeout": "超时",
+      "tls_error": "TLS 握手失败",
+      "ws_closed": "WebSocket 意外关闭",
+      "ws_upgrade": "WebSocket 升级失败"
+    },
+    "results": {
+      "fail": "失败",
+      "pass": "通过",
+      "unknown": "无结果"
+    },
+    "sections": {
+      "componentsDescription": "每个组件对应探针可以单独回答的一个问题。HTTP 正常并不代表信令或数据通道也正常。",
+      "componentsTitle": "组件"
+    },
+    "sources": {
+      "cloudflare": "Cloudflare",
+      "external": "外部"
+    },
+    "stale": {
+      "label": "{status} · 非当前状态"
     },
     "statuses": {
       "degraded": "性能下降",
       "maintenance": "维护中",
-      "major_outage": "重大中断",
-      "operational": "运行正常",
+      "major_outage": "严重故障",
+      "no_data": "无数据",
+      "operational": "正常",
       "overall": {
-        "degraded": "部分服务性能下降",
+        "degraded": "服务部分降级",
         "maintenance": "服务维护中",
-        "major_outage": "系统重大中断",
-        "operational": "所有系统运行正常",
-        "partial_outage": "系统部分中断"
+        "major_outage": "严重故障",
+        "operational": "所有组件运行正常",
+        "partial_outage": "部分故障",
+        "unknown": "状态未知"
       },
-      "partial_outage": "部分中断"
+      "partial_outage": "部分故障",
+      "unknown": "未知"
     },
     "subscribe": {
-      "cancel": "关闭",
-      "description": "此页面是前端原型，尚未接入通知投递。",
+      "componentsHint": "全部不勾选即接收所有组件的通知。",
+      "componentsLabel": "组件",
+      "consent": "我们会发送一封确认邮件，确认前不会发送任何状态邮件。每封邮件都附有修改偏好和退订的链接。你的邮箱地址只用于发送状态通知。",
+      "description": "通过邮件接收官方托管中继的事件与维护通知。",
+      "disabled": "邮件订阅暂不可用。可以改用 Atom 或 RSS 订阅源，或稍后再试。",
       "email": "邮箱地址",
-      "emailPlaceholder": "operator@example.com",
-      "preview": "预览订阅",
-      "result": "仅供预览——没有创建任何订阅。",
-      "title": "订阅状态更新"
+      "emailInvalid": "请输入有效的邮箱地址。",
+      "emailPlaceholder": "you@example.com",
+      "errors": {
+        "bad_request": "请求未被接受，请检查邮箱地址后重试。",
+        "forbidden": "请求被拒绝。如果你在使用 VPN 或隐私代理，请关闭后重试。",
+        "invalid": "状态服务返回了意外的响应，请稍后再试。",
+        "network": "请求无法到达状态服务，请检查网络连接后重试。",
+        "rate_limited": "请求过于频繁，请等待几分钟后再试。",
+        "unavailable": "邮件订阅暂时不可用，请稍后再试。"
+      },
+      "locale": "邮件语言",
+      "mirrorDescription": "只读镜像无法发起订阅，请在主状态页面订阅。",
+      "openPrimary": "前往主页面订阅",
+      "pending": "如果该地址可以订阅，确认链接已在发送途中。链接 24 小时内有效，确认前不会发送任何邮件。",
+      "pendingTitle": "请查收邮件",
+      "submit": "发送确认链接",
+      "submitting": "正在发送…",
+      "title": "订阅状态通知"
+    },
+    "token": {
+      "allComponents": "全部组件",
+      "app": "订阅链接需要在官方状态页面上处理，请前往该页面完成操作。",
+      "appContinue": "前往状态页面继续",
+      "confirm": {
+        "action": "确认订阅",
+        "description": "确认你希望通过邮件接收官方托管中继的状态通知。",
+        "done": "订阅已确认。",
+        "title": "确认订阅"
+      },
+      "errors": {
+        "bad_request": "请求未被接受，请重新打开邮件中的链接。",
+        "forbidden": "请求被拒绝。如果你在使用 VPN 或隐私代理，请关闭后重试。",
+        "invalid": "状态服务返回了意外的响应，请稍后再试。",
+        "network": "请求无法到达状态服务，请检查网络连接后重试。",
+        "rate_limited": "请求过于频繁，请等待几分钟后再试。",
+        "revision_conflict": "你的偏好已在别处被修改，请重新加载后再试。",
+        "token_expired": "该链接已过期。请重新订阅以获取新的确认链接。",
+        "token_invalid": "该链接无效，请使用最近一封状态邮件中的链接。",
+        "token_used": "该链接已被使用过，之前的选择仍然有效。",
+        "unavailable": "订阅服务暂时不可用，请稍后再试。"
+      },
+      "malformed": "该链接不完整或已损坏。请从邮件中重新打开，或重新订阅。",
+      "malformedTitle": "无法识别的链接",
+      "manage": {
+        "conflict": "你的偏好已在别处被修改。下面显示的是最新版本，请检查后重新保存。",
+        "description": "选择要接收通知的组件以及邮件语言。",
+        "loading": "正在加载你的偏好…",
+        "save": "保存偏好",
+        "saved": "偏好已保存。",
+        "saving": "正在保存…",
+        "title": "管理订阅"
+      },
+      "mirror": "只读镜像无法修改订阅，请在主状态页面打开此链接。",
+      "mirrorOpen": "在主页面打开",
+      "preferences": {
+        "address": "邮箱地址",
+        "components": "组件",
+        "locale": "语言"
+      },
+      "unsubscribe": {
+        "action": "退订",
+        "description": "停止向该地址发送所有状态邮件。在你点击按钮之前不会有任何变化。",
+        "done": "已退订。正在发送中的邮件仍可能送达，此后不会再向该地址发送任何邮件。",
+        "title": "退订",
+        "working": "正在退订…"
+      },
+      "working": "处理中…"
     }
   },
   "radar": {
@@ -40804,6 +41058,16 @@
           "revoked": "已吊销",
           "versionMismatch": "版本不匹配"
         }
+      },
+      "statusPage": {
+        "badgeOfficial": "官方中继",
+        "badgeSelfHosted": "不在覆盖范围内",
+        "description": "由 Cognia 自有探针测量的官方托管中继实时可用性、事件和维护信息。打开它不会检查你的中继。",
+        "official": "本设备使用的是官方托管中继，状态页面描述的就是它。不过本设备自身的连接情况仍以上方的检查结果为准。",
+        "open": "打开公开状态页面",
+        "openFailed": "无法打开状态页面，请在浏览器中访问 {url}。",
+        "selfHosted": "本设备使用的是其他中继（{host}）。公开状态页面只描述官方托管中继，不反映这个中继的状态，请改用上方的检查。",
+        "title": "公开状态页面"
       },
       "title": "连接",
       "tunnel": {

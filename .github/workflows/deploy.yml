@@ -1,8 +1,9 @@
 name: Deploy
 
 # ============================================================================
-# Real, opt-in deployments for the two cloud services (ADR-0059 P0.1):
-#   - Cloudflare Workers: cognia-signaling (Rust/wasm), cognia-share (TS)
+# Real, opt-in deployments for the cloud services (ADR-0059 P0.1):
+#   - Cloudflare Workers: cognia-signaling (Rust/wasm), cognia-share (TS),
+#     cognia-status (TS + D1 + the status-only static export)
 #   - Fly.io axum twins:  signaling-server, share-server
 #
 # Safety model (forks stay green with zero configuration):
@@ -15,7 +16,7 @@ name: Deploy
 # holding the SAME names so the workflow reads one set:
 #   secrets:  CLOUDFLARE_API_TOKEN, FLY_API_TOKEN
 #   variables: CLOUDFLARE_ACCOUNT_ID, CF_SHARE_KV_NAMESPACE_ID,
-#              FLY_SIGNALING_APP, FLY_SHARE_APP
+#              CF_STATUS_D1_DATABASE_ID (staging), FLY_SIGNALING_APP, FLY_SHARE_APP
 # `production` should carry protection rules (required reviewers) — configured
 # in Settings → Environments, documented in CI_CD.md.
 #
@@ -42,6 +43,7 @@ on:
           - fly
           - signaling-worker
           - share-worker
+          - status-worker
           - signaling-fly
           - share-fly
           - docs
@@ -158,6 +160,99 @@ jobs:
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: services/share-server/worker
           command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+
+  deploy-status-worker:
+    name: Worker — status
+    needs: gate
+    # Public signaling status (docs/plans/2026-10-02-signaling-public-status-
+    # implementation.md §12). Builds the app's static export, extracts the
+    # status-only distribution, applies additive D1 migrations BEFORE the new
+    # code goes live, then deploys Worker + assets together. Never touches the
+    # signaling Worker. Secrets (PROBE_SECRETS, SUBSCRIBER_*_KEYS,
+    # IP_BUCKET_SECRET) are set once with `wrangler secret put`, not here.
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","workers","status-worker"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+            services/status-server/worker/pnpm-lock.yaml
+
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+
+      - name: Guard D1 database variable
+        if: inputs.environment == 'staging'
+        env:
+          D1_ID: ${{ vars.CF_STATUS_D1_DATABASE_ID }}
+        run: |
+          if [ -z "$D1_ID" ]; then
+            echo "::error::CF_STATUS_D1_DATABASE_ID environment variable is not set"
+            exit 1
+          fi
+
+      - name: Install app dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Build static export
+        run: pnpm build
+
+      - name: Install Chromium for the asset crawl
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Extract status-only distribution
+        run: node scripts/build/build-status-site.mjs
+
+      - name: Install and test the status Worker
+        working-directory: services/status-server/worker
+        run: |
+          pnpm install --frozen-lockfile --prefer-offline
+          pnpm typecheck
+          pnpm test
+
+      - name: Inject D1 database id
+        if: inputs.environment == 'staging'
+        env:
+          D1_ID: ${{ vars.CF_STATUS_D1_DATABASE_ID }}
+        run: |
+          # Production's id is committed; staging's is injected per environment.
+          sed -i "s/REPLACE_WITH_STAGING_D1_DATABASE_ID/$D1_ID/" services/status-server/worker/wrangler.toml
+
+      - name: Apply D1 migrations (additive)
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/status-server/worker
+          command: >
+            d1 migrations apply
+            ${{ inputs.environment == 'staging' && 'cognia-status-staging --env staging' || 'cognia-status' }}
+            --remote
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/status-server/worker
+          command: >
+            deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+            --var BUILD_SHA:${{ github.sha }}
 
   deploy-signaling-fly:
     name: Fly — signaling
@@ -353,6 +448,7 @@ jobs:
         gate,
         deploy-signaling-worker,
         deploy-share-worker,
+        deploy-status-worker,
         deploy-signaling-fly,
         deploy-share-fly,
         deploy-docs,
@@ -370,6 +466,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Worker — signaling | ${{ needs.deploy-signaling-worker.result }} |"
             echo "| Worker — share | ${{ needs.deploy-share-worker.result }} |"
+            echo "| Worker — status | ${{ needs.deploy-status-worker.result }} |"
             echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
             echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
             echo "| Pages — docs | ${{ needs.deploy-docs.result }} |"

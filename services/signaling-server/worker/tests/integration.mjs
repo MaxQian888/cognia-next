@@ -1,7 +1,7 @@
 // Black-box protocol conformance smoke for the Cloudflare Worker rendezvous.
 // Run against `wrangler dev` or a deployed Worker via SIGNALING_URL.
 
-import { randomBytes, webcrypto } from "node:crypto"
+import { createRoom, randomBase64Url, subscribeFrame } from "./synthetic-room.mjs"
 
 const BASE = process.env.SIGNALING_URL ?? "ws://127.0.0.1:8787"
 const TIMEOUT_MS = 5_000
@@ -10,88 +10,8 @@ function assert(condition, message) {
   if (!condition) throw new Error(`assertion failed: ${message}`)
 }
 
-function encodeFields(fields) {
-  const parts = []
-  for (const value of fields) {
-    const field = Buffer.from(String(value), "utf8")
-    const length = Buffer.alloc(4)
-    length.writeUInt32BE(field.byteLength)
-    parts.push(length, field)
-  }
-  return Buffer.concat(parts)
-}
-
-async function identity() {
-  const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
-    "sign",
-    "verify",
-  ])
-  return {
-    privateKey: pair.privateKey,
-    publicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", pair.publicKey)).toString(
-      "base64url"
-    ),
-  }
-}
-
-async function createRoom() {
-  const [desktop, mobile] = await Promise.all([identity(), identity()])
-  const roomNonce = randomBytes(16).toString("base64url")
-  const notAfter = Date.now() + 60_000
-  const digest = await webcrypto.subtle.digest(
-    "SHA-256",
-    encodeFields([2, roomNonce, desktop.publicKey, mobile.publicKey, notAfter])
-  )
-  return {
-    descriptor: {
-      v: 2,
-      roomId: Buffer.from(digest).toString("base64url"),
-      roomNonce,
-      desktopSigningKey: desktop.publicKey,
-      mobileSigningKey: mobile.publicKey,
-      notAfter,
-    },
-    desktop,
-    mobile,
-  }
-}
-
-async function subscribeFrame(room, role, challenge) {
-  const ecdh = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
-    "deriveBits",
-  ])
-  const proof = {
-    v: 2,
-    roomId: room.descriptor.roomId,
-    role,
-    sessionId: randomBytes(16).toString("base64url"),
-    epoch: randomBytes(16).toString("base64url"),
-    issuedAt: Date.now(),
-    challenge,
-    ecdhPublicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", ecdh.publicKey)).toString(
-      "base64url"
-    ),
-  }
-  const signature = await webcrypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    room[role].privateKey,
-    encodeFields([
-      proof.v,
-      proof.roomId,
-      proof.role,
-      proof.sessionId,
-      proof.epoch,
-      proof.issuedAt,
-      proof.challenge,
-      proof.ecdhPublicKey,
-    ])
-  )
-  return {
-    kind: "subscribe",
-    descriptor: room.descriptor,
-    proof: { ...proof, signature: Buffer.from(signature).toString("base64url") },
-  }
-}
+// Room creation, canonical field encoding and challenge-bound subscribe
+// proofs live in `synthetic-room.mjs`, shared with the public status probes.
 
 function connect(label, roomId) {
   const ws = new WebSocket(`${BASE}/signaling?rid=${encodeURIComponent(roomId)}`)
@@ -186,7 +106,7 @@ async function main() {
   const joined = await desktop.client.next()
   assert(joined.kind === "peerJoined" && joined.peer?.proof?.role === "mobile", "peerJoined")
 
-  const payload = JSON.stringify({ ciphertext: randomBytes(48).toString("base64url") })
+  const payload = JSON.stringify({ ciphertext: randomBase64Url(48) })
   mobile.client.send({ kind: "relay", rendezvousId: room.descriptor.roomId, payload })
   const relay = await desktop.client.next()
   assert(

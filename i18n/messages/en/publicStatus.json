@@ -1,64 +1,130 @@
 {
-  "activeIncidents": {
-    "empty": "No active incidents",
-    "title": "Active incident"
-  },
-  "availability": {
-    "dayLabel": "{component} on {date}: {status}, {uptime}% uptime",
-    "from": "90 days ago",
-    "legend": "Availability history legend",
-    "today": "Today",
-    "uptime": "{value}% uptime"
+  "actions": {
+    "close": "Close",
+    "reload": "Reload page",
+    "retry": "Try again"
   },
   "brand": "Cognia",
   "brandMark": "C",
   "components": {
-    "agentRuntime": {
-      "description": "Agent execution, tool orchestration, and managed workloads.",
-      "name": "Agent Runtime"
+    "relayData": {
+      "description": "Two test peers send application bytes over the relay's explicit data lane and check they arrive intact in both directions.",
+      "name": "Relay data lane",
+      "phase": "Data latency: from sending a test payload over the data lane until the other peer has received and verified it."
     },
-    "artifactStorage": {
-      "description": "Durable artifacts, snapshots, and generated files.",
-      "name": "Artifact Storage"
+    "signalingAuth": {
+      "description": "Two test peers authenticate into a signaling room over WebSocket and exchange a signal.",
+      "name": "Authenticated signaling",
+      "phase": "Auth latency: from opening the WebSocket until both peers have authenticated into the test room."
     },
-    "controlPlane": {
-      "description": "Authentication, configuration, and fleet coordination.",
-      "name": "Control Plane"
-    },
-    "realtimeGateway": {
-      "description": "Realtime sessions, event delivery, and presence.",
-      "name": "Realtime Gateway"
-    },
-    "webApp": {
-      "description": "The Cognia web experience and static application delivery.",
-      "name": "Web App"
+    "signalingHttp": {
+      "description": "The signaling host answers HTTPS with a valid Cognia health response.",
+      "name": "Signaling HTTP",
+      "phase": "HTTP latency: time to receive a complete health response over HTTPS."
     }
   },
+  "confidence": {
+    "corroborated": "Corroborated",
+    "corroboratedHint": "More than one independent observer agrees.",
+    "none": "No evidence",
+    "noneHint": "No observer has fresh evidence for this check.",
+    "single_witness": "Single observer",
+    "single_witnessHint": "Only the reference observer has fresh evidence, so the result is not independently confirmed."
+  },
   "details": {
+    "evidenceTitle": "Evidence by observer",
     "hide": "Hide details for {component}",
-    "lastChecked": "Last checked {date}",
-    "latency": "24-hour response time",
-    "latencyValue": "{value} ms",
-    "regions": "Regional health",
-    "show": "View details for {component}"
+    "latestEvidence": "Latest evidence {time}",
+    "noEvidenceYet": "No evidence yet",
+    "phaseTitle": "What the latency measures",
+    "show": "Show details for {component}"
+  },
+  "error": {
+    "bannerDescription": "Showing the last data received {time}. Retrying automatically.",
+    "bannerTitle": "Status could not be refreshed",
+    "kinds": {
+      "http": "The status service returned an error.",
+      "invalid": "The status service sent a response this page could not read.",
+      "network": "The status service could not be reached.",
+      "timeout": "The status service did not answer in time.",
+      "unsupported": "The status service uses a newer data format than this page understands. Reload to get the current page."
+    },
+    "noSnapshotDescription": "No status data has been received, so the current state is unknown.",
+    "noSnapshotTitle": "Status data unavailable"
+  },
+  "evidence": {
+    "checkedAt": "Checked {time}",
+    "consecutiveFailures": "{count, plural, =1 {# consecutive failure} other {# consecutive failures}}",
+    "empty": "No observer has reported evidence for this check yet.",
+    "fresh": "Fresh",
+    "neverChecked": "Not checked yet",
+    "reference": "Reference",
+    "simulatedOrigin": "Simulated client Origin header, not a real device",
+    "stale": "Stale"
+  },
+  "feeds": {
+    "atom": "Atom feed",
+    "rss": "RSS feed"
   },
   "footer": {
-    "description": "Get a clear signal when Cognia services change state.",
+    "boundaries": "This page reports the official hosted Cognia relay: HTTPS reachability, authenticated signaling and the relay data lane, as measured by the observers listed above. It does not describe self-hosted relays, direct peer-to-peer or TURN connectivity, your own Host, or mobile carrier networks.",
+    "boundariesTitle": "What this page covers",
+    "description": "Get an email when an incident opens, changes or resolves, and when maintenance is scheduled.",
     "eyebrow": "Stay informed",
-    "legal": "This prototype displays deterministic preview data and does not report live infrastructure.",
-    "title": "Know before your workflows are affected."
+    "links": "Status links",
+    "measurement": "Availability is observed from probe results and always shown with its coverage. It is not a service-level agreement.",
+    "mirror": "Read-only mirror",
+    "primary": "Primary status page",
+    "title": "Know when the relay changes state."
+  },
+  "freshness": {
+    "stale": "Out of date",
+    "staleDescription": "This data is more than {minutes, plural, =1 {# minute} other {# minutes}} old. The service may have changed since.",
+    "uncertain": "Freshness uncertain",
+    "uncertainDescription": "Your device clock disagrees with the status server, so the age of this data cannot be determined."
   },
   "hero": {
-    "description": "A transparent view of Cognia Cloud availability, service performance, and incident response.",
-    "eyebrow": "Current platform health",
-    "lastUpdated": "Last updated {date}",
-    "title": "Infrastructure status, without the noise.",
-    "uptimeLabel": "90-day platform uptime",
-    "uptimeValue": "{value}%"
+    "availability": "Observed availability",
+    "coverage": "Coverage",
+    "coverageHint": "Share of expected checks that produced a pass or fail result.",
+    "description": "Live measurements of the official Cognia signaling relay, taken by real protocol probes.",
+    "excluded": "{count, plural, =1 {# maintenance minute} other {# maintenance minutes}} excluded: {value}",
+    "eyebrow": "Official hosted relay",
+    "generatedAt": "Generated {time}",
+    "lastUpdatedHours": "Updated {count, plural, =1 {# hour} other {# hours}} ago",
+    "lastUpdatedMinutes": "Updated {count, plural, =1 {# minute} other {# minutes}} ago",
+    "lastUpdatedNever": "No data received yet",
+    "lastUpdatedSeconds": "Updated just now",
+    "monitoring": "Monitoring",
+    "noData": "No data",
+    "percent": "{value}%",
+    "rangeFor": "Last {range}",
+    "staleOverall": "Last reported: {status}",
+    "title": "Relay status, measured, not assumed."
   },
   "history": {
-    "duration": "{minutes} min",
-    "title": "Incident history"
+    "cell": "{period}: {status}. {pass} passed, {fail} failed, {unknown} without a result, of {expected} expected checks. Availability {availability}, coverage {coverage}.",
+    "cellExcluded": "{count, plural, =1 {# minute} other {# minutes}} excluded for maintenance.",
+    "cellPartial": "Period incomplete.",
+    "groupLabel": "{name} history, {range}",
+    "legend": "History legend",
+    "now": "Now",
+    "overallName": "All components",
+    "partial": "Incomplete period",
+    "rangeSelector": "History range",
+    "rangeStart": {
+      "24h": "24 hours ago",
+      "30d": "30 days ago",
+      "7d": "7 days ago",
+      "90d": "90 days ago"
+    },
+    "selectHint": "Use the arrow keys to move between periods.",
+    "summary": "Availability {availability} · Coverage {coverage}"
+  },
+  "impacts": {
+    "degraded": "Degraded performance",
+    "major_outage": "Major outage",
+    "partial_outage": "Partial outage"
   },
   "incidentStates": {
     "identified": "Identified",
@@ -67,73 +133,261 @@
     "resolved": "Resolved"
   },
   "incidents": {
-    "apacRuntimeLatency": {
-      "description": "Agent jobs in Asia Pacific may take longer than usual to start. Running jobs are not affected.",
-      "title": "Elevated job start latency in APAC",
-      "updates": {
-        "identified": "A capacity imbalance in the APAC scheduler pool was identified. Traffic has been redistributed.",
-        "investigating": "We are investigating elevated queue times for new Agent Runtime jobs in Asia Pacific.",
-        "monitoring": "Queue latency has returned to the expected range. We are monitoring the recovery."
-      }
+    "activeEmpty": "No active incidents.",
+    "activeTitle": "Active incidents",
+    "components": "Affects: {components}",
+    "correction": "Correction to an earlier update",
+    "detailError": "The incident could not be loaded.",
+    "detailInvalid": "This incident link is not valid.",
+    "detailLoading": "Loading incident…",
+    "detailNotFound": "This incident could not be found. The link may be wrong or the incident may have been removed.",
+    "detailTitle": "Incident details",
+    "duration": "{minutes, plural, =1 {# minute} other {# minutes}}",
+    "latestUpdate": "Latest update",
+    "loadMore": "Load more incidents",
+    "loadMoreError": "Older incidents could not be loaded.",
+    "loadingMore": "Loading…",
+    "noMore": "No older incidents.",
+    "pastEmpty": "No past incidents recorded.",
+    "pastTitle": "Incident history",
+    "predecessor": "Open the earlier incident this follows",
+    "resolvedAt": "Resolved {time}",
+    "source": {
+      "automated": "Opened automatically by monitoring",
+      "manual": "Posted by an operator"
     },
-    "realtimeDisconnects": {
-      "description": "Some realtime sessions briefly reconnected after an edge routing change.",
-      "title": "Intermittent realtime disconnects"
-    },
-    "storageReadErrors": {
-      "description": "A subset of artifact reads returned errors while storage traffic was rerouted.",
-      "title": "Elevated artifact read errors"
-    }
+    "startedAt": "Started {time}",
+    "updatedAt": "Updated {time}",
+    "updatesTitle": "Updates",
+    "viewDetails": "View details",
+    "viewDetailsFor": "View details for {title}"
+  },
+  "latency": {
+    "chartLabel": "{component} latency, p50 and p95 per bucket",
+    "empty": "Not enough successful samples to show latency for this period.",
+    "gaps": "{gaps, plural, =0 {Every bucket has enough samples.} =1 {# bucket has too few samples and is shown as a gap.} other {# buckets have too few samples and are shown as gaps.}}",
+    "minSamples": "Percentiles are shown only for buckets with at least {min} successful samples. Failed attempts are not timed and appear as gaps.",
+    "p50": "p50 (median)",
+    "p95": "p95",
+    "summary": "Median {p50} ms and p95 {p95} ms from {count, plural, =1 {# successful sample} other {# successful samples}}.",
+    "title": "Latency",
+    "value": "{value} ms",
+    "window": "{start} – {end} UTC"
+  },
+  "locales": {
+    "en": "English",
+    "zh-CN": "简体中文"
   },
   "maintenance": {
-    "controlPlaneDatabase": {
-      "description": "A rolling database upgrade is scheduled. Existing sessions will remain connected.",
-      "title": "Control plane database maintenance"
+    "components": "Affects: {components}",
+    "empty": "No maintenance scheduled.",
+    "excluded": "Minutes inside this window are excluded from maintenance-adjusted availability.",
+    "localWindow": "Your time: {start} – {end}",
+    "states": {
+      "awaiting_confirmation": "Awaiting confirmation",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "in_progress": "In progress",
+      "scheduled": "Scheduled"
     },
     "title": "Scheduled maintenance",
-    "window": "{start}–{end}"
+    "utcWindow": "{start} – {end} UTC"
   },
   "metadata": {
-    "description": "Current availability, service performance, and incident history for Cognia.",
-    "title": "Cognia System Status"
+    "description": "Live availability, incidents and maintenance for the official Cognia signaling relay.",
+    "title": "Cognia Relay Status"
+  },
+  "mirror": {
+    "description": "This is an independently hosted, read-only copy of the status page. Its data may lag behind or be out of date. Subscriptions and email links work only on the primary page.",
+    "openPrimary": "Open the primary status page",
+    "title": "Read-only mirror, possibly stale"
+  },
+  "monitoring": {
+    "cadence": "{profile} every {seconds} s",
+    "coverage": "Observed from {count, plural, =0 {no locations} =1 {# location} other {# locations}}. This is not a global or mobile-network guarantee.",
+    "description": "Who measures the relay, from where, and how recently.",
+    "empty": "No observer is enrolled yet, so nothing is being measured.",
+    "lastAttempt": "Last attempt {time}",
+    "lastSuccess": "Last success {time}",
+    "locationUnknown": "Location not declared",
+    "never": "never",
+    "provider": "Hosted on {provider}",
+    "reference": "Reference observer",
+    "singleObserver": "Single observer",
+    "statusHints": {
+      "degraded": "The reference observer is not reporting normally.",
+      "healthy": "Independent observers are reporting.",
+      "limited": "Only one observer is reporting, so results are not independently confirmed.",
+      "unknown": "No observer is reporting."
+    },
+    "statuses": {
+      "degraded": "Degraded",
+      "healthy": "Healthy",
+      "limited": "Limited",
+      "unknown": "Unknown"
+    },
+    "title": "Monitoring"
   },
   "nav": {
-    "history": "Incident history",
-    "services": "Service health",
-    "subscribe": "Subscribe to updates",
+    "components": "Components",
+    "history": "Incidents",
+    "monitoring": "Monitoring",
+    "subscribe": "Subscribe",
     "systemStatus": "System status"
   },
-  "previewData": "Preview data",
-  "regions": {
-    "asiaPacific": "Asia Pacific",
-    "europe": "Europe",
-    "northAmerica": "North America"
+  "probeHealth": {
+    "disabled": "Disabled",
+    "error": "Error",
+    "healthy": "Healthy",
+    "stale": "Stale",
+    "unknown": "Unknown"
   },
-  "serviceHealth": {
-    "description": "Availability and latency for the services that power Cognia Cloud.",
-    "title": "Service health"
+  "profiles": {
+    "android": "Android",
+    "ios": "iOS",
+    "native": "Native",
+    "web": "Web"
+  },
+  "ranges": {
+    "24h": "24 hours",
+    "30d": "30 days",
+    "7d": "7 days",
+    "90d": "90 days"
+  },
+  "rangesShort": {
+    "24h": "24 h",
+    "30d": "30 d",
+    "7d": "7 d",
+    "90d": "90 d"
+  },
+  "reasons": {
+    "auth_rejected": "Authentication rejected",
+    "auth_timeout": "Authentication timed out",
+    "connect_error": "Connection failed",
+    "dependency_failed": "Skipped because a prerequisite check failed",
+    "dns_error": "DNS lookup failed",
+    "http_status": "Unexpected HTTP status",
+    "missing": "No result arrived",
+    "origin_rejected": "Origin rejected",
+    "overlap_skipped": "Skipped because the previous run was still in progress",
+    "peer_timeout": "Peer did not respond",
+    "protocol_mismatch": "Protocol version mismatch",
+    "relay_mismatch": "Relayed data did not match",
+    "relay_timeout": "Relayed data timed out",
+    "runner_error": "Probe runner error",
+    "schema_mismatch": "Unexpected health response",
+    "stale": "Result is out of date",
+    "timeout": "Timed out",
+    "tls_error": "TLS handshake failed",
+    "ws_closed": "WebSocket closed unexpectedly",
+    "ws_upgrade": "WebSocket upgrade failed"
+  },
+  "results": {
+    "fail": "Fail",
+    "pass": "Pass",
+    "unknown": "No result"
+  },
+  "sections": {
+    "componentsDescription": "Each component is one question a probe can answer on its own. A working HTTP endpoint does not prove that signaling or the data lane work.",
+    "componentsTitle": "Components"
+  },
+  "sources": {
+    "cloudflare": "Cloudflare",
+    "external": "External"
+  },
+  "stale": {
+    "label": "{status} · not current"
   },
   "statuses": {
     "degraded": "Degraded",
     "maintenance": "Under maintenance",
     "major_outage": "Major outage",
+    "no_data": "No data",
     "operational": "Operational",
     "overall": {
       "degraded": "Partially degraded service",
       "maintenance": "Service under maintenance",
-      "major_outage": "Major system outage",
-      "operational": "All systems operational",
-      "partial_outage": "Partial system outage"
+      "major_outage": "Major outage",
+      "operational": "All components operational",
+      "partial_outage": "Partial outage",
+      "unknown": "Status unknown"
     },
-    "partial_outage": "Partial outage"
+    "partial_outage": "Partial outage",
+    "unknown": "Unknown"
   },
   "subscribe": {
-    "cancel": "Close",
-    "description": "Notification delivery is not connected in this frontend prototype.",
+    "componentsHint": "Leave all unchecked to get updates for every component.",
+    "componentsLabel": "Components",
+    "consent": "We will email a confirmation link. You get no status emails until you confirm. Every email links to your preferences and to unsubscribe. Your address is used only for status notifications.",
+    "description": "Email updates about incidents and maintenance for the official hosted relay.",
+    "disabled": "Email subscriptions are not available right now. Use the Atom or RSS feed instead, or try again later.",
     "email": "Email address",
-    "emailPlaceholder": "operator@example.com",
-    "preview": "Preview subscription",
-    "result": "Preview only — no subscription was created.",
+    "emailInvalid": "Enter a valid email address.",
+    "emailPlaceholder": "you@example.com",
+    "errors": {
+      "bad_request": "The request was not accepted. Check the address and try again.",
+      "forbidden": "This request was refused. If you use a VPN or privacy proxy, try again without it.",
+      "invalid": "The status service sent an unexpected response. Try again later.",
+      "network": "The request could not reach the status service. Check your connection and try again.",
+      "rate_limited": "Too many requests. Wait a few minutes and try again.",
+      "unavailable": "Email subscriptions are temporarily unavailable. Try again later."
+    },
+    "locale": "Email language",
+    "mirrorDescription": "This read-only mirror cannot start subscriptions. Subscribe on the primary status page.",
+    "openPrimary": "Subscribe on the primary page",
+    "pending": "If this address can be subscribed, a confirmation link is on its way. The link expires in 24 hours, and nothing is sent until you confirm.",
+    "pendingTitle": "Check your inbox",
+    "submit": "Send confirmation link",
+    "submitting": "Sending…",
     "title": "Subscribe to status updates"
+  },
+  "token": {
+    "allComponents": "All components",
+    "app": "Subscription links are handled on the official status page. Continue there to finish this step.",
+    "appContinue": "Continue on the status page",
+    "confirm": {
+      "action": "Confirm subscription",
+      "description": "Confirm that you want email updates about the official hosted relay.",
+      "done": "Your subscription is confirmed.",
+      "title": "Confirm your subscription"
+    },
+    "errors": {
+      "bad_request": "This request was not accepted. Open the link from your email again.",
+      "forbidden": "This request was refused. If you use a VPN or privacy proxy, try again without it.",
+      "invalid": "The status service sent an unexpected response. Try again later.",
+      "network": "The request could not reach the status service. Check your connection and try again.",
+      "rate_limited": "Too many requests. Wait a few minutes and try again.",
+      "revision_conflict": "Your preferences were changed elsewhere. Reload and try again.",
+      "token_expired": "This link has expired. Subscribe again to get a new confirmation link.",
+      "token_invalid": "This link is not valid. Use the link from your most recent status email.",
+      "token_used": "This link has already been used. Your earlier choice still applies.",
+      "unavailable": "Subscriptions are temporarily unavailable. Try again later."
+    },
+    "malformed": "This link is incomplete or damaged. Open it again from the email, or subscribe again.",
+    "malformedTitle": "Link not recognised",
+    "manage": {
+      "conflict": "Your preferences were changed elsewhere. The latest version is shown; review it and save again.",
+      "description": "Choose which components to hear about and the email language.",
+      "loading": "Loading your preferences…",
+      "save": "Save preferences",
+      "saved": "Preferences saved.",
+      "saving": "Saving…",
+      "title": "Manage your subscription"
+    },
+    "mirror": "This read-only mirror cannot change subscriptions. Open this link on the primary status page.",
+    "mirrorOpen": "Open on the primary page",
+    "preferences": {
+      "address": "Address",
+      "components": "Components",
+      "locale": "Language"
+    },
+    "unsubscribe": {
+      "action": "Unsubscribe",
+      "description": "Stop all status emails to this address. Nothing changes until you press the button.",
+      "done": "You are unsubscribed. An email that was already being sent may still arrive; nothing else will be sent to this address.",
+      "title": "Unsubscribe",
+      "working": "Unsubscribing…"
+    },
+    "working": "Working…"
   }
 }

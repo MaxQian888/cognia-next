@@ -204,6 +204,7 @@
     "0206-a-workspace-streams-its-changes-instead-of-being-polled",
     "0207-a-collaboration-event-reaches-people-who-are-not-in-the-room",
     "0208-edits-to-different-fields-merge",
-    "0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs"
+    "0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs",
+    "0211-public-status-measures-the-relay-it-names"
   ]
 }

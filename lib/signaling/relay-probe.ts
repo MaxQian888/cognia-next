@@ -24,7 +24,17 @@ import {
   type PlatformFetch,
 } from "@/lib/network/platform-fetch"
 
-import { SIGNALING_PROTOCOL_VERSION } from "./types"
+import { classifyHealthz, relayHealthUrl, type RelayCapabilities } from "./relay-health"
+
+// The pure half lives in `relay-health.ts` so the public status Worker and
+// its external probe can parse the same body without this file's platform
+// transport. Re-exported here so existing callers keep one import path.
+export {
+  classifyHealthz,
+  relayHealthUrl,
+  relayProtocolMatches,
+  type RelayCapabilities,
+} from "./relay-health"
 
 export type RelayProbeState =
   /** Answered, and the data lane is served: the relay can carry app traffic. */
@@ -43,12 +53,6 @@ export type RelayProbeState =
   | "unreachable"
   /** The configured signaling URL cannot be turned into a health URL. */
   | "invalid-url"
-
-export interface RelayCapabilities {
-  protocol: number
-  lanes: string[]
-  relayDataLane: boolean
-}
 
 export interface RelayProbeResult {
   state: RelayProbeState
@@ -84,79 +88,12 @@ export interface ProbeRelayOptions {
 
 const DEFAULT_TIMEOUT_MS = 6_000
 
-/**
- * `wss://host/signaling` becomes `https://host/healthz`. Both backends
- * (the axum server and the Cloudflare Worker) mount `/healthz` at the root,
- * whatever path the WebSocket is on, so the signaling path is dropped rather
- * than rewritten. `ws://` becomes `http://` for a local rendezvous.
- */
-export function relayHealthUrl(signalingUrl: string): string | null {
-  let url: URL
-  try {
-    url = new URL(signalingUrl.trim())
-  } catch {
-    return null
-  }
-  if (url.protocol === "wss:" || url.protocol === "https:") url.protocol = "https:"
-  else if (url.protocol === "ws:" || url.protocol === "http:") url.protocol = "http:"
-  else return null
-  if (!url.hostname) return null
-  url.pathname = "/healthz"
-  url.search = ""
-  url.hash = ""
-  return url.toString()
-}
-
-interface HealthzBody {
-  ok?: unknown
-  backend?: unknown
-  version?: unknown
-  capabilities?: {
-    protocol?: unknown
-    lanes?: unknown
-    relayDataLane?: unknown
-  }
-}
-
-/** Pure classification of a health body, so the verdict is testable alone. */
-export function classifyHealthz(
-  body: unknown
-): Pick<RelayProbeResult, "state" | "backend" | "version" | "capabilities"> {
-  if (!body || typeof body !== "object") return { state: "not-a-relay" }
-  const health = body as HealthzBody
-  if (health.ok !== true || typeof health.version !== "string") return { state: "not-a-relay" }
-  const backend = typeof health.backend === "string" ? health.backend : undefined
-  const raw = health.capabilities
-  if (!raw || typeof raw !== "object") {
-    return { state: "legacy", backend, version: health.version }
-  }
-  const lanes = Array.isArray(raw.lanes)
-    ? raw.lanes.filter((lane): lane is string => typeof lane === "string")
-    : []
-  const capabilities: RelayCapabilities = {
-    protocol: typeof raw.protocol === "number" ? raw.protocol : 0,
-    lanes,
-    relayDataLane: raw.relayDataLane === true || lanes.includes("data"),
-  }
-  return {
-    state: capabilities.relayDataLane ? "ready" : "legacy",
-    backend,
-    version: health.version,
-    capabilities,
-  }
-}
-
 function describeError(error: unknown): string {
   if (error instanceof Error) {
     if (error.name === "AbortError" || error.name === "TimeoutError") return "timeout"
     return error.message || error.name
   }
   return String(error)
-}
-
-/** Whether this client and the probed relay speak the same generation. */
-export function relayProtocolMatches(capabilities: RelayCapabilities | undefined): boolean {
-  return capabilities?.protocol === SIGNALING_PROTOCOL_VERSION
 }
 
 export async function probeRelay(

@@ -195,6 +195,16 @@
     },
     "notFromHost": "This check ran from this device, not from the Host. It proves this device reaches the rendezvous; the Host's own route out is still unproven, so the summary above does not count it."
   },
+  "statusPage": {
+    "title": "Public status page",
+    "description": "Live availability, incidents and maintenance for the official hosted relay, measured by Cognia's own probes. Opening it does not check your relay.",
+    "open": "Open public status page",
+    "badgeOfficial": "Official relay",
+    "badgeSelfHosted": "Not covered",
+    "official": "This device uses the official hosted relay, so the status page describes it. The check above is still the proof for this device's own connection.",
+    "selfHosted": "This device uses a different relay ({host}). The public status page describes only the official hosted relay, not this one: its status says nothing about your relay. Use the check above instead.",
+    "openFailed": "The status page could not be opened. Visit {url} in a browser."
+  },
   "mesh": {
     "title": "Overlay network",
     "description": "Tailscale or ZeroTier put this Host and a phone anywhere on one private network, so the plain local route works from the road with nothing exposed to the internet.",

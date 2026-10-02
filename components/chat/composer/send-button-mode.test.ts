@@ -1,11 +1,13 @@
 /**
  * The composer's primary-button combination table.
  *
- * The regression this pins: streaming + typed text used to render Stop, which
- * left a typed follow-up with no way out (a send during a live turn is the
- * steer path, not a restart). Everything else here is the surrounding grid, so
- * fixing that case cannot quietly re-break emptiness, draft mode, or the
- * in-flight spinner.
+ * The regressions this pins: while a turn runs the primary button is Stop —
+ * whatever is typed, and however long the runtime keeps its dispatch pending.
+ * It used to be taken over by Send once text was typed, and to sit on a
+ * spinner for a whole external-agent run. A typed follow-up still has a way
+ * out: the secondary `followUp` control. Everything else here is the
+ * surrounding grid, so that change cannot quietly re-break emptiness, draft
+ * mode, or the in-flight spinner.
  */
 
 import { resolveSendButton, type SendButtonInput } from "./send-button-mode"
@@ -28,8 +30,8 @@ describe("resolveSendButton — idle", () => {
     expect(resolveSendButton(input())).toEqual({
       mode: "send",
       disabled: true,
-      queues: false,
       variant: "default",
+      followUp: null,
     })
   })
 
@@ -37,7 +39,7 @@ describe("resolveSendButton — idle", () => {
     const state = resolveSendButton(input({ hasContent: true }))
     expect(state.mode).toBe("send")
     expect(state.disabled).toBe(false)
-    expect(state.queues).toBe(false)
+    expect(state.followUp).toBeNull()
   })
 
   it("stays disabled when the composer is disabled", () => {
@@ -58,37 +60,37 @@ describe("resolveSendButton — idle", () => {
     expect(resolveSendButton(input({ status: "error", hasContent: true }))).toMatchObject({
       mode: "send",
       disabled: false,
-      queues: false,
+      followUp: null,
     })
   })
 })
 
 describe("resolveSendButton — streaming", () => {
-  it("is Stop while the box is empty", () => {
+  it("is Stop while the box is empty, with no follow-up control", () => {
     expect(resolveSendButton(input({ status: "streaming" }))).toEqual({
       mode: "stop",
       disabled: false,
-      queues: false,
-      variant: "destructive",
-    })
-  })
-
-  it("becomes Send — queued as a follow-up — as soon as something is typed", () => {
-    expect(resolveSendButton(input({ status: "streaming", hasContent: true }))).toEqual({
-      mode: "send",
-      disabled: false,
-      queues: true,
       variant: "default",
+      followUp: null,
     })
   })
 
-  it("falls back to Stop when the typed follow-up could not be sent anyway", () => {
+  it("stays Stop once something is typed, and offers the follow-up beside it", () => {
+    expect(resolveSendButton(input({ status: "streaming", hasContent: true }))).toEqual({
+      mode: "stop",
+      disabled: false,
+      variant: "default",
+      followUp: { disabled: false, busy: false },
+    })
+  })
+
+  it("offers no follow-up when the typed text could not be sent anyway", () => {
     expect(
       resolveSendButton(input({ status: "streaming", hasContent: true, composerDisabled: true }))
-    ).toMatchObject({ mode: "stop", disabled: false })
+    ).toMatchObject({ mode: "stop", disabled: false, followUp: null })
     expect(
       resolveSendButton(input({ status: "streaming", hasContent: true, outboundBlocked: true }))
-    ).toMatchObject({ mode: "stop", disabled: false })
+    ).toMatchObject({ mode: "stop", disabled: false, followUp: null })
   })
 
   it("keeps Stop clickable even when everything else is blocked", () => {
@@ -98,6 +100,23 @@ describe("resolveSendButton — streaming", () => {
     expect(state.mode).toBe("stop")
     expect(state.disabled).toBe(false)
   })
+
+  it("keeps Stop while a follow-up is being dispatched, showing the follow-up as busy", () => {
+    expect(resolveSendButton(input({ status: "streaming", isSending: true }))).toEqual({
+      mode: "stop",
+      disabled: false,
+      variant: "default",
+      followUp: { disabled: true, busy: true },
+    })
+  })
+
+  it("shows the follow-up as busy while its attachment is still being prepared", () => {
+    expect(
+      resolveSendButton(
+        input({ status: "streaming", hasContent: true, isPreparingAttachments: true })
+      )
+    ).toMatchObject({ mode: "stop", disabled: false, followUp: { disabled: true, busy: true } })
+  })
 })
 
 describe("resolveSendButton — in flight", () => {
@@ -105,8 +124,8 @@ describe("resolveSendButton — in flight", () => {
     expect(resolveSendButton(input({ hasContent: true, isSending: true }))).toEqual({
       mode: "busy",
       disabled: true,
-      queues: false,
       variant: "default",
+      followUp: null,
     })
   })
 
@@ -115,12 +134,6 @@ describe("resolveSendButton — in flight", () => {
       mode: "busy",
       disabled: true,
     })
-  })
-
-  it("lets the in-flight spinner win over Stop, so a queued follow-up is not mistaken for a stop", () => {
-    expect(
-      resolveSendButton(input({ status: "streaming", hasContent: true, isSending: true }))
-    ).toMatchObject({ mode: "busy", disabled: true })
   })
 
   it("treats a dispatched-but-not-yet-streaming turn as busy", () => {
@@ -136,8 +149,8 @@ describe("resolveSendButton — connector draft review", () => {
     expect(resolveSendButton(input({ hasPendingDrafts: true }))).toEqual({
       mode: "draft",
       disabled: false,
-      queues: false,
       variant: "secondary",
+      followUp: null,
     })
   })
 
@@ -146,8 +159,8 @@ describe("resolveSendButton — connector draft review", () => {
     expect(resolveSendButton(input({ hasPendingDrafts: true, hasContent: true }))).toEqual({
       mode: "send",
       disabled: false,
-      queues: false,
       variant: "default",
+      followUp: null,
     })
   })
 

@@ -85,6 +85,21 @@
         "--no-open"
       ],
       "port": 3020
+    },
+    {
+      "name": "cognia-status-worker",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "-C",
+        "services/status-server/worker",
+        "exec",
+        "wrangler",
+        "dev",
+        "--port",
+        "8790",
+        "--test-scheduled"
+      ],
+      "port": 8790
     }
   ]
 }

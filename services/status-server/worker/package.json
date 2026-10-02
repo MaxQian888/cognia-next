@@ -1,0 +1,28 @@
+{
+  "name": "cognia-status-worker",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "description": "Cloudflare Worker for the Cognia public signaling status service (D1 history, probe ingestion, incidents, subscriptions, static /status assets).",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "migrate:local": "wrangler d1 migrations apply cognia-status --local",
+    "migrate": "wrangler d1 migrations apply cognia-status --remote",
+    "migrate:staging": "wrangler d1 migrations apply cognia-status-staging --remote --env staging",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@cloudflare/workers-types": "5.20260927.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "4.1.11",
+    "wrangler": "4.141.0"
+  }
+}

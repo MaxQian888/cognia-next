@@ -1,0 +1,40 @@
+{
+  "apiBase": "https://status.cognia.cn/api/status/v1",
+  "probeId": "ext-1",
+  "keyId": "ext-1-k1",
+  "secretFile": "/run/credentials/cognia-status-probe.service/probe-secret",
+  "signalingUrl": "wss://signaling.cognia.cn/signaling",
+  "registryRevision": 1,
+  "profiles": [
+    { "id": "native", "origin": null, "httpCadenceSeconds": 60, "protocolCadenceSeconds": 60 },
+    {
+      "id": "web",
+      "origin": "https://cognia.cn",
+      "httpCadenceSeconds": null,
+      "protocolCadenceSeconds": 300
+    },
+    {
+      "id": "ios",
+      "origin": "capacitor://localhost",
+      "httpCadenceSeconds": null,
+      "protocolCadenceSeconds": 300
+    },
+    {
+      "id": "android",
+      "origin": "https://localhost",
+      "httpCadenceSeconds": null,
+      "protocolCadenceSeconds": 300
+    }
+  ],
+  "statusPageUrl": "https://status.cognia.cn/status/",
+  "spoolDir": "/var/lib/cognia-status-probe/spool",
+  "alertWebhook": "https://alerts.example.invalid/hooks/cognia-status",
+  "mirror": {
+    "enabled": false,
+    "dataDir": "/var/lib/cognia-status-mirror/data",
+    "assetsDir": "/srv/cognia-status-mirror/current",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "syncIntervalSeconds": 300
+  }
+}

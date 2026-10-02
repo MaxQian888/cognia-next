@@ -25,6 +25,11 @@ jest.mock("../blocks/relay-check-block", () => ({
     <div data-testid="relay-check-block" data-route={relay.route} />
   ),
 }))
+jest.mock("../blocks/status-page-link-block", () => ({
+  StatusPageLinkBlock: ({ signalingUrl }: { signalingUrl: string }) => (
+    <div data-testid="status-page-link-block" data-url={signalingUrl} />
+  ),
+}))
 jest.mock("../blocks/remote-access-summary", () => ({
   RemoteAccessSummary: ({ relay }: { relay: string }) => (
     <div data-testid="remote-access-summary" data-relay={relay} />
@@ -33,7 +38,7 @@ jest.mock("../blocks/remote-access-summary", () => ({
 jest.mock("@/hooks/connectivity/use-remote-access", () => ({
   useRemoteAccess: () => ({
     isHost: true,
-    relay: { route: "unchecked" },
+    relay: { route: "unchecked", signalingUrl: "wss://relay.example.com/signaling" },
     tunnel: { available: true, publicUrl: null, localUrl: null },
     mesh: { available: true, status: null, refresh: async () => {} },
   }),
@@ -43,6 +48,7 @@ it("leads with the verdict and the relay proof, then the relay, tunnel and overl
   render(<CloudRelayPanel />)
   const summary = screen.getByTestId("remote-access-summary")
   const check = screen.getByTestId("relay-check-block")
+  const statusLink = screen.getByTestId("status-page-link-block")
   const relay = screen.getByTestId("webrtc-card")
   const tunnel = screen.getByTestId("tunnel-block")
   const mesh = screen.getByTestId("mesh-block")
@@ -51,11 +57,15 @@ it("leads with the verdict and the relay proof, then the relay, tunnel and overl
   const follows = (a: Element, b: Element) =>
     Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
   expect(follows(summary, check)).toBe(true)
-  expect(follows(check, relay)).toBe(true)
+  expect(follows(check, statusLink)).toBe(true)
+  expect(follows(statusLink, relay)).toBe(true)
   expect(follows(relay, tunnel)).toBe(true)
   expect(follows(tunnel, mesh)).toBe(true)
   expect(follows(logto, collab)).toBe(true)
   // One read feeds both the banner and the proof block.
   expect(summary).toHaveAttribute("data-relay", "unchecked")
   expect(check).toHaveAttribute("data-route", "unchecked")
+  // The status link is told which relay is configured, so it can say when the
+  // public page does not describe it.
+  expect(statusLink).toHaveAttribute("data-url", "wss://relay.example.com/signaling")
 })

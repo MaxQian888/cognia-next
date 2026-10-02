@@ -42,3 +42,10 @@ export const PRIVACY_URL = `${DOCS_URL}/docs/en/privacy`
  * enabling the companion server and same-network requirements.
  */
 export const DOCS_COMPANION_SETUP_URL = `${DOCS_URL}/docs/en/getting-started`
+
+/**
+ * Public status page for the official hosted relay (`signaling.cognia.cn`).
+ * It describes the official service only, never a self-hosted relay; see
+ * `lib/status/config.ts` for the API base and self-host overrides.
+ */
+export const STATUS_PAGE_URL = "https://status.cognia.cn/status/"
