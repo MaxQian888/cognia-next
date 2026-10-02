@@ -110,12 +110,18 @@ export function collectHtmlRefs(html) {
   return refs
 }
 
-/** Same-origin non-Next files the HTML links (favicon, manifest, icons). */
+/**
+ * Same-origin non-Next files the HTML links (favicon, apple-touch icon), with
+ * Next's cache-busting query (`/favicon.ico?757f…`) stripped. The app's PWA
+ * manifest is excluded: the status host is not the installable app, and the
+ * Worker removes its `<link rel="manifest">`.
+ */
 export function collectLocalLinks(html) {
   const links = new Set()
-  for (const match of html.matchAll(/\b(?:href|src)="(\/[^"#?]+\.[A-Za-z0-9]{2,5})"/g)) {
+  for (const match of html.matchAll(/\b(?:href|src)="(\/[^"#?]+\.[A-Za-z0-9]{2,11})(?:[?#][^"]*)?"/g)) {
     const value = match[1]
-    if (!value.startsWith("/_next/") && !value.includes("..")) links.add(value)
+    if (value.startsWith("/_next/") || value.includes("..") || value.endsWith(".webmanifest")) continue
+    links.add(value)
   }
   return links
 }

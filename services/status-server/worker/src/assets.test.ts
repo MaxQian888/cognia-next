@@ -24,7 +24,7 @@ function assetsEnv(files: Record<string, { body: string; type: string }>): Env {
 
 const PAGE = {
   "/status/": {
-    body: '<!doctype html><html><head><meta name="cognia-status-runtime" content="{&quot;mode&quot;:&quot;primary&quot;,&quot;apiBase&quot;:&quot;https://evil.example&quot;}"><title>Status</title></head><body>ok</body></html>',
+    body: '<!doctype html><html><head><meta name="cognia-status-runtime" content="{&quot;mode&quot;:&quot;primary&quot;,&quot;apiBase&quot;:&quot;https://evil.example&quot;}"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.ico?757f"><title>Status</title></head><body>ok</body></html>',
     type: "text/html; charset=utf-8",
   },
   "/_next/static/chunks/app.js": { body: "console.log(1)", type: "application/javascript" },
@@ -56,6 +56,8 @@ describe("static status assets", () => {
     expect(html.match(/cognia-status-runtime/g)).toHaveLength(1)
     expect(html).toContain(`content='{"mode":"primary","apiBase":"/api/status/v1"}'`)
     expect(html).not.toContain("evil.example")
+    expect(html).not.toContain('rel="manifest"')
+    expect(html).toContain('<link rel="icon" href="/favicon.ico?757f">')
     expect(response.headers.get("content-security-policy")).toBe(STATUS_CSP)
     expect(response.headers.get("cache-control")).toBe("no-cache")
     expect(response.headers.get("x-frame-options")).toBe("DENY")

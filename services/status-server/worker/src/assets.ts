@@ -5,7 +5,7 @@
  * (scripts/build/build-status-site.mjs), so nothing else of the application
  * export is reachable here. HTML gets the runtime `<meta>` that tells the
  * page it is the primary deployment and where its same-origin API lives, and
- * a CSP that limits it to this origin.
+ * a CSP that limits it to this origin; the app's PWA manifest link is removed.
  */
 
 import { STATUS_RUNTIME_META_NAME } from "../../../../lib/status/config"
@@ -70,7 +70,8 @@ class RuntimeMetaInjector {
   }
 }
 
-class RemoveExistingRuntimeMeta {
+/** Drops an element: a stale runtime meta, or the app's PWA manifest link. */
+class RemoveElement {
   element(element: Element): void {
     element.remove()
   }
@@ -107,7 +108,11 @@ export async function serveStatusAsset(request: Request, env: Env, url: URL): Pr
   const isHtml = (response.headers.get("content-type") ?? "").includes("text/html")
   if (!isHtml) return withSecurityHeaders(response, false)
   const rewritten = new HTMLRewriter()
-    .on(`meta[name="${STATUS_RUNTIME_META_NAME}"]`, new RemoveExistingRuntimeMeta())
+    .on(`meta[name="${STATUS_RUNTIME_META_NAME}"]`, new RemoveElement())
+    // The exported head links the Cognia app's manifest (start_url `/`,
+    // shortcuts into app routes). The status host is not that installable
+    // app and does not ship the manifest, so the link is removed.
+    .on('link[rel="manifest"]', new RemoveElement())
     .on("head", new RuntimeMetaInjector())
     .transform(response)
   return withSecurityHeaders(rewritten, true)

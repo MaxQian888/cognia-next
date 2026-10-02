@@ -70,6 +70,11 @@ test("collectors find HTML, CSS and literal script references", () => {
   const html = '<script src="/_next/static/chunks/x.js"></script><link href="/favicon.ico">'
   assert.deepEqual([...collectHtmlRefs(html)], ["/_next/static/chunks/x.js"])
   assert.deepEqual([...collectLocalLinks(html)], ["/favicon.ico"])
+  // Next's cache-busting query is stripped; the app's PWA manifest is never shipped.
+  const head =
+    '<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.ico?757f38b1">' +
+    '<link rel="apple-touch-icon" href="/apple-icon.png?4d6c1a65">'
+  assert.deepEqual([...collectLocalLinks(head)], ["/favicon.ico", "/apple-icon.png"])
   assert.deepEqual(
     [...collectCssRefs("a{src:url('../media/f.woff2')} b{src:url(https://x/y.png)}", "/_next/static/css/a.css")],
     ["/_next/static/media/f.woff2"]
