@@ -60,13 +60,14 @@ async function harness(responder: (call: Captured, index: number) => Response | 
     },
   })
   const dir = await mkdtemp(path.join(os.tmpdir(), "probe-ingest-"))
-  const queue: IngestionQueue
+  // The spool reports losses to the queue that is built from it.
+  const queueRef: { current?: IngestionQueue } = {}
   const spool = new Spool(dir, {
     now: () => now,
-    onLoss: (entry, reason) => queue.recordLoss(entry, reason),
+    onLoss: (entry, reason) => queueRef.current?.recordLoss(entry, reason),
   })
   await spool.init()
-  queue = new IngestionQueue({
+  const queue = new IngestionQueue({
     apiBase: API,
     keyId: "ext-test-k1",
     secret: SECRET,
@@ -85,6 +86,7 @@ async function harness(responder: (call: Captured, index: number) => Response | 
       return responder(call, calls.length - 1)
     },
   })
+  queueRef.current = queue
   return {
     queue,
     spool,

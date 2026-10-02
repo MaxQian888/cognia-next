@@ -62,9 +62,31 @@ wrangler tail cognia-status            # cron_probe.*, cron.step_failed, ingest.
    Observer alerts still fire.
 2. After a rehearsal of outage/unknown/recovery on staging, set
    `FEATURE_INCIDENT_AUTOMATION=on` in `wrangler.toml` and redeploy.
-3. Mail: onboard `cognia.cn` in Cloudflare Email Sending, uncomment
-   `[[send_email]] name = "EMAIL"`, set `FEATURE_EMAIL=on`, redeploy. Confirm
-   and unsubscribe with an operator-controlled mailbox before announcing it.
+3. Mail (done 2026-10-02): `wrangler email sending enable status.cognia.cn`
+   onboarded the **subdomain** (Cloudflare created its bounce MX, SPF, DKIM
+   and `_dmarc` records under `status.cognia.cn`; the `cognia.cn` apex has no
+   mail records and stays untouched). `[[send_email]] name = "EMAIL"`,
+   `MAIL_FROM = "noreply@status.cognia.cn"` and `FEATURE_EMAIL=on` are in
+   the production config. Confirm and unsubscribe with an operator-controlled
+   mailbox after any sender change.
+
+## Isolation from other services
+
+The status Worker shares only the Cloudflare account with the relay, share
+and update services: its own Worker, its own D1, no Durable Object, KV, R2 or
+service bindings, `global_fetch_strictly_public`.
+
+- Probes reach the relay only through its public route, each in a fresh
+  synthetic room (no real user's room, peers or state is reachable). Each
+  protocol run does cost the relay one short-lived Durable Object.
+- Only `STATUS_ENV=production` may probe `signaling.cognia.cn`
+  (`probeTargetAllowed` in `worker/src/probe/cron-probe.ts`); staging and
+  development deployments probe nothing there. Staging's `SIGNALING_URL`
+  names the staging relay.
+- Page views invoke the Worker for the HTML, `/sw.js`, redirects and the API
+  only (`run_worker_first` in `wrangler.toml`). Hashed files come straight
+  from the asset layer with headers from the generated `_headers`, so a
+  visitor surge does not consume the account's shared Worker requests.
 
 ## Operator access (Cloudflare Access)
 

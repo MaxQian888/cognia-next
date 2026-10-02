@@ -8,6 +8,7 @@
  * is recorded as `unknown` / `runner_error`: observer failure, not an outage.
  */
 
+import { OFFICIAL_SIGNALING_HOST } from "../../../../../lib/status/config"
 import type { CheckObservation, ProfileId } from "../../../../../lib/status/contract"
 import { minuteOf } from "../../../../../lib/status/derive"
 import {
@@ -62,6 +63,23 @@ export function runnerErrorResult(
   return { startedAtMs, finishedAtMs, checks }
 }
 
+/**
+ * Only the production status deployment may probe the official production
+ * relay. A staging or development Worker pointed at it would add synthetic
+ * rooms (Durable Objects, alarms, requests) to the production relay's shared
+ * account usage for evidence nobody publishes, so it probes nothing and its
+ * page shows the minutes as unobserved instead.
+ */
+export function probeTargetAllowed(env: Pick<Env, "STATUS_ENV" | "SIGNALING_URL">): boolean {
+  let host: string
+  try {
+    host = new URL(env.SIGNALING_URL).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return host !== OFFICIAL_SIGNALING_HOST || env.STATUS_ENV === "production"
+}
+
 export async function runCloudflareProbe(input: {
   env: Env
   registry: Registry
@@ -75,6 +93,10 @@ export async function runCloudflareProbe(input: {
   const minute = minuteOf(input.scheduledTimeMs)
   const scheduledAtMs = minute * 60_000
   if (!probe || !probeActive(probe, scheduledAtMs)) return []
+  if (!probeTargetAllowed(env)) {
+    logEvent("cron_probe.production_target_refused", { statusEnv: env.STATUS_ENV })
+    return []
+  }
   const transport = input.transport ?? createWorkerTransport()
   const origins = parseOrigins(env.PROBE_ORIGIN_PROFILES)
 

@@ -8,7 +8,9 @@ import {
   useTranslations,
   type AbstractIntlMessages,
 } from "next-intl"
+import { usePathname } from "next/navigation"
 import { loadMessages, type Messages } from "@/i18n/messages"
+import { loadRouteMessages, routeMessageScope, type RouteMessageScope } from "@/i18n/route-messages"
 import type { Locale } from "@/i18n/config"
 import { PageLoading } from "@/components/ui/loading-states"
 import { Button } from "@/components/ui/button"
@@ -18,6 +20,8 @@ export const LocaleReadyContext = createContext(true)
 /** Mount only where the complete UI is allowed to start, after account entry.
  * Settings hydration and native window/splash handoff must remain outside.
  * Overlay callers can use this without importing the plugin/account runtime.
+ * A route with a scoped catalog (`i18n/route-messages.ts`, e.g. the public
+ * `/status` document) loads only that catalog instead of every namespace.
  */
 export function FullMessagesGate({
   children,
@@ -32,17 +36,26 @@ export function FullMessagesGate({
   const locale = useLocale() as Locale
   const timeZone = useTimeZone()
   const t = useTranslations("loading")
-  const [bundle, setBundle] = useState<{ locale: Locale; messages: Messages } | null>(null)
+  const scope = routeMessageScope(usePathname())
+  const [bundle, setBundle] = useState<{
+    locale: Locale
+    scope: RouteMessageScope | null
+    // The full catalog, or a route's scoped catalog (a subset of namespaces).
+    messages: Messages | AbstractIntlMessages
+  } | null>(null)
   const [failure, setFailure] = useState<Locale | null>(null)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!localeReady || !ready) return
     let active = true
-    void loadMessages(locale).then(
+    const load: Promise<Messages | AbstractIntlMessages> = scope
+      ? loadRouteMessages(scope, locale)
+      : loadMessages(locale)
+    void load.then(
       (messages) => {
         if (active) {
-          setBundle({ locale, messages })
+          setBundle({ locale, scope, messages })
           setFailure(null)
         }
       },
@@ -53,7 +66,7 @@ export function FullMessagesGate({
     return () => {
       active = false
     }
-  }, [locale, attempt, localeReady, ready])
+  }, [locale, scope, attempt, localeReady, ready])
 
   const messages = useMemo(
     () => (bundle ? { ...bundle.messages, ...additionalMessages?.[bundle.locale] } : undefined),
@@ -78,7 +91,7 @@ export function FullMessagesGate({
           </Button>
         </div>
       )}
-      {bundle ? (
+      {bundle && bundle.scope === scope ? (
         <NextIntlClientProvider locale={bundle.locale} messages={messages} timeZone={timeZone}>
           {children}
         </NextIntlClientProvider>

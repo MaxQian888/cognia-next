@@ -21,6 +21,7 @@
     "mobile",
     "sidecar",
     "services/share-server",
+    "services/status-server",
     "out",
     ".next",
     "tests/e2e",

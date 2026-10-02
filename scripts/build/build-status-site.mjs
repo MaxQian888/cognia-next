@@ -58,6 +58,23 @@ const RUNTIME_META = JSON.stringify({ mode: "primary", apiBase: "/api/status/v1"
 const INERT_SERVICE_WORKER =
   'self.addEventListener("install", () => self.skipWaiting())\nself.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()))\n'
 
+/**
+ * `_headers` for files the asset layer serves without invoking the Worker
+ * (wrangler.toml `run_worker_first` lists the Worker-first paths). Same
+ * security headers as `withSecurityHeaders` in
+ * services/status-server/worker/src/assets.ts; content-hashed Next files are
+ * immutable, everything else revalidates.
+ */
+export const STATUS_ASSET_HEADERS = `/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+`
+
 /** Root-level files the page may load besides `/_next/static` (never the app's own `/sw.js`). */
 export function isRootPageFile(pathname) {
   return /^\/[A-Za-z0-9._-]+\.(?:js|ico|png|svg|webmanifest|json)$/.test(pathname) && pathname !== "/sw.js"
@@ -418,6 +435,7 @@ export async function buildStatusSite(options) {
     files,
   }
   writeFileSync(path.join(dest, "status-asset-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
+  writeFileSync(path.join(dest, "_headers"), STATUS_ASSET_HEADERS)
   return manifest
 }
 

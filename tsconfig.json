@@ -182,6 +182,7 @@
     "mobile",
     "sidecar",
     "services/share-server",
+    "services/status-server",
     "out",
     ".next",
     "target",

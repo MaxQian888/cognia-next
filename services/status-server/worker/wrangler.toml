@@ -42,9 +42,16 @@ crons = ["* * * * *"]
 [assets]
 directory = "./assets"
 binding = "ASSETS"
-# The Worker decides which paths may reach assets (only the status export),
-# and answers unknown API paths with JSON 404 rather than HTML.
-run_worker_first = true
+# The asset directory holds only the status export, so hashed files are
+# served straight from the asset layer without invoking the Worker: a page
+# view costs one Worker request (the HTML) plus API calls, not one per file,
+# so a visitor surge during an outage cannot spend the account's shared
+# request capacity (the relay runs on the same account). Their security and
+# cache headers come from the generated `_headers` file
+# (scripts/build/build-status-site.mjs). The Worker still runs first for the
+# HTML (runtime meta + CSP), the API, `/sw.js` and the redirects; any path that
+# matches no asset falls through to it too (JSON 404 under /api).
+run_worker_first = ["/", "/api/*", "/status", "/status/", "/status/index.html", "/status.html", "/sw.js"]
 not_found_handling = "none"
 
 [[d1_databases]]
@@ -64,8 +71,11 @@ CLOUDFLARE_PROBE_ID = "cf-cron"
 PROBE_ORIGIN_PROFILES = '{"web":"https://cognia.cn","ios":"capacitor://localhost","android":"https://localhost"}'
 # Activation order (plan §12): live page first, then automation, then mail.
 FEATURE_INCIDENT_AUTOMATION = "off"
-FEATURE_EMAIL = "off"
-MAIL_FROM = "status@cognia.cn"
+FEATURE_EMAIL = "on"
+# Email Sending is enabled on the status.cognia.cn subdomain only (its own
+# DKIM/SPF/DMARC records under status.cognia.cn), so the cognia.cn apex mail
+# setup stays untouched.
+MAIL_FROM = "noreply@status.cognia.cn"
 MAIL_FROM_NAME = "Cognia Status"
 SUBSCRIBE_ALLOWED_ORIGINS = "https://status.cognia.cn"
 SUBSCRIBE_IP_LIMIT_PER_10MIN = "5"
@@ -78,10 +88,10 @@ SUBSCRIBER_ENC_KEY_ID = "e1"
 SERVICE_VERSION = "0.1.0"
 BUILD_SHA = ""
 
-# Cloudflare Email Sending (Workers Paid, beta). Uncomment once the sender
-# domain is onboarded in the dashboard, then set FEATURE_EMAIL = "on".
-# [[send_email]]
-# name = "EMAIL"
+# Cloudflare Email Sending (Workers Paid, open beta), onboarded for
+# status.cognia.cn with `wrangler email sending enable status.cognia.cn`.
+[[send_email]]
+name = "EMAIL"
 
 [observability]
 enabled = true
@@ -109,7 +119,11 @@ STATUS_ENV = "staging"
 PUBLIC_ORIGIN = "https://cognia-status-staging.workers.dev"
 PUBLIC_PAGE_URL = "https://cognia-status-staging.workers.dev/status/"
 MIRROR_URL = ""
-SIGNALING_URL = "wss://signaling.cognia.cn/signaling"
+# Staging probes the staging relay (`cognia-signaling-staging` on the
+# account's workers.dev subdomain), never production: the Cron refuses the
+# official relay host outside production (probeTargetAllowed in
+# src/probe/cron-probe.ts).
+SIGNALING_URL = "wss://cognia-signaling-staging.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev/signaling"
 CLOUDFLARE_PROBE_ID = "cf-cron"
 PROBE_ORIGIN_PROFILES = '{"web":"https://cognia.cn","ios":"capacitor://localhost","android":"https://localhost"}'
 FEATURE_INCIDENT_AUTOMATION = "off"

@@ -15,7 +15,15 @@ jest.mock("next-intl", () => ({
     return props.children
   },
 }))
-jest.mock("@/i18n/messages", () => ({ loadMessages: jest.fn() }))
+jest.mock("@/i18n/messages", () => ({
+  loadMessages: jest.fn(),
+  startupMessages: {
+    en: { loading: { title: "Loading" } },
+    "zh-CN": { loading: { title: "加载中" } },
+  },
+}))
+let mockPathname: string | null = "/"
+jest.mock("next/navigation", () => ({ usePathname: () => mockPathname }))
 jest.mock("@/components/ui/loading-states", () => ({
   PageLoading: () => <div role="status">loading</div>,
 }))
@@ -25,6 +33,7 @@ const load = loadMessages as jest.Mock
 
 beforeEach(() => {
   mockLocale = "en"
+  mockPathname = "/"
   mockProviders.length = 0
   load.mockReset()
 })
@@ -146,4 +155,24 @@ it("does not download SSR English before the boot locale and settings have resol
   )
   await screen.findByText("workspace")
   expect(load.mock.calls).toEqual([["zh-CN"]])
+})
+
+it("loads only the scoped catalog on the public status document, never the full one", async () => {
+  mockPathname = "/status/"
+  mockLocale = "zh-CN"
+  render(<FullMessagesGate>status page</FullMessagesGate>)
+  await screen.findByText("status page")
+  expect(load).not.toHaveBeenCalled()
+  const messages = mockProviders.at(-1)?.messages as Record<string, Record<string, unknown>>
+  expect(Object.keys(messages).sort()).toEqual(["loading", "publicStatus"])
+  expect(messages.loading).toEqual({ title: "加载中" })
+  expect(messages.publicStatus.brand).toBe("Cognia")
+})
+
+it("keeps loading the full catalog on every other lightweight route", async () => {
+  mockPathname = "/pet-overlay"
+  load.mockResolvedValue({ pet: { title: "Pet" } })
+  render(<FullMessagesGate>overlay</FullMessagesGate>)
+  await screen.findByText("overlay")
+  expect(load.mock.calls).toEqual([["en"]])
 })

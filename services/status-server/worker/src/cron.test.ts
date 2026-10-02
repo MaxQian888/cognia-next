@@ -7,7 +7,7 @@ import { FakeRelay } from "../../probe/src/testing/fake-relay"
 import { currentMinute, minuteMs, resetCore, seedRegistry, testEnv } from "../test/helpers"
 import { runAggregation, runScheduled, RETENTION_MINUTE, type CronModules } from "./cron"
 import { acquireLease } from "./platform/lease"
-import { runCloudflareProbe } from "./probe/cron-probe"
+import { probeTargetAllowed, runCloudflareProbe } from "./probe/cron-probe"
 import { loadRegistry } from "./registry/registry"
 import type { ReconcileInput } from "./seams"
 
@@ -105,6 +105,41 @@ describe("Cloudflare Cron observer", () => {
       ],
       [{ probeId: "cf-cron", effectiveMinute: minute - 60 }]
     )
+  })
+
+  it("never lets a non-production deployment probe the official production relay", async () => {
+    const official = "wss://signaling.cognia.cn/signaling"
+    expect(probeTargetAllowed({ STATUS_ENV: "staging", SIGNALING_URL: official })).toBe(false)
+    expect(
+      probeTargetAllowed({
+        STATUS_ENV: "development",
+        SIGNALING_URL: "wss://SIGNALING.cognia.cn/x",
+      })
+    ).toBe(false)
+    expect(probeTargetAllowed({ STATUS_ENV: "staging", SIGNALING_URL: "not a url" })).toBe(false)
+    expect(probeTargetAllowed({ STATUS_ENV: "production", SIGNALING_URL: official })).toBe(true)
+    expect(
+      probeTargetAllowed({
+        STATUS_ENV: "staging",
+        SIGNALING_URL: "wss://cognia-signaling-staging.example.workers.dev/signaling",
+      })
+    ).toBe(true)
+
+    const relay = new FakeRelay()
+    const runs = await runCloudflareProbe({
+      env: envWith({ STATUS_ENV: "staging", SIGNALING_URL: official }),
+      registry: await loadRegistry(db()),
+      scheduledTimeMs: scheduled,
+      transport: relay,
+      now: clock,
+    })
+    expect(runs).toEqual([])
+    expect(relay.origins).toEqual([])
+    const slot = await db()
+      .prepare("SELECT minute FROM reference_slots WHERE minute = ?")
+      .bind(scheduled / 60_000)
+      .first()
+    expect(slot).toBeNull()
   })
 
   it("runs every due profile through the real protocol core and records the reference minute", async () => {

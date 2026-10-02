@@ -6,6 +6,8 @@ import { test } from "node:test"
 
 import {
   buildStatusSite,
+  REPO_ROOT,
+  STATUS_ASSET_HEADERS,
   collectCssRefs,
   collectHtmlRefs,
   collectLocalLinks,
@@ -138,6 +140,7 @@ test("buildStatusSite copies only the status closure and writes a manifest", asy
     assert.ok(!existsSync(path.join(dest, "settings.html")))
     assert.ok(!existsSync(path.join(dest, "_next", "static", "chunks", "other-route.js")))
     assert.match(manifest.files.find((file) => file.path === "/status/index.html").sha256, /^[0-9a-f]{64}$/)
+    assert.equal(readFileSync(path.join(dest, "_headers"), "utf8"), STATUS_ASSET_HEADERS)
   } finally {
     rmSync(out, { recursive: true, force: true })
     rmSync(dest, { recursive: true, force: true })
@@ -148,4 +151,22 @@ test("crawlLocales covers every app locale so each lazily loaded catalog chunk s
   // A zh-CN browser loads the zh-CN catalog chunk; crawling only the default
   // locale shipped a status site that failed to load its language pack.
   assert.deepEqual(await crawlLocales(), ["en", "zh-CN"])
+})
+
+test("_headers carries every security header the Worker sets on assets it serves", () => {
+  // Files the asset layer serves directly (wrangler.toml run_worker_first)
+  // must not lose the headers the Worker adds to the ones it serves.
+  const workerSource = readFileSync(
+    path.join(REPO_ROOT, "services", "status-server", "worker", "src", "assets.ts"),
+    "utf8"
+  )
+  const workerHeaders = [...workerSource.matchAll(/headers\.set\("([a-z-]+)", "([^"]+)"\)/g)]
+    .filter(([, name]) => name !== "content-security-policy" && name !== "cache-control")
+    .map(([, name, value]) => [name, value])
+  assert.ok(workerHeaders.length >= 4)
+  const lines = STATUS_ASSET_HEADERS.split("\n").map((line) => line.trim().toLowerCase())
+  for (const [name, value] of workerHeaders) {
+    assert.ok(lines.includes(`${name}: ${value}`.toLowerCase()), `${name} missing from _headers`)
+  }
+  assert.match(STATUS_ASSET_HEADERS, /\/_next\/static\/\*\n {2}Cache-Control: public, max-age=31536000, immutable/)
 })
