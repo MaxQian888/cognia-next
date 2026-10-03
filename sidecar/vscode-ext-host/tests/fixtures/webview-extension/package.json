@@ -1,0 +1,23 @@
+{
+  "name": "webview-extension",
+  "publisher": "cognia",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "webviewFixture.sidebar",
+          "name": "%sidebar.name%"
+        }
+      ]
+    }
+  }
+}

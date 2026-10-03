@@ -15,6 +15,12 @@ jest.mock("@/lib/plugin/core/transport", () => ({
   listPluginPermissions: (...args: unknown[]) => listPermissions(...args),
 }))
 
+// Every method the host sends is backed today, so the refusal path is
+// exercised with a stand-in for one the host gains before the renderer does.
+jest.mock("./unavailable-methods", () => ({
+  EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS: ["fake:unbacked"],
+}))
+
 import {
   __resetCommandRegistryForTesting,
   executeCommand,
@@ -193,7 +199,7 @@ describe("VS Code host-neutral runtime handlers", () => {
       })
     ).toMatchObject({ error: { code: -32000 } })
 
-    const unavailable = await request("window:createWebviewPanel", {
+    const unavailable = await request("fake:unbacked", {
       extensionId: "publisher.extension",
     })
     expect(unavailable).toMatchObject({

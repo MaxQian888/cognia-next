@@ -39,12 +39,14 @@ import type { TextDocument, TextEditor } from "./documents"
 import type { WorkspaceFolder } from "./workspace-folders"
 import type { ShimDependencies } from "./index"
 import { createTerminalWindowMembers } from "./terminal"
+import { createWebviewWindowMembers } from "./webviews"
 
 type MessageItem = string | { title: string; isCloseAffordance?: boolean }
 
 type TerminalWindowMembers = ReturnType<typeof createTerminalWindowMembers>
+type WebviewWindowMembers = ReturnType<typeof createWebviewWindowMembers>
 
-interface SidecarWindow extends TerminalWindowMembers {
+interface SidecarWindow extends TerminalWindowMembers, WebviewWindowMembers {
   // Messages: `(message, ...items)` or `(message, options, ...items)`.
   showInformationMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
   showWarningMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
@@ -96,17 +98,6 @@ interface SidecarWindow extends TerminalWindowMembers {
     dispose(): void
   }
 
-  // Webview
-  createWebviewPanel(
-    viewType: string,
-    title: string,
-    showOptions: number | { viewColumn: number; preserveFocus?: boolean },
-    options?: Record<string, unknown>
-  ): WebviewPanel
-  registerWebviewViewProvider(
-    viewId: string,
-    provider: { resolveWebviewView: (view: WebviewView) => unknown }
-  ): Disposable
   registerUriHandler(handler: { handleUri: (uri: Uri) => unknown }): Disposable
 
   // Status bar
@@ -134,39 +125,23 @@ interface SaveDialogOptions {
   title?: string
 }
 
-export interface WebviewPanel {
-  readonly viewType: string
-  readonly webview: Webview
-  title: string
-  reveal(viewColumn?: number, preserveFocus?: boolean): void
-  dispose(): void
-  onDidChangeViewState(listener: (e: { webviewPanel: WebviewPanel }) => void): Disposable
-  onDidDispose(listener: () => void): Disposable
-}
-
-export interface WebviewView {
-  readonly webview: Webview
-  readonly viewType: string
-  show(preserveFocus?: boolean): void
-  onDidChangeVisibility(listener: () => void): Disposable
-  onDidDispose(listener: () => void): Disposable
-  visible: boolean
-}
-
-export interface Webview {
-  html: string
-  cspSource: string
-  postMessage(message: unknown): Promise<boolean>
-  onDidReceiveMessage(listener: (e: unknown) => void): Disposable
-  asWebviewUri(uri: Uri): Uri
-}
-
 export type OutputChannel = ReturnType<typeof createOutputChannel>
 
 export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
   const { connection, extensionId } = deps
   const documents = deps.documents
   let uriHandlerRegistered = false
+  const webviews = createWebviewWindowMembers({
+    registry: deps.webviews,
+    connection,
+    extensionId,
+    extensionPath: () => deps.ownedPaths().readOnly[0],
+    defaultRoots: () => [
+      ...deps.ownedPaths().readOnly.slice(0, 1),
+      ...(deps.folders.folders ?? []).map((folder) => folder.uri.fsPath),
+    ],
+    registerProviderCallback: deps.registerProviderCallback,
+  })
   const terminals = createTerminalWindowMembers({
     registry: deps.terminals,
     connection,
@@ -310,39 +285,9 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
     onDidChangeTextEditorOptions(listener) {
       return documents.onDidChangeOptions.event(listener)
     },
-    createWebviewPanel(viewType, title, showOptions, options) {
-      return buildWebviewPanel(connection, extensionId, {
-        viewType,
-        title,
-        showOptions,
-        options,
-      })
-    },
-    registerWebviewViewProvider(viewId, provider) {
-      const token = `wvv:${extensionId}:${viewId}`
-      deps.registerProviderCallback(token, async (_payload) => {
-        const view = buildWebviewView(connection, extensionId, viewId)
-        try {
-          await Promise.resolve(provider.resolveWebviewView(view))
-        } catch (err) {
-          process.stderr.write(
-            `[vscode-shim] webview provider threw: ${err instanceof Error ? err.message : String(err)}\n`
-          )
-        }
-        return { ok: true }
-      })
-      void connection.sendRequest("window:registerWebviewViewProvider", {
-        extensionId,
-        viewId,
-        token,
-      })
-      return new Disposable(() => {
-        void connection.sendNotification("window:unregisterWebviewViewProvider", {
-          extensionId,
-          viewId,
-        })
-      })
-    },
+    createWebviewPanel: webviews.createWebviewPanel,
+    registerWebviewViewProvider: webviews.registerWebviewViewProvider,
+    registerWebviewPanelSerializer: webviews.registerWebviewPanelSerializer,
     registerUriHandler(handler) {
       // As in VS Code, one handler at a time; the app routes
       // `cognia://<extension id>/...` links to it.
@@ -400,150 +345,4 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
       createOutputChannel(connection, extensionId, name, options),
   }
   return api
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// Object builders
-// ────────────────────────────────────────────────────────────────────────
-
-function buildWebviewPanel(
-  connection: ShimDependencies["connection"],
-  extensionId: string,
-  init: { viewType: string; title: string; showOptions: unknown; options: unknown }
-): WebviewPanel {
-  const panelId = `panel:${extensionId}:${Math.random().toString(36).slice(2, 10)}`
-  const messageEmitter = new EventEmitter<unknown>()
-  const stateEmitter = new EventEmitter<{ webviewPanel: WebviewPanel }>()
-  const disposeEmitter = new EventEmitter<void>()
-  let title = init.title
-  let html = ""
-
-  void connection.sendRequest("window:createWebviewPanel", {
-    extensionId,
-    panelId,
-    viewType: init.viewType,
-    title,
-    showOptions: init.showOptions,
-    options: init.options,
-  })
-
-  connection.onNotification(`webview:${panelId}:message`, (data) => {
-    messageEmitter.fire(data)
-  })
-  connection.onNotification(`webview:${panelId}:viewState`, () => {
-    stateEmitter.fire({ webviewPanel: panel })
-  })
-  connection.onNotification(`webview:${panelId}:dispose`, () => {
-    disposeEmitter.fire(undefined)
-  })
-
-  const webview: Webview = {
-    get html() {
-      return html
-    },
-    set html(value: string) {
-      html = value
-      void connection.sendNotification("webview:setHtml", { panelId, html: value })
-    },
-    get cspSource() {
-      return "cognia-webview://"
-    },
-    postMessage(message): Promise<boolean> {
-      return connection.sendRequest("webview:postMessage", { panelId, message })
-    },
-    onDidReceiveMessage(listener): Disposable {
-      return messageEmitter.event(listener)
-    },
-    asWebviewUri(uri): Uri {
-      return uri // The renderer-side bridge prefixes the resource scheme.
-    },
-  }
-
-  const panel: WebviewPanel = {
-    viewType: init.viewType,
-    webview,
-    get title() {
-      return title
-    },
-    set title(value: string) {
-      title = value
-      void connection.sendNotification("webview:setTitle", { panelId, title: value })
-    },
-    reveal(viewColumn, preserveFocus) {
-      void connection.sendNotification("webview:reveal", { panelId, viewColumn, preserveFocus })
-    },
-    dispose() {
-      void connection.sendNotification("webview:dispose", { panelId })
-    },
-    onDidChangeViewState(listener) {
-      return stateEmitter.event(listener)
-    },
-    onDidDispose(listener) {
-      return disposeEmitter.event(listener)
-    },
-  }
-  return panel
-}
-
-function buildWebviewView(
-  connection: ShimDependencies["connection"],
-  extensionId: string,
-  viewId: string
-): WebviewView {
-  const panelId = `view:${extensionId}:${viewId}`
-  const messageEmitter = new EventEmitter<unknown>()
-  const visibilityEmitter = new EventEmitter<void>()
-  const disposeEmitter = new EventEmitter<void>()
-  let visible = true
-  let html = ""
-
-  connection.onNotification(`webview:${panelId}:message`, (data) => {
-    messageEmitter.fire(data)
-  })
-  connection.onNotification(`webview:${panelId}:visibility`, (params) => {
-    visible = (params as { visible: boolean }).visible
-    visibilityEmitter.fire(undefined)
-  })
-
-  const webview: Webview = {
-    get html() {
-      return html
-    },
-    set html(value: string) {
-      html = value
-      void connection.sendNotification("webview:setHtml", { panelId, html: value })
-    },
-    get cspSource() {
-      return "cognia-webview://"
-    },
-    postMessage(message): Promise<boolean> {
-      return connection.sendRequest("webview:postMessage", { panelId, message })
-    },
-    onDidReceiveMessage(listener): Disposable {
-      return messageEmitter.event(listener)
-    },
-    asWebviewUri(uri): Uri {
-      return uri
-    },
-  }
-
-  return {
-    webview,
-    viewType: viewId,
-    show(preserveFocus) {
-      void connection.sendNotification("webview:show", { panelId, preserveFocus })
-    },
-    onDidChangeVisibility(listener) {
-      return visibilityEmitter.event(listener)
-    },
-    onDidDispose(listener) {
-      return disposeEmitter.event(listener)
-    },
-    get visible() {
-      return visible
-    },
-    set visible(_value: boolean) {
-      // VS Code spec: this is read-only at runtime, but extensions can show()/hide().
-    },
-  }
 }

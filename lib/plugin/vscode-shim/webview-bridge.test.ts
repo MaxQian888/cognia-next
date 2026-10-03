@@ -1,412 +1,117 @@
 import {
   __resetWebviewBridgeForTesting,
-  acquireVsCodeApiPolyfillSource,
-  asWebviewUri,
-  attachHostFrame,
-  createWebviewPanel,
-  detachHostFrame,
-  disposeWebviewPanel,
-  disposeWebviewPanelsByExtension,
-  getCspSource,
-  getPanel,
-  getState,
-  listPanels,
-  listPanelsByExtension,
-  notifyViewStateChange,
-  onDidChangeViewState,
-  onDidDispose,
-  onDidReceiveMessage,
-  postMessageToWebview,
-  setHtml,
-  setResourceUriRoot,
-  setState,
-  setTitle,
-  type HostFrame,
-  type WebviewMessage,
+  addWebview,
+  attachWebviewFrame,
+  DEFAULT_WEBVIEW_OPTIONS,
+  getSelectedWebview,
+  getWebview,
+  listWebviews,
+  postToWebview,
+  removeWebview,
+  selectWebview,
+  setWebviewState,
+  subscribeWebviews,
+  updateWebview,
 } from "./webview-bridge"
 
-function makeFakeFrame(panelId: string): HostFrame & {
-  setDocs: string[]
-  posts: WebviewMessage[]
-  fire: (msg: WebviewMessage) => void
-  destroyed: boolean
-} {
-  const setDocs: string[] = []
-  const posts: WebviewMessage[] = []
-  const listeners: Array<(msg: WebviewMessage) => void> = []
-  let destroyed = false
-  const fire = (msg: WebviewMessage) => listeners.forEach((l) => l(msg))
-  return {
-    panelId,
-    setDocs,
-    posts,
-    fire,
-    get destroyed() {
-      return destroyed
-    },
-    setSrcDoc: (html) => {
-      setDocs.push(html)
-    },
-    post: (msg) => {
-      posts.push(msg)
-    },
-    onMessage: (listener) => {
-      listeners.push(listener)
-      return () => {
-        const idx = listeners.indexOf(listener)
-        if (idx >= 0) listeners.splice(idx, 1)
-      }
-    },
-    destroy: () => {
-      destroyed = true
-    },
-  }
-}
+const panel = (handle: string) => ({
+  handle,
+  pluginId: "acme.ext",
+  kind: "panel" as const,
+  viewType: "acme.preview",
+  title: handle,
+  html: "",
+  options: DEFAULT_WEBVIEW_OPTIONS,
+})
 
-describe("webview-bridge", () => {
-  beforeEach(() => __resetWebviewBridgeForTesting())
+beforeEach(() => __resetWebviewBridgeForTesting())
 
-  describe("panel CRUD", () => {
-    it("creates a panel with default state", () => {
-      const panel = createWebviewPanel({
-        extensionId: "ext.a",
-        viewType: "ext.a.sidebar",
-        title: "Cline",
-        type: "view",
-        hostSlot: "sidebar.left",
-        options: { enableScripts: true },
-        initialHtml: "<p>hi</p>",
-      })
-      expect(panel.panelId).toBeDefined()
-      expect(panel.visible).toBe(true)
-      expect(panel.active).toBe(true)
-      expect(panel.disposed).toBe(false)
-      expect(getPanel(panel.panelId)).toBe(panel)
-    })
+it("adds webviews in order, selecting a new panel unless asked not to", () => {
+  const changes = jest.fn()
+  subscribeWebviews(changes)
+  addWebview(panel("a"), { select: false })
+  expect(getSelectedWebview()).toBe("a")
+  addWebview(panel("b"), { select: false })
+  expect(getSelectedWebview()).toBe("a")
+  addWebview(panel("c"), { select: true })
+  expect(getSelectedWebview()).toBe("c")
+  expect(listWebviews().map((webview) => webview.handle)).toEqual(["a", "b", "c"])
+  expect(changes).toHaveBeenCalledTimes(3)
+  expect(getWebview("a")).toMatchObject({ revision: 0, resolved: true, state: undefined })
+  const view = addWebview({ ...panel("v"), kind: "view", token: "t" }, { select: false })
+  expect(view.resolved).toBe(false)
+})
 
-    it("lists panels and filters by extension", () => {
-      const a1 = createWebviewPanel({
-        extensionId: "ext.a",
-        viewType: "v1",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const a2 = createWebviewPanel({
-        extensionId: "ext.a",
-        viewType: "v2",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      createWebviewPanel({
-        extensionId: "ext.b",
-        viewType: "v3",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      expect(listPanels()).toHaveLength(3)
-      expect(
-        listPanelsByExtension("ext.a")
-          .map((p) => p.panelId)
-          .sort()
-      ).toEqual([a1.panelId, a2.panelId].sort())
-    })
+it("keeps the snapshot stable until something changes", () => {
+  addWebview(panel("a"), { select: true })
+  const first = listWebviews()
+  expect(listWebviews()).toBe(first)
+  updateWebview("a", { title: "A" })
+  expect(listWebviews()).not.toBe(first)
+})
 
-    it("disposes panels and fires onDidDispose synchronously", () => {
-      const panel = createWebviewPanel({
-        extensionId: "ext.a",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const disposed = jest.fn()
-      onDidDispose(panel.panelId, disposed)
-      expect(disposeWebviewPanel(panel.panelId)).toBe(true)
-      expect(disposed).toHaveBeenCalledTimes(1)
-      expect(getPanel(panel.panelId)).toBeUndefined()
-      // Second dispose is idempotent.
-      expect(disposeWebviewPanel(panel.panelId)).toBe(false)
-    })
-
-    it("bulk-disposes by extension id", () => {
-      createWebviewPanel({
-        extensionId: "ext.a",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      createWebviewPanel({
-        extensionId: "ext.a",
-        viewType: "v2",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      createWebviewPanel({
-        extensionId: "ext.b",
-        viewType: "v3",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      expect(disposeWebviewPanelsByExtension("ext.a")).toBe(2)
-    })
-
-    it("survives a dispose listener that throws", () => {
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
-      try {
-        const panel = createWebviewPanel({
-          extensionId: "x",
-          viewType: "v",
-          title: "T",
-          type: "panel",
-          options: {},
-          initialHtml: "",
-        })
-        onDidDispose(panel.panelId, () => {
-          throw new Error("listener boom")
-        })
-        disposeWebviewPanel(panel.panelId)
-        expect(warn).toHaveBeenCalled()
-      } finally {
-        warn.mockRestore()
-      }
-    })
+it("reloads on new html or options, even the same html, but not on a title", () => {
+  addWebview(panel("a"), { select: true })
+  updateWebview("a", { html: "<p>x</p>" })
+  updateWebview("a", { html: "<p>x</p>" })
+  updateWebview("a", { options: { ...DEFAULT_WEBVIEW_OPTIONS, enableScripts: true } })
+  updateWebview("a", {
+    title: "T",
+    description: "d",
+    badge: { value: 2, tooltip: "two" },
+    resolved: true,
   })
-
-  describe("frame attachment", () => {
-    it("replays the html on attach", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "<p>hi</p>",
-      })
-      const frame = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, frame)
-      expect(frame.setDocs).toEqual(["<p>hi</p>"])
-    })
-
-    it("setHtml retransmits to the attached frame", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "v1",
-      })
-      const frame = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, frame)
-      setHtml(panel.panelId, "v2")
-      expect(frame.setDocs).toEqual(["v1", "v2"])
-    })
-
-    it("postMessageToWebview forwards via the frame", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const frame = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, frame)
-      expect(postMessageToWebview(panel.panelId, { hi: 1 })).toBe(true)
-      expect(frame.posts).toEqual([{ data: { hi: 1 } }])
-    })
-
-    it("postMessageToWebview returns false when no frame is attached", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      expect(postMessageToWebview(panel.panelId, { x: 1 })).toBe(false)
-    })
-
-    it("onDidReceiveMessage hears messages from the frame", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const frame = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, frame)
-      const received: WebviewMessage[] = []
-      onDidReceiveMessage(panel.panelId, (msg) => received.push(msg))
-      frame.fire({ data: { kind: "hello" } })
-      expect(received).toEqual([{ data: { kind: "hello" } }])
-    })
-
-    it("detachHostFrame stops further deliveries", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const frame = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, frame)
-      detachHostFrame(panel.panelId)
-      expect(postMessageToWebview(panel.panelId, { x: 1 })).toBe(false)
-    })
-
-    it("attachHostFrame on a disposed panel destroys the frame immediately", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      disposeWebviewPanel(panel.panelId)
-      const frame = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, frame)
-      expect(frame.destroyed).toBe(true)
-    })
-
-    it("replaces an existing frame on reattach", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "v1",
-      })
-      const first = makeFakeFrame(panel.panelId)
-      const second = makeFakeFrame(panel.panelId)
-      attachHostFrame(panel.panelId, first)
-      attachHostFrame(panel.panelId, second)
-      expect(second.setDocs).toEqual(["v1"])
-    })
+  expect(getWebview("a")).toMatchObject({
+    revision: 3,
+    html: "<p>x</p>",
+    title: "T",
+    description: "d",
+    badge: { value: 2, tooltip: "two" },
   })
+  updateWebview("a", { description: null, badge: null })
+  expect(getWebview("a")?.description).toBeUndefined()
+  expect(getWebview("a")?.badge).toBeUndefined()
+  expect(updateWebview("missing", { title: "x" })).toBe(false)
+})
 
-  describe("state retention", () => {
-    it("round-trips webview-side state through setState / getState", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: { retainContextWhenHidden: true },
-        initialHtml: "",
-      })
-      expect(getState(panel.panelId)).toBeUndefined()
-      setState(panel.panelId, { cursor: 7 })
-      expect(getState(panel.panelId)).toEqual({ cursor: 7 })
-    })
+it("moves the selection to the next tab, else the previous one, when the shown one goes", () => {
+  for (const handle of ["a", "b", "c"]) addWebview(panel(handle), { select: false })
+  selectWebview("b")
+  removeWebview("b")
+  expect(getSelectedWebview()).toBe("c")
+  removeWebview("c")
+  expect(getSelectedWebview()).toBe("a")
+  removeWebview("a")
+  expect(getSelectedWebview()).toBeNull()
+  expect(removeWebview("a")).toBeUndefined()
+  expect(selectWebview("a")).toBe(false)
+})
 
-    it("ignores state writes against a disposed panel", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      disposeWebviewPanel(panel.panelId)
-      setState(panel.panelId, { a: 1 })
-      expect(getState(panel.panelId)).toBeUndefined()
-    })
+it("keeps the frame's saved state, and delivers messages only to a live frame", () => {
+  addWebview(panel("a"), { select: true })
+  setWebviewState("a", { count: 1 })
+  expect(getWebview("a")?.state).toEqual({ count: 1 })
+  expect(postToWebview("a", "hi")).toBe(false)
+  const seen: unknown[] = []
+  const detach = attachWebviewFrame("a", (message) => {
+    seen.push(message)
+    return true
   })
-
-  describe("title + view state events", () => {
-    it("setTitle updates the record", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "old",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      setTitle(panel.panelId, "new")
-      expect(getPanel(panel.panelId)?.title).toBe("new")
-    })
-
-    it("notifyViewStateChange fires listeners", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const events: Array<{ visible: boolean; active: boolean }> = []
-      onDidChangeViewState(panel.panelId, (e) =>
-        events.push({ visible: e.visible, active: e.active })
-      )
-      notifyViewStateChange(panel.panelId, false, false)
-      notifyViewStateChange(panel.panelId, true, true)
-      expect(events).toEqual([
-        { visible: false, active: false },
-        { visible: true, active: true },
-      ])
-    })
-
-    it("no-ops when the state didn't actually change", () => {
-      const panel = createWebviewPanel({
-        extensionId: "x",
-        viewType: "v",
-        title: "T",
-        type: "panel",
-        options: {},
-        initialHtml: "",
-      })
-      const events: number[] = []
-      onDidChangeViewState(panel.panelId, () => events.push(1))
-      notifyViewStateChange(panel.panelId, true, true)
-      expect(events).toHaveLength(0)
-    })
+  expect(postToWebview("a", "hi")).toBe(true)
+  // A newer frame replaces it; the old one's detach leaves the new one.
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+  const detachNewer = attachWebviewFrame("a", () => {
+    throw new Error("broken frame")
   })
-
-  describe("uri / csp helpers", () => {
-    it("asWebviewUri prefixes the resource scheme", () => {
-      expect(asWebviewUri("file:///etc/passwd")).toContain("cognia-webview://")
-    })
-
-    it("asWebviewUri is idempotent for already-prefixed URIs", () => {
-      expect(asWebviewUri("cognia-webview://x")).toBe("cognia-webview://x")
-    })
-
-    it("setResourceUriRoot reconfigures the scheme", () => {
-      setResourceUriRoot("https://cdn.cognia/")
-      expect(asWebviewUri("file:///x")).toContain("https://cdn.cognia/")
-      expect(getCspSource()).toBe("https://cdn.cognia/")
-    })
-
-    it("acquireVsCodeApiPolyfillSource emits valid JS", () => {
-      const src = acquireVsCodeApiPolyfillSource()
-      expect(src).toContain("window.acquireVsCodeApi")
-      expect(src).toContain("postMessage")
-      expect(src).toContain("setState")
-    })
-  })
+  detach()
+  expect(postToWebview("a", "again")).toBe(false)
+  detachNewer()
+  expect(postToWebview("a", "again")).toBe(false)
+  expect(seen).toEqual(["hi"])
+  // A frame that throws counts as not delivered, and says so.
+  expect(warn).toHaveBeenCalledTimes(1)
+  warn.mockRestore()
+  attachWebviewFrame("a", () => true)
+  removeWebview("a")
+  expect(postToWebview("a", "after")).toBe(false)
 })

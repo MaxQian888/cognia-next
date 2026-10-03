@@ -181,6 +181,14 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     presenter: windowPresenter,
     sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
   })
+  // Extensions' webview panels and views, in the extension rail.
+  const { configureVscodeWebviews, createVscodeWebviewDependencies } =
+    await import("@/lib/plugin/vscode-shim/webview-handlers")
+  configureVscodeWebviews(
+    createVscodeWebviewDependencies({
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+    })
+  )
   // Extensions' terminals, as dock tabs.
   const { configureVscodeTerminals, createVscodeTerminalDependencies } =
     await import("@/lib/plugin/vscode-shim/terminal-handlers")
@@ -579,6 +587,9 @@ export async function unloadVscodeExtension(
       const { clearVscodeTerminalsForPlugin } =
         await import("@/lib/plugin/vscode-shim/terminal-handlers")
       clearVscodeTerminalsForPlugin(pluginId)
+      const { clearVscodeWebviewsForPlugin } =
+        await import("@/lib/plugin/vscode-shim/webview-handlers")
+      clearVscodeWebviewsForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

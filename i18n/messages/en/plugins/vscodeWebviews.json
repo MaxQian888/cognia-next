@@ -1,3 +1,8 @@
 {
-  "empty": "No VS Code extensions registered any webviews yet."
+  "empty": "No VS Code extension is showing a webview.",
+  "tabs": "Extension webviews",
+  "close": "Close {title}",
+  "loading": "Loading {title}…",
+  "failed": "{title} could not be shown. Its extension's log has the details.",
+  "from": "From {extension}"
 }

@@ -28741,7 +28741,12 @@
       "unavailable": "This view container is no longer available — its plugin may be disabled."
     },
     "vscodeWebviews": {
-      "empty": "No VS Code extensions registered any webviews yet."
+      "close": "Close {title}",
+      "empty": "No VS Code extension is showing a webview.",
+      "failed": "{title} could not be shown. Its extension's log has the details.",
+      "from": "From {extension}",
+      "loading": "Loading {title}…",
+      "tabs": "Extension webviews"
     },
     "vscodeWindow": {
       "extension": {

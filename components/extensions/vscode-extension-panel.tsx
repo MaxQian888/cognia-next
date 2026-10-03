@@ -1,51 +1,104 @@
 "use client"
 
 /**
- * Sidebar / activity-bar host for VS Code extension WebviewViews.
+ * The VS Code extension webviews, as tabs: panels from
+ * `window.createWebviewPanel` and views from `registerWebviewViewProvider`.
  *
- * The cognia plugin extension points `vscode.sidebar.view`,
- * `vscode.webview.panel`, and `vscode.activity-bar` mount this component.
- * It renders an iframe sandbox for each registered webview panel and
- * wires it into `webview-bridge.ts` so the sidecar's extension code can
- * drive `webview.html`, `postMessage`, `onDidReceiveMessage`, and
- * `onDidChangeViewState`.
- *
- * The iframe runs in a `sandbox="allow-scripts"` jail — no `allow-same-origin`
- * — so the webview can't reach renderer globals. Cross-frame communication
- * is `window.postMessage` only.
+ * One tab is shown at a time. The others are kept alive only when their
+ * webview asked to be (`retainContextWhenHidden`); otherwise their frame is
+ * dropped and rebuilt when shown again, with the state it saved through
+ * `setState`. A view's frame first appears when its tab does, which is when
+ * its provider is asked to fill it. Panels can be closed; views belong to
+ * their extension and stay while it runs.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useSyncExternalStore } from "react"
+import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
-import {
-  acquireVsCodeApiPolyfillSource,
-  attachHostFrame,
-  detachHostFrame,
-  disposeWebviewPanel,
-  listPanels,
-  notifyViewStateChange,
-  setState as setWebviewPanelState,
-  type HostFrame,
-  type WebviewMessage,
-  type WebviewRecord,
-} from "@/lib/plugin/vscode-shim/webview-bridge"
 
-interface VscodeExtensionPanelProps {
-  /**
-   * Slot filter. When set, only panels whose `hostSlot` matches will be
-   * rendered. Lets the host mount three independent panels (left sidebar,
-   * right sidebar, bottom panel) without showing duplicates.
-   */
-  slot?: WebviewRecord["hostSlot"]
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { useExtensionName } from "@/components/plugins/vscode/use-extension-name"
+import {
+  getSelectedWebview,
+  listWebviews,
+  selectWebview,
+  subscribeWebviews,
+  type VscodeWebviewRecord,
+} from "@/lib/plugin/vscode-shim/webview-bridge"
+import { closeWebview } from "@/lib/plugin/vscode-shim/webview-handlers"
+import { cn } from "@/lib/utils"
+
+import { VscodeWebviewFrame } from "./vscode-webview-frame"
+
+export function useVscodeWebviews(): {
+  webviews: readonly VscodeWebviewRecord[]
+  selected: string | null
+} {
+  const webviews = useSyncExternalStore(subscribeWebviews, listWebviews, listWebviews)
+  const selected = useSyncExternalStore(subscribeWebviews, getSelectedWebview, getSelectedWebview)
+  return { webviews, selected }
 }
 
-export function VscodeExtensionPanel({ slot }: VscodeExtensionPanelProps) {
+function WebviewTab({ webview, selected }: { webview: VscodeWebviewRecord; selected: boolean }) {
   const t = useTranslations("plugins.vscodeWebviews")
-  const panels = useWebviewPanels(slot)
-  if (panels.length === 0) {
+  const extension = useExtensionName(webview.pluginId)
+  const tooltip = [webview.title, webview.description, t("from", { extension })]
+    .filter(Boolean)
+    .join(" — ")
+  return (
+    <div
+      className={cn(
+        "flex max-w-48 shrink-0 items-center border-r text-xs",
+        selected ? "bg-background text-foreground" : "bg-muted/40 text-muted-foreground"
+      )}
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selected}
+        aria-controls={`vscode-webview-panel-${webview.handle}`}
+        title={tooltip}
+        onClick={() => selectWebview(webview.handle)}
+        className="flex min-w-0 items-center gap-1.5 px-2 py-1.5"
+      >
+        <span className="truncate">{webview.title || webview.viewType}</span>
+        {webview.description ? (
+          <span className="text-muted-foreground truncate">{webview.description}</span>
+        ) : null}
+        {webview.badge && webview.badge.value > 0 ? (
+          <Badge
+            variant="secondary"
+            className="h-4 px-1 text-[10px]"
+            title={webview.badge.tooltip || undefined}
+          >
+            {webview.badge.value}
+          </Badge>
+        ) : null}
+      </button>
+      {webview.kind === "panel" ? (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="mr-1 size-5"
+          aria-label={t("close", { title: webview.title || webview.viewType })}
+          onClick={() => closeWebview(webview.handle)}
+        >
+          <X className="size-3" />
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+export function VscodeExtensionPanel() {
+  const t = useTranslations("plugins.vscodeWebviews")
+  const { webviews, selected } = useVscodeWebviews()
+  if (webviews.length === 0) {
     return (
       <div
-        className="flex h-full w-full items-center justify-center text-sm text-muted-foreground"
+        className="text-muted-foreground flex h-full w-full items-center justify-center p-4 text-center text-sm"
         data-testid="vscode-extension-panel-empty"
       >
         {t("empty")}
@@ -53,193 +106,35 @@ export function VscodeExtensionPanel({ slot }: VscodeExtensionPanelProps) {
     )
   }
   return (
-    <div className="flex h-full w-full flex-col" data-testid="vscode-extension-panel">
-      {panels.map((p) => (
-        <VscodeWebviewIframe key={p.panelId} panel={p} />
-      ))}
+    <div className="flex h-full min-h-0 w-full flex-col" data-testid="vscode-extension-panel">
+      <div role="tablist" aria-label={t("tabs")} className="flex shrink-0 overflow-x-auto border-b">
+        {webviews.map((webview) => (
+          <WebviewTab
+            key={webview.handle}
+            webview={webview}
+            selected={webview.handle === selected}
+          />
+        ))}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {webviews.map((webview) => {
+          const shown = webview.handle === selected
+          if (!shown && !webview.options.retainContextWhenHidden) return null
+          // A view has no content until its provider has been asked for it.
+          if (webview.kind === "view" && !webview.resolved) return null
+          return (
+            <div
+              key={webview.handle}
+              id={`vscode-webview-panel-${webview.handle}`}
+              role="tabpanel"
+              hidden={!shown}
+              className="absolute inset-0"
+            >
+              <VscodeWebviewFrame webview={webview} shown={shown} />
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
-}
-
-function VscodeWebviewIframe({ panel }: { panel: WebviewRecord }) {
-  const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  // Build the iframe srcDoc once on mount; subsequent setHtml() goes through
-  // the bridge → frame.setSrcDoc → iframe.srcdoc update path.
-  // panel.html is intentionally NOT in the deps — re-running the memo on
-  // every html change would force a full iframe remount and drop the
-  // webview's runtime state. The bridge handles incremental updates.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const initialSrcDoc = useMemo(() => wrapHtmlForWebview(panel.html), [panel.panelId])
-
-  useEffect(() => {
-    const iframe = iframeRef.current
-    if (!iframe) return
-    const messageListeners: Array<(msg: WebviewMessage) => void> = []
-    let stateFromWebview: unknown = undefined
-
-    const frame: HostFrame = {
-      panelId: panel.panelId,
-      setSrcDoc: (html) => {
-        iframe.srcdoc = wrapHtmlForWebview(html)
-      },
-      post: (msg) => {
-        iframe.contentWindow?.postMessage(
-          { __cogniaWebviewKind: "host-message", data: msg.data },
-          "*"
-        )
-      },
-      onMessage: (listener) => {
-        messageListeners.push(listener)
-        return () => {
-          const idx = messageListeners.indexOf(listener)
-          if (idx >= 0) messageListeners.splice(idx, 1)
-        }
-      },
-      destroy: () => {
-        iframe.srcdoc = "about:blank"
-      },
-    }
-
-    const onWindowMessage = (event: MessageEvent) => {
-      if (event.source !== iframe.contentWindow) return
-      const payload = event.data as
-        { __cogniaWebviewKind?: string; data?: unknown; state?: unknown } | undefined
-      if (!payload || typeof payload !== "object") return
-      if (payload.__cogniaWebviewKind === "post" && payload.data !== undefined) {
-        for (const listener of messageListeners) {
-          try {
-            listener({ data: payload.data })
-          } catch (err) {
-            // Listeners must not throw across the bridge boundary.
-
-            console.warn(`vscode-extension-panel: listener threw for ${panel.panelId}:`, err)
-          }
-        }
-      } else if (payload.__cogniaWebviewKind === "set-state") {
-        stateFromWebview = payload.state
-        // Mirror into the bridge so the next mount (after detach/reattach)
-        // can rehydrate.
-        setWebviewPanelState(panel.panelId, stateFromWebview)
-      }
-    }
-
-    window.addEventListener("message", onWindowMessage)
-    attachHostFrame(panel.panelId, frame)
-
-    // Notify viewstate visible+active on mount; visibility tracking is
-    // delegated to IntersectionObserver below.
-    notifyViewStateChange(panel.panelId, true, true)
-
-    let observer: IntersectionObserver | undefined
-    if (typeof IntersectionObserver !== "undefined") {
-      observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            notifyViewStateChange(panel.panelId, entry.isIntersecting, entry.isIntersecting)
-          }
-        },
-        { threshold: 0.01 }
-      )
-      observer.observe(iframe)
-    }
-
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener("message", onWindowMessage)
-      detachHostFrame(panel.panelId)
-    }
-  }, [panel.panelId])
-
-  return (
-    <div
-      className="flex h-full w-full flex-col border-b last:border-b-0"
-      data-testid={`vscode-webview-${panel.panelId}`}
-    >
-      <header className="flex items-center justify-between border-b bg-muted/30 px-2 py-1 text-xs font-medium">
-        <span className="truncate" title={panel.title}>
-          {panel.title}
-        </span>
-        <button
-          type="button"
-          aria-label={`Close ${panel.title}`}
-          onClick={() => disposeWebviewPanel(panel.panelId)}
-          className="rounded px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-        >
-          ×
-        </button>
-      </header>
-      <iframe
-        ref={iframeRef}
-        title={panel.title}
-        srcDoc={initialSrcDoc}
-        sandbox="allow-scripts"
-        className="flex-1 border-0"
-        data-extension-id={panel.extensionId}
-      />
-    </div>
-  )
-}
-
-/**
- * Wrap a webview HTML body with:
- *   - the cognia CSP (matches VS Code semantics — strict by default)
- *   - the `acquireVsCodeApi()` polyfill
- *   - a default `<base target="_self">` so links don't try to navigate the iframe
- */
-function wrapHtmlForWebview(rawHtml: string): string {
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:;" />
-<base target="_self" />
-<script>${acquireVsCodeApiPolyfillSource()}</script>
-</head>
-<body>
-${rawHtml}
-</body>
-</html>`
-}
-
-/**
- * Subscribe to the webview-bridge panel list. Re-renders when panels are
- * added or removed. Uses polling against `listPanels()` because the bridge
- * doesn't expose a global change emitter (only per-panel dispose).
- *
- * 250ms is enough to feel responsive without dominating the event loop —
- * extensions register panels infrequently (once per activate()).
- */
-function useWebviewPanels(slot?: WebviewRecord["hostSlot"]): WebviewRecord[] {
-  const [panels, setPanels] = useState<WebviewRecord[]>(() => filterBySlot(listPanels(), slot))
-  useEffect(() => {
-    let mounted = true
-    const id = setInterval(() => {
-      if (!mounted) return
-      const next = filterBySlot(listPanels(), slot)
-      setPanels((prev) => (panelsShallowEqual(prev, next) ? prev : next))
-    }, 250)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
-  }, [slot])
-  return panels
-}
-
-function filterBySlot(
-  panels: WebviewRecord[],
-  slot: WebviewRecord["hostSlot"] | undefined
-): WebviewRecord[] {
-  if (!slot) return panels
-  return panels.filter((p) => p.hostSlot === slot)
-}
-
-function panelsShallowEqual(a: WebviewRecord[], b: WebviewRecord[]): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i]!.panelId !== b[i]!.panelId) return false
-    if (a[i]!.disposed !== b[i]!.disposed) return false
-    if (a[i]!.title !== b[i]!.title) return false
-  }
-  return true
 }

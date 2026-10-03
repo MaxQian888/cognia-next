@@ -1,69 +1,108 @@
-import { render, screen } from "@testing-library/react"
-import { act } from "react"
+/**
+ * @jest-environment jsdom
+ */
+
+import { act, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { NextIntlClientProvider } from "next-intl"
+
+import enMessages from "@/i18n/messages/en.json"
+
+const mockClose = jest.fn()
+jest.mock("@/lib/plugin/vscode-shim/webview-handlers", () => ({
+  closeWebview: (handle: string) => mockClose(handle),
+}))
+// Frames are tested on their own; here, which ones the tabs keep.
+jest.mock("./vscode-webview-frame", () => ({
+  VscodeWebviewFrame: ({ webview, shown }: { webview: { handle: string }; shown: boolean }) => (
+    <div data-testid={`frame-${webview.handle}`} data-shown={shown} />
+  ),
+}))
+
 import {
   __resetWebviewBridgeForTesting,
-  createWebviewPanel,
+  addWebview,
+  DEFAULT_WEBVIEW_OPTIONS,
+  getSelectedWebview,
+  updateWebview,
+  type VscodeWebviewRecord,
 } from "@/lib/plugin/vscode-shim/webview-bridge"
+
 import { VscodeExtensionPanel } from "./vscode-extension-panel"
 
-describe("<VscodeExtensionPanel />", () => {
-  beforeEach(() => {
-    __resetWebviewBridgeForTesting()
-    jest.useFakeTimers()
-  })
-  afterEach(() => {
-    jest.useRealTimers()
-  })
+const wrap = () =>
+  render(
+    <NextIntlClientProvider locale="en" messages={enMessages}>
+      <VscodeExtensionPanel />
+    </NextIntlClientProvider>
+  )
 
-  it("renders the empty state when no panels exist", () => {
-    render(<VscodeExtensionPanel />)
-    expect(screen.getByTestId("vscode-extension-panel-empty")).toBeInTheDocument()
+function add(handle: string, extra: Partial<VscodeWebviewRecord> = {}, select = false): void {
+  act(() => {
+    addWebview(
+      {
+        handle,
+        pluginId: "acme.ext",
+        kind: "panel",
+        viewType: `acme.${handle}`,
+        title: handle.toUpperCase(),
+        html: "",
+        options: DEFAULT_WEBVIEW_OPTIONS,
+        ...extra,
+      },
+      { select }
+    )
   })
+}
 
-  it("renders an iframe header + iframe for a registered panel", async () => {
-    const panel = createWebviewPanel({
-      extensionId: "ext.cline",
-      viewType: "cline.sidebar",
-      title: "Cline",
-      type: "view",
-      hostSlot: "sidebar.left",
-      options: { enableScripts: true },
-      initialHtml: "<p>hi</p>",
-    })
-    render(<VscodeExtensionPanel slot="sidebar.left" />)
-    // The polling-based panel list runs every 250ms; advance one tick so
-    // the first listPanels() refresh fires.
-    await act(async () => {
-      jest.advanceTimersByTime(300)
-    })
-    expect(screen.getByTestId(`vscode-webview-${panel.panelId}`)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Close Cline/i)).toBeInTheDocument()
-  })
+beforeEach(() => {
+  __resetWebviewBridgeForTesting()
+  mockClose.mockClear()
+})
 
-  it("filters by slot so right-sidebar panels don't show in the left", async () => {
-    const left = createWebviewPanel({
-      extensionId: "ext.a",
-      viewType: "a.view",
-      title: "Left",
-      type: "view",
-      hostSlot: "sidebar.left",
-      options: {},
-      initialHtml: "",
-    })
-    const right = createWebviewPanel({
-      extensionId: "ext.b",
-      viewType: "b.view",
-      title: "Right",
-      type: "view",
-      hostSlot: "sidebar.right",
-      options: {},
-      initialHtml: "",
-    })
-    render(<VscodeExtensionPanel slot="sidebar.left" />)
-    await act(async () => {
-      jest.advanceTimersByTime(300)
-    })
-    expect(screen.queryByTestId(`vscode-webview-${left.panelId}`)).toBeInTheDocument()
-    expect(screen.queryByTestId(`vscode-webview-${right.panelId}`)).not.toBeInTheDocument()
+it("says so when no extension shows a webview", () => {
+  wrap()
+  expect(screen.getByTestId("vscode-extension-panel-empty")).toHaveTextContent(
+    "No VS Code extension is showing a webview."
+  )
+})
+
+it("shows one tab at a time, keeping hidden frames only when asked to", async () => {
+  const user = userEvent.setup()
+  wrap()
+  add("one", {}, true)
+  add("two", { options: { ...DEFAULT_WEBVIEW_OPTIONS, retainContextWhenHidden: true } })
+  add("three")
+  expect(screen.getByRole("tablist", { name: "Extension webviews" })).toBeInTheDocument()
+  expect(screen.getByRole("tab", { name: "ONE" })).toHaveAttribute("aria-selected", "true")
+  expect(screen.getByTestId("frame-one")).toHaveAttribute("data-shown", "true")
+  // Retained even while hidden; the third is not mounted until shown.
+  expect(screen.getByTestId("frame-two")).toHaveAttribute("data-shown", "false")
+  expect(screen.queryByTestId("frame-three")).toBeNull()
+  await user.click(screen.getByRole("tab", { name: "THREE" }))
+  expect(getSelectedWebview()).toBe("three")
+  expect(screen.getByTestId("frame-three")).toHaveAttribute("data-shown", "true")
+  expect(screen.queryByTestId("frame-one")).toBeNull()
+})
+
+it("closes panels, not views, and shows a view only once its provider is asked", async () => {
+  const user = userEvent.setup()
+  wrap()
+  add("panel", {}, true)
+  add("view", { kind: "view", token: "t", resolved: false, description: "2 items" })
+  await user.click(screen.getByRole("button", { name: "Close PANEL" }))
+  expect(mockClose).toHaveBeenCalledWith("panel")
+  expect(screen.queryByRole("button", { name: "Close VIEW" })).toBeNull()
+  expect(screen.getByText("2 items")).toBeInTheDocument()
+  await user.click(screen.getByRole("tab", { name: /VIEW/ }))
+  expect(screen.queryByTestId("frame-view")).toBeNull()
+  act(() => {
+    updateWebview("view", { resolved: true, badge: { value: 4, tooltip: "Four" } })
   })
+  expect(screen.getByTestId("frame-view")).toBeInTheDocument()
+  expect(screen.getByTitle("Four")).toHaveTextContent("4")
+  expect(screen.getByRole("tab", { name: /VIEW/ })).toHaveAttribute(
+    "title",
+    "VIEW — 2 items — From acme.ext"
+  )
 })

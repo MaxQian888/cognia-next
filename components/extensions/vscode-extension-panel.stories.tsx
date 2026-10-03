@@ -1,15 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { VscodeExtensionPanel } from "./vscode-extension-panel"
-import {
-  createWebviewPanel,
-  disposeWebviewPanelsByExtension,
-} from "@/lib/plugin/vscode-shim/webview-bridge"
+import { __resetWebviewBridgeForTesting, addWebview } from "@/lib/plugin/vscode-shim/webview-bridge"
 
 const EXT = "story.sample-ext"
 
-// Host for VS Code extension WebviewViews. Renders an iframe per registered
-// panel, or an empty-state notice when no extension has registered a webview.
+// The extension rail's tabs: a webview panel and a view. Without a running
+// extension host the frames stay in their loading state, which is what this
+// shows besides the tab strip.
 const meta = {
   title: "Extensions/VscodeExtensionPanel",
   component: VscodeExtensionPanel,
@@ -26,25 +24,50 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const WithWebview: Story = {
+const OPTIONS = {
+  enableScripts: false,
+  enableForms: false,
+  enableCommandUris: false,
+  retainContextWhenHidden: false,
+}
+
+export const WithWebviews: Story = {
   beforeEach: () => {
-    disposeWebviewPanelsByExtension(EXT)
-    createWebviewPanel({
-      extensionId: EXT,
-      viewType: "sample.view",
-      title: "Sample Extension",
-      type: "view",
-      hostSlot: "sidebar.right",
-      options: { enableScripts: true },
-      initialHtml: "<h2 style='font-family:sans-serif'>Hello from a VS Code webview</h2>",
-    })
-    return () => disposeWebviewPanelsByExtension(EXT)
+    __resetWebviewBridgeForTesting()
+    addWebview(
+      {
+        handle: "story-panel",
+        pluginId: EXT,
+        kind: "panel",
+        viewType: "sample.preview",
+        title: "Preview",
+        html: "<h2>Hello from a VS Code webview</h2>",
+        options: OPTIONS,
+      },
+      { select: true }
+    )
+    addWebview(
+      {
+        handle: "story-view",
+        pluginId: EXT,
+        kind: "view",
+        viewType: "sample.view",
+        title: "Explorer",
+        description: "2 items",
+        badge: { value: 2, tooltip: "Two items" },
+        html: "",
+        options: OPTIONS,
+        token: "wvv:story",
+      },
+      { select: false }
+    )
+    return () => __resetWebviewBridgeForTesting()
   },
 }
 
-// No registered webviews → the empty-state notice.
+// No webviews: the empty-state notice.
 export const Empty: Story = {
   beforeEach: () => {
-    disposeWebviewPanelsByExtension(EXT)
+    __resetWebviewBridgeForTesting()
   },
 }

@@ -33,6 +33,7 @@ import { DocumentStore, type EditOutcome } from "./vscode-shim/documents"
 import { ConfigurationStore } from "./vscode-shim/configuration"
 import { ExtensionRegistry } from "./vscode-shim/extensions"
 import { TerminalRegistry } from "./vscode-shim/terminal"
+import { WebviewRegistry } from "./vscode-shim/webviews"
 import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
 import type { OwnedPaths } from "./vscode-shim/workspace-fs"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
@@ -159,6 +160,8 @@ const EXTENSIONS = new ExtensionRegistry()
 EXTENSIONS.attach(connection)
 const TERMINALS = new TerminalRegistry()
 TERMINALS.attach(connection)
+const WEBVIEWS = new WebviewRegistry()
+WEBVIEWS.attach(connection)
 
 /** Per extension, the directories it owns (install, storage, logs). */
 const OWNED_PATHS = new Map<string, OwnedPaths>()
@@ -230,6 +233,7 @@ setVscodeShimFactory((extensionId) => {
     configuration: CONFIGURATION,
     extensions: EXTENSIONS,
     terminals: TERMINALS,
+    webviews: WEBVIEWS,
     ownedPaths: () => OWNED_PATHS.get(extensionId) ?? { readOnly: [], readWrite: [] },
     registerProviderCallback,
   })
@@ -286,6 +290,7 @@ connection.onRequest("extension:deactivate", async (params) => {
   ACTIVE_CONTEXTS.delete(extensionId)
   EXTENSIONS.clearExports(extensionId)
   TERMINALS.closeAll(extensionId)
+  WEBVIEWS.closeAll(extensionId)
   return { ok: true }
 })
 

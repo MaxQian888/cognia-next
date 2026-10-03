@@ -25,17 +25,15 @@ Three differences from real VS Code:
 2. `activate` must return `{ registeredCommands, registeredWebviewViews,
 registeredLanguageProviders }`. The host reads that summary to know what the
    extension contributed.
-3. **The shim exposes more of `vscode` than the Host answers.** The Host serves
-   only the calls it has a canonical adapter for; the rest return a
-   deterministic capability error, and some send their request with a bare
-   `void`, so calling one raises an unhandled rejection inside the extension
-   host rather than merely doing nothing. The refused list is
-   `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS` in
-   `lib/plugin/vscode-shim/unavailable-methods.ts` — check it before reaching
-   for an API. Webviews (`window.createWebviewPanel`, webview views) and
-   terminals (`window.createTerminal`) are on it. Output channels, the status
-   bar, messages, quick picks, progress, documents, editors, decorations,
-   `workspace.fs`, `findFiles`, file watchers and settings are served.
+3. **Not every `vscode` namespace does something.** Commands, the window
+   (messages, quick picks, progress, the status bar, output channels, dialogs),
+   documents and editors, languages, `workspace.fs`, `findFiles`, file
+   watchers, settings, `env`, `extensions`, terminals (tabs in the terminal
+   dock) and webviews (tabs in the extension rail) are served. `debug`, `scm`,
+   `tests`, `notebooks` and `comments` are present but inert. Any request the
+   Host does not answer yet is listed in `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS`
+   (`lib/plugin/vscode-shim/unavailable-methods.ts`) and gets a deterministic
+   capability error; the list is empty today.
 
 ## Logging
 

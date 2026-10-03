@@ -18,14 +18,14 @@
  * 2. `activate` must return the registration summary below. The host reads it
  *    to know what this extension contributed, and an extension that returns
  *    nothing looks like one that registered nothing.
- * 3. NOT EVERY SHIMMED API HAS A HOST BEHIND IT. The shim exposes the full VS
- *    Code surface, but the Host answers only the calls it has a canonical
- *    adapter for; the rest get a deterministic capability error. The list is
- *    `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS` in
- *    `lib/plugin/vscode-shim/unavailable-methods.ts`; webviews and terminals
- *    are on it. Some of those send their request with a bare `void`, so
- *    calling one does not merely do nothing: it raises an unhandled rejection
- *    inside the extension host. Check that list before reaching for an API.
+ * 3. NOT EVERY NAMESPACE DOES SOMETHING. Commands, the window, documents,
+ *    editors, languages, workspace files and settings, `env`, `extensions`,
+ *    terminals (tabs in the terminal dock) and webviews (tabs in the
+ *    extension rail) are served; `debug`, `scm`, `tests`, `notebooks` and
+ *    `comments` are present but inert. A request the Host does not answer yet
+ *    is listed in `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS`
+ *    (`lib/plugin/vscode-shim/unavailable-methods.ts`) and gets a
+ *    deterministic capability error; the list is empty today.
  *
  * Logging: write to `console.error` / `console.warn`, never `console.log`.
  * The host process speaks JSON-RPC over stdout and reserves stderr for

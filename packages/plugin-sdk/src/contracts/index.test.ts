@@ -15,10 +15,8 @@ import {
 
 describe("plugin-sdk: contracts", () => {
   it("publishes the vscode RPC methods the Host refuses", () => {
-    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).toContain("window:createWebviewPanel")
-    // Backed methods leave the list.
-    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).not.toContain("window:showQuickPick")
-    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).not.toContain("terminal:create")
+    // Backed methods leave the list; today every method the host sends is backed.
+    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).toEqual([])
   })
 
   it("re-exports capability contract metadata for all canonical capabilities", () => {

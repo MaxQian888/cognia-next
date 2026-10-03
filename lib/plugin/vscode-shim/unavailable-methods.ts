@@ -4,20 +4,13 @@
  */
 
 /**
- * Every outbound request/notification currently exposed by the sidecar but
- * lacking a canonical host-neutral adapter. Registering these is intentional:
- * requests receive a deterministic JSON-RPC capability error immediately and
- * notifications are logged by the dispatcher rather than disappearing as
- * "method not found" noise.
+ * Outbound requests/notifications the sidecar may send that have no renderer
+ * handler yet. Registering these is intentional: requests receive a
+ * deterministic JSON-RPC capability error immediately and notifications are
+ * logged by the dispatcher rather than disappearing as "method not found"
+ * noise.
+ *
+ * Empty while every method the host sends is backed. A method belongs here
+ * when the host gains it before the renderer does.
  */
-export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
-  "webview:dispose",
-  "webview:postMessage",
-  "webview:reveal",
-  "webview:setHtml",
-  "webview:setTitle",
-  "webview:show",
-  "window:createWebviewPanel",
-  "window:registerWebviewViewProvider",
-  "window:unregisterWebviewViewProvider",
-] as const
+export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS: readonly string[] = []

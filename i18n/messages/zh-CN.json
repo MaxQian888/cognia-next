@@ -28741,7 +28741,12 @@
       "unavailable": "此视图容器已不可用——其插件可能已被禁用。"
     },
     "vscodeWebviews": {
-      "empty": "还没有 VS Code 扩展注册任何 Webview。"
+      "close": "关闭 {title}",
+      "empty": "没有 VS Code 扩展正在显示 Webview。",
+      "failed": "无法显示 {title}，详情见该扩展的日志。",
+      "from": "来自 {extension}",
+      "loading": "正在加载 {title}…",
+      "tabs": "扩展 Webview"
     },
     "vscodeWindow": {
       "extension": {

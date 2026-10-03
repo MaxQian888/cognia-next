@@ -153,7 +153,11 @@ export function toExtensionUri(link: ParsedDeepLink): string {
   return `${APP_URI_SCHEME}://${link.pluginId}${rest}`
 }
 
-async function openExternal(pluginId: string, target: string): Promise<boolean> {
+/**
+ * Open a link for an extension, as `env.openExternal` does: also what a click
+ * on a link in one of its webviews does.
+ */
+export async function openExternal(pluginId: string, target: string): Promise<boolean> {
   const scheme = schemeOf(target)
   const d = requireDeps()
   switch (scheme) {
