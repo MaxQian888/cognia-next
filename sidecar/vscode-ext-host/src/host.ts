@@ -31,6 +31,7 @@ import {
 import { ExtensionMode } from "./vscode-shim/api-types"
 import { DocumentStore, type EditOutcome } from "./vscode-shim/documents"
 import { ConfigurationStore } from "./vscode-shim/configuration"
+import { ExtensionRegistry } from "./vscode-shim/extensions"
 import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
 import type { OwnedPaths } from "./vscode-shim/workspace-fs"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
@@ -152,6 +153,10 @@ FOLDERS.attach(connection)
 const CONFIGURATION = new ConfigurationStore()
 CONFIGURATION.attach(connection)
 
+/** The installed VS Code extensions, and the exports of this host's own. */
+const EXTENSIONS = new ExtensionRegistry()
+EXTENSIONS.attach(connection)
+
 /** Per extension, the directories it owns (install, storage, logs). */
 const OWNED_PATHS = new Map<string, OwnedPaths>()
 
@@ -220,6 +225,7 @@ setVscodeShimFactory((extensionId) => {
     documents: DOCUMENTS,
     folders: FOLDERS,
     configuration: CONFIGURATION,
+    extensions: EXTENSIONS,
     ownedPaths: () => OWNED_PATHS.get(extensionId) ?? { readOnly: [], readWrite: [] },
     registerProviderCallback,
   })
@@ -260,6 +266,7 @@ connection.onRequest("extension:activate", async (params) => {
   const context = buildContext(req)
   ACTIVE_CONTEXTS.set(req.extensionId, context)
   const exports = await activateExtension(req.extensionId, context)
+  EXTENSIONS.setExports(req.extensionId, exports)
   return {
     sidecarPid: process.pid,
     registeredCommands: [] as string[],
@@ -273,6 +280,7 @@ connection.onRequest("extension:deactivate", async (params) => {
   const { extensionId } = params as { extensionId: string }
   await deactivateExtension(extensionId)
   ACTIVE_CONTEXTS.delete(extensionId)
+  EXTENSIONS.clearExports(extensionId)
   return { ok: true }
 })
 

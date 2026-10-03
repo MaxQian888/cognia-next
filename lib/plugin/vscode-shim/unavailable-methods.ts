@@ -15,8 +15,6 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "env:clipboardReadText",
   "env:clipboardWriteText",
   "env:openExternal",
-  "extensions:activate",
-  "extensions:get",
   "terminal:create",
   "terminal:dispose",
   "terminal:hide",

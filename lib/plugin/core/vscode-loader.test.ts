@@ -193,7 +193,11 @@ describe("vscode-loader — Tauri mode", () => {
     expect(commands.indexOf("workspace:foldersChanged")).toBeLessThan(
       commands.indexOf("plugin_activate_vscode")
     )
-    // And its settings.
+    // And its settings and the installed extensions.
+    expect(commands.indexOf("extensions:changed")).toBeGreaterThan(-1)
+    expect(commands.indexOf("extensions:changed")).toBeLessThan(
+      commands.indexOf("plugin_activate_vscode")
+    )
     expect(commands.indexOf("workspace:configurationChanged")).toBeGreaterThan(-1)
     expect(commands.indexOf("workspace:configurationChanged")).toBeLessThan(
       commands.indexOf("plugin_activate_vscode")

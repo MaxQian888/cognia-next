@@ -159,6 +159,16 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     })
   )
 
+  // `vscode.extensions`.
+  const { configureVscodeExtensions, createVscodeExtensionsDependencies } =
+    await import("@/lib/plugin/vscode-shim/extensions-handlers")
+  configureVscodeExtensions(
+    createVscodeExtensionsDependencies({
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+      hosts: () => [...vscodeGenerations.keys()],
+    })
+  )
+
   // Wire the monaco-bridge to the Monaco instance already managed by
   // @monaco-editor/react. Loading its prebuilt AMD assets avoids bundling and
   // compiling the full monaco-editor ESM source graph during every dev start.
@@ -423,11 +433,14 @@ export async function loadVscodeDefinition(
           await import("@/lib/plugin/vscode-shim/workspace-file-handlers")
         const { pushVscodeConfiguration } =
           await import("@/lib/plugin/vscode-shim/configuration-handlers")
+        const { pushVscodeExtensions } =
+          await import("@/lib/plugin/vscode-shim/extensions-handlers")
         // As with the document replay: a host that cannot take these reports
         // is failing, which its supervisor handles.
         for (const [what, push] of [
           ["workspace folders", pushWorkspaceFolders],
           ["settings", pushVscodeConfiguration],
+          ["installed extensions", pushVscodeExtensions],
         ] as const) {
           await push(manifest.id).catch((error: unknown) =>
             vscodeLoaderLogger.warn(`VS Code ${what} not delivered`, {
@@ -541,6 +554,9 @@ export async function unloadVscodeExtension(
       const { clearVscodeConfigurationForPlugin } =
         await import("@/lib/plugin/vscode-shim/configuration-handlers")
       clearVscodeConfigurationForPlugin(pluginId)
+      const { clearVscodeExtensionsForPlugin } =
+        await import("@/lib/plugin/vscode-shim/extensions-handlers")
+      clearVscodeExtensionsForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

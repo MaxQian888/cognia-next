@@ -218,3 +218,24 @@ test("settings: declared defaults, reported values, change events and updates", 
     host.stop()
   }
 })
+
+test("extensions: the reported list, its own entry with real exports", async () => {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "ws-ext-")))
+  const { host, run } = await startWorkspace({ folder })
+  try {
+    await host.request("extensions:changed", {
+      extensions: [
+        { id: ID, extensionPath: PATH, isActive: true },
+        { id: "acme.other", extensionPath: folder, isActive: false },
+      ],
+    })
+    assert.deepEqual(await run("workspaceFixture.extensions"), {
+      ids: [ID, "acme.other"],
+      isActive: true,
+      exports: { fixtureApi: 1 },
+      name: "workspace-extension",
+    })
+  } finally {
+    host.stop()
+  }
+})

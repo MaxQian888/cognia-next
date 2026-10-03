@@ -144,5 +144,18 @@ exports.activate = (context) => {
   register("workspaceFixture.setGreeting", (value) =>
     vscode.workspace.getConfiguration("fixture").update("greeting", value, true)
   )
+
+  register("workspaceFixture.extensions", () => {
+    const self = vscode.extensions.getExtension("Cognia.Workspace-Extension")
+    return {
+      ids: vscode.extensions.all.map((extension) => extension.id),
+      isActive: self?.isActive,
+      exports: self?.exports,
+      name: self?.packageJSON.name,
+      missing: vscode.extensions.getExtension("vscode.git"),
+    }
+  })
   register("workspaceFixture.unwatch", () => watcher.dispose())
+
+  return { fixtureApi: 1 }
 }

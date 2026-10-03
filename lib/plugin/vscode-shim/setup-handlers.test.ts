@@ -94,6 +94,7 @@ const EXPECTED_METHODS = [
   "workspace:createFileSystemWatcher",
   "workspace:disposeFileSystemWatcher",
   "workspace:configurationUpdate",
+  "extensions:activate",
   "languages:setLanguageConfiguration",
   "languages:disposeLanguageConfiguration",
   "languages:setTextDocumentLanguage",

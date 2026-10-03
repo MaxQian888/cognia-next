@@ -38,6 +38,7 @@ import {
 import * as apiTypes from "./api-types"
 import type { DocumentStore } from "./documents"
 import type { ConfigurationStore } from "./configuration"
+import type { ExtensionRegistry } from "./extensions"
 import type { WorkspaceFolders } from "./workspace-folders"
 import type { OwnedPaths } from "./workspace-fs"
 import type { CancellationToken } from "./types"
@@ -64,6 +65,8 @@ export interface ShimDependencies {
   connection: RpcConnection
   /** The host's open documents and editors (`documents.ts`). */
   documents: DocumentStore
+  /** The installed VS Code extensions the renderer reports (`extensions.ts`). */
+  extensions: ExtensionRegistry
   /** The settings the renderer reports (`configuration.ts`). */
   configuration: ConfigurationStore
   /** The open workspace folders and file-watcher routing (`workspace-folders.ts`). */
