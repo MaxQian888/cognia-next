@@ -74,6 +74,10 @@ export interface IMonacoModel {
   getLineContent(line: number): string
   isDisposed(): boolean
   getVersionId?(): number
+  getOptions?(): { tabSize: number; insertSpaces: boolean }
+  updateOptions?(options: { tabSize?: number; insertSpaces?: boolean }): void
+  /** Monaco `EndOfLineSequence`: 0 LF, 1 CRLF. */
+  pushEOL?(eol: number): void
   onDidChangeContent(listener: () => void): IDisposable
 }
 
@@ -106,6 +110,23 @@ export interface IMonacoEditor {
   onDidChangeCursorSelection(listener: () => void): IDisposable
   executeEdits(source: string | null, edits: unknown[]): boolean
   deltaDecorations(oldIds: string[], newDecorations: unknown[]): string[]
+  pushUndoStop?(): boolean
+  getContribution?(id: string): unknown
+  revealRange?(range: IMonacoRange): void
+  revealRangeInCenter?(range: IMonacoRange): void
+  revealRangeInCenterIfOutsideViewport?(range: IMonacoRange): void
+  revealRangeAtTop?(range: IMonacoRange): void
+  setSelections?(
+    selections: Array<{
+      selectionStartLineNumber: number
+      selectionStartColumn: number
+      positionLineNumber: number
+      positionColumn: number
+    }>
+  ): void
+  updateOptions?(options: Record<string, unknown>): void
+  getVisibleRanges?(): IMonacoRange[]
+  onDidScrollChange?(listener: () => void): IDisposable
 }
 
 export interface MonacoNamespace {
@@ -203,6 +224,8 @@ export function buildWorkbenchUri(spec: MonacoWorkbenchSpec): string {
  * pulling the full `monaco-editor` package into its dependency graph.
  */
 function adaptEditorForBridge(editor: IMonacoEditor): BridgeMonacoEditor {
+  /** Decoration ids per decoration type, so a type's next set replaces its last. */
+  const decorationIds = new Map<string, string[]>()
   return {
     id: editor.getId(),
     getModel: () => {
@@ -240,11 +263,84 @@ function adaptEditorForBridge(editor: IMonacoEditor): BridgeMonacoEditor {
       editor.executeEdits("workbench", edits as unknown[])
     },
     setDecorations: (typeId, decorations) => {
-      // Bridge issues one decoration set per typeId; the workbench
-      // forwards each batch as a fresh deltaDecorations call. The
-      // bridge's lifecycle owns dedup / cleanup.
-      void typeId
-      editor.deltaDecorations([], decorations as unknown[])
+      // Each type's decorations replace that type's previous ones.
+      const previous = decorationIds.get(typeId) ?? []
+      const next = editor.deltaDecorations(previous, decorations as unknown[])
+      if (next.length > 0) decorationIds.set(typeId, next)
+      else decorationIds.delete(typeId)
+    },
+    pushUndoStop: () => {
+      editor.pushUndoStop?.()
+    },
+    insertSnippet: (snippet, ranges) => {
+      editor.setSelections?.(
+        ranges.map((range) => ({
+          selectionStartLineNumber: range.startLineNumber,
+          selectionStartColumn: range.startColumn,
+          positionLineNumber: range.endLineNumber,
+          positionColumn: range.endColumn,
+        }))
+      )
+      const controller = editor.getContribution?.("snippetController2") as
+        { insert(template: string): void } | null | undefined
+      if (controller) controller.insert(snippet)
+      else
+        editor.executeEdits(
+          "workbench",
+          ranges.map((range) => ({ range, text: snippet }))
+        )
+    },
+    revealRange: (range, revealType) => {
+      // VS Code's TextEditorRevealType: Default 0, InCenter 1, InCenterIfOutsideViewport 2, AtTop 3.
+      if (revealType === 1) editor.revealRangeInCenter?.(range)
+      else if (revealType === 2) editor.revealRangeInCenterIfOutsideViewport?.(range)
+      else if (revealType === 3) editor.revealRangeAtTop?.(range)
+      else editor.revealRange?.(range)
+    },
+    setSelections: (selections) => {
+      editor.setSelections?.(
+        selections.map((selection) => ({
+          selectionStartLineNumber: selection.anchor.lineNumber,
+          selectionStartColumn: selection.anchor.column,
+          positionLineNumber: selection.active.lineNumber,
+          positionColumn: selection.active.column,
+        }))
+      )
+    },
+    updateOptions: (options) => {
+      const model = editor.getModel()
+      const modelOptions = {
+        ...(options.tabSize !== undefined ? { tabSize: options.tabSize } : {}),
+        ...(options.insertSpaces !== undefined ? { insertSpaces: options.insertSpaces } : {}),
+      }
+      if (Object.keys(modelOptions).length > 0) model?.updateOptions?.(modelOptions)
+      // VS Code's TextEditorCursorStyle starts at 1 (Line); Monaco names the same styles.
+      const cursorStyles = [
+        "line",
+        "block",
+        "underline",
+        "line-thin",
+        "block-outline",
+        "underline-thin",
+      ]
+      const editorOptions = {
+        ...(options.cursorStyle !== undefined
+          ? { cursorStyle: cursorStyles[options.cursorStyle - 1] ?? "line" }
+          : {}),
+        // VS Code's TextEditorLineNumbersStyle: Off 0, On 1, Relative 2, Interval 3.
+        ...(options.lineNumbers !== undefined
+          ? { lineNumbers: ["off", "on", "relative", "interval"][options.lineNumbers] ?? "on" }
+          : {}),
+      }
+      if (Object.keys(editorOptions).length > 0) editor.updateOptions?.(editorOptions)
+    },
+    getVisibleRanges: () => editor.getVisibleRanges?.() ?? [],
+    getOptions: () => {
+      const options = editor.getModel()?.getOptions?.()
+      return { tabSize: options?.tabSize ?? 4, insertSpaces: options?.insertSpaces ?? true }
+    },
+    setEndOfLine: (eol) => {
+      editor.getModel()?.pushEOL?.(eol === 2 ? 1 : 0)
     },
   }
 }
@@ -356,6 +452,10 @@ export function mountMonacoWorkbench(
   const contentDisposable = model.onDidChangeContent(() => {
     notifyContentChanged(editor.getId())
   })
+  // Scrolling changes the editor's visible ranges, which extensions can watch.
+  const scrollDisposable = editor.onDidScrollChange?.(() => {
+    notifySelectionChanged(editor.getId())
+  })
   const selectionDisposable = editor.onDidChangeCursorSelection(() => {
     notifySelectionChanged(editor.getId())
     lightBinding.update({ selection: editor.getSelection(), cursor: readCursor() })
@@ -370,6 +470,7 @@ export function mountMonacoWorkbench(
       blurDisposable.dispose()
       contentDisposable.dispose()
       selectionDisposable.dispose()
+      scrollDisposable?.dispose()
       if (bridgeMounted) notifyEditorUnmounted(editor.getId())
       if (
         spec.surface !== "file" &&

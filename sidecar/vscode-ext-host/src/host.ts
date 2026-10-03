@@ -110,8 +110,29 @@ process.on("uncaughtException", (error) => {
  * The open documents and editors every extension in this host sees. Saving
  * goes to the renderer, which owns the text.
  */
-const DOCUMENTS = new DocumentStore((document) =>
-  connection.sendRequest<boolean>("workspace:saveTextDocument", { uri: document.uri.toString() })
+const DOCUMENTS = new DocumentStore(
+  (document) =>
+    connection.sendRequest<boolean>("workspace:saveTextDocument", { uri: document.uri.toString() }),
+  {
+    edit: (editorId, version, edits, options) =>
+      connection.sendRequest<boolean>("window:editorEdit", { editorId, version, edits, options }),
+    insertSnippet: (editorId, version, snippet, ranges, options) =>
+      connection.sendRequest<boolean>("window:editorInsertSnippet", {
+        editorId,
+        version,
+        snippet,
+        ranges,
+        options,
+      }),
+    setDecorations: (editorId, key, decorations) =>
+      void connection.sendNotification("window:setDecorations", { editorId, key, decorations }),
+    revealRange: (editorId, range, revealType) =>
+      void connection.sendNotification("window:revealRange", { editorId, range, revealType }),
+    setSelections: (editorId, selections) =>
+      void connection.sendNotification("window:setSelections", { editorId, selections }),
+    setOptions: (editorId, options) =>
+      void connection.sendNotification("window:setEditorOptions", { editorId, options }),
+  }
 )
 DOCUMENTS.attach(connection)
 

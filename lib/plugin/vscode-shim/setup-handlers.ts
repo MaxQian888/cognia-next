@@ -28,8 +28,6 @@ import {
   handleDisposeLanguageConfiguration,
   handleExtensionCleanup,
   handleLanguagesRegister,
-  handleLanguagesRegisterDecorationType,
-  handleLanguagesSetDecorations,
   handleLanguagesSetDiagnostics,
   handleLanguagesUnregister,
   handleSetLanguageConfiguration,
@@ -45,6 +43,7 @@ import {
 } from "./runtime-handlers"
 import { getVscodeHostSupervisor, type VscodeHostExit } from "./host-supervisor"
 import { clearVscodeWindowUi, installVscodeWindowHandlers } from "./window-handlers"
+import { installVscodeEditorHandlers } from "./editor-handlers"
 import { appendVscodeLog, stderrLevel } from "./vscode-log-buffer"
 
 let installed = false
@@ -164,14 +163,6 @@ export function installVscodeRpcHandlers(): () => void {
     })
   )
   disposers.push(
-    registerMethod("languages:registerDecorationType", (p) =>
-      handleLanguagesRegisterDecorationType(p as never)
-    )
-  )
-  disposers.push(
-    registerMethod("languages:setDecorations", (p) => handleLanguagesSetDecorations(p as never))
-  )
-  disposers.push(
     registerMethod("languages:setLanguageConfiguration", (p) =>
       handleSetLanguageConfiguration(p as never)
     )
@@ -200,6 +191,7 @@ export function installVscodeRpcHandlers(): () => void {
 
   disposers.push(...installVscodeRuntimeRpcHandlers())
   disposers.push(...installVscodeWindowHandlers())
+  disposers.push(...installVscodeEditorHandlers())
 
   // host:* — notifications the Rust host emits about the Node process itself
   // (not the extension): its stderr, and how it ended.

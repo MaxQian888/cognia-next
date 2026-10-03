@@ -13,13 +13,15 @@
  *   - `workspace:documentChanged` `{uri, version, text}` on every edit;
  *   - `workspace:documentClosed` `{uri}` when the last editor on it goes;
  *   - `window:editorsChanged` `{editors, activeId}` whenever the set of
- *     editors, the focused one, or a selection changes.
+ *     editors, the focused one, a selection or the scroll position changes.
  *
  * Each host gets the reports in order through its own queue, so an edit
- * never overtakes the open before it. A host that starts later is brought
- * up to date with {@link DocumentSync.replay} before its extension
- * activates. A provider call names the version it was made against, and the
- * host waits for that edit, so a call never sees older text than Monaco did.
+ * never overtakes the open before it. An editors report still waiting at
+ * the end of a queue is replaced by a newer one rather than followed by it.
+ * A host that starts later is brought up to date with
+ * {@link DocumentSync.replay} before its extension activates. A provider
+ * call names the version it was made against, and the host waits for that
+ * edit, so a call never sees older text than Monaco did.
  */
 
 import { loggers } from "@cognia/logging"
@@ -46,6 +48,11 @@ interface OpenDocument {
   editors: Set<string>
 }
 
+interface WireRange {
+  start: { line: number; character: number }
+  end: { line: number; character: number }
+}
+
 interface WireEditor {
   id: string
   uri: string
@@ -53,6 +60,8 @@ interface WireEditor {
     anchor: { line: number; character: number }
     active: { line: number; character: number }
   }>
+  visibleRanges?: WireRange[]
+  options?: { tabSize: number; insertSpaces: boolean }
 }
 
 export interface DocumentSync {
@@ -96,11 +105,28 @@ export function createDocumentSync(deps: DocumentSyncDependencies): DocumentSync
   /** editor id → the URI it shows. */
   const editorUris = new Map<string, string>()
   const queues = new Map<string, Promise<unknown>>()
+  /**
+   * Per host, an editors report still waiting at the end of its queue.
+   * Selections and scrolling report often; a newer report replaces a waiting
+   * one instead of queueing behind it, so a busy host only gets the latest.
+   */
+  const waitingEditors = new Map<string, { payload: unknown }>()
 
   function enqueue(pluginId: string, method: string, payload: unknown): Promise<void> {
+    const waiting = waitingEditors.get(pluginId)
+    if (method === "window:editorsChanged" && waiting) {
+      waiting.payload = payload
+      return queues.get(pluginId)!.then(() => undefined)
+    }
+    const entry = { payload }
+    if (method === "window:editorsChanged") waitingEditors.set(pluginId, entry)
+    else waitingEditors.delete(pluginId)
     const previous = queues.get(pluginId) ?? Promise.resolve()
     const next = previous
-      .then(() => deps.send(pluginId, method, payload))
+      .then(() => {
+        if (waitingEditors.get(pluginId) === entry) waitingEditors.delete(pluginId)
+        return deps.send(pluginId, method, entry.payload)
+      })
       .catch((error: unknown) => {
         // A host that cannot take the report is crashing or stopping; its
         // supervisor deals with that, and a restarted host is replayed.
@@ -126,7 +152,23 @@ export function createDocumentSync(deps: DocumentSyncDependencies): DocumentSync
     const editors: WireEditor[] = []
     for (const [id, uri] of editorUris) {
       const editor = deps.getEditor(id)
-      if (editor) editors.push({ id, uri, selections: selectionsOf(editor) })
+      if (!editor) continue
+      const visibleRanges = editor.getVisibleRanges?.()
+      const options = editor.getOptions?.()
+      editors.push({
+        id,
+        uri,
+        selections: selectionsOf(editor),
+        ...(visibleRanges && visibleRanges.length > 0
+          ? {
+              visibleRanges: visibleRanges.map((range) => ({
+                start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+                end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+              })),
+            }
+          : {}),
+        ...(options ? { options } : {}),
+      })
     }
     const activeId = deps.getActiveEditorId()
     return { editors, activeId: activeId && editorUris.has(activeId) ? activeId : null }
@@ -224,6 +266,7 @@ export function createDocumentSync(deps: DocumentSyncDependencies): DocumentSync
     },
     forget(pluginId) {
       queues.delete(pluginId)
+      waitingEditors.delete(pluginId)
     },
     openDocuments() {
       return [...documents.keys()]
@@ -234,6 +277,7 @@ export function createDocumentSync(deps: DocumentSyncDependencies): DocumentSync
       documents.clear()
       editorUris.clear()
       queues.clear()
+      waitingEditors.clear()
     },
   }
 }

@@ -227,32 +227,262 @@ export interface WireEditor {
   id: string
   uri: string
   selections: WireSelection[]
+  visibleRanges?: WireEdit["range"][]
+  options?: Partial<EditorOptions>
+}
+
+/** One text change an editor operation makes, in the document's coordinates. */
+export interface WireEdit {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } }
+  text: string
+}
+
+/**
+ * What a `TextEditor` asks of the renderer, which owns the real editor.
+ * Implemented by the host over its connection.
+ */
+export interface EditorOperations {
+  /** Apply `edits` if the document is still at `version`; `false` when it moved on. */
+  edit(
+    editorId: string,
+    version: number,
+    edits: WireEdit[],
+    options: { undoStopBefore: boolean; undoStopAfter: boolean; endOfLine?: number }
+  ): Promise<boolean>
+  insertSnippet(
+    editorId: string,
+    version: number,
+    snippet: string,
+    ranges: WireEdit["range"][],
+    options: { undoStopBefore: boolean; undoStopAfter: boolean }
+  ): Promise<boolean>
+  setDecorations(editorId: string, key: string, decorations: unknown[]): void
+  revealRange(editorId: string, range: WireEdit["range"], revealType: number): void
+  setSelections(editorId: string, selections: WireSelection[]): void
+  setOptions(editorId: string, options: Partial<EditorOptions>): void
+}
+
+export interface EditorOptions {
+  tabSize: number
+  insertSpaces: boolean
+  cursorStyle: number
+  lineNumbers: number
+}
+
+const DEFAULT_EDITOR_OPTIONS: EditorOptions = {
+  tabSize: 4,
+  insertSpaces: true,
+  cursorStyle: 1,
+  lineNumbers: 1,
+}
+
+function wireRangeOf(range: Range): WireEdit["range"] {
+  return {
+    start: { line: range.start.line, character: range.start.character },
+    end: { line: range.end.line, character: range.end.character },
+  }
+}
+
+function wireSelectionOf(selection: Selection): WireSelection {
+  return {
+    anchor: { line: selection.anchor.line, character: selection.anchor.character },
+    active: { line: selection.active.line, character: selection.active.character },
+  }
+}
+
+/**
+ * The builder `TextEditor.edit` hands its callback. Edits are collected and
+ * sent together; like VS Code, overlapping ranges are refused.
+ */
+class TextEditorEdit {
+  readonly edits: Array<{ range: Range; text: string }> = []
+  endOfLine: number | undefined
+
+  constructor(private readonly document: TextDocument) {}
+
+  replace(location: Position | Range, value: string): void {
+    const range = location instanceof Position ? new Range(location, location) : location
+    this.edits.push({ range: this.document.validateRange(range), text: value })
+  }
+
+  insert(location: Position, value: string): void {
+    const at = this.document.validatePosition(location)
+    this.edits.push({ range: new Range(at, at), text: value })
+  }
+
+  delete(location: Range): void {
+    this.edits.push({ range: this.document.validateRange(location), text: "" })
+  }
+
+  setEndOfLine(endOfLine: number): void {
+    this.endOfLine = endOfLine
+  }
+
+  checked(): WireEdit[] {
+    const sorted = [...this.edits].sort((a, b) => a.range.start.compareTo(b.range.start))
+    for (let index = 1; index < sorted.length; index += 1) {
+      const previous = sorted[index - 1].range
+      const current = sorted[index].range
+      if (current.start.isBefore(previous.end)) {
+        throw new Error("Overlapping ranges are not allowed!")
+      }
+    }
+    return this.edits.map((edit) => ({ range: wireRangeOf(edit.range), text: edit.text }))
+  }
 }
 
 export class TextEditor {
-  selections: Selection[]
+  private selectionList: Selection[]
+  private visible: Range[] | undefined
+  private optionValues: EditorOptions
+
   constructor(
     readonly id: string,
     readonly document: TextDocument,
-    selections: Selection[]
+    selections: Selection[],
+    private readonly operations?: EditorOperations,
+    visibleRanges?: Range[],
+    options?: Partial<EditorOptions>
   ) {
-    this.selections = selections
+    this.selectionList = selections
+    this.visible = visibleRanges
+    this.optionValues = { ...DEFAULT_EDITOR_OPTIONS, ...options }
   }
+
+  get selections(): Selection[] {
+    return this.selectionList
+  }
+  /** Setting moves the editor's cursors, as in VS Code. */
+  set selections(value: Selection[]) {
+    this.selectionList = value
+    this.operations?.setSelections(this.id, value.map(wireSelectionOf))
+  }
+
   get selection(): Selection {
-    return this.selections[0] ?? new Selection(new Position(0, 0), new Position(0, 0))
+    return this.selectionList[0] ?? new Selection(new Position(0, 0), new Position(0, 0))
   }
   set selection(value: Selection) {
-    this.selections = [value, ...this.selections.slice(1)]
+    this.selections = [value, ...this.selectionList.slice(1)]
   }
+
+  /** Reported by the renderer; the whole document until it reports otherwise. */
   get visibleRanges(): Range[] {
-    return [new Range(0, 0, Math.max(0, this.document.lineCount - 1), 0)]
+    return this.visible ?? [new Range(0, 0, Math.max(0, this.document.lineCount - 1), 0)]
   }
-  get options(): { tabSize: number; insertSpaces: boolean } {
-    return { tabSize: 2, insertSpaces: true }
+
+  get options(): EditorOptions {
+    const editor = this
+    return new Proxy(this.optionValues, {
+      set(target, field, value) {
+        ;(target as unknown as Record<string | symbol, unknown>)[field] = value
+        editor.operations?.setOptions(editor.id, { [field]: value } as Partial<EditorOptions>)
+        return true
+      },
+    })
   }
+  set options(value: Partial<EditorOptions>) {
+    this.optionValues = { ...this.optionValues, ...value }
+    this.operations?.setOptions(this.id, value)
+  }
+
   get viewColumn(): number | undefined {
     return 1
   }
+
+  /** Updated from the renderer's report, without echoing it back. */
+  applyReport(
+    selections: Selection[],
+    visibleRanges?: Range[],
+    options?: Partial<EditorOptions>
+  ): void {
+    this.selectionList = selections
+    if (visibleRanges) this.visible = visibleRanges
+    if (options) this.optionValues = { ...this.optionValues, ...options }
+  }
+
+  async edit(
+    callback: (builder: TextEditorEdit) => void,
+    options: { undoStopBefore?: boolean; undoStopAfter?: boolean } = {}
+  ): Promise<boolean> {
+    if (this.document.isClosed || !this.operations) return false
+    const builder = new TextEditorEdit(this.document)
+    callback(builder)
+    const edits = builder.checked()
+    if (edits.length === 0 && builder.endOfLine === undefined) return true
+    return this.operations.edit(this.id, this.document.version, edits, {
+      undoStopBefore: options.undoStopBefore ?? true,
+      undoStopAfter: options.undoStopAfter ?? true,
+      ...(builder.endOfLine !== undefined ? { endOfLine: builder.endOfLine } : {}),
+    })
+  }
+
+  async insertSnippet(
+    snippet: { value: string },
+    location?: Position | Range | readonly Position[] | readonly Range[],
+    options: { undoStopBefore?: boolean; undoStopAfter?: boolean } = {}
+  ): Promise<boolean> {
+    if (this.document.isClosed || !this.operations) return false
+    const toRange = (at: Position | Range) => (at instanceof Position ? new Range(at, at) : at)
+    const ranges =
+      location === undefined
+        ? this.selectionList.map((selection) => new Range(selection.start, selection.end))
+        : Array.isArray(location)
+          ? (location as Array<Position | Range>).map(toRange)
+          : [toRange(location as Position | Range)]
+    return this.operations.insertSnippet(
+      this.id,
+      this.document.version,
+      snippet.value,
+      ranges.map(wireRangeOf),
+      {
+        undoStopBefore: options.undoStopBefore ?? true,
+        undoStopAfter: options.undoStopAfter ?? true,
+      }
+    )
+  }
+
+  /** `ranges` are `Range`s or `DecorationOptions` (`{range, hoverMessage, renderOptions}`). */
+  setDecorations(
+    decorationType: { key: string },
+    ranges: ReadonlyArray<Range | { range: Range; hoverMessage?: unknown; renderOptions?: unknown }>
+  ): void {
+    this.operations?.setDecorations(
+      this.id,
+      decorationType.key,
+      ranges.map((entry) =>
+        entry instanceof Range
+          ? { range: wireRangeOf(entry) }
+          : {
+              range: wireRangeOf(entry.range),
+              ...(entry.hoverMessage !== undefined
+                ? { hoverMessage: hoverText(entry.hoverMessage) }
+                : {}),
+              ...(entry.renderOptions !== undefined ? { renderOptions: entry.renderOptions } : {}),
+            }
+      )
+    )
+  }
+
+  revealRange(range: Range, revealType = 0): void {
+    this.operations?.revealRange(this.id, wireRangeOf(range), revealType)
+  }
+
+  /** Deprecated in VS Code; kept so old extensions do not throw. */
+  show(): void {}
+  hide(): void {}
+}
+
+/** A hover message (string, `MarkdownString` or a list of them) as Markdown text. */
+function hoverText(message: unknown): string {
+  const one = (value: unknown) =>
+    typeof value === "string"
+      ? value
+      : typeof value === "object" &&
+          value !== null &&
+          typeof (value as { value?: unknown }).value === "string"
+        ? (value as { value: string }).value
+        : String(value)
+  return Array.isArray(message) ? message.map(one).join("\n\n") : one(message)
 }
 
 function toSelection(wire: WireSelection): Selection {
@@ -283,7 +513,19 @@ export class DocumentStore {
     kind: undefined
   }>()
 
-  constructor(private readonly save: (document: TextDocument) => Promise<boolean>) {}
+  readonly onDidChangeVisibleRanges = new EventEmitter<{
+    textEditor: TextEditor
+    visibleRanges: readonly Range[]
+  }>()
+  readonly onDidChangeOptions = new EventEmitter<{
+    textEditor: TextEditor
+    options: EditorOptions
+  }>()
+
+  constructor(
+    private readonly save: (document: TextDocument) => Promise<boolean>,
+    private readonly operations?: EditorOperations
+  ) {}
 
   /** Answer the renderer's document and editor reports on `connection`. */
   attach(connection: RpcConnection): void {
@@ -383,20 +625,48 @@ export class DocumentStore {
     const previousIds = [...this.editors.keys()].join("\n")
     const next = new Map<string, TextEditor>()
     const selectionChanges: TextEditor[] = []
+    const rangeChanges: TextEditor[] = []
+    const optionChanges: TextEditor[] = []
     for (const entry of wire) {
       const document = this.documents.get(entry.uri)
       if (!document) continue
       const selections = entry.selections.map(toSelection)
+      const visibleRanges = entry.visibleRanges?.map(
+        (range) =>
+          new Range(range.start.line, range.start.character, range.end.line, range.end.character)
+      )
       const existing = this.editors.get(entry.id)
       if (existing && existing.document === document) {
         const changed =
           existing.selections.length !== selections.length ||
           existing.selections.some((selection, index) => !selection.isEqual(selections[index]))
-        existing.selections = selections
+        const rangesChanged =
+          visibleRanges !== undefined &&
+          (existing.visibleRanges.length !== visibleRanges.length ||
+            existing.visibleRanges.some((range, index) => !range.isEqual(visibleRanges[index])))
+        const optionsChanged =
+          entry.options !== undefined &&
+          Object.entries(entry.options).some(
+            ([field, value]) =>
+              (existing.options as unknown as Record<string, unknown>)[field] !== value
+          )
+        existing.applyReport(selections, visibleRanges, entry.options)
         next.set(entry.id, existing)
         if (changed) selectionChanges.push(existing)
+        if (rangesChanged) rangeChanges.push(existing)
+        if (optionsChanged) optionChanges.push(existing)
       } else {
-        next.set(entry.id, new TextEditor(entry.id, document, selections))
+        next.set(
+          entry.id,
+          new TextEditor(
+            entry.id,
+            document,
+            selections,
+            this.operations,
+            visibleRanges,
+            entry.options
+          )
+        )
       }
     }
     this.editors.clear()
@@ -415,6 +685,15 @@ export class DocumentStore {
         selections: editor.selections,
         kind: undefined,
       })
+    }
+    for (const editor of rangeChanges) {
+      this.onDidChangeVisibleRanges.fire({
+        textEditor: editor,
+        visibleRanges: editor.visibleRanges,
+      })
+    }
+    for (const editor of optionChanges) {
+      this.onDidChangeOptions.fire({ textEditor: editor, options: editor.options })
     }
   }
 

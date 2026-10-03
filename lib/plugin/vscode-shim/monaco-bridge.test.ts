@@ -1,3 +1,7 @@
+/**
+ * @jest-environment jsdom
+ */
+
 import {
   __resetMonacoBridgeForTesting,
   configureMonacoBridge,
@@ -21,6 +25,11 @@ import {
   registerDeclarationProvider,
   registerDecorationType,
   registerDefinitionProvider,
+  applyEditorEdit,
+  insertEditorSnippet,
+  revealEditorRange,
+  setEditorOptions,
+  setEditorSelections,
   registerDocumentFormattingProvider,
   registerDocumentHighlightProvider,
   registerDocumentLinkProvider,
@@ -661,21 +670,135 @@ describe("diagnostics", () => {
 })
 
 describe("decorations", () => {
-  it("registers a type and forwards decorations to the editor", () => {
+  const styleText = () => document.getElementById("cognia-vscode-decorations")?.textContent ?? ""
+
+  it("turns a decoration type into CSS classes and replaces an editor's decorations of that type", () => {
     setup()
     const editor = makeFakeEditor("e1", "file:///x.ts")
     notifyEditorMounted(editor)
-    const { typeId } = registerDecorationType({
-      extensionId: "ext.gitlens",
-      options: { className: "blame-line" },
+    registerDecorationType({
+      extensionId: "ext.lens",
+      key: "deco:ext.lens:1",
+      options: {
+        isWholeLine: true,
+        backgroundColor: { id: "editor.rangeHighlightBackground" },
+        after: { contentText: ' "blame"', color: "#888" },
+        rangeBehavior: 1,
+        overviewRulerColor: "red",
+      },
+    })
+    expect(styleText()).toContain("var(--vscode-editor-rangeHighlightBackground")
+    expect(styleText()).toContain('content: " \\"blame\\""')
+
+    expect(
+      setDecorations({
+        editorId: "e1",
+        typeId: "deco:ext.lens:1",
+        decorations: [{ range: wireRange1, hoverMessage: "**who**" }],
+      })
+    ).toBe(true)
+    const [typeId, decorations] = (editor.setDecorations as jest.Mock).mock.calls[0]
+    expect(typeId).toBe("deco:ext.lens:1")
+    expect(decorations).toEqual([
+      {
+        range: range1,
+        options: expect.objectContaining({
+          className: expect.stringMatching(/^vsdeco-.*-text$/),
+          afterContentClassName: expect.stringMatching(/-after$/),
+          isWholeLine: true,
+          stickiness: 1,
+          overviewRuler: { color: "red", position: 7 },
+          hoverMessage: { value: "**who**" },
+        }),
+      },
+    ])
+    expect(setDecorations({ editorId: "nope", typeId: "deco:ext.lens:1", decorations: [] })).toBe(
+      false
+    )
+    expect(setDecorations({ editorId: "e1", typeId: "unknown", decorations: [] })).toBe(false)
+  })
+
+  it("gives per-range render options classes of their own, and cleans everything up", () => {
+    setup()
+    const editor = makeFakeEditor("e1", "file:///x.ts")
+    notifyEditorMounted(editor)
+    registerDecorationType({
+      extensionId: "ext.a",
+      key: "deco:ext.a:1",
+      options: { color: "blue" },
     })
     setDecorations({
       editorId: "e1",
-      typeId,
-      decorations: [{ range: range1, options: { isWholeLine: true } }],
+      typeId: "deco:ext.a:1",
+      decorations: [{ range: wireRange1, renderOptions: { after: { contentText: "x" } } }],
     })
-    expect(editor.setDecorations).toHaveBeenCalledWith(typeId, expect.any(Array))
-    expect(() => setDecorations({ editorId: "nope", typeId, decorations: [] })).not.toThrow()
+    const options = (editor.setDecorations as jest.Mock).mock.calls[0][1][0].options
+    expect(options.inlineClassName).toMatch(/-text$/)
+    expect(options.afterContentClassName).toMatch(/-after$/)
+    expect(styleText()).toContain('content: "x"')
+
+    unregisterByExtension("ext.a")
+    expect((editor.setDecorations as jest.Mock).mock.calls.at(-1)).toEqual(["deco:ext.a:1", []])
+    expect(styleText()).toBe("")
+  })
+})
+
+describe("editor operations", () => {
+  function mountedEditor(version = 3) {
+    setup()
+    const editor = makeFakeEditor("e1", "file:///x.ts")
+    const model = editor.getModel()!
+    model.getVersionId = () => version
+    Object.assign(editor, {
+      pushUndoStop: jest.fn(),
+      insertSnippet: jest.fn(),
+      revealRange: jest.fn(),
+      setSelections: jest.fn(),
+      updateOptions: jest.fn(),
+      setEndOfLine: jest.fn(),
+    })
+    notifyEditorMounted(editor)
+    return editor as Required<MonacoEditor>
+  }
+
+  it("edits only the text the edit was made against, with undo stops", () => {
+    const editor = mountedEditor()
+    expect(
+      applyEditorEdit({
+        editorId: "e1",
+        version: 3,
+        edits: [{ range: wireRange1, text: "new" }],
+        options: { undoStopBefore: true, undoStopAfter: false, endOfLine: 2 },
+      })
+    ).toBe(true)
+    expect(editor.applyEdits).toHaveBeenCalledWith([{ range: range1, text: "new" }])
+    expect(editor.pushUndoStop).toHaveBeenCalledTimes(1)
+    expect(editor.setEndOfLine).toHaveBeenCalledWith(2)
+    expect(applyEditorEdit({ editorId: "e1", version: 2, edits: [] })).toBe(false)
+    expect(applyEditorEdit({ editorId: "gone", version: 3, edits: [] })).toBe(false)
+  })
+
+  it("inserts snippets, reveals ranges, moves cursors and sets options", () => {
+    const editor = mountedEditor()
+    expect(
+      insertEditorSnippet({ editorId: "e1", version: 3, snippet: "f($1)", ranges: [wireRange1] })
+    ).toBe(true)
+    expect(editor.insertSnippet).toHaveBeenCalledWith("f($1)", [range1])
+    expect(insertEditorSnippet({ editorId: "e1", version: 9, snippet: "x", ranges: [] })).toBe(
+      false
+    )
+
+    revealEditorRange({ editorId: "e1", range: wireRange1, revealType: 1 })
+    expect(editor.revealRange).toHaveBeenCalledWith(range1, 1)
+    setEditorSelections({
+      editorId: "e1",
+      selections: [{ anchor: { line: 0, character: 3 }, active: { line: 0, character: 0 } }],
+    })
+    expect(editor.setSelections).toHaveBeenCalledWith([
+      { anchor: { lineNumber: 1, column: 4 }, active: { lineNumber: 1, column: 1 } },
+    ])
+    setEditorOptions({ editorId: "e1", options: { tabSize: 2 } })
+    expect(editor.updateOptions).toHaveBeenCalledWith({ tabSize: 2 })
   })
 })
 

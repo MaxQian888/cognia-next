@@ -5,8 +5,6 @@ import {
   handleDisposeLanguageConfiguration,
   handleExtensionCleanup,
   handleLanguagesRegister,
-  handleLanguagesRegisterDecorationType,
-  handleLanguagesSetDecorations,
   handleLanguagesSetDiagnostics,
   handleLanguagesUnregister,
   handleSetLanguageConfiguration,
@@ -52,8 +50,6 @@ jest.mock("./monaco-bridge", () => {
     registerCallHierarchyProvider: make("callHierarchy"),
     registerTypeHierarchyProvider: make("typeHierarchy"),
     registerLinkedEditingRangeProvider: make("linkedEditing"),
-    registerDecorationType: jest.fn(() => ({ typeId: "decotype-1", dispose: jest.fn() })),
-    setDecorations: jest.fn(),
     setDiagnostics: jest.fn(),
     setLanguageConfiguration: jest.fn(),
     disposeLanguageConfiguration: jest.fn(() => true),
@@ -172,29 +168,6 @@ describe("languages-handler", () => {
       extensionId: "ext-1",
       uri: "canvas:///s/d.ts",
       markers,
-    })
-  })
-
-  it("registerDecorationType returns the bridge typeId", () => {
-    const result = handleLanguagesRegisterDecorationType({
-      extensionId: "ext-1",
-      options: { className: "deco" },
-    })
-    expect(result.typeId).toBe("decotype-1")
-    expect(bridge.registerDecorationType).toHaveBeenCalledTimes(1)
-  })
-
-  it("setDecorations forwards editor/type/decoration payload", () => {
-    const decos = [{ range: {}, options: {} }]
-    handleLanguagesSetDecorations({
-      editorId: "ed-1",
-      typeId: "decotype-1",
-      decorations: decos,
-    })
-    expect(bridge.setDecorations).toHaveBeenCalledWith({
-      editorId: "ed-1",
-      typeId: "decotype-1",
-      decorations: decos,
     })
   })
 

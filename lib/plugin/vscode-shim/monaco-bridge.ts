@@ -65,6 +65,15 @@ import {
   type VscodeWorkspaceEdit,
 } from "./lsp-protocol-adapter"
 import {
+  __resetDecorationCssForTesting,
+  buildDecorationStyles,
+  installDecorationCss,
+  removeDecorationCss,
+  unsupportedDecorationOptions,
+  type DecorationClasses,
+  type DecorationRenderOptions,
+} from "./decoration-styles"
+import {
   monacoMarkersToVscodeDiagnostics,
   toMonacoCodeActions,
   toMonacoCodeLenses,
@@ -124,7 +133,29 @@ export interface MonacoEditor {
   getSelections?(): Array<{ anchor: MonacoPosition; active: MonacoPosition }>
   /** Replace the editor's text via Monaco's text-edit API. */
   applyEdits(edits: MonacoTextEdit[]): void
+  /**
+   * Replace this editor's decorations of `typeId` with `decorations` (an
+   * empty list removes them).
+   */
   setDecorations(typeId: string, decorations: MonacoDecoration[]): void
+  /** Close an undo group, so the next edit undoes separately. */
+  pushUndoStop?(): void
+  /** Insert a snippet (`$1`, `${2:x}` …) at each range, as Monaco's snippet controller does. */
+  insertSnippet?(snippet: string, ranges: MonacoRange[]): void
+  /** Scroll `range` into view; `revealType` is VS Code's `TextEditorRevealType`. */
+  revealRange?(range: MonacoRange, revealType: number): void
+  setSelections?(selections: Array<{ anchor: MonacoPosition; active: MonacoPosition }>): void
+  /** `tabSize` / `insertSpaces` go to the model, the rest to the editor. */
+  updateOptions?(options: {
+    tabSize?: number
+    insertSpaces?: boolean
+    cursorStyle?: number
+    lineNumbers?: number
+  }): void
+  getVisibleRanges?(): MonacoRange[]
+  getOptions?(): { tabSize: number; insertSpaces: boolean }
+  /** `eol`: VS Code's `EndOfLine` (1 LF, 2 CRLF). */
+  setEndOfLine?(eol: number): void
 }
 
 export interface MonacoTextEdit {
@@ -137,15 +168,19 @@ export interface MonacoDecoration {
   options: MonacoDecorationOptions
 }
 
+/** Monaco's `IModelDecorationOptions`, the parts decoration types use. */
 export interface MonacoDecorationOptions {
   className?: string
-  hoverMessage?: string
+  /** Markdown, as Monaco's `IMarkdownString`. */
+  hoverMessage?: { value: string }
   glyphMarginClassName?: string
   isWholeLine?: boolean
-  /** Inline CSS for the decorated range. */
   inlineClassName?: string
-  /** Marker type used by setModelMarkers (error / warning / info / hint). */
-  severity?: "error" | "warning" | "info" | "hint"
+  beforeContentClassName?: string
+  afterContentClassName?: string
+  /** Monaco `TrackedRangeStickiness`. */
+  stickiness?: number
+  overviewRuler?: { color: string; position: number }
 }
 
 export interface MonacoCompletionItem {
@@ -436,7 +471,10 @@ const registrations = new Map<string, RegistrationRecord>()
 const languageConfigurations = new Map<string, { extensionId: string; disposable: Disposable }>()
 /** URI → owner → markers. */
 const diagnostics = new Map<string, Map<string, MonacoMarker[]>>()
-const decorationTypes = new Map<string, { extensionId: string; className?: string }>()
+const decorationTypes = new Map<
+  string,
+  { extensionId: string; classes: DecorationClasses; instanceStyles: Set<string> }
+>()
 const workspaceSymbolProviders = new Map<
   string,
   { extensionId: string; invoke: (query: string) => Promise<unknown[] | null> }
@@ -1310,36 +1348,195 @@ function applyStoredDiagnostics(uri: string): void {
 }
 
 /**
- * Register a decoration type. VS Code's
- * `window.createTextEditorDecorationType(options)` returns a type id that
- * the extension then uses with `editor.setDecorations(type, ranges)`.
+ * `window.createTextEditorDecorationType(options)`: the render options become
+ * CSS classes (`decoration-styles.ts`), keyed by the host's own key so
+ * `editor.setDecorations(type, …)` names it directly.
  */
 export function registerDecorationType(req: {
   extensionId: string
-  options: MonacoDecorationOptions
+  key: string
+  options: DecorationRenderOptions
 }): { typeId: string; dispose(): void } {
-  const typeId = nanoid()
-  decorationTypes.set(typeId, { extensionId: req.extensionId, className: req.options.className })
-  return {
-    typeId,
-    dispose: () => {
-      decorationTypes.delete(typeId)
-    },
+  disposeDecorationType(req.key)
+  const { classes, css } = buildDecorationStyles(decorationClassBase(req.key), req.options)
+  installDecorationCss(req.key, css)
+  decorationTypes.set(req.key, { extensionId: req.extensionId, classes, instanceStyles: new Set() })
+  const dropped = unsupportedDecorationOptions(req.options)
+  if (dropped.length > 0) {
+    console.warn(
+      `monaco-bridge: ${req.extensionId} decoration options not drawn: ${dropped.join(", ")}`
+    )
   }
+  return { typeId: req.key, dispose: () => disposeDecorationType(req.key) }
+}
+
+/** Remove a decoration type, its CSS, and its decorations from every editor. */
+export function disposeDecorationType(key: string): boolean {
+  const type = decorationTypes.get(key)
+  if (!type) return false
+  decorationTypes.delete(key)
+  for (const editor of editors.values()) editor.setDecorations(key, [])
+  removeDecorationCss(key)
+  for (const owner of type.instanceStyles) removeDecorationCss(owner)
+  return true
+}
+
+/** One `editor.setDecorations` entry as the host sends it (0-based range). */
+export interface DecorationInstance {
+  range: AdapterVscodeRange
+  /** Markdown. */
+  hoverMessage?: string
+  renderOptions?: DecorationRenderOptions
 }
 
 /**
- * Apply previously registered decorations to a model. The sidecar calls
- * this when an extension invokes `editor.setDecorations(type, ranges)`.
+ * `editor.setDecorations(type, rangesOrOptions)`: replaces that editor's
+ * decorations of the type. Per-range `renderOptions` get classes of their
+ * own, shared by identical options.
  */
 export function setDecorations(req: {
   editorId: string
   typeId: string
-  decorations: MonacoDecoration[]
-}): void {
+  decorations: DecorationInstance[]
+}): boolean {
   const editor = editors.get(req.editorId)
-  if (!editor) return
-  editor.setDecorations(req.typeId, req.decorations)
+  const type = decorationTypes.get(req.typeId)
+  if (!editor || !type) return false
+  editor.setDecorations(
+    req.typeId,
+    req.decorations.map((decoration) => {
+      let instance: DecorationClasses | undefined
+      if (decoration.renderOptions) {
+        const signature = JSON.stringify(decoration.renderOptions)
+        const owner = `${req.typeId}:${hashString(signature)}`
+        const built = buildDecorationStyles(decorationClassBase(owner), decoration.renderOptions)
+        installDecorationCss(owner, built.css)
+        type.instanceStyles.add(owner)
+        instance = built.classes
+      }
+      const classes = { ...type.classes, ...(instance ?? {}) }
+      return {
+        range: vscodeRangeToMonaco(decoration.range),
+        options: {
+          ...(classes.className ? { className: classes.className } : {}),
+          ...(classes.inlineClassName ? { inlineClassName: classes.inlineClassName } : {}),
+          ...(classes.beforeContentClassName
+            ? { beforeContentClassName: classes.beforeContentClassName }
+            : {}),
+          ...(classes.afterContentClassName
+            ? { afterContentClassName: classes.afterContentClassName }
+            : {}),
+          ...(type.classes.isWholeLine ? { isWholeLine: true } : {}),
+          ...(classes.stickiness !== undefined ? { stickiness: classes.stickiness } : {}),
+          ...(classes.overviewRuler ? { overviewRuler: classes.overviewRuler } : {}),
+          ...(decoration.hoverMessage ? { hoverMessage: { value: decoration.hoverMessage } } : {}),
+        },
+      }
+    })
+  )
+  return true
+}
+
+function decorationClassBase(key: string): string {
+  return `vsdeco-${hashString(key)}`
+}
+
+/** A short stable hash for class names (FNV-1a). */
+function hashString(text: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Editor operations (`TextEditor.edit`, `insertSnippet`, `revealRange`, …)
+// ────────────────────────────────────────────────────────────────────────
+
+/** The editor if it still shows the document at `version`; an edit made against older text is refused. */
+function editorAtVersion(editorId: string, version: number): MonacoEditor | undefined {
+  const editor = editors.get(editorId)
+  const model = editor?.getModel()
+  if (!editor || !model || model.isDisposed()) return undefined
+  const current = model.getVersionId?.()
+  return current === undefined || current === version ? editor : undefined
+}
+
+/** `TextEditor.edit`: `false` when the editor is gone or its text changed since the edit was made. */
+export function applyEditorEdit(req: {
+  editorId: string
+  version: number
+  edits: Array<{ range: AdapterVscodeRange; text: string }>
+  options?: { undoStopBefore?: boolean; undoStopAfter?: boolean; endOfLine?: number }
+}): boolean {
+  const editor = editorAtVersion(req.editorId, req.version)
+  if (!editor) return false
+  if (req.options?.undoStopBefore !== false) editor.pushUndoStop?.()
+  if (req.edits.length > 0) {
+    editor.applyEdits(
+      req.edits.map((edit) => ({ range: vscodeRangeToMonaco(edit.range), text: edit.text }))
+    )
+  }
+  if (req.options?.endOfLine !== undefined) editor.setEndOfLine?.(req.options.endOfLine)
+  if (req.options?.undoStopAfter !== false) editor.pushUndoStop?.()
+  return true
+}
+
+/** `TextEditor.insertSnippet`. */
+export function insertEditorSnippet(req: {
+  editorId: string
+  version: number
+  snippet: string
+  ranges: AdapterVscodeRange[]
+  options?: { undoStopBefore?: boolean; undoStopAfter?: boolean }
+}): boolean {
+  const editor = editorAtVersion(req.editorId, req.version)
+  if (!editor?.insertSnippet) return false
+  if (req.options?.undoStopBefore !== false) editor.pushUndoStop?.()
+  editor.insertSnippet(req.snippet, req.ranges.map(vscodeRangeToMonaco))
+  if (req.options?.undoStopAfter !== false) editor.pushUndoStop?.()
+  return true
+}
+
+export function revealEditorRange(req: {
+  editorId: string
+  range: AdapterVscodeRange
+  revealType: number
+}): boolean {
+  const editor = editors.get(req.editorId)
+  if (!editor?.revealRange) return false
+  editor.revealRange(vscodeRangeToMonaco(req.range), req.revealType)
+  return true
+}
+
+export function setEditorSelections(req: {
+  editorId: string
+  selections: Array<{
+    anchor: { line: number; character: number }
+    active: { line: number; character: number }
+  }>
+}): boolean {
+  const editor = editors.get(req.editorId)
+  if (!editor?.setSelections) return false
+  editor.setSelections(
+    req.selections.map((selection) => ({
+      anchor: { lineNumber: selection.anchor.line + 1, column: selection.anchor.character + 1 },
+      active: { lineNumber: selection.active.line + 1, column: selection.active.character + 1 },
+    }))
+  )
+  return true
+}
+
+export function setEditorOptions(req: {
+  editorId: string
+  options: { tabSize?: number; insertSpaces?: boolean; cursorStyle?: number; lineNumbers?: number }
+}): boolean {
+  const editor = editors.get(req.editorId)
+  if (!editor?.updateOptions) return false
+  editor.updateOptions(req.options)
+  return true
 }
 
 /** `{$regexp, flags}` (how a `RegExp` crosses JSON) back into a `RegExp`. */
@@ -1434,10 +1631,8 @@ export function unregisterByExtension(extensionId: string): number {
       removed += 1
     }
   }
-  for (const [id, deco] of decorationTypes) {
-    if (deco.extensionId === extensionId) {
-      decorationTypes.delete(id)
-    }
+  for (const [key, type] of [...decorationTypes]) {
+    if (type.extensionId === extensionId) disposeDecorationType(key)
   }
   for (const [token, provider] of workspaceSymbolProviders) {
     if (provider.extensionId === extensionId) {
@@ -1517,6 +1712,7 @@ export function __resetMonacoBridgeForTesting(): void {
   diagnostics.clear()
   languageConfigurations.clear()
   decorationTypes.clear()
+  __resetDecorationCssForTesting()
   workspaceSymbolProviders.clear()
   activeEditorListeners.clear()
   editorChangeListeners.clear()

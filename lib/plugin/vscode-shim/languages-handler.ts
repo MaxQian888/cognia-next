@@ -15,7 +15,6 @@ import {
   registerCodeLensProvider,
   registerColorProvider,
   registerCompletionItemProvider,
-  registerDecorationType,
   registerDeclarationProvider,
   registerDefinitionProvider,
   registerDocumentFormattingProvider,
@@ -40,7 +39,6 @@ import {
   registerTypeHierarchyProvider,
   registerWorkspaceSymbolProvider,
   disposeLanguageConfiguration,
-  setDecorations,
   setDiagnostics,
   setDocumentLanguage,
   setLanguageConfiguration,
@@ -109,17 +107,6 @@ export interface LanguagesSetDiagnosticsPayload {
   markers: unknown[]
 }
 
-export interface LanguagesRegisterDecorationTypePayload {
-  extensionId: string
-  options: unknown
-}
-
-export interface LanguagesSetDecorationsPayload {
-  editorId: string
-  typeId: string
-  decorations: unknown[]
-}
-
 export interface ExtensionCleanupPayload {
   extensionId: string
 }
@@ -151,24 +138,6 @@ export function handleLanguagesSetDiagnostics(payload: LanguagesSetDiagnosticsPa
     extensionId: payload.extensionId,
     uri: payload.uri,
     markers: payload.markers as never,
-  })
-}
-
-export function handleLanguagesRegisterDecorationType(
-  payload: LanguagesRegisterDecorationTypePayload
-): { typeId: string } {
-  const { typeId } = registerDecorationType({
-    extensionId: payload.extensionId,
-    options: payload.options as never,
-  })
-  return { typeId }
-}
-
-export function handleLanguagesSetDecorations(payload: LanguagesSetDecorationsPayload): void {
-  setDecorations({
-    editorId: payload.editorId,
-    typeId: payload.typeId,
-    decorations: payload.decorations as never,
   })
 }
 

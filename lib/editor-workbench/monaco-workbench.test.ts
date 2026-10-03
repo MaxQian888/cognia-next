@@ -384,6 +384,77 @@ describe("mountMonacoWorkbench", () => {
     expect(editor.deltaDecorations).toHaveBeenCalledWith([], [{ range: {} }])
   })
 
+  it("adapter replaces a decoration type's previous decorations and runs editor operations", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-ops")
+    let nextId = 0
+    const modelOptions = {
+      updateOptions: jest.fn(),
+      pushEOL: jest.fn(),
+      getOptions: () => ({ tabSize: 2, insertSpaces: false }),
+    }
+    const snippet = { insert: jest.fn() }
+    Object.assign(editor, {
+      deltaDecorations: jest.fn((_old: string[], next: unknown[]) =>
+        next.map(() => `d${++nextId}`)
+      ),
+      pushUndoStop: jest.fn(),
+      getContribution: jest.fn(() => snippet),
+      setSelections: jest.fn(),
+      revealRangeInCenter: jest.fn(),
+      revealRange: jest.fn(),
+      updateOptions: jest.fn(),
+      getVisibleRanges: () => [
+        { startLineNumber: 1, startColumn: 1, endLineNumber: 9, endColumn: 1 },
+      ],
+    })
+    mountMonacoWorkbench(editor, monaco, baseSpec)
+    Object.assign(editor.getModel()!, modelOptions)
+    const adapted = bridge.notifyEditorMounted.mock.calls[0]?.[0] as Required<
+      import("@/lib/plugin/vscode-shim/monaco-bridge").MonacoEditor
+    >
+    const range = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 2 }
+
+    adapted.setDecorations("type-1", [{ range, options: {} }])
+    adapted.setDecorations("type-1", [
+      { range, options: {} },
+      { range, options: {} },
+    ])
+    adapted.setDecorations("type-1", [])
+    expect((editor.deltaDecorations as jest.Mock).mock.calls.map((call) => call[0])).toEqual([
+      [],
+      ["d1"],
+      ["d2", "d3"],
+    ])
+
+    adapted.insertSnippet("f($1)", [range])
+    expect(editor.setSelections).toHaveBeenCalledWith([
+      {
+        selectionStartLineNumber: 1,
+        selectionStartColumn: 1,
+        positionLineNumber: 1,
+        positionColumn: 2,
+      },
+    ])
+    expect(snippet.insert).toHaveBeenCalledWith("f($1)")
+    adapted.revealRange(range, 1)
+    expect(editor.revealRangeInCenter).toHaveBeenCalledWith(range)
+    adapted.revealRange(range, 0)
+    expect(editor.revealRange).toHaveBeenCalledWith(range)
+    adapted.updateOptions({ tabSize: 8, cursorStyle: 2, lineNumbers: 2 })
+    expect(modelOptions.updateOptions).toHaveBeenCalledWith({ tabSize: 8 })
+    expect(editor.updateOptions).toHaveBeenCalledWith({
+      cursorStyle: "block",
+      lineNumbers: "relative",
+    })
+    adapted.setEndOfLine(2)
+    expect(modelOptions.pushEOL).toHaveBeenCalledWith(1)
+    expect(adapted.getOptions()).toEqual({ tabSize: 2, insertSpaces: false })
+    expect(adapted.getVisibleRanges()).toHaveLength(1)
+    adapted.pushUndoStop()
+    expect(editor.pushUndoStop).toHaveBeenCalled()
+  })
+
   it("adapter getSelection returns null when the editor has no selection", () => {
     const { monaco } = makeFakeMonaco()
     const { editor } = makeFakeEditor("ed-nosel")

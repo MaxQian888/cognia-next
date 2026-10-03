@@ -89,9 +89,9 @@ describe("document sync", () => {
     await h.flush()
 
     const forA = h.sent.filter(([id]) => id === "ext.a")
+    // The focus report replaced the open's editors report while it waited.
     expect(methods(forA)).toEqual([
       "workspace:documentOpened",
-      "window:editorsChanged",
       "window:editorsChanged",
       "workspace:documentChanged",
       "workspace:documentClosed",
@@ -103,7 +103,7 @@ describe("document sync", () => {
       version: 1,
       text: "one",
     })
-    expect(forA[2][2]).toEqual({
+    expect(forA[1][2]).toEqual({
       activeId: "e1",
       editors: [
         {
@@ -113,8 +113,64 @@ describe("document sync", () => {
         },
       ],
     })
-    expect(forA[3][2]).toEqual({ uri: "file:///a.ts", version: 2, text: "two" })
+    expect(forA[2][2]).toEqual({ uri: "file:///a.ts", version: 2, text: "two" })
     expect(h.sent.filter(([id]) => id === "ext.b")).toHaveLength(forA.length)
+  })
+
+  it("reports what the editor shows and its indentation, when the editor knows them", async () => {
+    const h = harness()
+    const { editor } = h.mount("e1", "file:///a.ts")
+    editor.getVisibleRanges = () => [
+      { startLineNumber: 3, startColumn: 1, endLineNumber: 40, endColumn: 7 },
+    ]
+    editor.getOptions = () => ({ tabSize: 2, insertSpaces: false })
+    h.focus("e1")
+    await h.flush()
+    expect(h.sent.at(-1)?.[2]).toEqual({
+      activeId: "e1",
+      editors: [
+        {
+          id: "e1",
+          uri: "file:///a.ts",
+          selections: [{ anchor: { line: 0, character: 0 }, active: { line: 0, character: 3 } }],
+          visibleRanges: [{ start: { line: 2, character: 0 }, end: { line: 39, character: 6 } }],
+          options: { tabSize: 2, insertSpaces: false },
+        },
+      ],
+    })
+  })
+
+  it("sends only the latest of the editors reports waiting behind a slow host", async () => {
+    const h = harness()
+    let release: () => void = () => {}
+    const sendNow = h.deps.send as jest.Mock
+    const delivered: Array<[string, unknown]> = []
+    sendNow.mockImplementation(async (_pluginId: string, method: string, payload: unknown) => {
+      if (method === "workspace:documentOpened") await new Promise<void>((r) => (release = r))
+      delivered.push([method, payload])
+    })
+    const { editor } = h.mount("e1", "file:///a.ts")
+    await h.flush()
+    for (const column of [2, 3, 4]) {
+      editor.getSelections = () => [
+        { anchor: { lineNumber: 1, column: 1 }, active: { lineNumber: 1, column } },
+      ]
+      h.fire({ editorId: "e1", uri: "file:///a.ts", kind: "change-selection" })
+    }
+    release()
+    await h.flush()
+    await h.flush()
+    expect(delivered.map(([method]) => method)).toEqual([
+      "workspace:documentOpened",
+      "window:editorsChanged",
+    ])
+    expect(delivered[1][1]).toMatchObject({
+      editors: [{ selections: [{ active: { line: 0, character: 3 } }] }],
+    })
+    // Once that report is on its way, the next one queues behind it again.
+    h.fire({ editorId: "e1", uri: "file:///a.ts", kind: "change-selection" })
+    await h.flush()
+    expect(delivered).toHaveLength(3)
   })
 
   it("closes a document only when its last editor goes", async () => {

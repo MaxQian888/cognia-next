@@ -3,7 +3,8 @@ import { test } from "node:test"
 
 const { DocumentStore, TextDocument, VERSION_WAIT_MS } =
   await import("../dist/vscode-shim/documents.js")
-const { CancellationTokenSource, Position, Range } = await import("../dist/vscode-shim/types.js")
+const { CancellationTokenSource, Position, Range, Selection } =
+  await import("../dist/vscode-shim/types.js")
 
 const noSave = async () => false
 
@@ -140,4 +141,170 @@ test("a cancellation listener added after cancelling still runs", async () => {
   })
   assert.equal(fired, true)
   assert.equal(source.token.isCancellationRequested, true)
+})
+
+function recordingOperations(answer = true) {
+  const calls = []
+  return {
+    calls,
+    operations: {
+      edit: async (...args) => (calls.push(["edit", ...args]), answer),
+      insertSnippet: async (...args) => (calls.push(["snippet", ...args]), answer),
+      setDecorations: (...args) => calls.push(["decorations", ...args]),
+      revealRange: (...args) => calls.push(["reveal", ...args]),
+      setSelections: (...args) => calls.push(["selections", ...args]),
+      setOptions: (...args) => calls.push(["options", ...args]),
+    },
+  }
+}
+
+const zero = { anchor: { line: 0, character: 0 }, active: { line: 0, character: 0 } }
+
+test("editor.edit sends the batch against the current version and refuses overlaps", async () => {
+  const { calls, operations } = recordingOperations()
+  const store = new DocumentStore(noSave, operations)
+  store.open("file:///a.ts", "typescript", 7, "hello\nworld")
+  store.setEditors([{ id: "e", uri: "file:///a.ts", selections: [zero] }], "e")
+  const editor = store.activeEditor
+
+  assert.equal(
+    await editor.edit(
+      (builder) => {
+        builder.insert(new Position(0, 0), ">")
+        builder.replace(new Range(1, 0, 1, 5), "there")
+        builder.delete(new Range(0, 9, 0, 99)) // clamped to the line's end
+        builder.setEndOfLine(2)
+      },
+      { undoStopBefore: false }
+    ),
+    true
+  )
+  assert.deepEqual(calls[0], [
+    "edit",
+    "e",
+    7,
+    [
+      { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: ">" },
+      {
+        range: { start: { line: 1, character: 0 }, end: { line: 1, character: 5 } },
+        text: "there",
+      },
+      { range: { start: { line: 0, character: 5 }, end: { line: 0, character: 5 } }, text: "" },
+    ],
+    { undoStopBefore: false, undoStopAfter: true, endOfLine: 2 },
+  ])
+
+  await assert.rejects(
+    editor.edit((builder) => {
+      builder.replace(new Range(0, 0, 0, 3), "x")
+      builder.replace(new Range(0, 2, 0, 4), "y")
+    }),
+    /Overlapping/
+  )
+  // Nothing to do answers true without a round trip.
+  assert.equal(await editor.edit(() => {}), true)
+  assert.equal(calls.length, 1)
+
+  store.close("file:///a.ts")
+  assert.equal(await editor.edit((builder) => builder.insert(new Position(0, 0), "x")), false)
+})
+
+test("snippets go to the given locations, or the selections", async () => {
+  const { calls, operations } = recordingOperations(false)
+  const store = new DocumentStore(noSave, operations)
+  store.open("file:///a.ts", "typescript", 2, "abc")
+  store.setEditors(
+    [
+      {
+        id: "e",
+        uri: "file:///a.ts",
+        selections: [{ anchor: { line: 0, character: 1 }, active: { line: 0, character: 2 } }],
+      },
+    ],
+    "e"
+  )
+  const editor = store.activeEditor
+  assert.equal(await editor.insertSnippet({ value: "${1:x}" }), false)
+  await editor.insertSnippet({ value: "$0" }, [new Position(0, 0), new Range(0, 2, 0, 3)])
+  assert.deepEqual(calls[0].slice(0, 5), [
+    "snippet",
+    "e",
+    2,
+    "${1:x}",
+    [{ start: { line: 0, character: 1 }, end: { line: 0, character: 2 } }],
+  ])
+  assert.deepEqual(calls[1][4], [
+    { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    { start: { line: 0, character: 2 }, end: { line: 0, character: 3 } },
+  ])
+})
+
+test("decorations, reveal, selections and options reach the renderer; reports do not echo", () => {
+  const { calls, operations } = recordingOperations()
+  const store = new DocumentStore(noSave, operations)
+  store.open("file:///a.ts", "typescript", 1, "a\nb\nc")
+  store.setEditors([{ id: "e", uri: "file:///a.ts", selections: [zero] }], "e")
+  const editor = store.activeEditor
+  const events = []
+  store.onDidChangeVisibleRanges.event((event) =>
+    events.push(`ranges:${event.visibleRanges[0].end.line}`)
+  )
+  store.onDidChangeOptions.event((event) => events.push(`tab:${event.options.tabSize}`))
+
+  assert.deepEqual(
+    editor.visibleRanges,
+    [new Range(0, 0, 2, 0)],
+    "the whole document until reported"
+  )
+  assert.equal(editor.options.tabSize, 4)
+
+  editor.setDecorations({ key: "deco:x:1" }, [
+    new Range(0, 0, 0, 1),
+    {
+      range: new Range(1, 0, 1, 1),
+      hoverMessage: [{ value: "**a**" }, "b"],
+      renderOptions: { after: { contentText: "!" } },
+    },
+  ])
+  editor.revealRange(new Range(2, 0, 2, 0), 1)
+  editor.selection = new Selection(new Position(1, 0), new Position(1, 1))
+  editor.options.tabSize = 2
+  editor.options = { insertSpaces: false }
+  assert.deepEqual(calls, [
+    [
+      "decorations",
+      "e",
+      "deco:x:1",
+      [
+        { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } },
+        {
+          range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } },
+          hoverMessage: "**a**\n\nb",
+          renderOptions: { after: { contentText: "!" } },
+        },
+      ],
+    ],
+    ["reveal", "e", { start: { line: 2, character: 0 }, end: { line: 2, character: 0 } }, 1],
+    ["selections", "e", [{ anchor: { line: 1, character: 0 }, active: { line: 1, character: 1 } }]],
+    ["options", "e", { tabSize: 2 }],
+    ["options", "e", { insertSpaces: false }],
+  ])
+  assert.equal(editor.options.tabSize, 2)
+
+  // The renderer's report updates the editor and fires events, without calling back.
+  store.setEditors(
+    [
+      {
+        id: "e",
+        uri: "file:///a.ts",
+        selections: [zero],
+        visibleRanges: [{ start: { line: 0, character: 0 }, end: { line: 1, character: 0 } }],
+        options: { tabSize: 8 },
+      },
+    ],
+    "e"
+  )
+  assert.equal(calls.length, 5)
+  assert.deepEqual(events, ["ranges:1", "tab:8"])
+  assert.equal(editor.selection.active.line, 0)
 })

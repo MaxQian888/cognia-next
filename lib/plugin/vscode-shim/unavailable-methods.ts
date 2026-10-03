@@ -37,8 +37,6 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "webview:setTitle",
   "webview:show",
   "window:createWebviewPanel",
-  "window:disposeDecorationType",
-  "window:registerDecorationType",
   "window:registerUriHandler",
   "window:registerWebviewViewProvider",
   "window:unregisterUriHandler",

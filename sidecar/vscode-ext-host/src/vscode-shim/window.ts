@@ -66,6 +66,8 @@ interface SidecarWindow {
   onDidChangeActiveTextEditor(listener: (e: TextEditor | undefined) => void): Disposable
   onDidChangeVisibleTextEditors(listener: (e: readonly TextEditor[]) => void): Disposable
   onDidChangeTextEditorSelection(listener: (e: unknown) => void): Disposable
+  onDidChangeTextEditorVisibleRanges(listener: (e: unknown) => void): Disposable
+  onDidChangeTextEditorOptions(listener: (e: unknown) => void): Disposable
   createTextEditorDecorationType(options: Record<string, unknown>): {
     key: string
     dispose(): void
@@ -259,17 +261,25 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
     },
     createTextEditorDecorationType(options) {
       const key = `deco:${extensionId}:${Math.random().toString(36).slice(2, 10)}`
-      void connection.sendRequest("window:registerDecorationType", {
-        extensionId,
-        key,
-        options,
-      })
+      connection
+        .sendRequest("window:registerDecorationType", { extensionId, key, options })
+        .catch((error: unknown) => {
+          process.stderr.write(
+            `[vscode-shim] ${extensionId}: decoration type not registered: ${error instanceof Error ? error.message : String(error)}\n`
+          )
+        })
       return {
         key,
         dispose: () => {
-          void connection.sendNotification("window:disposeDecorationType", { key })
+          void connection.sendNotification("window:disposeDecorationType", { extensionId, key })
         },
       }
+    },
+    onDidChangeTextEditorVisibleRanges(listener) {
+      return documents.onDidChangeVisibleRanges.event(listener)
+    },
+    onDidChangeTextEditorOptions(listener) {
+      return documents.onDidChangeOptions.event(listener)
     },
     createWebviewPanel(viewType, title, showOptions, options) {
       return buildWebviewPanel(connection, extensionId, {
