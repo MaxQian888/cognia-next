@@ -2,8 +2,11 @@ import {
   evaluateEngineCompat,
   isUnimplementedNamespace,
   IMPLEMENTED_VSCODE_NAMESPACES,
+  UNAVAILABLE_VSCODE_MEMBERS,
   UNIMPLEMENTED_VSCODE_NAMESPACES,
   SHIM_VSCODE_VERSION,
+  unavailableVscodeApi,
+  VSCODE_API_COVERAGE,
 } from "./engine-compat"
 import { inferPermissions } from "./permission-inference"
 import type { VsixInstallResult } from "./vsix-installer"
@@ -175,6 +178,40 @@ describe("engine-compat", () => {
     expect(overlap).toEqual([])
     expect(isUnimplementedNamespace("debug")).toBe(true)
     expect(isUnimplementedNamespace("commands")).toBe(false)
+  })
+})
+
+describe("VSCODE_API_COVERAGE", () => {
+  it("measures the API level the shim claims", () => {
+    expect(VSCODE_API_COVERAGE.apiVersion).toBe(SHIM_VSCODE_VERSION)
+    const { summary } = VSCODE_API_COVERAGE
+    expect(summary.implemented).toBe(VSCODE_API_COVERAGE.implemented.length)
+    expect(summary.missing).toBe(VSCODE_API_COVERAGE.missing.length)
+    expect(summary.unsupported).toBe(Object.keys(VSCODE_API_COVERAGE.unsupported).length)
+  })
+
+  it("derives the namespace sets from it", () => {
+    expect(UNIMPLEMENTED_VSCODE_NAMESPACES).toEqual(
+      expect.arrayContaining(["comments", "debug", "notebooks", "scm", "tests"])
+    )
+    expect(IMPLEMENTED_VSCODE_NAMESPACES).toEqual(
+      expect.arrayContaining(["commands", "window", "workspace", "languages", "env"])
+    )
+    // `vscode.terminal` is not VS Code API.
+    expect(IMPLEMENTED_VSCODE_NAMESPACES).not.toContain("terminal")
+  })
+
+  it("names the unavailable API a member chain reaches", () => {
+    expect(unavailableVscodeApi("vscode.debug.startDebugging")).toBe("vscode.debug")
+    expect(unavailableVscodeApi("vscode.window.showInformationMessage")).toBeNull()
+    expect(unavailableVscodeApi("vscode.commands")).toBeNull()
+    expect(unavailableVscodeApi("other.debug")).toBeNull()
+    expect(unavailableVscodeApi("vscode.window.createTreeView")).toBe(
+      "vscode.window.createTreeView"
+    )
+    expect(UNAVAILABLE_VSCODE_MEMBERS).toContain("window.createTreeView")
+    // Whole unsupported namespaces are reported as the namespace, not per member.
+    expect(UNAVAILABLE_VSCODE_MEMBERS.some((path) => path.startsWith("debug."))).toBe(false)
   })
 })
 

@@ -47,6 +47,8 @@
 import { satisfiesConstraint } from "@/lib/plugin/package/dependency-resolver"
 import type { VsCodePermissionInference } from "@/types/plugin/plugin-vscode"
 
+import coverage from "./vscode-api-coverage.generated.json"
+
 /**
  * The VS Code version the shim reports as `vscode.version`.
  *
@@ -59,52 +61,81 @@ import type { VsCodePermissionInference } from "@/types/plugin/plugin-vscode"
 export const SHIM_VSCODE_VERSION = "1.91.0"
 
 /**
- * Namespaces whose every callable throws `NotSupportedError` at runtime.
- *
- * Verified against the sidecar shim sources rather than assumed — each of these
- * modules exists and each of its methods throws:
- * `debug.ts`, `notebooks.ts`, `scm.ts`, `comments.ts`, `tests.ts`. They are
- * mounted (`index.ts` lines 98-102), so `vscode.debug` is defined and truthy;
- * an extension feature-detecting with `if (vscode.debug)` sees success and
- * fails on the first call. That is exactly why the warning has to reach the
- * user at install time.
+ * What the shim provides of the API level it claims, measured by
+ * `scripts/gates/check-vscode-api-coverage.mjs` against `@types/vscode` at
+ * {@link SHIM_VSCODE_VERSION}: each declared value is implemented, unsupported
+ * (mounted, with a reason) or missing (not mounted). The gate keeps the file
+ * in step with the shim.
  */
-export const UNIMPLEMENTED_VSCODE_NAMESPACES = [
-  "debug",
-  "notebooks",
-  "scm",
-  "comments",
-  "tests",
-] as const
-
-export type UnimplementedVsCodeNamespace = (typeof UNIMPLEMENTED_VSCODE_NAMESPACES)[number]
-
-/**
- * Namespaces the shim implements with real behaviour. Listed for the reader's
- * benefit (and to keep the two sets visibly disjoint); nothing branches on it.
- */
-export const IMPLEMENTED_VSCODE_NAMESPACES = [
-  "commands",
-  "window",
-  "workspace",
-  "languages",
-  "env",
-  "extensions",
-  "authentication",
-  "tasks",
-  "lm",
-  "chat",
-  "terminal",
-  "l10n",
-] as const
-
-/** Whether `name` is a namespace the shim mounts but does not implement. */
-export function isUnimplementedNamespace(name: string): name is UnimplementedVsCodeNamespace {
-  return (UNIMPLEMENTED_VSCODE_NAMESPACES as readonly string[]).includes(name)
+export const VSCODE_API_COVERAGE = coverage as {
+  apiVersion: string
+  summary: { implemented: number; unsupported: number; missing: number }
+  unsupported: Record<string, string>
+  missing: string[]
+  implemented: string[]
+  extra: string[]
 }
 
+const isNamespace = (path: string) => /^[a-z]/.test(path) && !path.includes(".")
+
+/**
+ * Namespaces the shim mounts whose every member is unsupported (throws
+ * `NotSupportedError` or registers something nothing uses). They are
+ * mounted, so `vscode.debug` is defined and truthy: an extension
+ * feature-detecting with `if (vscode.debug)` sees success and fails on the
+ * first call. That is exactly why the warning has to reach the user at
+ * install time.
+ */
+export const UNIMPLEMENTED_VSCODE_NAMESPACES: readonly string[] = Object.keys(
+  VSCODE_API_COVERAGE.unsupported
+)
+  .filter(isNamespace)
+  .sort()
+
+/** Namespaces the shim implements, at least in part. Nothing branches on it. */
+export const IMPLEMENTED_VSCODE_NAMESPACES: readonly string[] = [
+  ...new Set(
+    VSCODE_API_COVERAGE.implemented
+      .filter((path) => path.includes("."))
+      .map((path) => path.split(".")[0]!)
+  ),
+]
+  .filter((namespace) => !UNIMPLEMENTED_VSCODE_NAMESPACES.includes(namespace))
+  .sort()
+
+/** Whether `name` is a namespace the shim mounts but does not implement. */
+export function isUnimplementedNamespace(name: string): boolean {
+  return UNIMPLEMENTED_VSCODE_NAMESPACES.includes(name)
+}
+
+const UNAVAILABLE = new Set([
+  ...Object.keys(VSCODE_API_COVERAGE.unsupported),
+  ...VSCODE_API_COVERAGE.missing,
+])
+
+/**
+ * The API a `vscode.…` member chain reaches that Cognia does not provide, as
+ * the path to report (`vscode.debug`, `vscode.window.createTreeView`,
+ * `vscode.TreeItemCheckboxState`), or `null` when the shim provides it or the
+ * chain is not API this level declares.
+ */
+export function unavailableVscodeApi(chain: string): string | null {
+  if (!chain.startsWith("vscode.")) return null
+  const [first, second] = chain.slice("vscode.".length).split(".")
+  if (!first) return null
+  if (isUnimplementedNamespace(first)) return `vscode.${first}`
+  if (second && UNAVAILABLE.has(`${first}.${second}`)) return `vscode.${first}.${second}`
+  if (!isNamespace(first) && UNAVAILABLE.has(first)) return `vscode.${first}`
+  return null
+}
+
+/** Unavailable member paths (`window.createTreeView`), for the text scan. */
+export const UNAVAILABLE_VSCODE_MEMBERS: readonly string[] = [...UNAVAILABLE]
+  .filter((path) => path.includes(".") && !isUnimplementedNamespace(path.split(".")[0]!))
+  .sort()
+
 export type EngineCompatWarning =
-  /** The bundle references namespaces that throw at runtime. */
+  /** The bundle references API the shim does not provide (namespaces or members). */
   | { kind: "unsupported-api"; namespaces: string[] }
   /** `engines.vscode` demands a newer VS Code than the shim reports. */
   | { kind: "engine-mismatch"; required: string; shimVersion: string }
@@ -120,8 +151,9 @@ export interface EngineCompatReport {
   /** The raw `engines.vscode` range, or `"*"` when the manifest omitted it. */
   engineVscode: string
   /**
-   * Unimplemented namespaces the bundle references, deduped and sorted.
-   * Persisted onto the manifest so the warning survives the install.
+   * API the bundle references that the shim does not provide (unsupported or
+   * missing namespaces, members and classes), deduped and sorted. Persisted
+   * onto the manifest so the warning survives the install.
    */
   unsupportedApis: string[]
   /**

@@ -3,6 +3,7 @@
  * no real ZIP parsing involved.
  */
 
+import { UNAVAILABLE_VSCODE_MEMBERS } from "./engine-compat"
 import { inferPermissions } from "./permission-inference"
 import type { VsixInstallResult } from "./vsix-installer"
 import type { VsCodeManifest } from "@/types/plugin/plugin-vscode"
@@ -167,6 +168,21 @@ describe("inferPermissions", () => {
         expect.arrayContaining(["network:fetch", "network:websocket"])
       )
       expect(infer(`repo.fetch(u); ((( unbalanced`).permissions).not.toContain("network:fetch")
+    })
+
+    it("records the unavailable members a bundle uses, by AST and by text", () => {
+      expect(UNAVAILABLE_VSCODE_MEMBERS).toContain("window.createTreeView")
+      expect(
+        infer(`const vscode = require("vscode"); vscode.window.createTreeView("v", {})`)
+          .unsupportedApis
+      ).toContain("vscode.window.createTreeView")
+      expect(
+        infer(`vscode . window . createTreeView("v", {}); ((( unbalanced`).unsupportedApis
+      ).toContain("vscode.window.createTreeView")
+      expect(
+        infer(`const vscode = require("vscode"); vscode.window.showInformationMessage("hi")`)
+          .unsupportedApis
+      ).toEqual([])
     })
 
     it("detects vscode.secrets.* → secrets:read+write", () => {

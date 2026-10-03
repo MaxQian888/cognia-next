@@ -24,7 +24,11 @@
 
 import { parse, type ParserOptions } from "@babel/parser"
 import type { Node } from "@babel/types"
-import { UNIMPLEMENTED_VSCODE_NAMESPACES } from "./engine-compat"
+import {
+  UNAVAILABLE_VSCODE_MEMBERS,
+  UNIMPLEMENTED_VSCODE_NAMESPACES,
+  unavailableVscodeApi,
+} from "./engine-compat"
 import type {
   VsCodePermissionInference,
   VsCodePermissionReason,
@@ -726,12 +730,20 @@ function walkMemberChain(node: unknown): string {
  * API and claiming it as evidence would be a fabricated warning.
  */
 function recordUnsupportedApi(chain: string, unsupportedApis: Set<string>): void {
-  if (!chain.startsWith("vscode.")) return
-  const namespace = chain.slice("vscode.".length).split(".")[0]
-  if ((UNIMPLEMENTED_VSCODE_NAMESPACES as readonly string[]).includes(namespace)) {
-    unsupportedApis.add(`vscode.${namespace}`)
-  }
+  const unavailable = unavailableVscodeApi(chain)
+  if (unavailable) unsupportedApis.add(unavailable)
 }
+
+/** `vscode.<namespace>.<member>` for every unavailable member, as one pattern. */
+const UNAVAILABLE_MEMBER_PATTERN =
+  UNAVAILABLE_VSCODE_MEMBERS.length > 0
+    ? new RegExp(
+        `\\bvscode\\s*\\.\\s*(${UNAVAILABLE_VSCODE_MEMBERS.map((path) =>
+          path.split(".").join("\\s*\\.\\s*")
+        ).join("|")})\\b`,
+        "g"
+      )
+    : /(?!)/g
 
 function applyModulePermissions(
   moduleName: string,
@@ -776,6 +788,11 @@ function scanStrings(
     if (new RegExp(`\\bvscode\\s*\\.\\s*${namespace}\\b`).test(source)) {
       unsupportedApis.add(`vscode.${namespace}`)
     }
+  }
+  // Members, the same way: `vscode.window.createTreeView` survives
+  // minification as text.
+  for (const match of source.matchAll(UNAVAILABLE_MEMBER_PATTERN)) {
+    unsupportedApis.add(`vscode.${match[1]!.replace(/\s+/g, "")}`)
   }
 
   for (const entry of MODULE_PERMISSION_MAP) {

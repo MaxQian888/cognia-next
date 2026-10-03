@@ -149,6 +149,9 @@ const REGISTRY = [
   // Repo-specific structural audits (see the ADRs each one cites).
   { script: "audit:slots", group: "audit" },
   { script: "audit:plugin-surfaces", group: "audit" },
+  // How much of the VS Code API level the extension host claims it provides;
+  // the install-time compatibility hint reads the report.
+  { script: "audit:vscode-api-coverage", group: "audit" },
   { script: "audit:ai-elements", group: "audit" },
   // Local persistence governance rejects schema/catalog, TypeScript/Rust sync,
   // version-order, and generated-documentation drift.
@@ -294,6 +297,7 @@ const REGISTRY = [
   { script: "audit:workspace-attribution:test", group: "gate-tests" },
   { script: "audit:router-fusion-gate:test", group: "gate-tests" },
   { script: "audit:llm-ledger-boundary:test", group: "gate-tests" },
+  { script: "audit:vscode-api-coverage:test", group: "gate-tests" },
   { script: "router-fusion:live-smoke:test", group: "gate-tests" },
   // `node --test` over mobile/scripts/ — the iOS project/plist configurators
   // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
