@@ -27,6 +27,7 @@ Each host computes capabilities from the current resource and platform. A native
 - Compact activity buttons group related panels. Arrow keys, Home, and End move through activities and grouped tabs with standard tab/tabpanel semantics.
 - `narrow` uses the host's normal 360px width. `wide` uses about half of the host, clamped to 640–960px. `focus` is an accessible full-screen presentation that restores focus on Escape.
 - Mobile renders a full-width Sheet and intentionally omits desktop-only width and focus controls.
+- On a narrow desktop window the open right panel keeps the conversation at least 420px wide, giving way in three steps: it first shrinks toward its own minimum (480px for the workspace, a quarter of the row otherwise); then the conversation list folds to its icon rail; and when even that is not enough, the panel floats over the conversation behind a dimmed backdrop. Press Escape or click the backdrop to close it; focus returns to where it was. The fold is temporary and never changes your saved sidebar setting. If you reopen the list yourself it stays open, and the panel floats instead, until the window is wide enough again. A panel the window narrowed returns to its own width when the window widens.
 - Pinning protects the selected panel from automatic reveals. Diagnostics, proposals, selection changes, and plugin requests update pending indicators until the user navigates explicitly or unpins.
 
 ## Task overview

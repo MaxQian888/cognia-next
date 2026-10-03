@@ -3,7 +3,7 @@
  */
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
-import { render, screen, act, waitFor } from "@testing-library/react"
+import { render, screen, act, waitFor, fireEvent } from "@testing-library/react"
 
 jest.mock("@/hooks/ui", () => ({
   useBreakpoint: jest.fn(() => "desktop"),
@@ -177,9 +177,34 @@ jest.mock("@/components/ui/resizable", () => {
 // Literal attribute name rather than the imported constant — a jest.mock
 // factory referencing a module-scope import hits the TDZ trap.
 jest.mock("./artifact-dock", () => ({
-  ArtifactDock: ({ railOnly }: { railOnly?: boolean }) => (
-    <div data-testid="dock" data-rail-only={railOnly ? "true" : undefined} data-pro-ide-region="" />
-  ),
+  ArtifactDock: ({ railOnly }: { railOnly?: boolean }) => {
+    // Whether the dock's header would project into the title bar.
+    const { useTitleBarProjectionScope } = jest.requireActual<
+      typeof import("@/components/shell/title-bar-outlets")
+    >("@/components/shell/title-bar-outlets")
+    return (
+      <div
+        data-testid="dock"
+        data-rail-only={railOnly ? "true" : undefined}
+        data-projection={useTitleBarProjectionScope() ? "on" : "off"}
+        data-pro-ide-region=""
+      >
+        <button type="button">inside the dock</button>
+      </div>
+    )
+  },
+}))
+
+// The row budget is its own unit (`use-chat-row-budget.test.ts`); here it is a
+// dial. `null` is what an unmeasured jsdom row produces — the shipped layout.
+let mockRowBudget: {
+  autoFold: boolean
+  needsFold: boolean
+  overlay: boolean
+  groupPx: number
+} | null = null
+jest.mock("@/hooks/shell/use-chat-row-budget", () => ({
+  useChatRowBudget: jest.fn(() => mockRowBudget),
 }))
 
 jest.mock("./artifact-panel", () => ({
@@ -208,6 +233,8 @@ import {
 import { requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
+import { useChatRowBudget } from "@/hooks/shell/use-chat-row-budget"
 
 const SESSION = "session-1"
 import {
@@ -221,6 +248,7 @@ const RECT = { x: 0, y: 0, width: 400, height: 600 }
 
 beforeEach(() => {
   localStorage.clear()
+  mockRowBudget = null
   useBreakpointMock.mockReturnValue("desktop")
   __resetCodeServerPaneManagerForTesting()
   // The persistent rail is a settings field defaulting to OFF (see
@@ -1295,4 +1323,210 @@ it("reserves no summary column beside the dock (ADR-0214)", () => {
   // and the dock, and the dock's bounds are never forced to zero for it.
   expect(screen.queryByTestId("session-summary-dock")).not.toBeInTheDocument()
   expect(screen.getByTestId("resizable-panel-artifact-dock")).not.toHaveAttribute("data-max", "0%")
+})
+
+describe("ArtifactWorkspaceDock — narrow row budget (ADR-0214 D5)", () => {
+  const OVERLAY = { autoFold: true, needsFold: true, overlay: true, groupPx: 800 }
+  const ROW = { autoFold: false, needsFold: false, overlay: false, groupPx: 1200 }
+
+  function renderDock() {
+    return render(
+      <TitleBarProjectionScope enabled>
+        <button type="button">composer</button>
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      </TitleBarProjectionScope>
+    )
+  }
+
+  it("asks the budget about the dock it actually shows", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    renderDock()
+    expect(jest.mocked(useChatRowBudget).mock.calls.at(-1)?.[0]).toMatchObject({
+      dockOpen: true,
+      dockFloor: { minPx: 0, minPercent: 24 },
+      chatMinPx: CHAT_MIN_PX,
+    })
+  })
+
+  it("floats an open dock over the chat with a scrim when the row cannot hold it", () => {
+    mockRowBudget = OVERLAY
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    renderDock()
+
+    const overlay = screen.getByRole("dialog", { name: "Side panel" })
+    expect(overlay).toHaveAttribute("aria-modal", "true")
+    // 34% of the 800px row, over the artifact floor and under the chat strip.
+    expect(overlay).toHaveStyle({ width: "272px" })
+    expect(overlay).toContainElement(screen.getByTestId("dock"))
+    expect(screen.getByTestId("artifact-dock-scrim")).toBeInTheDocument()
+    expect(screen.getByTestId("artifact-workspace-dock")).toHaveAttribute("data-dock-overlay")
+    // The column itself is shut — all the way, not to the persistent rail.
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
+    // The divider has nothing to drag: hidden with the column.
+    expect(screen.getByTestId("resizable-handle")).toHaveClass("w-0", "opacity-0")
+    // The title bar's end zone is sized to the shut column: draw inline.
+    expect(screen.getByTestId("dock")).toHaveAttribute("data-projection", "off")
+    // A float is not a choice to close the dock.
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+
+  it("closes from the scrim or Escape, but not from an Escape something inside handled", () => {
+    mockRowBudget = OVERLAY
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    renderDock()
+    const inside = screen.getByRole("button", { name: "inside the dock" })
+
+    const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    handled.preventDefault()
+    act(() => {
+      inside.dispatchEvent(handled)
+    })
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+
+    fireEvent.keyDown(inside, { key: "Escape" })
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    fireEvent.click(screen.getByTestId("artifact-dock-scrim"))
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
+  it("takes focus in when it floats and gives it back when it closes", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const view = renderDock()
+    const composer = screen.getByRole("button", { name: "composer" })
+    composer.focus()
+
+    mockRowBudget = OVERLAY
+    view.rerender(
+      <TitleBarProjectionScope enabled>
+        <button type="button">composer</button>
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      </TitleBarProjectionScope>
+    )
+    expect(screen.getByRole("dialog")).toHaveFocus()
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    mockRowBudget = ROW
+    view.rerender(
+      <TitleBarProjectionScope enabled>
+        <button type="button">composer</button>
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      </TitleBarProjectionScope>
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(composer).toHaveFocus()
+  })
+
+  it("puts the dock back in the row, without stealing focus, when the window widens", () => {
+    mockRowBudget = OVERLAY
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const view = renderDock()
+    screen.getByRole("button", { name: "inside the dock" }).focus()
+
+    mockRowBudget = ROW
+    view.rerender(
+      <TitleBarProjectionScope enabled>
+        <button type="button">composer</button>
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      </TitleBarProjectionScope>
+    )
+    const dockSize = useArtifactDockLayoutStore.getState().dockSize
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute(
+      "data-size",
+      `${dockSize}%`
+    )
+    expect(screen.queryByTestId("artifact-dock-scrim")).not.toBeInTheDocument()
+    expect(screen.getByTestId("dock")).toHaveAttribute("data-projection", "on")
+    expect(screen.getByRole("button", { name: "inside the dock" })).toHaveFocus()
+  })
+
+  it("opens straight into the overlay, leaving the column shut", () => {
+    mockRowBudget = null
+    renderDock()
+    // The budget only floats an open dock; opening it is what tips it over.
+    mockRowBudget = OVERLAY
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("does not read the column the overlay shut as the user collapsing the dock", () => {
+    mockRowBudget = OVERLAY
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    renderDock()
+    const before = useArtifactDockLayoutStore.getState().dockSize
+    try {
+      fireEvent.click(screen.getByTestId("drag-dock-shut"))
+      fireEvent.click(screen.getByTestId("resize-dock"))
+      expect(useArtifactDockLayoutStore.getState()).toMatchObject({
+        dockCollapsed: false,
+        dockSize: before,
+      })
+    } finally {
+      // The mock's drag flag is module state; leave no shut panel behind.
+      const { __setCollapsedByDrag } = jest.requireMock("@/components/ui/resizable") as {
+        __setCollapsedByDrag: (id: string, value: boolean) => void
+      }
+      __setCollapsedByDrag("artifact-dock", false)
+    }
+  })
+})
+
+describe("ArtifactWorkspaceDock — the chat-floor cap is the window's, not the user's", () => {
+  // Group width the cap is computed from: (width − 420) / width.
+  let groupWidth = 0
+  beforeEach(() => {
+    groupWidth = 0
+    jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(() => groupWidth)
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it("keeps the user's width while the cap holds the dock under it, then grows back", () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+      useArtifactDockLayoutStore.getState().setDockSize(50)
+    })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    // A 724px group caps the dock at 42%: the layout settles on the cap.
+    groupWidth = 420 / 0.58
+    fireEvent.click(screen.getByTestId("resize-dock"))
+    const cap = screen.getByTestId("resizable-panel-artifact-dock").getAttribute("data-max")
+    expect(Number.parseFloat(cap ?? "")).toBeCloseTo(42, 3)
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(50)
+
+    // The window widens. The library first reports the dock where the old cap
+    // left it; the dock then returns to the width the user gave it.
+    groupWidth = 2000
+    fireEvent.click(screen.getByTestId("resize-dock-to-42"))
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(50)
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "50%")
+  })
+
+  it("still keeps a width the user drags to below the cap", () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+      useArtifactDockLayoutStore.getState().setDockSize(50)
+    })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    groupWidth = 420 / 0.58
+    fireEvent.click(screen.getByTestId("resize-dock-to-35.5"))
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(35.5)
+  })
 })

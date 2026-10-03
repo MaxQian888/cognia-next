@@ -28,6 +28,8 @@ const RESET = {
   statusBarCollapsed: false,
   webTitleBarEnabled: false,
   sidebarCollapsed: false,
+  sidebarAutoCollapsed: false,
+  sidebarAutoCollapseSuppressed: false,
   sidebarTeamsCollapsed: false,
   sidebarWidth: 256,
   channelListView: "active" as const,
@@ -787,5 +789,91 @@ describe("member activity", () => {
     act(() => useUIStore.getState().setMemberActivity("ts1", "a", "Read · a"))
     const raw = window.localStorage.getItem("cognia-ui") ?? ""
     expect(raw).not.toContain("memberActivity")
+  })
+})
+
+describe("sidebar auto-fold (ADR-0214 D5)", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    useUIStore.setState(RESET)
+  })
+
+  function persistedCollapsed(): unknown {
+    const raw = window.localStorage.getItem("cognia-ui")
+    return raw
+      ? (JSON.parse(raw) as { state: Record<string, unknown> }).state.sidebarCollapsed
+      : null
+  }
+
+  it("folds an open sidebar without persisting the fold", () => {
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    expect(useUIStore.getState()).toMatchObject({
+      sidebarCollapsed: true,
+      sidebarAutoCollapsed: true,
+    })
+    expect(persistedCollapsed()).toBe(false)
+    const raw = window.localStorage.getItem("cognia-ui") ?? ""
+    expect(raw).not.toContain("sidebarAutoCollapsed")
+    expect(raw).not.toContain("sidebarAutoCollapseSuppressed")
+  })
+
+  it("never takes over a sidebar the user folded, and releases only its own fold", () => {
+    act(() => useUIStore.getState().setSidebarCollapsed(true))
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    expect(useUIStore.getState().sidebarAutoCollapsed).toBe(false)
+    act(() => useUIStore.getState().releaseSidebarAutoCollapse())
+    expect(useUIStore.getState().sidebarCollapsed).toBe(true)
+    expect(persistedCollapsed()).toBe(true)
+  })
+
+  it("unfolds when the row has room again", () => {
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    act(() => useUIStore.getState().releaseSidebarAutoCollapse())
+    expect(useUIStore.getState()).toMatchObject({
+      sidebarCollapsed: false,
+      sidebarAutoCollapsed: false,
+    })
+  })
+
+  it("treats re-opening a borrowed fold as a refusal until the row has room", () => {
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    act(() => useUIStore.getState().toggleSidebar())
+    expect(useUIStore.getState()).toMatchObject({
+      sidebarCollapsed: false,
+      sidebarAutoCollapsed: false,
+      sidebarAutoCollapseSuppressed: true,
+    })
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    expect(useUIStore.getState().sidebarCollapsed).toBe(false)
+    // Room returned: the next squeeze may fold again.
+    act(() => useUIStore.getState().releaseSidebarAutoCollapse())
+    expect(useUIStore.getState().sidebarAutoCollapseSuppressed).toBe(false)
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    expect(useUIStore.getState().sidebarAutoCollapsed).toBe(true)
+  })
+
+  it("lets the user keep a borrowed fold as their own", () => {
+    act(() => useUIStore.getState().autoCollapseSidebar())
+    act(() => useUIStore.getState().setSidebarCollapsed(true))
+    expect(useUIStore.getState()).toMatchObject({
+      sidebarCollapsed: true,
+      sidebarAutoCollapsed: false,
+      sidebarAutoCollapseSuppressed: false,
+    })
+    expect(persistedCollapsed()).toBe(true)
+  })
+
+  it("tells plugins the sidebar's visibility changed", () => {
+    const spy = jest
+      .spyOn(getPluginEventHooks(), "dispatchSidebarToggle")
+      .mockImplementation(() => {})
+    try {
+      act(() => useUIStore.getState().autoCollapseSidebar())
+      expect(spy).toHaveBeenLastCalledWith(false)
+      act(() => useUIStore.getState().releaseSidebarAutoCollapse())
+      expect(spy).toHaveBeenLastCalledWith(true)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

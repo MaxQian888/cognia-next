@@ -149,6 +149,29 @@ interface UIState {
   sidebarCollapsed: boolean
   toggleSidebar: () => void
   setSidebarCollapsed: (collapsed: boolean) => void
+  /**
+   * The sidebar is folded because the chat row ran out of width, not because
+   * the user folded it (ADR-0214, D5 — `lib/shell/chat-row-budget.ts`).
+   *
+   * `sidebarCollapsed` stays the one field every surface reads, so the rail,
+   * the title bar's toggles and the status bar all show the fold without
+   * learning a second flag; this only marks the fold as borrowed. It is never
+   * persisted, and `partialize` writes the user's own value: a narrow window
+   * must not turn into a collapsed sidebar on the next launch. No gesture
+   * animation either — it follows a window resize, not a click.
+   */
+  sidebarAutoCollapsed: boolean
+  /**
+   * The user re-opened a sidebar the budget had folded. From then on the
+   * budget floats the dock instead of folding again, until the window has room
+   * for the open sidebar — an automatic rule that keeps re-folding a column
+   * the user just opened is worse than none. Runtime-only.
+   */
+  sidebarAutoCollapseSuppressed: boolean
+  /** Fold an open sidebar for the row budget; ignored once suppressed. */
+  autoCollapseSidebar: () => void
+  /** The row has room again: undo an auto fold and lift the suppression. */
+  releaseSidebarAutoCollapse: () => void
 
   /**
    * The sidebar's guild band (Chats + the teams) folded down to the row that
@@ -447,27 +470,46 @@ export const useUIStore = create<UIState>()(
         }),
 
       sidebarCollapsed: false,
-      toggleSidebar: () => {
-        const next = !get().sidebarCollapsed
+      sidebarAutoCollapsed: false,
+      sidebarAutoCollapseSuppressed: false,
+      toggleSidebar: () => get().setSidebarCollapsed(!get().sidebarCollapsed),
+      setSidebarCollapsed: (collapsed) => {
+        // A user's choice replaces a borrowed fold either way. Opening one is
+        // also a refusal of it, which the row budget honours for the session.
+        const refusedAutoFold = get().sidebarAutoCollapsed && !collapsed
         // The gesture animates the row toward the width the sidebar is headed
         // for — `0` when collapsing, the persisted width when expanding.
         runSidebarGesture(
           () => {
-            set({ sidebarCollapsed: next })
+            set({
+              sidebarCollapsed: collapsed,
+              sidebarAutoCollapsed: false,
+              ...(refusedAutoFold ? { sidebarAutoCollapseSuppressed: true } : {}),
+            })
             // Plugin host: dispatch sidebar visibility change. Visible === !collapsed.
-            getPluginEventHooks().dispatchSidebarToggle(!next)
-          },
-          next ? 0 : get().sidebarWidth
-        )
-      },
-      setSidebarCollapsed: (collapsed) => {
-        runSidebarGesture(
-          () => {
-            set({ sidebarCollapsed: collapsed })
             getPluginEventHooks().dispatchSidebarToggle(!collapsed)
           },
           collapsed ? 0 : get().sidebarWidth
         )
+      },
+      autoCollapseSidebar: () => {
+        const state = get()
+        if (state.sidebarCollapsed || state.sidebarAutoCollapseSuppressed) return
+        set({ sidebarCollapsed: true, sidebarAutoCollapsed: true })
+        getPluginEventHooks().dispatchSidebarToggle(false)
+      },
+      releaseSidebarAutoCollapse: () => {
+        const state = get()
+        if (state.sidebarAutoCollapsed) {
+          set({
+            sidebarCollapsed: false,
+            sidebarAutoCollapsed: false,
+            sidebarAutoCollapseSuppressed: false,
+          })
+          getPluginEventHooks().dispatchSidebarToggle(true)
+        } else if (state.sidebarAutoCollapseSuppressed) {
+          set({ sidebarAutoCollapseSuppressed: false })
+        }
       },
 
       sidebarTeamsCollapsed: false,
@@ -663,7 +705,8 @@ export const useUIStore = create<UIState>()(
       partialize: (s) => ({
         selectedGuild: s.selectedGuild,
         scratchpadCollapsed: s.scratchpadCollapsed,
-        sidebarCollapsed: s.sidebarCollapsed,
+        // The user's value: a fold the row budget borrowed is not a preference.
+        sidebarCollapsed: s.sidebarCollapsed && !s.sidebarAutoCollapsed,
         sidebarTeamsCollapsed: s.sidebarTeamsCollapsed,
         sidebarWidth: s.sidebarWidth,
         sidebarPeekEnabled: s.sidebarPeekEnabled,

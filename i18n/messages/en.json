@@ -4011,6 +4011,7 @@
       "goToSource": "Go to source message",
       "openArtifacts": "Open artifacts",
       "openInNewTab": "Open in new tab",
+      "overlayLabel": "Side panel",
       "referenceInChat": "Reference in conversation",
       "saveToProject": "Save to project…",
       "splitView": "Split",

@@ -17,8 +17,18 @@
  * Cmd/Ctrl+J toggles it (see `useArtifactDockShortcuts`).
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react"
+import { useTranslations } from "next-intl"
 import type { PanelImperativeHandle } from "react-resizable-panels"
+import { FocusScope } from "radix-ui/internal"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { onBrowserUrlReveal } from "@/lib/browser/open-url-request"
 import { runShellViewTransition } from "@/lib/ui/shell-view-transition"
@@ -33,6 +43,12 @@ import { cn } from "@/lib/utils"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { useEffectiveWorkbenchRailPersistent as useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
+import { useChatRowBudget } from "@/hooks/shell/use-chat-row-budget"
+import { dockOverlayWidthPx, type ChatRowDockFloor } from "@/lib/shell/chat-row-budget"
+import {
+  TitleBarProjectionScope,
+  useTitleBarProjectionScope,
+} from "@/components/shell/title-bar-outlets"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
@@ -172,6 +188,20 @@ export function dockCapForChatFloor(groupWidthPx: number): number {
   if (!Number.isFinite(groupWidthPx) || groupWidthPx <= 0) return 100
   return Math.max(0, ((groupWidthPx - CHAT_MIN_PX) / groupWidthPx) * 100)
 }
+
+/** The dock's floor in the row budget's terms (`lib/shell/chat-row-budget.ts`). */
+export function dockFloorForProfile(workspaceProfile: boolean): ChatRowDockFloor {
+  return workspaceProfile
+    ? { minPx: Number.parseFloat(WORKSPACE_DOCK_BOUNDS.minPx), minPercent: 0 }
+    : { minPx: 0, minPercent: ARTIFACT_DOCK_BOUNDS.min }
+}
+
+/**
+ * Below this a cap change is noise: the group's width converts to a percent
+ * through a division, so a settled layout reports the same cap a few decimals
+ * apart.
+ */
+const CAP_EPSILON_PERCENT = 0.5
 
 /**
  * Raise the dock when something new wants attention inside it — a freshly
@@ -336,6 +366,41 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
   const railPreference = useWorkbenchRailPersistent()
   const railPersistent = railPreference
+  const t = useTranslations("artifacts.dock")
+  const projectionScope = useTitleBarProjectionScope()
+
+  /**
+   * The chat row's width budget (ADR-0214, D5): when the window cannot hold
+   * the chat's minimum beside the dock's floor, the sidebar folds first and
+   * the dock floats over the chat last. The row is this host's parent — the
+   * element the conversation sidebar shares with it.
+   */
+  const [row, setRow] = useState<HTMLElement | null>(null)
+  const bindRoot = useCallback((element: HTMLDivElement | null) => {
+    setRow(element?.parentElement ?? null)
+  }, [])
+  const dockFloor = dockFloorForProfile(dockProfile === "workspace")
+  const budget = useChatRowBudget({
+    row,
+    dockOpen: !dockCollapsed,
+    dockFloor,
+    chatMinPx: CHAT_MIN_PX,
+  })
+  /** The dock floats over the chat; only ever true while it is open. */
+  const overlayOpen = budget?.overlay ?? false
+  const overlayWidthPx = budget ? dockOverlayWidthPx(budget.groupPx, dockSize, dockFloor) : 0
+  /**
+   * Read by the effects and the layout callback below, which must not treat
+   * the column the overlay shut as the user's collapse. A layout effect so it
+   * is current before the passive effects of the same commit.
+   */
+  const overlayRef = useRef(overlayOpen)
+  useLayoutEffect(() => {
+    overlayRef.current = overlayOpen
+  }, [overlayOpen])
+  const overlayElementRef = useRef<HTMLDivElement | null>(null)
+  const overlayReturnFocusRef = useRef<HTMLElement | null>(null)
+  const previousOverlayRef = useRef(overlayOpen)
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
   // The title bar hosts this dock's header and sizes its end outlet to the
@@ -386,6 +451,8 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
    * drag target: dragging below `minSize` snaps here on its own.
    */
   const collapsedSize = railPersistent ? `${WORKBENCH_RAIL_WIDTH_PX}px` : "0%"
+  /** Overlaid, the column shuts all the way: the rail floats with the dock. */
+  const panelCollapsedSize = overlayOpen ? "0%" : collapsedSize
 
   /**
    * The dock's live width as the drag reports it, plus whether that drag began
@@ -406,6 +473,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
    * write is equality-guarded so a settled layout cannot loop.
    */
   const [chatFloorCap, setChatFloorCap] = useState(100)
+  const previousChatFloorCapRef = useRef(chatFloorCap)
 
   /**
    * Release-snap. Runs on the divider's `pointerup`, never during the drag, so
@@ -458,6 +526,8 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (previousDockCollapsedRef.current === dockCollapsed) return
     previousDockCollapsedRef.current = dockCollapsed
+    // Opening into the overlay: the column stays shut and the dock floats.
+    if (!dockCollapsed && overlayRef.current) return
 
     const panel = dockPanelRef.current
     const element = dockPanelElementRef.current
@@ -481,7 +551,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
 
     const panel = dockPanelRef.current
     const element = dockPanelElementRef.current
-    if (!panel || !element || dockCollapsed) return
+    if (!panel || !element || dockCollapsed || overlayRef.current) return
 
     const target = dockSizeRef.current
     return animateDockResize(element, () => {
@@ -489,6 +559,59 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
       publishDockColumnTarget(element)
     })
   }, [dockCollapsed, dockSizeRequest])
+
+  // Into and out of the overlay. Entering shuts the column (the content floats
+  // instead) and takes focus into the dock, which is modal while it covers the
+  // chat; leaving because the window widened puts the dock back at its width,
+  // and leaving because it closed returns focus to where it came from.
+  useEffect(() => {
+    if (previousOverlayRef.current === overlayOpen) return
+    previousOverlayRef.current = overlayOpen
+    const panel = dockPanelRef.current
+    if (overlayOpen) {
+      panel?.collapse()
+      const active = document.activeElement
+      overlayReturnFocusRef.current = active instanceof HTMLElement ? active : null
+      overlayElementRef.current?.focus()
+      return
+    }
+    const returnTo = overlayReturnFocusRef.current
+    overlayReturnFocusRef.current = null
+    if (!useArtifactDockLayoutStore.getState().dockCollapsed) {
+      panel?.resize(`${dockSizeRef.current}%`)
+      return
+    }
+    const active = document.activeElement
+    const focusLeftBehind =
+      active === null ||
+      active === document.body ||
+      Boolean(overlayElementRef.current?.contains(active))
+    if (focusLeftBehind && returnTo?.isConnected) returnTo.focus()
+  }, [overlayOpen])
+
+  // The window widened under a dock its cap had been holding below the width
+  // the user gave it: grow back toward that width. The cap is the window's
+  // limit, not a choice, so it never overwrote `dockSize` (see the layout
+  // callback) and the user's width is still there to return to.
+  useEffect(() => {
+    const previous = previousChatFloorCapRef.current
+    previousChatFloorCapRef.current = chatFloorCap
+    if (chatFloorCap <= previous + CAP_EPSILON_PERCENT) return
+    const state = useArtifactDockLayoutStore.getState()
+    const panel = dockPanelRef.current
+    if (!panel || state.dockCollapsed || overlayRef.current) return
+    if (previous + CAP_EPSILON_PERCENT >= state.dockSize) return
+    panel.resize(`${Math.min(state.dockSize, chatFloorCap)}%`)
+  }, [chatFloorCap])
+
+  const closeOverlay = () => setDockCollapsed(true)
+  const handleOverlayKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // A menu or dialog inside the dock dismisses itself first and marks the
+    // event handled; only an Escape nothing else claimed closes the overlay.
+    if (event.key !== "Escape" || event.defaultPrevented) return
+    event.preventDefault()
+    closeOverlay()
+  }
 
   // Auto-expanding on a fresh artifact lives in `useDockAttentionSignal` on the
   // shared layer, so the mobile Sheet gets the identical rule.
@@ -531,8 +654,12 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="flex w-full flex-1 min-h-0 overflow-hidden"
+      ref={bindRoot}
+      // `relative`: the overlaid dock and its scrim position against this box,
+      // which the panel group and panels (none of them positioned) do not clip.
+      className="relative flex w-full flex-1 min-h-0 overflow-hidden"
       data-testid="artifact-workspace-dock"
+      data-dock-overlay={overlayOpen || undefined}
     >
       <WorkspaceRevealOpener />
       <ResizablePanelGroup
@@ -549,6 +676,9 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           setChatFloorCap((previous) => (Math.abs(previous - nextCap) < 0.01 ? previous : nextCap))
           const dock = layout["artifact-dock"]
           if (typeof dock !== "number") return
+          // The overlay shut the column on purpose: neither a collapse to
+          // mirror nor a width to keep.
+          if (overlayRef.current) return
           // Tracked before the collapsed early-out: dragging *out* of the rail
           // only produces layouts while the store still says collapsed, and the
           // release-snap has to know where the pointer actually left it.
@@ -575,7 +705,21 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           // 2560px screen that is ~18.75%, so dragging the workspace dock down
           // to its own minimum silently failed to persist and the next
           // collapse/expand snapped it back to the stale wider value.
-          if (dock >= dockFloorPercent(dockPanelElementRef.current, workspaceProfile)) {
+          //
+          // Nor a dock that is merely sitting on the chat-floor cap below the
+          // width it was given: the window narrowed under it, and that width is
+          // the window's, not the user's — the cap effect grows it back.
+          // The cap it sits on may be the one this very layout just lifted:
+          // a widening window first reports the dock still at the old cap.
+          const heldByCap = [nextCap, chatFloorCap].some(
+            (cap) =>
+              cap + CAP_EPSILON_PERCENT < dockSizeRef.current &&
+              Math.abs(dock - cap) < CAP_EPSILON_PERCENT
+          )
+          if (
+            !heldByCap &&
+            dock >= dockFloorPercent(dockPanelElementRef.current, workspaceProfile)
+          ) {
             setDockSize(dock)
           }
         }}
@@ -594,7 +738,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             zero has nothing left to grab. */}
         <ResizableHandle
           withHandle
-          aria-hidden={(dockCollapsed && !railPersistent) || undefined}
+          aria-hidden={(dockCollapsed && !railPersistent) || overlayOpen || undefined}
           className={cn(
             // Literal twin of DOCK_RESIZE_DURATION_MS / DOCK_RESIZE_EASE — see
             // their declaration for why this cannot read them directly.
@@ -602,9 +746,9 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             // library's default proximity target is only about 10px total, so
             // grabbing the visible edge a few pixels inside the panel missed.
             "z-20 after:w-5 transition-[width,opacity] duration-[calc(280ms*var(--motion-duration-scale,1))] ease-[cubic-bezier(0.32,0.72,0,1)]",
-            dockCollapsed && !railPersistent && "w-0 opacity-0 [&>div]:opacity-0"
+            ((dockCollapsed && !railPersistent) || overlayOpen) && "w-0 opacity-0 [&>div]:opacity-0"
           )}
-          disabled={dockCollapsed && !railPersistent}
+          disabled={(dockCollapsed && !railPersistent) || overlayOpen}
           onPointerDown={() => {
             dragStartCollapsedRef.current = dockCollapsed
           }}
@@ -622,17 +766,57 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           id="artifact-dock"
           panelRef={dockPanelRef}
           elementRef={dockPanelElementRef}
-          defaultSize={dockCollapsed ? collapsedSize : `${dockSize}%`}
+          defaultSize={dockCollapsed || overlayOpen ? panelCollapsedSize : `${dockSize}%`}
           minSize={dockMinSize}
           maxSize={dockMaxSize}
           collapsible
-          collapsedSize={collapsedSize}
+          collapsedSize={panelCollapsedSize}
         >
-          <div data-testid="artifact-dock-wrapper" className="h-full min-w-0 overflow-hidden">
-            {dockContentMounted ? <ArtifactDock railOnly={!dockBodyMounted} /> : null}
-          </div>
+          {/* One element in both shapes, so the dock's content (a live browser
+              page, open editors) never remounts when the window crosses into
+              the overlay. Overlaid, it leaves the shut column by absolute
+              positioning against the host, and is a modal dialog: focus is
+              trapped inside, Escape or the scrim closes it. Its header draws
+              inline there — the title bar's end zone is sized to the column,
+              which the overlay shut. */}
+          <FocusScope.FocusScope
+            asChild
+            trapped={overlayOpen}
+            loop
+            onMountAutoFocus={(event) => event.preventDefault()}
+            onUnmountAutoFocus={(event) => event.preventDefault()}
+          >
+            <div
+              ref={overlayElementRef}
+              data-testid="artifact-dock-wrapper"
+              role={overlayOpen ? "dialog" : undefined}
+              aria-modal={overlayOpen || undefined}
+              aria-label={overlayOpen ? t("overlayLabel") : undefined}
+              onKeyDown={overlayOpen ? handleOverlayKeyDown : undefined}
+              className={cn(
+                "h-full min-w-0 overflow-hidden outline-none",
+                overlayOpen &&
+                  "absolute inset-y-0 right-0 z-40 border-l bg-background shadow-(--elevation-3) animate-in fade-in-0 slide-in-from-right-4"
+              )}
+              style={overlayOpen ? { width: overlayWidthPx } : undefined}
+            >
+              <TitleBarProjectionScope enabled={projectionScope && !overlayOpen}>
+                {dockContentMounted ? <ArtifactDock railOnly={!dockBodyMounted} /> : null}
+              </TitleBarProjectionScope>
+            </div>
+          </FocusScope.FocusScope>
         </ResizablePanel>
       </ResizablePanelGroup>
+      {overlayOpen ? (
+        // Pointer-only: the keyboard closes the overlay with Escape, so the
+        // scrim stays out of the tab order and the accessibility tree.
+        <div
+          aria-hidden
+          data-testid="artifact-dock-scrim"
+          className="absolute inset-0 z-30 bg-black/30 animate-in fade-in-0"
+          onClick={closeOverlay}
+        />
+      ) : null}
     </div>
   )
 }
