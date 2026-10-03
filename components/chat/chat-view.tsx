@@ -6,7 +6,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   useSyncExternalStore,
   type ReactNode,
   type Ref,
@@ -72,8 +71,7 @@ import { useCharacter } from "@/lib/data-hooks/context"
 import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
-import { SessionSummaryPopover } from "@/components/context-workbench/session-summary-popover"
-import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
+import { SessionSummaryStageHost } from "@/components/context-workbench/session-summary-card/session-summary-trigger"
 import { useTitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -939,13 +937,15 @@ export function ChatPane({
           top"). This wrapper is the positioned offset parent that popLayout
           pins the exiting branch against; keep it `relative`. */}
       <div className="relative flex min-h-0 flex-1 flex-col" data-slot="chat-surface-stage">
-        {/* The summary opener moved off the title bar onto the pane surface:
-            it floats at the stage's top-right, beside the right-hand column the
-            card opens into, and outside the scroll lane so it never scrolls
-            with the messages or overlaps the gates/notices above the stage.
-            Scoped to the workspace — embedded hosts keep it on their header.
-            Split panes each get their own, bound to that pane's session. */}
-        {inScope ? <ChatSummaryTrigger session={activeSession} /> : null}
+        {/* The summary card floats at the stage's top-right, under the title
+            bar's summary button, when the gutter beside the chat column holds
+            it — outside the scroll lane so it never scrolls with the messages,
+            and below the stage's top edge so it never covers a banner. Scoped
+            to the workspace (embedded hosts use the popover). Split panes each
+            get their own, bound to that pane's session. */}
+        {inScope ? (
+          <SessionSummaryStageHost key={activeSession.id} session={activeSession} />
+        ) : null}
         <AnimatePresence
           mode="popLayout"
           initial={false}
@@ -1102,29 +1102,6 @@ export function ChatPane({
           )}
         </AnimatePresence>
       </div>
-    </>
-  )
-}
-
-/**
- * The summary opener now lives on the pane surface rather than the title bar:
- * a floating button pinned to the stage's top-right corner, next to the
- * right-hand column the card opens into. It owns the `SessionSettingsSheet`
- * the card's Manage action needs, so the opener and its settings sheet stay
- * one self-contained unit wherever the workspace mounts a `ChatPane`.
- */
-function ChatSummaryTrigger({ session }: { session: ChatSession }) {
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  return (
-    <>
-      <div className="absolute right-3 top-3 z-20 sm:right-4" data-testid="chat-summary-trigger">
-        <SessionSummaryPopover
-          key={session.id}
-          session={session}
-          onManage={() => setSettingsOpen(true)}
-        />
-      </div>
-      <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   )
 }

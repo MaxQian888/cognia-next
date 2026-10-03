@@ -5,7 +5,9 @@ description: Shared right-side workspace for project files, Canvas documents, ar
 
 # Context Workbench
 
-The Context Workbench is the common right-side workspace for resource-specific tools. It consolidates navigation and layout; it does **not** replace the specialized capabilities owned by Project, Canvas, Artifact, or Workflow.
+The Context Workbench provides a shared workspace on the right for resource-specific tools.
+It combines navigation and layout.
+Project, Canvas, Artifact, and Workflow retain their specialized capabilities.
 
 ## Surface parity
 
@@ -29,20 +31,44 @@ Each host computes capabilities from the current resource and platform. A native
 
 ## Task overview
 
-Click **Task summary** in the top-right toolbar to open a compact floating card in a 280px reserved area. The card has margins, rounded corners and a shadow, and grows with its content rather than filling the window height.
-On desktop it reserves space beside the conversation, narrowing the chat instead
-of covering messages. Closing it restores the chat width. The summary and full
-workbench share the right-side space: **View details** replaces the summary with
-the existing workbench and preserves the saved workspace width. Small screens
-use a drawer instead of squeezing the chat.
+**Task summary** sits in the title bar beside the layout toggles (shortcut
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd>). It opens a compact card about the
+current conversation:
 
-Capabilities start collapsed and results appear only when available. The
-conversation title remains plain text. Search and navigation controls are grouped in the top-right toolbar; history,
+- **Header**: the project and branch the task runs in, **Manage task** (session
+  settings) and a menu.
+- **Run progress**: the current step of the run's plan, with a step bar.
+- **Waiting for you**: approvals and questions the task is blocked on; click to
+  jump to the turn that asked.
+- **Changes**: lines added and removed (or the file count when some files have
+  no line counts); click to open the workspace panel.
+- **Artifacts**: the artifacts this conversation made; one opens directly,
+  several open the artifact list.
+- **Sources**: the most-used kinds of source, **+** to manage sources and
+  capabilities, and **View all** for the sources panel.
+- **Sharing**: private or shared, the participants, and the shared-chat
+  controls (connection status and **Request AI** in a shared room).
+
+When the window leaves room beside the centred chat column, the card floats in
+that gutter under the button and stays open; the button (or **Hide card** in
+the menu) puts it away for this conversation. On a narrower window it opens as
+a popover under the button instead. Either way the card never narrows the
+conversation and never covers a banner. It does not open or close the right
+panel, so it can sit beside whatever the panel shows.
+
+Choose what the card shows from its menu: each row is **Always**, **When
+present** or **Hidden**, and **Restore defaults** resets them. The choice
+syncs with your other settings. **Open task overview** in the same menu opens
+the full overview in the right panel. The rail's sources and workspace badges
+use the same counts as the card.
+
+In the full overview, capabilities start collapsed and results appear only when
+available. The conversation title remains plain text. Search and navigation controls are grouped in the top-right toolbar; history,
 workspace selection and navigation shortcuts remain available in **Navigation**.
 
 The full overview includes open questions and subtasks, configured skills,
-runtime capability snapshots, and technical details. Both presentations reuse
-the same session state and capability/result components.
+runtime capability snapshots, sharing controls and technical details. The card
+and the overview read the same session state, so their counts always agree.
 
 The overview keeps the existing `metadata` panel ID, so saved layouts and panel
 shortcuts continue to work. Artifact properties remain a separate resource view.

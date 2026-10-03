@@ -7,7 +7,6 @@
 
 import { useTranslations } from "next-intl"
 import { ListTodoIcon } from "lucide-react"
-import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -19,8 +18,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { TodoList } from "@/components/chat/todo-list"
-import { getLatestRunRecord } from "@/lib/db/run-records"
-import type { TodoEntry } from "@/lib/chat/todos"
+import { useSessionRunProgress } from "@/hooks/chat/use-session-run-progress"
 
 export interface PlanModeTasksSheetProps {
   /** Active chat session id. */
@@ -28,14 +26,11 @@ export interface PlanModeTasksSheetProps {
   className?: string
 }
 
-const NO_TODOS: TodoEntry[] = []
-
 export function PlanModeTasksSheet({ sessionId, className }: PlanModeTasksSheetProps) {
   const t = useTranslations("planModeTasks")
   // Live-read the latest persisted run record's todo snapshot; updates as the
   // run-record persistence hook writes new snapshots.
-  const record = useLiveQuery(() => getLatestRunRecord(sessionId), [sessionId])
-  const todos = record?.todos ?? NO_TODOS
+  const { todos } = useSessionRunProgress(sessionId)
 
   if (todos.length === 0) return null
 

@@ -895,6 +895,7 @@
               "searchEnabled",
               "searchFallbackEnabled",
               "searchMaxResults",
+              "sessionSummaryCard",
               "sidebarLayout",
               "streamPartialMessages",
               "sttLanguage",

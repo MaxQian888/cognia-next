@@ -85,15 +85,7 @@ export function runSidebarGesture(apply: () => void, sidebarTargetPx: number): v
       // *schedules* the row's new layout (React commits it in a microtask), so
       // the settled width is computed rather than measured: the dock holds a
       // fixed percentage of its resizable group, and the group grows by what
-      // the sidebar frees. The summary aside is a fixed-width sibling outside
-      // the group — while it owns the reported column its width does not move.
-      const summary = document.getElementById("session-summary-dock")
-      if (summary && summary.getBoundingClientRect().width > 0) {
-        useShellColumnsStore
-          .getState()
-          .setColumnTarget("dock", summary.getBoundingClientRect().width)
-        return
-      }
+      // the sidebar frees.
       const dockPanel = workspace
         .querySelector<HTMLElement>('[data-testid="artifact-dock-wrapper"]')
         ?.closest<HTMLElement>("[data-panel]")

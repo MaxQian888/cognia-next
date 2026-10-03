@@ -560,7 +560,7 @@ export interface SessionSurfacePanelsInput {
   unresolvedCommentCount: number
   /** Number of unique sources referenced in session messages. */
   sourceCount?: number
-  /** Number of uncommitted file changes in the project workspace. */
+  /** Number of files this conversation's task workspaces changed. */
   uncommittedChangeCount?: number
   /** Number of run-learning proposals awaiting an explicit user decision. */
   pendingRunLearningCount?: number
@@ -801,7 +801,9 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         scope: "session",
-        getBadge: () => uncommittedChangeCount,
+        // No badge: the rail sums a group's badges, and this panel shares the
+        // `workspace` activity with the workspace panel, which already counts
+        // the conversation's changed files.
         renderer: renderers.sourceControl,
       },
       {

@@ -52,6 +52,8 @@ import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
 import { SessionOverviewContext } from "@/components/context-workbench/session-overview-panel"
 import { getSession } from "@/lib/db/sessions"
 import { countPendingSessionRunLearningProposals } from "@/lib/db/run-retrospectives"
+import { useSessionResourceChanges } from "@/hooks/chat/use-session-resource-changes"
+import { collectSessionSources } from "@/lib/chat/session-sources"
 
 /**
  * The activity that carries the dock's unread dot, per surface.
@@ -212,6 +214,7 @@ function useDockPanelSync(
 /** Stable identity so the sync effects don't re-run on every render. */
 const EMPTY_PANEL_IDS: string[] = []
 const EMPTY_SESSION_MESSAGES: UIMessage[] = []
+const SOURCE_COUNT_LABELS = { document: "", file: "" }
 
 /**
  * Set by the Sheet host (`<ArtifactPanel />`). `panelMode` is the host's own
@@ -506,6 +509,14 @@ export function SessionContextWorkbench({
     [activeSessionId],
     0
   )
+  // The rail badges read the same walks as the session summary card, so the
+  // numbers on the card and on the rail never disagree. Labels are irrelevant
+  // to a count.
+  const sourceCount = useMemo(
+    () => collectSessionSources(sessionMessages, SOURCE_COUNT_LABELS).length,
+    [sessionMessages]
+  )
+  const uncommittedChangeCount = useSessionResourceChanges(activeSessionId).totals.files
 
   const panels = useSessionSurfacePanels({
     activeSessionId,
@@ -516,6 +527,8 @@ export function SessionContextWorkbench({
     workspaceLayout,
     workspaceAvailable,
     unresolvedCommentCount,
+    sourceCount,
+    uncommittedChangeCount,
     pendingRunLearningCount,
     scopeKey,
     onWidthHint: dockWidthHint,

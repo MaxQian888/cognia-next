@@ -362,7 +362,6 @@
     "openItems": "待解决问题与子任务",
     "openContext": "打开运行上下文",
     "noOpenItems": "尚未记录待解决问题或子任务。",
-    "openItemsMore": "还有 {count} 项，见运行上下文",
     "technicalDetails": "技术详情",
     "statuses": {
       "idle": "待命",
@@ -389,9 +388,7 @@
       "refresh": "刷新快照",
       "runtimeHint": "最近的主机快照区分已加载和延迟加载的能力。下轮运行后可能发生变化。",
       "snapshotUnavailable": "暂时没有运行时快照。请在已连接且支持的主机上运行一轮后刷新。",
-      "inventoryUnavailable": "主机快照未提供能力明细。",
-      "configuredCount": "{count} 项技能配置",
-      "runtimeCount": "{count} 项运行时能力"
+      "inventoryUnavailable": "主机快照未提供能力明细。"
     },
     "results": {
       "title": "关键结果",
@@ -407,16 +404,47 @@
       "outputs": "输出文件",
       "sharedLinks": "助手分享的链接",
       "sharedLinksDescription": "回复中提及的链接；尚未验证是否新建及外部状态。"
-    },
-    "summaryTitle": "任务摘要",
-    "viewDetails": "查看详情",
-    "rows": {
-      "sharing": "协作",
-      "mode": "模式",
-      "runtime": "智能体",
-      "environment": "运行环境",
-      "directory": "工作目录"
     }
+  },
+  "summaryCard": {
+    "trigger": "任务摘要",
+    "triggerPending": "任务摘要，{count} 项等你处理",
+    "card": "{title} 的任务摘要",
+    "menu": "摘要卡片选项",
+    "showOnCard": "卡片显示",
+    "rows": {
+      "progress": "运行进度",
+      "needsYou": "等你处理",
+      "changes": "改动",
+      "artifacts": "产物",
+      "sources": "来源",
+      "sharing": "共享"
+    },
+    "visibility": {
+      "always": "总是",
+      "auto": "有内容时",
+      "never": "隐藏"
+    },
+    "resetRows": "恢复默认",
+    "openOverview": "打开任务概览",
+    "pinCard": "固定在聊天旁",
+    "unpinCard": "隐藏卡片",
+    "noWorkspace": "未关联工作区",
+    "branch": "分支 {branch}",
+    "progressCurrent": "第 {done}/{total} 步：{step}",
+    "progressDone": "{total} 个步骤已全部完成",
+    "needsYou": "{count} 项等你处理",
+    "changesNone": "无",
+    "changesFiles": "{count} 个文件",
+    "linesAdded": "新增 {count} 行",
+    "linesRemoved": "删除 {count} 行",
+    "linesUnknown": "部分改动文件没有记录行数，因此只显示文件数。",
+    "changesUnavailable": "当前环境无法追踪改动",
+    "artifactCount": "{count} 个产物",
+    "sourcesNone": "还没有使用来源",
+    "sourceCount": "{count} 次",
+    "addSource": "管理来源与能力",
+    "viewAll": "查看全部"
   },
   "navigation": {
     "tabs": "文字标签页",

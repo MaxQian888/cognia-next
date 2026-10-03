@@ -11379,11 +11379,50 @@
       "unboundTitle": "Runs on a single agent",
       "working": "{count, plural, =0 {Idle} =1 {1 working} other {# working}}"
     },
+    "summaryCard": {
+      "addSource": "Manage sources and capabilities",
+      "artifactCount": "{count, plural, one {# artifact} other {# artifacts}}",
+      "branch": "Branch {branch}",
+      "card": "Task summary for {title}",
+      "changesFiles": "{count, plural, one {# file} other {# files}}",
+      "changesNone": "None",
+      "changesUnavailable": "Change tracking isn't available here",
+      "linesAdded": "{count} lines added",
+      "linesRemoved": "{count} lines removed",
+      "linesUnknown": "Line counts aren't recorded for every changed file, so only the file count is shown.",
+      "menu": "Summary card options",
+      "needsYou": "{count, plural, one {# request waiting for you} other {# requests waiting for you}}",
+      "noWorkspace": "No workspace",
+      "openOverview": "Open task overview",
+      "pinCard": "Keep open beside the chat",
+      "progressCurrent": "Step {done} of {total}: {step}",
+      "progressDone": "All {total} steps done",
+      "resetRows": "Restore defaults",
+      "rows": {
+        "artifacts": "Artifacts",
+        "changes": "Changes",
+        "needsYou": "Waiting for you",
+        "progress": "Run progress",
+        "sharing": "Sharing",
+        "sources": "Sources"
+      },
+      "showOnCard": "Show on card",
+      "sourceCount": "{count, plural, one {# use} other {# uses}}",
+      "sourcesNone": "No sources used yet",
+      "trigger": "Task summary",
+      "triggerPending": "Task summary, {count, plural, one {# request} other {# requests}} waiting for you",
+      "unpinCard": "Hide card",
+      "viewAll": "View all",
+      "visibility": {
+        "always": "Always",
+        "auto": "When present",
+        "never": "Hidden"
+      }
+    },
     "taskOverview": {
       "capabilities": {
         "character": "Character",
         "configured": "Skills configured for the next send",
-        "configuredCount": "{count} configured skills",
         "configuredHint": "Character skills and attachments follow session disable settings. Configuration does not confirm runtime loading.",
         "disabled": "Disabled",
         "inventoryUnavailable": "The host snapshot does not report capability details.",
@@ -11392,7 +11431,6 @@
         "noneConfigured": "No character skills or next-message skill attachments configured.",
         "refresh": "Refresh snapshot",
         "runtime": "Runtime capability snapshot",
-        "runtimeCount": "{count} runtime entries",
         "runtimeHint": "The latest host snapshot distinguishes loaded and deferred capabilities. Entries may change after the next turn.",
         "snapshotUnavailable": "No runtime snapshot is available yet. Start a turn on a supported connected host, then refresh.",
         "title": "Capabilities",
@@ -11405,7 +11443,6 @@
       "noOpenItems": "No open questions or subtasks recorded.",
       "openContext": "Open run context",
       "openItems": "Open questions and subtasks",
-      "openItemsMore": "{count} more in the run context",
       "results": {
         "artifacts": "Artifacts",
         "emptyFiles": "No file changes have been recorded.",
@@ -11421,13 +11458,6 @@
         "title": "Key results",
         "unavailable": "File tracking is not available for this session yet."
       },
-      "rows": {
-        "directory": "Directory",
-        "environment": "Environment",
-        "mode": "Mode",
-        "runtime": "Agent",
-        "sharing": "Sharing"
-      },
       "statusHints": {
         "awaiting_approval": "Respond to the pending request in the conversation to continue.",
         "error": "The last turn stopped before it finished.",
@@ -11439,10 +11469,8 @@
         "idle": "Idle",
         "streaming": "Working"
       },
-      "summaryTitle": "Task summary",
       "technicalDetails": "Technical details",
-      "untitled": "Untitled task",
-      "viewDetails": "View details"
+      "untitled": "Untitled task"
     },
     "teamMembersPanel": {
       "title": "Team members"
@@ -45834,6 +45862,7 @@
         "observabilityRefresh": "Refresh",
         "observabilityToggleEdit": "Toggle edit layout",
         "searchFocus": "Focus search",
+        "sessionSummaryToggle": "Chat: toggle task summary",
         "settingsOpen": "Open settings",
         "sidebarToggle": "Toggle conversation sidebar",
         "skillsClearSelection": "Clear selection / close detail",

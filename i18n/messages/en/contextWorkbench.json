@@ -362,7 +362,6 @@
     "openItems": "Open questions and subtasks",
     "openContext": "Open run context",
     "noOpenItems": "No open questions or subtasks recorded.",
-    "openItemsMore": "{count} more in the run context",
     "technicalDetails": "Technical details",
     "statuses": {
       "idle": "Idle",
@@ -389,9 +388,7 @@
       "refresh": "Refresh snapshot",
       "runtimeHint": "The latest host snapshot distinguishes loaded and deferred capabilities. Entries may change after the next turn.",
       "snapshotUnavailable": "No runtime snapshot is available yet. Start a turn on a supported connected host, then refresh.",
-      "inventoryUnavailable": "The host snapshot does not report capability details.",
-      "configuredCount": "{count} configured skills",
-      "runtimeCount": "{count} runtime entries"
+      "inventoryUnavailable": "The host snapshot does not report capability details."
     },
     "results": {
       "title": "Key results",
@@ -407,16 +404,47 @@
       "outputs": "Output files",
       "sharedLinks": "Links shared by assistant",
       "sharedLinksDescription": "Links mentioned in replies; creation and external status are not verified."
-    },
-    "summaryTitle": "Task summary",
-    "viewDetails": "View details",
-    "rows": {
-      "sharing": "Sharing",
-      "mode": "Mode",
-      "runtime": "Agent",
-      "environment": "Environment",
-      "directory": "Directory"
     }
+  },
+  "summaryCard": {
+    "trigger": "Task summary",
+    "triggerPending": "Task summary, {count, plural, one {# request} other {# requests}} waiting for you",
+    "card": "Task summary for {title}",
+    "menu": "Summary card options",
+    "showOnCard": "Show on card",
+    "rows": {
+      "progress": "Run progress",
+      "needsYou": "Waiting for you",
+      "changes": "Changes",
+      "artifacts": "Artifacts",
+      "sources": "Sources",
+      "sharing": "Sharing"
+    },
+    "visibility": {
+      "always": "Always",
+      "auto": "When present",
+      "never": "Hidden"
+    },
+    "resetRows": "Restore defaults",
+    "openOverview": "Open task overview",
+    "pinCard": "Keep open beside the chat",
+    "unpinCard": "Hide card",
+    "noWorkspace": "No workspace",
+    "branch": "Branch {branch}",
+    "progressCurrent": "Step {done} of {total}: {step}",
+    "progressDone": "All {total} steps done",
+    "needsYou": "{count, plural, one {# request waiting for you} other {# requests waiting for you}}",
+    "changesNone": "None",
+    "changesFiles": "{count, plural, one {# file} other {# files}}",
+    "linesAdded": "{count} lines added",
+    "linesRemoved": "{count} lines removed",
+    "linesUnknown": "Line counts aren't recorded for every changed file, so only the file count is shown.",
+    "changesUnavailable": "Change tracking isn't available here",
+    "artifactCount": "{count, plural, one {# artifact} other {# artifacts}}",
+    "sourcesNone": "No sources used yet",
+    "sourceCount": "{count, plural, one {# use} other {# uses}}",
+    "addSource": "Manage sources and capabilities",
+    "viewAll": "View all"
   },
   "navigation": {
     "tabs": "Labeled tabs",

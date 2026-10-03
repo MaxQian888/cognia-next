@@ -11379,11 +11379,50 @@
       "unboundTitle": "由单个 Agent 承担",
       "working": "{count, plural, =0 {空闲} other {# 个在跑}}"
     },
+    "summaryCard": {
+      "addSource": "管理来源与能力",
+      "artifactCount": "{count} 个产物",
+      "branch": "分支 {branch}",
+      "card": "{title} 的任务摘要",
+      "changesFiles": "{count} 个文件",
+      "changesNone": "无",
+      "changesUnavailable": "当前环境无法追踪改动",
+      "linesAdded": "新增 {count} 行",
+      "linesRemoved": "删除 {count} 行",
+      "linesUnknown": "部分改动文件没有记录行数，因此只显示文件数。",
+      "menu": "摘要卡片选项",
+      "needsYou": "{count} 项等你处理",
+      "noWorkspace": "未关联工作区",
+      "openOverview": "打开任务概览",
+      "pinCard": "固定在聊天旁",
+      "progressCurrent": "第 {done}/{total} 步：{step}",
+      "progressDone": "{total} 个步骤已全部完成",
+      "resetRows": "恢复默认",
+      "rows": {
+        "artifacts": "产物",
+        "changes": "改动",
+        "needsYou": "等你处理",
+        "progress": "运行进度",
+        "sharing": "共享",
+        "sources": "来源"
+      },
+      "showOnCard": "卡片显示",
+      "sourceCount": "{count} 次",
+      "sourcesNone": "还没有使用来源",
+      "trigger": "任务摘要",
+      "triggerPending": "任务摘要，{count} 项等你处理",
+      "unpinCard": "隐藏卡片",
+      "viewAll": "查看全部",
+      "visibility": {
+        "always": "总是",
+        "auto": "有内容时",
+        "never": "隐藏"
+      }
+    },
     "taskOverview": {
       "capabilities": {
         "character": "角色",
         "configured": "下次发送配置的技能",
-        "configuredCount": "{count} 项技能配置",
         "configuredHint": "角色技能和临时附件遵循本会话的禁用设置。已配置不代表运行时已加载。",
         "disabled": "已禁用",
         "inventoryUnavailable": "主机快照未提供能力明细。",
@@ -11392,7 +11431,6 @@
         "noneConfigured": "尚未配置角色技能或下条消息的技能附件。",
         "refresh": "刷新快照",
         "runtime": "运行时能力快照",
-        "runtimeCount": "{count} 项运行时能力",
         "runtimeHint": "最近的主机快照区分已加载和延迟加载的能力。下轮运行后可能发生变化。",
         "snapshotUnavailable": "暂时没有运行时快照。请在已连接且支持的主机上运行一轮后刷新。",
         "title": "扩展能力",
@@ -11405,7 +11443,6 @@
       "noOpenItems": "尚未记录待解决问题或子任务。",
       "openContext": "打开运行上下文",
       "openItems": "待解决问题与子任务",
-      "openItemsMore": "还有 {count} 项，见运行上下文",
       "results": {
         "artifacts": "产物",
         "emptyFiles": "尚未记录文件变更。",
@@ -11421,13 +11458,6 @@
         "title": "关键结果",
         "unavailable": "此会话暂未提供文件追踪信息。"
       },
-      "rows": {
-        "directory": "工作目录",
-        "environment": "运行环境",
-        "mode": "模式",
-        "runtime": "智能体",
-        "sharing": "协作"
-      },
       "statusHints": {
         "awaiting_approval": "请在会话中处理待响应的请求，以继续运行。",
         "error": "上一轮在完成前中断。",
@@ -11439,10 +11469,8 @@
         "idle": "待命",
         "streaming": "运行中"
       },
-      "summaryTitle": "任务摘要",
       "technicalDetails": "技术详情",
-      "untitled": "未命名任务",
-      "viewDetails": "查看详情"
+      "untitled": "未命名任务"
     },
     "teamMembersPanel": {
       "title": "团队成员"
@@ -45878,6 +45906,7 @@
         "observabilityRefresh": "刷新",
         "observabilityToggleEdit": "切换编辑布局",
         "searchFocus": "聚焦搜索",
+        "sessionSummaryToggle": "对话：显示 / 隐藏任务摘要",
         "settingsOpen": "打开设置",
         "sidebarToggle": "切换会话侧栏",
         "skillsClearSelection": "清除选择 / 关闭详情",

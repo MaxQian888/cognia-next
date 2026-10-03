@@ -96,9 +96,12 @@ test.describe("web — Codex-inspired workflow entry", () => {
         },
       })
 
-    await page.getByRole("button", { name: "Task summary", exact: true }).click()
+    const summary = page
+      .getByTestId("title-bar-outlet-actions")
+      .getByRole("button", { name: /^Task summary/ })
+    if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click()
     await page
-      .getByTestId("session-summary")
+      .getByTestId("session-summary-card")
       .getByRole("button", { name: "Manage task", exact: true })
       .click()
     const settings = page.getByRole("dialog", { name: "Session settings" })

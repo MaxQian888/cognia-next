@@ -182,6 +182,7 @@ export const SETTINGS_SYNC = {
   workbenchRailPersistent: { category: "desktop-only" },
   workbenchRailPerProject: { category: "desktop-only" },
   workbenchPanels: { category: "desktop-only" },
+  sessionSummaryCard: { category: "shared" },
   titleBarLayout: { category: "desktop-only" },
   statusBarLayout: { category: "desktop-only" },
   mobileHomeLayout: { category: "desktop-only" },

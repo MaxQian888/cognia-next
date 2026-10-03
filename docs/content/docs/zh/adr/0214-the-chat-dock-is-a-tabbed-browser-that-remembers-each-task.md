@@ -1,0 +1,61 @@
+---
+title: "0214 — 聊天右侧栏是会记住每个任务的标签式浏览器"
+description: "会话摘要不再是一列会挤掉产物右侧栏的侧栏，改成 Codex 式卡片：挂在标题栏按钮下，或悬浮在聊天列旁的空白处。桌面端右侧栏只有一条标签栏，混排会话面板、产物、本地 Chromium 页面和一个 React 新标签页；新标签页不会启动 Chromium。每个会话记住右侧栏开关、标签顺序和当前标签，宽度全局共用。网页（含 localhost）默认用本地 Chromium，单个标签可切到系统 webview 的轻量预览。任务切到后台时关闭它的页面，正在运行的除外。窗口变窄时依次：右侧栏缩小、左栏临时收成图标条、右侧栏改为浮层。"
+---
+
+# ADR 0214 — 聊天右侧栏是会记住每个任务的标签式浏览器
+
+**状态：** 已接受
+**日期：** 2026-10-03
+**修订：** [ADR-0098](./0098-persistent-workbench-rail)（聊天右侧栏的开关不再全局唯一）、[ADR-0201](./0201-the-desktop-browser-runs-chromium-locally)（后端表：localhost 默认走本地 Chromium）
+**相关：** [ADR-0083](./0083-context-workbench)（scope 与保留策略）、[ADR-0121](./0121-workbench-mobile-drawer-and-panel-customization)（隐藏的面板仍可到达）、[ADR-0123](./0123-context-workbench-vertical-split)（不重新挂载）、[ADR-0055](./0055-agent-browser-loop)（智能体浏览器循环）
+
+## 背景
+
+会话摘要是一张 320px 卡片，渲染在产物右侧栏旁预留的 `<aside>` 里。打开它会收起右侧栏，右侧栏的任何展示又会关掉它，所以摘要和它描述的产物不会同时出现在屏幕上。卡片最显眼的是五行配置，结果只剩数字。
+
+标签模式下右侧栏有两排标签（`ArtifactTabStrip` 和工作台面板标签），本地 Chromium 在浏览器面板里再加一排。没有产物的会话打开后只看到“还没有产物”。右侧栏开关是所有会话共用的一个持久化布尔值：ADR-0098 这样设计，是为了避免在**产物标签**之间切换时右侧栏反复开合。
+
+工作台的 `activatedPanelIds` 按资源 scope 存储，同时承担标签列表、挂载门控和生命周期记忆，而且不带任何附加数据，放不下一个包含网址的有序标签列表。
+
+## 决定
+
+### 摘要卡片
+
+- 卡片挂在聊天标题行的触发按钮下（桌面端位于标题栏 `actions` 出口），用 Radix Popover 渲染，限制在聊天区域内。右侧栏关闭、且聊天列旁边的空白放得下时，改为悬浮在空白处。
+- 宽度为 `min(288px, 聊天宽度 − 16px)`。卡片不写 `dockCollapsed`，也不写 `userDismissed`。
+- 内容：项目与分支；运行进度（仅运行中）；等你处理（仅有待处理项时）；改动及 `+/−` 行数；产物；来源（可添加，带“查看全部”）。每一行打开右侧栏对应的标签；“查看全部”打开 `metadata`（任务概览）面板。
+- 每行可设为“总是 / 有内容时 / 隐藏”，存在 `AppSettings.sessionSummaryCard`。
+- 删除预留摘要列，以及 `summarySessionId`、`openSummary`、`closeSummary`。
+
+### 一条标签栏
+
+- 桌面端聊天右侧栏只渲染一个 `DockTabStrip`。标签可以是会话面板、产物、网页或新标签页。这个宿主下不再渲染工作台自己的标签栏、活动栏和 `ArtifactTabStrip`；`LocalChromiumPreview` 也隐藏自己的标签行。
+- 有序标签列表存在新的按会话 store 里。工作台 store 仍负责挂载和生命周期，右侧栏通过 `navigatePanel` / `closePanelTab` 驱动它，因此 ADR-0123 的“不重新挂载”和 ADR-0121 的“可到达”规则不变。产物标签镜像 `artifactStore.openArtifactIdsBySession`，哪些产物处于打开状态仍由它决定。
+- 新标签页是 React 面板，不启动 Chromium；选中网址后，该标签变成网页。
+
+### 按任务记忆
+
+- 每个会话保存 `{ open, tabs, activeTabId, lastUsedAt }`，宽度全局共用。清理规则与工作台 scope 一致（30 天 / 200 条）。
+- 切换会话时，以记住的 `open` 为准，优先于 `parkIdleArtifactDock` 和桌面端 `useDockAttentionSignal` 的自动展开。没有记录的会话保持现有规则。
+
+### 浏览器
+
+- 本地 Chromium 上只有一个共享的右侧栏 session，第一次打开网页时才创建。每个页面登记在注册表里，归属某个会话。`browser` 面板仍是单例，显示当前激活的网页标签。
+- 切走时关闭离开任务的页面；如果它的运行还在进行（流式输出或等待审批），页面保留，等运行结束且任务仍在后台时再关闭。切回来时，网页标签变为激活才重新创建页面。
+- 智能体引擎绑定和浏览器工具记住的“上一个网址”都改为按会话区分。接管智能体 session 后，卸载时不会再关闭它。
+- 网页（含 localhost）默认用本地 Chromium；没装时由系统 webview 打开，新标签页提供安装入口。单个网页标签可切到轻量预览（系统 webview），保留元素拾取、标注、Adjust、CDP 控制和检查侧栏；`browser_annotate` 会被路由到那里。
+
+### 窄窗口
+
+依次让出空间：右侧栏缩到下限，聊天区保持 420px；左栏通过不持久化的临时覆盖收成图标条，不改用户保存的偏好；右侧栏离开这一行，带遮罩浮在聊天区上方。
+
+平板和手机保留现有的 Sheet 与抽屉，卡片在那里以弹出层出现。
+
+## 后果
+
+- 聊天右侧栏不再遵守 ADR-0098 的“开关全局唯一”；Canvas、工作流编辑器和项目编辑器仍然遵守。
+- ADR-0201 中 localhost 的默认后端改变：React DevTools 等扩展在开发服务上可用。代价是每个可见的网页标签占一个 Chromium 页面，上限为运行时的 32 页；后台任务的页面会被关闭。
+- localhost 页面默认失去 webview 专属工具，需要时手动切到轻量预览。
+- `+/−` 行数依赖 task-workspace 记录，网页版只显示文件数。
+- 之前没接上的 `sourceCount` 和 `uncommittedChangeCount` 角标现在接上了。

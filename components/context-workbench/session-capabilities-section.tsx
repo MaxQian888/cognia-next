@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { BoxesIcon, ChevronRightIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { ContextDetailPanel } from "@/components/chat/context-detail-panel"
@@ -16,15 +15,10 @@ import { useComposerEphemeralSkillIds } from "@/stores/chat"
 export interface SessionCapabilitiesSectionProps {
   session: ChatSession
   onManage?: () => void
-  compact?: boolean
 }
 
 /** Configuration describes the next send; only host snapshots describe loaded tools. */
-export function SessionCapabilitiesSection({
-  session,
-  onManage,
-  compact = false,
-}: SessionCapabilitiesSectionProps) {
+export function SessionCapabilitiesSection({ session, onManage }: SessionCapabilitiesSectionProps) {
   const t = useTranslations("contextWorkbench.taskOverview.capabilities")
   const character = useCharacter(session.characterId)
   const ephemeralSkillIds = useComposerEphemeralSkillIds(session.id)
@@ -48,8 +42,7 @@ export function SessionCapabilitiesSection({
       }
     : null
 
-  const [summaryOpen, setSummaryOpen] = useState(false)
-  const content = (
+  return (
     <section className="space-y-3" aria-label={t("title")}>
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">{t("title")}</h3>
@@ -61,7 +54,7 @@ export function SessionCapabilitiesSection({
       </div>
       <div className="space-y-2">
         <p className="text-xs font-medium">{t("configured")}</p>
-        {!compact && <p className="text-xs text-muted-foreground">{t("configuredHint")}</p>}
+        <p className="text-xs text-muted-foreground">{t("configuredHint")}</p>
         {refs.length > 0 ? (
           <ul className="space-y-1">
             {refs.map((ref) => {
@@ -95,7 +88,7 @@ export function SessionCapabilitiesSection({
             {t("refresh")}
           </Button>
         </div>
-        {!compact && <p className="text-xs text-muted-foreground">{t("runtimeHint")}</p>}
+        <p className="text-xs text-muted-foreground">{t("runtimeHint")}</p>
         {capabilityBreakdown?.groups.length ? (
           <ContextDetailPanel
             breakdown={capabilityBreakdown}
@@ -111,25 +104,5 @@ export function SessionCapabilitiesSection({
         )}
       </div>
     </section>
-  )
-  if (!compact) return content
-  return (
-    <details
-      className="group/capabilities border-t pt-2.5"
-      onToggle={(event) => setSummaryOpen(event.currentTarget.open)}
-    >
-      <summary className="grid min-h-6 cursor-pointer list-none grid-cols-[15px_minmax(0,max-content)_minmax(0,1fr)_12px] items-center gap-x-2 text-xs [&::-webkit-details-marker]:hidden">
-        <BoxesIcon className="size-3.5 text-warning" aria-hidden />
-        <span className="text-muted-foreground">{t("title")}</span>
-        <span className="min-w-0 truncate text-right">
-          {t("configuredCount", { count: refs.length })}
-        </span>
-        <ChevronRightIcon
-          className="size-3 text-muted-foreground transition-transform duration-[calc(160ms*var(--motion-duration-scale,1))] group-open/capabilities:rotate-90"
-          aria-hidden
-        />
-      </summary>
-      {summaryOpen ? <div className="mt-2">{content}</div> : null}
-    </details>
   )
 }

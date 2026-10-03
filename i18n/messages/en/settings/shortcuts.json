@@ -61,6 +61,7 @@
     "workbenchActivityTemplates": "Workbench: templates",
     "workbenchActivityWorkspace": "Workbench: workspace",
     "workbenchQuickSwitch": "Workbench: quick switch panel",
+    "sessionSummaryToggle": "Chat: toggle task summary",
     "workflowCommandPaletteToggle": "Workflow editor: command palette",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",

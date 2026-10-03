@@ -639,10 +639,11 @@ describe("ChatHeader — title-bar projection", () => {
     const outlet = screen.getByTestId("center-outlet")
     expect(outlet).toContainElement(screen.getByTestId("chat-header"))
     expect(outlet).toHaveTextContent("Projected")
-    // The summary opener moved off the title bar onto the pane surface
-    // (`chat-surface-stage` in `chat-view.tsx`), so the projected header emits
-    // no copy of it at all — only the pane actions still use the actions outlet.
-    expect(screen.queryByRole("button", { name: "Task summary" })).toBeNull()
+    // The summary opener sits in the title bar's actions slot with the other
+    // pane actions, never in the centre with the title.
+    const summary = screen.getByRole("button", { name: "Task summary" })
+    expect(screen.getByTestId("actions-outlet")).toContainElement(summary)
+    expect(outlet).not.toContainElement(summary)
     const splitButton = screen.getByRole("button", { name: /^split view$/i })
     expect(screen.getByTestId("actions-outlet")).toContainElement(splitButton)
     expect(outlet).not.toContainElement(splitButton)
@@ -674,10 +675,8 @@ describe("ChatHeader — title-bar projection", () => {
         </TitleBarOutletsProvider>
       </Wrapper>
     )
-    // The summary opener is a pane-surface control now (`chat-view.tsx`), so
-    // neither projected header emits it — the actions outlet carries only the
-    // focused pane's split affordance.
-    expect(screen.queryByRole("button", { name: "Task summary" })).toBeNull()
+    // One summary opener in the bar: the focused pane's, like its split action.
+    expect(screen.getAllByRole("button", { name: "Task summary" })).toHaveLength(1)
     expect(screen.getByRole("button", { name: /^split view$/i })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /exit split view/i })).not.toBeInTheDocument()
     act(() => useChatStore.setState({ activeSessionId: "second" }))

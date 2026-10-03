@@ -33,9 +33,15 @@ async function configureStandaloneChat(page: Page) {
   await openPrivateConversation(page)
 }
 
+/**
+ * The sharing controls live on the summary card's sharing row (and in the
+ * task overview panel). The card floats on a wide window and is a popover
+ * under its title-bar button otherwise.
+ */
 async function openTaskSummary(page: Page) {
-  const summary = page.getByRole("button", { name: "Task summary", exact: true })
+  const summary = page.getByRole("button", { name: /^Task summary/ }).first()
   if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click()
+  await expect(page.getByTestId("summary-row-sharing")).toBeVisible()
 }
 
 async function openPrivateConversation(page: Page) {

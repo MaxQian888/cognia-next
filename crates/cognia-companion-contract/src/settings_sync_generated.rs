@@ -154,6 +154,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "searchEnabled",
     "searchFallbackEnabled",
     "searchMaxResults",
+    "sessionSummaryCard",
     "sidebarLayout",
     "streamPartialMessages",
     "sttLanguage",

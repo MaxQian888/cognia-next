@@ -19,8 +19,7 @@ import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { PlanModeTasksSheet } from "@/components/chat/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
-import { SessionSummaryPopover } from "@/components/context-workbench/session-summary-popover"
-import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
+import { SessionSummaryButton } from "@/components/context-workbench/session-summary-card/session-summary-trigger"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
 import { ScheduledOriginChip } from "@/components/chat/scheduled-origin-chip"
@@ -63,7 +62,6 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const t = useTranslations("chat.header")
   const tConcurrent = useTranslations("chat.concurrent")
   const character = useCharacter(session.characterId)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [codexDispatching, setCodexDispatching] = useState(false)
 
   const handleOpenInCodexApp = async () => {
@@ -125,17 +123,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         </Button>
       )}
 
-      {/* The summary opener left the title bar. The workspace floats it at the
-          pane's top-right (see `chat-surface-stage` in `chat-view.tsx`); only a
-          host outside the projection scope — an embedded chat surface — still
-          keeps it on this row. The card itself is unchanged either way. */}
-      {inScope ? null : (
-        <SessionSummaryPopover
-          key={session.id}
-          session={session}
-          onManage={() => setSettingsOpen(true)}
-        />
-      )}
+      {/* The summary opener. Projected, it lands in the title bar's actions
+          slot beside the layout toggles, for the focused pane only; inline (an
+          embedded chat surface) it sits on this row. Its floating card lives
+          on the pane's stage (`SessionSummaryStageHost` in `chat-view.tsx`). */}
+      <SessionSummaryButton key={session.id} session={session} />
     </>
   )
 
@@ -263,17 +255,6 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
       )}
 
       <WebSessionStatus host="header" />
-
-      {/* The settings sheet backs the inline summary opener above, so it mounts
-          only on the same non-workspace surfaces; inside the scope the pane's
-          own trigger (`chat-view.tsx`) hosts its sheet instead. */}
-      {inScope ? null : (
-        <SessionSettingsSheet
-          session={session}
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-        />
-      )}
     </>
   )
 

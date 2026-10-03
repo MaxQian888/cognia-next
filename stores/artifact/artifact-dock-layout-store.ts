@@ -127,10 +127,6 @@ export const DOCK_MODE_WIDTH_PERCENT: Record<
 export const ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS = 150
 
 export interface ArtifactDockLayoutState {
-  /** Runtime-only compact summary; mutually exclusive with the full workspace. */
-  summarySessionId: string | null
-  openSummary: (sessionId: string) => void
-  closeSummary: () => void
   /** Dock width as a percentage of the chat workspace. */
   dockSize: number
   /** When true the dock is hidden (collapsedSize 0). Default: hidden until an artifact opens. */
@@ -371,16 +367,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
   persist(
     (set, get) => ({
       ...DEFAULTS,
-      summarySessionId: null,
-      openSummary: (sessionId) =>
-        set({
-          summarySessionId: sessionId,
-          dockCollapsed: true,
-          mobileSheetOpen: false,
-          userDismissed: true,
-          revealIntent: null,
-        }),
-      closeSummary: () => set({ summarySessionId: null }),
       mobileSheetOpen: false,
       userDismissed: false,
       unreadArtifact: false,
@@ -417,7 +403,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           state.dockCollapsed
             ? {
                 dockCollapsed: false,
-                summarySessionId: null,
                 userDismissed: false,
                 unreadArtifact: false,
                 mobileSheetOpen: true,
@@ -430,7 +415,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
             ? { dockCollapsed: true, userDismissed: true, mobileSheetOpen: false }
             : {
                 dockCollapsed: false,
-                summarySessionId: null,
                 userDismissed: false,
                 unreadArtifact: false,
                 mobileSheetOpen: true,
@@ -446,7 +430,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
             ? { unreadArtifact: true }
             : {
                 dockCollapsed: false,
-                summarySessionId: null,
                 userDismissed: false,
                 unreadArtifact: false,
                 // Raise the narrow-screen Sheet too, the same way every other
@@ -483,8 +466,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
               }
             : left
         }),
-      requestReveal: (revealIntent) =>
-        set({ revealIntent, unreadArtifact: false, summarySessionId: null }),
+      requestReveal: (revealIntent) => set({ revealIntent, unreadArtifact: false }),
       consumeRevealIntent: (panelId) =>
         set((state) => (state.revealIntent?.panelId === panelId ? { revealIntent: null } : state)),
       openBrowser: (url) =>
@@ -495,7 +477,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           // token, or it would re-navigate the pane to whatever it last showed.
           browserRequestId: url ? state.browserRequestId + 1 : state.browserRequestId,
           dockCollapsed: false,
-          summarySessionId: null,
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
@@ -506,7 +487,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set({
           revealIntent: { panelId: SIDECHAT_PANEL_ID, mode: "narrow" },
           dockCollapsed: false,
-          summarySessionId: null,
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
@@ -519,7 +499,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           // value from its active panel once it settles.
           dockProfile: "workspace",
           dockCollapsed: false,
-          summarySessionId: null,
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
@@ -538,7 +517,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           // value from its active panel once it settles.
           dockProfile: "workspace",
           dockCollapsed: false,
-          summarySessionId: null,
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
@@ -555,14 +533,12 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         ),
       clearSessionScopedReveals: () =>
         set((state) =>
-          state.summarySessionId === null &&
           state.revealIntent === null &&
           state.workspaceRevealRequest === null &&
           state.workspaceContext === null &&
           state.browserRequestUrl === null
             ? state
             : {
-                summarySessionId: null,
                 revealIntent: null,
                 workspaceRevealRequest: null,
                 workspaceContext: null,
@@ -573,7 +549,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       setMobileSheetOpen: (open) =>
         set(
           open
-            ? { mobileSheetOpen: true, summarySessionId: null }
+            ? { mobileSheetOpen: true }
             : {
                 mobileSheetOpen: false,
                 workspaceRevealRequest: null,
@@ -583,7 +559,6 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       resetLayout: () =>
         set((state) => ({
           ...DEFAULTS,
-          summarySessionId: null,
           layoutVersion: state.layoutVersion + 1,
           dockSizeRequest: 0,
           mobileSheetOpen: false,

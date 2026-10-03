@@ -1,17 +1,17 @@
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { ensureAppMounted, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
+/** The summary button sits in the title bar's actions slot (ADR-0214). */
+function summaryTrigger(page: Page) {
+  return page.getByTestId("title-bar-outlet-actions").getByRole("button", { name: /^Task summary/ })
+}
+
 async function openOverview(page: Page) {
-  // The opener floats on the chat pane surface (`chat-summary-trigger`), not
-  // in the title bar.
-  await page
-    .getByTestId("chat-summary-trigger")
-    .getByRole("button", { name: "Task summary", exact: true })
-    .click()
-  await page
-    .getByTestId("session-summary")
-    .getByRole("button", { name: "View details", exact: true })
-    .click()
+  const trigger = summaryTrigger(page)
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") await trigger.click()
+  const card = page.getByTestId("session-summary-card")
+  await card.getByRole("button", { name: "Summary card options", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Open task overview", exact: true }).click()
   await expect(page.getByTestId("session-overview-panel")).toBeVisible()
 }
 
@@ -62,7 +62,7 @@ async function prepareConversations(page: Page) {
   return sessions
 }
 
-test("@smoke task summary reserves narrow space and opens the selected task details", async ({
+test("@smoke task summary opens from the title bar and hands off to the task overview", async ({
   page,
 }) => {
   await prepareConversations(page)
@@ -95,80 +95,34 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
   const conversation = page.getByRole("log")
   await expect(conversation).toBeVisible()
   const bounds = await conversation.boundingBox()
-  // The opener lives on the pane surface now — the title bar's actions outlet
-  // no longer carries it.
-  await expect(
-    page
-      .getByTestId("title-bar-outlet-actions")
-      .getByRole("button", { name: "Task summary", exact: true })
-  ).toHaveCount(0)
-  const trigger = page
-    .getByTestId("chat-summary-trigger")
-    .getByRole("button", { name: "Task summary", exact: true })
+
+  // At this width there is no room beside the chat column, so the card opens
+  // as a popover under its title-bar button rather than floating.
+  const trigger = summaryTrigger(page)
   await expect(trigger).toBeVisible()
-  const triggerBounds = await trigger.boundingBox()
-  expect(triggerBounds).not.toBeNull()
-  expect(triggerBounds!.x).toBeGreaterThan(page.viewportSize()!.width * 0.8)
+  await expect(trigger).toHaveAttribute("aria-expanded", "false")
+  const triggerBounds = (await trigger.boundingBox())!
+  expect(triggerBounds.x).toBeGreaterThan(page.viewportSize()!.width * 0.8)
   await trigger.click()
-  const summary = page.getByTestId("session-summary")
-  await expect(summary).toBeVisible()
-  const reserved = page.locator("#session-summary-dock")
-  await expect(reserved).toBeVisible()
-  await expect
-    .poll(async () => {
-      const region = await reserved.boundingBox()
-      const chat = await conversation.boundingBox()
-      if (!region || !chat || !bounds) return false
-      return (
-        Math.abs(region.width - 320) <= 1 &&
-        chat.x + chat.width <= region.x + 1 &&
-        Math.abs(bounds.width - chat.width - region.width) <= 2 &&
-        region.x + region.width <= page.viewportSize()!.width
-      )
-    })
-    .toBe(true)
-  await expect(summary.getByRole("status")).toContainText("Idle")
-  await expect(summary.getByText("Open questions and subtasks", { exact: true })).toBeVisible()
   const card = page.getByTestId("session-summary-card")
   await expect(card).toBeVisible()
-  // The card grew a title row, a status rail and an open-items block; it still
-  // has to stay well short of the column so the reserved region reads as a card
-  // rather than a second panel.
-  expect((await card.boundingBox())!.height).toBeLessThanOrEqual(440)
-  // Closing is the toolbar trigger's job — there is deliberately no close
-  // control inside the card.
-  await expect(card.getByRole("button", { name: /close/i })).toHaveCount(0)
-  await expect(card.getByRole("heading", { name: "Overview first task" })).toBeVisible()
-  // Status moved out of the definition list and into the rail.
-  await expect(summary.locator("dt")).toHaveText(["Mode", "Agent", "Environment", "Sharing"])
-  expect(
-    await summary.locator("dl").evaluate((element) => element.scrollWidth <= element.clientWidth)
-  ).toBe(true)
-  await expect
-    .poll(async () => {
-      const outer = await reserved.boundingBox()
-      const inner = await card.boundingBox()
-      if (!outer || !inner) return false
-      return (
-        Math.abs(inner.x - outer.x - 12) <= 2 &&
-        Math.abs(inner.y - outer.y - 12) <= 2 &&
-        Math.abs(outer.x + outer.width - inner.x - inner.width - 12) <= 2 &&
-        inner.height < outer.height - 24
-      )
-    })
-    .toBe(true)
-  expect(
-    await card.evaluate((element) => parseFloat(getComputedStyle(element).borderTopLeftRadius))
-  ).toBeGreaterThanOrEqual(8)
-  await expect(summary.getByText("Technical details", { exact: true })).toHaveCount(0)
-  await expect(summary.getByText("No artifacts yet", { exact: true })).toHaveCount(0)
+  await expect(card).toHaveAttribute("data-mode", "popover")
+  await expect(trigger).toHaveAttribute("aria-expanded", "true")
+  const cardBounds = (await card.boundingBox())!
+  expect(cardBounds.y).toBeGreaterThanOrEqual(triggerBounds.y + triggerBounds.height)
+  expect(cardBounds.x + cardBounds.width).toBeLessThanOrEqual(page.viewportSize()!.width)
+  expect(cardBounds.y + cardBounds.height).toBeLessThanOrEqual(page.viewportSize()!.height)
+  // The project, the standing rows, and no column reserved for the card.
+  await expect(card.getByText("No workspace", { exact: true })).toBeVisible()
+  await expect(card.getByTestId("summary-row-changes")).toBeVisible()
+  await expect(card.getByTestId("summary-sources")).toContainText("No sources used yet")
+  await expect(page.locator("#session-summary-dock")).toHaveCount(0)
   await expect(toggle).toHaveAttribute("aria-pressed", "false")
-  expect((await conversation.boundingBox())!.width).toBeLessThan(bounds!.width)
+  expect((await conversation.boundingBox())!.width).toBe(bounds!.width)
   await page.screenshot({ path: test.info().outputPath("task-summary.png"), fullPage: true })
   await page.keyboard.press("Escape")
-  await expect(summary).toBeHidden()
-  await expect(toggle).toHaveAttribute("aria-pressed", "false")
-  await expect.poll(async () => (await conversation.boundingBox())?.width).toBe(bounds?.width)
+  await expect(card).toBeHidden()
+  await expect(trigger).toHaveAttribute("aria-expanded", "false")
 
   await page
     .getByRole("complementary", { name: "Conversations" })
@@ -177,19 +131,75 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
   await expect(
     page.getByRole("banner").getByText("Overview second task", { exact: true })
   ).toBeVisible()
-  await page
-    .getByTestId("chat-summary-trigger")
-    .getByRole("button", { name: "Task summary", exact: true })
-    .click()
-  await expect(summary).toBeVisible()
-  await summary.getByRole("button", { name: "View details", exact: true }).click()
-  await expect(summary).toBeHidden()
+  await openOverview(page)
+  await expect(card).toBeHidden()
   await expect(toggle).toHaveAttribute("aria-pressed", "true")
   await expect(
     page
       .getByTestId("session-overview-panel")
       .getByRole("heading", { name: "Overview second task" })
   ).toBeVisible()
+})
+
+test("@smoke task summary floats beside a wide chat and stays out of the column", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await prepareConversations(page)
+  const toggle = page.getByRole("button", { name: "Toggle Right Sidebar", exact: true })
+  if ((await toggle.getAttribute("aria-pressed")) === "true") await toggle.click()
+  const trigger = summaryTrigger(page)
+  const card = page.getByTestId("session-summary-card")
+  // Shown without being asked: there is room in the gutter.
+  await expect(card).toBeVisible()
+  await expect(card).toHaveAttribute("data-mode", "float")
+  await expect(trigger).toHaveAttribute("aria-expanded", "true")
+  const stage = page.locator('[data-slot="chat-surface-stage"]').first()
+  await expect
+    .poll(async () => {
+      const box = await card.boundingBox()
+      const area = await stage.boundingBox()
+      if (!box || !area) return false
+      // The chat column is centred on the stage and capped at 52rem (832px).
+      const columnRight = area.x + (area.width + Math.min(area.width, 832)) / 2
+      return (
+        box.x + box.width <= area.x + area.width &&
+        box.y >= area.y &&
+        box.y + box.height <= area.y + area.height &&
+        // Beside the centred column, never over it.
+        box.x >= columnRight
+      )
+    })
+    .toBe(true)
+  await page.screenshot({ path: test.info().outputPath("task-summary-float.png"), fullPage: true })
+
+  await trigger.click()
+  await expect(card).toBeHidden()
+  await expect(trigger).toHaveAttribute("aria-expanded", "false")
+  await trigger.click()
+  await expect(card).toBeVisible()
+  await card.getByRole("button", { name: "Summary card options", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Hide card", exact: true }).click()
+  await expect(card).toBeHidden()
+
+  // Narrowing the window turns the floating card back into the popover.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await expect(card).toBeHidden()
+  await trigger.click()
+  await expect(card).toHaveAttribute("data-mode", "popover")
+
+  // A row hidden from the card's menu stays hidden after a reload.
+  await expect(card.getByTestId("summary-row-changes")).toBeVisible()
+  await card.getByRole("button", { name: "Summary card options", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^Changes/ }).hover()
+  await page.getByRole("menuitemradio", { name: "Hidden", exact: true }).click()
+  await expect(card.getByTestId("summary-row-changes")).toHaveCount(0)
+  await page.reload()
+  await waitForTestGlobals(page, 30_000)
+  await summaryTrigger(page).click()
+  await expect(card).toBeVisible()
+  await expect(card.getByTestId("summary-sources")).toBeVisible()
+  await expect(card.getByTestId("summary-row-changes")).toHaveCount(0)
 })
 
 test("@smoke workbench tabs switch close reopen and preserve navigation preference", async ({

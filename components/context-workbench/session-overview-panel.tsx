@@ -8,14 +8,14 @@ import { Settings2Icon } from "lucide-react"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
+import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { SessionEnvironmentChip } from "@/components/chat/session-environment-chip"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useCharacter } from "@/lib/data-hooks/context"
-import { useSessionErrorMessage, useSessionPendingApprovals, useSessionStatus } from "@/stores/chat"
-import { useAskUserStore } from "@/stores/agent/ask-user-store"
-import { useSessionPendingElicitation } from "@/stores/agent/external-elicitation-store"
+import { useSessionNeedsYou } from "@/hooks/chat/use-session-needs-you"
+import { useSessionErrorMessage, useSessionStatus } from "@/stores/chat"
 import { ContextMetadataPanel } from "./context-metadata-panel"
 import { SessionCapabilitiesSection } from "./session-capabilities-section"
 import { SessionOpenItems } from "./session-open-items"
@@ -38,22 +38,16 @@ export function SessionOverviewPanelHost() {
   return props ? <SessionOverviewPanel key={props.session.id} {...props} /> : null
 }
 
-/** Shared session-scoped state for the summary and detailed overview. */
+/**
+ * The four-state status the summary card and the detailed overview share.
+ * "Needs a response" is derived from `useSessionNeedsYou`, the one place that
+ * knows which pending approvals, questions and elicitations count.
+ */
 export function useSessionOverviewState(sessionId: string) {
   const status = useSessionStatus(sessionId)
-  const approvals = useSessionPendingApprovals(sessionId)
-  const question = useSessionPendingElicitation(sessionId)
-  const pendingAsk = useAskUserStore(
-    (state) =>
-      state.active?.sessionId === sessionId ||
-      state.queue.some((entry) => entry.sessionId === sessionId)
-  )
+  const { items } = useSessionNeedsYou(sessionId)
   const error = useSessionErrorMessage(sessionId)
-  const needsResponse =
-    approvals.some((approval) => approval.status !== "interrupted") ||
-    Boolean(question) ||
-    pendingAsk
-  const displayStatus = needsResponse ? "awaiting_approval" : status
+  const displayStatus = items.length > 0 ? "awaiting_approval" : status
   const busy = status === "streaming" || displayStatus === "awaiting_approval"
   return { status, displayStatus, busy, error }
 }
@@ -103,6 +97,9 @@ export function SessionOverviewPanel({
           <div className="flex flex-wrap items-center gap-2">
             {character ? <span className="break-words text-sm">{character.name}</span> : null}
             <RoomParticipantsChip session={session} />
+            {/* The full surface keeps the sharing controls whatever the summary
+                card's sharing row is set to. */}
+            <SharedSessionPanel session={session} />
           </div>
           {session.kind !== "workflow-editor" ? (
             <div className="flex flex-wrap items-center gap-2" aria-label={t("execution")}>

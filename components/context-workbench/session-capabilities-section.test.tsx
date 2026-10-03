@@ -123,19 +123,3 @@ describe("SessionCapabilitiesSection", () => {
     expect(screen.queryByText("snapshotUnavailable")).not.toBeInTheDocument()
   })
 })
-
-it("keeps compact capabilities collapsed and omits long explanations when expanded", () => {
-  jest.mocked(useCharacter).mockReturnValue({ skillIds: [] } as never)
-  jest.mocked(useSkillsByIds).mockReturnValue([])
-  jest.mocked(useComposerEphemeralSkillIds).mockReturnValue([])
-  jest.mocked(useSdkContextUsage).mockReturnValue({ snapshot: null, refresh: jest.fn() })
-  const { container } = render(<SessionCapabilitiesSection session={session} compact />)
-  expect(screen.getByText("configuredCount 0")).toBeInTheDocument()
-  expect(screen.queryByText("snapshotUnavailable")).not.toBeInTheDocument()
-  const details = container.querySelector("details")!
-  details.open = true
-  fireEvent(details, new Event("toggle"))
-  expect(screen.getByText("snapshotUnavailable")).toBeInTheDocument()
-  expect(screen.queryByText("configuredHint")).not.toBeInTheDocument()
-  expect(screen.queryByText("runtimeHint")).not.toBeInTheDocument()
-})

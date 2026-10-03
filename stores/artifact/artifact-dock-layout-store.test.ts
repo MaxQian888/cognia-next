@@ -603,54 +603,16 @@ describe("useArtifactDockLayoutStore", () => {
   })
 })
 
-describe("compact session summary", () => {
+describe("session summary card independence", () => {
   beforeEach(() => useArtifactDockLayoutStore.getState().resetLayout())
-  it("reserves a separate summary without overwriting workspace width or persisting visibility", () => {
+  it("keeps no summary state, so the card can never collapse or hide the dock", () => {
+    const state = useArtifactDockLayoutStore.getState() as unknown as Record<string, unknown>
+    // ADR-0214: the summary is a card beside the chat, not a dock column; the
+    // store that owns the dock must not grow a field that closes one for the other.
+    expect(Object.keys(state).filter((key) => /summary/i.test(key))).toEqual([])
     const dock = useArtifactDockLayoutStore.getState()
-    dock.requestDockSize(47)
     dock.setDockCollapsed(false)
-    dock.openSummary("one")
-    expect(useArtifactDockLayoutStore.getState()).toMatchObject({
-      summarySessionId: "one",
-      dockCollapsed: true,
-      mobileSheetOpen: false,
-      dockSize: 47,
-    })
-    expect(readPersisted()?.state).not.toHaveProperty("summarySessionId")
-    dock.closeSummary()
-    expect(useArtifactDockLayoutStore.getState()).toMatchObject({
-      summarySessionId: null,
-      dockSize: 47,
-    })
-  })
-  it("closes on session changes and reset without reopening the full workspace", () => {
-    const dock = useArtifactDockLayoutStore.getState()
-    dock.openSummary("one")
     dock.clearSessionScopedReveals()
-    expect(useArtifactDockLayoutStore.getState().summarySessionId).toBeNull()
-    dock.openSummary("two")
-    dock.resetLayout()
-    expect(useArtifactDockLayoutStore.getState().summarySessionId).toBeNull()
-  })
-  it("explicit workspace entries replace the summary while automatic artifacts only badge it", () => {
-    const dock = useArtifactDockLayoutStore.getState()
-    dock.openSummary("one")
-    dock.notifyNewArtifact()
-    expect(useArtifactDockLayoutStore.getState()).toMatchObject({
-      summarySessionId: "one",
-      dockCollapsed: true,
-      unreadArtifact: true,
-    })
-    for (const open of [
-      () => dock.toggleDock(),
-      () => dock.setDockCollapsed(false),
-      () => dock.openBrowser(),
-      () => dock.revealSidechat(),
-      () => dock.setMobileSheetOpen(true),
-    ]) {
-      dock.openSummary("one")
-      open()
-      expect(useArtifactDockLayoutStore.getState().summarySessionId).toBeNull()
-    }
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 })

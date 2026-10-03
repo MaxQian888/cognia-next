@@ -9,7 +9,7 @@ import {
   SessionOverviewContext,
 } from "./session-overview-panel"
 import { useSessionStatus, useSessionPendingApprovals, useSessionErrorMessage } from "@/stores/chat"
-import { useSessionPendingElicitation } from "@/stores/agent/external-elicitation-store"
+import { useExternalElicitationStore } from "@/stores/agent/external-elicitation-store"
 
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, values?: Record<string, unknown>) =>
@@ -19,9 +19,12 @@ jest.mock("@/stores/chat", () => ({
   useSessionStatus: jest.fn(() => "idle"),
   useSessionPendingApprovals: jest.fn(() => []),
   useSessionErrorMessage: jest.fn(() => null),
+  useSessionMessages: jest.fn(() => []),
 }))
 jest.mock("@/stores/agent/external-elicitation-store", () => ({
-  useSessionPendingElicitation: jest.fn(() => null),
+  useExternalElicitationStore: jest.fn((selector: (s: unknown) => unknown) =>
+    selector({ bySession: {} })
+  ),
 }))
 jest.mock("@/stores/agent/ask-user-store", () => ({
   useAskUserStore: jest.fn((selector: (s: unknown) => unknown) =>
@@ -34,6 +37,11 @@ jest.mock("@/lib/data-hooks/context", () => ({
 jest.mock("@/components/chat/room-participants-chip", () => ({
   RoomParticipantsChip: ({ session }: { session: ChatSession }) => (
     <span>members:{session.id}</span>
+  ),
+}))
+jest.mock("@/components/chat/shared-session-panel", () => ({
+  SharedSessionPanel: ({ session }: { session: ChatSession }) => (
+    <button type="button">sharing:{session.id}</button>
   ),
 }))
 jest.mock("@/components/chat/session-environment-chip", () => ({
@@ -84,6 +92,17 @@ const session = {
   },
 } as unknown as ChatSession
 const mockAskUser = useAskUserStore as unknown as jest.Mock
+const mockElicitations = useExternalElicitationStore as unknown as jest.Mock
+function setElicitations(list: unknown[]) {
+  mockElicitations.mockImplementation((selector: (s: unknown) => unknown) =>
+    selector({ bySession: { one: list } })
+  )
+}
+const ask = (sessionId: string) => ({
+  id: `ask-${sessionId}`,
+  sessionId,
+  request: { question: "?" },
+})
 const props = { session, messages: [], messageCount: 3, onNavigate: jest.fn() }
 beforeEach(() => {
   jest.clearAllMocks()
@@ -93,7 +112,7 @@ beforeEach(() => {
   jest.mocked(useCharacter).mockReturnValue({ name: "Researcher" } as never)
   jest.mocked(useSessionStatus).mockReturnValue("idle")
   jest.mocked(useSessionPendingApprovals).mockReturnValue([])
-  jest.mocked(useSessionPendingElicitation).mockReturnValue(null)
+  setElicitations([])
   jest.mocked(useSessionErrorMessage).mockReturnValue(null)
 })
 
@@ -102,6 +121,8 @@ it("composes existing controls and routes outputs and working context", () => {
   expect(screen.getByRole("heading", { name: session.title })).toBeInTheDocument()
   expect(screen.getByText("Researcher")).toBeInTheDocument()
   expect(screen.getByText("Choose release")).toBeInTheDocument()
+  // The sharing controls stay here whatever the summary card shows.
+  expect(screen.getByRole("button", { name: "sharing:one" })).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "results:one" }))
   expect(props.onNavigate).toHaveBeenCalledWith("workspace")
   fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.taskOverview.openContext" }))
@@ -114,7 +135,7 @@ it("reads status and blockers from the bound session", () => {
   jest.mocked(useSessionStatus).mockReturnValue("streaming")
   jest
     .mocked(useSessionPendingApprovals)
-    .mockReturnValue([{ requestId: "a", status: "pending" }] as never)
+    .mockReturnValue([{ requestId: "a", status: "pending", toolName: "Bash" }] as never)
   render(<SessionOverviewPanel {...props} />)
   expect(useSessionStatus).toHaveBeenCalledWith("one")
   expect(useSessionPendingApprovals).toHaveBeenCalledWith("one")
@@ -122,10 +143,10 @@ it("reads status and blockers from the bound session", () => {
   expect(screen.getByRole("button", { name: "mode:one" })).toBeDisabled()
 })
 it("shows external questions and errors, without treating idle as completed", () => {
-  jest.mocked(useSessionPendingElicitation).mockReturnValue({ request: { id: "q" } } as never)
+  setElicitations([{ request: { id: "q", message: "Pick one" } }])
   const view = render(<SessionOverviewPanel {...props} />)
   expect(screen.getByRole("status")).toHaveTextContent("awaiting_approval")
-  jest.mocked(useSessionPendingElicitation).mockReturnValue(null)
+  setElicitations([])
   jest.mocked(useSessionStatus).mockReturnValue("error")
   jest.mocked(useSessionErrorMessage).mockReturnValue("Connection lost")
   view.rerender(<SessionOverviewPanel {...props} />)
@@ -150,13 +171,13 @@ it("keeps technical details and handles missing context", () => {
 
 it("ignores another session's questions and interrupted approvals", () => {
   mockAskUser.mockImplementation((selector: (s: unknown) => unknown) =>
-    selector({ active: { sessionId: "other" }, queue: [{ sessionId: "other" }] })
+    selector({ active: ask("other"), queue: [ask("other")] })
   )
   jest.mocked(useSessionPendingApprovals).mockReturnValue([{ status: "interrupted" }] as never)
   const view = render(<SessionOverviewPanel {...props} />)
   expect(screen.getByRole("status")).toHaveTextContent("idle")
   mockAskUser.mockImplementation((selector: (s: unknown) => unknown) =>
-    selector({ active: null, queue: [{ sessionId: "one" }] })
+    selector({ active: null, queue: [ask("one")] })
   )
   view.rerender(<SessionOverviewPanel {...props} />)
   expect(screen.getByRole("status")).toHaveTextContent("awaiting_approval")
@@ -220,7 +241,9 @@ it("preserves open controls across live updates and resets them for another sess
 })
 
 it("shares one status rail with the compact card rather than a second vocabulary", () => {
-  jest.mocked(useSessionPendingApprovals).mockReturnValue([{ status: "pending" }] as never)
+  jest
+    .mocked(useSessionPendingApprovals)
+    .mockReturnValue([{ requestId: "b", status: "pending", toolName: "Bash" }] as never)
   render(<SessionOverviewPanel {...props} />)
   const rail = screen.getByRole("status")
   expect(rail.className).toContain("bg-warning/12")

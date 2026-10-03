@@ -163,19 +163,6 @@ describe("runSidebarGesture", () => {
     expect(document.documentElement.dataset.shellEdge).toBe("right")
   })
 
-  it("keeps the summary aside's fixed width while it owns the dock column", () => {
-    buildShellRow()
-    const summary = document.createElement("aside")
-    summary.id = "session-summary-dock"
-    document.body.appendChild(summary)
-    installViewTransition()
-    jest.spyOn(summary, "getBoundingClientRect").mockReturnValue(rect(320))
-
-    runSidebarGesture(jest.fn(), 0)
-
-    expect(useShellColumnsStore.getState().targets.dock).toBe(320)
-  })
-
   it("publishes no dock target when the dock panel cannot be found", () => {
     buildShellRow()
     document.querySelector('[data-testid="artifact-dock-wrapper"]')?.remove()

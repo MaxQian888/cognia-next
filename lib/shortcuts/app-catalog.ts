@@ -356,6 +356,14 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     defaultChord: "ctrl+shift+e",
   },
   {
+    // `ctrl+shift+i` (the mnemonic) belongs to the terminal's AI shell.
+    id: "chat.summaryToggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.sessionSummaryToggle",
+    category: "app.panels",
+    defaultChord: "ctrl+alt+s",
+  },
+  {
     id: "canvasLayout.toggleLeft",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.canvasToggleLeft",

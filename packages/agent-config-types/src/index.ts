@@ -4971,6 +4971,12 @@ export interface AppSettings {
    */
   workbenchPanels?: import("@/types/shell/workbench-panels").WorkbenchPanelLayout
   /**
+   * Which rows the session summary card shows: each row is `always`, `auto`
+   * (only when it has content) or `never`. Edited from the card's own menu.
+   * See `@/types/shell/session-summary-card` for the model and defaults.
+   */
+  sessionSummaryCard?: import("@/types/shell/session-summary-card").SessionSummaryCardSettings
+  /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
    * pattern as `sidebarLayout`) so it persists without a Dexie migration and

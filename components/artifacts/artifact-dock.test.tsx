@@ -72,6 +72,11 @@ jest.mock("@/lib/files/workspace-backend", () => ({
   hasWorkspaceFsBackend: () => workspaceAvailable,
 }))
 
+let mockChangedFiles = 0
+jest.mock("@/hooks/chat/use-session-resource-changes", () => ({
+  useSessionResourceChanges: jest.fn(() => ({ totals: { files: mockChangedFiles } })),
+}))
+
 jest.mock("./workspace-mode/dock-workspace", () => ({
   DockWorkspace: ({ activeSessionId }: { activeSessionId: string | null }) => (
     <div data-testid="workspace" data-session={activeSessionId ?? ""} />
@@ -195,6 +200,7 @@ jest.mock("@/stores/project/project-store", () => ({
 
 import { toast } from "sonner"
 import { ArtifactContextWorkbench, ArtifactDock, SessionContextWorkbench } from "./artifact-dock"
+import { useSessionResourceChanges } from "@/hooks/chat/use-session-resource-changes"
 import {
   DOCK_MODE_WIDTH_PERCENT,
   useArtifactDockLayoutStore,
@@ -657,6 +663,24 @@ describe("ArtifactDock — converged workbench shell", () => {
       })
 
       expect(screen.getByTestId("session-sources-panel")).toHaveAttribute("data-count", "1")
+    })
+
+    it("counts the conversation's sources and changed files on the rail", () => {
+      mockChangedFiles = 3
+      mockSessionMessages = [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          parts: [{ type: "source-url", sourceId: "docs", url: "https://example.com" }],
+        },
+      ]
+      render(<SessionContextWorkbench />)
+
+      expect(screen.getByTestId("workbench-activity-inspect")).toHaveTextContent("1")
+      // Once, though the source-control panel shares the activity.
+      expect(screen.getByTestId("workbench-activity-workspace")).toHaveTextContent("3")
+      expect(useSessionResourceChanges).toHaveBeenLastCalledWith("sess-1")
+      mockChangedFiles = 0
     })
 
     it("opens a default sidechat beside the active conversation", () => {
