@@ -28757,6 +28757,12 @@
           "warning": "警告"
         }
       },
+      "openExternal": {
+        "cancel": "取消",
+        "copy": "复制链接",
+        "open": "打开",
+        "question": "{extension} 想要打开此链接"
+      },
       "output": {
         "openLogs": "打开日志",
         "shown": "{extension} 向其“{channel}”输出写入了内容"

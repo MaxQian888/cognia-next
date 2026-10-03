@@ -16,6 +16,7 @@ import {
 import {
   VscodeMessageDialog,
   VscodeMessageToast,
+  VscodeOpenExternalDialog,
   VscodeOutputToast,
   VscodeProgressToast,
 } from "./vscode-notices"
@@ -121,4 +122,39 @@ it("output toast offers the logs", async () => {
   expect(screen.getByText("ext.a wrote to its Server output")).toBeInTheDocument()
   await user.click(screen.getByRole("button", { name: "Open logs" }))
   expect(onOpenLogs).toHaveBeenCalled()
+})
+
+it("open-external question: opens, copies, or answers nothing when closed", async () => {
+  const user = userEvent.setup()
+  const url = "https://example.com/login?x=1"
+  for (const [button, choice] of [
+    ["Open", "open"],
+    ["Copy link", "copy"],
+    ["Cancel", null],
+  ] as const) {
+    const settle = jest.fn()
+    const onClose = jest.fn()
+    const view = wrap(
+      <VscodeOpenExternalDialog
+        modalId="m"
+        onClose={onClose}
+        args={{ pluginId: "ext.a", url, settle }}
+      />
+    )
+    expect(screen.getByText("ext.a wants to open this link")).toBeInTheDocument()
+    expect(screen.getByText(url)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: button }))
+    view.unmount()
+    expect(settle.mock.calls).toEqual([[choice]])
+    expect(onClose).toHaveBeenCalled()
+  }
+  const settle = jest.fn()
+  wrap(
+    <VscodeOpenExternalDialog
+      modalId="m"
+      onClose={jest.fn()}
+      args={{ pluginId: "ext.a", url, settle }}
+    />
+  ).unmount()
+  expect(settle.mock.calls).toEqual([[null]])
 })

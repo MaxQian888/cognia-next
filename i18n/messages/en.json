@@ -28757,6 +28757,12 @@
           "warning": "Warning"
         }
       },
+      "openExternal": {
+        "cancel": "Cancel",
+        "copy": "Copy link",
+        "open": "Open",
+        "question": "{extension} wants to open this link"
+      },
       "output": {
         "openLogs": "Open logs",
         "shown": "{extension} wrote to its {channel} output"

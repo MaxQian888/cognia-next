@@ -169,6 +169,25 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     })
   )
 
+  // `vscode.window`'s messages, quick inputs, progress, status bar and dialogs,
+  // and `vscode.env`'s clipboard, links and URI handler. Neither needs Monaco.
+  const [{ configureVscodeWindow }, { createVscodeWindowPresenter }, env] = await Promise.all([
+    import("@/lib/plugin/vscode-shim/window-handlers"),
+    import("@/components/plugins/vscode/vscode-window-presenter"),
+    import("@/lib/plugin/vscode-shim/env-handlers"),
+  ])
+  const windowPresenter = createVscodeWindowPresenter()
+  configureVscodeWindow({
+    presenter: windowPresenter,
+    sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+  })
+  env.configureVscodeEnv(
+    env.createVscodeEnvDependencies({
+      confirmOpenExternal: (pluginId, url) => windowPresenter.confirmOpenExternal(pluginId, url),
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+    })
+  )
+
   // Wire the monaco-bridge to the Monaco instance already managed by
   // @monaco-editor/react. Loading its prebuilt AMD assets avoids bundling and
   // compiling the full monaco-editor ESM source graph during every dev start.
@@ -208,16 +227,6 @@ export async function ensureDispatcherConfigured(): Promise<void> {
       },
       dispatchRpc: (pluginId, method, payload, cancellation) =>
         callVscodeProvider(pluginId, method, payload, cancellation),
-    })
-
-    // `vscode.window`'s messages, quick inputs, progress, status bar and dialogs.
-    const [{ configureVscodeWindow }, { createVscodeWindowPresenter }] = await Promise.all([
-      import("@/lib/plugin/vscode-shim/window-handlers"),
-      import("@/components/plugins/vscode/vscode-window-presenter"),
-    ])
-    configureVscodeWindow({
-      presenter: createVscodeWindowPresenter(),
-      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
     })
 
     const { createDocumentSync } = await import("@/lib/plugin/vscode-shim/document-sync")
@@ -557,6 +566,8 @@ export async function unloadVscodeExtension(
       const { clearVscodeExtensionsForPlugin } =
         await import("@/lib/plugin/vscode-shim/extensions-handlers")
       clearVscodeExtensionsForPlugin(pluginId)
+      const { clearVscodeEnvForPlugin } = await import("@/lib/plugin/vscode-shim/env-handlers")
+      clearVscodeEnvForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

@@ -4,6 +4,7 @@
  * The React side of `vscode.window` (see `lib/plugin/vscode-shim/window-handlers.ts`):
  *
  *   - messages: a sonner toast, or a dialog in the plugin modal stack when modal;
+ *   - "open this link?" for `env.openExternal`: the plugin modal stack;
  *   - quick inputs: the plugin modal stack;
  *   - notification progress and output notices: sonner toasts;
  *   - status bar entries: each extension's own `statusbar.left` / `statusbar.right`
@@ -21,6 +22,7 @@ import { createExtensionAPI } from "@/lib/plugin/api/extension-api"
 import { requestPluginNavigation } from "@/lib/plugin/api/navigation-request"
 import { buildPluginLogsHref } from "@/lib/plugin/devtools/plugin-logs-link"
 import { pickOpenUris, pickSaveUri } from "@/lib/plugin/vscode-shim/native-dialogs"
+import type { OpenExternalChoice } from "@/lib/plugin/vscode-shim/env-handlers"
 import {
   cancelProgress,
   type VscodeWindowPresenter,
@@ -31,6 +33,7 @@ import type { ExtensionProps } from "@/types/plugin"
 import {
   VscodeMessageDialog,
   VscodeMessageToast,
+  VscodeOpenExternalDialog,
   VscodeOutputToast,
   VscodeProgressToast,
 } from "./vscode-notices"
@@ -44,7 +47,11 @@ export const OUTPUT_NOTICE_INTERVAL_MS = 30_000
 
 export function createVscodeWindowPresenter(
   options: { now?: () => number } = {}
-): VscodeWindowPresenter & { dispose(): void } {
+): VscodeWindowPresenter & {
+  /** Ask whether to open a link an extension passed to `env.openExternal`. */
+  confirmOpenExternal(pluginId: string, url: string): Promise<OpenExternalChoice>
+  dispose(): void
+} {
   const now = options.now ?? (() => Date.now())
   const statusBars = new Map<string, Array<() => void>>()
   const outputNotices = new Map<string, number>()
@@ -95,6 +102,26 @@ export function createVscodeWindowPresenter(
             onAutoClose: () => settle(null),
           }
         )
+      })
+    },
+
+    confirmOpenExternal(pluginId, url) {
+      return new Promise<OpenExternalChoice>((resolve) => {
+        let settled = false
+        usePluginModalStore.getState().open({
+          pluginId,
+          component: VscodeOpenExternalDialog,
+          args: {
+            pluginId,
+            url,
+            settle: (choice: OpenExternalChoice) => {
+              if (settled) return
+              settled = true
+              resolve(choice)
+            },
+          },
+          options: { size: "sm" },
+        })
       })
     },
 

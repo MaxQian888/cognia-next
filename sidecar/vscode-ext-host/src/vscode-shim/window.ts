@@ -182,6 +182,7 @@ export type OutputChannel = ReturnType<typeof createOutputChannel>
 export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
   const { connection, extensionId } = deps
   const documents = deps.documents
+  let uriHandlerRegistered = false
 
   /**
    * `show*Message(message, ...items)` or `(message, options, ...items)`.
@@ -354,20 +355,38 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
       })
     },
     registerUriHandler(handler) {
+      // As in VS Code, one handler at a time; the app routes
+      // `cognia://<extension id>/...` links to it.
+      if (uriHandlerRegistered) {
+        throw new Error(`A URI handler is already registered for ${extensionId}`)
+      }
+      uriHandlerRegistered = true
       const token = `uri:${extensionId}`
-      deps.registerProviderCallback(token, async (payload) => {
-        const uri = payload as Uri
+      const unregisterCallback = deps.registerProviderCallback(token, async (payload) => {
+        const uri = Uri.revive(payload)
+        if (!uri) return { ok: false }
         try {
           await Promise.resolve(handler.handleUri(uri))
         } catch (err) {
           process.stderr.write(
-            `[vscode-shim] URI handler threw: ${err instanceof Error ? err.message : String(err)}\n`
+            `[vscode-shim] ${extensionId}: URI handler threw: ${err instanceof Error ? err.message : String(err)}\n`
           )
         }
         return { ok: true }
       })
-      void connection.sendRequest("window:registerUriHandler", { extensionId, token })
+      connection
+        .sendRequest("window:registerUriHandler", { extensionId, token })
+        .catch((error: unknown) => {
+          process.stderr.write(
+            `[vscode-shim] ${extensionId}: URI handler not registered: ${error instanceof Error ? error.message : String(error)}\n`
+          )
+        })
+      let disposed = false
       return new Disposable(() => {
+        if (disposed) return
+        disposed = true
+        uriHandlerRegistered = false
+        unregisterCallback()
         void connection.sendNotification("window:unregisterUriHandler", { extensionId })
       })
     },

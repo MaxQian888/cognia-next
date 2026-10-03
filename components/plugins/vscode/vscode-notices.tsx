@@ -2,18 +2,19 @@
 
 /**
  * The transient things a VS Code extension shows: messages (a toast, or a
- * dialog when modal), notification progress, and the "wrote to its output"
- * toast. The window presenter mounts them through sonner and the plugin
+ * dialog when modal), the "open this link?" question, notification progress,
+ * and the "wrote to its output" toast. The window presenter mounts them through sonner and the plugin
  * modal stack; they read live state from `window-ui-store`.
  */
 
 import { useEffect, useRef, useSyncExternalStore } from "react"
-import { AlertTriangle, CircleX, Info, X } from "lucide-react"
+import { AlertTriangle, CircleX, ExternalLink, Info, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
+import type { OpenExternalChoice } from "@/lib/plugin/vscode-shim/env-handlers"
 import type { VscodeMessageRequest } from "@/lib/plugin/vscode-shim/window-handlers"
 import {
   getProgress,
@@ -158,6 +159,58 @@ export function VscodeMessageDialog({ args, onClose }: PluginModalProps) {
             {item.title}
           </Button>
         ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * `env.openExternal` of a web or mail link: the user opens it, copies it, or
+ * neither. Closing the dialog is neither.
+ */
+export function VscodeOpenExternalDialog({ args, onClose }: PluginModalProps) {
+  const t = useTranslations("plugins.vscodeWindow.openExternal")
+  const pluginId = args?.pluginId as string
+  const url = args?.url as string
+  const settle = args?.settle as (choice: OpenExternalChoice) => void
+  const extension = useExtensionName(pluginId)
+  const settled = useRef(false)
+  const answer = (choice: OpenExternalChoice) => {
+    if (settled.current) return
+    settled.current = true
+    settle(choice)
+  }
+
+  useEffect(
+    () => () => answer(null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on unmount
+    []
+  )
+
+  const choose = (choice: OpenExternalChoice) => {
+    answer(choice)
+    onClose()
+  }
+
+  return (
+    <div data-testid="vscode-open-external-dialog" className="space-y-4">
+      <div className="flex min-w-0 gap-3">
+        <ExternalLink className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden />
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="text-sm">{t("question", { extension })}</p>
+          <p className="bg-muted rounded-md px-2 py-1 font-mono text-xs break-all">{url}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" onClick={() => choose(null)}>
+          {t("cancel")}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => choose("copy")}>
+          {t("copy")}
+        </Button>
+        <Button type="button" onClick={() => choose("open")}>
+          {t("open")}
+        </Button>
       </div>
     </div>
   )

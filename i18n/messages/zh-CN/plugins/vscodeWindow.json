@@ -12,6 +12,12 @@
     "cancel": "取消",
     "close": "关闭"
   },
+  "openExternal": {
+    "question": "{extension} 想要打开此链接",
+    "open": "打开",
+    "copy": "复制链接",
+    "cancel": "取消"
+  },
   "quickInput": {
     "ariaPick": "为 {extension} 选择一项",
     "ariaInput": "为 {extension} 输入内容",

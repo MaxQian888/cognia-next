@@ -7,8 +7,7 @@
 
 import { useEffect } from "react"
 import { useTranslations } from "next-intl"
-import { parseDeepLink } from "@/lib/plugin/uri/parse-deep-link"
-import { dispatchUri } from "@/lib/plugin/uri/uri-handler-registry"
+import { routePluginDeepLink } from "@/lib/plugin/uri/route-deep-link"
 
 export default function DeepLinkPage() {
   const t = useTranslations("plugins.deepLink")
@@ -16,17 +15,7 @@ export default function DeepLinkPage() {
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("u")
     if (!raw) return
-    const parsed = parseDeepLink(raw)
-    if (!parsed) return
-    void (async () => {
-      try {
-        const { getPluginManager } = await import("@/lib/plugin/core/manager")
-        await getPluginManager().handleActivationEvent(`onUri:${parsed.pluginId}`)
-      } catch {
-        // Manager not initialized — a statically-active plugin may still handle it.
-      }
-      dispatchUri(parsed)
-    })()
+    void routePluginDeepLink(raw)
   }, [])
 
   return (

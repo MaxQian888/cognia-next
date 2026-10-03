@@ -12,6 +12,12 @@
     "cancel": "Cancel",
     "close": "Close"
   },
+  "openExternal": {
+    "question": "{extension} wants to open this link",
+    "open": "Open",
+    "copy": "Copy link",
+    "cancel": "Cancel"
+  },
   "quickInput": {
     "ariaPick": "Choose an option from {extension}",
     "ariaInput": "Enter a value for {extension}",

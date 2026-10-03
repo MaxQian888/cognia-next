@@ -11,10 +11,6 @@
  * "method not found" noise.
  */
 export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
-  "env:asExternalUri",
-  "env:clipboardReadText",
-  "env:clipboardWriteText",
-  "env:openExternal",
   "terminal:create",
   "terminal:dispose",
   "terminal:hide",
@@ -27,8 +23,6 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "webview:setTitle",
   "webview:show",
   "window:createWebviewPanel",
-  "window:registerUriHandler",
   "window:registerWebviewViewProvider",
-  "window:unregisterUriHandler",
   "window:unregisterWebviewViewProvider",
 ] as const

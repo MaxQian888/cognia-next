@@ -89,6 +89,20 @@ it("a modal message and a quick input open in the plugin modal stack", async () 
   ).toBe(false)
 })
 
+it("asks about an external link in the plugin modal stack and answers once", async () => {
+  const presenter = createVscodeWindowPresenter()
+  const answer = presenter.confirmOpenExternal("ext.a", "https://example.com")
+  const [entry] = usePluginModalStore.getState().stack as unknown as Array<{
+    pluginId: string
+    args: { url: string; settle: (choice: string | null) => void }
+  }>
+  expect(entry.pluginId).toBe("ext.a")
+  expect(entry.args.url).toBe("https://example.com")
+  entry.args.settle("open")
+  entry.args.settle(null)
+  await expect(answer).resolves.toBe("open")
+})
+
 it("progress toasts are keyed by handle", () => {
   const presenter = createVscodeWindowPresenter()
   presenter.showProgress("ext.a", "h1")
