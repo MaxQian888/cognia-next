@@ -10,10 +10,11 @@
  * so most extensions run unmodified. Three differences are worth knowing
  * before you port one:
  *
- * 1. `workspace.getConfiguration().get()` answers with the default you pass
- *    and refreshes in the background, because the shim is async underneath a
- *    synchronous VS Code API. Always pass a default, and re-read rather than
- *    caching the first value.
+ * 1. Settings declared in `package.json` `contributes.configuration` appear
+ *    on the plugin's settings page. `workspace.getConfiguration().get()`
+ *    reads them synchronously, as in VS Code: the user's value, else the
+ *    declared default, else the default you pass. Listen to
+ *    `workspace.onDidChangeConfiguration` to follow changes.
  * 2. `activate` must return the registration summary below. The host reads it
  *    to know what this extension contributed, and an extension that returns
  *    nothing looks like one that registered nothing.
@@ -21,13 +22,10 @@
  *    Code surface, but the Host answers only the calls it has a canonical
  *    adapter for; the rest get a deterministic capability error. The list is
  *    `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS` in
- *    `lib/plugin/vscode-shim/runtime-handlers.ts`, and it currently includes
- *    the surfaces a VS Code extension reaches for first — output channels,
- *    status bar items, message boxes, webviews and terminals. Several of them
- *    send their request with a bare `void`, so calling one does not merely do
- *    nothing: it raises an unhandled rejection inside the extension host.
- *    This template therefore demonstrates only APIs the Host serves end to
- *    end. Check that list before reaching for one it does not.
+ *    `lib/plugin/vscode-shim/unavailable-methods.ts`; webviews and terminals
+ *    are on it. Some of those send their request with a bare `void`, so
+ *    calling one does not merely do nothing: it raises an unhandled rejection
+ *    inside the extension host. Check that list before reaching for an API.
  *
  * Logging: write to `console.error` / `console.warn`, never `console.log`.
  * The host process speaks JSON-RPC over stdout and reserves stderr for
@@ -44,7 +42,7 @@ function activate(context) {
   /** See the logging note above: stdout belongs to the RPC connection. */
   const log = (message) => console.error(`[cognia-template] ${message}`)
 
-  // Pass the default. See note 1 above.
+  // The declared default applies; the one passed here is the last resort. See note 1.
   const greeting = vscode.workspace.getConfiguration("cogniaPluginTemplate").get("greeting", "Hello")
 
   // A command. The Host serves `commands:register` / `commands:execute`, so

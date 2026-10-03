@@ -30,7 +30,6 @@ const API_RPC_METHOD = {
   "window.createOutputChannel": "window:createOutputChannel",
   "window.createStatusBarItem": "window:createStatusBarItem",
   "window.showInformationMessage": "window:showMessage",
-  "workspace.getConfiguration.get": "workspace:configurationGet",
   "workspace.onDidSaveTextDocument": "workspace:documentSaved",
 } as const
 
@@ -61,11 +60,8 @@ interface VscodeDouble {
 /**
  * A `vscode` double whose every entry point records the Host method it would
  * reach, and refuses the ones the Host refuses — the way the sidecar does.
- *
- * `getConfiguration().get()` is the one deliberate exception: its RPC IS
- * unavailable, but the shim wraps the request in `.catch()` and answers with
- * the caller's default synchronously, so depending on it is safe and the
- * template's note 1 documents exactly that.
+ * `getConfiguration().get()` reaches nothing: the host answers it from the
+ * settings snapshot it already holds (template note 1).
  */
 function createVscodeDouble(): VscodeDouble {
   const reached: string[] = []
@@ -123,9 +119,7 @@ function createVscodeDouble(): VscodeDouble {
           return {
             section,
             get<T>(_key: string, defaultValue: T): T {
-              // Records the reach but never throws: the shim `.catch()`es this
-              // one and answers with the default (template note 1).
-              reached.push(API_RPC_METHOD["workspace.getConfiguration.get"])
+              // No user value in this double: the default applies.
               return defaultValue
             },
           }
@@ -211,9 +205,7 @@ describe("the emitted VS Code scaffold", () => {
     // Give any floating promise a turn to reject before the assertion.
     await new Promise((resolve) => setImmediate(resolve))
 
-    const refused = double.reached.filter(
-      (method) => UNAVAILABLE.has(method) && method !== "workspace:configurationGet"
-    )
+    const refused = double.reached.filter((method) => UNAVAILABLE.has(method))
     expect(refused).toEqual([])
     expect(rejections).toEqual([])
     expect(summary).toEqual({

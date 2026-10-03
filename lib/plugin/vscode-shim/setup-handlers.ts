@@ -46,6 +46,7 @@ import { clearVscodeWindowUi, installVscodeWindowHandlers } from "./window-handl
 import { installVscodeEditorHandlers } from "./editor-handlers"
 import { installVscodeDocumentHandlers } from "./workspace-document-handlers"
 import { installVscodeWorkspaceFileHandlers } from "./workspace-file-handlers"
+import { installVscodeConfigurationHandlers } from "./configuration-handlers"
 import { appendVscodeLog, stderrLevel } from "./vscode-log-buffer"
 
 let installed = false
@@ -196,6 +197,7 @@ export function installVscodeRpcHandlers(): () => void {
   disposers.push(...installVscodeEditorHandlers())
   disposers.push(...installVscodeDocumentHandlers())
   disposers.push(...installVscodeWorkspaceFileHandlers())
+  disposers.push(...installVscodeConfigurationHandlers())
 
   // host:* — notifications the Rust host emits about the Node process itself
   // (not the extension): its stderr, and how it ended.

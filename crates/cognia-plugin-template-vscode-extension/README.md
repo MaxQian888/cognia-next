@@ -18,9 +18,10 @@ What it registers:
 
 Three differences from real VS Code:
 
-1. `getConfiguration().get(key, default)` answers with the default and refreshes
-   in the background, because the shim is async under a synchronous API. Always
-   pass a default and re-read rather than caching the first value.
+1. Settings declared in `contributes.configuration` appear on the plugin's
+   settings page, and `getConfiguration().get(key, default)` reads them
+   synchronously, as in VS Code: the user's value, else the declared default,
+   else the one you pass. `workspace.onDidChangeConfiguration` follows changes.
 2. `activate` must return `{ registeredCommands, registeredWebviewViews,
 registeredLanguageProviders }`. The host reads that summary to know what the
    extension contributed.
@@ -30,16 +31,11 @@ registeredLanguageProviders }`. The host reads that summary to know what the
    `void`, so calling one raises an unhandled rejection inside the extension
    host rather than merely doing nothing. The refused list is
    `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS` in
-   `lib/plugin/vscode-shim/runtime-handlers.ts` — check it before reaching for
-   an API. It currently includes the surfaces an extension reaches for first:
-
-   | Not available yet                                    | Instead                                                             |
-   | ---------------------------------------------------- | ------------------------------------------------------------------- |
-   | `window.createOutputChannel`                         | `console.error` / `console.warn` (see below)                        |
-   | `window.createStatusBarItem`                         | — no host status bar surface exists                                 |
-   | `window.showInformationMessage` and its siblings     | — no host message surface exists                                    |
-   | `window.createWebviewPanel`, `window.createTerminal` | — see the list for the full set                                     |
-   | `workspace.onDidSaveTextDocument`                    | — the notification has no host emitter, so the listener never fires |
+   `lib/plugin/vscode-shim/unavailable-methods.ts` — check it before reaching
+   for an API. Webviews (`window.createWebviewPanel`, webview views) and
+   terminals (`window.createTerminal`) are on it. Output channels, the status
+   bar, messages, quick picks, progress, documents, editors, decorations,
+   `workspace.fs`, `findFiles`, file watchers and settings are served.
 
 ## Logging
 

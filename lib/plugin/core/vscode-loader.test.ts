@@ -193,6 +193,11 @@ describe("vscode-loader — Tauri mode", () => {
     expect(commands.indexOf("workspace:foldersChanged")).toBeLessThan(
       commands.indexOf("plugin_activate_vscode")
     )
+    // And its settings.
+    expect(commands.indexOf("workspace:configurationChanged")).toBeGreaterThan(-1)
+    expect(commands.indexOf("workspace:configurationChanged")).toBeLessThan(
+      commands.indexOf("plugin_activate_vscode")
+    )
     const { getVscodeHostSupervisor } = await import("@/lib/plugin/vscode-shim/host-supervisor")
     expect(getVscodeHostSupervisor().state("cognia.test-ext")).toMatchObject({
       status: "running",

@@ -37,6 +37,7 @@ import {
 } from "./types"
 import * as apiTypes from "./api-types"
 import type { DocumentStore } from "./documents"
+import type { ConfigurationStore } from "./configuration"
 import type { WorkspaceFolders } from "./workspace-folders"
 import type { OwnedPaths } from "./workspace-fs"
 import type { CancellationToken } from "./types"
@@ -63,6 +64,8 @@ export interface ShimDependencies {
   connection: RpcConnection
   /** The host's open documents and editors (`documents.ts`). */
   documents: DocumentStore
+  /** The settings the renderer reports (`configuration.ts`). */
+  configuration: ConfigurationStore
   /** The open workspace folders and file-watcher routing (`workspace-folders.ts`). */
   folders: WorkspaceFolders
   /** The extension's own directories, which `workspace.fs` may use without asking. */

@@ -30,6 +30,12 @@ import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-p
 import type { VsixInstallResult } from "./vsix-installer"
 import { canonicalExtensionId } from "./extension-id"
 import { evaluateEngineCompat } from "./engine-compat"
+import {
+  nlsKeyOf,
+  readNlsBundles,
+  resolveNls,
+  vscodeConfigurationToSchema,
+} from "./vscode-configuration-schema"
 
 export interface AdaptVscodeManifestInput {
   /** Output of `installVsix`. */
@@ -61,11 +67,20 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
   const warnings: string[] = []
 
   const id = canonicalId(pkgJson)
-  const displayName =
+  // `%key%` strings come from `package.nls*.json`: the default bundle gives
+  // the literal, and the per-locale bundles let the app show the user's
+  // language through `nameKey` / `descriptionKey`.
+  const nls = readNlsBundles(vsix.files, warnings)
+  const rawDisplayName =
     typeof pkgJson.displayName === "string" && pkgJson.displayName.length > 0
       ? pkgJson.displayName
       : pkgJson.name
-  const description = typeof pkgJson.description === "string" ? pkgJson.description : displayName
+  const displayName = resolveNls(rawDisplayName, nls)
+  const nameKey = nlsKeyOf(rawDisplayName)
+  const rawDescription = typeof pkgJson.description === "string" ? pkgJson.description : undefined
+  const description = rawDescription !== undefined ? resolveNls(rawDescription, nls) : displayName
+  const descriptionKey = nlsKeyOf(rawDescription)
+  const hasNlsLocales = Object.keys(nls.locales).length > 0
   const license = typeof pkgJson.license === "string" ? pkgJson.license : undefined
   const homepage = typeof pkgJson.homepage === "string" ? pkgJson.homepage : undefined
   const repository = resolveRepositoryUrl(pkgJson.repository)
@@ -196,12 +211,21 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     .filter((sn) => sn && typeof sn.language === "string" && typeof sn.path === "string")
     .map((sn) => ({ language: sn.language as string, path: sn.path as string }))
 
+  // ── Settings contributed via VS Code ──────────────────────────────────
+  const configSchema = vscodeConfigurationToSchema(pkgJson.contributes, nls, warnings)
+
   // ── Final cognia manifest ─────────────────────────────────────────────
   const manifest: PluginManifest = {
     id,
     name: displayName,
     version: pkgJson.version,
     description,
+    ...(nameKey !== undefined && hasNlsLocales ? { nameKey } : {}),
+    ...(descriptionKey !== undefined && hasNlsLocales ? { descriptionKey } : {}),
+    ...(hasNlsLocales && (nameKey !== undefined || descriptionKey !== undefined)
+      ? { i18n: { locales: pickNlsKeys(nls.locales, [nameKey, descriptionKey]) } }
+      : {}),
+    ...(configSchema ? { configSchema } : {}),
     type: "vscode-extension",
     capabilities,
     author,
@@ -240,6 +264,22 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     lspBinaryCandidates: vsix.lspBinaryCandidates,
     warnings,
   }
+}
+
+/** Only the strings the manifest names, from each locale's bundle. */
+function pickNlsKeys(
+  locales: Record<string, Record<string, string>>,
+  keys: Array<string | undefined>
+): Record<string, Record<string, string>> {
+  const wanted = keys.filter((key): key is string => key !== undefined)
+  const out: Record<string, Record<string, string>> = {}
+  for (const [locale, bundle] of Object.entries(locales)) {
+    const picked = Object.fromEntries(
+      wanted.filter((key) => typeof bundle[key] === "string").map((key) => [key, bundle[key]])
+    )
+    if (Object.keys(picked).length > 0) out[locale] = picked
+  }
+  return out
 }
 
 /**

@@ -30,6 +30,7 @@ import {
 } from "./require-hook"
 import { ExtensionMode } from "./vscode-shim/api-types"
 import { DocumentStore, type EditOutcome } from "./vscode-shim/documents"
+import { ConfigurationStore } from "./vscode-shim/configuration"
 import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
 import type { OwnedPaths } from "./vscode-shim/workspace-fs"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
@@ -147,6 +148,10 @@ DOCUMENTS.attach(connection)
 const FOLDERS = new WorkspaceFolders()
 FOLDERS.attach(connection)
 
+/** The settings the renderer reports, plus the extension's own declared defaults. */
+const CONFIGURATION = new ConfigurationStore()
+CONFIGURATION.attach(connection)
+
 /** Per extension, the directories it owns (install, storage, logs). */
 const OWNED_PATHS = new Map<string, OwnedPaths>()
 
@@ -214,6 +219,7 @@ setVscodeShimFactory((extensionId) => {
     connection,
     documents: DOCUMENTS,
     folders: FOLDERS,
+    configuration: CONFIGURATION,
     ownedPaths: () => OWNED_PATHS.get(extensionId) ?? { readOnly: [], readWrite: [] },
     registerProviderCallback,
   })
@@ -235,6 +241,7 @@ connection.onRequest("extension:load", async (params) => {
   setGrantedModules(req.extensionId, req.grantedModules ?? [])
   EXTENSION_ROOTS.set(nodePath.resolve(req.extensionPath), req.extensionId)
   OWNED_PATHS.set(req.extensionId, { readOnly: [req.extensionPath], readWrite: [] })
+  CONFIGURATION.loadOwnDefaults(req.extensionPath)
   await loadExtension({
     extensionId: req.extensionId,
     extensionPath: req.extensionPath,

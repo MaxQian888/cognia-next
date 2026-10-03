@@ -33,8 +33,4 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "window:registerWebviewViewProvider",
   "window:unregisterUriHandler",
   "window:unregisterWebviewViewProvider",
-  "workspace:configurationGet",
-  "workspace:configurationHas",
-  "workspace:configurationInspect",
-  "workspace:configurationUpdate",
 ] as const

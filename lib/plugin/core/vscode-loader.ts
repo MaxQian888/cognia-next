@@ -149,6 +149,16 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     })
   )
 
+  // `workspace.getConfiguration` and its change events.
+  const { configureVscodeConfiguration, createVscodeConfigurationDependencies } =
+    await import("@/lib/plugin/vscode-shim/configuration-handlers")
+  configureVscodeConfiguration(
+    createVscodeConfigurationDependencies({
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+      hosts: () => [...vscodeGenerations.keys()],
+    })
+  )
+
   // Wire the monaco-bridge to the Monaco instance already managed by
   // @monaco-editor/react. Loading its prebuilt AMD assets avoids bundling and
   // compiling the full monaco-editor ESM source graph during every dev start.
@@ -411,14 +421,21 @@ export async function loadVscodeDefinition(
         await documentSync?.replay(manifest.id)
         const { pushWorkspaceFolders } =
           await import("@/lib/plugin/vscode-shim/workspace-file-handlers")
-        await pushWorkspaceFolders(manifest.id).catch((error: unknown) =>
-          // As with the document replay: a host that cannot take the report
-          // is failing, which its supervisor handles.
-          vscodeLoaderLogger.warn("VS Code workspace folders not delivered", {
-            pluginId: manifest.id,
-            error: error instanceof Error ? error.message : String(error),
-          })
-        )
+        const { pushVscodeConfiguration } =
+          await import("@/lib/plugin/vscode-shim/configuration-handlers")
+        // As with the document replay: a host that cannot take these reports
+        // is failing, which its supervisor handles.
+        for (const [what, push] of [
+          ["workspace folders", pushWorkspaceFolders],
+          ["settings", pushVscodeConfiguration],
+        ] as const) {
+          await push(manifest.id).catch((error: unknown) =>
+            vscodeLoaderLogger.warn(`VS Code ${what} not delivered`, {
+              pluginId: manifest.id,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          )
+        }
         const result = await invoke<VscodeActivateResult>("plugin_activate_vscode", {
           pluginId: manifest.id,
           generation: requireVscodeGeneration(manifest.id),
@@ -521,6 +538,9 @@ export async function unloadVscodeExtension(
       const { clearVscodeWorkspaceFilesForPlugin } =
         await import("@/lib/plugin/vscode-shim/workspace-file-handlers")
       clearVscodeWorkspaceFilesForPlugin(pluginId)
+      const { clearVscodeConfigurationForPlugin } =
+        await import("@/lib/plugin/vscode-shim/configuration-handlers")
+      clearVscodeConfigurationForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

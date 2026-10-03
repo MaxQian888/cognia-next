@@ -95,16 +95,24 @@ export interface VsCodeKeybinding {
 }
 
 export interface VsCodeConfigurationProperty {
-  type: "string" | "number" | "boolean" | "array" | "object" | "null" | string[]
+  /** Absent means any type; a list allows each (`["string", "null"]`). */
+  type?: "string" | "number" | "integer" | "boolean" | "array" | "object" | "null" | string[]
   default?: unknown
   description?: string
   markdownDescription?: string
   enum?: unknown[]
   enumDescriptions?: string[]
+  markdownEnumDescriptions?: string[]
+  enumItemLabels?: string[]
   pattern?: string
+  patternErrorMessage?: string
   format?: string
+  /** `"multilineText"` asks for a multi-line editor. */
+  editPresentation?: "singlelineText" | "multilineText"
   minimum?: number
   maximum?: number
+  minLength?: number
+  maxLength?: number
   scope?:
     | "application"
     | "machine"

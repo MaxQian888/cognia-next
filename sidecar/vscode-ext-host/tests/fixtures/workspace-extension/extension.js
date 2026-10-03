@@ -118,5 +118,31 @@ exports.activate = (context) => {
     return { ignoreChangeEvents: watcher.ignoreChangeEvents }
   })
   register("workspaceFixture.seen", () => seen)
+
+  const configEvents = []
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) =>
+      configEvents.push({
+        fixture: event.affectsConfiguration("fixture"),
+        port: event.affectsConfiguration("fixture.server.port"),
+        greeting: event.affectsConfiguration("fixture.greeting"),
+      })
+    )
+  )
+  register("workspaceFixture.config", () => {
+    const config = vscode.workspace.getConfiguration("fixture")
+    return {
+      greeting: config.get("greeting"),
+      server: config.get("server"),
+      port: vscode.workspace.getConfiguration("fixture.server").port,
+      missing: config.get("missing", "fallback"),
+      inspect: config.inspect("server.port"),
+      tabSize: vscode.workspace.getConfiguration("editor").get("tabSize"),
+      events: configEvents,
+    }
+  })
+  register("workspaceFixture.setGreeting", (value) =>
+    vscode.workspace.getConfiguration("fixture").update("greeting", value, true)
+  )
   register("workspaceFixture.unwatch", () => watcher.dispose())
 }

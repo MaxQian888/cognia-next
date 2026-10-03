@@ -10,6 +10,7 @@
 
 import { Disposable, EventEmitter, Uri, type CancellationToken, type WorkspaceEdit } from "./types"
 import type { ShimDependencies } from "./index"
+import { createWorkspaceConfiguration } from "./configuration"
 import { createWorkspaceFileSystem } from "./workspace-fs"
 import type { FileSystemEventKind } from "./workspace-folders"
 
@@ -29,10 +30,6 @@ function wireGlob(pattern: GlobPattern): { base?: string; pattern: string } {
 export function createWorkspaceNamespace(deps: ShimDependencies) {
   const { connection, extensionId, folders } = deps
   const documents = deps.documents
-  const didChangeConfig = new EventEmitter<{ affectsConfiguration: (key: string) => boolean }>()
-  connection.onNotification("workspace:configurationChanged", (data) =>
-    didChangeConfig.fire(data as { affectsConfiguration: (key: string) => boolean })
-  )
   const fileSystem = createWorkspaceFileSystem({
     connection,
     extensionId,
@@ -82,11 +79,7 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
     onDidChangeTextDocument: documents.onDidChange.event,
     onDidSaveTextDocument: documents.onDidSave.event,
     onDidCloseTextDocument: documents.onDidClose.event,
-    onDidChangeConfiguration(
-      listener: (e: { affectsConfiguration: (k: string) => boolean }) => void
-    ) {
-      return didChangeConfig.event(listener)
-    },
+    onDidChangeConfiguration: deps.configuration.onDidChange.event,
     /**
      * A file path or URI, or `{ content, language }` (or nothing) for a new
      * untitled document. An open document is answered here; anything else
@@ -121,8 +114,17 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
       if (!document) throw new Error(`Could not open ${opened.uri}`)
       return document
     },
-    getConfiguration(section?: string, scope?: unknown) {
-      return new ProxyConfiguration(connection, extensionId, section, scope)
+    /**
+     * The settings under `section`. `scope` (a resource or language) selects
+     * nothing: there are no folder- or language-specific values here.
+     */
+    getConfiguration(section?: string, _scope?: unknown) {
+      return createWorkspaceConfiguration({
+        store: deps.configuration,
+        connection,
+        extensionId,
+        ...(section ? { section } : {}),
+      })
     },
     /**
      * Files in the open folders matching `include`, matched against each
@@ -271,59 +273,5 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
         })
       })
     },
-  }
-}
-
-class ProxyConfiguration {
-  constructor(
-    private readonly connection: ShimDependencies["connection"],
-    private readonly extensionId: string,
-    private readonly section: string | undefined,
-    private readonly scope: unknown
-  ) {}
-  get<T>(key: string, defaultValue?: T): T | undefined {
-    // VS Code's getConfiguration is synchronous, but our shim is async at
-    // its core. We expose both: callers using the sync API get undefined
-    // until they re-read after a `.refresh()`. Most extensions read once
-    // at activate, which still works because the renderer pushes initial
-    // values before activate.
-    void this.connection
-      .sendRequest<T | undefined>("workspace:configurationGet", {
-        extensionId: this.extensionId,
-        section: this.section,
-        key,
-        scope: this.scope,
-      })
-      .catch(() => undefined)
-    return defaultValue
-  }
-  has(key: string): boolean {
-    void this.connection
-      .sendRequest<boolean>("workspace:configurationHas", {
-        extensionId: this.extensionId,
-        section: this.section,
-        key,
-      })
-      .catch(() => false)
-    return false
-  }
-  update(key: string, value: unknown, configurationTarget?: number): Promise<void> {
-    return this.connection.sendRequest("workspace:configurationUpdate", {
-      extensionId: this.extensionId,
-      section: this.section,
-      key,
-      value,
-      configurationTarget,
-    })
-  }
-  inspect<T>(key: string): T | undefined {
-    void this.connection
-      .sendRequest<T | undefined>("workspace:configurationInspect", {
-        extensionId: this.extensionId,
-        section: this.section,
-        key,
-      })
-      .catch(() => undefined)
-    return undefined
   }
 }

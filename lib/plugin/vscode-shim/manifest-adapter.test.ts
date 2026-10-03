@@ -45,6 +45,87 @@ describe("adaptVscodeManifest", () => {
     expect(result.manifest.id).toBe("esbenp.prettier-vscode")
   })
 
+  it("resolves %nls% names and keeps the localized ones for the user's language", () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult(
+        {
+          name: "lint",
+          publisher: "acme",
+          version: "1.0.0",
+          displayName: "%displayName%",
+          description: "%description%",
+          engines: { vscode: ">=1.74.0" },
+          contributes: {
+            configuration: {
+              title: "Lint",
+              properties: {
+                "lint.run": { type: "string", default: "onSave", description: "%run%" },
+              },
+            },
+          },
+        },
+        {
+          files: new Map([
+            [
+              "package.nls.json",
+              encode({
+                displayName: "Acme Lint",
+                description: "Lints",
+                run: "When to lint",
+                unused: "x",
+              }),
+            ],
+            ["package.nls.zh-cn.json", encode({ displayName: "Acme 检查" })],
+          ]),
+        }
+      ),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest).toMatchObject({
+      name: "Acme Lint",
+      description: "Lints",
+      nameKey: "displayName",
+      descriptionKey: "description",
+      i18n: {
+        locales: {
+          en: { displayName: "Acme Lint", description: "Lints" },
+          "zh-CN": { displayName: "Acme 检查" },
+        },
+      },
+      configSchema: {
+        type: "object",
+        properties: {
+          "lint.run": {
+            type: "string",
+            title: "Run",
+            default: "onSave",
+            description: "When to lint",
+          },
+        },
+      },
+    })
+  })
+
+  it("leaves names as written, and adds no settings, when there is nothing to resolve", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "plain",
+        publisher: "acme",
+        version: "1.0.0",
+        displayName: "Plain",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.name).toBe("Plain")
+    expect(result.manifest.nameKey).toBeUndefined()
+    expect(result.manifest.i18n).toBeUndefined()
+    expect(result.manifest.configSchema).toBeUndefined()
+  })
+
   it("projects contributes.languages onto manifest.vscodeLanguages", () => {
     const result = adaptVscodeManifest({
       vsix: makeVsixResult({

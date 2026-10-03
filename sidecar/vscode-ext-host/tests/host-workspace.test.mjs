@@ -180,3 +180,41 @@ test("findFiles sends the pattern and revives the answer; watchers get their eve
     host.stop()
   }
 })
+
+test("settings: declared defaults, reported values, change events and updates", async () => {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "ws-config-")))
+  const { host, run, requests } = await startWorkspace({ folder })
+  try {
+    // Before any report, the extension's own package.json defaults hold.
+    assert.deepEqual(await run("workspaceFixture.config"), {
+      greeting: "Hello",
+      server: { port: 8080 },
+      port: 8080,
+      missing: "fallback",
+      inspect: { key: "fixture.server.port", defaultValue: 8080 },
+      events: [],
+    })
+    await host.request("workspace:configurationChanged", {
+      defaults: { "fixture.greeting": "Hello", "editor.tabSize": 4 },
+      values: { "fixture.server.port": 9000 },
+      changed: ["fixture.server.port"],
+    })
+    const after = await run("workspaceFixture.config")
+    assert.equal(after.port, 9000)
+    assert.equal(after.tabSize, 4)
+    assert.deepEqual(after.inspect, {
+      key: "fixture.server.port",
+      defaultValue: 8080,
+      globalValue: 9000,
+    })
+    assert.deepEqual(after.events, [{ fixture: true, port: true, greeting: false }])
+
+    await run("workspaceFixture.setGreeting", "Hi")
+    assert.deepEqual(
+      requests.find((entry) => entry.method === "workspace:configurationUpdate").params,
+      { extensionId: ID, key: "fixture.greeting", value: "Hi", target: 1 }
+    )
+  } finally {
+    host.stop()
+  }
+})

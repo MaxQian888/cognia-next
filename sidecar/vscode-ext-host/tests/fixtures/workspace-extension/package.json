@@ -8,5 +8,20 @@
   "main": "./extension.js",
   "activationEvents": [
     "onStartupFinished"
-  ]
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "Fixture",
+      "properties": {
+        "fixture.greeting": {
+          "type": "string",
+          "default": "Hello"
+        },
+        "fixture.server.port": {
+          "type": "number",
+          "default": 8080
+        }
+      }
+    }
+  }
 }
