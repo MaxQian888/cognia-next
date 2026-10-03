@@ -15,7 +15,6 @@ import {
   unregisterCommandsByPlugin,
 } from "@/lib/plugin/commands/registry"
 import {
-  executeTask,
   fetchTasks,
   registerTaskProvider,
   unregisterProvidersByPlugin,
@@ -271,14 +270,6 @@ export function installVscodeRuntimeRpcHandlers(): Array<() => void> {
       )
     })
   )
-  disposers.push(
-    registerMethod("tasks:executeTask", async (payload) => {
-      const execution = await executeTask(payloadObject(payload).task as unknown as ResolvedTask)
-      const task = payloadObject(payload).task as unknown as ResolvedTask
-      return { taskId: task.id, started: true, cancellable: typeof execution.cancel === "function" }
-    })
-  )
-
   disposers.push(
     registerMethod("authentication:registerProvider", async (payload, context) => {
       const value = ownedPayload(payload, context)

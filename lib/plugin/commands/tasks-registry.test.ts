@@ -1,18 +1,11 @@
 import {
   __resetTaskRegistryForTesting,
-  cancelTask,
-  clearDefaultTaskExecutor,
-  executeTask,
   fetchTasks,
-  getRunningTask,
   registerTaskProvider,
-  setDefaultTaskExecutor,
   subscribeTaskRegistry,
   unregisterProvidersByPlugin,
   unregisterTaskProvider,
   type ResolvedTask,
-  type TaskCompletionEvent,
-  type TaskExecution,
 } from "./tasks-registry"
 
 function makeTask(id: string, type: string, name = id): ResolvedTask {
@@ -21,18 +14,6 @@ function makeTask(id: string, type: string, name = id): ResolvedTask {
     name,
     source: type,
     definition: { type },
-  }
-}
-
-function makeExecution(): TaskExecution & { resolve: (e: TaskCompletionEvent) => void } {
-  let resolveFn: (event: TaskCompletionEvent) => void = () => {}
-  const finished = new Promise<TaskCompletionEvent>((resolve) => {
-    resolveFn = resolve
-  })
-  return {
-    cancel: jest.fn(),
-    finished,
-    resolve: resolveFn,
   }
 }
 
@@ -116,106 +97,31 @@ describe("task registry", () => {
     })
   })
 
-  describe("execution", () => {
-    it("dispatches to the provider's executor when it declared one", async () => {
-      const exec = makeExecution()
-      const executor = jest.fn(async () => exec)
-      registerTaskProvider({
-        type: "npm",
-        pluginId: "p",
-        provideTasks: async () => [],
-        executor,
-      })
-      const result = await executeTask(makeTask("npm.build", "npm"))
-      expect(executor).toHaveBeenCalledTimes(1)
-      expect(result.finished).toBe(exec.finished)
-    })
-
-    it("falls back to the default executor when the provider had none", async () => {
-      const exec = makeExecution()
-      const defaultExec = jest.fn(async () => exec)
-      setDefaultTaskExecutor(defaultExec)
-      registerTaskProvider({
-        type: "npm",
-        pluginId: "p",
-        provideTasks: async () => [],
-      })
-      await executeTask(makeTask("npm.x", "npm"))
-      expect(defaultExec).toHaveBeenCalledTimes(1)
-      clearDefaultTaskExecutor()
-    })
-
-    it("rejects when no executor is available at all", async () => {
-      registerTaskProvider({
-        type: "npm",
-        pluginId: "p",
-        provideTasks: async () => [],
-      })
-      await expect(executeTask(makeTask("npm.x", "npm"))).rejects.toThrow(/No executor available/i)
-    })
-
-    it("tracks running tasks and clears them on completion", async () => {
-      const exec = makeExecution()
-      const executor = jest.fn(async () => exec)
-      registerTaskProvider({
-        type: "npm",
-        pluginId: "p",
-        provideTasks: async () => [],
-        executor,
-      })
-      const task = makeTask("npm.x", "npm")
-      await executeTask(task)
-      expect(getRunningTask(task.id)).toBe(exec)
-      exec.resolve({
-        taskId: task.id,
-        exitCode: 0,
-        signal: null,
-        durationMs: 0,
-      })
-      await exec.finished
-      // microtask flush
-      await new Promise((r) => setTimeout(r, 0))
-      expect(getRunningTask(task.id)).toBeUndefined()
-    })
-
-    it("cancel() returns true when the task is running, false otherwise", async () => {
-      const exec = makeExecution()
-      registerTaskProvider({
-        type: "x",
-        pluginId: "p",
-        provideTasks: async () => [],
-        executor: async () => exec,
-      })
-      const task = makeTask("x.t", "x")
-      await executeTask(task)
-      expect(cancelTask(task.id)).toBe(true)
-      expect(exec.cancel).toHaveBeenCalled()
-      expect(cancelTask("nope")).toBe(false)
-    })
-  })
-
   describe("subscriptions", () => {
-    it("emits register / task-start / task-end events", async () => {
+    it("emits register and unregister events", async () => {
       const events: string[] = []
       const dispose = subscribeTaskRegistry((e) => {
-        events.push(e.type)
+        events.push(`${e.type}:${e.providerType}`)
       })
-      const exec = makeExecution()
-      registerTaskProvider({
+      const unregister = registerTaskProvider({
         type: "x",
         pluginId: "p",
         provideTasks: async () => [],
-        executor: async () => exec,
       })
-      const task = makeTask("x.t", "x")
-      await executeTask(task)
-      exec.resolve({ taskId: task.id, exitCode: 0, signal: null, durationMs: 0 })
-      await exec.finished
+      unregister()
       await new Promise((r) => setTimeout(r, 0))
-      expect(events).toEqual(
-        expect.arrayContaining(["register-provider", "task-start", "task-end"])
-      )
+      expect(events).toEqual(["register-provider:x", "unregister-provider:x"])
       dispose()
+    })
+
+    it("passes a provider's wire tasks through as they are", async () => {
+      const wire = {
+        ...makeTask("acme.ext/npm/build", "npm", "build"),
+        extensionId: "acme.ext",
+        execution: { kind: "shell", commandLine: "npm run build", args: [] },
+      }
+      registerTaskProvider({ type: "npm", pluginId: "acme.ext", provideTasks: async () => [wire] })
+      await expect(fetchTasks()).resolves.toEqual([wire])
     })
 
     it("survives a listener that throws", async () => {

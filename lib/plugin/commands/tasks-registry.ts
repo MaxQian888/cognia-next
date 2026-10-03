@@ -1,16 +1,13 @@
 /**
- * Task registry — `vscode.tasks.*` backing store.
+ * Task registry: the task providers VS Code extensions register with
+ * `vscode.tasks.registerTaskProvider`, so `vscode.tasks.fetchTasks` in any
+ * extension sees every extension's tasks.
  *
- * VS Code extensions contribute task providers (npm, gulp, cargo, etc.) via
- * `vscode.tasks.registerTaskProvider`. cognia's reuse layer routes those
- * through this registry; the sidecar's `vscode-shim/tasks.ts` RPC-walls in.
- *
- * Mirrors the shape and lifecycle of `commands/registry.ts`. Each task
- * carries enough metadata for the cognia UI to render a "run task" entry
- * even before the provider's lazy `provideTasks` is called.
- *
- * Task execution is delegated to the provider's own executor, or the default
- * one the host installs (`setDefaultTaskExecutor`).
+ * Mirrors the shape and lifecycle of `commands/registry.ts`. A task crosses
+ * as the host's wire form (`sidecar/vscode-ext-host/src/vscode-shim/tasks.ts`,
+ * `WireTask`); this registry passes it through without reading more than its
+ * type. Running a task happens in the extension's own host, which opens a
+ * terminal for it, not here.
  */
 
 export interface TaskDefinition {
@@ -18,48 +15,31 @@ export interface TaskDefinition {
   [key: string]: unknown
 }
 
-export interface TaskExecution {
-  /** Stop the task. Idempotent. */
-  cancel(): void
-  /** Resolved when the task completes (cleanly or via cancel). */
-  finished: Promise<TaskCompletionEvent>
-}
-
-export interface TaskCompletionEvent {
-  taskId: string
-  exitCode: number | null
-  signal: string | null
-  /** Captured stdout — empty when streamed elsewhere. */
-  stdout?: string
-  /** Captured stderr — empty when streamed elsewhere. */
-  stderr?: string
-  /** Wall-clock duration in ms. */
-  durationMs: number
-}
-
-export type TaskExecutor = (task: ResolvedTask) => Promise<TaskExecution>
-
 /**
- * The shape `vscode.Task` instances take after the provider resolves them.
- * Trimmed to the fields cognia's command-palette + terminal panel need.
+ * A task as a provider hands it over (the host's `WireTask`): who provided
+ * it, its name, source and definition, and how it runs.
  */
 export interface ResolvedTask {
-  /** Stable identifier — `${pluginId}.${name}` by convention. */
+  /** `${extension id}/${source}/${name}`. */
   id: string
-  /** Display name surfaced in the command palette. */
+  /** The extension that provided it. */
+  extensionId?: string
+  /** Display name. */
   name: string
   /** Source label, e.g. `"npm"` / `"cargo"`. */
   source: string
-  /** Definition object the provider hands back; surfaced for UI metadata. */
   definition: TaskDefinition
-  /** Detail label (usually `${command} ${...args}`). */
   detail?: string
-  /** Group (`build`, `test`, …) — mirrors `vscode.TaskGroup`. */
-  group?: "build" | "test" | "clean" | "rebuild" | "none"
-  /** Whether the task is a background task (long-running). */
+  /** `TaskGroup.id`: `build`, `test`, `clean` or `rebuild`. */
+  group?: string
   isBackground?: boolean
-  /** Problem matcher names referenced by this task. Ignored at runtime. */
+  /** Problem matcher names. Cognia makes no diagnostics from them. */
   problemMatchers?: string[]
+  /** Global, workspace, or a workspace folder (`{ folder: uri }`). */
+  scope?: unknown
+  /** How it runs: shell, process or custom, as the host describes it. */
+  execution?: unknown
+  presentationOptions?: Record<string, unknown>
 }
 
 export interface TaskProviderRegistration {
@@ -71,29 +51,20 @@ export interface TaskProviderRegistration {
    * provider emits change events.
    */
   provideTasks: () => Promise<ResolvedTask[]>
-  /**
-   * Optional — the provider's own executor. If omitted, cognia falls back
-   * to `defaultShellTaskExecutor` (spawn via ctx.shell.spawn).
-   */
-  executor?: TaskExecutor
 }
 
-export type TaskRegistryEventType =
-  "register-provider" | "unregister-provider" | "task-start" | "task-end"
+export type TaskRegistryEventType = "register-provider" | "unregister-provider"
 
 export interface TaskRegistryEvent {
   type: TaskRegistryEventType
   providerType?: string
   pluginId?: string
-  taskId?: string
-  exitCode?: number | null
 }
 
 export type TaskRegistryListener = (event: TaskRegistryEvent) => void
 
 const providers = new Map<string, TaskProviderRegistration>()
 const listeners = new Set<TaskRegistryListener>()
-const runningTasks = new Map<string, TaskExecution>()
 
 function providerKey(type: string, pluginId: string): string {
   return `${pluginId}::${type}`
@@ -158,71 +129,12 @@ export async function fetchTasks(filter?: { type?: string }): Promise<ResolvedTa
   return out
 }
 
-/**
- * Run a task. Uses the provider's executor if it declared one, otherwise
- * falls back to the cognia `defaultShellTaskExecutor` (set by the
- * renderer's bootstrap so this module stays test-friendly).
- */
-export async function executeTask(task: ResolvedTask): Promise<TaskExecution> {
-  // Look up the provider whose `type` matches. Cross-plugin lookup is
-  // intentional — the task palette doesn't know who registered the type.
-  const providerEntry = [...providers.values()].find((p) => p.type === task.definition.type)
-  const executor =
-    providerEntry?.executor ??
-    defaultExecutor ??
-    (() =>
-      Promise.reject(
-        new Error(
-          `No executor available for task type "${task.definition.type}". Did you call setDefaultTaskExecutor()?`
-        )
-      ))
-  const execution = await executor(task)
-  runningTasks.set(task.id, execution)
-  emit({ type: "task-start", taskId: task.id })
-  void execution.finished.then((event) => {
-    runningTasks.delete(task.id)
-    emit({ type: "task-end", taskId: task.id, exitCode: event.exitCode })
-  })
-  return execution
-}
-
-export function getRunningTask(taskId: string): TaskExecution | undefined {
-  return runningTasks.get(taskId)
-}
-
-export function cancelTask(taskId: string): boolean {
-  const exec = runningTasks.get(taskId)
-  if (!exec) return false
-  exec.cancel()
-  return true
-}
-
 export function subscribeTaskRegistry(listener: TaskRegistryListener): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Default shell executor pluggable point
-// ────────────────────────────────────────────────────────────────────────
-
-let defaultExecutor: TaskExecutor | undefined
-
-/**
- * Install the fallback task executor used when a provider didn't supply
- * its own.
- */
-export function setDefaultTaskExecutor(executor: TaskExecutor): void {
-  defaultExecutor = executor
-}
-
-export function clearDefaultTaskExecutor(): void {
-  defaultExecutor = undefined
-}
-
 export function __resetTaskRegistryForTesting(): void {
   providers.clear()
   listeners.clear()
-  runningTasks.clear()
-  defaultExecutor = undefined
 }

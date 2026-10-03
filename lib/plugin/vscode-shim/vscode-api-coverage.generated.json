@@ -1,9 +1,9 @@
 {
   "apiVersion": "1.91.0",
   "summary": {
-    "implemented": 314,
+    "implemented": 316,
     "unsupported": 66,
-    "missing": 2
+    "missing": 0
   },
   "unsupported": {
     "comments": "Cognia's editor has no comment threads.",
@@ -73,7 +73,7 @@
     "workspace.registerNotebookSerializer": "Cognia has no notebooks.",
     "workspace.saveAs": "Cognia does not let extensions save a document under a new name."
   },
-  "missing": ["tasks.onDidEndTaskProcess", "tasks.onDidStartTaskProcess"],
+  "missing": [],
   "implemented": [
     "BranchCoverage",
     "Breakpoint",
@@ -320,7 +320,9 @@
     "tasks.executeTask",
     "tasks.fetchTasks",
     "tasks.onDidEndTask",
+    "tasks.onDidEndTaskProcess",
     "tasks.onDidStartTask",
+    "tasks.onDidStartTaskProcess",
     "tasks.registerTaskProvider",
     "tasks.taskExecutions",
     "version",

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+VS Code extensions can run tasks. `vscode.tasks.executeTask` opens a terminal in the dock for the task: a shell task runs its command line in your shell (or the one it names), with its arguments quoted for that shell, a process task runs its program directly, and a custom task shows the extension's own terminal. The task runs in its workspace folder unless it names another directory, and `${workspaceFolder}`, `${workspaceFolderBasename}`, `${userHome}`, `${pathSeparator}` and `${env:NAME}` are filled in. The extension hears the task start and end, and the exit code of its process, and can stop it. A task without an execution is first completed by the extension's own task provider. `fetchTasks` returns every extension's tasks; another extension's custom task cannot be run. Running tasks needs the extension's terminal permission, which is now asked for at install when its code runs tasks. Problem matchers are not supported, so a task's output produces no diagnostics, and the process id is not reported.

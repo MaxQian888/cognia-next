@@ -1,0 +1,19 @@
+{
+  "name": "tasks-extension",
+  "publisher": "cognia",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "taskDefinitions": [
+      {
+        "type": "fixture"
+      }
+    ]
+  }
+}

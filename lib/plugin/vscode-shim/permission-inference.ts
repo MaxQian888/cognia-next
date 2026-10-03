@@ -51,6 +51,7 @@ export interface InferPermissionsInput {
  *
  * `window.createTerminal` opens a shell in the dock, and `sendText` (a method
  * on the terminal it returns, so not visible here) types into it.
+ * `tasks.executeTask` runs a shell or process task in a dock terminal.
  *
  * `lm.selectChatModels` is how an extension reaches a language model; the
  * requests it then sends (`sendRequest`, on the model it returns) spend the
@@ -76,6 +77,7 @@ const VSCODE_API_PERMISSIONS: ReadonlyArray<{
     permissions: ["filesystem:read", "filesystem:write"],
   },
   { api: "vscode.window.createTerminal", permissions: ["terminal:spawn", "terminal:write"] },
+  { api: "vscode.tasks.executeTask", permissions: ["terminal:spawn"] },
   { api: "vscode.lm.selectChatModels", permissions: ["ai:chat"] },
 ]
 

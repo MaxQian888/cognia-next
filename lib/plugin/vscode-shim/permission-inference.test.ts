@@ -288,6 +288,15 @@ describe("inferPermissions", () => {
       expect(scanned.permissions).toEqual(
         expect.arrayContaining(["terminal:spawn", "terminal:write"])
       )
+      // Running a task opens a terminal for it.
+      const tasks = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          { "out/extension.js": `const vscode = require("vscode"); vscode.tasks.executeTask(task)` }
+        ),
+      })
+      expect(tasks.permissions).toContain("terminal:spawn")
+      expect(tasks.permissions).not.toContain("terminal:write")
       // Other window calls need nothing.
       const window = inferPermissions({
         vsix: makeVsix(

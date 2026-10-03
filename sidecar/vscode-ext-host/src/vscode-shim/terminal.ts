@@ -148,6 +148,8 @@ class ExtensionTerminal implements Terminal {
   /** Every renderer call waits for the create, in order. */
   private queue: Promise<unknown>
   readonly processId: Promise<number | undefined>
+  /** Resolves once the renderer has made the terminal; rejects with why it could not. */
+  readonly ready: Promise<void>
   readonly creationOptions: Readonly<TerminalOptions | ExtensionTerminalOptions>
   readonly shellIntegration = undefined
   private readonly subscriptions: Disposable[] = []
@@ -169,6 +171,9 @@ class ExtensionTerminal implements Terminal {
       ...wireOptions(options),
     })
     this.queue = created.catch(() => undefined)
+    this.ready = created.then(() => undefined)
+    // Callers that never ask are not left with an unhandled rejection.
+    this.ready.catch(() => undefined)
     this.processId = created.then(
       (result) => (typeof result?.processId === "number" ? result.processId : undefined),
       () => undefined
@@ -445,6 +450,13 @@ export class TerminalRegistry {
       this.onDidChangeActive.fire(null)
     }
     this.onDidClose.fire(terminal)
+  }
+
+  /** Resolves once the renderer has made `terminal`; rejects with why it could not. */
+  whenCreated(terminal: Terminal): Promise<void> {
+    return terminal instanceof ExtensionTerminal
+      ? terminal.ready
+      : Promise.reject(new Error("The terminal was not created by this host"))
   }
 
   ownerOf(terminal: Terminal): string | undefined {
