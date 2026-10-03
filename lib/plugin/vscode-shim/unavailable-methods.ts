@@ -41,7 +41,6 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "window:registerWebviewViewProvider",
   "window:unregisterUriHandler",
   "window:unregisterWebviewViewProvider",
-  "workspace:applyEdit",
   "workspace:configurationGet",
   "workspace:configurationHas",
   "workspace:configurationInspect",
@@ -49,8 +48,4 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "workspace:createFileSystemWatcher",
   "workspace:disposeFileSystemWatcher",
   "workspace:findFiles",
-  "workspace:openTextDocument",
-  "workspace:registerTextDocumentContentProvider",
-  "workspace:saveTextDocument",
-  "workspace:unregisterTextDocumentContentProvider",
 ] as const

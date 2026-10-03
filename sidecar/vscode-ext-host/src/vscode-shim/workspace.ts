@@ -7,7 +7,7 @@
  * state pushed by the renderer.
  */
 
-import { Disposable, EventEmitter, Uri } from "./types"
+import { Disposable, EventEmitter, Uri, type CancellationToken, type WorkspaceEdit } from "./types"
 import type { ShimDependencies } from "./index"
 
 export function createWorkspaceNamespace(deps: ShimDependencies) {
@@ -49,9 +49,12 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
     ) {
       return didChangeConfig.event(listener)
     },
+    /**
+     * A file path or URI, or `{ content, language }` (or nothing) for a new
+     * untitled document. An open document is answered here; anything else
+     * the renderer opens, and its report puts it in the store first.
+     */
     async openTextDocument(uriOrOptions?: Uri | string | { content?: string; language?: string }) {
-      // An open document is answered here; anything else the renderer opens,
-      // and its report puts it in the store before this answer returns.
       const uri =
         typeof uriOrOptions === "string"
           ? Uri.file(uriOrOptions).toString()
@@ -60,11 +63,25 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
             : undefined
       const open = uri ? documents.get(uri) : undefined
       if (open) return open
+      const options =
+        uri === undefined
+          ? (uriOrOptions as { content?: string; language?: string } | undefined)
+          : undefined
       const opened = await connection.sendRequest<{ uri: string; version: number }>(
         "workspace:openTextDocument",
-        { extensionId, argument: uri ?? uriOrOptions ?? {} }
+        uri
+          ? { extensionId, uri }
+          : {
+              extensionId,
+              untitled: {
+                ...(options?.content !== undefined ? { content: options.content } : {}),
+                ...(options?.language !== undefined ? { language: options.language } : {}),
+              },
+            }
       )
-      return (await documents.waitForVersion(opened.uri, opened.version)) ?? null
+      const document = await documents.waitForVersion(opened.uri, opened.version)
+      if (!document) throw new Error(`Could not open ${opened.uri}`)
+      return document
     },
     getConfiguration(section?: string, scope?: unknown) {
       return new ProxyConfiguration(connection, extensionId, section, scope)
@@ -117,27 +134,73 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
       createDirectory: (uri: Uri) =>
         connection.sendRequest("fs:createDirectory", { extensionId, uri }),
     },
-    applyEdit: (edit: unknown) =>
-      connection.sendRequest("workspace:applyEdit", { extensionId, edit }),
-    registerTextDocumentContentProvider: (
+    /**
+     * Resolves once every document the edit changed shows it here, as in VS
+     * Code; `false` when a step failed (the reason is in the extension's log).
+     */
+    async applyEdit(edit: WorkspaceEdit | { toJSON(): unknown }): Promise<boolean> {
+      const result = await connection.sendRequest<{
+        applied: boolean
+        versions: Record<string, number>
+      }>("workspace:applyEdit", { extensionId, edit: edit.toJSON() })
+      await Promise.all(
+        Object.entries(result.versions ?? {}).map(([uri, version]) =>
+          documents.waitForVersion(uri, version)
+        )
+      )
+      return result.applied
+    },
+    /** Save the document at `uri`; its URI once saved, `undefined` otherwise. */
+    async save(uri: Uri): Promise<Uri | undefined> {
+      const saved = await connection.sendRequest<boolean>("workspace:saveTextDocument", {
+        extensionId,
+        uri: uri.toString(),
+      })
+      return saved ? uri : undefined
+    },
+    saveAll(includeUntitled?: boolean): Promise<boolean> {
+      return connection.sendRequest<boolean>("workspace:saveAll", {
+        extensionId,
+        includeUntitled: includeUntitled === true,
+      })
+    },
+    registerTextDocumentContentProvider(
       scheme: string,
       provider: {
-        provideTextDocumentContent: (uri: Uri) => string | Promise<string>
+        provideTextDocumentContent: (
+          uri: Uri,
+          token: CancellationToken
+        ) => string | null | undefined | Promise<string | null | undefined>
+        onDidChange?: (listener: (uri: Uri) => void) => { dispose(): void }
       }
-    ) => {
-      const token = `tdcp:${extensionId}:${scheme}`
-      deps.registerProviderCallback(token, async (payload) => {
-        return provider.provideTextDocumentContent(payload as Uri)
-      })
+    ) {
+      const token = `tdcp:${extensionId}:${scheme}:${Math.random().toString(36).slice(2, 10)}`
+      const unregisterCallback = deps.registerProviderCallback(token, async (payload, call) =>
+        provider.provideTextDocumentContent(
+          Uri.parse(String((payload as { uri: string }).uri)),
+          call.cancellation
+        )
+      )
       void connection.sendRequest("workspace:registerTextDocumentContentProvider", {
         extensionId,
         scheme,
         token,
       })
+      // The provider's own change event refreshes every copy of that document.
+      const changes = provider.onDidChange?.((uri) => {
+        void connection.sendNotification("workspace:textDocumentContentChanged", {
+          extensionId,
+          scheme,
+          uri: uri.toString(),
+        })
+      })
       return new Disposable(() => {
+        changes?.dispose()
+        unregisterCallback()
         void connection.sendNotification("workspace:unregisterTextDocumentContentProvider", {
           extensionId,
           scheme,
+          token,
         })
       })
     },

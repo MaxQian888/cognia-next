@@ -20,7 +20,14 @@ import {
   type QuickPickItem,
   type QuickPickOptions,
 } from "./quick-input"
-import { Disposable, EventEmitter, Uri, type CancellationToken } from "./types"
+import {
+  Disposable,
+  EventEmitter,
+  Selection,
+  Uri,
+  type CancellationToken,
+  type Range,
+} from "./types"
 import {
   createOutputChannel,
   createStatusBarItem,
@@ -28,7 +35,7 @@ import {
   withProgress,
   type StatusBarItem,
 } from "./window-surfaces"
-import type { TextEditor } from "./documents"
+import type { TextDocument, TextEditor } from "./documents"
 import type { ShimDependencies } from "./index"
 
 type MessageItem = string | { title: string; isCloseAffordance?: boolean }
@@ -61,6 +68,18 @@ interface SidecarWindow {
   ): Promise<R>
 
   // Editors & decorations
+  /**
+   * Open the document in the project editor and answer its editor. Only
+   * files from the open project can be shown; column and preview are not
+   * meaningful with a single editor area.
+   */
+  showTextDocument(
+    document: TextDocument | Uri,
+    columnOrOptions?:
+      | number
+      | { viewColumn?: number; preserveFocus?: boolean; preview?: boolean; selection?: Range },
+    preserveFocus?: boolean
+  ): Promise<TextEditor>
   readonly activeTextEditor: TextEditor | undefined
   readonly visibleTextEditors: readonly TextEditor[]
   onDidChangeActiveTextEditor(listener: (e: TextEditor | undefined) => void): Disposable
@@ -244,6 +263,30 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
       return picked ? Uri.parse(picked) : undefined
     },
     withProgress: (options, task) => withProgress(connection, extensionId, options, task),
+    async showTextDocument(document, columnOrOptions) {
+      const uri = document instanceof Uri ? document.toString() : document.uri.toString()
+      const selection =
+        typeof columnOrOptions === "object" && columnOrOptions?.selection
+          ? columnOrOptions.selection
+          : undefined
+      const shown = await connection.sendRequest<{ uri: string }>("window:showTextDocument", {
+        extensionId,
+        uri,
+        ...(selection
+          ? {
+              selection: {
+                start: { line: selection.start.line, character: selection.start.character },
+                end: { line: selection.end.line, character: selection.end.character },
+              },
+            }
+          : {}),
+      })
+      const editor = await documents.waitForEditor(shown.uri)
+      if (!editor) throw new Error(`The editor for ${shown.uri} did not open`)
+      // The editor opened at the selection's start; select all of it.
+      if (selection) editor.selection = new Selection(selection.start, selection.end)
+      return editor
+    },
     get activeTextEditor() {
       return documents.activeEditor
     },

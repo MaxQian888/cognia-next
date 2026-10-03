@@ -39,6 +39,31 @@ export interface InferPermissionsInput {
 }
 
 /**
+ * `vscode.workspace` calls that reach the user's files. Opening a document
+ * or searching reads them; `applyEdit` and the write side of `workspace.fs`
+ * change them (and `applyEdit` reads a file before editing it).
+ */
+const VSCODE_FILE_API_PERMISSIONS: ReadonlyArray<{
+  api: string
+  permissions: ReadonlyArray<PluginPermission>
+}> = [
+  { api: "vscode.workspace.openTextDocument", permissions: ["filesystem:read"] },
+  { api: "vscode.workspace.findFiles", permissions: ["filesystem:read"] },
+  { api: "vscode.workspace.fs.readFile", permissions: ["filesystem:read"] },
+  { api: "vscode.workspace.fs.stat", permissions: ["filesystem:read"] },
+  { api: "vscode.workspace.fs.readDirectory", permissions: ["filesystem:read"] },
+  { api: "vscode.workspace.applyEdit", permissions: ["filesystem:read", "filesystem:write"] },
+  { api: "vscode.workspace.fs.writeFile", permissions: ["filesystem:read", "filesystem:write"] },
+  { api: "vscode.workspace.fs.delete", permissions: ["filesystem:read", "filesystem:write"] },
+  { api: "vscode.workspace.fs.rename", permissions: ["filesystem:read", "filesystem:write"] },
+  { api: "vscode.workspace.fs.copy", permissions: ["filesystem:read", "filesystem:write"] },
+  {
+    api: "vscode.workspace.fs.createDirectory",
+    permissions: ["filesystem:read", "filesystem:write"],
+  },
+]
+
+/**
  * Modules that imply specific cognia permissions when imported by an
  * extension bundle. Kept in one place so the AST walker, the string-scan
  * fallback, and tests all agree.
@@ -527,6 +552,19 @@ function walkAst(
             },
             `vscode.authentication OAuth flows dial out`
           )
+        } else if (root.startsWith("vscode.workspace.")) {
+          for (const entry of VSCODE_FILE_API_PERMISSIONS) {
+            if (root !== entry.api && !root.startsWith(`${entry.api}.`)) continue
+            for (const permission of entry.permissions) {
+              addPermission(
+                permissions,
+                reasons,
+                permission,
+                { kind: "vscode-api", api: entry.api },
+                `${entry.api} used`
+              )
+            }
+          }
         } else if (root.startsWith("vscode.env.clipboard")) {
           addPermission(
             permissions,
@@ -736,6 +774,20 @@ function scanStrings(
       },
       `string-scan matched vscode.authentication`
     )
+  }
+  for (const entry of VSCODE_FILE_API_PERMISSIONS) {
+    const pattern = new RegExp(`\\b${entry.api.split(".").join("\\s*\\.\\s*")}\\b`)
+    if (!pattern.test(source)) continue
+    for (const permission of entry.permissions) {
+      if (permissions.has(permission)) continue
+      addPermission(
+        permissions,
+        reasons,
+        permission,
+        { kind: "vscode-api", api: entry.api },
+        `string-scan matched ${entry.api}`
+      )
+    }
   }
   if (/\bvscode\s*\.\s*env\s*\.\s*clipboard\b/.test(source) && !permissions.has("clipboard:read")) {
     addPermission(

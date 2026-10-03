@@ -71,6 +71,12 @@ export interface ProjectEditorOpener {
    */
   saveDirty?: () => Promise<string[]>
   /**
+   * Save one open file (path relative to `root`): `true` once written, `false`
+   * when it is not open here or the save was declined. Optional: an engine
+   * without per-file buffers omits it.
+   */
+  save?: (relPath: string) => Promise<boolean>
+  /**
    * Show `content` against the on-disk file (path relative to `root`) as a diff, so
    * a proposed change can be reviewed before it is written. Optional: an engine
    * without a diff surface omits it and callers fall back to writing directly.
@@ -293,6 +299,32 @@ export async function showDiffInProjectEditor(
   return true
 }
 
+/**
+ * Save the open file at an absolute path in whichever editor is rooted there.
+ * `null` when no editor there can save one file, so the caller can decide
+ * what else to do.
+ */
+export async function saveInProjectEditor(absolutePath: string): Promise<boolean | null> {
+  const resolved = resolveOpener(absolutePath)
+  if (!resolved?.opener.save) return null
+  return resolved.opener.save(resolved.rel)
+}
+
+const savedListeners = new Set<(absolutePath: string) => void>()
+
+/** Subscribe to "an editor wrote this file because the user (or a caller) saved it". */
+export function onProjectFileSaved(listener: (absolutePath: string) => void): () => void {
+  savedListeners.add(listener)
+  return () => {
+    savedListeners.delete(listener)
+  }
+}
+
+/** Called by an editor after it saved a file. */
+export function notifyProjectFileSaved(absolutePath: string): void {
+  for (const listener of [...savedListeners]) listener(absolutePath)
+}
+
 /** Reveal an absolute path in whichever editor's file tree is rooted there. */
 export async function revealInProjectEditor(absolutePath: string): Promise<boolean> {
   const resolved = resolveOpener(absolutePath)
@@ -346,4 +378,5 @@ export function deferProjectEditorOpen(absolutePath: string, line?: number, colu
 export function __resetProjectEditorBridgeForTesting(): void {
   openers.clear()
   pendingOpen = null
+  savedListeners.clear()
 }

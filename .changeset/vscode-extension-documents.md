@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+VS Code extensions can now open, edit and save documents. `workspace.openTextDocument` opens files from the project (with the extension's file-read permission), new untitled documents and documents from content providers (`registerTextDocumentContentProvider`, including its change event). `workspace.applyEdit` applies text edits and file creates, renames and deletes in the order they were added: open documents change in the editor (undoable, unsaved), other files change on disk with the extension's file-write permission, and a failed step answers `false` with the reason in the extension's log. `document.save()`, `workspace.save` and `saveAll` save through the project editor, extensions see the user's saves through `onDidSaveTextDocument`, `window.showTextDocument` opens a file in the project editor at a selection, and `editor.edit` / `applyEdit` resolve once the document shows the change. Saving an untitled document is not supported yet. Extensions that open or edit files now ask for file read/write permission when installed.

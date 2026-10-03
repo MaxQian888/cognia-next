@@ -1464,15 +1464,26 @@ function editorAtVersion(editorId: string, version: number): MonacoEditor | unde
   return current === undefined || current === version ? editor : undefined
 }
 
-/** `TextEditor.edit`: `false` when the editor is gone or its text changed since the edit was made. */
+/** Whether an editor operation applied and, if so, the document's version after it. */
+export interface EditOutcome {
+  applied: boolean
+  version?: number
+}
+
+function appliedTo(editor: MonacoEditor): EditOutcome {
+  const version = editor.getModel()?.getVersionId?.()
+  return version === undefined ? { applied: true } : { applied: true, version }
+}
+
+/** `TextEditor.edit`: not applied when the editor is gone or its text changed since the edit was made. */
 export function applyEditorEdit(req: {
   editorId: string
   version: number
   edits: Array<{ range: AdapterVscodeRange; text: string }>
   options?: { undoStopBefore?: boolean; undoStopAfter?: boolean; endOfLine?: number }
-}): boolean {
+}): EditOutcome {
   const editor = editorAtVersion(req.editorId, req.version)
-  if (!editor) return false
+  if (!editor) return { applied: false }
   if (req.options?.undoStopBefore !== false) editor.pushUndoStop?.()
   if (req.edits.length > 0) {
     editor.applyEdits(
@@ -1481,7 +1492,34 @@ export function applyEditorEdit(req: {
   }
   if (req.options?.endOfLine !== undefined) editor.setEndOfLine?.(req.options.endOfLine)
   if (req.options?.undoStopAfter !== false) editor.pushUndoStop?.()
-  return true
+  return appliedTo(editor)
+}
+
+/**
+ * `workspace.applyEdit`'s text edits to a document an editor shows: applied
+ * in one undo group through the first editor on `uri`. `null` when no editor
+ * shows it.
+ */
+export function applyDocumentEdits(req: {
+  uri: string
+  edits: Array<{ range: AdapterVscodeRange; newText: string }>
+  /** VS Code's `EndOfLine` (1 LF, 2 CRLF). */
+  eol?: number
+}): EditOutcome | null {
+  const editor = [...editors.values()].find((candidate) => {
+    const model = candidate.getModel()
+    return model !== null && !model.isDisposed() && model.uri === req.uri
+  })
+  if (!editor) return null
+  editor.pushUndoStop?.()
+  if (req.edits.length > 0) {
+    editor.applyEdits(
+      req.edits.map((edit) => ({ range: vscodeRangeToMonaco(edit.range), text: edit.newText }))
+    )
+  }
+  if (req.eol !== undefined) editor.setEndOfLine?.(req.eol)
+  editor.pushUndoStop?.()
+  return appliedTo(editor)
 }
 
 /** `TextEditor.insertSnippet`. */
@@ -1491,13 +1529,13 @@ export function insertEditorSnippet(req: {
   snippet: string
   ranges: AdapterVscodeRange[]
   options?: { undoStopBefore?: boolean; undoStopAfter?: boolean }
-}): boolean {
+}): EditOutcome {
   const editor = editorAtVersion(req.editorId, req.version)
-  if (!editor?.insertSnippet) return false
+  if (!editor?.insertSnippet) return { applied: false }
   if (req.options?.undoStopBefore !== false) editor.pushUndoStop?.()
   editor.insertSnippet(req.snippet, req.ranges.map(vscodeRangeToMonaco))
   if (req.options?.undoStopAfter !== false) editor.pushUndoStop?.()
-  return true
+  return appliedTo(editor)
 }
 
 export function revealEditorRange(req: {

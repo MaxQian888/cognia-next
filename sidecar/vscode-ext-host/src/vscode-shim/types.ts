@@ -437,7 +437,11 @@ export class TextEdit {
 
 /** One file operation recorded in a {@link WorkspaceEdit}. */
 export type WorkspaceFileOperation =
-  | { kind: "create"; uri: Uri; options?: { overwrite?: boolean; ignoreIfExists?: boolean } }
+  | {
+      kind: "create"
+      uri: Uri
+      options?: { overwrite?: boolean; ignoreIfExists?: boolean; contents?: Uint8Array }
+    }
   | {
       kind: "rename"
       oldUri: Uri
@@ -446,18 +450,61 @@ export type WorkspaceFileOperation =
     }
   | { kind: "delete"; uri: Uri; options?: { recursive?: boolean; ignoreIfNotExists?: boolean } }
 
+type WorkspaceEditEntry = { kind: "edit"; uri: string; edit: TextEdit } | WorkspaceFileOperation
+
+/** One step of a {@link WorkspaceEdit} as the renderer applies it, in order. */
+export type WireWorkspaceEditOperation =
+  | {
+      kind: "edit"
+      uri: string
+      edits: Array<{ range: Range; newText: string }>
+      /** `EndOfLine` (1 LF, 2 CRLF) when a `TextEdit.setEndOfLine` asked for one. */
+      eol?: number
+    }
+  | {
+      kind: "create"
+      uri: string
+      options?: { overwrite?: boolean; ignoreIfExists?: boolean }
+      /** The new file's text; `binary` when the contents are not UTF-8. */
+      contents?: { text: string } | { binary: true }
+    }
+  | {
+      kind: "rename"
+      oldUri: string
+      newUri: string
+      options?: { overwrite?: boolean; ignoreIfExists?: boolean }
+    }
+  | {
+      kind: "delete"
+      uri: string
+      options?: { recursive?: boolean; ignoreIfNotExists?: boolean }
+    }
+
+/**
+ * Text edits and file operations, kept in the order they were added: VS
+ * Code applies a workspace edit in that order, so an edit to a file it
+ * creates comes after the create.
+ */
 export class WorkspaceEdit {
-  private edits = new Map<string, TextEdit[]>()
-  /** File operations, in the order they were added. */
-  readonly fileOperations: WorkspaceFileOperation[] = []
+  private entriesInOrder: WorkspaceEditEntry[] = []
   set(uri: Uri, edits: ReadonlyArray<TextEdit | [TextEdit, unknown]> | null | undefined): void {
-    this.edits.set(
-      uri.toString(),
-      (edits ?? []).map((edit) => (Array.isArray(edit) ? edit[0] : edit))
+    const key = uri.toString()
+    this.entriesInOrder = this.entriesInOrder.filter(
+      (entry) => !(entry.kind === "edit" && entry.uri === key)
     )
+    for (const edit of edits ?? []) {
+      this.entriesInOrder.push({
+        kind: "edit",
+        uri: key,
+        edit: Array.isArray(edit) ? edit[0] : edit,
+      })
+    }
   }
   get(uri: Uri): TextEdit[] {
-    return this.edits.get(uri.toString())?.slice() ?? []
+    const key = uri.toString()
+    return this.textEntries()
+      .filter((entry) => entry.uri === key)
+      .map((entry) => entry.edit)
   }
   replace(uri: Uri, range: Range, newText: string): void {
     this.push(uri, TextEdit.replace(range, newText))
@@ -467,45 +514,102 @@ export class WorkspaceEdit {
   }
   delete(uri: Uri, range?: Range): void {
     if (range) this.push(uri, TextEdit.delete(range))
-    else this.edits.delete(uri.toString())
+    else this.set(uri, [])
   }
-  createFile(uri: Uri, options?: { overwrite?: boolean; ignoreIfExists?: boolean }): void {
-    this.fileOperations.push({ kind: "create", uri, options })
+  createFile(
+    uri: Uri,
+    options?: { overwrite?: boolean; ignoreIfExists?: boolean; contents?: Uint8Array }
+  ): void {
+    this.entriesInOrder.push({ kind: "create", uri, options })
   }
   renameFile(
     oldUri: Uri,
     newUri: Uri,
     options?: { overwrite?: boolean; ignoreIfExists?: boolean }
   ): void {
-    this.fileOperations.push({ kind: "rename", oldUri, newUri, options })
+    this.entriesInOrder.push({ kind: "rename", oldUri, newUri, options })
   }
   deleteFile(uri: Uri, options?: { recursive?: boolean; ignoreIfNotExists?: boolean }): void {
-    this.fileOperations.push({ kind: "delete", uri, options })
+    this.entriesInOrder.push({ kind: "delete", uri, options })
+  }
+  /** The file operations, in the order they were added. */
+  get fileOperations(): WorkspaceFileOperation[] {
+    return this.entriesInOrder.filter(
+      (entry): entry is WorkspaceFileOperation => entry.kind !== "edit"
+    )
   }
   entries(): Array<[Uri, TextEdit[]]> {
-    return [...this.edits.entries()].map(([k, v]) => [Uri.parse(k), v.slice()])
+    const grouped = new Map<string, TextEdit[]>()
+    for (const entry of this.textEntries()) {
+      grouped.set(entry.uri, [...(grouped.get(entry.uri) ?? []), entry.edit])
+    }
+    return [...grouped].map(([key, edits]) => [Uri.parse(key), edits])
   }
   has(uri: Uri): boolean {
-    return this.edits.has(uri.toString())
+    const key = uri.toString()
+    return this.textEntries().some((entry) => entry.uri === key)
   }
   get size(): number {
-    return this.edits.size + this.fileOperations.length
+    return this.entries().length + this.fileOperations.length
+  }
+  private textEntries(): Array<{ kind: "edit"; uri: string; edit: TextEdit }> {
+    return this.entriesInOrder.filter(
+      (entry): entry is { kind: "edit"; uri: string; edit: TextEdit } => entry.kind === "edit"
+    )
   }
   private push(uri: Uri, edit: TextEdit): void {
-    const key = uri.toString()
-    this.edits.set(key, [...(this.edits.get(key) ?? []), edit])
+    this.entriesInOrder.push({ kind: "edit", uri: uri.toString(), edit })
   }
-  /** The JSON form the renderer applies. */
-  toJSON(): {
-    edits: Array<{ uri: string; edits: Array<{ range: Range; newText: string }> }>
-    fileOperations: WorkspaceFileOperation[]
-  } {
-    return {
-      edits: [...this.edits].map(([uri, edits]) => ({
-        uri,
-        edits: edits.map((edit) => ({ range: edit.range, newText: edit.newText })),
-      })),
-      fileOperations: this.fileOperations,
+  /**
+   * The steps the renderer applies, in order: consecutive text edits to one
+   * document travel together, and file operations sit between them where
+   * they were added.
+   */
+  toJSON(): { operations: WireWorkspaceEditOperation[] } {
+    const operations: WireWorkspaceEditOperation[] = []
+    for (const entry of this.entriesInOrder) {
+      if (entry.kind === "edit") {
+        const last = operations[operations.length - 1]
+        const step =
+          last?.kind === "edit" && last.uri === entry.uri
+            ? last
+            : (operations[
+                operations.push({ kind: "edit", uri: entry.uri, edits: [] }) - 1
+              ] as Extract<WireWorkspaceEditOperation, { kind: "edit" }>)
+        if (entry.edit.newEol !== undefined) step.eol = entry.edit.newEol
+        else step.edits.push({ range: entry.edit.range, newText: entry.edit.newText })
+      } else if (entry.kind === "create") {
+        const { contents, ...options } = entry.options ?? {}
+        operations.push({
+          kind: "create",
+          uri: entry.uri.toString(),
+          ...(entry.options ? { options } : {}),
+          ...(contents ? { contents: wireContents(contents) } : {}),
+        })
+      } else if (entry.kind === "rename") {
+        operations.push({
+          kind: "rename",
+          oldUri: entry.oldUri.toString(),
+          newUri: entry.newUri.toString(),
+          ...(entry.options ? { options: entry.options } : {}),
+        })
+      } else {
+        operations.push({
+          kind: "delete",
+          uri: entry.uri.toString(),
+          ...(entry.options ? { options: entry.options } : {}),
+        })
+      }
     }
+    return { operations }
+  }
+}
+
+/** File contents as text, or marked binary when they are not UTF-8. */
+export function wireContents(contents: Uint8Array): { text: string } | { binary: true } {
+  try {
+    return { text: new TextDecoder("utf-8", { fatal: true }).decode(contents) }
+  } catch {
+    return { binary: true }
   }
 }

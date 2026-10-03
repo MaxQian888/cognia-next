@@ -1,4 +1,8 @@
-import { createDocumentSync, type DocumentSyncDependencies } from "./document-sync"
+import {
+  createDocumentSync,
+  MAX_DETACHED_DOCUMENTS,
+  type DocumentSyncDependencies,
+} from "./document-sync"
 import type { MonacoEditor, MonacoEditorChangeEvent } from "./monaco-bridge"
 
 function makeEditor(id: string, uri: string) {
@@ -220,5 +224,78 @@ describe("document sync", () => {
     h.mount("e1", "file:///a.ts")
     await h.flush()
     expect(methods(h.sent)).toEqual(["window:editorsChanged"])
+  })
+})
+
+describe("detached documents", () => {
+  it("go only to the host that opened them, and follow its edits", async () => {
+    const h = harness(["ext.a", "ext.b"])
+    await expect(h.sync.openDetached("ext.a", "file:///d.ts", "typescript", "one")).resolves.toBe(1)
+    await expect(h.sync.changeDetached("ext.a", "file:///d.ts", "two")).resolves.toBe(2)
+    await expect(h.sync.changeDetached("ext.a", "file:///d.ts", "two")).resolves.toBe(2)
+    await expect(h.sync.changeDetached("ext.b", "file:///d.ts", "x")).resolves.toBeUndefined()
+    expect(h.sent).toEqual([
+      [
+        "ext.a",
+        "workspace:documentOpened",
+        { uri: "file:///d.ts", languageId: "typescript", version: 1, text: "one" },
+      ],
+      ["ext.a", "workspace:documentChanged", { uri: "file:///d.ts", version: 2, text: "two" }],
+    ])
+    expect(h.sync.detachedHolders("file:///d.ts")).toEqual(["ext.a"])
+    expect(h.sync.heldBy("ext.a")).toEqual(["file:///d.ts"])
+    // Opening it again with other text is an edit.
+    await expect(h.sync.openDetached("ext.a", "file:///d.ts", "typescript", "three")).resolves.toBe(
+      3
+    )
+
+    h.sync.saved("file:///d.ts")
+    h.sync.closeDetached("ext.a", "file:///d.ts")
+    await h.flush()
+    expect(methods(h.sent).slice(-2)).toEqual([
+      "workspace:documentSaved",
+      "workspace:documentClosed",
+    ])
+    expect(h.sync.detached("ext.a", "file:///d.ts")).toBeUndefined()
+  })
+
+  it("are adopted when an editor opens the same document", async () => {
+    const h = harness()
+    await h.sync.openDetached("ext.a", "file:///a.ts", "typescript", "disk")
+    h.mount("e1", "file:///a.ts")
+    await h.flush()
+    expect(h.sync.detached("ext.a", "file:///a.ts")).toBeUndefined()
+    expect(h.sync.editorDocument("file:///a.ts")).toEqual({
+      languageId: "typescript",
+      version: 1,
+      text: "one",
+    })
+    // Already shown: opening it detached answers the editor's version.
+    await expect(h.sync.openDetached("ext.a", "file:///a.ts", "typescript", "x")).resolves.toBe(1)
+    expect(methods(h.sent)).toEqual([
+      "workspace:documentOpened",
+      "workspace:documentOpened",
+      "window:editorsChanged",
+    ])
+  })
+
+  it("keep a bounded number per host, closing the oldest", async () => {
+    const h = harness()
+    for (let index = 0; index <= MAX_DETACHED_DOCUMENTS; index += 1) {
+      await h.sync.openDetached("ext.a", `untitled:${index}`, "plaintext", "")
+    }
+    expect(h.sync.heldBy("ext.a")).toHaveLength(MAX_DETACHED_DOCUMENTS)
+    expect(h.sync.detached("ext.a", "untitled:0")).toBeUndefined()
+    expect(h.sent.at(-1)).toEqual(["ext.a", "workspace:documentClosed", { uri: "untitled:0" }])
+  })
+
+  it("are gone when the host restarts or stops", async () => {
+    const h = harness()
+    await h.sync.openDetached("ext.a", "untitled:1", "plaintext", "")
+    await h.sync.replay("ext.a")
+    expect(h.sync.heldBy("ext.a")).toEqual([])
+    await h.sync.openDetached("ext.a", "untitled:1", "plaintext", "")
+    h.sync.forget("ext.a")
+    expect(h.sync.heldBy("ext.a")).toEqual([])
   })
 })

@@ -12,6 +12,7 @@ import {
   type ProjectEditorDeps,
 } from "./use-project-editor"
 import type { WorkspaceFsChange } from "@/lib/files/workspace-watch"
+import { onProjectFileSaved } from "@/lib/files/project-editor-bridge"
 import {
   getModelRetainCount,
   getRetainedModelUris,
@@ -159,6 +160,24 @@ describe("useProjectEditor", () => {
     })
     expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "changed\n")
     expect(result.current.dirtyCount).toBe(0)
+  })
+
+  it("announces each save, so VS Code extensions see onDidSaveTextDocument", async () => {
+    const saved = jest.fn()
+    const unsubscribe = onProjectFileSaved(saved)
+    const deps = makeDeps()
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    act(() => result.current.setDraft("src/a.ts", "changed\n"))
+    await act(async () => {
+      await result.current.saveFile("src/a.ts")
+    })
+    unsubscribe()
+    expect(saved).toHaveBeenCalledWith("/repo/src/a.ts")
   })
 
   it("does not re-read an already-open file, just re-activates it", async () => {

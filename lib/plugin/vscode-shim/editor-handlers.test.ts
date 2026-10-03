@@ -12,9 +12,9 @@ jest.mock("./rpc-dispatcher", () => ({
 }))
 
 const mockBridge = {
-  applyEditorEdit: jest.fn(() => true),
+  applyEditorEdit: jest.fn(() => ({ applied: true, version: 5 })),
   disposeDecorationType: jest.fn(() => true),
-  insertEditorSnippet: jest.fn(() => false),
+  insertEditorSnippet: jest.fn(() => ({ applied: false })),
   registerDecorationType: jest.fn(),
   revealEditorRange: jest.fn(),
   setDecorations: jest.fn(() => true),
@@ -87,7 +87,7 @@ it("decoration types belong to the extension that minted the key", () => {
   expect(mockBridge.disposeDecorationType).toHaveBeenCalledWith("deco:ext.a:1")
 })
 
-it("edits and snippets answer whether they applied", () => {
+it("edits and snippets answer whether they applied, and the version after", () => {
   expect(
     call("window:editorEdit", {
       editorId: "e",
@@ -95,7 +95,7 @@ it("edits and snippets answer whether they applied", () => {
       edits: [{ range, text: "x" }],
       options: { undoStopBefore: false },
     })
-  ).toBe(true)
+  ).toEqual({ applied: true, version: 5 })
   expect(mockBridge.applyEditorEdit).toHaveBeenCalledWith({
     editorId: "e",
     version: 4,
@@ -109,7 +109,7 @@ it("edits and snippets answer whether they applied", () => {
       snippet: "$1",
       ranges: [range],
     })
-  ).toBe(false)
+  ).toEqual({ applied: false })
 })
 
 it("reveal, selections and options go to the bridge", () => {

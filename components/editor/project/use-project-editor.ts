@@ -24,6 +24,7 @@ import {
 } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { watchWorkspace } from "@/lib/files/workspace-watch"
 import { pathToFileUri } from "@/lib/files/path-uri"
+import { notifyProjectFileSaved } from "@/lib/files/project-editor-bridge"
 import {
   releaseModel,
   releaseModels,
@@ -1012,6 +1013,7 @@ export function useProjectEditor({
         await d.writeFile(rootPath, file.relPath, file.draftContent)
         // Stamp before the watcher can possibly deliver the write's echo.
         recentSelfWrites.current.set(file.absolutePath, Date.now())
+        notifyProjectFileSaved(file.absolutePath)
         if (!current()) return true
         const stat = await d.statFile(rootPath, file.relPath).catch(() => null)
         if (!current()) return true

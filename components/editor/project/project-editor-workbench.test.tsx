@@ -756,6 +756,17 @@ describe("saveDirty", () => {
 
     await expect(registeredSaveDirty()?.()).resolves.toEqual(["/repo"])
   })
+
+  it("saves one file for a caller that asks by path", async () => {
+    // A VS Code extension's `document.save()` saves that file, not every draft.
+    editor.saveFile.mockResolvedValueOnce(true)
+    render(<Harness />)
+    const args = registerOpener.mock.calls.at(-1)?.[0] as {
+      save?: (relPath: string) => Promise<boolean>
+    }
+    await expect(args.save?.("src/a.ts")).resolves.toBe(true)
+    expect(editor.saveFile).toHaveBeenCalledWith("src/a.ts")
+  })
 })
 
 it("lifts the editor selection so the context workbench sees it", () => {

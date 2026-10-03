@@ -719,8 +719,9 @@ export function useProjectEditorWorkbench({
       // without it the read side would stay Pro-IDE-only.
       readActive,
       saveDirty: flushDrafts,
+      save: (relPath) => saveFile(relPath),
     })
-  }, [flushDrafts, gotoLine, readActive, registerProjectOpener, rootPath])
+  }, [flushDrafts, gotoLine, readActive, registerProjectOpener, rootPath, saveFile])
 
   const saveActive = useCallback(() => {
     if (!activePath) return

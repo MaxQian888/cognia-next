@@ -242,24 +242,32 @@ export interface WireEdit {
  * Implemented by the host over its connection.
  */
 export interface EditorOperations {
-  /** Apply `edits` if the document is still at `version`; `false` when it moved on. */
+  /**
+   * Apply `edits` if the document is still at `version`. Not applied when
+   * it moved on; when applied, `version` is the document's version after.
+   */
   edit(
     editorId: string,
     version: number,
     edits: WireEdit[],
     options: { undoStopBefore: boolean; undoStopAfter: boolean; endOfLine?: number }
-  ): Promise<boolean>
+  ): Promise<EditOutcome>
   insertSnippet(
     editorId: string,
     version: number,
     snippet: string,
     ranges: WireEdit["range"][],
     options: { undoStopBefore: boolean; undoStopAfter: boolean }
-  ): Promise<boolean>
+  ): Promise<EditOutcome>
   setDecorations(editorId: string, key: string, decorations: unknown[]): void
   revealRange(editorId: string, range: WireEdit["range"], revealType: number): void
   setSelections(editorId: string, selections: WireSelection[]): void
   setOptions(editorId: string, options: Partial<EditorOptions>): void
+}
+
+export interface EditOutcome {
+  applied: boolean
+  version?: number
 }
 
 export interface EditorOptions {
@@ -342,7 +350,9 @@ export class TextEditor {
     selections: Selection[],
     private readonly operations?: EditorOperations,
     visibleRanges?: Range[],
-    options?: Partial<EditorOptions>
+    options?: Partial<EditorOptions>,
+    /** Resolves once the document has reached `version` here. */
+    private readonly settle: (version: number) => Promise<unknown> = async () => undefined
   ) {
     this.selectionList = selections
     this.visible = visibleRanges
@@ -409,11 +419,19 @@ export class TextEditor {
     callback(builder)
     const edits = builder.checked()
     if (edits.length === 0 && builder.endOfLine === undefined) return true
-    return this.operations.edit(this.id, this.document.version, edits, {
-      undoStopBefore: options.undoStopBefore ?? true,
-      undoStopAfter: options.undoStopAfter ?? true,
-      ...(builder.endOfLine !== undefined ? { endOfLine: builder.endOfLine } : {}),
-    })
+    return this.settled(
+      await this.operations.edit(this.id, this.document.version, edits, {
+        undoStopBefore: options.undoStopBefore ?? true,
+        undoStopAfter: options.undoStopAfter ?? true,
+        ...(builder.endOfLine !== undefined ? { endOfLine: builder.endOfLine } : {}),
+      })
+    )
+  }
+
+  /** As in VS Code, a resolved edit is already visible in `document`. */
+  private async settled(outcome: EditOutcome): Promise<boolean> {
+    if (outcome.applied && outcome.version !== undefined) await this.settle(outcome.version)
+    return outcome.applied
   }
 
   async insertSnippet(
@@ -429,15 +447,17 @@ export class TextEditor {
         : Array.isArray(location)
           ? (location as Array<Position | Range>).map(toRange)
           : [toRange(location as Position | Range)]
-    return this.operations.insertSnippet(
-      this.id,
-      this.document.version,
-      snippet.value,
-      ranges.map(wireRangeOf),
-      {
-        undoStopBefore: options.undoStopBefore ?? true,
-        undoStopAfter: options.undoStopAfter ?? true,
-      }
+    return this.settled(
+      await this.operations.insertSnippet(
+        this.id,
+        this.document.version,
+        snippet.value,
+        ranges.map(wireRangeOf),
+        {
+          undoStopBefore: options.undoStopBefore ?? true,
+          undoStopAfter: options.undoStopAfter ?? true,
+        }
+      )
     )
   }
 
@@ -494,12 +514,15 @@ function toSelection(wire: WireSelection): Selection {
 
 /** How long a provider call waits for the edit it was made against. */
 export const VERSION_WAIT_MS = 2_000
+/** How long `showTextDocument` waits for the editor it opened to be reported. */
+export const EDITOR_WAIT_MS = 5_000
 
 export class DocumentStore {
   private readonly documents = new Map<string, TextDocument>()
   private readonly editors = new Map<string, TextEditor>()
   private activeEditorId: string | null = null
   private readonly versionWaiters = new Set<() => void>()
+  private readonly editorWaiters = new Set<() => void>()
 
   readonly onDidOpen = new EventEmitter<TextDocument>()
   readonly onDidChange = new EventEmitter<TextDocumentChangeEvent>()
@@ -568,7 +591,14 @@ export class DocumentStore {
   open(uri: string, languageId: string, version: number, text: string): TextDocument {
     const existing = this.documents.get(uri)
     if (existing) {
-      this.change(uri, version, text)
+      // A document this host held detached, now shown in an editor: the
+      // editor's language, text and version numbering take over.
+      this.setLanguage(uri, languageId)
+      const change = existing.replaceText(text, version)
+      if (change) {
+        this.onDidChange.fire({ document: existing, contentChanges: [change], reason: undefined })
+      }
+      this.notifyVersion()
       return existing
     }
     const document = new TextDocument(uri, languageId, version, text, this.save)
@@ -664,7 +694,8 @@ export class DocumentStore {
             selections,
             this.operations,
             visibleRanges,
-            entry.options
+            entry.options,
+            (version) => this.waitForVersion(entry.uri, version)
           )
         )
       }
@@ -695,6 +726,7 @@ export class DocumentStore {
     for (const editor of optionChanges) {
       this.onDidChangeOptions.fire({ textEditor: editor, options: editor.options })
     }
+    for (const waiter of [...this.editorWaiters]) waiter()
   }
 
   /**
@@ -728,6 +760,33 @@ export class DocumentStore {
       }
       const timer = setTimeout(() => finish(this.documents.get(uri)), VERSION_WAIT_MS)
       this.versionWaiters.add(check)
+    })
+  }
+
+  /**
+   * The editor showing `uri` once the renderer reports one (the focused one
+   * when several do), or `undefined` after {@link EDITOR_WAIT_MS}.
+   */
+  async waitForEditor(uri: string): Promise<TextEditor | undefined> {
+    const find = () => {
+      const active = this.activeEditor
+      if (active?.document.uri.toString() === uri) return active
+      return this.visibleEditors.find((editor) => editor.document.uri.toString() === uri)
+    }
+    const now = find()
+    if (now) return now
+    return new Promise((resolve) => {
+      const check = () => {
+        const editor = find()
+        if (editor) finish(editor)
+      }
+      const finish = (editor: TextEditor | undefined) => {
+        clearTimeout(timer)
+        this.editorWaiters.delete(check)
+        resolve(editor)
+      }
+      const timer = setTimeout(() => finish(undefined), EDITOR_WAIT_MS)
+      this.editorWaiters.add(check)
     })
   }
 

@@ -750,8 +750,14 @@ describe("editor operations", () => {
     const model = editor.getModel()!
     model.getVersionId = () => version
     Object.assign(editor, {
+      // Every change moves the model's version, as in Monaco.
+      applyEdits: jest.fn(() => {
+        version += 1
+      }),
       pushUndoStop: jest.fn(),
-      insertSnippet: jest.fn(),
+      insertSnippet: jest.fn(() => {
+        version += 1
+      }),
       revealRange: jest.fn(),
       setSelections: jest.fn(),
       updateOptions: jest.fn(),
@@ -770,23 +776,25 @@ describe("editor operations", () => {
         edits: [{ range: wireRange1, text: "new" }],
         options: { undoStopBefore: true, undoStopAfter: false, endOfLine: 2 },
       })
-    ).toBe(true)
+    ).toEqual({ applied: true, version: 4 })
     expect(editor.applyEdits).toHaveBeenCalledWith([{ range: range1, text: "new" }])
     expect(editor.pushUndoStop).toHaveBeenCalledTimes(1)
     expect(editor.setEndOfLine).toHaveBeenCalledWith(2)
-    expect(applyEditorEdit({ editorId: "e1", version: 2, edits: [] })).toBe(false)
-    expect(applyEditorEdit({ editorId: "gone", version: 3, edits: [] })).toBe(false)
+    expect(applyEditorEdit({ editorId: "e1", version: 3, edits: [] })).toEqual({ applied: false })
+    expect(applyEditorEdit({ editorId: "gone", version: 4, edits: [] })).toEqual({
+      applied: false,
+    })
   })
 
   it("inserts snippets, reveals ranges, moves cursors and sets options", () => {
     const editor = mountedEditor()
     expect(
       insertEditorSnippet({ editorId: "e1", version: 3, snippet: "f($1)", ranges: [wireRange1] })
-    ).toBe(true)
+    ).toEqual({ applied: true, version: 4 })
     expect(editor.insertSnippet).toHaveBeenCalledWith("f($1)", [range1])
-    expect(insertEditorSnippet({ editorId: "e1", version: 9, snippet: "x", ranges: [] })).toBe(
-      false
-    )
+    expect(insertEditorSnippet({ editorId: "e1", version: 9, snippet: "x", ranges: [] })).toEqual({
+      applied: false,
+    })
 
     revealEditorRange({ editorId: "e1", range: wireRange1, revealType: 1 })
     expect(editor.revealRange).toHaveBeenCalledWith(range1, 1)

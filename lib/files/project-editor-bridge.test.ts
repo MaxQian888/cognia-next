@@ -6,7 +6,10 @@ import {
   deferProjectEditorOpen,
   flushProjectEditorEdits,
   notifyInProjectEditor,
+  notifyProjectFileSaved,
+  onProjectFileSaved,
   revealInProjectEditor,
+  saveInProjectEditor,
   runInProjectEditorTerminal,
   showDiffInProjectEditor,
   __resetProjectEditorBridgeForTesting,
@@ -358,5 +361,32 @@ describe("notifyInProjectEditor", () => {
 
   it("reports false when nothing can show a message", async () => {
     await expect(notifyInProjectEditor("done")).resolves.toBe(false)
+  })
+})
+
+describe("saveInProjectEditor", () => {
+  it("saves one file through the editor rooted at it", async () => {
+    const save = jest.fn().mockResolvedValue(true)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), save })
+    await expect(saveInProjectEditor("/repo/src/a.ts")).resolves.toBe(true)
+    expect(save).toHaveBeenCalledWith("src/a.ts")
+  })
+
+  it("answers null when no editor there saves single files", async () => {
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn() })
+    await expect(saveInProjectEditor("/repo/a.ts")).resolves.toBeNull()
+    await expect(saveInProjectEditor("/elsewhere/a.ts")).resolves.toBeNull()
+  })
+})
+
+describe("project file saved events", () => {
+  it("tells every subscriber which file was saved, until it unsubscribes", () => {
+    const listener = jest.fn()
+    const unsubscribe = onProjectFileSaved(listener)
+    notifyProjectFileSaved("/repo/a.ts")
+    unsubscribe()
+    notifyProjectFileSaved("/repo/b.ts")
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith("/repo/a.ts")
   })
 })

@@ -338,10 +338,25 @@ describe("vscode-loader — Tauri mode", () => {
       onEditorChange: jest.fn(() => () => {}),
       onActiveEditorChanged: jest.fn(() => () => {}),
     }))
+    const configureVscodeDocuments = jest.fn()
+    const createVscodeDocumentsDependencies = jest.fn((sync: unknown) => ({ sync }))
+    jest.doMock("@/lib/plugin/vscode-shim/workspace-document-handlers", () => ({
+      ...jest.requireActual("@/lib/plugin/vscode-shim/workspace-document-handlers"),
+      configureVscodeDocuments,
+      createVscodeDocumentsDependencies,
+    }))
 
     const { loadVscodeDefinition } = await import("./vscode-loader")
     await loadVscodeDefinition(baseManifest, "/tmp/plugin")
 
+    // Documents are served over the same document sync the editors report to.
+    expect(createVscodeDocumentsDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({ openDetached: expect.any(Function) }),
+      expect.any(Function)
+    )
+    expect(configureVscodeDocuments).toHaveBeenCalledWith(
+      createVscodeDocumentsDependencies.mock.results[0].value
+    )
     expect(configureMonacoBridge).toHaveBeenCalledTimes(1)
     const arg = configureMonacoBridge.mock.calls[0][0]
     expect(arg.monacoApi).toBeDefined()
@@ -383,6 +398,7 @@ describe("vscode-loader — Tauri mode", () => {
       .map((entry) => entry as unknown as [string, { method?: string; payloadJson?: string }])
       .find(([, args]) => args?.method === "extension:cancel")
     expect(JSON.parse(cancelCall![1].payloadJson!)).toEqual({ callId: sent.callId })
+    jest.dontMock("@/lib/plugin/vscode-shim/workspace-document-handlers")
   })
 
   it("survives configured Monaco failing to load (logs warn + continues activation)", async () => {

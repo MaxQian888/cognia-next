@@ -199,6 +199,15 @@ export async function ensureDispatcherConfigured(): Promise<void> {
       onActiveEditorChanged: bridge.onActiveEditorChanged,
     })
 
+    // `workspace.openTextDocument` / `applyEdit` / saving and `window.showTextDocument`.
+    const { configureVscodeDocuments, createVscodeDocumentsDependencies } =
+      await import("@/lib/plugin/vscode-shim/workspace-document-handlers")
+    configureVscodeDocuments(
+      createVscodeDocumentsDependencies(documentSync, (pluginId, method, payload) =>
+        invokeVscodeRpc(pluginId, method, payload)
+      )
+    )
+
     // Consume `contributes.languages[]` (populated by the manager via
     // languages-bridge): register each contributed language id into Monaco and
     // keep it in sync as VS Code extensions enable / disable.
@@ -485,6 +494,9 @@ export async function unloadVscodeExtension(
       documentSync?.forget(pluginId)
       const { clearVscodeWindowUi } = await import("@/lib/plugin/vscode-shim/window-handlers")
       clearVscodeWindowUi(pluginId)
+      const { clearVscodeDocumentsForPlugin } =
+        await import("@/lib/plugin/vscode-shim/workspace-document-handlers")
+      clearVscodeDocumentsForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

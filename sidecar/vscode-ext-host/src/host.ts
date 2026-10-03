@@ -29,7 +29,7 @@ import {
   setGrantedModules,
 } from "./require-hook"
 import { ExtensionMode } from "./vscode-shim/api-types"
-import { DocumentStore } from "./vscode-shim/documents"
+import { DocumentStore, type EditOutcome } from "./vscode-shim/documents"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
 import {
   activateExtension,
@@ -115,9 +115,14 @@ const DOCUMENTS = new DocumentStore(
     connection.sendRequest<boolean>("workspace:saveTextDocument", { uri: document.uri.toString() }),
   {
     edit: (editorId, version, edits, options) =>
-      connection.sendRequest<boolean>("window:editorEdit", { editorId, version, edits, options }),
+      connection.sendRequest<EditOutcome>("window:editorEdit", {
+        editorId,
+        version,
+        edits,
+        options,
+      }),
     insertSnippet: (editorId, version, snippet, ranges, options) =>
-      connection.sendRequest<boolean>("window:editorInsertSnippet", {
+      connection.sendRequest<EditOutcome>("window:editorInsertSnippet", {
         editorId,
         version,
         snippet,

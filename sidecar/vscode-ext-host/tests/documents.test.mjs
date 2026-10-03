@@ -145,11 +145,12 @@ test("a cancellation listener added after cancelling still runs", async () => {
 
 function recordingOperations(answer = true) {
   const calls = []
+  const outcome = answer ? { applied: true } : { applied: false }
   return {
     calls,
     operations: {
-      edit: async (...args) => (calls.push(["edit", ...args]), answer),
-      insertSnippet: async (...args) => (calls.push(["snippet", ...args]), answer),
+      edit: async (...args) => (calls.push(["edit", ...args]), outcome),
+      insertSnippet: async (...args) => (calls.push(["snippet", ...args]), outcome),
       setDecorations: (...args) => calls.push(["decorations", ...args]),
       revealRange: (...args) => calls.push(["reveal", ...args]),
       setSelections: (...args) => calls.push(["selections", ...args]),
@@ -307,4 +308,96 @@ test("decorations, reveal, selections and options reach the renderer; reports do
   assert.equal(calls.length, 5)
   assert.deepEqual(events, ["ranges:1", "tab:8"])
   assert.equal(editor.selection.active.line, 0)
+})
+
+test("an applied edit resolves once the document shows it", async () => {
+  const store = new DocumentStore(noSave, {
+    ...recordingOperations().operations,
+    edit: async () => {
+      setTimeout(() => store.change("file:///a.ts", 8, ">a"), 20)
+      return { applied: true, version: 8 }
+    },
+  })
+  store.open("file:///a.ts", "typescript", 7, "a")
+  store.setEditors([{ id: "e", uri: "file:///a.ts", selections: [zero] }], "e")
+  const editor = store.activeEditor
+  assert.equal(await editor.edit((builder) => builder.insert(new Position(0, 0), ">")), true)
+  assert.equal(editor.document.getText(), ">a")
+})
+
+test("an editor opening a detached document takes it over, version and all", () => {
+  const store = new DocumentStore(noSave)
+  const events = []
+  store.onDidChange.event((event) => events.push(`change:${event.document.version}`))
+  store.onDidClose.event(() => events.push("close"))
+  store.onDidOpen.event((document) => events.push(`open:${document.languageId}`))
+  const detached = store.open("file:///a.ts", "plaintext", 5, "disk")
+  // The editor's numbering restarts at 1 and may be behind the detached copy's.
+  assert.equal(store.open("file:///a.ts", "typescript", 1, "editor"), detached)
+  assert.equal(detached.version, 1)
+  assert.equal(detached.getText(), "editor")
+  assert.deepEqual(events, ["open:plaintext", "close", "open:typescript", "change:1"])
+})
+
+test("waiting for an editor: the focused one on the document, or none after the limit", async () => {
+  const store = new DocumentStore(noSave)
+  store.open("file:///a.ts", "typescript", 1, "a")
+  const waiting = store.waitForEditor("file:///a.ts")
+  setTimeout(
+    () => store.setEditors([{ id: "e", uri: "file:///a.ts", selections: [zero] }], "e"),
+    10
+  )
+  assert.equal((await waiting).id, "e")
+  assert.equal((await store.waitForEditor("file:///a.ts")).id, "e")
+})
+
+test("a workspace edit keeps its steps in the order they were added", async () => {
+  const { WorkspaceEdit, Uri, TextEdit } = await import("../dist/vscode-shim/types.js")
+  const edit = new WorkspaceEdit()
+  const a = Uri.file("/a.ts")
+  const b = Uri.file("/b.ts")
+  edit.createFile(b, { contents: new Uint8Array([0xff]) })
+  edit.insert(b, new Position(0, 0), "1")
+  edit.insert(b, new Position(0, 1), "2")
+  edit.replace(a, new Range(0, 0, 0, 1), "x")
+  edit.renameFile(b, Uri.file("/c.ts"), { overwrite: true })
+  edit.set(a, [TextEdit.setEndOfLine(2), TextEdit.delete(new Range(0, 0, 0, 2))])
+  edit.deleteFile(Uri.file("/d"), { recursive: true })
+  const range = (sl, sc, el, ec) => new Range(sl, sc, el, ec)
+  assert.deepEqual(JSON.parse(JSON.stringify(edit)), {
+    operations: [
+      { kind: "create", uri: "file:///b.ts", options: {}, contents: { binary: true } },
+      {
+        kind: "edit",
+        uri: "file:///b.ts",
+        edits: [
+          { range: JSON.parse(JSON.stringify(range(0, 0, 0, 0))), newText: "1" },
+          { range: JSON.parse(JSON.stringify(range(0, 1, 0, 1))), newText: "2" },
+        ],
+      },
+      {
+        kind: "rename",
+        oldUri: "file:///b.ts",
+        newUri: "file:///c.ts",
+        options: { overwrite: true },
+      },
+      // `set` replaced the document's earlier edits, so they move to where it was called.
+      {
+        kind: "edit",
+        uri: "file:///a.ts",
+        edits: [{ range: JSON.parse(JSON.stringify(range(0, 0, 0, 2))), newText: "" }],
+        eol: 2,
+      },
+      { kind: "delete", uri: "file:///d", options: { recursive: true } },
+    ],
+  })
+  assert.equal(edit.size, 5)
+  assert.deepEqual(
+    edit.get(b).map((e) => e.newText),
+    ["1", "2"]
+  )
+  assert.equal(edit.has(a), true)
+  assert.equal(edit.fileOperations.length, 3)
+  edit.delete(a)
+  assert.equal(edit.has(a), false)
 })

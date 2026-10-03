@@ -166,6 +166,49 @@ describe("inferPermissions", () => {
       )
     })
 
+    it("reads files for openTextDocument, and writes them for applyEdit", () => {
+      const infer = (code: string) =>
+        inferPermissions({
+          vsix: makeVsix(
+            { ...HEAD, main: "out/extension.js" },
+            { "out/extension.js": `const vscode = require("vscode"); ${code}` }
+          ),
+        })
+      const reading = infer(`vscode.workspace.openTextDocument("/a.ts")`)
+      expect(reading.permissions).toContain("filesystem:read")
+      expect(reading.permissions).not.toContain("filesystem:write")
+      expect(reading.reasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            permission: "filesystem:read",
+            trigger: { kind: "vscode-api", api: "vscode.workspace.openTextDocument" },
+          }),
+        ])
+      )
+      expect(infer(`vscode.workspace.applyEdit(edit)`).permissions).toEqual(
+        expect.arrayContaining(["filesystem:read", "filesystem:write"])
+      )
+      expect(infer(`vscode.workspace.fs.writeFile(uri, bytes)`).permissions).toContain(
+        "filesystem:write"
+      )
+      // Reading the folder list touches no file.
+      expect(infer(`vscode.workspace.workspaceFolders`).permissions).not.toContain(
+        "filesystem:read"
+      )
+    })
+
+    it("finds the file APIs by string scan when the bundle does not parse", () => {
+      const result = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          { "out/extension.js": `vscode . workspace . applyEdit(edit); ((( unbalanced` }
+        ),
+      })
+      expect(result.permissions).toEqual(
+        expect.arrayContaining(["filesystem:read", "filesystem:write"])
+      )
+    })
+
     it("dedupes when the same module is referenced multiple times", () => {
       const result = inferPermissions({
         vsix: makeVsix(
