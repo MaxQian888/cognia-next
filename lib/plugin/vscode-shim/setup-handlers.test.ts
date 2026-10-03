@@ -14,15 +14,14 @@
  * `installed` flag and the `handlers` Map in lock-step.
  */
 
-jest.mock("./lm-handler", () => ({
-  handleRegisterChatModelProvider: jest.fn(),
-  handleRegisterMcpServerDefinitionProvider: jest.fn(),
-  handleRegisterTool: jest.fn(),
-  handleSelectChatModels: jest.fn(),
-  handleSendChatRequest: jest.fn(),
-  handleUnregisterChatModelProvider: jest.fn(),
-  handleUnregisterMcpServerDefinitionProvider: jest.fn(),
-  handleUnregisterTool: jest.fn(),
+// The real lm handlers register; the AI stack behind them stays out.
+jest.mock("@/lib/plugin/api/ai-provider-api", () => ({ createAIProviderAPI: jest.fn() }))
+jest.mock("@/lib/plugin/api/api-permission-gate", () => ({ hasApiOrGuardPermission: jest.fn() }))
+jest.mock("@/lib/plugin/runtime/host-runtime", () => ({
+  PluginHostRuntimeUnavailableError: class extends Error {},
+}))
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: { getState: jest.fn(), subscribe: jest.fn(() => () => {}) },
 }))
 
 jest.mock("./chat-participant-registry", () => ({
@@ -56,12 +55,12 @@ import path from "node:path"
 const EXPECTED_METHODS = [
   "lm:selectChatModels",
   "lm:sendChatRequest",
+  "lm:readChatResponse",
+  "lm:cancelChatRequest",
+  "lm:countTokens",
   "lm:registerChatModelProvider",
-  "lm:unregisterChatModelProvider",
   "lm:registerMcpServerDefinitionProvider",
-  "lm:unregisterMcpServerDefinitionProvider",
   "lm:registerTool",
-  "lm:unregisterTool",
   "chat:createParticipant",
   "chat:disposeParticipant",
   "chat:registerVariableResolver",

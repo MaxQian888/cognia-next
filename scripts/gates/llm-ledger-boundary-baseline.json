@@ -81,11 +81,6 @@
       "entries": ["ai:streamText"],
       "note": "Ambient plugin host runtime (renderer, desktop, mobile): plugin model calls stream through streamText with no ledger."
     },
-    "lib/plugin/vscode-shim/lm-handler.ts": {
-      "reason": "unwrapped",
-      "entries": ["ai:generateText"],
-      "note": "VS Code `vscode.lm` shim: sendChatRequest runs generateText, no ledger."
-    },
     "lib/provider-diagnostics/benchmark.ts": {
       "reason": "unwrapped",
       "entries": ["ai:streamText"],

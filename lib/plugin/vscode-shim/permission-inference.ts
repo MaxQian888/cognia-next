@@ -47,6 +47,10 @@ export interface InferPermissionsInput {
  *
  * `window.createTerminal` opens a shell in the dock, and `sendText` (a method
  * on the terminal it returns, so not visible here) types into it.
+ *
+ * `lm.selectChatModels` is how an extension reaches a language model; the
+ * requests it then sends (`sendRequest`, on the model it returns) spend the
+ * user's model quota.
  */
 const VSCODE_API_PERMISSIONS: ReadonlyArray<{
   api: string
@@ -68,6 +72,7 @@ const VSCODE_API_PERMISSIONS: ReadonlyArray<{
     permissions: ["filesystem:read", "filesystem:write"],
   },
   { api: "vscode.window.createTerminal", permissions: ["terminal:spawn", "terminal:write"] },
+  { api: "vscode.lm.selectChatModels", permissions: ["ai:chat"] },
 ]
 
 /**
@@ -419,6 +424,7 @@ function orderedPermissions(set: Set<PluginPermission>): PluginPermission[] {
     "secrets:write",
     "terminal:spawn",
     "terminal:write",
+    "ai:chat",
   ]
   return order.filter((p) => set.has(p))
 }
@@ -561,7 +567,11 @@ function walkAst(
             },
             `vscode.authentication OAuth flows dial out`
           )
-        } else if (root.startsWith("vscode.workspace.") || root.startsWith("vscode.window.")) {
+        } else if (
+          root.startsWith("vscode.workspace.") ||
+          root.startsWith("vscode.window.") ||
+          root.startsWith("vscode.lm.")
+        ) {
           for (const entry of VSCODE_API_PERMISSIONS) {
             if (root !== entry.api && !root.startsWith(`${entry.api}.`)) continue
             for (const permission of entry.permissions) {

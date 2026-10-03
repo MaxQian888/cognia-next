@@ -58,6 +58,7 @@ import { createTestsNamespace } from "./tests"
 import { createCommentsNamespace } from "./comments"
 import { createNotebooksNamespace } from "./notebooks"
 import type { WebviewRegistry } from "./webviews"
+import type { LanguageModels } from "./lm"
 import {
   TerminalExitReason,
   TerminalLocation,
@@ -79,6 +80,8 @@ export interface ShimDependencies {
   terminals: TerminalRegistry
   /** The webview panels and views the host's extensions show (`webviews.ts`). */
   webviews: WebviewRegistry
+  /** The app's language models as the renderer last described them (`lm.ts`). */
+  languageModels: LanguageModels
   /** The open workspace folders and file-watcher routing (`workspace-folders.ts`). */
   folders: WorkspaceFolders
   /** The extension's own directories, which `workspace.fs` may use without asking. */

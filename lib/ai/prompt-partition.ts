@@ -5,8 +5,9 @@
  * default: system content must travel in the top-level instructions option, and
  * anything left inline has to be explicitly opted back in with
  * `allowSystemInMessages`. Several of our call sites (the sidecar dispatcher, the
- * plugin AI API, the VS Code LM shim) build one flat `ModelMessage[]` with the
- * system prompt at the head, so they all need the same split.
+ * plugin AI API, which also serves the VS Code LM shim) build one flat
+ * `ModelMessage[]` with the system prompt at the head, so they all need the same
+ * split.
  *
  * This helper is that single split. It is deliberately shaped as a
  * **spreadable options fragment** so call sites read as:
@@ -59,10 +60,11 @@ export interface PartitionedPrompt {
    * them would reorder what the model sees.
    *
    * Every producer of these messages is trusted first-party code (the sidecar
-   * prompt builder, the plugin host, the LM shim); none of them splice
-   * user-authored text in as a system turn. Do not widen this to
-   * user-controlled message arrays — a user-settable system message is a prompt
-   * injection primitive.
+   * prompt builder, the plugin host); none of them splice user-authored text in
+   * as a system turn. The VS Code LM shim forwards a third-party extension's
+   * messages, so it refuses a system message after the conversation has started
+   * and never reaches this. Do not widen this to user-controlled message arrays —
+   * a user-settable system message is a prompt injection primitive.
    */
   allowSystemInMessages?: true
 }

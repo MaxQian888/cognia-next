@@ -29,7 +29,6 @@ import {
 import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
 import { getVscodeHostSupervisor } from "@/lib/plugin/vscode-shim/host-supervisor"
 import { listWorkspaceFolders } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
-import { configureLmHandler } from "@/lib/plugin/vscode-shim/lm-handler"
 import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
 
@@ -117,25 +116,6 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     },
     listen: (event, cb) => listen(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
   })
-  // Resolve cognia's currently configured Claude model for lm.selectChatModels.
-  configureLmHandler({
-    resolveDefaultModel: async () => {
-      try {
-        if (isHeadlessHost()) {
-          const { useSettingsStore } = await import("@/stores/settings")
-          const { resolveAppDefaultModel } = await import("@/lib/ai/app-default-model")
-          // The extension host runs provider calls, and the app-wide pair
-          // doubles as the external agent's default: handing an extension an
-          // agent's own model id names nothing it can resolve.
-          return resolveAppDefaultModel(useSettingsStore.getState().settings).model
-        }
-        const settings = await invoke<{ model?: string } | null>("read_claude_user_settings")
-        return settings?.model
-      } catch {
-        return undefined
-      }
-    },
-  })
   installVscodeRpcHandlers()
 
   // `workspace.workspaceFolders`, `workspace.fs`, `findFiles` and file
@@ -187,6 +167,15 @@ export async function ensureDispatcherConfigured(): Promise<void> {
   configureVscodeWebviews(
     createVscodeWebviewDependencies({
       sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+    })
+  )
+  // `vscode.lm`: the app's own model, through the plugin AI API.
+  const { configureVscodeLm, createVscodeLmDependencies } =
+    await import("@/lib/plugin/vscode-shim/lm-handler")
+  configureVscodeLm(
+    createVscodeLmDependencies({
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+      hosts: () => [...vscodeGenerations.keys()],
     })
   )
   // Extensions' terminals, as dock tabs.

@@ -7,16 +7,7 @@
  */
 
 import { registerMethod } from "./rpc-dispatcher"
-import {
-  handleRegisterChatModelProvider,
-  handleRegisterMcpServerDefinitionProvider,
-  handleRegisterTool,
-  handleSelectChatModels,
-  handleSendChatRequest,
-  handleUnregisterChatModelProvider,
-  handleUnregisterMcpServerDefinitionProvider,
-  handleUnregisterTool,
-} from "./lm-handler"
+import { installVscodeLmHandlers, unregisterAllLmFor } from "./lm-handler"
 import {
   handleChatParticipantRespond,
   handleCreateChatParticipant,
@@ -64,35 +55,8 @@ export function installVscodeRpcHandlers(): () => void {
   installed = true
   const disposers: Array<() => void> = []
 
-  // lm:* — language model & MCP/tool providers.
-  disposers.push(registerMethod("lm:selectChatModels", (p) => handleSelectChatModels(p as never)))
-  disposers.push(registerMethod("lm:sendChatRequest", (p) => handleSendChatRequest(p as never)))
-  disposers.push(
-    registerMethod("lm:registerChatModelProvider", (p) =>
-      handleRegisterChatModelProvider(p as never)
-    )
-  )
-  disposers.push(
-    registerMethod("lm:unregisterChatModelProvider", (p) => {
-      handleUnregisterChatModelProvider(p as never)
-    })
-  )
-  disposers.push(
-    registerMethod("lm:registerMcpServerDefinitionProvider", (p) =>
-      handleRegisterMcpServerDefinitionProvider(p as never)
-    )
-  )
-  disposers.push(
-    registerMethod("lm:unregisterMcpServerDefinitionProvider", (p) => {
-      handleUnregisterMcpServerDefinitionProvider(p as never)
-    })
-  )
-  disposers.push(registerMethod("lm:registerTool", (p) => handleRegisterTool(p as never)))
-  disposers.push(
-    registerMethod("lm:unregisterTool", (p) => {
-      handleUnregisterTool(p as never)
-    })
-  )
+  // lm:* — the app's language model, and the registrations nothing calls.
+  disposers.push(...installVscodeLmHandlers())
 
   // chat:* — participants & variable resolvers.
   disposers.push(
@@ -192,6 +156,7 @@ export function installVscodeRpcHandlers(): () => void {
       clearVscodeEnvForPlugin(payload.extensionId)
       clearVscodeTerminalsForPlugin(payload.extensionId)
       clearVscodeWebviewsForPlugin(payload.extensionId)
+      unregisterAllLmFor(payload.extensionId)
       return handleExtensionCleanup(payload)
     })
   )
@@ -230,11 +195,13 @@ export function installVscodeRpcHandlers(): () => void {
         kind: "host",
       })
       // Whatever the host had on screen went with it: its URI handler, its
-      // extension terminals and its webviews.
+      // extension terminals and its webviews; and the model requests it was
+      // reading.
       clearVscodeWindowUi(ctx.pluginId)
       clearVscodeEnvForPlugin(ctx.pluginId)
       clearVscodeTerminalsForPlugin(ctx.pluginId)
       clearVscodeWebviewsForPlugin(ctx.pluginId)
+      unregisterAllLmFor(ctx.pluginId)
       getVscodeHostSupervisor().onExited(ctx.pluginId, exit)
       return null
     })

@@ -241,6 +241,43 @@ describe("inferPermissions", () => {
       expect(window.permissions).not.toContain("terminal:spawn")
     })
 
+    it("asks to use the user's language model for lm.selectChatModels, by AST and by string scan", () => {
+      const parsed = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          {
+            "out/extension.js": `const vscode = require("vscode"); vscode.lm.selectChatModels({ vendor: "cognia" })`,
+          }
+        ),
+      })
+      expect(parsed.permissions).toContain("ai:chat")
+      expect(parsed.reasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            permission: "ai:chat",
+            trigger: { kind: "vscode-api", api: "vscode.lm.selectChatModels" },
+          }),
+        ])
+      )
+      const scanned = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          { "out/extension.js": `vscode.lm.selectChatModels(); ((( unbalanced` }
+        ),
+      })
+      expect(scanned.permissions).toContain("ai:chat")
+      // Registering a tool reaches no model.
+      const tools = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          {
+            "out/extension.js": `const vscode = require("vscode"); vscode.lm.registerTool("t", {})`,
+          }
+        ),
+      })
+      expect(tools.permissions).not.toContain("ai:chat")
+    })
+
     it("finds the file APIs by string scan when the bundle does not parse", () => {
       const result = inferPermissions({
         vsix: makeVsix(

@@ -78,9 +78,10 @@ export interface SidecarExtensionContext {
    */
   environmentVariableCollection: EnvironmentVariableCollection
   /**
-   * VS Code's chat / lm permission gate. cognia always returns "limited"
-   * (extensions can call lm.* but the policy layer may apply rate limits
-   * later). The `onDidChange` emitter never fires today.
+   * Whether the extension may send requests to a language model: `true` or
+   * `false` for a model `lm.selectChatModels` returned (it holds `ai:chat` or
+   * not), `undefined` for one the host has not been told about. Changes when
+   * the app's models do.
    */
   languageModelAccessInformation: LanguageModelAccessInformation
 }
@@ -105,13 +106,12 @@ export interface EnvironmentVariableCollection {
 }
 
 export interface LanguageModelAccessInformation {
-  /** "limited" (cognia config gates) | "unlimited" | "denied". */
-  canSendRequest(): "limited" | "unlimited" | "denied"
-  /** EventEmitter-shaped — cognia never fires today; reserved for future
-   *  quota-change events. */
-  onDidChange: {
-    (listener: () => void): { dispose(): void }
-  }
+  canSendRequest(chat: { id?: unknown }): boolean | undefined
+  onDidChange: (
+    listener: () => void,
+    thisArgs?: unknown,
+    disposables?: Array<{ dispose(): unknown }>
+  ) => { dispose(): void }
 }
 
 export interface Disposable {

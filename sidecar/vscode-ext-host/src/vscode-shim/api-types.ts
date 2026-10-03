@@ -713,6 +713,17 @@ export class LanguageModelToolResultPart {
   ) {}
 }
 
+/** A prompt-tsx element tree. Only VS Code's own models render these. */
+export class LanguageModelPromptTsxPart {
+  constructor(public value: unknown) {}
+}
+
+export class LanguageModelToolResult {
+  constructor(public content: unknown[]) {}
+}
+
+export const LanguageModelChatToolMode = { Auto: 1, Required: 2 } as const
+
 export const LanguageModelChatMessageRole = { User: 1, Assistant: 2 } as const
 
 export class LanguageModelChatMessage {
