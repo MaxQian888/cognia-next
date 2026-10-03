@@ -24,6 +24,26 @@
 //! about a compromised registry, a registry insider, or a malicious publisher —
 //! each of those controls both files. UI wording must not claim otherwise.
 //!
+//! # The Open VSX signature
+//!
+//! Open VSX signs every `.vsix` it publishes: `files.signature` is a
+//! `.sigzip` whose `.signature.sig` entry is a raw Ed25519 signature over the
+//! whole `.vsix`. It is checked against Open VSX's key **pinned here**
+//! ([`OPENVSX_SIGNING_KEY`]), never against the key URL the registry offers,
+//! since whoever could swap the file could swap that key too. A verified
+//! signature proves the bytes are what Open VSX published, which a mirror,
+//! proxy or CDN in between cannot fake. It says nothing about whether the
+//! publisher is honest.
+//!
+//! - Signed by the pinned key and valid: [`VsixSignature::Verified`]; the
+//!   install gets a `signature` verification receipt.
+//! - Advertised as signed by the pinned key but invalid: the download is
+//!   refused ([`DownloadError::SignatureInvalid`]); a signature that was
+//!   advertised but cannot be fetched or read is refused too.
+//! - No signature, or one by a key Cognia does not know: the bytes install
+//!   unsigned ([`VsixSignature::Unsigned`] / [`VsixSignature::UnknownKey`]),
+//!   and the extension starts only once the user trusts it.
+//!
 //! `dead_code` is silenced module-wide for the same reason as the sibling
 //! `commands` module: `tauri::generate_handler!` hides the command's callsite
 //! from rustc's dead-code analyser.
@@ -66,6 +86,48 @@ const OPENVSX_ALLOWED_HOSTS: &[&str] = &["open-vsx.org", "openvsx.eclipsecontent
 /// name. Anything meaningfully larger is not a digest file, and reading it
 /// unbounded would let a hostile origin drive an allocation.
 const MAX_DIGEST_BODY_BYTES: usize = 4096;
+
+/// A `.sigzip` holds a 64-byte signature, a small JSON manifest and an empty
+/// placeholder; anything near this size is not one.
+const MAX_SIGZIP_BYTES: usize = 64 * 1024;
+
+/// The `.sigzip` entry holding the raw Ed25519 signature.
+const SIGNATURE_ENTRY: &str = ".signature.sig";
+
+/// A signing key Cognia trusts: the id the registry names it by, and the raw
+/// 32-byte Ed25519 public key (base64).
+#[derive(Debug, Clone, Copy)]
+pub struct PinnedKey {
+    pub id: &'static str,
+    pub public_key_base64: &'static str,
+}
+
+/// Open VSX's signing key, as `https://open-vsx.org/api/-/public-key/<id>`
+/// serves it (SPKI `MCowBQYDK2VwAyEA` + these 32 bytes).
+pub const OPENVSX_SIGNING_KEY: PinnedKey = PinnedKey {
+    id: "14ccb407-4e79-41ed-be5a-6d608325c45a",
+    public_key_base64: "je+vAaSS1zHV5WHCJSa5UXvxRo6+yerEU3IEmtuEuF4=",
+};
+
+/// What the download learned about the `.vsix`'s signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VsixSignature {
+    /// Signed by the pinned Open VSX key, and the signature holds.
+    Verified,
+    /// The registry published no signature for it.
+    Unsigned,
+    /// Signed by a key Cognia does not pin, so nothing can be said of it.
+    UnknownKey,
+}
+
+/// Where a `.vsix`'s signature is: `files.signature` (the `.sigzip`) and
+/// `files.publicKey` (whose last path segment names the key).
+#[derive(Debug, Clone, Copy)]
+pub struct SignatureSource<'a> {
+    pub sigzip_url: &'a str,
+    pub public_key_url: Option<&'a str>,
+}
 
 /// Redirect hops allowed before we call it a loop. Open VSX uses exactly one.
 const MAX_REDIRECTS: usize = 5;
@@ -153,6 +215,12 @@ pub enum DownloadError {
     #[error("sha256 mismatch: expected {expected}, downloaded {actual}")]
     ChecksumMismatch { expected: String, actual: String },
 
+    #[error("the Open VSX signature does not match the downloaded .vsix")]
+    SignatureInvalid,
+
+    #[error("the Open VSX signature could not be read: {0}")]
+    SignatureUnreadable(String),
+
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -171,6 +239,8 @@ impl DownloadError {
             }
             DownloadError::Digest(_) => "bad_sha256_file",
             DownloadError::ChecksumMismatch { .. } => "checksum_mismatch",
+            DownloadError::SignatureInvalid => "signature_invalid",
+            DownloadError::SignatureUnreadable(_) => "signature_unreadable",
             DownloadError::Io(_) => "io_error",
         }
     }
@@ -189,24 +259,44 @@ pub struct DownloadedVsix {
     pub temp_path: String,
     pub sha256_hex: String,
     pub size_bytes: u64,
+    pub signature: VsixSignature,
 }
 
 /// Download a `.vsix` from Open VSX, verify it against the registry's digest
 /// file, and stage it for the renderer.
 ///
 /// `sha256_url` is `files.sha256` from the Open VSX API — a **URL to a digest
-/// file**, not a digest.
+/// file**, not a digest. `signature_url` and `public_key_url` are
+/// `files.signature` and `files.publicKey`, when the registry lists them.
+///
+/// What the signature check found is remembered for the staged file, so the
+/// install that consumes it (`plugin_vscode_install_vsix_from_path`) writes
+/// the receipt the host earned, not one the renderer claims.
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn plugin_vscode_download_vsix(
     download_url: String,
     sha256_url: String,
+    signature_url: Option<String>,
+    public_key_url: Option<String>,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<DownloadedVsix, VscodeCommandError> {
     let staging = downloads_dir(&state.extension_install_dir);
-    download_vsix_to_temp(&OPENVSX_POLICY, &download_url, &sha256_url, &staging)
-        .await
-        .map_err(Into::into)
+    let signature = signature_url.as_deref().map(|sigzip_url| SignatureSource {
+        sigzip_url,
+        public_key_url: public_key_url.as_deref(),
+    });
+    let downloaded = download_vsix_to_temp(
+        &OPENVSX_POLICY,
+        &download_url,
+        &sha256_url,
+        signature,
+        &OPENVSX_SIGNING_KEY,
+        &staging,
+    )
+    .await?;
+    state.remember_staged_download(&downloaded);
+    Ok(downloaded)
 }
 
 /// The command's body, minus Tauri state — see [`DownloadPolicy`] for why the
@@ -215,17 +305,35 @@ pub async fn download_vsix_to_temp(
     policy: &DownloadPolicy,
     download_url: &str,
     sha256_url: &str,
+    signature: Option<SignatureSource<'_>>,
+    pinned: &PinnedKey,
     staging_dir: &Path,
 ) -> Result<DownloadedVsix, DownloadError> {
     let download = check_url(download_url, policy)?;
     let digest_url = check_url(sha256_url, policy)?;
+    let sigzip_url = signature
+        .map(|source| check_url(source.sigzip_url, policy))
+        .transpose()?;
 
     let client = build_client(policy, download_url)?;
 
-    // The digest comes first, deliberately: a missing or malformed digest file
-    // must abort before we spend up to 80 MB of the user's bandwidth on bytes
-    // we would then have to throw away.
+    // The digest and the signature come first, deliberately: a missing or
+    // malformed one must abort before we spend up to 80 MB of the user's
+    // bandwidth on bytes we would then have to throw away.
     let expected = fetch_expected_digest(&client, digest_url.as_str()).await?;
+    let sigzip = match &sigzip_url {
+        Some(url) => Some(
+            fetch_bounded(&client, url.as_str(), MAX_SIGZIP_BYTES)
+                .await
+                .map_err(|error| match error {
+                    BoundedFetchError::TooLarge => DownloadError::SignatureUnreadable(format!(
+                        "the .sigzip exceeds {MAX_SIGZIP_BYTES} bytes"
+                    )),
+                    BoundedFetchError::Download(error) => error,
+                })?,
+        ),
+        None => None,
+    };
 
     std::fs::create_dir_all(staging_dir)?;
     let temp_path = staging_dir.join(format!("{}.vsix", uuid::Uuid::new_v4()));
@@ -256,11 +364,82 @@ pub async fn download_vsix_to_temp(
         });
     }
 
+    let verdict = match (&sigzip, signature) {
+        (Some(sigzip), Some(source)) => std::fs::read(&temp_path)
+            .map_err(DownloadError::Io)
+            .and_then(|vsix| {
+                check_signature(&vsix, sigzip, key_id_of(source.public_key_url), pinned)
+            }),
+        _ => Ok(VsixSignature::Unsigned),
+    };
+    let signature = match verdict {
+        Ok(signature) => signature,
+        Err(error) => {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(error);
+        }
+    };
+
     Ok(DownloadedVsix {
         temp_path: temp_path.to_string_lossy().into_owned(),
         sha256_hex: outcome.sha256_hex,
         size_bytes: outcome.bytes_written,
+        signature,
     })
+}
+
+/// The key id a `files.publicKey` URL names: its last path segment.
+fn key_id_of(public_key_url: Option<&str>) -> Option<String> {
+    let url = Url::parse(public_key_url?).ok()?;
+    let id = url
+        .path_segments()?
+        .rev()
+        .find(|segment| !segment.is_empty())?;
+    Some(id.to_string())
+}
+
+/// Check a `.sigzip` against the `.vsix` it signs; see the module docs for
+/// what each outcome means.
+pub fn check_signature(
+    vsix: &[u8],
+    sigzip: &[u8],
+    key_id: Option<String>,
+    pinned: &PinnedKey,
+) -> Result<VsixSignature, DownloadError> {
+    use base64::Engine as _;
+    use std::io::Read as _;
+
+    let unreadable = |detail: String| DownloadError::SignatureUnreadable(detail);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(sigzip))
+        .map_err(|e| unreadable(format!("not a zip: {e}")))?;
+    let mut signature = Vec::new();
+    archive
+        .by_name(SIGNATURE_ENTRY)
+        .map_err(|_| unreadable(format!("no {SIGNATURE_ENTRY} entry")))?
+        .take(1024)
+        .read_to_end(&mut signature)
+        .map_err(|e| unreadable(e.to_string()))?;
+    if signature.len() != 64 {
+        return Err(unreadable(format!(
+            "{SIGNATURE_ENTRY} holds {} bytes, not a 64-byte Ed25519 signature",
+            signature.len()
+        )));
+    }
+    if key_id.as_deref().is_some_and(|id| id != pinned.id) {
+        return Ok(VsixSignature::UnknownKey);
+    }
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&signature);
+    let valid =
+        crate::signature::verify_detached_signature_bytes(vsix, &encoded, pinned.public_key_base64)
+            .map_err(|e| unreadable(e.to_string()))?;
+    match (valid, key_id.is_some()) {
+        (true, _) => Ok(VsixSignature::Verified),
+        // The registry named the pinned key and the signature does not hold:
+        // these are not the bytes Open VSX signed.
+        (false, true) => Err(DownloadError::SignatureInvalid),
+        // No key named: it may be another key's signature.
+        (false, false) => Ok(VsixSignature::UnknownKey),
+    }
 }
 
 /// Parse `raw` and assert it matches `policy`'s scheme + host allowlist.
@@ -323,17 +502,24 @@ fn build_client(
     builder.build().map_err(DownloadError::Client)
 }
 
-/// GET the digest file and parse it. The body is read with a hard bound rather
-/// than `.bytes()`, which would be unbounded when the origin omits
-/// `Content-Length`.
-async fn fetch_expected_digest(
+/// Why a bounded fetch failed.
+enum BoundedFetchError {
+    TooLarge,
+    Download(DownloadError),
+}
+
+/// GET `url` into memory, refusing more than `max` bytes. The body is read
+/// with a hard bound rather than `.bytes()`, which would be unbounded when the
+/// origin omits `Content-Length`.
+async fn fetch_bounded(
     client: &reqwest::Client,
     url: &str,
-) -> Result<String, DownloadError> {
+    max: usize,
+) -> Result<Vec<u8>, BoundedFetchError> {
     use futures_util::StreamExt as _;
 
     let http_err = |source: reqwest::Error| {
-        if source.is_redirect() {
+        BoundedFetchError::Download(if source.is_redirect() {
             DownloadError::OffsiteRedirect {
                 url: url.to_string(),
             }
@@ -342,7 +528,7 @@ async fn fetch_expected_digest(
                 url: url.to_string(),
                 source,
             }
-        }
+        })
     };
 
     let resp = client
@@ -357,15 +543,27 @@ async fn fetch_expected_digest(
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(http_err)?;
-        if body.len() + chunk.len() > MAX_DIGEST_BODY_BYTES {
-            return Err(DigestParseError::Malformed(format!(
-                "digest file exceeds {MAX_DIGEST_BODY_BYTES} bytes"
-            ))
-            .into());
+        if body.len() + chunk.len() > max {
+            return Err(BoundedFetchError::TooLarge);
         }
         body.extend_from_slice(&chunk);
     }
+    Ok(body)
+}
 
+/// GET the digest file and parse it.
+async fn fetch_expected_digest(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<String, DownloadError> {
+    let body = fetch_bounded(client, url, MAX_DIGEST_BODY_BYTES)
+        .await
+        .map_err(|error| match error {
+            BoundedFetchError::TooLarge => DownloadError::Digest(DigestParseError::Malformed(
+                format!("digest file exceeds {MAX_DIGEST_BODY_BYTES} bytes"),
+            )),
+            BoundedFetchError::Download(error) => error,
+        })?;
     Ok(parse_sha256_digest(&String::from_utf8_lossy(&body))?)
 }
 
@@ -657,6 +855,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -688,6 +888,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &dir.path().join(DOWNLOADS_SUBDIR),
         )
         .await
@@ -714,6 +916,8 @@ mod tests {
                 &test_policy(1024),
                 &format!("http://{addr}/x.vsix"),
                 &format!("http://{addr}{path}"),
+                None,
+                &OPENVSX_SIGNING_KEY,
                 &staging,
             )
             .await
@@ -743,6 +947,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/bad.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -772,6 +978,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/huge.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &dir.path().join(DOWNLOADS_SUBDIR),
         )
         .await
@@ -799,6 +1007,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -836,6 +1046,8 @@ mod tests {
             &test_policy(16),
             &format!("http://{addr}/big.vsix"),
             &format!("http://{addr}/big.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -874,6 +1086,8 @@ mod tests {
             &test_policy(16),
             &format!("http://{addr}/big.vsix"),
             &format!("http://{addr}/big.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -911,6 +1125,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -939,6 +1155,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/x.vsix"),
             &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &dir.path().join(DOWNLOADS_SUBDIR),
         )
         .await
@@ -963,6 +1181,8 @@ mod tests {
             &test_policy(1024),
             &format!("http://{addr}/missing.vsix"), // 404
             &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -983,6 +1203,8 @@ mod tests {
             &test_policy(1024),
             "https://evil.example.com/x.vsix",
             "http://127.0.0.1/x.sha256",
+            None,
+            &OPENVSX_SIGNING_KEY,
             &staging,
         )
         .await
@@ -1012,10 +1234,241 @@ mod tests {
             temp_path: "/tmp/x.vsix".into(),
             sha256_hex: sha256_of(b"vsix-bytes"),
             size_bytes: 10,
+            signature: VsixSignature::Verified,
         };
         let value = serde_json::to_value(&payload).unwrap();
         assert!(value.get("tempPath").is_some());
         assert!(value.get("sha256Hex").is_some());
         assert!(value.get("sizeBytes").is_some());
+        assert_eq!(value["signature"], "verified");
+    }
+
+    // ---- the Open VSX signature -------------------------------------------
+
+    /// A key pair standing in for Open VSX's, pinned under the real key id.
+    fn test_key() -> (ed25519_dalek::SigningKey, PinnedKey) {
+        use base64::Engine as _;
+        let signing = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let public =
+            base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
+        let pinned = PinnedKey {
+            id: OPENVSX_SIGNING_KEY.id,
+            public_key_base64: Box::leak(public.into_boxed_str()),
+        };
+        (signing, pinned)
+    }
+
+    /// A `.sigzip` as Open VSX lays it out: the signature, a manifest and the
+    /// empty `.p7s` placeholder.
+    fn sigzip(signature: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let options = zip::write::FileOptions::<()>::default();
+            zip.start_file(".signature.sig", options).unwrap();
+            zip.write_all(signature).unwrap();
+            zip.start_file(".signature.manifest", options).unwrap();
+            zip.write_all(b"{}").unwrap();
+            zip.start_file(".signature.p7s", options).unwrap();
+            zip.finish().unwrap();
+        }
+        buf
+    }
+
+    fn signed(signing: &ed25519_dalek::SigningKey, payload: &[u8]) -> Vec<u8> {
+        use ed25519_dalek::Signer as _;
+        sigzip(&signing.sign(payload).to_bytes())
+    }
+
+    const KEY_URL: &str =
+        "https://open-vsx.org/api/-/public-key/14ccb407-4e79-41ed-be5a-6d608325c45a";
+
+    #[test]
+    fn the_pinned_key_is_open_vsx_s() {
+        use base64::Engine as _;
+        let key = base64::engine::general_purpose::STANDARD
+            .decode(OPENVSX_SIGNING_KEY.public_key_base64)
+            .unwrap();
+        assert_eq!(key.len(), 32);
+        assert_eq!(
+            OPENVSX_SIGNING_KEY.id,
+            "14ccb407-4e79-41ed-be5a-6d608325c45a"
+        );
+    }
+
+    #[test]
+    fn a_signature_by_the_pinned_key_over_the_whole_vsix_verifies() {
+        let (signing, pinned) = test_key();
+        let vsix = b"the whole vsix";
+        let key_id = key_id_of(Some(KEY_URL));
+        assert_eq!(
+            check_signature(vsix, &signed(&signing, vsix), key_id.clone(), &pinned).unwrap(),
+            VsixSignature::Verified
+        );
+        // With no key named, a valid pinned-key signature still verifies.
+        assert_eq!(
+            check_signature(vsix, &signed(&signing, vsix), None, &pinned).unwrap(),
+            VsixSignature::Verified
+        );
+    }
+
+    #[test]
+    fn tampered_bytes_under_the_pinned_key_are_refused() {
+        let (signing, pinned) = test_key();
+        let err = check_signature(
+            b"other bytes",
+            &signed(&signing, b"the whole vsix"),
+            key_id_of(Some(KEY_URL)),
+            &pinned,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DownloadError::SignatureInvalid));
+        assert_eq!(err.code(), "signature_invalid");
+    }
+
+    #[test]
+    fn another_key_s_signature_proves_nothing_either_way() {
+        let (signing, pinned) = test_key();
+        let other = Some("another-key".to_string());
+        assert_eq!(
+            check_signature(b"vsix", &signed(&signing, b"vsix"), other, &pinned).unwrap(),
+            VsixSignature::UnknownKey
+        );
+        // No key named and the pinned key does not verify it: unknown, not tampered.
+        let stranger = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        assert_eq!(
+            check_signature(b"vsix", &signed(&stranger, b"vsix"), None, &pinned).unwrap(),
+            VsixSignature::UnknownKey
+        );
+    }
+
+    #[test]
+    fn an_unreadable_sigzip_is_refused() {
+        let (_, pinned) = test_key();
+        for bad in [b"not a zip".to_vec(), sigzip(b"short")] {
+            let err = check_signature(b"vsix", &bad, None, &pinned).unwrap_err();
+            assert_eq!(err.code(), "signature_unreadable");
+        }
+    }
+
+    #[test]
+    fn the_key_id_is_the_last_segment_of_the_key_url() {
+        assert_eq!(
+            key_id_of(Some(KEY_URL)).as_deref(),
+            Some("14ccb407-4e79-41ed-be5a-6d608325c45a")
+        );
+        assert_eq!(key_id_of(Some("not a url")), None);
+        assert_eq!(key_id_of(None), None);
+    }
+
+    #[tokio::test]
+    async fn a_signed_download_is_verified_before_it_is_staged() {
+        let (signing, pinned) = test_key();
+        let body = b"vsix-bytes";
+        let addr = serve(vec![
+            ("/x.vsix", ok_response(body)),
+            ("/x.sha256", ok_response(sha256_of(body).as_bytes())),
+            ("/x.sigzip", ok_response(&signed(&signing, body))),
+        ])
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let sigzip_url = format!("http://{addr}/x.sigzip");
+        let result = download_vsix_to_temp(
+            &test_policy(1024),
+            &format!("http://{addr}/x.vsix"),
+            &format!("http://{addr}/x.sha256"),
+            Some(SignatureSource {
+                sigzip_url: &sigzip_url,
+                public_key_url: Some(KEY_URL),
+            }),
+            &pinned,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.signature, VsixSignature::Verified);
+    }
+
+    #[tokio::test]
+    async fn a_download_whose_signature_fails_is_not_staged() {
+        let (signing, pinned) = test_key();
+        let body = b"vsix-bytes";
+        let addr = serve(vec![
+            ("/x.vsix", ok_response(body)),
+            ("/x.sha256", ok_response(sha256_of(body).as_bytes())),
+            (
+                "/x.sigzip",
+                ok_response(&signed(&signing, b"what was signed")),
+            ),
+        ])
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let sigzip_url = format!("http://{addr}/x.sigzip");
+        let err = download_vsix_to_temp(
+            &test_policy(1024),
+            &format!("http://{addr}/x.vsix"),
+            &format!("http://{addr}/x.sha256"),
+            Some(SignatureSource {
+                sigzip_url: &sigzip_url,
+                public_key_url: Some(KEY_URL),
+            }),
+            &pinned,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DownloadError::SignatureInvalid));
+        assert!(staged_files(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_advertised_signature_that_cannot_be_fetched_stops_the_download() {
+        let (_, pinned) = test_key();
+        let body = b"vsix-bytes";
+        let addr = serve(vec![
+            ("/x.vsix", ok_response(body)),
+            ("/x.sha256", ok_response(sha256_of(body).as_bytes())),
+        ])
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let sigzip_url = format!("http://{addr}/missing.sigzip");
+        let err = download_vsix_to_temp(
+            &test_policy(1024),
+            &format!("http://{addr}/x.vsix"),
+            &format!("http://{addr}/x.sha256"),
+            Some(SignatureSource {
+                sigzip_url: &sigzip_url,
+                public_key_url: Some(KEY_URL),
+            }),
+            &pinned,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code(), "http_error");
+        assert!(staged_files(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn without_a_signature_the_download_is_unsigned() {
+        let body = b"vsix-bytes";
+        let addr = serve(vec![
+            ("/x.vsix", ok_response(body)),
+            ("/x.sha256", ok_response(sha256_of(body).as_bytes())),
+        ])
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let result = download_vsix_to_temp(
+            &test_policy(1024),
+            &format!("http://{addr}/x.vsix"),
+            &format!("http://{addr}/x.sha256"),
+            None,
+            &OPENVSX_SIGNING_KEY,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.signature, VsixSignature::Unsigned);
     }
 }

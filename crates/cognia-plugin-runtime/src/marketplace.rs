@@ -472,8 +472,21 @@ pub(crate) fn read_verification_receipt(
     state: &PluginRuntimeState,
     plugin_id: &str,
 ) -> Option<VerificationReceipt> {
-    let path = state.plugin_dir(plugin_id).join(VERIFICATION_RECEIPT_FILE);
-    let raw = fs::read_to_string(path).ok()?;
+    read_receipt_in(&state.plugin_dir(plugin_id))
+}
+
+/// The receipt of a VS Code extension, which installs beside the plugins
+/// (`vscode-extensions/<id>`) rather than among them.
+pub(crate) fn read_vscode_verification_receipt(
+    state: &PluginRuntimeState,
+    extension_id: &str,
+) -> Option<VerificationReceipt> {
+    let root = crate::vscode::extension_install_dir_for(&state.plugin_install_dir);
+    read_receipt_in(&root.join(crate::sanitize_plugin_id(extension_id)))
+}
+
+fn read_receipt_in(install_dir: &Path) -> Option<VerificationReceipt> {
+    let raw = fs::read_to_string(install_dir.join(VERIFICATION_RECEIPT_FILE)).ok()?;
     let receipt: VerificationReceipt = serde_json::from_str(&raw).ok()?;
     // A `local-dev` receipt vouches only while Managed IDE Dev Mode is on.
     crate::managed_ide_dev::DevModeState::global()
@@ -486,8 +499,13 @@ pub(crate) fn read_verification_receipt(
 pub async fn plugin_read_verification(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
+    plugin_type: Option<String>,
 ) -> Result<Option<VerificationReceipt>> {
-    Ok(read_verification_receipt(state.inner(), &plugin_id))
+    Ok(if plugin_type.as_deref() == Some("vscode-extension") {
+        read_vscode_verification_receipt(state.inner(), &plugin_id)
+    } else {
+        read_verification_receipt(state.inner(), &plugin_id)
+    })
 }
 
 /// Extract a `.tar.gz` into `dest` WITHOUT stripping a top-level directory
@@ -1867,6 +1885,27 @@ mod tests {
             discard_supplied_receipt(tmp.path()).is_ok(),
             "absent is fine"
         );
+    }
+
+    #[test]
+    fn a_vscode_extension_s_receipt_is_read_from_the_extension_root() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let extension_dir =
+            crate::vscode::extension_install_dir_for(&state.plugin_install_dir).join("acme.ext");
+        fs::create_dir_all(&extension_dir).unwrap();
+        fs::write(
+            extension_dir.join(VERIFICATION_RECEIPT_FILE),
+            br#"{"verifiedVia":"signature","version":"1.2.0","verifiedAt":"2026-10-03T00:00:00Z"}"#,
+        )
+        .unwrap();
+
+        let receipt = read_vscode_verification_receipt(&state, "acme.ext").unwrap();
+        assert_eq!(receipt.verified_via, "signature");
+        assert_eq!(receipt.version, "1.2.0");
+        // It is not a plugin's receipt, and another extension has none.
+        assert!(read_verification_receipt(&state, "acme.ext").is_none());
+        assert!(read_vscode_verification_receipt(&state, "acme.other").is_none());
     }
 
     #[test]

@@ -30,6 +30,11 @@ describe("classifyPluginError", () => {
     ["Incompatible plugin: needs tauri", "incompatible", {}],
     ["Signature verification failed for plugin a", "signature", {}],
     ["Invalid plugin manifest: id missing", "invalidManifest", {}],
+    [
+      `Cannot start VS Code extension "a.b": no Open VSX signature vouches for it. Grant it explicit trust in the plugin's Permissions tab to start it.`,
+      "vscodeTrust",
+      {},
+    ],
   ])("classifies %s", (message, code, values) => {
     expect(classifyPluginError(new Error(message))).toEqual({ code, message, values })
   })

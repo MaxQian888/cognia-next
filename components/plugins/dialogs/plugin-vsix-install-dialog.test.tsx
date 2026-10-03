@@ -15,9 +15,22 @@ jest.mock("@/lib/db/plugins", () => ({
   upsertPlugin: jest.fn().mockResolvedValue(undefined),
 }))
 
-const canUseTauriInvokeMock = jest.fn(() => false)
+const canUseTauriInvokeMock = jest.fn(() => true)
 jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: () => canUseTauriInvokeMock(),
+}))
+
+// The host unpacks the extension where VS Code extensions install.
+const invokeMock = jest.fn(async (_command: string, _args?: unknown) => ({
+  extensionId: "rust-lang.rust-analyzer",
+  installPath: "/data/vscode-extensions/rust-lang.rust-analyzer",
+}))
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: unknown) => invokeMock(command, args),
+}))
+
+jest.mock("@/lib/plugin/origin/install-origin", () => ({
+  recordInstallOrigin: jest.fn(async () => undefined),
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -51,7 +64,8 @@ function fakeParsedVsix() {
 beforeEach(() => {
   installVsixMock.mockReset()
   upsertPluginMock.mockReset()
-  canUseTauriInvokeMock.mockReturnValue(false)
+  canUseTauriInvokeMock.mockReturnValue(true)
+  invokeMock.mockClear()
 })
 
 afterEach(() => {
@@ -111,6 +125,8 @@ describe("PluginVsixInstallDialog", () => {
       expect(screen.getByText("v0.4.0")).toBeInTheDocument()
       expect(screen.getByText("extension/server/rust-analyzer.exe")).toBeInTheDocument()
     })
+    // No Open VSX signature comes with a dropped file: say it will need trust.
+    expect(screen.getByTestId("plugin-vsix-unsigned-note")).toHaveTextContent("unsignedNote")
   })
 
   it("renders an error card when installVsix throws", async () => {
@@ -147,7 +163,25 @@ describe("PluginVsixInstallDialog", () => {
     })
   })
 
-  it("uses a vsix:// path stub when Tauri invoke is unavailable", async () => {
+  it("installs through the host, from the bytes the user picked", async () => {
+    installVsixMock.mockResolvedValueOnce(fakeParsedVsix())
+    installFilePicker()
+    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
+    fireEvent.click(screen.getByText("choose"))
+    await waitFor(() => screen.getByText("rust-analyzer"))
+    fireEvent.click(screen.getByText("install"))
+    await waitFor(() =>
+      expect(upsertPluginMock).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/data/vscode-extensions/rust-lang.rust-analyzer" })
+      )
+    )
+    expect(invokeMock).toHaveBeenCalledWith(
+      "plugin_vscode_install_vsix",
+      expect.objectContaining({ vsixBase64: expect.any(String) })
+    )
+  })
+
+  it("refuses to install outside the desktop app, and says why", async () => {
     canUseTauriInvokeMock.mockReturnValue(false)
     installVsixMock.mockResolvedValueOnce(fakeParsedVsix())
     installFilePicker()
@@ -155,13 +189,10 @@ describe("PluginVsixInstallDialog", () => {
     fireEvent.click(screen.getByText("choose"))
     await waitFor(() => screen.getByText("rust-analyzer"))
     fireEvent.click(screen.getByText("install"))
-    await waitFor(() => {
-      expect(upsertPluginMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          path: expect.stringMatching(/^vsix:\/\/rust-lang\.rust-analyzer@/),
-        })
-      )
-    })
+    await waitFor(() =>
+      expect(screen.getByText(/can only be installed in the desktop app/)).toBeInTheDocument()
+    )
+    expect(upsertPluginMock).not.toHaveBeenCalled()
   })
 
   it("applies mobile-first w-[95vw] width to DialogContent", () => {

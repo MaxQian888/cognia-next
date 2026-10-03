@@ -246,7 +246,8 @@ pub async fn plugin_vscode_install_vsix(
         .decode(&vsix_base64)
         .map_err(|e| VscodeCommandError::new("decode_error", e.to_string()))?;
     let install_root = state.extension_install_dir.clone();
-    let result = install_vsix(&payload, &install_root)?;
+    // Bytes that only ever existed in the renderer: nothing vouches for them.
+    let result = install_vsix(&payload, &install_root, None)?;
     Ok(result)
 }
 
@@ -265,7 +266,9 @@ pub async fn plugin_vscode_install_vsix_from_path(
     temp_path: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<InstallResult, VscodeCommandError> {
-    install_staged_vsix(&state.extension_install_dir, Path::new(&temp_path))
+    let path = Path::new(&temp_path);
+    let staged = state.take_staged_download(path);
+    install_staged_vsix(&state.extension_install_dir, path, staged)
 }
 
 /// Body of [`plugin_vscode_install_vsix_from_path`], minus Tauri state.
@@ -274,9 +277,14 @@ pub async fn plugin_vscode_install_vsix_from_path(
 /// touched or deleted. `path` comes from the renderer, and a cleanup step that
 /// ran before the check would turn this command into an arbitrary-file-delete
 /// primitive.
+///
+/// The install gets a `signature` receipt when the download that staged this
+/// file verified its Open VSX signature and the bytes are still the ones it
+/// verified.
 fn install_staged_vsix(
     install_root: &Path,
     path: &Path,
+    staged: Option<super::StagedDownload>,
 ) -> Result<InstallResult, VscodeCommandError> {
     ensure_staged(install_root, path)?;
 
@@ -285,10 +293,23 @@ fn install_staged_vsix(
     let outcome = std::fs::read(path)
         .map_err(|e| VscodeCommandError::new("read_error", e.to_string()))
         .and_then(|payload| {
-            install_vsix(&payload, &install_root.to_path_buf()).map_err(Into::into)
+            let verified_via = staged
+                .filter(|staged| {
+                    staged.signature == super::openvsx_download::VsixSignature::Verified
+                        && staged
+                            .sha256_hex
+                            .eq_ignore_ascii_case(&sha256_hex(&payload))
+                })
+                .map(|_| "signature");
+            install_vsix(&payload, &install_root.to_path_buf(), verified_via).map_err(Into::into)
         });
     let _ = std::fs::remove_file(path);
     outcome
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// Assert `path` is a file this crate itself staged — a direct child of the
@@ -1473,7 +1494,7 @@ rl.on("line", (line) => {
         let root = dir.path().to_path_buf();
         let staged = stage(&root, &make_test_vsix());
 
-        let result = install_staged_vsix(&root, &staged).unwrap();
+        let result = install_staged_vsix(&root, &staged, None).unwrap();
 
         assert_eq!(result.extension_id, "cognia.hello");
         assert!(result.install_path.join("out/extension.js").exists());
@@ -1483,13 +1504,64 @@ rl.on("line", (line) => {
         );
     }
 
+    fn verified(bytes: &[u8]) -> Option<super::super::StagedDownload> {
+        use sha2::{Digest, Sha256};
+        Some(super::super::StagedDownload {
+            sha256_hex: hex::encode(Sha256::digest(bytes)),
+            signature: super::super::openvsx_download::VsixSignature::Verified,
+        })
+    }
+
+    fn receipt_of(install_path: &Path) -> Option<serde_json::Value> {
+        let raw = std::fs::read_to_string(
+            install_path.join(crate::marketplace::VERIFICATION_RECEIPT_FILE),
+        )
+        .ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    #[test]
+    fn a_staged_file_whose_signature_verified_installs_with_a_signature_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let bytes = make_test_vsix();
+        let staged = stage(&root, &bytes);
+
+        let result = install_staged_vsix(&root, &staged, verified(&bytes)).unwrap();
+
+        let receipt = receipt_of(&result.install_path).expect("a receipt");
+        assert_eq!(receipt["verifiedVia"], "signature");
+        assert_eq!(receipt["version"], "1.0.0");
+    }
+
+    #[test]
+    fn no_receipt_without_a_verified_signature_for_these_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let bytes = make_test_vsix();
+
+        // Verified bytes, but not these ones.
+        let staged = stage(&root, &bytes);
+        let result = install_staged_vsix(&root, &staged, verified(b"other bytes")).unwrap();
+        assert!(receipt_of(&result.install_path).is_none());
+
+        // These bytes, unsigned.
+        let staged = stage(&root, &bytes);
+        let unsigned = verified(&bytes).map(|mut download| {
+            download.signature = super::super::openvsx_download::VsixSignature::Unsigned;
+            download
+        });
+        let result = install_staged_vsix(&root, &staged, unsigned).unwrap();
+        assert!(receipt_of(&result.install_path).is_none());
+    }
+
     #[test]
     fn failed_install_still_removes_the_staged_temp_file() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         let staged = stage(&root, b"not a zip");
 
-        let err = install_staged_vsix(&root, &staged).unwrap_err();
+        let err = install_staged_vsix(&root, &staged, None).unwrap_err();
 
         assert_eq!(err.code, "install_error");
         assert!(
@@ -1509,7 +1581,7 @@ rl.on("line", (line) => {
         let elsewhere = dir.path().join("attacker.vsix");
         std::fs::write(&elsewhere, make_test_vsix()).unwrap();
 
-        let err = install_staged_vsix(&root, &elsewhere).unwrap_err();
+        let err = install_staged_vsix(&root, &elsewhere, None).unwrap_err();
 
         assert_eq!(err.code, "path_not_staged");
         assert!(
@@ -1531,7 +1603,7 @@ rl.on("line", (line) => {
         std::fs::write(&outside, make_test_vsix()).unwrap();
         let traversing = staging.join("..").join("secret.vsix");
 
-        let err = install_staged_vsix(&root, &traversing).unwrap_err();
+        let err = install_staged_vsix(&root, &traversing, None).unwrap_err();
 
         assert_eq!(err.code, "path_not_staged");
         assert!(outside.exists());
@@ -1548,7 +1620,7 @@ rl.on("line", (line) => {
         let path = nested.join("x.vsix");
         std::fs::write(&path, make_test_vsix()).unwrap();
 
-        let err = install_staged_vsix(&root, &path).unwrap_err();
+        let err = install_staged_vsix(&root, &path, None).unwrap_err();
 
         assert_eq!(err.code, "path_not_staged");
     }
@@ -1559,7 +1631,7 @@ rl.on("line", (line) => {
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(super::super::openvsx_download::downloads_dir(&root)).unwrap();
 
-        let err = install_staged_vsix(&root, &root.join(".downloads/gone.vsix")).unwrap_err();
+        let err = install_staged_vsix(&root, &root.join(".downloads/gone.vsix"), None).unwrap_err();
 
         assert_eq!(err.code, "path_not_staged");
     }

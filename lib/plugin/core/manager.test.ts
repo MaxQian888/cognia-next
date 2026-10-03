@@ -210,6 +210,7 @@ describe("PluginManager", () => {
   const mockGetState = usePluginStore.getState as unknown as jest.Mock
   const mockVerifier = {
     verify: jest.fn(),
+    readVscodeExtensionReceipt: jest.fn(async () => null as { verifiedVia: string } | null),
     getConfig: jest.fn().mockReturnValue({
       requireSignatures: false,
       allowUntrusted: true,
@@ -3872,6 +3873,8 @@ describe("PluginManager", () => {
               engineVscode: "^1.91.0",
               vsixSha256: "0",
               source: "openvsx",
+              // Signed, so trust does not decide whether it starts.
+              signedBy: "openvsx" as const,
               bundleFormat: "cjs",
               activationEvents: [],
               ...(planned ? { activationPlanned: true as const } : {}),
@@ -6664,6 +6667,113 @@ describe("PluginManager", () => {
 
       await manager.loadPlugin("wasm-local")
       expect(loader.load).toHaveBeenCalled()
+    })
+
+    describe("VS Code extensions", () => {
+      const createExtension = (
+        id: string,
+        source: Plugin["source"],
+        signedBy?: "openvsx"
+      ): Plugin => {
+        const plugin = createTrustPlugin(id, "vscode-extension", source)
+        return {
+          ...plugin,
+          manifest: {
+            ...plugin.manifest,
+            vscodeMain: "./out/extension.js",
+            vscodeExtension: {
+              identifier: id,
+              version: "1.0.0",
+              engineVscode: "^1.91.0",
+              vsixSha256: "a".repeat(64),
+              source: source === "marketplace" ? "openvsx" : null,
+              bundleFormat: "cjs",
+              activationEvents: [],
+              ...(signedBy ? { signedBy } : {}),
+            },
+          },
+        }
+      }
+
+      beforeEach(() => {
+        mockVerifier.readVscodeExtensionReceipt.mockReset()
+        mockVerifier.readVscodeExtensionReceipt.mockResolvedValue(null)
+        mockVerifier.verify.mockClear()
+      })
+
+      it("starts one whose Open VSX signature the host verified, without the signature policy", async () => {
+        const plugin = createExtension("acme.signed", "marketplace", "openvsx")
+        mockGetState.mockReturnValue(createTrustStore(plugin))
+        mockVerifier.readVscodeExtensionReceipt.mockResolvedValue({ verifiedVia: "signature" })
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const loader = stubTrustLoader(manager)
+
+        await manager.loadPlugin("acme.signed")
+        expect(loader.load).toHaveBeenCalled()
+        expect(mockVerifier.readVscodeExtensionReceipt).toHaveBeenCalledWith("acme.signed")
+        expect(mockVerifier.verify).not.toHaveBeenCalled()
+      })
+
+      it("refuses an unsigned one until the user trusts it", async () => {
+        const plugin = createExtension("acme.dropped", "local")
+        mockGetState.mockReturnValue(createTrustStore(plugin))
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const loader = stubTrustLoader(manager)
+
+        const error = await manager.loadPlugin("acme.dropped").catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(PluginFrontendTrustError)
+        expect((error as PluginFrontendTrustError).reason).toBe("unsigned-vscode-extension")
+        expect((error as Error).message).toContain("no Open VSX signature vouches for it")
+        expect(loader.load).not.toHaveBeenCalled()
+
+        mockReadPolicy.mockReturnValue(withTrusted(["acme.dropped"]))
+        await manager.loadPlugin("acme.dropped")
+        expect(loader.load).toHaveBeenCalled()
+      })
+
+      it("does not take the manifest's word: no host receipt, no start", async () => {
+        const plugin = createExtension("acme.claims", "marketplace", "openvsx")
+        mockGetState.mockReturnValue(createTrustStore(plugin))
+        mockVerifier.readVscodeExtensionReceipt.mockResolvedValue({ verifiedVia: "checksum" })
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        stubTrustLoader(manager)
+
+        await expect(manager.loadPlugin("acme.claims")).rejects.toBeInstanceOf(
+          PluginFrontendTrustError
+        )
+      })
+
+      it("starts a development folder without asking", async () => {
+        const plugin = createExtension("acme.dev", "dev")
+        mockGetState.mockReturnValue(createTrustStore(plugin))
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const loader = stubTrustLoader(manager)
+
+        await manager.loadPlugin("acme.dev")
+        expect(loader.load).toHaveBeenCalled()
+        expect(mockVerifier.readVscodeExtensionReceipt).not.toHaveBeenCalled()
+      })
+
+      it("does not start an unsigned one at launch, and revoking trust stops it", async () => {
+        const unsigned: Plugin = {
+          ...createExtension("acme.unsigned", "local"),
+          status: "enabled",
+        }
+        unsigned.manifest.activationEvents = ["startup"]
+        mockGetState.mockReturnValue({
+          ...createTrustStore(unsigned),
+          plugins: { "acme.unsigned": unsigned },
+        })
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+        const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+
+        await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+        expect(enableSpy).not.toHaveBeenCalled()
+
+        await manager.setFrontendTrust("acme.unsigned", false)
+        expect(disableSpy).toHaveBeenCalledWith("acme.unsigned", "frontend-trust-revoked")
+      })
     })
 
     it("carries pluginId + source on the typed error", () => {

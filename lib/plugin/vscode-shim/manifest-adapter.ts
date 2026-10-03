@@ -56,6 +56,8 @@ export interface AdaptVscodeManifestInput {
    * was actually installed.
    */
   targetPlatform?: string
+  /** The download's Open VSX signature was verified (see `VsCodeExtensionBlock.signedBy`). */
+  signedByOpenVsx?: boolean
 }
 
 /**
@@ -66,7 +68,7 @@ export interface AdaptVscodeManifestInput {
  * warnings the adapter emitted during translation.
  */
 export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExtensionAdapterResult {
-  const { vsix, inference, source, targetPlatform } = input
+  const { vsix, inference, source, targetPlatform, signedByOpenVsx } = input
   const { pkgJson } = vsix
   const warnings: string[] = []
 
@@ -146,6 +148,7 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     engineVscode: pkgJson.engines?.vscode ?? "*",
     vsixSha256: vsix.sha256,
     source,
+    ...(signedByOpenVsx && source === "openvsx" ? { signedBy: "openvsx" as const } : {}),
     bundleFormat: vsix.bundleFormat ?? "cjs",
     activationEvents: rawActivation as VsCodeActivationEvent[],
     ...(activation.unsupported.length > 0

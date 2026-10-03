@@ -88,7 +88,17 @@ const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 600 * 1024 * 1024;
 /// attack, where total bytes stay small but inode churn does not.
 const MAX_ENTRY_COUNT: usize = 20_000;
 
-pub fn install_vsix(payload: &[u8], install_root: &PathBuf) -> Result<InstallResult, InstallError> {
+/// Unpack `payload` into `install_root/<publisher.name>`.
+///
+/// `verified_via` is how the host verified these bytes, when it did
+/// (`"signature"`: an Open VSX signature); it is written as the install's
+/// verification receipt. A receipt the archive itself carries is always
+/// discarded first: only the host vouches for an install.
+pub fn install_vsix(
+    payload: &[u8],
+    install_root: &PathBuf,
+    verified_via: Option<&str>,
+) -> Result<InstallResult, InstallError> {
     if payload.len() > MAX_VSIX_BYTES {
         return Err(InstallError::TooLarge(payload.len()));
     }
@@ -148,7 +158,9 @@ pub fn install_vsix(payload: &[u8], install_root: &PathBuf) -> Result<InstallRes
     // first, which turned a failed reinstall into data loss.
     fs::create_dir_all(install_root)?;
     let staging = install_root.join(format!(".staging-{}", Uuid::new_v4()));
-    if let Err(err) = unpack_extension(&mut archive, &staging, MAX_TOTAL_UNCOMPRESSED_BYTES) {
+    if let Err(err) = unpack_extension(&mut archive, &staging, MAX_TOTAL_UNCOMPRESSED_BYTES)
+        .and_then(|()| write_receipt(&staging, &manifest, verified_via))
+    {
         let _ = fs::remove_dir_all(&staging);
         return Err(err);
     }
@@ -160,6 +172,33 @@ pub fn install_vsix(payload: &[u8], install_root: &PathBuf) -> Result<InstallRes
         sha256_hex,
         package_json: manifest,
     })
+}
+
+/// Drop any receipt the archive brought, then write the host's, if any.
+fn write_receipt(
+    staging: &Path,
+    manifest: &serde_json::Value,
+    verified_via: Option<&str>,
+) -> Result<(), InstallError> {
+    crate::marketplace::discard_supplied_receipt(staging)?;
+    if let Some(verified_via) = verified_via {
+        let receipt = crate::marketplace::VerificationReceipt {
+            verified_via: verified_via.to_string(),
+            version: manifest
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            verified_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let json = serde_json::to_string(&receipt)
+            .map_err(|e| InstallError::Io(std::io::Error::other(e)))?;
+        fs::write(
+            staging.join(crate::marketplace::VERIFICATION_RECEIPT_FILE),
+            json,
+        )?;
+    }
+    Ok(())
 }
 
 /// Assert `candidate` is a *direct child* of `root`.
@@ -292,13 +331,13 @@ mod tests {
     #[test]
     fn rejects_payload_over_size_cap() {
         let huge = vec![0u8; MAX_VSIX_BYTES + 1];
-        let result = install_vsix(&huge, &PathBuf::from("/tmp/x"));
+        let result = install_vsix(&huge, &PathBuf::from("/tmp/x"), None);
         assert!(matches!(result, Err(InstallError::TooLarge(_))));
     }
 
     #[test]
     fn rejects_non_zip_payload() {
-        let result = install_vsix(b"not a zip", &PathBuf::from("/tmp/x"));
+        let result = install_vsix(b"not a zip", &PathBuf::from("/tmp/x"), None);
         assert!(matches!(result, Err(InstallError::InvalidZip(_))));
     }
 
@@ -320,14 +359,30 @@ mod tests {
             zip.finish().unwrap();
         }
         let root = tempfile::tempdir().unwrap();
-        let error = install_vsix(&bytes, &root.path().to_path_buf()).unwrap_err();
+        let error = install_vsix(&bytes, &root.path().to_path_buf(), None).unwrap_err();
         assert!(matches!(error, InstallError::UnsafeEntryPath(_)));
+    }
+
+    #[test]
+    fn an_archive_cannot_bring_its_own_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let receipt = crate::marketplace::VERIFICATION_RECEIPT_FILE;
+        let bytes = make_vsix_with_entry(&format!("extension/{receipt}"));
+        let result = install_vsix(&bytes, &dir.path().to_path_buf(), None).unwrap();
+        assert!(!result.install_path.join(receipt).exists());
+
+        let result = install_vsix(&bytes, &dir.path().to_path_buf(), Some("signature")).unwrap();
+        let written: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(result.install_path.join(receipt)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(written["verifiedVia"], "signature");
     }
 
     #[test]
     fn install_unpacks_to_disk() {
         let dir = tempfile::tempdir().unwrap();
-        let result = install_vsix(&make_test_vsix(), &dir.path().to_path_buf()).unwrap();
+        let result = install_vsix(&make_test_vsix(), &dir.path().to_path_buf(), None).unwrap();
         assert_eq!(result.extension_id, "cognia.hello");
         assert!(result.install_path.join("out/extension.js").exists());
         assert!(result.sha256_hex.len() == 64);
@@ -385,7 +440,7 @@ mod tests {
         let sentinel = root.path().join("precious.db");
         fs::write(&sentinel, b"user data").unwrap();
 
-        let result = install_vsix(&make_vsix_with_id("", "."), &install_root);
+        let result = install_vsix(&make_vsix_with_id("", "."), &install_root, None);
 
         assert!(
             matches!(result, Err(InstallError::InvalidId(_))),
@@ -407,7 +462,7 @@ mod tests {
         let existing = install_root.join("other.extension");
         fs::create_dir_all(&existing).unwrap();
 
-        let result = install_vsix(&make_vsix_with_id("", ""), &install_root);
+        let result = install_vsix(&make_vsix_with_id("", ""), &install_root, None);
 
         assert!(matches!(result, Err(InstallError::InvalidId(_))));
         assert!(
@@ -419,7 +474,11 @@ mod tests {
     #[test]
     fn rejects_empty_publisher_field() {
         let dir = tempfile::tempdir().unwrap();
-        let result = install_vsix(&make_vsix_with_id("", "hello"), &dir.path().to_path_buf());
+        let result = install_vsix(
+            &make_vsix_with_id("", "hello"),
+            &dir.path().to_path_buf(),
+            None,
+        );
         assert!(matches!(result, Err(InstallError::InvalidId(_))));
     }
 
@@ -429,7 +488,7 @@ mod tests {
     fn publisher_with_path_separators_escapes_instead_of_traversing() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
-        let result = install_vsix(&make_vsix_with_id("../../etc", "passwd"), &root).unwrap();
+        let result = install_vsix(&make_vsix_with_id("../../etc", "passwd"), &root, None).unwrap();
 
         assert_eq!(result.extension_id, "------etc.passwd");
         assert_eq!(result.install_path.parent(), Some(root.as_path()));
@@ -451,6 +510,7 @@ mod tests {
         let result = install_vsix(
             &make_vsix_with_entry("extension/../../evil.js"),
             &dir.path().to_path_buf(),
+            None,
         );
         assert!(
             matches!(result, Err(InstallError::UnsafeEntryPath(_))),
@@ -467,6 +527,7 @@ mod tests {
         let result = install_vsix(
             &make_vsix_with_entry("extension//etc/passwd"),
             &dir.path().to_path_buf(),
+            None,
         )
         .unwrap();
         assert!(
@@ -496,10 +557,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
 
-        let first = install_vsix(&make_test_vsix(), &root).unwrap();
+        let first = install_vsix(&make_test_vsix(), &root, None).unwrap();
         fs::write(first.install_path.join("stale.txt"), b"v1 leftover").unwrap();
 
-        let second = install_vsix(&make_test_vsix(), &root).unwrap();
+        let second = install_vsix(&make_test_vsix(), &root, None).unwrap();
 
         assert_eq!(first.install_path, second.install_path);
         assert!(second.install_path.join("out/extension.js").exists());
@@ -515,7 +576,7 @@ mod tests {
     fn failed_unpack_leaves_previous_version_intact() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
-        let good = install_vsix(&make_test_vsix(), &root).unwrap();
+        let good = install_vsix(&make_test_vsix(), &root, None).unwrap();
         assert!(good.install_path.join("out/extension.js").exists());
 
         // Same id, but the archive traverses → unpack fails mid-flight.
@@ -530,7 +591,7 @@ mod tests {
             zip.write_all(b"pwned").unwrap();
             zip.finish().unwrap();
         }
-        let result = install_vsix(&buf, &root);
+        let result = install_vsix(&buf, &root, None);
 
         assert!(matches!(result, Err(InstallError::UnsafeEntryPath(_))));
         assert!(
@@ -544,7 +605,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
 
-        let _ = install_vsix(&make_vsix_with_entry("extension/../../evil.js"), &root);
+        let _ = install_vsix(
+            &make_vsix_with_entry("extension/../../evil.js"),
+            &root,
+            None,
+        );
 
         let leftovers: Vec<_> = fs::read_dir(&root)
             .unwrap()

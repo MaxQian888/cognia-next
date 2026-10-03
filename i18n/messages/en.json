@@ -27569,7 +27569,13 @@
         "blockedHint": "Until trusted, this plugin will not load. Only trust plugins from authors you know.",
         "description": "This plugin runs its code directly in the app, unsandboxed — it can access your data and everything the app can. It came from an untrusted source, so it only runs after you trust it.",
         "switchAria": "Trust this plugin's frontend code",
-        "title": "Trust frontend code"
+        "title": "Trust frontend code",
+        "vscode": {
+          "blockedHint": "Until trusted, this extension will not start. Only trust extensions from authors you know.",
+          "description": "No Open VSX signature vouches for this VS Code extension: it was added from a .vsix file, or signed by a key Cognia does not know. It runs with real access to your files, network and programs, so it only starts after you trust it.",
+          "switchAria": "Trust this VS Code extension",
+          "title": "Trust this extension"
+        }
       },
       "keywordFilterAria": "Filter by keyword {keyword}",
       "keywords": "Keywords",
@@ -28030,7 +28036,8 @@
         "notFound": "It's no longer installed.",
         "pythonDisabled": "The Python runtime is turned off on this device.",
         "signature": "Its signature couldn't be verified.",
-        "uninstallMirrored": "Uninstall it in the desktop app. This device only mirrors it."
+        "uninstallMirrored": "Uninstall it in the desktop app. This device only mirrors it.",
+        "vscodeTrust": "No Open VSX signature vouches for this VS Code extension. Trust it in the plugin's Permissions section to start it."
       },
       "config": "Couldn't apply settings for {pluginName}",
       "disable": "Couldn't disable {pluginName}",
@@ -28268,9 +28275,11 @@
       "sectionsAria": "Plugin sections"
     },
     "openVsx": {
-      "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install — cognia checks the download's checksum, not what the code does.",
+      "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install. Cognia checks the download's checksum and Open VSX's signature, which prove the file is what Open VSX published, not what the code does.",
       "integrityChecked": "Integrity checked",
       "integrityCheckedTooltip": "The download matched Open VSX's SHA-256 checksum, which confirms the file was not corrupted in transit. This is not a signature: it does not verify the publisher, and it cannot detect a compromised registry — the same server supplies both the file and the checksum.",
+      "openVsxSigned": "Signed by Open VSX",
+      "openVsxSignedTooltip": "The download carried Open VSX's signature, checked against Open VSX's key built into Cognia. That proves the file is exactly what Open VSX published: nothing between Open VSX and you changed it. It does not say the publisher or the code can be trusted.",
       "publisherVerified": "Publisher verified by Open VSX",
       "publisherVerifiedTooltip": "Open VSX states that this publisher controls the \"{namespace}\" namespace. That is Open VSX's claim about ownership, not cognia's, and not a claim that the extension is safe.",
       "searchPlaceholder": "Search Open VSX extensions…",
@@ -28869,7 +28878,8 @@
       "sectionNotes": "{count, plural, =1 {# note} other {# notes}}",
       "sectionPermissions": "Requested permissions",
       "sectionThemes": "{count, plural, =1 {# theme} other {# themes}}",
-      "title": "Install VSCode extension"
+      "title": "Install VSCode extension",
+      "unsignedNote": "A .vsix file carries no Open VSX signature, so nothing vouches for where it came from. After installing, trust it in its Permissions section to start it."
     },
     "wasmGitInstall": {
       "branchLabel": "Branch / tag / commit (optional)",

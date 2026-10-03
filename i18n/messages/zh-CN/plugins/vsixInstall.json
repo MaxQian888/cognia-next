@@ -25,5 +25,6 @@
   "sectionNotes": "{count, plural, other {# 条提示}}",
   "sectionPermissions": "请求的权限",
   "sectionThemes": "{count, plural, other {# 个主题}}",
-  "title": "安装 VSCode 扩展"
+  "title": "安装 VSCode 扩展",
+  "unsignedNote": ".vsix 文件不带 Open VSX 签名，无法证明它的来源。安装后，请在它的“权限”部分信任它才能启动。"
 }

@@ -63,7 +63,13 @@
     "blockedHint": "Until trusted, this plugin will not load. Only trust plugins from authors you know.",
     "description": "This plugin runs its code directly in the app, unsandboxed — it can access your data and everything the app can. It came from an untrusted source, so it only runs after you trust it.",
     "switchAria": "Trust this plugin's frontend code",
-    "title": "Trust frontend code"
+    "title": "Trust frontend code",
+    "vscode": {
+      "blockedHint": "Until trusted, this extension will not start. Only trust extensions from authors you know.",
+      "description": "No Open VSX signature vouches for this VS Code extension: it was added from a .vsix file, or signed by a key Cognia does not know. It runs with real access to your files, network and programs, so it only starts after you trust it.",
+      "switchAria": "Trust this VS Code extension",
+      "title": "Trust this extension"
+    }
   },
   "keywordFilterAria": "Filter by keyword {keyword}",
   "keywords": "Keywords",

@@ -97,11 +97,17 @@ export async function prepareVscodeExtension(
    * marketplace path knows it (the platform is a registry fact, not something
    * the archive declares); drag-drop leaves it undefined.
    */
-  targetPlatform?: string
+  targetPlatform?: string,
+  /**
+   * Whether the download's Open VSX signature was verified host-side. Only
+   * the marketplace path knows; the host also records it in the receipt the
+   * install gets, which is what enabling checks.
+   */
+  signedByOpenVsx = false
 ): Promise<PreparedVscodeExtension> {
   const vsix = await installVsix(bytes)
   const inference = inferPermissions({ vsix })
-  const adapted = adaptVscodeManifest({ vsix, inference, source, targetPlatform })
+  const adapted = adaptVscodeManifest({ vsix, inference, source, targetPlatform, signedByOpenVsx })
   return { bytes, vsix, adapted }
 }
 

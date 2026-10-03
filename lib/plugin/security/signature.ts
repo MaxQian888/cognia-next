@@ -230,11 +230,28 @@ export class PluginSignatureVerifier {
   private async readVerificationReceipt(
     pluginPath: string
   ): Promise<PluginVerificationReceipt | null> {
+    return this.invokeReceipt({ pluginId: this.extractPluginId(pluginPath) })
+  }
+
+  /**
+   * The host's receipt for a VS Code extension, which installs beside the
+   * plugins (`vscode-extensions/<id>`): `signature` when its Open VSX
+   * signature was verified at install. `null` off-Tauri or when it has none.
+   */
+  async readVscodeExtensionReceipt(extensionId: string): Promise<PluginVerificationReceipt | null> {
+    return this.invokeReceipt({ pluginId: extensionId, pluginType: "vscode-extension" })
+  }
+
+  private async invokeReceipt(args: {
+    pluginId: string
+    pluginType?: "vscode-extension"
+  }): Promise<PluginVerificationReceipt | null> {
     if (!isTauri()) return null
     try {
-      const receipt = await invoke<PluginVerificationReceipt | null>("plugin_read_verification", {
-        pluginId: this.extractPluginId(pluginPath),
-      })
+      const receipt = await invoke<PluginVerificationReceipt | null>(
+        "plugin_read_verification",
+        args
+      )
       return receipt ?? null
     } catch (error) {
       recordSilentFailure(

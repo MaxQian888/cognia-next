@@ -109,6 +109,17 @@ pub struct VscodeExtensionState {
     pub node_binary: RwLock<Option<String>>,
     /// Host-neutral event bridge for sidecar-initiated JSON-RPC frames.
     pub event_sink: RwLock<Option<VscodeEventSink>>,
+    /// What `plugin_vscode_download_vsix` verified about each file it staged,
+    /// by path, until the install consumes it. Kept here rather than taken
+    /// from the renderer, which could otherwise claim any staged file signed.
+    staged_downloads: RwLock<HashMap<PathBuf, StagedDownload>>,
+}
+
+/// A staged `.vsix` as its download verified it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedDownload {
+    pub sha256_hex: String,
+    pub signature: openvsx_download::VsixSignature,
 }
 
 impl VscodeExtensionState {
@@ -120,7 +131,25 @@ impl VscodeExtensionState {
             sidecar_script: RwLock::new(None),
             node_binary: RwLock::new(None),
             event_sink: RwLock::new(None),
+            staged_downloads: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Remember what the download verified about a file it staged.
+    pub fn remember_staged_download(&self, downloaded: &openvsx_download::DownloadedVsix) {
+        self.staged_downloads.write().insert(
+            PathBuf::from(&downloaded.temp_path),
+            StagedDownload {
+                sha256_hex: downloaded.sha256_hex.clone(),
+                signature: downloaded.signature,
+            },
+        );
+    }
+
+    /// What the download verified about the staged file at `path`, forgotten
+    /// as it is read: each staged file installs once.
+    pub fn take_staged_download(&self, path: &Path) -> Option<StagedDownload> {
+        self.staged_downloads.write().remove(path)
     }
 
     pub fn configure_host(

@@ -136,6 +136,7 @@ function makeDeps(
     tempPath: `/tmp/${entry.namespace}.${entry.name}.vsix`,
     sha256Hex: `sha-${entry.namespace}.${entry.name}`,
     sizeBytes: 3,
+    signature: "verified" as const,
   }))
   const commit = jest.fn(async (p: PreparedVscodeExtension) => row(p.adapted.manifest.id))
   const uninstall = jest.fn(async () => undefined)
@@ -229,6 +230,7 @@ describe("stageGraph", () => {
           tempPath: "/tmp/a.root.vsix",
           sha256Hex: "a-completely-different-digest",
           sizeBytes: 3,
+          signature: "unsigned" as const,
         })),
       }
     )
@@ -250,6 +252,7 @@ describe("stageGraph", () => {
           tempPath: "/tmp/a.root.vsix",
           sha256Hex: "sha-someone.else",
           sizeBytes: 3,
+          signature: "unsigned" as const,
         })),
       }
     )
@@ -272,6 +275,7 @@ describe("stageGraph", () => {
             tempPath: `/tmp/${entry.namespace}.${entry.name}.vsix`,
             sha256Hex: `sha-${entry.namespace}.${entry.name}`,
             sizeBytes: 3,
+            signature: "unsigned" as const,
           }
         }),
       }
@@ -643,6 +647,7 @@ describe("default download", () => {
       tempPath: "/tmp/a.root.vsix",
       sha256Hex: "sha-a.root",
       sizeBytes: 3,
+      signature: "unsigned" as const,
     })
 
     await stageGraph(plan(["a.root"]), realDownloadDeps())
@@ -650,7 +655,36 @@ describe("default download", () => {
     expect(invoke).toHaveBeenCalledWith("plugin_vscode_download_vsix", {
       downloadUrl: "https://open-vsx.org/api/a/root/1.0.0/file/a.root.vsix",
       sha256Url: "https://open-vsx.org/api/a/root/1.0.0/file/a.root.sha256",
+      signatureUrl: null,
+      publicKeyUrl: null,
     })
+  })
+
+  it("hands it the signature and key URLs the registry lists, for the host to check", async () => {
+    const { invoke } = jest.requireMock("@tauri-apps/api/core")
+    invoke.mockResolvedValue({
+      tempPath: "/tmp/a.root.vsix",
+      sha256Hex: "sha-a.root",
+      sizeBytes: 3,
+      signature: "verified",
+    })
+    const signed = plan(["a.root"])
+    signed.nodes[0].entry.files.signature =
+      "https://open-vsx.org/api/a/root/1.0.0/file/a.root.sigzip"
+    signed.nodes[0].entry.files.publicKey = "https://open-vsx.org/api/-/public-key/key-id"
+    const prepare = jest.fn(async (bytes: Uint8Array) => prepared(new TextDecoder().decode(bytes)))
+
+    await stageGraph(signed, realDownloadDeps({ prepare }))
+
+    expect(invoke).toHaveBeenCalledWith(
+      "plugin_vscode_download_vsix",
+      expect.objectContaining({
+        signatureUrl: "https://open-vsx.org/api/a/root/1.0.0/file/a.root.sigzip",
+        publicKeyUrl: "https://open-vsx.org/api/-/public-key/key-id",
+      })
+    )
+    // The verdict reaches the manifest as `signedBy`.
+    expect(prepare).toHaveBeenCalledWith(expect.any(Uint8Array), "openvsx", expect.anything(), true)
   })
 })
 
@@ -749,6 +783,7 @@ describe("staging a real .vsix through the undefaulted pipeline", () => {
         tempPath: "/tmp/cognia.hello.vsix",
         sha256Hex: vsix.sha256,
         sizeBytes: bytes.length,
+        signature: "unsigned" as const,
       })),
     })
 

@@ -27569,7 +27569,13 @@
         "blockedHint": "在你信任它之前，此插件不会加载。请只信任你了解的作者的插件。",
         "description": "此插件的代码会直接在应用内运行且不受沙箱限制——它能访问你的数据以及应用能做的一切。它来自不受信任的来源，因此需要你信任后才会运行。",
         "switchAria": "信任此插件的前端代码",
-        "title": "信任前端代码"
+        "title": "信任前端代码",
+        "vscode": {
+          "blockedHint": "在信任之前，此扩展不会启动。只信任你了解的作者的扩展。",
+          "description": "没有 Open VSX 签名为此 VS Code 扩展作证：它来自 .vsix 文件，或由 Cognia 不认识的密钥签名。它能真实访问你的文件、网络和程序，因此只有在你信任它之后才会启动。",
+          "switchAria": "信任此 VS Code 扩展",
+          "title": "信任此扩展"
+        }
       },
       "keywordFilterAria": "按关键词 {keyword} 筛选",
       "keywords": "关键词",
@@ -28030,7 +28036,8 @@
         "notFound": "它已不再安装。",
         "pythonDisabled": "当前设备已关闭 Python 运行时。",
         "signature": "无法验证它的签名。",
-        "uninstallMirrored": "请在桌面应用中卸载它。本设备只是它的镜像。"
+        "uninstallMirrored": "请在桌面应用中卸载它。本设备只是它的镜像。",
+        "vscodeTrust": "没有 Open VSX 签名为此 VS Code 扩展作证。请在插件的“权限”部分信任它后再启动。"
       },
       "config": "{pluginName} 设置应用失败",
       "disable": "{pluginName} 禁用失败",
@@ -28268,9 +28275,11 @@
       "sectionsAria": "插件分区"
     },
     "openVsx": {
-      "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限；cognia 校验的是下载文件的校验和，而不是代码的行为。",
+      "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限。Cognia 校验下载文件的校验和与 Open VSX 签名，这只能证明文件与 Open VSX 发布的一致，并不代表代码的行为。",
       "integrityChecked": "完整性已校验",
       "integrityCheckedTooltip": "下载文件与 Open VSX 提供的 SHA-256 校验和一致，说明文件在传输过程中没有损坏。这不是签名：它不验证发布者，也无法发现被攻陷的注册表——文件和校验和由同一台服务器提供。",
+      "openVsxSigned": "Open VSX 已签名",
+      "openVsxSignedTooltip": "下载的文件带有 Open VSX 的签名，并已用 Cognia 内置的 Open VSX 密钥校验。这证明该文件与 Open VSX 发布的完全一致：从 Open VSX 到你之间没有任何环节改动过它。但这不代表发布者或代码值得信任。",
       "publisherVerified": "发布者由 Open VSX 验证",
       "publisherVerifiedTooltip": "Open VSX 声明该发布者拥有「{namespace}」命名空间。这是 Open VSX 对归属权的声明，不是 cognia 的声明，也不代表该扩展是安全的。",
       "searchPlaceholder": "搜索 Open VSX 扩展…",
@@ -28869,7 +28878,8 @@
       "sectionNotes": "{count, plural, other {# 条提示}}",
       "sectionPermissions": "请求的权限",
       "sectionThemes": "{count, plural, other {# 个主题}}",
-      "title": "安装 VSCode 扩展"
+      "title": "安装 VSCode 扩展",
+      "unsignedNote": ".vsix 文件不带 Open VSX 签名，无法证明它的来源。安装后，请在它的“权限”部分信任它才能启动。"
     },
     "wasmGitInstall": {
       "branchLabel": "分支 / 标签 / 提交（可选）",

@@ -660,10 +660,19 @@ export class PluginDirtyRuntimeError extends Error {
 export class PluginFrontendTrustError extends Error {
   constructor(
     public readonly pluginId: string,
-    public readonly source: PluginSource
+    public readonly source: PluginSource,
+    /**
+     * `unsigned-vscode-extension`: a VS Code extension whose bytes no Open VSX
+     * signature vouches for (a dropped `.vsix`, or one signed by a key Cognia
+     * does not pin). It runs with real file, network and process access, so
+     * it too starts only once the user trusts it.
+     */
+    public readonly reason: "renderer-js" | "unsigned-vscode-extension" = "renderer-js"
   ) {
     super(
-      `Cannot load plugin "${pluginId}": it runs un-sandboxed JavaScript in the renderer and comes from the untrusted source "${source}". Grant it explicit trust in the plugin's Permissions tab to load it.`
+      reason === "unsigned-vscode-extension"
+        ? `Cannot start VS Code extension "${pluginId}": no Open VSX signature vouches for it. Grant it explicit trust in the plugin's Permissions tab to start it.`
+        : `Cannot load plugin "${pluginId}": it runs un-sandboxed JavaScript in the renderer and comes from the untrusted source "${source}". Grant it explicit trust in the plugin's Permissions tab to load it.`
     )
     this.name = "PluginFrontendTrustError"
   }
@@ -3474,7 +3483,13 @@ export class PluginManager {
       // them, so the enable path must exempt them too — otherwise the
       // default-on `requireSignatures` policy rejects every built-in with
       // "Signature required but not found".
-      if (
+      //
+      // A VS Code extension is vouched for by its Open VSX signature (the
+      // host's receipt) or by the user's trust, never by the plugin
+      // signature policy: no VS Code extension carries a Cognia signature.
+      if (plugin.manifest.type === "vscode-extension") {
+        await this.requireVscodeExtensionTrust(plugin)
+      } else if (
         plugin.source !== "builtin" &&
         !(await this.verifyPluginSignature(plugin.path, pluginId))
       ) {
@@ -3485,7 +3500,10 @@ export class PluginManager {
       // untrusted source need an explicit per-plugin user grant before any of
       // their code is imported or evaluated. Kept outside the retry boundary
       // below — refusal is a policy decision, not a transient failure.
-      if (this.requiresExplicitFrontendTrust(plugin)) {
+      if (
+        plugin.manifest.type !== "vscode-extension" &&
+        this.requiresExplicitFrontendTrust(plugin)
+      ) {
         throw new PluginFrontendTrustError(pluginId, plugin.source)
       }
 
@@ -4783,9 +4801,10 @@ export class PluginManager {
   }
 
   /**
-   * Whether the user has explicitly trusted this plugin's renderer-JS
-   * execution (frontend trust boundary). Only consulted for
-   * `frontend`/`hybrid` plugins from a non-inherently-trusted source.
+   * Whether the user has explicitly trusted this plugin: the renderer-JS
+   * execution of a `frontend`/`hybrid` plugin from a non-inherently-trusted
+   * source (frontend trust boundary), or a VS Code extension no Open VSX
+   * signature vouches for.
    */
   isFrontendTrusted(pluginId: string): boolean {
     return readPolicy().trustedFrontendPlugins.includes(pluginId)
@@ -4821,11 +4840,28 @@ export class PluginManager {
    * no explicit user grant.
    */
   private requiresExplicitFrontendTrust(plugin: Plugin): boolean {
-    return (
-      (plugin.manifest.type === "frontend" || plugin.manifest.type === "hybrid") &&
-      !isInherentlyTrustedFrontendSource(plugin.source) &&
-      !this.isFrontendTrusted(plugin.manifest.id)
-    )
+    if (isInherentlyTrustedFrontendSource(plugin.source)) return false
+    if (this.isFrontendTrusted(plugin.manifest.id)) return false
+    if (plugin.manifest.type === "vscode-extension") {
+      // The manifest's hint; enabling checks the host's receipt.
+      return plugin.manifest.vscodeExtension?.signedBy !== "openvsx"
+    }
+    return plugin.manifest.type === "frontend" || plugin.manifest.type === "hybrid"
+  }
+
+  /**
+   * A VS Code extension starts when the host verified its Open VSX signature
+   * at install (its receipt), when it is a development folder, or when the
+   * user trusted it. Otherwise the user is asked to trust it.
+   */
+  private async requireVscodeExtensionTrust(plugin: Plugin): Promise<void> {
+    const pluginId = plugin.manifest.id
+    if (isInherentlyTrustedFrontendSource(plugin.source) || this.isFrontendTrusted(pluginId)) {
+      return
+    }
+    const receipt = await getPluginSignatureVerifier().readVscodeExtensionReceipt(pluginId)
+    if (receipt?.verifiedVia === "signature") return
+    throw new PluginFrontendTrustError(pluginId, plugin.source, "unsigned-vscode-extension")
   }
 
   private async verifyPluginSignature(pluginPath: string, pluginId: string): Promise<boolean> {

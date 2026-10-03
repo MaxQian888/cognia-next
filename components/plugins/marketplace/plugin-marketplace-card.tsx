@@ -4,8 +4,9 @@
 // `components/skills/skill-marketplace-card.tsx` but adds plugin-specific
 // concerns: signature badge, danger-permission warning, capability count.
 //
-// Three optional props (`verifiedPublisher`, `integrityChecked`,
-// `unsupportedApis`) serve the Open VSX section. All three are additive: when
+// The optional props (`verifiedPublisher`, `integrityChecked`,
+// `openVsxSigned`, `unsupportedApis`, `unsupportedActivationEvents`) serve the
+// Open VSX section. All of them are additive: when
 // absent — which is every cognia-registry entry — the render is unchanged.
 // That is why this is one card rather than a parallel VS Code card that would
 // drift from this one on the first styling change.
@@ -19,6 +20,7 @@ import {
   BadgeCheckIcon,
   FileCheckIcon,
   PlugZapIcon,
+  ShieldCheckIcon,
   PowerOffIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -58,7 +60,8 @@ interface Props {
    * ("Publisher verified by Open VSX") because it is not our claim, and it is
    * not a safety claim — a verified publisher can still ship malware.
    *
-   * Never derive this from a signature check; we don't do one. See
+   * Never derive this from the Open VSX signature (`openVsxSigned`), which
+   * proves where the bytes came from, not who controls the namespace. See
    * `use-openvsx-marketplace.ts:toMarketplaceEntry`.
    */
   verifiedPublisher?: boolean
@@ -72,6 +75,13 @@ interface Props {
    * about a compromised registry (which serves the file and the digest).
    */
   integrityChecked?: boolean
+  /**
+   * The installed `.vsix` carried Open VSX's signature, verified host-side
+   * against the key Cognia pins. It proves the bytes are what Open VSX
+   * published, not that the publisher or the code can be trusted. Only ever
+   * true for something installed.
+   */
+  openVsxSigned?: boolean
   /**
    * `vscode.*` namespaces the extension references that cognia's shim doesn't
    * implement, read back from the installed manifest so the warning outlives
@@ -123,6 +133,7 @@ export function PluginMarketplaceCard({
   installing,
   verifiedPublisher,
   integrityChecked,
+  openVsxSigned,
   unsupportedApis,
   unsupportedActivationEvents,
   onView,
@@ -206,6 +217,15 @@ export function PluginMarketplaceCard({
               tooltip={tv("integrityCheckedTooltip")}
               variant="outline"
               testId={`plugin-openvsx-integrity-${entry.id}`}
+            />
+          )}
+          {openVsxSigned && (
+            <ExplainedBadge
+              icon={ShieldCheckIcon}
+              label={tv("openVsxSigned")}
+              tooltip={tv("openVsxSignedTooltip")}
+              variant="outline"
+              testId={`plugin-openvsx-signed-${entry.id}`}
             />
           )}
           {unsupportedApis && unsupportedApis.length > 0 && (

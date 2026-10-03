@@ -13,7 +13,8 @@
     "notFound": "它已不再安装。",
     "pythonDisabled": "当前设备已关闭 Python 运行时。",
     "signature": "无法验证它的签名。",
-    "uninstallMirrored": "请在桌面应用中卸载它。本设备只是它的镜像。"
+    "uninstallMirrored": "请在桌面应用中卸载它。本设备只是它的镜像。",
+    "vscodeTrust": "没有 Open VSX 签名为此 VS Code 扩展作证。请在插件的“权限”部分信任它后再启动。"
   },
   "config": "{pluginName} 设置应用失败",
   "disable": "{pluginName} 禁用失败",

@@ -81,6 +81,19 @@ function installedVscodeLists(
   return map
 }
 
+/** Installed VS Code extensions whose Open VSX signature was verified at install. */
+function installedOpenVsxSigned(
+  rows: ReadonlyArray<{ id: string; manifest?: unknown }> | undefined
+): Set<string> {
+  const ids = new Set<string>()
+  for (const row of rows ?? []) {
+    const block = (row.manifest as { vscodeExtension?: { signedBy?: unknown } } | undefined)
+      ?.vscodeExtension
+    if (block?.signedBy === "openvsx") ids.add(row.id)
+  }
+  return ids
+}
+
 export function PluginMarketplace() {
   const t = useTranslations("plugins.marketplace")
   const tv = useTranslations("plugins.openVsx")
@@ -186,6 +199,7 @@ export function PluginMarketplace() {
     () => installedVscodeLists(installedRows, "unsupportedActivationEvents"),
     [installedRows]
   )
+  const openVsxSignedIds = useMemo(() => installedOpenVsxSigned(installedRows), [installedRows])
 
   // Lazy-loaded client wraps the marketplace singleton; passed to the
   // pre-install hook so the orchestrator can pull manifests + call
@@ -516,6 +530,7 @@ export function PluginMarketplace() {
                   // been checked, and the badge would be claiming work we
                   // haven't done.
                   integrityChecked={isVscodeSection && installedIds.has(entry.id)}
+                  openVsxSigned={isVscodeSection && openVsxSignedIds.has(entry.id)}
                   unsupportedApis={unsupportedApisById.get(entry.id)}
                   unsupportedActivationEvents={unsupportedActivationById.get(entry.id)}
                   onView={() => setSelectedEntry(entry)}

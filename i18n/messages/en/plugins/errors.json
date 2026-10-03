@@ -13,7 +13,8 @@
     "notFound": "It's no longer installed.",
     "pythonDisabled": "The Python runtime is turned off on this device.",
     "signature": "Its signature couldn't be verified.",
-    "uninstallMirrored": "Uninstall it in the desktop app. This device only mirrors it."
+    "uninstallMirrored": "Uninstall it in the desktop app. This device only mirrors it.",
+    "vscodeTrust": "No Open VSX signature vouches for this VS Code extension. Trust it in the plugin's Permissions section to start it."
   },
   "config": "Couldn't apply settings for {pluginName}",
   "disable": "Couldn't disable {pluginName}",

@@ -894,3 +894,29 @@ describe("vscodeUnsupportedContributions", () => {
     )
   })
 })
+
+describe("signedBy", () => {
+  const pkgJson: VsCodeManifest = {
+    name: "ext",
+    publisher: "acme",
+    version: "1.0.0",
+    engines: { vscode: "^1.91.0" },
+  }
+  const adapt = (source: "openvsx" | "vsix-upload", signedByOpenVsx?: boolean) =>
+    adaptVscodeManifest({
+      vsix: makeVsixResult(pkgJson),
+      inference: emptyInference,
+      source,
+      signedByOpenVsx,
+    }).manifest.vscodeExtension
+
+  it("records an Open VSX download whose signature the host verified", () => {
+    expect(adapt("openvsx", true)?.signedBy).toBe("openvsx")
+  })
+
+  it("records nothing for an unverified download or a dropped .vsix", () => {
+    expect(adapt("openvsx", false)).not.toHaveProperty("signedBy")
+    expect(adapt("openvsx")).not.toHaveProperty("signedBy")
+    expect(adapt("vsix-upload", true)).not.toHaveProperty("signedBy")
+  })
+})

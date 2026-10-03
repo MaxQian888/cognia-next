@@ -243,6 +243,24 @@ describe("PluginSignatureVerifier", () => {
       })
     })
 
+    it("reads a VS Code extension's receipt from the extension root", async () => {
+      isTauriMock.mockReturnValue(true)
+      invokeMock.mockResolvedValue({
+        verifiedVia: "signature",
+        version: "0.18.2",
+        verifiedAt: "2026-10-03T00:00:00.000Z",
+      })
+      await expect(verifier.readVscodeExtensionReceipt("acme.ext")).resolves.toMatchObject({
+        verifiedVia: "signature",
+      })
+      expect(invokeMock).toHaveBeenCalledWith("plugin_read_verification", {
+        pluginId: "acme.ext",
+        pluginType: "vscode-extension",
+      })
+      isTauriMock.mockReturnValue(false)
+      await expect(verifier.readVscodeExtensionReceipt("acme.ext")).resolves.toBeNull()
+    })
+
     it("rejects under require-signatures when the receipt is only a checksum", async () => {
       isTauriMock.mockReturnValue(true)
       invokeMock.mockResolvedValue({

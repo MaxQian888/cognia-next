@@ -104,6 +104,35 @@ describe("PluginMarketplaceCard", () => {
   })
 
   describe("Open VSX badges", () => {
+    it("says an installed extension was signed by Open VSX, and what that means", () => {
+      const cb = callbacks()
+      render(
+        <PluginMarketplaceCard
+          entry={{ ...baseEntry, type: "vscode-extension" }}
+          installed
+          installing={false}
+          integrityChecked
+          openVsxSigned
+          {...cb}
+        />
+      )
+      expect(screen.getByTestId("plugin-openvsx-signed-p1")).toHaveTextContent("openVsxSigned")
+    })
+
+    it("has no Open VSX signature badge unless the host verified one", () => {
+      const cb = callbacks()
+      render(
+        <PluginMarketplaceCard
+          entry={{ ...baseEntry, type: "vscode-extension" }}
+          installed
+          installing={false}
+          integrityChecked
+          {...cb}
+        />
+      )
+      expect(screen.queryByTestId("plugin-openvsx-signed-p1")).not.toBeInTheDocument()
+    })
+
     it("checksum_badge_does_not_claim_publisher_verification", () => {
       // The failure this guards: mapping Open VSX's `verified` onto `signed`
       // makes the card render a ShieldCheck labelled "Verified" whose tooltip

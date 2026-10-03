@@ -68,12 +68,14 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
 
   // PluginRow stores type/source as plain strings (Dexie row shape); narrow
   // them the same way the manifest is narrowed above. The card renders null
-  // unless the plugin is renderer-JS from an untrusted source.
+  // unless the plugin is renderer-JS from an untrusted source, or a VS Code
+  // extension no Open VSX signature vouches for.
   const trustCard = (
     <PluginFrontendTrustCard
       pluginId={pluginId}
       type={rowState.row.type as PluginType}
       source={rowState.row.source as PluginSource}
+      signedByOpenVsx={manifest?.vscodeExtension?.signedBy === "openvsx"}
     />
   )
 

@@ -63,7 +63,13 @@
     "blockedHint": "在你信任它之前，此插件不会加载。请只信任你了解的作者的插件。",
     "description": "此插件的代码会直接在应用内运行且不受沙箱限制——它能访问你的数据以及应用能做的一切。它来自不受信任的来源，因此需要你信任后才会运行。",
     "switchAria": "信任此插件的前端代码",
-    "title": "信任前端代码"
+    "title": "信任前端代码",
+    "vscode": {
+      "blockedHint": "在信任之前，此扩展不会启动。只信任你了解的作者的扩展。",
+      "description": "没有 Open VSX 签名为此 VS Code 扩展作证：它来自 .vsix 文件，或由 Cognia 不认识的密钥签名。它能真实访问你的文件、网络和程序，因此只有在你信任它之后才会启动。",
+      "switchAria": "信任此 VS Code 扩展",
+      "title": "信任此扩展"
+    }
   },
   "keywordFilterAria": "按关键词 {keyword} 筛选",
   "keywords": "关键词",

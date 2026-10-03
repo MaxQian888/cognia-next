@@ -76,6 +76,12 @@ export interface DownloadedVsix {
   tempPath: string
   sha256Hex: string
   sizeBytes: number
+  /**
+   * What the host found of the Open VSX signature: `verified` against the key
+   * Cognia pins, `unsigned` (none published), or `unknown-key` (signed by a
+   * key Cognia does not pin). A signature that fails is refused outright.
+   */
+  signature: "verified" | "unsigned" | "unknown-key"
 }
 
 /** One node, downloaded and parsed, not yet written anywhere. */
@@ -148,6 +154,9 @@ async function defaultDownload(entry: OpenVsxQueryEntry): Promise<DownloadedVsix
   return invoke<DownloadedVsix>("plugin_vscode_download_vsix", {
     downloadUrl: entry.files.download,
     sha256Url: entry.files.sha256,
+    // Checked host-side against the pinned Open VSX key, never this URL's key.
+    signatureUrl: entry.files.signature ?? null,
+    publicKeyUrl: entry.files.publicKey ?? null,
   })
 }
 
@@ -193,7 +202,12 @@ export async function stageGraph(
       // re-queries with it: a `universal` fallback install must keep asking
       // for `universal`, not for whatever the asking machine happens to be.
       const prepared: PreparedVscodeExtension = {
-        ...(await prepare(bytes, "openvsx", node.targetPlatform)),
+        ...(await prepare(
+          bytes,
+          "openvsx",
+          node.targetPlatform,
+          downloaded.signature === "verified"
+        )),
         stagedPath: downloaded.tempPath,
       }
 

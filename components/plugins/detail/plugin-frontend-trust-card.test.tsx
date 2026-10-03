@@ -45,7 +45,7 @@ describe("PluginFrontendTrustCard", () => {
     }
   )
 
-  it.each(["wasm", "python", "vscode-extension"] as PluginType[])(
+  it.each(["wasm", "python"] as PluginType[])(
     "does not render for the isolated-host type %s",
     (type) => {
       const { container } = render(
@@ -54,6 +54,34 @@ describe("PluginFrontendTrustCard", () => {
       expect(container).toBeEmptyDOMElement()
     }
   )
+
+  it("asks to trust a VS Code extension no Open VSX signature vouches for, in its own words", () => {
+    render(<PluginFrontendTrustCard pluginId="a" type="vscode-extension" source="local" />)
+    expect(screen.getByText("vscode.title")).toBeInTheDocument()
+    expect(screen.getByText("vscode.description")).toBeInTheDocument()
+    expect(screen.getByText("vscode.blockedHint")).toBeInTheDocument()
+    expect(screen.getByRole("switch")).toHaveAccessibleName("vscode.switchAria")
+
+    fireEvent.click(screen.getByRole("switch"))
+    expect(setFrontendTrust).toHaveBeenCalledWith("a", true)
+  })
+
+  it("does not render for a VS Code extension Open VSX signed, or one in development", () => {
+    const signed = render(
+      <PluginFrontendTrustCard
+        pluginId="a"
+        type="vscode-extension"
+        source="marketplace"
+        signedByOpenVsx
+      />
+    )
+    expect(signed.container).toBeEmptyDOMElement()
+    signed.unmount()
+    const dev = render(
+      <PluginFrontendTrustCard pluginId="a" type="vscode-extension" source="dev" />
+    )
+    expect(dev.container).toBeEmptyDOMElement()
+  })
 
   it("grants trust via the manager and hides the blocked hint once trusted", () => {
     render(<PluginFrontendTrustCard pluginId="a" type="hybrid" source="marketplace" />)

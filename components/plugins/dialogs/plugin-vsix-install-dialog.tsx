@@ -228,6 +228,11 @@ function VsixReviewBody({
           <p className="text-xs break-words text-muted-foreground">{pkgJson.description}</p>
         )}
       </Card>
+      {/* A dropped .vsix has no Open VSX signature, so it starts only once
+          the user trusts it (`PluginFrontendTrustError`, `unsigned-vscode-extension`). */}
+      <p className="text-xs text-muted-foreground" data-testid="plugin-vsix-unsigned-note">
+        {t("unsignedNote")}
+      </p>
 
       {lspBinaryCandidates.length > 0 && (
         <Card className="p-3 text-sm space-y-2">

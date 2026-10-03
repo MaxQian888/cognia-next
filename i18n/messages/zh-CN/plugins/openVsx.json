@@ -1,5 +1,5 @@
 {
-  "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限；cognia 校验的是下载文件的校验和，而不是代码的行为。",
+  "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限。Cognia 校验下载文件的校验和与 Open VSX 签名，这只能证明文件与 Open VSX 发布的一致，并不代表代码的行为。",
   "integrityChecked": "完整性已校验",
   "integrityCheckedTooltip": "下载文件与 Open VSX 提供的 SHA-256 校验和一致，说明文件在传输过程中没有损坏。这不是签名：它不验证发布者，也无法发现被攻陷的注册表——文件和校验和由同一台服务器提供。",
   "publisherVerified": "发布者由 Open VSX 验证",
@@ -12,5 +12,7 @@
   "vscodeEmpty": "没有匹配的扩展，换个关键词试试。",
   "vscodeError": "Open VSX 错误：{message}",
   "vscodeLoadMore": "加载更多 ({shown}/{total})",
-  "vscodeSectionHint": "来自 Open VSX 的扩展——VS Codium 与 code-server 使用的同一个注册表。不支持微软官方市场：其服务条款限定仅可用于微软自家产品。"
+  "vscodeSectionHint": "来自 Open VSX 的扩展——VS Codium 与 code-server 使用的同一个注册表。不支持微软官方市场：其服务条款限定仅可用于微软自家产品。",
+  "openVsxSigned": "Open VSX 已签名",
+  "openVsxSignedTooltip": "下载的文件带有 Open VSX 的签名，并已用 Cognia 内置的 Open VSX 密钥校验。这证明该文件与 Open VSX 发布的完全一致：从 Open VSX 到你之间没有任何环节改动过它。但这不代表发布者或代码值得信任。"
 }

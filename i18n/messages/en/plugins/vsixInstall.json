@@ -25,5 +25,6 @@
   "sectionNotes": "{count, plural, =1 {# note} other {# notes}}",
   "sectionPermissions": "Requested permissions",
   "sectionThemes": "{count, plural, =1 {# theme} other {# themes}}",
-  "title": "Install VSCode extension"
+  "title": "Install VSCode extension",
+  "unsignedNote": "A .vsix file carries no Open VSX signature, so nothing vouches for where it came from. After installing, trust it in its Permissions section to start it."
 }

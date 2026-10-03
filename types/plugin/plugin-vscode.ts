@@ -719,6 +719,14 @@ export interface VsCodeExtensionBlock {
   /** Marketplace source. `null` for `.vsix` drag-drop installs. */
   source: "openvsx" | "vsix-upload" | "dev" | null
   /**
+   * Set when the download's Open VSX signature was verified against the key
+   * Cognia pins (`openvsx_download.rs`). A hint for the plugin list and for
+   * starting extensions at launch; enabling re-checks the host's receipt,
+   * which is what counts. An extension without it is unsigned, or was signed
+   * by a key Cognia does not know, and starts only once the user trusts it.
+   */
+  signedBy?: "openvsx"
+  /**
    * The Open VSX `targetPlatform` this build was resolved for (one of the 12
    * enum values in `lib/plugin/vscode-shim/openvsx-platform.ts`, typically the
    * host platform or `"universal"`).

@@ -25,6 +25,7 @@ export type PluginErrorCode =
   | "intentDisabled"
   | "dirtyRuntime"
   | "frontendTrust"
+  | "vscodeTrust"
   | "notFound"
   | "managerNotReady"
   | "incompatible"
@@ -70,6 +71,7 @@ const PATTERNS: ReadonlyArray<{
     test: /has unconfirmed runtime resources|has unresolved runtime resources/,
   },
   { code: "frontendTrust", test: /runs un-sandboxed JavaScript in the renderer/ },
+  { code: "vscodeTrust", test: /no Open VSX signature vouches for it/ },
   { code: "notFound", test: /^Plugin not found: / },
   { code: "managerNotReady", test: /^Plugin manager not initialized/ },
   {
