@@ -123,6 +123,15 @@ export function setGrantedModules(extensionId: string, modules: readonly string[
   grantCache.set(extensionId, new Set(modules))
 }
 
+/**
+ * Whether the extension may load `module`. Also gates the network globals
+ * the sandbox hands out (`fetch` follows `https`, `WebSocket` follows `ws`),
+ * so a global cannot reach what the module behind it may not.
+ */
+export function isModuleGranted(extensionId: string, module: string): boolean {
+  return grantCache.get(extensionId)?.has(module) ?? false
+}
+
 export function installRequireHook(): void {
   if (installed) return
   installed = true

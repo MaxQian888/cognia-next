@@ -29,7 +29,7 @@
 import * as vm from "node:vm"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { registerVscodeShim, unregisterVscodeShim } from "./require-hook"
+import { isModuleGranted, registerVscodeShim, unregisterVscodeShim } from "./require-hook"
 import type { Uri } from "./vscode-shim/types"
 
 export interface ExtensionLoadRequest {
@@ -168,6 +168,33 @@ export const SHARED_BINARY_GLOBALS = {
   BigUint64Array,
 } as const
 
+/**
+ * The host's web-platform globals Node gives every module and VS Code
+ * extensions rely on, given to every extension context. The network ones
+ * (`fetch`, `WebSocket`) are not here: they follow the extension's grants
+ * (`createSandboxNetwork`).
+ */
+export const SHARED_WEB_GLOBALS = {
+  queueMicrotask,
+  structuredClone,
+  AbortController,
+  AbortSignal,
+  Event,
+  EventTarget,
+  performance,
+  atob,
+  btoa,
+  crypto,
+  Blob,
+  File,
+  FormData,
+  Headers,
+  Request,
+  Response,
+  MessageChannel,
+  MessagePort,
+} as const
+
 let shimFactory: VscodeShimFactory | null = null
 
 export function setVscodeShimFactory(factory: VscodeShimFactory): void {
@@ -229,6 +256,8 @@ export async function loadExtension(req: ExtensionLoadRequest): Promise<void> {
     // `Buffer`), and the host makes it with its own constructors. Sharing
     // them keeps `bytes instanceof Uint8Array` true inside the extension.
     ...SHARED_BINARY_GLOBALS,
+    ...SHARED_WEB_GLOBALS,
+    ...createSandboxNetwork(req.extensionId),
   } as Record<string, unknown>
 
   if (req.bundleFormat === "esm") {
@@ -238,6 +267,8 @@ export async function loadExtension(req: ExtensionLoadRequest): Promise<void> {
   }
   vm.createContext(sandbox)
   try {
+    // Node's `global`, as bundles written for Node expect: the context's own global.
+    vm.runInContext("globalThis.global = globalThis", sandbox)
     const script = new vm.Script(source, { filename: mainPath })
     script.runInContext(sandbox)
   } catch (err) {
@@ -374,6 +405,44 @@ function createRequireForExtension(extensionId: string, mainPath: string): NodeR
   // Tag so the require-hook resolver can attribute calls back to us.
   req.cogniaExtensionId = extensionId
   return req
+}
+
+/**
+ * `fetch` and `WebSocket` for one extension. Each works only while the
+ * extension may load the module behind the same reach (`https` for
+ * `network:fetch`, `ws` for `network:websocket`), checked on every call, and
+ * goes through the user's proxy (`network.ts`). Without the grant `fetch`
+ * rejects and `new WebSocket` throws, naming the permission, and the refusal
+ * lands in the extension's log.
+ */
+export function createSandboxNetwork(extensionId: string): {
+  fetch: typeof fetch
+  WebSocket: typeof WebSocket
+} {
+  const refuse = (what: string, permission: string) => {
+    const message = `${what} is not available to extension "${extensionId}": it needs the ${permission} permission`
+    process.stderr.write(`[vscode-ext-host] WARN ${message}\n`)
+    return new TypeError(message)
+  }
+  const gatedFetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+    isModuleGranted(extensionId, "https")
+      ? fetch(input, init)
+      : Promise.reject(refuse("fetch", "network:fetch"))) as typeof fetch
+  const HostWebSocket = WebSocket
+  function GatedWebSocket(
+    this: unknown,
+    url: string | URL,
+    protocols?: string | string[]
+  ): WebSocket {
+    if (!new.target) throw new TypeError("Constructor WebSocket requires 'new'")
+    if (!isModuleGranted(extensionId, "ws")) throw refuse("WebSocket", "network:websocket")
+    return new HostWebSocket(url, protocols)
+  }
+  // `instanceof WebSocket`, the static constants and `WebSocket.prototype`
+  // behave as the host's.
+  GatedWebSocket.prototype = HostWebSocket.prototype
+  Object.setPrototypeOf(GatedWebSocket, HostWebSocket)
+  return { fetch: gatedFetch, WebSocket: GatedWebSocket as unknown as typeof WebSocket }
 }
 
 function createSandboxProcess(extensionId: string): NodeJS.Process {

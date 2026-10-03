@@ -12,10 +12,18 @@ const here = dirname(fileURLToPath(import.meta.url))
 export const HOST = join(here, "..", "dist", "host.js")
 export const FIXTURES = join(here, "fixtures")
 
-/** One host process, with a renderer-side answerer for host → renderer requests. */
-export function startHost(extensionId, answer = () => null) {
+/**
+ * One host process, with a renderer-side answerer for host → renderer
+ * requests. `env` adds to (or, with `undefined`, removes from) the
+ * environment the host starts with.
+ */
+export function startHost(extensionId, answer = () => null, { env = {} } = {}) {
+  const childEnv = { ...process.env, COGNIA_VSCODE_EXTENSION_ID: extensionId, ...env }
+  for (const [key, value] of Object.entries(childEnv)) {
+    if (value === undefined) delete childEnv[key]
+  }
   const child = spawn(process.execPath, [HOST, "--cognia-extension", extensionId], {
-    env: { ...process.env, COGNIA_VSCODE_EXTENSION_ID: extensionId },
+    env: childEnv,
     stdio: ["pipe", "pipe", "pipe"],
   })
   const pending = new Map()

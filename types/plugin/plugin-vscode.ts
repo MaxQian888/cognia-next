@@ -677,6 +677,7 @@ export interface VsCodePermissionReason {
     | { kind: "manifest-contribution"; contribution: string }
     | { kind: "vscode-api"; api: string }
     | { kind: "fetch-call" }
+    | { kind: "websocket" }
     | { kind: "binary-file"; path: string }
   evidence: string
 }

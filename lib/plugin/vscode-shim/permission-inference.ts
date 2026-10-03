@@ -357,6 +357,7 @@ export function inferPermissions(input: InferPermissionsInput): VsCodePermission
   } else {
     unparsedBundle = true
     scanStrings(source, permissions, reasons, unsupportedApis)
+    scanNetworkGlobals(source, permissions, reasons)
   }
 
   // String-scan complements the AST walk: regex catches what the AST
@@ -451,6 +452,52 @@ function tryParseBundle(source: string): Node | null {
   }
 }
 
+const GLOBAL_OBJECTS = ["globalThis", "global", "self", "window"]
+/** `fetch` reached through the global object. */
+const GLOBAL_OBJECT_FETCH = new Set(GLOBAL_OBJECTS.map((root) => `${root}.fetch`))
+/** `WebSocket` reached through the global object. */
+const GLOBAL_OBJECT_WEBSOCKET = new Set(GLOBAL_OBJECTS.map((root) => `${root}.WebSocket`))
+
+/**
+ * A WebSocket is the `network:websocket` reach, which the host grants only
+ * together with `network:fetch` (as it does for the `ws` module).
+ */
+function addWebSocketPermissions(
+  permissions: Set<PluginPermission>,
+  reasons: VsCodePermissionReason[],
+  evidence: string
+): void {
+  for (const permission of ["network:websocket", "network:fetch"] as const) {
+    addPermission(permissions, reasons, permission, { kind: "websocket" }, evidence)
+  }
+}
+
+/**
+ * `fetch(` and `new WebSocket(` in a bundle the parser could not read. Only
+ * there: in a parsed bundle the AST walk tells a call of the global from a
+ * method of the same name (`repo.fetch()`), which text cannot.
+ */
+function scanNetworkGlobals(
+  source: string,
+  permissions: Set<PluginPermission>,
+  reasons: VsCodePermissionReason[]
+): void {
+  if (
+    /(?:^|[^\w$.])fetch\s*\(|\b(?:globalThis|global|self|window)\s*\.\s*fetch\s*\(/.test(source)
+  ) {
+    addPermission(
+      permissions,
+      reasons,
+      "network:fetch",
+      { kind: "fetch-call" },
+      "string-scan matched fetch("
+    )
+  }
+  if (/\bnew\s+(?:(?:globalThis|global|self|window)\s*\.\s*)?WebSocket\s*\(/.test(source)) {
+    addWebSocketPermissions(permissions, reasons, "string-scan matched new WebSocket(")
+  }
+}
+
 /**
  * Permission-relevant AST walk. We don't use @babel/traverse to keep the
  * dependency surface small — a hand-rolled recursive walker is enough for
@@ -488,8 +535,11 @@ function walkAst(
             }
           }
         }
-        // fetch("...")
-        if (callee?.type === "Identifier" && callee["name"] === "fetch") {
+        // fetch("...") / globalThis.fetch("...")
+        if (
+          (callee?.type === "Identifier" && callee["name"] === "fetch") ||
+          GLOBAL_OBJECT_FETCH.has(walkMemberChain(callee))
+        ) {
           addPermission(
             permissions,
             reasons,
@@ -499,6 +549,17 @@ function walkAst(
             },
             "fetch() call detected in bundle"
           )
+        }
+        break
+      }
+      case "NewExpression": {
+        // new WebSocket("...") / new globalThis.WebSocket("...")
+        const callee = n.callee as Record<string, unknown> | undefined
+        if (
+          (callee?.type === "Identifier" && callee["name"] === "WebSocket") ||
+          GLOBAL_OBJECT_WEBSOCKET.has(walkMemberChain(callee))
+        ) {
+          addWebSocketPermissions(permissions, reasons, "new WebSocket() detected in bundle")
         }
         break
       }

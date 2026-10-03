@@ -126,6 +126,49 @@ describe("inferPermissions", () => {
       expect(result.permissions).toContain("network:fetch")
     })
 
+    const infer = (source: string) =>
+      inferPermissions({
+        vsix: makeVsix({ ...HEAD, main: "out/extension.js" }, { "out/extension.js": source }),
+      })
+
+    it("detects fetch reached through the global object, but not a method named fetch", () => {
+      expect(infer(`globalThis.fetch("https://example.com")`).permissions).toContain(
+        "network:fetch"
+      )
+      expect(infer(`self.fetch(url)`).permissions).toContain("network:fetch")
+      expect(infer(`repo.fetch("origin")`).permissions).not.toContain("network:fetch")
+    })
+
+    it("detects new WebSocket → network:websocket + network:fetch", () => {
+      for (const source of [
+        `new WebSocket("wss://example.com")`,
+        `new globalThis.WebSocket(url)`,
+      ]) {
+        const result = infer(source)
+        expect(result.permissions).toEqual(
+          expect.arrayContaining(["network:websocket", "network:fetch"])
+        )
+        expect(result.reasons).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              permission: "network:websocket",
+              trigger: { kind: "websocket" },
+            }),
+          ])
+        )
+      }
+      expect(infer(`new socket.WebSocketServer()`).permissions).not.toContain("network:websocket")
+    })
+
+    it("finds fetch( and new WebSocket( by text in a bundle that does not parse", () => {
+      const result = infer(`fetch(u); new WebSocket(u); ((( unbalanced`)
+      expect(result.unparsedBundle).toBe(true)
+      expect(result.permissions).toEqual(
+        expect.arrayContaining(["network:fetch", "network:websocket"])
+      )
+      expect(infer(`repo.fetch(u); ((( unbalanced`).permissions).not.toContain("network:fetch")
+    })
+
     it("detects vscode.secrets.* → secrets:read+write", () => {
       const result = inferPermissions({
         vsix: makeVsix(

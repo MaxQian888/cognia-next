@@ -35,6 +35,7 @@ import { ExtensionRegistry } from "./vscode-shim/extensions"
 import { TerminalRegistry } from "./vscode-shim/terminal"
 import { WebviewRegistry } from "./vscode-shim/webviews"
 import { LanguageModels } from "./vscode-shim/lm"
+import { installEnvProxy } from "./network"
 import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
 import type { OwnedPaths } from "./vscode-shim/workspace-fs"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
@@ -222,6 +223,9 @@ setExtensionResolver(
 )
 
 installRequireHook()
+
+// Extensions' `fetch`, `WebSocket` and `http(s)` go through the user's proxy.
+installEnvProxy()
 
 // Configure the vscode shim factory. The actual shim implementation lives
 // in `src/vscode-shim/index.ts` — wired below.
