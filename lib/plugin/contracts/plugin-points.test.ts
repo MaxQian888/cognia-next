@@ -323,12 +323,16 @@ describe("plugin point contracts", () => {
       const contracts = PLUGIN_POINT_CONTRACTS.filter((c) => c.id.startsWith("vscode."))
       expect(contracts).toHaveLength(4)
       // sidebar/webview/activity-bar are bound to the unified webview panel host;
-      // terminal.output is bound to the bridge initializer that surfaces extension
-      // terminals as tabs in <TerminalDock>.
+      // terminal.output to the handlers that open extensions' terminals as tabs
+      // in <TerminalDock>.
       for (const contract of contracts) {
         expect(contract.kind).toBe("ui-slot")
         expect(contract.status).toBe("implemented")
-        expect(contract.binding).toMatch(/^components\/.*\.tsx$/)
+        expect(contract.binding).toBe(
+          contract.id === "vscode.terminal.output"
+            ? "lib/plugin/vscode-shim/terminal-handlers.ts"
+            : "components/extensions/vscode-extension-panel.tsx"
+        )
       }
     })
 

@@ -127,8 +127,8 @@ export async function syncTerminalHostProfiles(
  * and a spawn firing before boot finished still waits for the same sync rather
  * than racing it into "unknown terminal profile".
  *
- * A no-op on the local PTY: `TerminalBridgeInitializer` owns that path, where
- * the push is ordered against the VS Code bridge setup.
+ * A no-op on the local PTY: `TerminalBootInitializer` owns that path, where
+ * the push is ordered before the first spawn.
  */
 let profileSync: Promise<void> | null = null
 

@@ -9,7 +9,7 @@
  * surviving sessions the desktop does, and `rehydrate.ts` has always known how
  * to reach them over `ws` / `webrtc`. But nothing called it there:
  *
- *   * `TerminalBridgeInitializer` mounts inside `desktop-only-initializers.tsx`,
+ *   * `TerminalBootInitializer` mounts inside `desktop-only-initializers.tsx`,
  *     behind an `isTauri()` gate, so its own non-Tauri branch was unreachable;
  *   * the dock's other call sits behind the host-state banner's Retry button,
  *     which never renders because `hostState` starts `"online"`;
@@ -42,9 +42,9 @@ let inFlight: Promise<void> | null = null
  * Reattach to whatever the active host still has, at most once per page load.
  *
  * Three shells, three outcomes:
- *   * **local PTY** (`tauri-channel`) — no-op. `TerminalBridgeInitializer`
- *     already owns that path and also configures the VS Code bridge and the
- *     profile sync alongside it; running both would double-attach.
+ *   * **local PTY** (`tauri-channel`) — no-op. `TerminalBootInitializer`
+ *     already owns that path and runs the profile sync alongside it; running
+ *     both would double-attach.
  *   * **remote host** (`ws` / `webrtc`) — reattach. `rehydrateTerminals`
  *     restores the saved tab layout itself, after the surviving sessions have
  *     registered, so the layout is validated against real rows.

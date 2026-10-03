@@ -9,10 +9,8 @@
  * carries enough metadata for the cognia UI to render a "run task" entry
  * even before the provider's lazy `provideTasks` is called.
  *
- * Task execution is delegated to `ctx.shell.spawn` (or a custom executor
- * registered by the provider). We don't ship a terminal UI — task output
- * streams through the `vscode.terminal.output` extension point the
- * VS Code Extension Panel mounts (Phase M1.C).
+ * Task execution is delegated to the provider's own executor, or the default
+ * one the host installs (`setDefaultTaskExecutor`).
  */
 
 export interface TaskDefinition {
@@ -212,8 +210,7 @@ let defaultExecutor: TaskExecutor | undefined
 
 /**
  * Install the fallback task executor used when a provider didn't supply
- * its own. The renderer's bootstrap calls this with an executor that wraps
- * `ctx.shell.spawn` + the `vscode.terminal.output` panel.
+ * its own.
  */
 export function setDefaultTaskExecutor(executor: TaskExecutor): void {
   defaultExecutor = executor

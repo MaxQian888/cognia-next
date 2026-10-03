@@ -36,7 +36,7 @@ function useIsClient(): boolean {
  * Each child below already no-ops on web / Capacitor (it self-gates on
  * `isTauri()` / native bridges and renders `null`), so they were previously
  * mounted unconditionally in `app/layout.tsx` and statically imported. That
- * pulled their entire subsystem module graphs (terminal bridge, computer-use
+ * pulled their entire subsystem module graphs (terminal boot, computer-use
  * kill switch, connector/plugin deep-link routers, CLI bridge, updater, pet
  * window, codex usage, crash/exit dialogs, automation consent) into the root
  * layout's eager graph — which the dev server must compile to render *any*
@@ -81,8 +81,8 @@ const ComputerUseKillSwitchInitializer = dynamic(
     ),
   { ssr: false }
 )
-const TerminalBridgeInitializer = dynamic(
-  () => import("./terminal-bridge-initializer").then((m) => m.TerminalBridgeInitializer),
+const TerminalBootInitializer = dynamic(
+  () => import("./terminal-boot-initializer").then((m) => m.TerminalBootInitializer),
   { ssr: false }
 )
 const EditorLspRuntimeInitializer = dynamic(
@@ -216,7 +216,7 @@ export function DesktopOnlyInitializers() {
       <AnthropicUsageSchedulerInitializer />
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />
-      <TerminalBridgeInitializer />
+      <TerminalBootInitializer />
       <EditorLspRuntimeInitializer />
       <ManagedIdeBrokerInitializer />
       <LocalCharacterPackInitializer />

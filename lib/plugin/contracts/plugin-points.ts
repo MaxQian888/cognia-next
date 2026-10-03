@@ -343,9 +343,8 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
 
 // VS Code extension slots are wired through `components/extensions/
 // vscode-extension-panel.tsx` (sidebar/webview/activity-bar) and
-// `components/providers/initializers/terminal-bridge-initializer.tsx`
-// (terminal output — surfaces extension-spawned terminals as tabs in
-// `<TerminalDock>`). Both are direct registration hosts rather than a
+// `lib/plugin/vscode-shim/terminal-handlers.ts` (terminal output — opens
+// extensions' terminals as tabs in `<TerminalDock>`). Both are direct registration hosts rather than a
 // `<PluginExtensionSlot>` JSX mount. They are fully functional at
 // runtime, so the contract reports `status: "implemented"` with their
 // explicit binding files in `IMPLEMENTED_EXTENSION_POINT_BINDINGS`
@@ -518,7 +517,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "vscode.sidebar.view": "components/extensions/vscode-extension-panel.tsx",
   "vscode.webview.panel": "components/extensions/vscode-extension-panel.tsx",
   "vscode.activity-bar": "components/extensions/vscode-extension-panel.tsx",
-  "vscode.terminal.output": "components/providers/initializers/terminal-bridge-initializer.tsx",
+  "vscode.terminal.output": "lib/plugin/vscode-shim/terminal-handlers.ts",
 }
 
 const EXTENSION_POINT_ALIASES: Record<string, CanonicalExtensionPoint> = {

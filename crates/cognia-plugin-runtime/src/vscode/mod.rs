@@ -1,9 +1,10 @@
 //! VS Code extension host (Rust side).
 //!
 //! Spawns the Node sidecar (`sidecar/vscode-ext-host/dist/host.js`) per
-//! extension, mediates `child_process`, file, and network capability
-//! grants, and routes JSON-RPC frames between the renderer and the
-//! sidecar.
+//! extension, tells it which sensitive Node modules the extension's
+//! permissions allow (`commands.rs:granted_node_modules`; the sidecar's
+//! require hook enforces them), and routes JSON-RPC frames between the
+//! renderer and the sidecar.
 //!
 //! Module layout mirrors `src-tauri/src/plugin_api/wasm/`:
 //!
@@ -11,7 +12,6 @@
 //! - [`installer`]         — `.vsix` extraction + checksum.
 //! - [`openvsx_download`]  — Open VSX `.vsix` fetch + SHA-256 verification.
 //! - [`commands`]          — `tauri::generate_handler!` entry points.
-//! - [`capabilities`]      — per-extension file path / process / network gates.
 //!
 //! `ExtensionRuntime` is published by the Tauri state but not yet read
 //! back — the renderer queries runtime telemetry through the Dexie
@@ -19,7 +19,6 @@
 //! shape so the Phase M3 wiring can write into it without a schema bump.
 #![allow(dead_code)]
 
-pub mod capabilities;
 pub mod commands;
 pub mod host;
 pub mod installer;

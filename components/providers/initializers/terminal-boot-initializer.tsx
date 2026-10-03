@@ -1,51 +1,28 @@
 "use client"
 
 /**
- * Wires the VS Code-shim terminal bridge to the real PTY at app boot.
+ * Brings the local terminal up at app boot (Tauri only).
  *
- * Before this initializer existed, `configureTerminalBridge()` was never
- * called in production — extensions calling `vscode.window.createTerminal`
- * would throw "not configured". The unit test injected its own fake spawn
- * for coverage, but the runtime path was a TODO.
+ * On mount it pushes the user's terminal profiles to the host (ordered
+ * before any spawn, see `syncTerminalHostProfiles`), reattaches to PTY
+ * sessions that survived a webview reload, and warm-imports
+ * `dock-tool-handler` so the first `terminal_dock_*` MCP call from the agent
+ * doesn't pay a dynamic-import round-trip mid-tool. The module is pure (no
+ * top-level side effects); the cost is the bundle inclusion only.
  *
- * Now: on mount, we install `createPtyShellSpawn()` (which routes spawn
- * calls into `lib/terminal/session.ts`) and a no-op `TerminalOutputSink`;
- * the integrated dock subscribes to bridge events and the dock store directly.
- *
- * We also warm-import `dock-tool-handler` so the first
- * `terminal_dock_*` MCP call from the agent doesn't pay a dynamic-import
- * round-trip mid-tool. The module is pure (no top-level side effects);
- * the cost is the bundle inclusion only.
- *
- * Tauri-only — `TerminalSession.spawn` calls `invoke` which throws in
- * web/Capacitor mode. The bridge stays unconfigured outside Tauri, so
- * an extension calling `createTerminal` there throws the same
- * "not configured" error rather than appearing to work and silently
- * dropping bytes.
+ * Tauri-only: the local PTY lives in the desktop app. Web and Capacitor
+ * reattach to a remote host's sessions through `lib/terminal/boot-reattach.ts`.
+ * VS Code extensions' terminals are dock tabs opened on demand by
+ * `lib/plugin/vscode-shim/terminal-handlers.ts`, not here.
  */
 
 import { useEffect } from "react"
 
 import { isTauri } from "@/lib/tauri"
-import { createPtyShellSpawn } from "@/lib/plugin/vscode-shim/pty-bridge-adapter"
-import {
-  __resetTerminalBridgeForTesting,
-  configureTerminalBridge,
-  type TerminalOutputSink,
-} from "@/lib/plugin/vscode-shim/terminal-bridge"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 
-const noopSink: TerminalOutputSink = {
-  appendLine() {
-    // The dock store subscribes via `subscribeTerminalEvents` instead.
-  },
-  markClosed() {
-    // Same — dock store handles close from the event channel.
-  },
-}
-
-export function TerminalBridgeInitializer() {
+export function TerminalBootInitializer() {
   useEffect(() => {
     // Unreachable in production — `desktop-only-initializers.tsx` mounts this
     // component behind its own `isTauri()` gate — but kept as a local guard
@@ -53,10 +30,6 @@ export function TerminalBridgeInitializer() {
     // Capacitor reattach through `lib/terminal/boot-reattach.ts` instead, which
     // is mounted from the dock region and therefore actually runs there.
     if (!isTauri()) return
-    configureTerminalBridge({
-      spawn: createPtyShellSpawn(),
-      outputSink: noopSink,
-    })
     // Warm-import so the first agent-driven terminal_dock_* call does
     // not pay a dynamic-import round-trip inside `handlePluginToolExec`.
     // Best-effort: if the import fails (e.g. test environment without
@@ -91,15 +64,10 @@ export function TerminalBridgeInitializer() {
       .catch(() => undefined)
     return () => {
       stopWaitingForSettings?.()
-      // Drop the bridge state so a subsequent remount (e.g. after fast
-      // refresh) installs a fresh spawn handle. In production this
-      // effectively never runs — the initializer is mounted once at the
-      // app shell.
-      __resetTerminalBridgeForTesting()
     }
   }, [])
 
   return null
 }
 
-export default TerminalBridgeInitializer
+export default TerminalBootInitializer

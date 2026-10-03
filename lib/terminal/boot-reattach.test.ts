@@ -54,8 +54,8 @@ describe("bootReattachTerminals", () => {
     expect(restorePersistedLayout).not.toHaveBeenCalled()
   })
 
-  // `TerminalBridgeInitializer` already reattaches there, alongside the VS Code
-  // bridge and the profile sync it must stay ordered with.
+  // `TerminalBootInitializer` already reattaches there, alongside the profile
+  // sync it must stay ordered with.
   it("leaves the local PTY to the desktop initializer", async () => {
     mockChain = ["tauri-channel"]
     await bootReattachTerminals()
