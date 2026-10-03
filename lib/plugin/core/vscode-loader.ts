@@ -179,6 +179,16 @@ export async function ensureDispatcherConfigured(): Promise<void> {
         callVscodeProvider(pluginId, method, payload, cancellation),
     })
 
+    // `vscode.window`'s messages, quick inputs, progress, status bar and dialogs.
+    const [{ configureVscodeWindow }, { createVscodeWindowPresenter }] = await Promise.all([
+      import("@/lib/plugin/vscode-shim/window-handlers"),
+      import("@/components/plugins/vscode/vscode-window-presenter"),
+    ])
+    configureVscodeWindow({
+      presenter: createVscodeWindowPresenter(),
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+    })
+
     const { createDocumentSync } = await import("@/lib/plugin/vscode-shim/document-sync")
     documentSync = createDocumentSync({
       send: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
@@ -473,6 +483,8 @@ export async function unloadVscodeExtension(
     if (vscodeGenerations.get(pluginId) === generation) {
       vscodeGenerations.delete(pluginId)
       documentSync?.forget(pluginId)
+      const { clearVscodeWindowUi } = await import("@/lib/plugin/vscode-shim/window-handlers")
+      clearVscodeWindowUi(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

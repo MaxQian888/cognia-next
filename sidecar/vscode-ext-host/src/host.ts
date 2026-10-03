@@ -93,6 +93,19 @@ const PENDING_CALLS = new Map<string, CancellationTokenSource>()
 
 const connection = new RpcConnection(process.stdin, process.stdout)
 
+// An extension's stray rejection or throw is its bug, not the host's: log it
+// (stderr reaches the plugin's log stream) and keep serving, as VS Code's
+// extension host does. Node would otherwise exit, and the renderer would
+// restart the host into the same error.
+process.on("unhandledRejection", (reason) => {
+  process.stderr.write(
+    `[extension-host] Unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}\n`
+  )
+})
+process.on("uncaughtException", (error) => {
+  process.stderr.write(`[extension-host] Uncaught exception: ${error.stack ?? error.message}\n`)
+})
+
 /**
  * The open documents and editors every extension in this host sees. Saving
  * goes to the renderer, which owns the text.

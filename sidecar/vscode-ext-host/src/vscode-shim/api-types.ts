@@ -82,6 +82,7 @@ export const DecorationRangeBehavior = {
   ClosedOpen: 3,
 } as const
 export const QuickPickItemKind = { Separator: -1, Default: 0 } as const
+export const InputBoxValidationSeverity = { Info: 1, Warning: 2, Error: 3 } as const
 export const TreeItemCollapsibleState = { None: 0, Collapsed: 1, Expanded: 2 } as const
 export const ColorThemeKind = { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 } as const
 export const FileChangeType = { Changed: 1, Created: 2, Deleted: 3 } as const
@@ -144,6 +145,11 @@ export class ThemeIcon {
     public readonly color?: ThemeColor
   ) {}
 }
+
+/** The built-in quick input buttons; `Back` is the only one VS Code defines. */
+export const QuickInputButtons = {
+  Back: { iconPath: new ThemeIcon("arrow-left"), tooltip: "Back" },
+} as const
 
 // ── Locations and diagnostics ───────────────────────────────────────────
 

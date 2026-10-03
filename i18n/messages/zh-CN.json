@@ -28743,6 +28743,46 @@
     "vscodeWebviews": {
       "empty": "还没有 VS Code 扩展注册任何 Webview。"
     },
+    "vscodeWindow": {
+      "extension": {
+        "fallbackName": "VS Code 扩展"
+      },
+      "message": {
+        "cancel": "取消",
+        "close": "关闭",
+        "from": "来自 {extension}",
+        "severity": {
+          "error": "错误",
+          "info": "信息",
+          "warning": "警告"
+        }
+      },
+      "output": {
+        "openLogs": "打开日志",
+        "shown": "{extension} 向其“{channel}”输出写入了内容"
+      },
+      "progress": {
+        "cancel": "取消",
+        "percent": "{percent}%",
+        "working": "处理中…"
+      },
+      "quickInput": {
+        "ariaInput": "为 {extension} 输入内容",
+        "ariaPick": "为 {extension} 选择一项",
+        "filterPlaceholder": "输入以筛选",
+        "hint": "按 Enter 确认，按 Esc 取消",
+        "noResults": "没有匹配的结果",
+        "ok": "确定",
+        "selectedCount": "{count, plural, =0 {未选择} other {已选择 # 项}}",
+        "step": "第 {step} 步，共 {total} 步",
+        "stepOnly": "第 {step} 步",
+        "toggleAll": "全选",
+        "working": "处理中…"
+      },
+      "statusBar": {
+        "ariaFallback": "{extension} 状态"
+      }
+    },
     "vsixInstall": {
       "cancel": "取消",
       "choose": "选择 .vsix 文件",

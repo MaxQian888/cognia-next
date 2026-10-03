@@ -15,7 +15,9 @@ import {
 
 describe("plugin-sdk: contracts", () => {
   it("publishes the vscode RPC methods the Host refuses", () => {
-    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).toContain("window:createOutputChannel")
+    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).toContain("terminal:create")
+    // Backed methods leave the list.
+    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).not.toContain("window:showQuickPick")
   })
 
   it("re-exports capability contract metadata for all canonical capabilities", () => {

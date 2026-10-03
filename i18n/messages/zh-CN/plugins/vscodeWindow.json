@@ -1,0 +1,40 @@
+{
+  "extension": {
+    "fallbackName": "VS Code 扩展"
+  },
+  "message": {
+    "severity": {
+      "error": "错误",
+      "info": "信息",
+      "warning": "警告"
+    },
+    "from": "来自 {extension}",
+    "cancel": "取消",
+    "close": "关闭"
+  },
+  "quickInput": {
+    "ariaPick": "为 {extension} 选择一项",
+    "ariaInput": "为 {extension} 输入内容",
+    "filterPlaceholder": "输入以筛选",
+    "noResults": "没有匹配的结果",
+    "step": "第 {step} 步，共 {total} 步",
+    "stepOnly": "第 {step} 步",
+    "working": "处理中…",
+    "ok": "确定",
+    "selectedCount": "{count, plural, =0 {未选择} other {已选择 # 项}}",
+    "hint": "按 Enter 确认，按 Esc 取消",
+    "toggleAll": "全选"
+  },
+  "progress": {
+    "working": "处理中…",
+    "cancel": "取消",
+    "percent": "{percent}%"
+  },
+  "output": {
+    "shown": "{extension} 向其“{channel}”输出写入了内容",
+    "openLogs": "打开日志"
+  },
+  "statusBar": {
+    "ariaFallback": "{extension} 状态"
+  }
+}

@@ -193,7 +193,7 @@ describe("VS Code host-neutral runtime handlers", () => {
       })
     ).toMatchObject({ error: { code: -32000 } })
 
-    const unavailable = await request("window:showInputBox", {
+    const unavailable = await request("terminal:create", {
       extensionId: "publisher.extension",
     })
     expect(unavailable).toMatchObject({

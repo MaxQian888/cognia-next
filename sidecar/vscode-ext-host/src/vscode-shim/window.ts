@@ -11,43 +11,54 @@
  * faithful Disposable shape.
  */
 
-import { Disposable, EventEmitter, type Uri } from "./types"
+import {
+  InputBox,
+  QuickPick,
+  showInputBox,
+  showQuickPick,
+  type InputBoxOptions,
+  type QuickPickItem,
+  type QuickPickOptions,
+} from "./quick-input"
+import { Disposable, EventEmitter, Uri, type CancellationToken } from "./types"
+import {
+  createOutputChannel,
+  createStatusBarItem,
+  setStatusBarMessage,
+  withProgress,
+  type StatusBarItem,
+} from "./window-surfaces"
 import type { TextEditor } from "./documents"
 import type { ShimDependencies } from "./index"
 
-interface RpcShowMessageButtons {
-  title: string
-  isCloseAffordance?: boolean
-}
+type MessageItem = string | { title: string; isCloseAffordance?: boolean }
 
 interface SidecarWindow {
-  // Notifications
-  showInformationMessage<T extends string>(message: string, ...items: T[]): Promise<T | undefined>
-  showWarningMessage<T extends string>(message: string, ...items: T[]): Promise<T | undefined>
-  showErrorMessage<T extends string>(message: string, ...items: T[]): Promise<T | undefined>
-  showInputBox(options?: {
-    prompt?: string
+  // Messages: `(message, ...items)` or `(message, options, ...items)`.
+  showInformationMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
+  showWarningMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
+  showErrorMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
+  showInputBox(options?: InputBoxOptions, token?: CancellationToken): Promise<string | undefined>
+  showQuickPick(
+    items: readonly (string | QuickPickItem)[] | Thenable<readonly (string | QuickPickItem)[]>,
+    options?: QuickPickOptions,
+    token?: CancellationToken
+  ): Promise<unknown>
+  createQuickPick<T extends QuickPickItem>(): QuickPick<T>
+  createInputBox(): InputBox
+  showWorkspaceFolderPick(options?: {
     placeHolder?: string
-    value?: string
-    password?: boolean
-  }): Promise<string | undefined>
-  showQuickPick<T extends string>(
-    items: T[],
-    options?: { placeHolder?: string }
-  ): Promise<T | undefined>
-  showOpenDialog(options?: {
-    canSelectFiles?: boolean
-    canSelectFolders?: boolean
-    canSelectMany?: boolean
-    title?: string
-  }): Promise<Uri[] | undefined>
-  showSaveDialog(options?: { title?: string; defaultUri?: Uri }): Promise<Uri | undefined>
-  withProgress<T>(
-    options: { location?: number; title?: string; cancellable?: boolean },
-    task: (progress: {
-      report: (msg: { increment?: number; message?: string }) => void
-    }) => Promise<T>
-  ): Promise<T>
+    ignoreFocusOut?: boolean
+  }): Promise<{ uri: Uri; name: string; index: number } | undefined>
+  showOpenDialog(options?: OpenDialogOptions): Promise<Uri[] | undefined>
+  showSaveDialog(options?: SaveDialogOptions): Promise<Uri | undefined>
+  withProgress<R>(
+    options: { location: number | { viewId: string }; title?: string; cancellable?: boolean },
+    task: (
+      progress: { report(value: { message?: string; increment?: number }): void },
+      token: CancellationToken
+    ) => Thenable<R>
+  ): Promise<R>
 
   // Editors & decorations
   readonly activeTextEditor: TextEditor | undefined
@@ -83,11 +94,28 @@ interface SidecarWindow {
   }): Terminal
 
   // Status bar
-  createStatusBarItem(alignment?: number, priority?: number): StatusBarItem
-  setStatusBarMessage(text: string, hideAfterTimeout?: number): Disposable
+  createStatusBarItem(...args: unknown[]): StatusBarItem
+  setStatusBarMessage(text: string, hideAfter?: number | Thenable<unknown>): Disposable
 
-  // Output channel
-  createOutputChannel(name: string): OutputChannel
+  // Output channel: `(name, languageId?)`, or `(name, { log: true })` for a LogOutputChannel.
+  createOutputChannel(name: string, options?: string | { log: true }): OutputChannel
+}
+
+interface OpenDialogOptions {
+  defaultUri?: Uri
+  openLabel?: string
+  canSelectFiles?: boolean
+  canSelectFolders?: boolean
+  canSelectMany?: boolean
+  filters?: Record<string, string[]>
+  title?: string
+}
+
+interface SaveDialogOptions {
+  defaultUri?: Uri
+  saveLabel?: string
+  filters?: Record<string, string[]>
+  title?: string
 }
 
 export interface WebviewPanel {
@@ -127,98 +155,93 @@ export interface Terminal {
   readonly exitStatus: { code: number | null } | undefined
 }
 
-export interface StatusBarItem {
-  text: string
-  tooltip: string | undefined
-  alignment: number
-  priority: number | undefined
-  show(): void
-  hide(): void
-  dispose(): void
-}
-
-export interface OutputChannel {
-  readonly name: string
-  append(value: string): void
-  appendLine(value: string): void
-  clear(): void
-  show(preserveFocus?: boolean): void
-  hide(): void
-  dispose(): void
-}
+export type OutputChannel = ReturnType<typeof createOutputChannel>
 
 export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
   const { connection, extensionId } = deps
   const documents = deps.documents
 
+  /**
+   * `show*Message(message, ...items)` or `(message, options, ...items)`.
+   * Items are strings or `MessageItem`s; the chosen one comes back as given.
+   */
+  async function showMessage(
+    severity: "info" | "warning" | "error",
+    message: string,
+    rest: unknown[]
+  ): Promise<MessageItem | undefined> {
+    const first = rest[0]
+    const hasOptions =
+      typeof first === "object" && first !== null && !("title" in (first as object))
+    const options = (hasOptions ? first : {}) as { modal?: boolean; detail?: string }
+    const items = (hasOptions ? rest.slice(1) : rest).filter(
+      (item): item is MessageItem =>
+        typeof item === "string" || (typeof item === "object" && item !== null)
+    )
+    const chosen = await connection.sendRequest<number | null>("window:showMessage", {
+      extensionId,
+      severity,
+      message,
+      ...(options.detail ? { detail: options.detail } : {}),
+      modal: Boolean(options.modal),
+      items: items.map((item) =>
+        typeof item === "string"
+          ? { title: item }
+          : { title: item.title, ...(item.isCloseAffordance ? { isCloseAffordance: true } : {}) }
+      ),
+    })
+    return typeof chosen === "number" ? items[chosen] : undefined
+  }
+
   const api: SidecarWindow = {
-    async showInformationMessage<T extends string>(
-      message: string,
-      ...items: T[]
-    ): Promise<T | undefined> {
-      return connection.sendRequest("window:showMessage", {
+    showInformationMessage: (message, ...rest) => showMessage("info", message, rest),
+    showWarningMessage: (message, ...rest) => showMessage("warning", message, rest),
+    showErrorMessage: (message, ...rest) => showMessage("error", message, rest),
+    showInputBox: (options, token) => showInputBox(connection, extensionId, options, token),
+    showQuickPick: (items, options, token) =>
+      showQuickPick(connection, extensionId, items, options, token),
+    createQuickPick: <T extends QuickPickItem>() => new QuickPick<T>(connection, extensionId),
+    createInputBox: () => new InputBox(connection, extensionId),
+    async showWorkspaceFolderPick(options) {
+      const folders = await connection.sendRequest<Array<{ uri: string; name: string }>>(
+        "workspace:listFolders",
+        {}
+      )
+      if (folders.length === 0) return undefined
+      const items = folders.map((folder, index) => ({
+        label: folder.name,
+        description: Uri.parse(folder.uri).fsPath,
+        index,
+      }))
+      const picked = (await showQuickPick(connection, extensionId, items, {
+        placeHolder: options?.placeHolder,
+        ignoreFocusOut: options?.ignoreFocusOut,
+      })) as (typeof items)[number] | undefined
+      if (!picked) return undefined
+      const folder = folders[picked.index]
+      return { uri: Uri.parse(folder.uri), name: folder.name, index: picked.index }
+    },
+    async showOpenDialog(options) {
+      const picked = await connection.sendRequest<string[] | null>("window:showOpenDialog", {
         extensionId,
-        severity: "info",
-        message,
-        items: items.map<RpcShowMessageButtons>((i) => ({ title: i })),
+        options: {
+          ...options,
+          ...(options?.defaultUri ? { defaultUri: options.defaultUri.toString() } : {}),
+        },
       })
+      return picked && picked.length > 0 ? picked.map((uri) => Uri.parse(uri)) : undefined
     },
-    async showWarningMessage<T extends string>(
-      message: string,
-      ...items: T[]
-    ): Promise<T | undefined> {
-      return connection.sendRequest("window:showMessage", {
+    async showSaveDialog(options) {
+      const picked = await connection.sendRequest<string | null>("window:showSaveDialog", {
         extensionId,
-        severity: "warning",
-        message,
-        items: items.map((i) => ({ title: i })),
+        options: {
+          ...options,
+          ...(options?.defaultUri ? { defaultUri: options.defaultUri.toString() } : {}),
+        },
       })
+      return picked ? Uri.parse(picked) : undefined
     },
-    async showErrorMessage<T extends string>(
-      message: string,
-      ...items: T[]
-    ): Promise<T | undefined> {
-      return connection.sendRequest("window:showMessage", {
-        extensionId,
-        severity: "error",
-        message,
-        items: items.map((i) => ({ title: i })),
-      })
-    },
-    showInputBox(options) {
-      return connection.sendRequest("window:showInputBox", { extensionId, options })
-    },
-    showQuickPick<T extends string>(
-      items: T[],
-      options?: { placeHolder?: string }
-    ): Promise<T | undefined> {
-      return connection.sendRequest<T | undefined>("window:showQuickPick", {
-        extensionId,
-        items,
-        options,
-      })
-    },
-    showOpenDialog(options) {
-      return connection.sendRequest("window:showOpenDialog", { extensionId, options })
-    },
-    showSaveDialog(options) {
-      return connection.sendRequest("window:showSaveDialog", { extensionId, options })
-    },
-    async withProgress(options, task) {
-      const handle = await connection.sendRequest<string>("window:progressStart", {
-        extensionId,
-        options,
-      })
-      try {
-        return await task({
-          report: (msg) => {
-            void connection.sendNotification("window:progressReport", { handle, msg })
-          },
-        })
-      } finally {
-        void connection.sendNotification("window:progressEnd", { handle })
-      }
-    },
+    withProgress: (options, task) => withProgress(connection, extensionId, options, task),
     get activeTextEditor() {
       return documents.activeEditor
     },
@@ -302,24 +325,11 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
     createTerminal(options) {
       return buildTerminal(connection, extensionId, options)
     },
-    createStatusBarItem(alignment = 1, priority) {
-      return buildStatusBarItem(connection, extensionId, alignment, priority)
-    },
-    setStatusBarMessage(text, hideAfterTimeout) {
-      const handle = `sbm:${Math.random().toString(36).slice(2, 10)}`
-      void connection.sendRequest("window:setStatusBarMessage", {
-        extensionId,
-        handle,
-        text,
-        hideAfterTimeout,
-      })
-      return new Disposable(() => {
-        void connection.sendNotification("window:clearStatusBarMessage", { handle })
-      })
-    },
-    createOutputChannel(name) {
-      return buildOutputChannel(connection, extensionId, name)
-    },
+    createStatusBarItem: (...args) => createStatusBarItem(connection, extensionId, args),
+    setStatusBarMessage: (text, hideAfter) =>
+      setStatusBarMessage(connection, extensionId, text, hideAfter),
+    createOutputChannel: (name, options) =>
+      createOutputChannel(connection, extensionId, name, options),
   }
   return api
 }
@@ -512,87 +522,6 @@ function buildTerminal(
     },
     get exitStatus() {
       return exitStatus
-    },
-  }
-}
-
-function buildStatusBarItem(
-  connection: ShimDependencies["connection"],
-  extensionId: string,
-  alignment: number,
-  priority: number | undefined
-): StatusBarItem {
-  const itemId = `sb:${extensionId}:${Math.random().toString(36).slice(2, 10)}`
-  let text = ""
-  let tooltip: string | undefined
-  void connection.sendRequest("window:createStatusBarItem", {
-    extensionId,
-    itemId,
-    alignment,
-    priority,
-  })
-  return {
-    get text() {
-      return text
-    },
-    set text(v: string) {
-      text = v
-      void connection.sendNotification("window:setStatusBarText", { itemId, text: v })
-    },
-    get tooltip() {
-      return tooltip
-    },
-    set tooltip(v: string | undefined) {
-      tooltip = v
-      void connection.sendNotification("window:setStatusBarTooltip", { itemId, tooltip: v })
-    },
-    alignment,
-    priority,
-    show() {
-      void connection.sendNotification("window:showStatusBarItem", { itemId })
-    },
-    hide() {
-      void connection.sendNotification("window:hideStatusBarItem", { itemId })
-    },
-    dispose() {
-      void connection.sendNotification("window:disposeStatusBarItem", { itemId })
-    },
-  }
-}
-
-function buildOutputChannel(
-  connection: ShimDependencies["connection"],
-  extensionId: string,
-  name: string
-): OutputChannel {
-  const channelId = `ch:${extensionId}:${name}`
-  void connection.sendRequest("window:createOutputChannel", {
-    extensionId,
-    channelId,
-    name,
-  })
-  return {
-    name,
-    append(value) {
-      void connection.sendNotification("window:outputChannelAppend", { channelId, value })
-    },
-    appendLine(value) {
-      void connection.sendNotification("window:outputChannelAppend", {
-        channelId,
-        value: `${value}\n`,
-      })
-    },
-    clear() {
-      void connection.sendNotification("window:outputChannelClear", { channelId })
-    },
-    show(preserveFocus) {
-      void connection.sendNotification("window:outputChannelShow", { channelId, preserveFocus })
-    },
-    hide() {
-      void connection.sendNotification("window:outputChannelHide", { channelId })
-    },
-    dispose() {
-      void connection.sendNotification("window:outputChannelDispose", { channelId })
     },
   }
 }

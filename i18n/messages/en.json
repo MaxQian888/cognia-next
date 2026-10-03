@@ -28743,6 +28743,46 @@
     "vscodeWebviews": {
       "empty": "No VS Code extensions registered any webviews yet."
     },
+    "vscodeWindow": {
+      "extension": {
+        "fallbackName": "VS Code extension"
+      },
+      "message": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "from": "From {extension}",
+        "severity": {
+          "error": "Error",
+          "info": "Information",
+          "warning": "Warning"
+        }
+      },
+      "output": {
+        "openLogs": "Open logs",
+        "shown": "{extension} wrote to its {channel} output"
+      },
+      "progress": {
+        "cancel": "Cancel",
+        "percent": "{percent}%",
+        "working": "Working…"
+      },
+      "quickInput": {
+        "ariaInput": "Enter a value for {extension}",
+        "ariaPick": "Choose an option from {extension}",
+        "filterPlaceholder": "Type to filter",
+        "hint": "Press Enter to confirm or Escape to cancel",
+        "noResults": "No matching results",
+        "ok": "OK",
+        "selectedCount": "{count, plural, =0 {Nothing selected} =1 {1 selected} other {# selected}}",
+        "step": "{step} of {total}",
+        "stepOnly": "Step {step}",
+        "toggleAll": "Select all",
+        "working": "Working…"
+      },
+      "statusBar": {
+        "ariaFallback": "{extension} status"
+      }
+    },
     "vsixInstall": {
       "cancel": "Cancel",
       "choose": "Choose .vsix file",
