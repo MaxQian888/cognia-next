@@ -27785,7 +27785,6 @@
         "empty": "Nothing logged yet.",
         "filter": "Structured logs for {pluginId}, generation {generation}",
         "missing": {
-          "vscode-no-channel": "The VS Code extension host does not serve output channels. `window:outputChannelAppend` is on its explicitly-unavailable list, so an extension writing there gets a capability error and nothing is buffered.",
           "wasm-no-channel": "WASM plugins have no per-plugin output channel. The host reports failures by throwing, which surfaces in attempt diagnostics above rather than here."
         },
         "title": "Runtime logs",

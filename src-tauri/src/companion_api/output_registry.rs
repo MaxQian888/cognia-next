@@ -798,6 +798,7 @@ mod tests {
         ("plugin_activate_vscode", OutputShape::Opaque(RootType::Any)),
         ("plugin_deactivate_vscode", OutputShape::Scalar(ScalarShape::Null)),
         ("plugin_unload_vscode", OutputShape::Scalar(ScalarShape::Null)),
+        ("plugin_vscode_uninstall", OutputShape::Scalar(ScalarShape::Null)),
         ("plugin_invoke_vscode_rpc", OutputShape::Scalar(ScalarShape::Text)),
         ("plugin_vscode_send_response", OutputShape::Scalar(ScalarShape::Null)),
         ("plugin_launch_js", OutputShape::Opaque(RootType::Any)),

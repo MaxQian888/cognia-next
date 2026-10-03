@@ -9,8 +9,9 @@
  * ## Why `engines.vscode` is the wrong thing to gate on
  *
  * The obvious gate is `engines.vscode: ^1.93.0` against a shim that reports
- * `1.74.0` (`sidecar/vscode-ext-host/src/vscode-shim/index.ts` → `version:
- * "cognia-1.74.0"`). Refusing on that range would be wrong in both directions:
+ * `1.91.0` (`SHIM_VSCODE_API_VERSION` in
+ * `sidecar/vscode-ext-host/src/vscode-shim/index.ts`). Refusing on that range
+ * would be wrong in both directions:
  *
  * - **It rejects extensions that work.** The range says which VS Code the
  *   publisher built against, never which APIs they call. Practically every
@@ -49,12 +50,13 @@ import type { VsCodePermissionInference } from "@/types/plugin/plugin-vscode"
 /**
  * The VS Code version the shim reports as `vscode.version`.
  *
- * Not a guess: it is read off the sidecar's own namespace factory
- * (`sidecar/vscode-ext-host/src/vscode-shim/index.ts:110`, `"cognia-1.74.0"`).
- * If the shim's advertised version moves, this must move with it — they are the
- * same claim made to two audiences.
+ * Not a guess: it is the sidecar shim's `SHIM_VSCODE_API_VERSION`
+ * (`sidecar/vscode-ext-host/src/vscode-shim/index.ts`), the API level it
+ * implements. It is valid semver because `vscode-languageclient` parses it and
+ * requires `^1.91.0`. If the shim's advertised version moves, this must move
+ * with it: they are the same claim made to two audiences (a test pins it).
  */
-export const SHIM_VSCODE_VERSION = "1.74.0"
+export const SHIM_VSCODE_VERSION = "1.91.0"
 
 /**
  * Namespaces whose every callable throws `NotSupportedError` at runtime.

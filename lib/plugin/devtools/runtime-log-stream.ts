@@ -13,9 +13,10 @@
  *   vscode-extension   nothing.
  *
  * A Python plugin author watching the workbench saw an empty Runtime Logs
- * card while their real output sat one page away. This module merges the two
- * real sources into one time-ordered stream and names the two gaps rather
- * than leaving them as silence.
+ * card while their real output sat one page away. This module merges the real
+ * sources into one time-ordered stream (VS Code extensions now have one too:
+ * their host's stderr and their output channels) and names the remaining gap
+ * rather than leaving it as silence.
  */
 
 import type { PluginType } from "@/types/plugin"
@@ -26,6 +27,11 @@ import {
   subscribePythonLogs,
   type PythonLogEntry,
 } from "@/lib/plugin/python/log-buffer"
+import {
+  clearVscodeLogs,
+  getVscodeLogs,
+  subscribeVscodeLogs,
+} from "@/lib/plugin/vscode-shim/vscode-log-buffer"
 
 export type PluginLogRuntime = "frontend" | "python" | "wasm" | "vscode"
 export type PluginLogLevel = "debug" | "info" | "warn" | "error"
@@ -51,16 +57,11 @@ export interface PluginRuntimeLogEntry {
  * Why a runtime contributes nothing, so the UI can say so instead of
  * rendering an empty list that looks like a bug.
  *
- * Both are real gaps, not oversights in this module:
- *   - the WASM host reports failures by throwing, and has no per-plugin
- *     output channel to drain.
- *   - the VS Code extension host lists `window:outputChannelAppend` in
- *     `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS`, so an extension that
- *     writes to an output channel gets a capability error, not a buffer.
+ * A real gap, not an oversight in this module: the WASM host reports
+ * failures by throwing, and has no per-plugin output channel to drain.
  */
 export const RUNTIMES_WITHOUT_LOG_CHANNEL = {
   wasm: "wasm-no-channel",
-  "vscode-extension": "vscode-no-channel",
 } as const
 
 export type MissingLogChannelReason =
@@ -95,7 +96,7 @@ export function logSourcesFor(type: PluginType): {
     case "wasm":
       return { runtimes: [], missingReason: RUNTIMES_WITHOUT_LOG_CHANNEL.wasm }
     case "vscode-extension":
-      return { runtimes: [], missingReason: RUNTIMES_WITHOUT_LOG_CHANNEL["vscode-extension"] }
+      return { runtimes: ["vscode"] }
   }
 }
 
@@ -194,6 +195,7 @@ export function getPluginRuntimeLogs(
   const merged = [
     ...getPluginDebugger().getLogs(pluginId).map(normalizeFrontendEntry),
     ...getPythonLogs(pluginId).map(normalizePythonEntry),
+    ...getVscodeLogs(pluginId),
   ]
   const wanted = query.generation == null ? null : String(query.generation)
   const filtered =
@@ -212,13 +214,18 @@ export function subscribePluginRuntimeLogs(pluginId: string, onChange: () => voi
   const offPython = subscribePythonLogs((changedId) => {
     if (changedId === pluginId) onChange()
   })
+  const offVscode = subscribeVscodeLogs((changedId) => {
+    if (changedId === pluginId) onChange()
+  })
   return () => {
     offFrontend()
     offPython()
+    offVscode()
   }
 }
 
 export function clearPluginRuntimeLogs(pluginId: string): void {
   getPluginDebugger().clearLogs(pluginId)
   clearPythonLogs(pluginId)
+  clearVscodeLogs(pluginId)
 }

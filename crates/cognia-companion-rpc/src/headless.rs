@@ -276,10 +276,8 @@ impl HeadlessServices {
                 }
             }
         }));
-        let vscode_dir = plugin_install_dir
-            .parent()
-            .unwrap_or(plugin_install_dir.as_path())
-            .join("vscode-extensions");
+        let vscode_dir =
+            cognia_plugin_runtime::vscode::extension_install_dir_for(&plugin_install_dir);
         let vscode_plugins = Arc::new(cognia_plugin_runtime::vscode::VscodeExtensionState::new(
             vscode_dir,
         ));

@@ -959,6 +959,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_activate_vscode",
     "plugin_deactivate_vscode",
     "plugin_unload_vscode",
+    "plugin_vscode_uninstall",
     "plugin_invoke_vscode_rpc",
     "plugin_vscode_send_response",
     // ── Workflow CRUD (ADR-0027 Wave 4.1) ───────────────────────────────────
@@ -2299,6 +2300,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "plugin_activate_vscode",
     "plugin_deactivate_vscode",
     "plugin_unload_vscode",
+    "plugin_vscode_uninstall",
     "plugin_invoke_vscode_rpc",
     "plugin_vscode_send_response",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane. Exports are

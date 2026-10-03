@@ -11293,6 +11293,9 @@
     "plugin_unload_vscode": {
       "$ref": "#/$defs/NullResult"
     },
+    "plugin_vscode_uninstall": {
+      "$ref": "#/$defs/NullResult"
+    },
     "plugin_vscode_send_response": {
       "$ref": "#/$defs/NullResult"
     },

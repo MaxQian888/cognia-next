@@ -59,7 +59,8 @@ pub async fn plugin_backup_create_for_state(
 ) -> Result<BackupPayload> {
     crate::validate_plugin_id_path_component(&plugin_id)?;
     let plugin_dir = state.plugin_dir(&plugin_id);
-    if !plugin_dir.exists() {
+    let trees = BackupTrees::for_plugin(state, &plugin_id);
+    if !plugin_dir.exists() && !trees.vscode_install.exists() {
         return Err(PluginError::NotFound(plugin_id));
     }
     let backups = ensure_backups_dir(state)?;
@@ -69,14 +70,30 @@ pub async fn plugin_backup_create_for_state(
     let archive_file = File::create(&archive_path)?;
     let encoder = GzEncoder::new(archive_file, Compression::default());
     let mut builder = tar::Builder::new(encoder);
-    builder
-        .append_dir_all(&plugin_id, &plugin_dir)
-        .map_err(|e| PluginError::Internal(format!("tar append: {e}")))?;
-    let host_state_dir = state.plugin_host_state_dir(&plugin_id);
-    if host_state_dir.exists() {
+    if plugin_dir.exists() {
         builder
-            .append_dir_all(Path::new(".host-state").join(&plugin_id), &host_state_dir)
-            .map_err(|e| PluginError::Internal(format!("tar host state: {e}")))?;
+            .append_dir_all(&plugin_id, &plugin_dir)
+            .map_err(|e| PluginError::Internal(format!("tar append: {e}")))?;
+    }
+    for (archived, source) in [
+        (
+            Path::new(HOST_STATE_ENTRY).join(&plugin_id),
+            trees.host_state.clone(),
+        ),
+        (
+            Path::new(VSCODE_INSTALL_ENTRY).join(&plugin_id),
+            trees.vscode_install.clone(),
+        ),
+        (
+            Path::new(VSCODE_STATE_ENTRY).join(&plugin_id),
+            trees.vscode_state.clone(),
+        ),
+    ] {
+        if source.exists() {
+            builder
+                .append_dir_all(&archived, &source)
+                .map_err(|e| PluginError::Internal(format!("tar {}: {e}", archived.display())))?;
+        }
     }
     builder
         .into_inner()
@@ -163,38 +180,96 @@ pub async fn plugin_backup_restore_for_state(
             .map_err(|e| PluginError::Internal(format!("unpack backup entry: {e}")))?;
     }
 
+    let trees = BackupTrees::for_plugin(state, &plugin_id);
     let staged_plugin = staging.path().join(&plugin_id);
-    if !staged_plugin.is_dir() {
+    let staged_vscode = staging.path().join(VSCODE_INSTALL_ENTRY).join(&plugin_id);
+    if !staged_plugin.is_dir() && !staged_vscode.is_dir() {
         return Err(PluginError::InvalidArgument(
             "backup does not contain the requested plugin".into(),
         ));
     }
-    let staged_host_state = staging.path().join(".host-state").join(&plugin_id);
-    let rollback_plugin = staging.path().join(".rollback-package");
-    let rollback_host_state = staging.path().join(".rollback-host-state");
+    // Every tree is replaced by the backup's copy, or removed when the backup
+    // has none, as one transaction: a failure puts every tree back.
+    swap_trees(
+        staging.path(),
+        &[
+            (staged_plugin, plugin_dir),
+            (
+                staging.path().join(HOST_STATE_ENTRY).join(&plugin_id),
+                host_state_dir,
+            ),
+            (staged_vscode, trees.vscode_install),
+            (
+                staging.path().join(VSCODE_STATE_ENTRY).join(&plugin_id),
+                trees.vscode_state,
+            ),
+        ],
+    )
+}
 
-    if plugin_dir.exists() {
-        fs::rename(&plugin_dir, &rollback_plugin)?;
-    }
-    if host_state_dir.exists() {
-        fs::rename(&host_state_dir, &rollback_host_state)?;
-    }
+const HOST_STATE_ENTRY: &str = ".host-state";
+const VSCODE_INSTALL_ENTRY: &str = ".vscode-extension";
+const VSCODE_STATE_ENTRY: &str = ".vscode-extension-state";
 
-    if let Err(error) = fs::rename(&staged_plugin, &plugin_dir) {
-        let _ = restore_renamed_tree(&rollback_plugin, &plugin_dir);
-        let _ = restore_renamed_tree(&rollback_host_state, &host_state_dir);
-        return Err(PluginError::Io(error));
-    }
-    if staged_host_state.exists() {
-        if let Some(parent) = host_state_dir.parent() {
-            fs::create_dir_all(parent)?;
+/// The trees beside a plugin's own directory that its backup carries.
+struct BackupTrees {
+    host_state: std::path::PathBuf,
+    /// A `.vsix` install (`vscode-extensions/<id>`).
+    vscode_install: std::path::PathBuf,
+    /// Its storage and Mementos (`vscode-extension-state/<id>`).
+    vscode_state: std::path::PathBuf,
+}
+
+impl BackupTrees {
+    fn for_plugin(state: &PluginRuntimeState, plugin_id: &str) -> Self {
+        let installs = crate::vscode::extension_install_dir_for(&state.plugin_install_dir);
+        let sanitized = crate::sanitize_plugin_id(plugin_id);
+        Self {
+            host_state: state.plugin_host_state_dir(plugin_id),
+            vscode_state: crate::vscode::extension_state_root_for(&installs).join(&sanitized),
+            vscode_install: installs.join(sanitized),
         }
-        if let Err(error) = fs::rename(&staged_host_state, &host_state_dir) {
-            let _ = fs::remove_dir_all(&plugin_dir);
-            let _ = restore_renamed_tree(&rollback_plugin, &plugin_dir);
-            let _ = restore_renamed_tree(&rollback_host_state, &host_state_dir);
+    }
+}
+
+/// Replace each `(staged, target)`: move every existing target aside under
+/// `scratch`, then move each staged tree in. Any failure removes what was
+/// moved in and moves every original back.
+fn swap_trees(scratch: &Path, pairs: &[(std::path::PathBuf, std::path::PathBuf)]) -> Result<()> {
+    let mut moved_out: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    let mut moved_in: Vec<std::path::PathBuf> = Vec::new();
+    let undo = |moved_in: &[std::path::PathBuf],
+                moved_out: &[(std::path::PathBuf, std::path::PathBuf)]| {
+        for target in moved_in {
+            let _ = fs::remove_dir_all(target);
+        }
+        for (rollback, target) in moved_out {
+            let _ = restore_renamed_tree(rollback, target);
+        }
+    };
+    for (index, (_, target)) in pairs.iter().enumerate() {
+        if target.exists() {
+            let rollback = scratch.join(format!(".rollback-{index}"));
+            if let Err(error) = fs::rename(target, &rollback) {
+                undo(&moved_in, &moved_out);
+                return Err(PluginError::Io(error));
+            }
+            moved_out.push((rollback, target.clone()));
+        }
+    }
+    for (staged, target) in pairs {
+        if !staged.exists() {
+            continue;
+        }
+        let result = target
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::rename(staged, target));
+        if let Err(error) = result {
+            undo(&moved_in, &moved_out);
             return Err(PluginError::Io(error));
         }
+        moved_in.push(target.clone());
     }
     Ok(())
 }
@@ -263,7 +338,10 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_state(tmp: &TempDir) -> PluginRuntimeState {
-        PluginRuntimeState::new(PathBuf::from(tmp.path()))
+        // Nested, so the sibling VS Code roots stay inside the temp dir too.
+        let plugins = tmp.path().join("cognia").join("plugins");
+        fs::create_dir_all(&plugins).unwrap();
+        PluginRuntimeState::new(plugins)
     }
 
     fn seed_plugin_dir(state: &PluginRuntimeState, plugin_id: &str, contents: &str) {
@@ -330,6 +408,39 @@ mod tests {
         assert!(matches!(err, Some(PluginError::InvalidArgument(_))));
         // Original archive untouched.
         assert!(archive_path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_vscode_extension_backs_up_its_install_and_state_and_restores_both() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let trees = BackupTrees::for_plugin(&state, "acme.tools");
+        fs::create_dir_all(&trees.vscode_install).unwrap();
+        fs::write(trees.vscode_install.join("package.json"), b"v1").unwrap();
+        fs::create_dir_all(trees.vscode_state.join("global")).unwrap();
+        fs::write(trees.vscode_state.join("global/state.json"), b"{\"n\":1}").unwrap();
+        assert!(
+            !state.plugin_dir("acme.tools").exists(),
+            "a .vsix install has no plugin dir"
+        );
+
+        let backup = plugin_backup_create_for_state(&state, "acme.tools".to_string(), None)
+            .await
+            .unwrap();
+        fs::write(trees.vscode_install.join("package.json"), b"v2").unwrap();
+        fs::write(trees.vscode_state.join("global/state.json"), b"{\"n\":2}").unwrap();
+        plugin_backup_restore_for_state(&state, "acme.tools".to_string(), backup.backup_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read(trees.vscode_install.join("package.json")).unwrap(),
+            b"v1"
+        );
+        assert_eq!(
+            fs::read(trees.vscode_state.join("global/state.json")).unwrap(),
+            b"{\"n\":1}"
+        );
+        assert!(!state.plugin_dir("acme.tools").exists());
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { appendVscodeLog } from "@/lib/plugin/vscode-shim/vscode-log-buffer"
 import { getPluginDebugger, resetPluginDebugger } from "./debugger"
 import { __resetPythonLogBufferForTesting, appendPythonEvent } from "@/lib/plugin/python/log-buffer"
 import {
@@ -37,11 +38,20 @@ describe("logSourcesFor", () => {
     })
   })
 
-  it("names why a vscode extension produces nothing", () => {
-    expect(logSourcesFor("vscode-extension")).toEqual({
-      runtimes: [],
-      missingReason: RUNTIMES_WITHOUT_LOG_CHANNEL["vscode-extension"],
-    })
+  it("streams a vscode extension's host output and output channels", () => {
+    expect(logSourcesFor("vscode-extension")).toEqual({ runtimes: ["vscode"] })
+  })
+})
+
+describe("VS Code extension logs", () => {
+  it("merge into the stream in time order", () => {
+    clearPluginRuntimeLogs("vs")
+    appendVscodeLog("vs", { level: "warn", message: "from stderr", kind: "stderr" })
+    expect(getPluginRuntimeLogs("vs")).toEqual([
+      expect.objectContaining({ runtime: "vscode", level: "warn", message: "from stderr" }),
+    ])
+    clearPluginRuntimeLogs("vs")
+    expect(getPluginRuntimeLogs("vs")).toEqual([])
   })
 })
 

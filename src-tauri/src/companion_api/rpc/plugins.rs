@@ -74,6 +74,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "plugin_activate_vscode",
     "plugin_deactivate_vscode",
     "plugin_unload_vscode",
+    "plugin_vscode_uninstall",
     "plugin_invoke_vscode_rpc",
     "plugin_vscode_send_response",
     "plugin_launch_js",
@@ -1210,11 +1211,14 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
+            let workspace_root: Option<String> =
+                optional_aliased(&args, "workspace_root", "workspaceRoot")?;
             crate::plugin_api::vscode::commands::plugin_activate_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
                 config_json,
+                workspace_root,
             )
             .await
             .map_err(vscode_rpc_error)
@@ -1230,6 +1234,19 @@ pub(super) async fn dispatch(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+        "plugin_vscode_uninstall" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::vscode::commands::plugin_vscode_uninstall_for_state(
+                services.vscode_plugins.as_ref(),
+                plugin_id,
             )
             .await
             .map(|_| Value::Null)

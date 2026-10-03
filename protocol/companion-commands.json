@@ -14674,6 +14674,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "plugin_vscode_uninstall",
+      "resource": "plugin.vscode",
+      "verb": "uninstall",
+      "arm": "plugin_vscode_uninstall",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "plugin_verify_detached_signature",
       "resource": "plugin.detached_signature",
       "verb": "verify",

@@ -30,8 +30,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::process::{ChildStdin, ChildStdout, Command};
+use tokio::sync::{mpsc, oneshot, watch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SidecarError {
@@ -78,8 +78,56 @@ pub struct Sidecar {
     /// Inbound frame sink for sidecar-initiated requests/notifications.
     /// `commands::plugin_load_vscode` wires this to a Tauri event emitter.
     pub notify_tx: Arc<Mutex<Option<mpsc::UnboundedSender<InboundFrame>>>>,
-    /// Handle to the spawned process so we can kill it on drop.
-    child: Arc<Mutex<Option<Child>>>,
+    /// The extension's persisted `globalState` / `workspaceState`, set at
+    /// activation. `memento:write` notifications are applied here and never
+    /// reach the renderer.
+    pub mementos: Arc<Mutex<Option<super::memento::ExtensionMementos>>>,
+    /// Asks the waiter task (which owns the child) to kill it.
+    kill_tx: Mutex<Option<oneshot::Sender<()>>>,
+    /// How the process ended, once it has.
+    exit_rx: watch::Receiver<Option<SidecarExit>>,
+}
+
+/// How a sidecar process ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarExit {
+    pub code: Option<i32>,
+    pub signal: Option<i32>,
+    /// Killed by the host (unload, replacement), not a crash.
+    pub intentional: bool,
+}
+
+/// Longest stderr line forwarded to the renderer; the rest is cut.
+pub const MAX_STDERR_LINE: usize = 4096;
+
+/// A JSON-RPC notification the host itself originates on the renderer channel.
+fn host_notification(method: &str, params: serde_json::Value) -> String {
+    serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params }).to_string()
+}
+
+fn forward(
+    notify: &Arc<Mutex<Option<mpsc::UnboundedSender<InboundFrame>>>>,
+    extension_id: &str,
+    raw_frame: String,
+) {
+    if let Some(tx) = notify.lock().as_ref() {
+        let _ = tx.send(InboundFrame {
+            extension_id: extension_id.to_string(),
+            raw_frame,
+        });
+    }
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
 }
 
 impl Sidecar {
@@ -110,6 +158,9 @@ impl Sidecar {
         let pid = child.id().ok_or(SidecarError::PidUnavailable)?;
         let stdin = child.stdin.take().ok_or(SidecarError::StdioNotPiped)?;
         let stdout = child.stdout.take().ok_or(SidecarError::StdioNotPiped)?;
+        let stderr = child.stderr.take().ok_or(SidecarError::StdioNotPiped)?;
+        let mementos: Arc<Mutex<Option<super::memento::ExtensionMementos>>> =
+            Arc::new(Mutex::new(None));
 
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
         let pending: Arc<Mutex<HashMap<i64, oneshot::Sender<String>>>> =
@@ -143,6 +194,7 @@ impl Sidecar {
         let pending_for_reader = pending.clone();
         let notify_for_reader = notify_tx.clone();
         let extension_id_for_reader = req.extension_id.clone();
+        let mementos_for_reader = mementos.clone();
         tokio::spawn(async move {
             let stdout: ChildStdout = stdout;
             let mut lines = BufReader::new(stdout).lines();
@@ -165,14 +217,30 @@ impl Sidecar {
                     continue;
                 }
 
-                if has_method {
-                    let guard = notify_for_reader.lock();
-                    if let Some(tx) = guard.as_ref() {
-                        let _ = tx.send(InboundFrame {
-                            extension_id: extension_id_for_reader.clone(),
-                            raw_frame: line.clone(),
-                        });
+                if parsed.get("method").and_then(|value| value.as_str()) == Some("memento:write")
+                    && id_value.is_none()
+                {
+                    // Persisted here, never forwarded: the renderer has no
+                    // part in an extension's own state.
+                    let params = parsed.get("params").cloned().unwrap_or_default();
+                    let mut guard = mementos_for_reader.lock();
+                    match guard.as_mut() {
+                        Some(mementos) => {
+                            if let Err(error) = mementos.apply_write(&params) {
+                                log::warn!(
+                                    "VS Code extension {extension_id_for_reader} memento write refused: {error}"
+                                );
+                            }
+                        }
+                        None => log::warn!(
+                            "VS Code extension {extension_id_for_reader} wrote a memento before activation"
+                        ),
                     }
+                    continue;
+                }
+
+                if has_method {
+                    forward(&notify_for_reader, &extension_id_for_reader, line.clone());
                 }
             }
 
@@ -193,6 +261,68 @@ impl Sidecar {
             }
         });
 
+        // Stderr reader: drained so a chatty extension cannot fill the pipe and
+        // stall, logged, and forwarded line by line (bounded) for the
+        // plugin's log stream.
+        let notify_for_stderr = notify_tx.clone();
+        let extension_id_for_stderr = req.extension_id.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(mut line)) = lines.next_line().await {
+                if line.len() > MAX_STDERR_LINE {
+                    let mut cut = MAX_STDERR_LINE;
+                    while !line.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    line.truncate(cut);
+                    line.push('…');
+                }
+                log::debug!("[vscode-ext {extension_id_for_stderr}] {line}");
+                forward(
+                    &notify_for_stderr,
+                    &extension_id_for_stderr,
+                    host_notification("host:stderr", serde_json::json!({ "line": line })),
+                );
+            }
+        });
+
+        // Waiter: owns the child, kills it on request, and reports how it
+        // ended, so a crash is visible instead of a silent dead entry.
+        let (kill_tx, kill_rx) = oneshot::channel::<()>();
+        let (exit_tx, exit_rx) = watch::channel::<Option<SidecarExit>>(None);
+        let notify_for_waiter = notify_tx.clone();
+        let extension_id_for_waiter = req.extension_id.clone();
+        tokio::spawn(async move {
+            let (status, intentional) = tokio::select! {
+                status = child.wait() => (status, false),
+                _ = kill_rx => {
+                    let _ = child.start_kill();
+                    (child.wait().await, true)
+                }
+            };
+            let exit = SidecarExit {
+                code: status.as_ref().ok().and_then(|status| status.code()),
+                signal: status.as_ref().ok().and_then(exit_signal),
+                intentional,
+            };
+            if !intentional {
+                log::warn!(
+                    "VS Code extension host for {extension_id_for_waiter} exited: code {:?}, signal {:?}",
+                    exit.code,
+                    exit.signal
+                );
+            }
+            forward(
+                &notify_for_waiter,
+                &extension_id_for_waiter,
+                host_notification(
+                    "host:exited",
+                    serde_json::to_value(&exit).unwrap_or_default(),
+                ),
+            );
+            let _ = exit_tx.send(Some(exit));
+        });
+
         Ok(Self {
             extension_id: req.extension_id,
             extension_path: req.extension_path,
@@ -201,7 +331,9 @@ impl Sidecar {
             stdin_tx,
             pending,
             notify_tx,
-            child: Arc::new(Mutex::new(Some(child))),
+            mementos,
+            kill_tx: Mutex::new(Some(kill_tx)),
+            exit_rx,
         })
     }
 
@@ -234,20 +366,47 @@ impl Sidecar {
         *self.notify_tx.lock() = Some(tx);
     }
 
+    /// Kill the process and wait (briefly) for it to be gone.
     pub async fn kill(&self) {
-        let child_opt = self.child.lock().take();
-        if let Some(mut child) = child_opt {
-            let _ = child.kill().await;
+        if let Some(kill) = self.kill_tx.lock().take() {
+            let _ = kill.send(());
         }
+        let mut exit = self.exit_rx.clone();
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            exit.wait_for(|exit| exit.is_some()),
+        )
+        .await;
+    }
+
+    /// How the process ended, or `None` while it runs.
+    pub fn exit(&self) -> Option<SidecarExit> {
+        self.exit_rx.borrow().clone()
+    }
+
+    /// Resolves when the process ends, however it ends.
+    pub async fn exited(&self) -> SidecarExit {
+        let mut exit = self.exit_rx.clone();
+        let ended = exit
+            .wait_for(|exit| exit.is_some())
+            .await
+            .ok()
+            .and_then(|exit| exit.clone());
+        ended.unwrap_or(SidecarExit {
+            code: None,
+            signal: None,
+            intentional: false,
+        })
     }
 }
 
 impl Drop for Sidecar {
     fn drop(&mut self) {
-        // Best-effort sync kill so dropping a Sidecar handle (e.g. during
-        // shutdown) doesn't leak the child.
-        if let Some(mut child) = self.child.lock().take() {
-            let _ = child.start_kill();
+        // Dropping the handle (e.g. during shutdown) kills the child: the
+        // waiter does it on this signal, and `kill_on_drop` covers a waiter
+        // that is itself gone with its runtime.
+        if let Some(kill) = self.kill_tx.lock().take() {
+            let _ = kill.send(());
         }
     }
 }

@@ -2980,6 +2980,36 @@ describe("PluginManager", () => {
       })
       expect(removePluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
     })
+
+    it("removes a VS Code extension's own install and state before the plugin directory", async () => {
+      const manifest = { ...createManifest("acme.vsc"), type: "vscode-extension" as const }
+      const store = {
+        plugins: {
+          "acme.vsc": {
+            manifest,
+            status: "installed",
+            source: "local",
+            path: "/plugins/acme.vsc",
+            config: {},
+          } as Plugin,
+        },
+        uninstallPlugin: jest.fn(async () => undefined),
+        unloadPlugin: jest.fn(async () => undefined),
+        setPluginError: jest.fn(),
+        setPluginStatus: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockClear()
+      mockInvoke.mockResolvedValue(undefined)
+
+      await new PluginManager({ pluginDirectory: "/plugins" }).uninstallPlugin("acme.vsc")
+
+      const commands = mockInvoke.mock.calls.map(([command]) => command)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_vscode_uninstall", { pluginId: "acme.vsc" })
+      expect(commands.indexOf("plugin_vscode_uninstall")).toBeLessThan(
+        commands.indexOf("plugin_uninstall")
+      )
+    })
   })
 
   describe("disablePlugin", () => {

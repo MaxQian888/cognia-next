@@ -4376,6 +4376,15 @@ export class PluginManager {
         // directory to delete — invoking there threw, and a successful
         // uninstall was recorded as a failure with the plugin left in error.
         if (this.canInvokeNativeHost() && !plugin.path?.startsWith("builtin://")) {
+          if (plugin.manifest.type === "vscode-extension") {
+            // The extension's own install root and its globalState /
+            // workspaceState live beside the plugin directory, not in it;
+            // only the VS Code host knows them.
+            await this.invokeNativeHost("plugin_vscode_uninstall", { pluginId })
+            const { getVscodeHostSupervisor } =
+              await import("@/lib/plugin/vscode-shim/host-supervisor")
+            getVscodeHostSupervisor().reset(pluginId)
+          }
           await this.invokeNativeHost("plugin_uninstall", {
             pluginId,
             pluginPath: plugin.path,

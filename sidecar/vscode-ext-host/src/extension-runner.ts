@@ -30,6 +30,7 @@ import * as vm from "node:vm"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { registerVscodeShim, unregisterVscodeShim } from "./require-hook"
+import type { Uri } from "./vscode-shim/types"
 
 export interface ExtensionLoadRequest {
   extensionId: string
@@ -45,15 +46,21 @@ export interface SidecarExtensionContext {
   globalState: KvStore
   workspaceState: KvStore
   secrets: SecretsStore
-  extensionUri: string
+  extensionUri: Uri
   extensionPath: string
-  globalStorageUri: string
-  storageUri: string
-  logUri: string
-  extensionMode: "production" | "development" | "test"
+  globalStorageUri: Uri
+  globalStoragePath: string
+  /** Undefined when no workspace folder is open. */
+  storageUri: Uri | undefined
+  storagePath: string | undefined
+  logUri: Uri
+  logPath: string
+  /** `ExtensionMode`: Production 1, Development 2, Test 3. */
+  extensionMode: number
   extension: {
     id: string
     extensionPath: string
+    extensionUri: Uri
     isActive: boolean
     packageJSON: Record<string, unknown>
     exports?: unknown
@@ -112,9 +119,10 @@ export interface Disposable {
 }
 
 export interface KvStore {
-  get<T>(key: string): T | undefined
+  get<T>(key: string, defaultValue?: T): T | undefined
   update(key: string, value: unknown): Promise<void>
   keys(): readonly string[]
+  setKeysForSync?(keys: readonly string[]): void
 }
 
 export interface SecretsStore {
@@ -253,6 +261,7 @@ export async function activateExtension(
   context.extension = {
     id: extensionId,
     extensionPath: entry.extensionPath,
+    extensionUri: context.extensionUri,
     isActive: true,
     packageJSON: entry.packageJSON,
   }

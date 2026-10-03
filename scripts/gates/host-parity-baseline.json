@@ -166,6 +166,7 @@
     "C:plugin_set_status:headless-only",
     "C:plugin_stop_js:headless-only",
     "C:plugin_unload_vscode:headless-only",
+    "C:plugin_vscode_uninstall:headless-only",
     "C:plugin_vscode_send_response:headless-only",
     "C:plugin_wasm_activate:headless-only",
     "C:plugin_wasm_call:headless-only",

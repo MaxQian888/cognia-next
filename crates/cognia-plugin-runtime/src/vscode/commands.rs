@@ -408,13 +408,23 @@ pub async fn plugin_load_vscode_for_state(
             format!("unsupported vscodeExtension.bundleFormat: {bundle_format}"),
         ));
     }
-    let expected_root = runtime.plugin_dir(&plugin_id);
+    // A `.vsix` unpacks into the VS Code install root; a VS Code-type plugin
+    // that came through the ordinary plugin install lives in the plugins
+    // root. The claim must equal one of those two host-owned paths exactly.
+    let extension_install_root = state.extension_dir(&plugin_id);
+    let plugin_install_root = runtime.plugin_dir(&plugin_id);
     let claimed_root = PathBuf::from(plugin_path);
     let main = main.to_string();
     let main_for_validation = main.clone();
     let extension_root = tokio::task::spawn_blocking(move || {
-        let plugin_root =
-            crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)?;
+        let plugin_root = crate::contained_path::validate_claimed_plugin_root(
+            &extension_install_root,
+            &claimed_root,
+        )
+        .or_else(|first| {
+            crate::contained_path::validate_claimed_plugin_root(&plugin_install_root, &claimed_root)
+                .map_err(|_| first)
+        })?;
         crate::contained_path::validate_symlink_free_tree(&plugin_root)?;
         crate::contained_path::resolve_existing_plugin_file(&plugin_root, &main_for_validation)?;
         Ok::<PathBuf, String>(plugin_root)
@@ -501,6 +511,26 @@ pub async fn plugin_load_vscode_for_state(
     };
     if !inserted {
         sidecar.kill().await;
+    } else {
+        // A crashed host leaves the table, so the renderer's restart spawns a
+        // fresh one instead of addressing a dead process.
+        let sidecars = Arc::clone(&state.sidecars);
+        let runtimes = Arc::clone(&state.runtimes);
+        let watched = Arc::clone(&sidecar);
+        tokio::spawn(async move {
+            let exit = watched.exited().await;
+            if exit.intentional {
+                return;
+            }
+            let mut table = sidecars.write();
+            if table
+                .get(&watched.extension_id)
+                .is_some_and(|current| current.generation == watched.generation)
+            {
+                table.remove(&watched.extension_id);
+                runtimes.write().remove(&watched.extension_id);
+            }
+        });
     }
     Ok(VscodeLoadResult {
         generation: published_generation,
@@ -647,41 +677,81 @@ pub async fn plugin_activate_vscode(
     plugin_id: String,
     generation: String,
     config_json: String,
+    workspace_root: Option<String>,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<ActivateResult, VscodeCommandError> {
-    plugin_activate_vscode_generation_for_state(state.inner(), plugin_id, generation, config_json)
-        .await
+    plugin_activate_vscode_generation_for_state(
+        state.inner(),
+        plugin_id,
+        generation,
+        config_json,
+        workspace_root,
+    )
+    .await
 }
 
 pub async fn plugin_activate_vscode_for_state(
     state: &VscodeExtensionState,
     plugin_id: String,
     config_json: String,
+    workspace_root: Option<String>,
 ) -> Result<ActivateResult, VscodeCommandError> {
     let generation = current_generation(state, &plugin_id)?;
-    plugin_activate_vscode_generation_for_state(state, plugin_id, generation, config_json).await
+    plugin_activate_vscode_generation_for_state(
+        state,
+        plugin_id,
+        generation,
+        config_json,
+        workspace_root,
+    )
+    .await
 }
 
+/// Activate with storage outside the install directory
+/// (`<data>/cognia/vscode-extension-state/<id>/{global,workspace/<hash>,log}`)
+/// and the extension's persisted `globalState` / `workspaceState`.
+/// `workspace_root` is the open workspace folder's URI; without one,
+/// `storageUri` is undefined, as in VS Code.
 pub async fn plugin_activate_vscode_generation_for_state(
     state: &VscodeExtensionState,
     plugin_id: String,
     generation: String,
     config_json: String,
+    workspace_root: Option<String>,
 ) -> Result<ActivateResult, VscodeCommandError> {
     let sidecar = sidecar_for_generation(state, &plugin_id, &generation)?;
     let pid = sidecar.pid;
+    let paths = state
+        .storage_paths(&plugin_id, workspace_root.as_deref())
+        .map_err(|error| VscodeCommandError::new("storage_unavailable", error.to_string()))?;
+    let mementos = super::memento::ExtensionMementos {
+        global: super::memento::MementoStore::open(paths.global_memento())
+            .map_err(|error| VscodeCommandError::new("storage_unavailable", error.to_string()))?,
+        workspace: paths
+            .workspace_memento()
+            .map(super::memento::MementoStore::open)
+            .transpose()
+            .map_err(|error| VscodeCommandError::new("storage_unavailable", error.to_string()))?,
+    };
+    let initial_global = serde_json::Value::Object(mementos.global.values().clone());
+    let initial_workspace = mementos
+        .workspace
+        .as_ref()
+        .map(|store| serde_json::Value::Object(store.values().clone()))
+        .unwrap_or_else(|| serde_json::json!({}));
+    *sidecar.mementos.lock() = Some(mementos);
     let result = request_sidecar(
         sidecar.as_ref(),
         "extension:activate",
         serde_json::json!({
             "extensionId": plugin_id,
             "extensionPath": sidecar.extension_path,
-            "globalStorageUri": format!("file://{}", state.extension_dir(&plugin_id).display()),
-            "storageUri": format!("file://{}", state.extension_dir(&plugin_id).display()),
-            "logUri": format!("file://{}", state.extension_dir(&plugin_id).display()),
+            "globalStoragePath": paths.global,
+            "storagePath": paths.workspace,
+            "logPath": paths.log,
             "extensionMode": "production",
-            "initialGlobalState": {},
-            "initialWorkspaceState": {},
+            "initialGlobalState": initial_global,
+            "initialWorkspaceState": initial_workspace,
             "config": serde_json::from_str::<serde_json::Value>(&config_json).unwrap_or(serde_json::Value::Null),
         }),
     )
@@ -773,6 +843,53 @@ pub async fn plugin_unload_vscode_for_state(
 
 pub fn plugin_vscode_list_for_state(state: &VscodeExtensionState) -> Vec<String> {
     state.sidecars.read().keys().cloned().collect()
+}
+
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn plugin_vscode_uninstall(
+    plugin_id: String,
+    state: State<'_, VscodeExtensionState>,
+) -> Result<(), VscodeCommandError> {
+    plugin_vscode_uninstall_for_state(state.inner(), plugin_id).await
+}
+
+/// Remove a VS Code extension: stop its host, then delete its install
+/// (`vscode-extensions/<id>`) and its state (`vscode-extension-state/<id>`).
+/// The plugin-runtime uninstall removes the plugin record; this is the part
+/// only the VS Code host knows about.
+pub async fn plugin_vscode_uninstall_for_state(
+    state: &VscodeExtensionState,
+    plugin_id: String,
+) -> Result<(), VscodeCommandError> {
+    crate::validate_plugin_id_path_component(&plugin_id)
+        .map_err(|error| VscodeCommandError::new("bad_plugin_id", error.to_string()))?;
+    let running = state
+        .sidecars
+        .read()
+        .get(&plugin_id)
+        .map(|sidecar| sidecar.generation.clone());
+    if let Some(generation) = running {
+        // A host that will not unload cleanly is still killed by the unload.
+        let _ =
+            plugin_unload_vscode_generation_for_state(state, plugin_id.clone(), generation).await;
+    }
+    let install = state.extension_dir(&plugin_id);
+    let state_dir = state.state_dir(&plugin_id);
+    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        for dir in [install, state_dir] {
+            match std::fs::symlink_metadata(&dir) {
+                Ok(metadata) if metadata.file_type().is_symlink() => std::fs::remove_file(&dir)?,
+                Ok(_) => std::fs::remove_dir_all(&dir)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| VscodeCommandError::new("uninstall_failed", error.to_string()))?
+    .map_err(|error| VscodeCommandError::new("uninstall_failed", error.to_string()))
 }
 
 pub async fn plugin_unload_vscode_generation_for_state(
@@ -1138,6 +1255,7 @@ rl.on("line", (line) => {
             plugin_id.to_string(),
             loaded.generation.clone(),
             "{}".to_string(),
+            None,
         )
         .await
         .unwrap();
@@ -1167,6 +1285,159 @@ rl.on("line", (line) => {
             .unwrap();
         assert!(state.sidecars.read().is_empty());
         assert!(state.runtimes.read().is_empty());
+    }
+
+    /// A fake host that records what activation sent, writes a memento,
+    /// talks on stderr, and crashes on request.
+    const RECORDING_HOST: &str = r#"
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+const send = (frame) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...frame }) + "\n");
+rl.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.method === "test:crash") {
+    process.stderr.write("about to crash\n");
+    setTimeout(() => process.exit(3), 20);
+    return;
+  }
+  if (request.method === "extension:activate") {
+    send({ method: "memento:write", params: { extensionId: request.params.extensionId, scope: "global", key: "seen", value: (request.params.initialGlobalState.seen || 0) + 1, deleted: false } });
+    send({ id: request.id, result: { echoed: request.params } });
+    return;
+  }
+  send({ id: request.id, result: { ok: true } });
+});
+"#;
+
+    async fn wait_until(mut check: impl FnMut() -> bool) {
+        for _ in 0..200 {
+            if check() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("condition never held");
+    }
+
+    #[tokio::test]
+    async fn vsix_installs_load_from_their_own_root_keep_state_outside_it_and_report_crashes() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("cognia");
+        let runtime = PluginRuntimeState::new(data.join("plugins"));
+        let state = VscodeExtensionState::new(super::super::extension_install_dir_for(
+            &data.join("plugins"),
+        ));
+        let plugin_id = "acme.recorder";
+        let install_dir = state.extension_dir(plugin_id);
+        std::fs::create_dir_all(install_dir.join("out")).unwrap();
+        std::fs::write(
+            install_dir.join("out/extension.js"),
+            "module.exports = { activate() {} };",
+        )
+        .unwrap();
+        let host_script = temp.path().join("recording-host.cjs");
+        std::fs::write(&host_script, RECORDING_HOST).unwrap();
+        let events = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let events_for_sink = Arc::clone(&events);
+        state.configure_host(
+            host_script,
+            None,
+            Arc::new(move |_event, frame| events_for_sink.lock().push(frame)),
+        );
+        let manifest = serde_json::json!({
+            "id": plugin_id,
+            "vscodeMain": "out/extension.js",
+            "vscodeExtension": { "bundleFormat": "cjs" },
+        })
+        .to_string();
+        let load = || {
+            plugin_load_vscode_for_state(
+                &state,
+                &runtime,
+                plugin_id.to_string(),
+                manifest.clone(),
+                install_dir.to_string_lossy().to_string(),
+            )
+        };
+        let activate = |generation: String| {
+            plugin_activate_vscode_generation_for_state(
+                &state,
+                plugin_id.to_string(),
+                generation,
+                "{}".to_string(),
+                Some("file:///work/project".to_string()),
+            )
+        };
+
+        // Loads from vscode-extensions/<id>, which the plugins-root check refused.
+        let first = load().await.unwrap();
+        activate(first.generation.clone()).await.unwrap();
+        let global = data
+            .join(super::super::EXTENSION_STATE_DIR)
+            .join(plugin_id)
+            .join("global");
+        let memento = global.join("state.json");
+        wait_until(|| memento.exists()).await;
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&memento).unwrap()).unwrap(),
+            serde_json::json!({ "seen": 1 })
+        );
+        assert!(
+            !install_dir.join("state.json").exists(),
+            "state stays out of the install"
+        );
+
+        // A crash is reported (stderr and exit) and the dead host leaves the table.
+        let sidecar = Arc::clone(state.sidecars.read().get(plugin_id).unwrap());
+        let _ = sidecar.send(r#"{"jsonrpc":"2.0","id":999,"method":"test:crash"}"#);
+        wait_until(|| !state.sidecars.read().contains_key(plugin_id)).await;
+        let frames = events.lock().clone();
+        let raw_frames: Vec<serde_json::Value> = frames
+            .iter()
+            .filter_map(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+            .filter_map(|payload| {
+                payload["rawFrame"]
+                    .as_str()
+                    .and_then(|raw| serde_json::from_str(raw).ok())
+            })
+            .collect();
+        let exited = raw_frames
+            .iter()
+            .find(|frame| frame["method"] == "host:exited")
+            .expect("exit reported");
+        assert_eq!(exited["params"]["intentional"], false);
+        assert_eq!(exited["params"]["code"], 3);
+        assert!(raw_frames
+            .iter()
+            .any(|frame| frame["method"] == "host:stderr"
+                && frame["params"]["line"] == "about to crash"));
+        assert!(
+            !raw_frames
+                .iter()
+                .any(|frame| frame["method"] == "memento:write"),
+            "mementos never reach the renderer"
+        );
+
+        // Restarted, the extension gets its persisted state back.
+        let second = load().await.unwrap();
+        assert_ne!(second.generation, first.generation);
+        let activated = activate(second.generation.clone()).await;
+        assert!(activated.is_ok());
+        wait_until(|| {
+            std::fs::read(&memento)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                == Some(serde_json::json!({ "seen": 2 }))
+        })
+        .await;
+
+        // Uninstall removes the install and the state, and stops the host.
+        plugin_vscode_uninstall_for_state(&state, plugin_id.to_string())
+            .await
+            .unwrap();
+        assert!(!install_dir.exists());
+        assert!(!global.exists());
+        assert!(state.sidecars.read().is_empty());
     }
 
     /// Minimal valid `.vsix` for the staged-install path.

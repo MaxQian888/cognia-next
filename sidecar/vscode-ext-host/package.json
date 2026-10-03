@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test --experimental-vm-modules tests/*.test.mjs"
+    "test": "tsc -p tsconfig.json && node --test --experimental-vm-modules tests/*.test.mjs"
   },
   "dependencies": {
     "vscode-jsonrpc": "^9.0.3",

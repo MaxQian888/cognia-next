@@ -26,15 +26,20 @@
  * stays exactly as it is, because the Dev Session workbench reads it live and
  * at a much finer grain than a log panel wants.
  *
- * `wasm` and `vscode-extension` contribute nothing here. That is not an
- * omission: they have no per-plugin output channel at all, which is why
- * `RUNTIMES_WITHOUT_LOG_CHANNEL` names them and the detail pane hides the link
- * for them instead of pointing at a list that can only ever be empty.
+ * VS Code extensions are bridged the same way, from their own buffer
+ * (`lib/plugin/vscode-shim/vscode-log-buffer.ts`: the host's stderr and the
+ * extension's output channels).
+ *
+ * `wasm` contributes nothing here. That is not an omission: it has no
+ * per-plugin output channel at all, which is why `RUNTIMES_WITHOUT_LOG_CHANNEL`
+ * names it and the detail pane hides the link for it instead of pointing at a
+ * list that can only ever be empty.
  */
 
 import { loggers } from "@cognia/logging"
 
 import { subscribePythonPluginEvents } from "@/lib/plugin/python/event-bus"
+import { subscribeVscodeLogEntries } from "@/lib/plugin/vscode-shim/vscode-log-buffer"
 import { normalizePythonEntry, type PluginRuntimeLogEntry } from "./runtime-log-stream"
 
 /**
@@ -124,10 +129,13 @@ export function installPluginRuntimeLogBridge(): () => void {
     forwardPluginRuntimeLog(normalizePythonEntry({ ...event, ts: Date.now() }, sequence++))
   })
 
+  const offVscode = subscribeVscodeLogEntries(forwardPluginRuntimeLog)
+
   const teardown = () => {
     if (active !== teardown) return
     active = null
     offPython()
+    offVscode()
   }
   active = teardown
   return teardown

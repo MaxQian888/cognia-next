@@ -40,6 +40,8 @@ import {
   cleanupVscodeRuntimeRegistrations,
   installVscodeRuntimeRpcHandlers,
 } from "./runtime-handlers"
+import { getVscodeHostSupervisor, type VscodeHostExit } from "./host-supervisor"
+import { appendVscodeLog, stderrLevel } from "./vscode-log-buffer"
 
 let installed = false
 
@@ -177,6 +179,30 @@ export function installVscodeRpcHandlers(): () => void {
   )
 
   disposers.push(...installVscodeRuntimeRpcHandlers())
+
+  // host:* — notifications the Rust host emits about the Node process itself
+  // (not the extension): its stderr, and how it ended.
+  disposers.push(
+    registerMethod("host:stderr", (p, ctx) => {
+      const { line } = p as { line: string }
+      appendVscodeLog(ctx.pluginId, { level: stderrLevel(line), message: line, kind: "stderr" })
+      return null
+    })
+  )
+  disposers.push(
+    registerMethod("host:exited", (p, ctx) => {
+      const exit = p as VscodeHostExit
+      appendVscodeLog(ctx.pluginId, {
+        level: exit.intentional ? "info" : "error",
+        message: exit.intentional
+          ? "VS Code extension host stopped"
+          : `VS Code extension host exited unexpectedly (${exit.signal !== null ? `signal ${exit.signal}` : `code ${exit.code}`})`,
+        kind: "host",
+      })
+      getVscodeHostSupervisor().onExited(ctx.pluginId, exit)
+      return null
+    })
+  )
 
   // workspace:* — workspace folder lookups for the sidecar's
   // `vscode.workspace.workspaceFolders` / `getWorkspaceFolder(uri)` APIs.

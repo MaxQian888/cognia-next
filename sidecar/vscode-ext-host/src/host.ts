@@ -19,8 +19,17 @@
  * process. This makes it trivial to test under Node's `--test` runner.
  */
 
+import * as nodePath from "node:path"
+
 import { ErrorCode, RpcConnection, type RpcError } from "./rpc"
-import { installRequireHook, setExtensionResolver, setGrantedModules } from "./require-hook"
+import {
+  createExtensionResolver,
+  installRequireHook,
+  setExtensionResolver,
+  setGrantedModules,
+} from "./require-hook"
+import { ExtensionMode } from "./vscode-shim/api-types"
+import { Uri } from "./vscode-shim/types"
 import {
   activateExtension,
   deactivateExtension,
@@ -42,9 +51,11 @@ interface LoadRequest {
 interface ActivateRequest {
   extensionId: string
   extensionPath: string
-  globalStorageUri: string
-  storageUri: string
-  logUri: string
+  /** Plain filesystem paths; the host builds the `Uri`s. */
+  globalStoragePath: string
+  /** Absent when no workspace folder is open, as in VS Code. */
+  storagePath: string | null
+  logPath: string
   extensionMode: "production" | "development" | "test"
   initialGlobalState: Record<string, unknown>
   initialWorkspaceState: Record<string, unknown>
@@ -58,6 +69,11 @@ interface CallExtensionRequest {
   token: string
   payload: unknown
 }
+
+/** The sidecar package itself: its own code and dependencies are never an extension's. */
+const HOST_PACKAGE_ROOT = nodePath.resolve(__dirname, "..")
+/** Extension install root → extension id, registered at `extension:load`. */
+const EXTENSION_ROOTS = new Map<string, string>()
 
 const ACTIVE_CONTEXTS = new Map<string, SidecarExtensionContext>()
 const PROVIDER_CALLBACKS = new Map<string, (payload: unknown) => Promise<unknown> | unknown>()
@@ -103,16 +119,18 @@ function ensureProtocolService(): import("./protocol-process-service").ProtocolP
   return protocolService
 }
 
-// Map a require() call back to an extension by walking `parent.cogniaExtensionId`.
-setExtensionResolver((parent) => {
-  let cur: NodeModule | null = parent
-  while (cur) {
-    const tagged = (cur.require as unknown as { cogniaExtensionId?: string }).cogniaExtensionId
-    if (typeof tagged === "string") return tagged
-    cur = cur.parent ?? null
-  }
-  return null
-})
+// Map a require() call back to an extension by WHERE the requiring module
+// lives. The extension's main bundle runs with a `createRequire(mainPath)`
+// require, whose parent module is a fresh one; a tag on it does not survive,
+// which once left every `require("vscode")` unattributed and every
+// sensitive-module gate open. File location cannot be lost that way.
+setExtensionResolver(
+  createExtensionResolver({
+    hostRoot: HOST_PACKAGE_ROOT,
+    roots: EXTENSION_ROOTS,
+    dedicatedExtensionId: process.env.COGNIA_VSCODE_EXTENSION_ID ?? null,
+  })
+)
 
 installRequireHook()
 
@@ -141,6 +159,7 @@ function registerProviderCallback(
 connection.onRequest("extension:load", async (params) => {
   const req = params as LoadRequest
   setGrantedModules(req.extensionId, req.grantedModules ?? [])
+  EXTENSION_ROOTS.set(nodePath.resolve(req.extensionPath), req.extensionId)
   await loadExtension({
     extensionId: req.extensionId,
     extensionPath: req.extensionPath,
@@ -175,6 +194,9 @@ connection.onRequest("extension:unload", async (params) => {
   const { extensionId } = params as { extensionId: string }
   unloadExtension(extensionId)
   ACTIVE_CONTEXTS.delete(extensionId)
+  for (const [root, id] of [...EXTENSION_ROOTS]) {
+    if (id === extensionId) EXTENSION_ROOTS.delete(root)
+  }
   return { ok: true }
 })
 
@@ -312,24 +334,36 @@ connection.onRequest("protocol:status", async () => {
 // Helpers
 // ────────────────────────────────────────────────────────────────────────
 
+const EXTENSION_MODES = {
+  production: ExtensionMode.Production,
+  development: ExtensionMode.Development,
+  test: ExtensionMode.Test,
+} as const
+
 function buildContext(req: ActivateRequest): SidecarExtensionContext {
-  const globalState = makeKvStore(req.initialGlobalState)
-  const workspaceState = makeKvStore(req.initialWorkspaceState)
+  const globalState = makeKvStore(req.extensionId, "global", req.initialGlobalState)
+  const workspaceState = makeKvStore(req.extensionId, "workspace", req.initialWorkspaceState)
   const extensionPath = req.extensionPath
+  const extensionUri = Uri.file(extensionPath)
   return {
     subscriptions: [] as Disposable[],
     globalState,
     workspaceState,
     secrets: makeSecretsStore(req.extensionId, connection),
-    extensionUri: `file://${req.extensionId}`,
+    extensionUri,
     extensionPath,
-    globalStorageUri: req.globalStorageUri,
-    storageUri: req.storageUri,
-    logUri: req.logUri,
-    extensionMode: req.extensionMode,
+    globalStorageUri: Uri.file(req.globalStoragePath),
+    globalStoragePath: req.globalStoragePath,
+    storageUri: req.storagePath ? Uri.file(req.storagePath) : undefined,
+    storagePath: req.storagePath ?? undefined,
+    logUri: Uri.file(req.logPath),
+    logPath: req.logPath,
+    extensionMode: EXTENSION_MODES[req.extensionMode] ?? ExtensionMode.Production,
+    // Replaced with the real manifest by `activateExtension`.
     extension: {
       id: req.extensionId,
-      extensionPath: req.extensionId,
+      extensionPath,
+      extensionUri,
       isActive: true,
       packageJSON: {},
     },
@@ -394,21 +428,42 @@ function makeEnvironmentVariableCollection() {
   return collection
 }
 
-function makeKvStore(initial: Record<string, unknown>): SidecarExtensionContext["globalState"] {
-  const map = new Map(Object.entries(initial))
+/**
+ * A `Memento`. Every write is also sent to the Rust host (`memento:write`),
+ * which persists it in the extension's state directory, outside its install
+ * directory, so it survives a restart and an update. The host intercepts the
+ * notification; the renderer never sees it.
+ */
+function makeKvStore(
+  extensionId: string,
+  scope: "global" | "workspace",
+  initial: Record<string, unknown>
+): SidecarExtensionContext["globalState"] {
+  const map = new Map(Object.entries(initial ?? {}))
   return {
-    get<T>(key: string): T | undefined {
-      return map.get(key) as T | undefined
+    get<T>(key: string, defaultValue?: T): T | undefined {
+      return map.has(key) ? (map.get(key) as T) : defaultValue
     },
     async update(key: string, value: unknown): Promise<void> {
       if (value === undefined) {
         map.delete(key)
       } else {
-        map.set(key, value)
+        // A Memento holds JSON: what does not survive a round trip is not kept.
+        map.set(key, JSON.parse(JSON.stringify(value)) as unknown)
       }
+      connection.sendNotification("memento:write", {
+        extensionId,
+        scope,
+        key,
+        value: value === undefined ? null : map.get(key),
+        deleted: value === undefined,
+      })
     },
     keys(): readonly string[] {
       return [...map.keys()]
+    },
+    setKeysForSync(): void {
+      // Settings Sync does not exist here; nothing to mark.
     },
   }
 }

@@ -180,8 +180,13 @@ describe("vscode-loader — Tauri mode", () => {
     await def.activate!(mockContext)
     expect(invoke).toHaveBeenCalledWith(
       "plugin_activate_vscode",
-      expect.objectContaining({ pluginId: "cognia.test-ext" })
+      // No workspace open: the extension gets no workspaceState.
+      expect.objectContaining({ pluginId: "cognia.test-ext", workspaceRoot: null })
     )
+    const { getVscodeHostSupervisor } = await import("@/lib/plugin/vscode-shim/host-supervisor")
+    expect(getVscodeHostSupervisor().state("cognia.test-ext")).toMatchObject({
+      status: "running",
+    })
     expect(mockLogger.debug).toHaveBeenCalledWith(
       expect.stringMatching(/activated/i),
       expect.objectContaining({ sidecarPid: 12345 })

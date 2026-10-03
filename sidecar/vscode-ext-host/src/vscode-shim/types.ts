@@ -67,6 +67,26 @@ export class Range {
     }
     return this.contains(position.start) && this.contains(position.end)
   }
+  isEqual(other: Range): boolean {
+    return this.start.isEqual(other.start) && this.end.isEqual(other.end)
+  }
+  intersection(other: Range): Range | undefined {
+    const start = this.start.isAfter(other.start) ? this.start : other.start
+    const end = this.end.isBefore(other.end) ? this.end : other.end
+    return start.isAfter(end) ? undefined : new Range(start, end)
+  }
+  union(other: Range): Range {
+    return new Range(
+      this.start.isBefore(other.start) ? this.start : other.start,
+      this.end.isAfter(other.end) ? this.end : other.end
+    )
+  }
+  with(start?: Position | { start?: Position; end?: Position }, end?: Position): Range {
+    if (start && !(start instanceof Position)) {
+      return new Range(start.start ?? this.start, start.end ?? this.end)
+    }
+    return new Range(start ?? this.start, end ?? this.end)
+  }
 }
 
 export class Selection extends Range {
@@ -81,6 +101,16 @@ export class Selection extends Range {
   }
 }
 
+/**
+ * VS Code's `Uri`. `path` is decoded (a space is a space); `toString()`
+ * percent-encodes it, so `Uri.file("/a b").toString()` is `file:///a%20b`
+ * and `Uri.parse` of that gives back the same path.
+ *
+ * Serialization: `toJSON()` returns the string form. Every value crossing
+ * the sidecar's JSON-RPC wire is JSON, and the renderer reads URIs as
+ * strings, so a `Diagnostic` or `Location` arrives with a usable `uri`
+ * rather than a bag of components. `Uri.revive` accepts either form.
+ */
 export class Uri {
   private constructor(
     public readonly scheme: string,
@@ -90,33 +120,85 @@ export class Uri {
     public readonly fragment: string
   ) {}
   static file(p: string): Uri {
-    return new Uri("file", "", p, "", "")
+    let path = p.replace(/\\/g, "/")
+    if (/^[a-zA-Z]:/.test(path)) path = `/${path}`
+    if (!path.startsWith("/")) path = `/${path}`
+    return new Uri("file", "", path, "", "")
   }
   static parse(value: string): Uri {
-    const u = new URL(value)
-    return new Uri(
-      u.protocol.replace(/:$/, ""),
-      u.host,
-      u.pathname,
-      u.search.replace(/^\?/, ""),
-      u.hash.replace(/^#/, "")
+    const match = /^([a-zA-Z][\w+.-]*):(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/.exec(
+      value
     )
+    if (!match) throw new Error(`[UriError]: ${value} is not a URI`)
+    const [, scheme, authority = "", path = "", query = "", fragment = ""] = match
+    return new Uri(
+      scheme.toLowerCase(),
+      decodeLenient(authority),
+      decodeLenient(path),
+      decodeLenient(query),
+      decodeLenient(fragment)
+    )
+  }
+  static from(components: {
+    scheme: string
+    authority?: string
+    path?: string
+    query?: string
+    fragment?: string
+  }): Uri {
+    return new Uri(
+      components.scheme,
+      components.authority ?? "",
+      components.path ?? "",
+      components.query ?? "",
+      components.fragment ?? ""
+    )
+  }
+  /** A string, a `Uri`, or URI components (as JSON from elsewhere) → `Uri`. */
+  static revive(value: unknown): Uri | undefined {
+    if (value instanceof Uri) return value
+    if (typeof value === "string") return Uri.parse(value)
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof (value as { scheme?: unknown }).scheme === "string"
+    ) {
+      return Uri.from(value as { scheme: string })
+    }
+    return undefined
   }
   static joinPath(base: Uri, ...segments: string[]): Uri {
     const joined = [base.path, ...segments]
-      .map((s) => s.replace(/^\/+|\/+$/g, ""))
-      .filter(Boolean)
+      .join("/")
+      .split("/")
+      .reduce<string[]>((parts, part) => {
+        if (part === "" || part === ".") return parts
+        if (part === "..") parts.pop()
+        else parts.push(part)
+        return parts
+      }, [])
       .join("/")
     return new Uri(base.scheme, base.authority, `/${joined}`, base.query, base.fragment)
   }
-  get fsPath(): string {
-    return this.path.replace(/^\/+/, this.scheme === "file" ? "/" : "")
+  static isUri(value: unknown): value is Uri {
+    return value instanceof Uri
   }
-  toString(): string {
-    const auth = this.authority ? `//${this.authority}` : ""
-    const q = this.query ? `?${this.query}` : ""
-    const f = this.fragment ? `#${this.fragment}` : ""
-    return `${this.scheme}:${auth}${this.path}${q}${f}`
+  get fsPath(): string {
+    if (this.authority && this.scheme === "file") return `//${this.authority}${this.path}`
+    if (/^\/[a-zA-Z]:/.test(this.path)) return this.path.slice(1)
+    return this.path
+  }
+  toString(skipEncoding = false): string {
+    const encode = skipEncoding ? (text: string) => text : encodePath
+    const authority = this.authority || this.scheme === "file" ? `//${this.authority}` : ""
+    const query = this.query ? `?${skipEncoding ? this.query : encodeURIComponent(this.query)}` : ""
+    const fragment = this.fragment
+      ? `#${skipEncoding ? this.fragment : encodeURIComponent(this.fragment)}`
+      : ""
+    return `${this.scheme}:${authority}${encode(this.path)}${query}${fragment}`
+  }
+  toJSON(): string {
+    return this.toString()
   }
   with(
     change: Partial<{
@@ -134,6 +216,21 @@ export class Uri {
       change.query ?? this.query,
       change.fragment ?? this.fragment
     )
+  }
+}
+
+function encodePath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment).replace(/%3A/gi, ":"))
+    .join("/")
+}
+
+function decodeLenient(text: string): string {
+  try {
+    return decodeURIComponent(text)
+  } catch {
+    return text
   }
 }
 
@@ -285,6 +382,8 @@ export const CompletionItemKind = {
   Event: 22,
   Operator: 23,
   TypeParameter: 24,
+  User: 25,
+  Issue: 26,
 } as const
 
 export class MarkdownString {
@@ -319,19 +418,64 @@ export class TextEdit {
   static delete(range: Range): TextEdit {
     return new TextEdit(range, "")
   }
+  static setEndOfLine(eol: number): TextEdit {
+    const edit = new TextEdit(new Range(new Position(0, 0), new Position(0, 0)), "")
+    edit.newEol = eol
+    return edit
+  }
+  newEol?: number
   constructor(
-    public readonly range: Range,
-    public readonly newText: string
+    public range: Range,
+    public newText: string
   ) {}
 }
 
+/** One file operation recorded in a {@link WorkspaceEdit}. */
+export type WorkspaceFileOperation =
+  | { kind: "create"; uri: Uri; options?: { overwrite?: boolean; ignoreIfExists?: boolean } }
+  | {
+      kind: "rename"
+      oldUri: Uri
+      newUri: Uri
+      options?: { overwrite?: boolean; ignoreIfExists?: boolean }
+    }
+  | { kind: "delete"; uri: Uri; options?: { recursive?: boolean; ignoreIfNotExists?: boolean } }
+
 export class WorkspaceEdit {
   private edits = new Map<string, TextEdit[]>()
-  set(uri: Uri, edits: TextEdit[]): void {
-    this.edits.set(uri.toString(), edits.slice())
+  /** File operations, in the order they were added. */
+  readonly fileOperations: WorkspaceFileOperation[] = []
+  set(uri: Uri, edits: ReadonlyArray<TextEdit | [TextEdit, unknown]> | null | undefined): void {
+    this.edits.set(
+      uri.toString(),
+      (edits ?? []).map((edit) => (Array.isArray(edit) ? edit[0] : edit))
+    )
   }
   get(uri: Uri): TextEdit[] {
     return this.edits.get(uri.toString())?.slice() ?? []
+  }
+  replace(uri: Uri, range: Range, newText: string): void {
+    this.push(uri, TextEdit.replace(range, newText))
+  }
+  insert(uri: Uri, position: Position, newText: string): void {
+    this.push(uri, TextEdit.insert(position, newText))
+  }
+  delete(uri: Uri, range?: Range): void {
+    if (range) this.push(uri, TextEdit.delete(range))
+    else this.edits.delete(uri.toString())
+  }
+  createFile(uri: Uri, options?: { overwrite?: boolean; ignoreIfExists?: boolean }): void {
+    this.fileOperations.push({ kind: "create", uri, options })
+  }
+  renameFile(
+    oldUri: Uri,
+    newUri: Uri,
+    options?: { overwrite?: boolean; ignoreIfExists?: boolean }
+  ): void {
+    this.fileOperations.push({ kind: "rename", oldUri, newUri, options })
+  }
+  deleteFile(uri: Uri, options?: { recursive?: boolean; ignoreIfNotExists?: boolean }): void {
+    this.fileOperations.push({ kind: "delete", uri, options })
   }
   entries(): Array<[Uri, TextEdit[]]> {
     return [...this.edits.entries()].map(([k, v]) => [Uri.parse(k), v.slice()])
@@ -339,10 +483,24 @@ export class WorkspaceEdit {
   has(uri: Uri): boolean {
     return this.edits.has(uri.toString())
   }
-  delete(uri: Uri): void {
-    this.edits.delete(uri.toString())
-  }
   get size(): number {
-    return this.edits.size
+    return this.edits.size + this.fileOperations.length
+  }
+  private push(uri: Uri, edit: TextEdit): void {
+    const key = uri.toString()
+    this.edits.set(key, [...(this.edits.get(key) ?? []), edit])
+  }
+  /** The JSON form the renderer applies. */
+  toJSON(): {
+    edits: Array<{ uri: string; edits: Array<{ range: Range; newText: string }> }>
+    fileOperations: WorkspaceFileOperation[]
+  } {
+    return {
+      edits: [...this.edits].map(([uri, edits]) => ({
+        uri,
+        edits: edits.map((edit) => ({ range: edit.range, newText: edit.newText })),
+      })),
+      fileOperations: this.fileOperations,
+    }
   }
 }

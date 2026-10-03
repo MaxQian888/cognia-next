@@ -618,7 +618,9 @@ pub fn run() {
         .manage(session_import_watch::SessionImportWatcherState::new())
         .manage(plugin_api::vscode::VscodeExtensionState::new(
             dirs::data_dir()
-                .map(|d| d.join("cognia").join("vscode-extensions"))
+                .map(|d| {
+                    plugin_api::vscode::extension_install_dir_for(&d.join("cognia").join("plugins"))
+                })
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
         // Automation subsystem state — registered via `app.manage` from
@@ -1492,6 +1494,7 @@ pub fn run() {
             plugin_api::vscode::commands::plugin_activate_vscode,
             plugin_api::vscode::commands::plugin_deactivate_vscode,
             plugin_api::vscode::commands::plugin_unload_vscode,
+            plugin_api::vscode::commands::plugin_vscode_uninstall,
             plugin_api::vscode::commands::plugin_invoke_vscode_rpc,
             plugin_api::vscode::commands::plugin_vscode_send_response,
             plugin_api::vscode::commands::ensure_system_lsp_host,

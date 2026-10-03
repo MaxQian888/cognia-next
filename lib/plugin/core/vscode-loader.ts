@@ -25,6 +25,8 @@ import {
   subscribeToVscodeEvents,
 } from "@/lib/plugin/vscode-shim/rpc-dispatcher"
 import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
+import { getVscodeHostSupervisor } from "@/lib/plugin/vscode-shim/host-supervisor"
+import { listWorkspaceFolders } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { configureLmHandler } from "@/lib/plugin/vscode-shim/lm-handler"
 import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
@@ -319,7 +321,10 @@ export async function loadVscodeDefinition(
           pluginId: manifest.id,
           generation: requireVscodeGeneration(manifest.id),
           configJson: JSON.stringify(context.config ?? {}),
+          // Keys `workspaceState`; none open means the extension has none.
+          workspaceRoot: listWorkspaceFolders()[0]?.uri ?? null,
         })
+        getVscodeHostSupervisor().onStarted(manifest.id)
         context.logger.debug("VS Code extension activated", {
           pluginId: manifest.id,
           registeredCommands: result?.registeredCommands ?? [],

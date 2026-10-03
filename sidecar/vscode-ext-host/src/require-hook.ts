@@ -16,6 +16,7 @@
  */
 
 import Module from "node:module"
+import { sep } from "node:path"
 
 const ORIGINAL_RESOLVE = (
   Module as unknown as {
@@ -61,6 +62,38 @@ const grantCache = new Map<string, Set<string>>()
  */
 export function setExtensionResolver(resolver: (parent: NodeModule | null) => string | null): void {
   extensionResolver = resolver
+}
+
+/**
+ * Attribute a `require()` to an extension by where the requiring module
+ * lives, failing closed:
+ *
+ * - inside the sidecar package (`hostRoot`): the host's own code, never an
+ *   extension's, so never gated;
+ * - inside a registered extension root (longest match wins): that extension;
+ * - anything else in a process dedicated to one extension (the Rust host
+ *   spawns one per extension and names it in `COGNIA_VSCODE_EXTENSION_ID`),
+ *   including a module with no filename: that extension.
+ */
+export function createExtensionResolver(options: {
+  hostRoot: string
+  roots: ReadonlyMap<string, string>
+  dedicatedExtensionId: string | null
+}): (parent: NodeModule | null) => string | null {
+  const within = (file: string, root: string) =>
+    file === root || file.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)
+  return (parent) => {
+    const filename = parent?.filename ?? null
+    if (filename) {
+      let best: [string, string] | null = null
+      for (const [root, id] of options.roots) {
+        if (within(filename, root) && (!best || root.length > best[0].length)) best = [root, id]
+      }
+      if (best) return best[1]
+      if (within(filename, options.hostRoot)) return null
+    }
+    return options.dedicatedExtensionId
+  }
 }
 
 /**

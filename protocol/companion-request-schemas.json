@@ -9549,6 +9549,12 @@
         },
         "generation": {
           "type": "string"
+        },
+        "workspaceRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
@@ -10727,6 +10733,18 @@
           "type": "string"
         },
         "generation": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_vscode_uninstall": {
+      "type": "object",
+      "required": [
+        "pluginId"
+      ],
+      "properties": {
+        "pluginId": {
           "type": "string"
         }
       },

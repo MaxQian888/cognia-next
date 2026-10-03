@@ -19,7 +19,7 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "f0e179b54033c8688caf0a47f9165ecb6379990b0c1416cb44f44509d2044d7d";
+pub const CATALOG_HASH: &str = "77a119c7646209f2b2cd2a0789d7ba24d4ac9cf33057f68625637164efe1829f";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
@@ -887,6 +887,7 @@ pub static WIRE_COMMANDS: &[WireCommand] = &[
     WireCommand { name: "plugin_uninstall", arm: "plugin_uninstall", resource: "plugin", verb: "uninstall", target: CommandTarget::Execution, operation: CommandOperation::Write, capability: "process.spawn", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_unload", arm: "plugin_unload", resource: "plugin", verb: "unload", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_unload_vscode", arm: "plugin_unload_vscode", resource: "plugin.vscode", verb: "unload", target: CommandTarget::Service, operation: CommandOperation::Write, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
+    WireCommand { name: "plugin_vscode_uninstall", arm: "plugin_vscode_uninstall", resource: "plugin.vscode", verb: "uninstall", target: CommandTarget::Service, operation: CommandOperation::Write, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_verify_detached_signature", arm: "plugin_verify_detached_signature", resource: "plugin.detached_signature", verb: "verify", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_verify_pack_signature", arm: "plugin_verify_pack_signature", resource: "plugin.pack_signature", verb: "verify", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_verify_signature", arm: "plugin_verify_signature", resource: "plugin.signature", verb: "verify", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
@@ -2358,6 +2359,7 @@ pub static RENAMED_COMMANDS: &[(&str, &str)] = &[
     ("plugin_vscode_install_vsix", "plugin.vscode.vsix.install"),
     ("plugin_vscode_install_vsix_from_path", "plugin.vscode.vsix_from_path.install"),
     ("plugin_vscode_send_response", "plugin.vscode.respond"),
+    ("plugin_vscode_uninstall", "plugin.vscode.uninstall"),
     ("plugin_wasm_activate", "plugin.wasm.activate"),
     ("plugin_wasm_call", "plugin.wasm.call"),
     ("plugin_wasm_deactivate", "plugin.wasm.deactivate"),

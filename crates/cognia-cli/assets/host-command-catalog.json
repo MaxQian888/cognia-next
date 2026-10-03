@@ -32292,11 +32292,23 @@
           "generation": {
             "type": "string"
           },
+          "workspaceRoot": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "plugin_id": {
             "type": "string"
           },
           "config_json": {
             "type": "string"
+          },
+          "workspace_root": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false,
@@ -36944,6 +36956,53 @@
               {
                 "required": [
                   "responseJson"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "plugin_vscode_uninstall",
+      "category": "extensions",
+      "resource": "plugin-vscode",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "plugin_vscode_uninstall (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pluginId": {
+            "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
                 ]
               }
             ]
@@ -64859,5 +64918,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "f0e179b54033c8688caf0a47f9165ecb6379990b0c1416cb44f44509d2044d7d"
+  "catalogHash": "77a119c7646209f2b2cd2a0789d7ba24d4ac9cf33057f68625637164efe1829f"
 }

@@ -795,6 +795,7 @@ commands.allow = [
   "plugin_vscode_install_vsix",
   "plugin_vscode_install_vsix_from_path",
   "plugin_vscode_send_response",
+  "plugin_vscode_uninstall",
   "plugin_wasm_activate",
   "plugin_wasm_call",
   "plugin_wasm_deactivate",

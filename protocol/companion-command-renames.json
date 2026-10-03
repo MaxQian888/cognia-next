@@ -2575,6 +2575,9 @@
     "plugin_unload_vscode": {
       "to": "plugin.vscode.unload"
     },
+    "plugin_vscode_uninstall": {
+      "to": "plugin.vscode.uninstall"
+    },
     "plugin_verify_detached_signature": {
       "to": "plugin.detached_signature.verify"
     },

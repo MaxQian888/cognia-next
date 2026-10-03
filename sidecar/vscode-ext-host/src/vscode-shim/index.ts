@@ -35,6 +35,7 @@ import {
   TextDocumentSaveReason,
   ViewColumn,
 } from "./types"
+import * as apiTypes from "./api-types"
 import { createCommandsNamespace } from "./commands"
 import { createWindowNamespace } from "./window"
 import { createWorkspaceNamespace } from "./workspace"
@@ -62,8 +63,17 @@ export interface ShimDependencies {
   ) => () => void
 }
 
+/**
+ * The VS Code API level this shim implements. A semver `version` is what
+ * extensions and `vscode-languageclient` (which requires `^1.91.0`) check;
+ * mirrored by `SHIM_VSCODE_VERSION` in `lib/plugin/vscode-shim/engine-compat.ts`.
+ */
+export const SHIM_VSCODE_API_VERSION = "1.91.0"
+
 export function createVscodeShim(deps: ShimDependencies): unknown {
   return {
+    // Value types beyond the core ones below.
+    ...apiTypes,
     // Data types
     Position,
     Range,
@@ -106,7 +116,7 @@ export function createVscodeShim(deps: ShimDependencies): unknown {
     // Convenience errors so extensions can `instanceof` them.
     NotSupportedError,
 
-    // Version metadata — extensions sometimes branch on this.
-    version: "cognia-1.74.0",
+    // Extensions and vscode-languageclient parse this as semver.
+    version: SHIM_VSCODE_API_VERSION,
   }
 }

@@ -88,7 +88,7 @@ describe("engine-compat", () => {
   })
 
   it("engine_mismatch_warns_but_does_not_block", () => {
-    // ^1.93.0 against a shim reporting 1.74.0 — the exact case that a naive
+    // ^1.93.0 against a shim reporting 1.91.0 — the exact case that a naive
     // gate would reject, even though nothing here uses an unsupported API.
     const report = evaluateEngineCompat({
       engineVscode: "^1.93.0",
@@ -175,5 +175,18 @@ describe("engine-compat", () => {
     expect(overlap).toEqual([])
     expect(isUnimplementedNamespace("debug")).toBe(true)
     expect(isUnimplementedNamespace("commands")).toBe(false)
+  })
+})
+
+describe("SHIM_VSCODE_VERSION", () => {
+  it("is the version the sidecar shim reports, and valid semver", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require("node:fs") as typeof import("node:fs")
+    const shim = readFileSync(
+      require.resolve("../../../sidecar/vscode-ext-host/src/vscode-shim/index.ts"),
+      "utf8"
+    )
+    expect(shim).toContain(`SHIM_VSCODE_API_VERSION = "${SHIM_VSCODE_VERSION}"`)
+    expect(SHIM_VSCODE_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
   })
 })

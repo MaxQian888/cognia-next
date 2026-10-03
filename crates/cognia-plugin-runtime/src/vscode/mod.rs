@@ -23,16 +23,68 @@ pub mod capabilities;
 pub mod commands;
 pub mod host;
 pub mod installer;
+pub mod memento;
 pub mod openvsx_download;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 pub type VscodeEventSink = Arc<dyn Fn(String, String) + Send + Sync + 'static>;
+
+/// Where `.vsix` installs unpack, relative to the data root's `cognia/`.
+pub const EXTENSIONS_DIR: &str = "vscode-extensions";
+/// Where each extension's storage, Memento and log live, apart from its
+/// install so they survive an update or a reinstall.
+pub const EXTENSION_STATE_DIR: &str = "vscode-extension-state";
+
+/// The VS Code extension install root for a host whose plugins live in
+/// `plugin_install_dir`: its sibling `vscode-extensions`, on every host (the
+/// desktop and the headless companion build it this one way).
+pub fn extension_install_dir_for(plugin_install_dir: &Path) -> PathBuf {
+    plugin_install_dir
+        .parent()
+        .unwrap_or(plugin_install_dir)
+        .join(EXTENSIONS_DIR)
+}
+
+/// The state root beside an extension install root.
+pub fn extension_state_root_for(extension_install_dir: &Path) -> PathBuf {
+    extension_install_dir
+        .parent()
+        .unwrap_or(extension_install_dir)
+        .join(EXTENSION_STATE_DIR)
+}
+
+/// One extension's storage directories for one activation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionStoragePaths {
+    /// `globalStorageUri`.
+    pub global: PathBuf,
+    /// `storageUri`: per workspace folder, absent with none open.
+    pub workspace: Option<PathBuf>,
+    /// `logUri`.
+    pub log: PathBuf,
+}
+
+impl ExtensionStoragePaths {
+    pub fn global_memento(&self) -> PathBuf {
+        self.global.join("state.json")
+    }
+    pub fn workspace_memento(&self) -> Option<PathBuf> {
+        self.workspace.as_ref().map(|dir| dir.join("state.json"))
+    }
+}
+
+/// A short, stable directory name for a workspace folder URI.
+pub fn workspace_storage_key(workspace_root: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(workspace_root.as_bytes());
+    hex::encode(&digest[..12])
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionRuntime {
@@ -93,6 +145,37 @@ impl VscodeExtensionState {
         self.extension_install_dir
             .join(super::sanitize_plugin_id(extension_id))
     }
+
+    /// `<data>/cognia/vscode-extension-state/<id>`.
+    pub fn state_dir(&self, extension_id: &str) -> PathBuf {
+        extension_state_root_for(&self.extension_install_dir)
+            .join(super::sanitize_plugin_id(extension_id))
+    }
+
+    /// The storage directories for one activation, created on disk.
+    pub fn storage_paths(
+        &self,
+        extension_id: &str,
+        workspace_root: Option<&str>,
+    ) -> std::io::Result<ExtensionStoragePaths> {
+        let root = self.state_dir(extension_id);
+        let paths = ExtensionStoragePaths {
+            global: root.join("global"),
+            workspace: workspace_root
+                .filter(|root| !root.is_empty())
+                .map(|workspace| {
+                    root.join("workspace")
+                        .join(workspace_storage_key(workspace))
+                }),
+            log: root.join("log"),
+        };
+        std::fs::create_dir_all(&paths.global)?;
+        std::fs::create_dir_all(&paths.log)?;
+        if let Some(workspace) = &paths.workspace {
+            std::fs::create_dir_all(workspace)?;
+        }
+        Ok(paths)
+    }
 }
 
 #[cfg(test)]
@@ -106,6 +189,43 @@ mod tests {
         assert!(state.runtimes.read().is_empty());
         assert!(state.sidecar_script.read().is_none());
         assert!(state.event_sink.read().is_none());
+    }
+
+    #[test]
+    fn state_lives_beside_the_install_root_and_is_per_workspace() {
+        let data = tempfile::tempdir().unwrap();
+        let plugins = data.path().join("cognia").join("plugins");
+        let installs = extension_install_dir_for(&plugins);
+        assert_eq!(installs, data.path().join("cognia").join(EXTENSIONS_DIR));
+        let state = VscodeExtensionState::new(installs);
+        let first = state
+            .storage_paths("acme.tools", Some("file:///work/a"))
+            .unwrap();
+        let second = state
+            .storage_paths("acme.tools", Some("file:///work/b"))
+            .unwrap();
+        assert_eq!(
+            first.global,
+            data.path()
+                .join("cognia")
+                .join(EXTENSION_STATE_DIR)
+                .join("acme.tools")
+                .join("global")
+        );
+        assert!(first.global.is_dir() && first.log.is_dir());
+        assert_ne!(first.workspace, second.workspace);
+        assert!(first.workspace.as_ref().unwrap().is_dir());
+        assert_eq!(
+            state.storage_paths("acme.tools", None).unwrap().workspace,
+            None
+        );
+        assert_eq!(
+            state
+                .storage_paths("acme.tools", Some(""))
+                .unwrap()
+                .workspace,
+            None
+        );
     }
 
     #[test]

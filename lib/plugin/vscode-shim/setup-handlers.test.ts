@@ -81,6 +81,8 @@ const EXPECTED_METHODS = [
   "window:activeTextEditor:get",
   "workspace:listFolders",
   "workspace:getWorkspaceFolder",
+  "host:stderr",
+  "host:exited",
 ]
 
 interface IsolatedModules {
@@ -264,6 +266,52 @@ describe("installVscodeRpcHandlers", () => {
       source: "eslint",
     })
     expect(arg.markers[1]).toMatchObject({ severity: "warning", message: "unused" })
+  })
+
+  it("host:stderr lands in the extension's log stream and host:exited reaches the supervisor", async () => {
+    let handleInboundFrame!: (pluginId: string, raw: string) => Promise<void>
+    let getVscodeLogs!: (
+      pluginId: string
+    ) => Array<{ level: string; message: string; kind: string }>
+    let supervisor!: {
+      state: (pluginId: string) => { status: string } | undefined
+      dispose: () => void
+    }
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const setup = require("./setup-handlers") as { installVscodeRpcHandlers: () => () => void }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const dispatcher = require("./rpc-dispatcher") as {
+        handleInboundFrame: (pluginId: string, raw: string) => Promise<void>
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      getVscodeLogs = require("./vscode-log-buffer").getVscodeLogs
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      supervisor = require("./host-supervisor").getVscodeHostSupervisor()
+      setup.installVscodeRpcHandlers()
+      handleInboundFrame = dispatcher.handleInboundFrame
+    })
+    const frame = (method: string, params: unknown) =>
+      JSON.stringify({ jsonrpc: "2.0", method, params })
+
+    try {
+      await handleInboundFrame("ext.crashy", frame("host:stderr", { line: "Error: boom" }))
+      await handleInboundFrame(
+        "ext.crashy",
+        frame("host:exited", { code: 1, signal: null, intentional: false })
+      )
+      expect(getVscodeLogs("ext.crashy")).toEqual([
+        expect.objectContaining({ level: "error", message: "Error: boom", kind: "stderr" }),
+        expect.objectContaining({
+          level: "error",
+          kind: "host",
+          message: expect.stringContaining("code 1"),
+        }),
+      ])
+      expect(supervisor.state("ext.crashy")).toMatchObject({ status: "restarting", restarts: 1 })
+    } finally {
+      supervisor.dispose()
+    }
   })
 
   it("languages:clearDiagnostics forwards an empty marker list", async () => {
