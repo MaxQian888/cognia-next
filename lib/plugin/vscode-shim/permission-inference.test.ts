@@ -191,6 +191,9 @@ describe("inferPermissions", () => {
       expect(infer(`vscode.workspace.fs.writeFile(uri, bytes)`).permissions).toContain(
         "filesystem:write"
       )
+      expect(infer(`vscode.workspace.createFileSystemWatcher("**/*.ts")`).permissions).toContain(
+        "filesystem:read"
+      )
       // Reading the folder list touches no file.
       expect(infer(`vscode.workspace.workspaceFolders`).permissions).not.toContain(
         "filesystem:read"

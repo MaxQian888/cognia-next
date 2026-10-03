@@ -1,30 +1,69 @@
 /**
- * `vscode.workspace` — files, configuration, document lifecycle.
+ * `vscode.workspace` — folders, files, configuration, document lifecycle.
  *
- * `workspace.fs` proxies to the renderer's `ctx.fs.*` (which is permission-
- * gated). `workspace.getConfiguration` reads from cognia settings.
- * `workspace.textDocuments` + `onDidOpenTextDocument` reflect Monaco editor
- * state pushed by the renderer.
+ * Folders and file-watcher events come from the renderer (`workspace-folders.ts`);
+ * `workspace.fs` works on files in the host once the renderer has authorized
+ * each path (`workspace-fs.ts`); `findFiles` asks the renderer, which walks
+ * the folders. `workspace.textDocuments` + `onDidOpenTextDocument` reflect
+ * Monaco editor state pushed by the renderer.
  */
 
 import { Disposable, EventEmitter, Uri, type CancellationToken, type WorkspaceEdit } from "./types"
 import type { ShimDependencies } from "./index"
+import { createWorkspaceFileSystem } from "./workspace-fs"
+import type { FileSystemEventKind } from "./workspace-folders"
+
+/** A `GlobPattern`: a glob string, or a `RelativePattern` (`{ baseUri | base, pattern }`). */
+type GlobPattern = string | { baseUri?: Uri; base?: string; pattern: string }
+
+/** A glob pattern as the renderer takes it: the base (a URI) and the glob relative to it. */
+function wireGlob(pattern: GlobPattern): { base?: string; pattern: string } {
+  if (typeof pattern === "string") return { pattern }
+  if (!pattern || typeof pattern.pattern !== "string") {
+    throw new TypeError("A glob pattern is a string or a RelativePattern")
+  }
+  const base = pattern.baseUri ?? (pattern.base !== undefined ? Uri.file(pattern.base) : undefined)
+  return { ...(base ? { base: base.toString() } : {}), pattern: pattern.pattern }
+}
 
 export function createWorkspaceNamespace(deps: ShimDependencies) {
-  const { connection, extensionId } = deps
+  const { connection, extensionId, folders } = deps
   const documents = deps.documents
   const didChangeConfig = new EventEmitter<{ affectsConfiguration: (key: string) => boolean }>()
-  let workspaceFolders: ReadonlyArray<{ uri: Uri; name: string; index: number }> = []
   connection.onNotification("workspace:configurationChanged", (data) =>
     didChangeConfig.fire(data as { affectsConfiguration: (key: string) => boolean })
   )
-  connection.onNotification("workspace:foldersChanged", (params) => {
-    workspaceFolders = (params as typeof workspaceFolders) ?? []
+  const fileSystem = createWorkspaceFileSystem({
+    connection,
+    extensionId,
+    ownedPaths: deps.ownedPaths,
   })
 
   return {
     get workspaceFolders() {
-      return workspaceFolders
+      return folders.folders
+    },
+    /** The first folder's name, or `undefined` with none open. */
+    get name() {
+      return folders.folders?.[0]?.name
+    },
+    /** Deprecated in VS Code: the first folder's path. */
+    get rootPath() {
+      return folders.folders?.[0]?.uri.fsPath
+    },
+    /** There are no `.code-workspace` files here. */
+    workspaceFile: undefined,
+    onDidChangeWorkspaceFolders: folders.onDidChange.event,
+    getWorkspaceFolder: (uri: Uri) => folders.getWorkspaceFolder(uri),
+    asRelativePath: (pathOrUri: string | Uri, includeWorkspaceFolder?: boolean) =>
+      folders.asRelativePath(pathOrUri, includeWorkspaceFolder),
+    /**
+     * The folders are the projects open in the app's editors, which the
+     * extension cannot change: answers `false` (not applied), as VS Code
+     * does for an edit it refuses.
+     */
+    updateWorkspaceFolders(): boolean {
+      return false
     },
     get textDocuments() {
       return documents.all()
@@ -34,7 +73,6 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
       // the cognia permission gate is the actual trust boundary.
       return true
     },
-    name: "cognia",
     onDidGrantWorkspaceTrust(listener: () => void) {
       // Synchronous fire — cognia never revokes trust.
       queueMicrotask(listener)
@@ -86,54 +124,83 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
     getConfiguration(section?: string, scope?: unknown) {
       return new ProxyConfiguration(connection, extensionId, section, scope)
     },
-    findFiles(pattern: string, exclude?: string, maxResults?: number) {
-      return connection.sendRequest("workspace:findFiles", {
+    /**
+     * Files in the open folders matching `include`, matched against each
+     * file's path inside its folder. `exclude` `undefined` applies the
+     * default excludes (`.git` and the like), `null` none. Ignore files
+     * (`.gitignore`) are not applied, as in VS Code.
+     */
+    async findFiles(
+      include: GlobPattern,
+      exclude?: GlobPattern | null,
+      maxResults?: number,
+      token?: CancellationToken
+    ): Promise<Uri[]> {
+      if (token?.isCancellationRequested) return []
+      const search = connection.sendRequest<string[]>("workspace:findFiles", {
         extensionId,
-        pattern,
-        exclude,
-        maxResults,
+        include: wireGlob(include),
+        exclude: exclude === undefined ? undefined : exclude === null ? null : wireGlob(exclude),
+        ...(maxResults !== undefined ? { maxResults } : {}),
       })
+      const found = token
+        ? await Promise.race([
+            search,
+            new Promise<null>((resolve) => token.onCancellationRequested(() => resolve(null))),
+          ])
+        : await search
+      return found === null || token?.isCancellationRequested
+        ? []
+        : found.map((uri) => Uri.parse(uri))
     },
-    createFileSystemWatcher(globPattern: string) {
+    /**
+     * Events for files in the open folders matching `globPattern` (a string
+     * glob is matched against the whole path, a `RelativePattern` inside
+     * its base). The renderer runs the watch; one it cannot run (no
+     * permission, a base outside the folders) says why in the extension's
+     * log and stays silent.
+     */
+    createFileSystemWatcher(
+      globPattern: GlobPattern,
+      ignoreCreateEvents = false,
+      ignoreChangeEvents = false,
+      ignoreDeleteEvents = false
+    ) {
       const handle = `fsw:${extensionId}:${Math.random().toString(36).slice(2, 10)}`
-      const createEmitter = new EventEmitter<Uri>()
-      const changeEmitter = new EventEmitter<Uri>()
-      const deleteEmitter = new EventEmitter<Uri>()
-      connection.onNotification(`fsw:${handle}:create`, (uri) => createEmitter.fire(uri as Uri))
-      connection.onNotification(`fsw:${handle}:change`, (uri) => changeEmitter.fire(uri as Uri))
-      connection.onNotification(`fsw:${handle}:delete`, (uri) => deleteEmitter.fire(uri as Uri))
-      void connection.sendRequest("workspace:createFileSystemWatcher", {
-        extensionId,
-        handle,
-        globPattern,
-      })
+      const emitters: Record<FileSystemEventKind, EventEmitter<Uri>> = {
+        create: new EventEmitter<Uri>(),
+        change: new EventEmitter<Uri>(),
+        delete: new EventEmitter<Uri>(),
+      }
+      const removeSink = folders.addWatcher(handle, (kind, uri) => emitters[kind].fire(uri))
+      void connection
+        .sendRequest("workspace:createFileSystemWatcher", {
+          extensionId,
+          handle,
+          pattern: wireGlob(globPattern),
+          ignoreCreateEvents,
+          ignoreChangeEvents,
+          ignoreDeleteEvents,
+        })
+        .catch(() => undefined)
       return {
-        onDidCreate: createEmitter.event,
-        onDidChange: changeEmitter.event,
-        onDidDelete: deleteEmitter.event,
+        ignoreCreateEvents,
+        ignoreChangeEvents,
+        ignoreDeleteEvents,
+        onDidCreate: emitters.create.event,
+        onDidChange: emitters.change.event,
+        onDidDelete: emitters.delete.event,
         dispose: () => {
-          createEmitter.dispose()
-          changeEmitter.dispose()
-          deleteEmitter.dispose()
-          void connection.sendNotification("workspace:disposeFileSystemWatcher", { handle })
+          removeSink()
+          for (const emitter of Object.values(emitters)) emitter.dispose()
+          void connection.sendNotification("workspace:disposeFileSystemWatcher", {
+            extensionId,
+            handle,
+          })
         },
       }
     },
-    fs: {
-      readFile: (uri: Uri) => connection.sendRequest("fs:readFile", { extensionId, uri }),
-      writeFile: (uri: Uri, content: Uint8Array) =>
-        connection.sendRequest("fs:writeFile", { extensionId, uri, content }),
-      delete: (uri: Uri, options?: { recursive?: boolean }) =>
-        connection.sendRequest("fs:delete", { extensionId, uri, options }),
-      rename: (oldUri: Uri, newUri: Uri) =>
-        connection.sendRequest("fs:rename", { extensionId, oldUri, newUri }),
-      copy: (source: Uri, target: Uri, options?: { overwrite?: boolean }) =>
-        connection.sendRequest("fs:copy", { extensionId, source, target, options }),
-      stat: (uri: Uri) => connection.sendRequest("fs:stat", { extensionId, uri }),
-      readDirectory: (uri: Uri) => connection.sendRequest("fs:readDirectory", { extensionId, uri }),
-      createDirectory: (uri: Uri) =>
-        connection.sendRequest("fs:createDirectory", { extensionId, uri }),
-    },
+    fs: fileSystem,
     /**
      * Resolves once every document the edit changed shows it here, as in VS
      * Code; `false` when a step failed (the reason is in the extension's log).

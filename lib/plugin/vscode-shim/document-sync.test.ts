@@ -244,6 +244,7 @@ describe("detached documents", () => {
     ])
     expect(h.sync.detachedHolders("file:///d.ts")).toEqual(["ext.a"])
     expect(h.sync.heldBy("ext.a")).toEqual(["file:///d.ts"])
+    expect(h.sync.heldUris()).toEqual(["file:///d.ts"])
     // Opening it again with other text is an edit.
     await expect(h.sync.openDetached("ext.a", "file:///d.ts", "typescript", "three")).resolves.toBe(
       3

@@ -37,6 +37,8 @@ import {
 } from "./types"
 import * as apiTypes from "./api-types"
 import type { DocumentStore } from "./documents"
+import type { WorkspaceFolders } from "./workspace-folders"
+import type { OwnedPaths } from "./workspace-fs"
 import type { CancellationToken } from "./types"
 import { createCommandsNamespace } from "./commands"
 import { createWindowNamespace } from "./window"
@@ -61,6 +63,10 @@ export interface ShimDependencies {
   connection: RpcConnection
   /** The host's open documents and editors (`documents.ts`). */
   documents: DocumentStore
+  /** The open workspace folders and file-watcher routing (`workspace-folders.ts`). */
+  folders: WorkspaceFolders
+  /** The extension's own directories, which `workspace.fs` may use without asking. */
+  ownedPaths: () => OwnedPaths
   /**
    * Answer `extension:call`s carrying `token`. `call` names the method the
    * renderer asked for and carries the call's cancellation token.

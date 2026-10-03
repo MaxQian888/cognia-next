@@ -150,6 +150,24 @@ interface LoadedExtension {
 }
 
 const extensions = new Map<string, LoadedExtension>()
+/** The host's binary-data constructors, given to every extension context. */
+export const SHARED_BINARY_GLOBALS = {
+  ArrayBuffer,
+  SharedArrayBuffer,
+  DataView,
+  Int8Array,
+  Uint8Array,
+  Uint8ClampedArray,
+  Int16Array,
+  Uint16Array,
+  Int32Array,
+  Uint32Array,
+  Float32Array,
+  Float64Array,
+  BigInt64Array,
+  BigUint64Array,
+} as const
+
 let shimFactory: VscodeShimFactory | null = null
 
 export function setVscodeShimFactory(factory: VscodeShimFactory): void {
@@ -207,6 +225,10 @@ export async function loadExtension(req: ExtensionLoadRequest): Promise<void> {
     TextEncoder,
     TextDecoder,
     Promise,
+    // Binary data crosses the API constantly (`workspace.fs`, `TextEncoder`,
+    // `Buffer`), and the host makes it with its own constructors. Sharing
+    // them keeps `bytes instanceof Uint8Array` true inside the extension.
+    ...SHARED_BINARY_GLOBALS,
   } as Record<string, unknown>
 
   if (req.bundleFormat === "esm") {

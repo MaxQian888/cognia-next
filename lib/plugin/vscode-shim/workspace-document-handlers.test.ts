@@ -77,6 +77,8 @@ function setup(options: { granted?: string[] } = {}) {
     onActiveEditorChanged: () => () => {},
   })
   const files = new Map<string, string>([["/repo/a.ts", "hello\nworld"]])
+  const watchers = new Map<string, (change: { kind: string; path: string }) => void>()
+  const stoppedWatches: string[] = []
   const savedListeners = new Set<(path: string) => void>()
   const deps: VscodeDocumentsDependencies = {
     sync,
@@ -104,6 +106,13 @@ function setup(options: { granted?: string[] } = {}) {
       rename: jest.fn(async (root: string, from: string, to: string) => {
         files.set(`${root}/${to}`, files.get(`${root}/${from}`) ?? "")
         files.delete(`${root}/${from}`)
+      }),
+      watch: jest.fn((root: string, listener: (change: { kind: string; path: string }) => void) => {
+        watchers.set(root, listener)
+        return () => {
+          watchers.delete(root)
+          stoppedWatches.push(root)
+        }
       }),
     },
     editor: {
@@ -157,6 +166,8 @@ function setup(options: { granted?: string[] } = {}) {
     call,
     methodsFor,
     fireSaved: (path: string) => savedListeners.forEach((listener) => listener(path)),
+    watchers,
+    stoppedWatches,
   }
 }
 
@@ -289,6 +300,31 @@ describe("workspace.openTextDocument", () => {
     await expect(h.call("workspace:openTextDocument", { uri: "git:/a" })).rejects.toThrow(
       /No text document content provider/
     )
+  })
+})
+
+describe("files held outside an editor", () => {
+  it("follow the disk while a host holds them, and stop being watched after", async () => {
+    const h = setup({ granted: ["filesystem:read"] })
+    await h.call("workspace:openTextDocument", { uri: "file:///repo/a.ts" })
+    expect([...h.watchers.keys()]).toEqual(["/repo"])
+
+    h.files.set("/repo/a.ts", "changed on disk")
+    h.watchers.get("/repo")!({ kind: "modify", path: "/repo/a.ts" })
+    await h.flush()
+    expect(h.sync.detached("ext.a", "file:///repo/a.ts")).toMatchObject({
+      text: "changed on disk",
+      version: 2,
+    })
+    // A delete keeps the last text.
+    h.watchers.get("/repo")!({ kind: "delete", path: "/repo/a.ts" })
+    await h.flush()
+    expect(h.sync.detached("ext.a", "file:///repo/a.ts")?.text).toBe("changed on disk")
+
+    h.sync.closeDetached("ext.a", "file:///repo/a.ts")
+    h.watchers.get("/repo")!({ kind: "modify", path: "/repo/b.ts" })
+    await h.flush()
+    expect(h.stoppedWatches).toEqual(["/repo"])
   })
 })
 
@@ -486,6 +522,7 @@ describe("createVscodeDocumentsDependencies", () => {
     const deps = createVscodeDocumentsDependencies(sync, jest.fn())
     expect(deps.sync).toBe(sync)
     await expect(deps.fs.roots()).resolves.toEqual(["/repo"])
+    expect(typeof deps.fs.watch).toBe("function")
     await expect(deps.fs.stat("/repo", "a.ts")).resolves.toEqual({ exists: true, isDir: false })
     await deps.fs.write("/repo", "a.ts", "t")
     expect(mockFs.writeWorkspaceFile).toHaveBeenCalledWith("/repo", "a.ts", "t")

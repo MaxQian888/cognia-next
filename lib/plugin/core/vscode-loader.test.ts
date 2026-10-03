@@ -163,6 +163,7 @@ describe("vscode-loader — Tauri mode", () => {
           sidecarPid: 12345,
         }
       }
+      if (cmd === "plugin_invoke_vscode_rpc") return JSON.stringify(null)
       throw new Error(`unexpected command ${cmd}`)
     })
     jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
@@ -182,6 +183,15 @@ describe("vscode-loader — Tauri mode", () => {
       "plugin_activate_vscode",
       // No workspace open: the extension gets no workspaceState.
       expect.objectContaining({ pluginId: "cognia.test-ext", workspaceRoot: null })
+    )
+    // The host learns the open folders before its extension activates.
+    const commands = invoke.mock.calls.map((call) => {
+      const [cmd, args] = call as unknown as [string, { method?: string } | undefined]
+      return args?.method ?? cmd
+    })
+    expect(commands.indexOf("workspace:foldersChanged")).toBeGreaterThan(-1)
+    expect(commands.indexOf("workspace:foldersChanged")).toBeLessThan(
+      commands.indexOf("plugin_activate_vscode")
     )
     const { getVscodeHostSupervisor } = await import("@/lib/plugin/vscode-shim/host-supervisor")
     expect(getVscodeHostSupervisor().state("cognia.test-ext")).toMatchObject({

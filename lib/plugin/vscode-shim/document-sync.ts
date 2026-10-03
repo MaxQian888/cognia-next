@@ -100,6 +100,8 @@ export interface DocumentSync {
   detachedHolders(uri: string): string[]
   /** The detached documents a host holds. */
   heldBy(pluginId: string): string[]
+  /** Every detached document any host holds. */
+  heldUris(): string[]
   /** Tell the hosts that see `uri` it was saved (`onDidSaveTextDocument`). */
   saved(uri: string): void
   dispose(): void
@@ -381,6 +383,9 @@ export function createDocumentSync(deps: DocumentSyncDependencies): DocumentSync
     },
     heldBy(pluginId) {
       return [...(detachedByHost.get(pluginId)?.keys() ?? [])]
+    },
+    heldUris() {
+      return [...new Set([...detachedByHost.values()].flatMap((held) => [...held.keys()]))]
     },
     saved(uri) {
       if (documents.has(uri)) {

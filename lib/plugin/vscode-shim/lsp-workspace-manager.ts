@@ -570,6 +570,21 @@ export function resolveMonacoDocumentUri(fileUri: string): string {
 }
 
 /**
+ * The real project folders open in the app's editors: what a VS Code
+ * extension sees as `workspace.workspaceFolders`. Unlike
+ * {@link listWorkspaceFolders}, it leaves out the scratch folders
+ * materialised per document for language servers, which are not folders a
+ * user opened. `path` is the folder's absolute path.
+ */
+export function listProjectWorkspaceFolders(): Array<{ uri: string; name: string; path: string }> {
+  return [...projectWorkspaces.values()].map((ws) => ({
+    uri: ws.rootUri,
+    name: ws.name,
+    path: ws.root.replace(/\\/g, "/").replace(/\/+$/g, ""),
+  }))
+}
+
+/**
  * Enumerate every workspace folder currently materialised — the answer
  * to `vscode.workspace.workspaceFolders` from a sidecar that hasn't
  * specified a URI. Stable insertion order.

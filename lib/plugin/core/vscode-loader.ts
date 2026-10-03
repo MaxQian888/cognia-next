@@ -138,6 +138,17 @@ export async function ensureDispatcherConfigured(): Promise<void> {
   })
   installVscodeRpcHandlers()
 
+  // `workspace.workspaceFolders`, `workspace.fs`, `findFiles` and file
+  // watchers. Independent of Monaco, so configured outside its try below.
+  const { configureVscodeWorkspaceFiles, createVscodeWorkspaceFilesDependencies } =
+    await import("@/lib/plugin/vscode-shim/workspace-file-handlers")
+  configureVscodeWorkspaceFiles(
+    createVscodeWorkspaceFilesDependencies({
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+      hosts: () => [...vscodeGenerations.keys()],
+    })
+  )
+
   // Wire the monaco-bridge to the Monaco instance already managed by
   // @monaco-editor/react. Loading its prebuilt AMD assets avoids bundling and
   // compiling the full monaco-editor ESM source graph during every dev start.
@@ -396,8 +407,18 @@ export async function loadVscodeDefinition(
     activate: async (context) => {
       context.logger.info(`Activating VS Code extension ${manifest.id}`)
       try {
-        // Open documents and editors first: `activate()` may read them.
+        // Open documents, editors and folders first: `activate()` may read them.
         await documentSync?.replay(manifest.id)
+        const { pushWorkspaceFolders } =
+          await import("@/lib/plugin/vscode-shim/workspace-file-handlers")
+        await pushWorkspaceFolders(manifest.id).catch((error: unknown) =>
+          // As with the document replay: a host that cannot take the report
+          // is failing, which its supervisor handles.
+          vscodeLoaderLogger.warn("VS Code workspace folders not delivered", {
+            pluginId: manifest.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        )
         const result = await invoke<VscodeActivateResult>("plugin_activate_vscode", {
           pluginId: manifest.id,
           generation: requireVscodeGeneration(manifest.id),
@@ -497,6 +518,9 @@ export async function unloadVscodeExtension(
       const { clearVscodeDocumentsForPlugin } =
         await import("@/lib/plugin/vscode-shim/workspace-document-handlers")
       clearVscodeDocumentsForPlugin(pluginId)
+      const { clearVscodeWorkspaceFilesForPlugin } =
+        await import("@/lib/plugin/vscode-shim/workspace-file-handlers")
+      clearVscodeWorkspaceFilesForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

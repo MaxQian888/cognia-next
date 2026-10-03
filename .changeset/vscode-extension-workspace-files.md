@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+VS Code extensions now see the project folders open in the app's editors: `workspace.workspaceFolders`, `name`, `rootPath`, `getWorkspaceFolder`, `asRelativePath` and `onDidChangeWorkspaceFolders` all work, and `showWorkspaceFolderPick` offers them. `workspace.fs` reads, writes, stats, lists, copies, renames and deletes files (binary included) inside those folders with the extension's file permissions, and in the extension's own storage without asking; symlinks cannot lead outside a folder. `workspace.findFiles` searches the folders with full VS Code glob syntax (relative patterns, excludes, result limits), and `createFileSystemWatcher` reports created, changed and deleted files on the desktop. Documents an extension opened without an editor now follow changes on disk. Not supported yet: moving files to the trash (`delete` with `useTrash`), changing the folder list (`updateWorkspaceFolders` answers `false`), and file system providers for other schemes. Extensions that watch files now ask for file-read permission when installed.

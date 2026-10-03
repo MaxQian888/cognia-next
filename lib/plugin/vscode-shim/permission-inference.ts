@@ -39,8 +39,8 @@ export interface InferPermissionsInput {
 }
 
 /**
- * `vscode.workspace` calls that reach the user's files. Opening a document
- * or searching reads them; `applyEdit` and the write side of `workspace.fs`
+ * `vscode.workspace` calls that reach the user's files. Opening a document,
+ * searching or watching reads them; `applyEdit` and the write side of `workspace.fs`
  * change them (and `applyEdit` reads a file before editing it).
  */
 const VSCODE_FILE_API_PERMISSIONS: ReadonlyArray<{
@@ -49,6 +49,7 @@ const VSCODE_FILE_API_PERMISSIONS: ReadonlyArray<{
 }> = [
   { api: "vscode.workspace.openTextDocument", permissions: ["filesystem:read"] },
   { api: "vscode.workspace.findFiles", permissions: ["filesystem:read"] },
+  { api: "vscode.workspace.createFileSystemWatcher", permissions: ["filesystem:read"] },
   { api: "vscode.workspace.fs.readFile", permissions: ["filesystem:read"] },
   { api: "vscode.workspace.fs.stat", permissions: ["filesystem:read"] },
   { api: "vscode.workspace.fs.readDirectory", permissions: ["filesystem:read"] },

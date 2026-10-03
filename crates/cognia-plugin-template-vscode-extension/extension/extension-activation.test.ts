@@ -4,13 +4,11 @@
  * The shim exposes the whole `vscode` surface, but the Host answers only the
  * calls it has a canonical adapter for. Everything named in
  * `EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS` gets a deterministic capability
- * error, and several shim builders send their request with a bare `void`
- * (`buildOutputChannel` / `buildStatusBarItem` in
- * `sidecar/vscode-ext-host/src/vscode-shim/window.ts`), so calling one does
- * not merely do nothing — it raises an unhandled rejection inside the
- * extension host. The scaffold shipped `createOutputChannel`,
- * `createStatusBarItem` and `showInformationMessage`: three unavailable
- * methods, on the very first thing a plugin author runs.
+ * error, which a shim call made with a bare `void` turns into an unhandled
+ * rejection inside the extension host. The scaffold once shipped
+ * `createOutputChannel`, `createStatusBarItem` and `showInformationMessage`
+ * while the Host refused all three, on the very first thing a plugin author
+ * ran. The Host serves them now (`lib/plugin/vscode-shim/window-handlers.ts`).
  *
  * This drives the REAL scaffold — `require`d off disk, the same bytes
  * `cognia plugin new --kind vscode` writes — through a `vscode` double that
@@ -275,12 +273,12 @@ describe("the emitted VS Code scaffold", () => {
     expect(logSpy).toHaveBeenCalled()
   })
 
-  it("pins the three surfaces the Host refuses, so a re-add is caught here", () => {
-    // Not a restatement of the list: these are the exact methods the scaffold
-    // used to reach, and the reason the very first plugin an author generated
-    // logged capability errors and an unhandled rejection on activation.
-    expect(UNAVAILABLE.has("window:createOutputChannel")).toBe(true)
-    expect(UNAVAILABLE.has("window:createStatusBarItem")).toBe(true)
-    expect(UNAVAILABLE.has("window:showMessage")).toBe(true)
+  it("pins the window surfaces the Host now serves, so they cannot slip back to refused", () => {
+    // The exact methods the scaffold once reached while the Host refused
+    // them. They are served since the window adapters landed; a scaffold
+    // using them again must not start logging capability errors.
+    expect(UNAVAILABLE.has("window:createOutputChannel")).toBe(false)
+    expect(UNAVAILABLE.has("window:createStatusBarItem")).toBe(false)
+    expect(UNAVAILABLE.has("window:showMessage")).toBe(false)
   })
 })

@@ -30,6 +30,8 @@ import {
 } from "./require-hook"
 import { ExtensionMode } from "./vscode-shim/api-types"
 import { DocumentStore, type EditOutcome } from "./vscode-shim/documents"
+import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
+import type { OwnedPaths } from "./vscode-shim/workspace-fs"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
 import {
   activateExtension,
@@ -141,6 +143,13 @@ const DOCUMENTS = new DocumentStore(
 )
 DOCUMENTS.attach(connection)
 
+/** The open workspace folders, and the routing of file-watcher events. */
+const FOLDERS = new WorkspaceFolders()
+FOLDERS.attach(connection)
+
+/** Per extension, the directories it owns (install, storage, logs). */
+const OWNED_PATHS = new Map<string, OwnedPaths>()
+
 // Phase B of the LSP reuse work — see
 // `lib/plugin/lsp/lsp-registry.ts` and
 // `~/.claude/plans/vscode-lsp-mighty-robin.md`. The service is wired
@@ -204,6 +213,8 @@ setVscodeShimFactory((extensionId) => {
     extensionId,
     connection,
     documents: DOCUMENTS,
+    folders: FOLDERS,
+    ownedPaths: () => OWNED_PATHS.get(extensionId) ?? { readOnly: [], readWrite: [] },
     registerProviderCallback,
   })
 })
@@ -223,6 +234,7 @@ connection.onRequest("extension:load", async (params) => {
   const req = params as LoadRequest
   setGrantedModules(req.extensionId, req.grantedModules ?? [])
   EXTENSION_ROOTS.set(nodePath.resolve(req.extensionPath), req.extensionId)
+  OWNED_PATHS.set(req.extensionId, { readOnly: [req.extensionPath], readWrite: [] })
   await loadExtension({
     extensionId: req.extensionId,
     extensionPath: req.extensionPath,
@@ -234,6 +246,10 @@ connection.onRequest("extension:load", async (params) => {
 
 connection.onRequest("extension:activate", async (params) => {
   const req = params as ActivateRequest
+  OWNED_PATHS.set(req.extensionId, {
+    readOnly: [req.extensionPath],
+    readWrite: [req.globalStoragePath, ...(req.storagePath ? [req.storagePath] : []), req.logPath],
+  })
   const context = buildContext(req)
   ACTIVE_CONTEXTS.set(req.extensionId, context)
   const exports = await activateExtension(req.extensionId, context)

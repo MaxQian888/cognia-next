@@ -7,6 +7,7 @@ import {
   ensureWorkspaceFiles,
   FLUSH_DEBOUNCE_MS,
   flushDocument,
+  listProjectWorkspaceFolders,
   listWorkspaceFolders,
   resolveWorkspaceFolder,
   resolveMaterializedDocumentUri,
@@ -299,6 +300,22 @@ describe("lsp-workspace-manager", () => {
   })
 
   describe("registerProjectWorkspace (real file:// project roots)", () => {
+    it("lists only the project folders for VS Code extensions, with their paths", async () => {
+      configureLspWorkspaceManager(makeFakeFs())
+      await ensureWorkspace({
+        surface: "canvas",
+        documentId: "doc",
+        fileName: "main.ts",
+        initialContent: "",
+        monacoUri: "canvas:///s/doc.ts",
+      })
+      registerProjectWorkspace("/home/me/proj/", "Proj")
+      expect(listProjectWorkspaceFolders()).toEqual([
+        { uri: "file:///home/me/proj", name: "Proj", path: "/home/me/proj" },
+      ])
+      expect(listWorkspaceFolders().length).toBeGreaterThan(1)
+    })
+
     it("resolves a file:// document to its enclosing project root", () => {
       registerProjectWorkspace("/home/me/proj")
       const folder = resolveWorkspaceFolder("file:///home/me/proj/src/index.ts")

@@ -36,6 +36,7 @@ import {
   type StatusBarItem,
 } from "./window-surfaces"
 import type { TextDocument, TextEditor } from "./documents"
+import type { WorkspaceFolder } from "./workspace-folders"
 import type { ShimDependencies } from "./index"
 
 type MessageItem = string | { title: string; isCloseAffordance?: boolean }
@@ -56,7 +57,7 @@ interface SidecarWindow {
   showWorkspaceFolderPick(options?: {
     placeHolder?: string
     ignoreFocusOut?: boolean
-  }): Promise<{ uri: Uri; name: string; index: number } | undefined>
+  }): Promise<WorkspaceFolder | undefined>
   showOpenDialog(options?: OpenDialogOptions): Promise<Uri[] | undefined>
   showSaveDialog(options?: SaveDialogOptions): Promise<Uri | undefined>
   withProgress<R>(
@@ -224,23 +225,18 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
     createQuickPick: <T extends QuickPickItem>() => new QuickPick<T>(connection, extensionId),
     createInputBox: () => new InputBox(connection, extensionId),
     async showWorkspaceFolderPick(options) {
-      const folders = await connection.sendRequest<Array<{ uri: string; name: string }>>(
-        "workspace:listFolders",
-        {}
-      )
+      const folders = deps.folders.folders ?? []
       if (folders.length === 0) return undefined
       const items = folders.map((folder, index) => ({
         label: folder.name,
-        description: Uri.parse(folder.uri).fsPath,
+        description: folder.uri.fsPath,
         index,
       }))
       const picked = (await showQuickPick(connection, extensionId, items, {
         placeHolder: options?.placeHolder,
         ignoreFocusOut: options?.ignoreFocusOut,
       })) as (typeof items)[number] | undefined
-      if (!picked) return undefined
-      const folder = folders[picked.index]
-      return { uri: Uri.parse(folder.uri), name: folder.name, index: picked.index }
+      return picked ? folders[picked.index] : undefined
     },
     async showOpenDialog(options) {
       const picked = await connection.sendRequest<string[] | null>("window:showOpenDialog", {

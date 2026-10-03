@@ -41,8 +41,10 @@ import { languageFromPath } from "@/lib/git/language-map"
 import { detectLanguage } from "@/lib/plugin/bridge/languages-bridge"
 import { listPluginPermissions } from "@/lib/plugin/core/transport"
 
+import { watchRoot } from "./root-watchers"
 import { appendVscodeLog } from "./vscode-log-buffer"
 import type { DocumentSync } from "./document-sync"
+import { listProjectWorkspaceFolders } from "./lsp-workspace-manager"
 import { applyDocumentEdits, type EditOutcome } from "./monaco-bridge"
 import { registerMethod, type RpcContext } from "./rpc-dispatcher"
 import { applyTextEdits, type PlainTextEdit } from "./text-edits"
@@ -66,6 +68,8 @@ export interface VscodeDocumentsDependencies {
     stat(root: string, relPath: string): Promise<{ exists: boolean; isDir: boolean }>
     remove(root: string, relPath: string, recursive: boolean): Promise<void>
     rename(root: string, fromRelPath: string, toRelPath: string): Promise<void>
+    /** Listen to file changes under a root; returns the unsubscribe. */
+    watch(root: string, listener: (change: { kind: string; path: string }) => void): () => void
   }
   editor: {
     /** Open a file in the project editor at a 1-based line/column; `false` when none is rooted there. */
@@ -95,7 +99,13 @@ export function createVscodeDocumentsDependencies(
     pathOf: fileUriToPath,
     uriOf: pathToFileUri,
     fs: {
-      roots: async () => (await listWorkspaceRoots()).map((root) => root.path),
+      // The project folders open in the editors, and what the host browses.
+      roots: async () => [
+        ...new Set([
+          ...listProjectWorkspaceFolders().map((folder) => folder.path),
+          ...(await listWorkspaceRoots()).map((root) => root.path),
+        ]),
+      ],
       read: (root, relPath) => readWorkspaceFile(root, relPath),
       write: (root, relPath, text) => writeWorkspaceFile(root, relPath, text),
       stat: async (root, relPath) => {
@@ -104,6 +114,7 @@ export function createVscodeDocumentsDependencies(
       },
       remove: (root, relPath, recursive) => deleteWorkspaceEntry(root, relPath, recursive),
       rename: (root, fromRelPath, toRelPath) => renameWorkspaceEntry(root, fromRelPath, toRelPath),
+      watch: watchRoot,
     },
     editor: {
       open: openInProjectEditor,
@@ -130,9 +141,55 @@ const untitledCounters = new Map<string, number>()
 /** Schemes a content provider cannot take: their documents come from elsewhere. */
 const RESERVED_SCHEMES = new Set(["file", "untitled"])
 
+/**
+ * Roots watched so the files hosts hold outside an editor follow the disk,
+ * as VS Code's loaded documents do.
+ */
+const heldFileWatches = new Map<string, () => void>()
+
+function stopHeldFileWatches(): void {
+  for (const stop of heldFileWatches.values()) stop()
+  heldFileWatches.clear()
+}
+
+/** Watch `root` while some host holds a file under it outside an editor. */
+function watchHeldFiles(root: string): void {
+  if (heldFileWatches.has(root) || !deps) return
+  const current = deps
+  heldFileWatches.set(
+    root,
+    current.fs.watch(root, (change) => {
+      void refreshHeldFile(root, change.path, change.kind).catch(() => undefined)
+    })
+  )
+}
+
+async function refreshHeldFile(root: string, path: string, kind: string): Promise<void> {
+  if (!deps) return
+  const { sync, uriOf, fs } = deps
+  const stillHeld = sync.heldUris().some((uri) => {
+    const held = deps?.pathOf(uri)
+    return held !== null && held !== undefined && normalize(held).startsWith(`${root}/`)
+  })
+  if (!stillHeld) {
+    heldFileWatches.get(root)?.()
+    heldFileWatches.delete(root)
+    return
+  }
+  // A deleted file keeps its last text, as in VS Code.
+  if (kind === "delete") return
+  const uri = uriOf(path)
+  if (sync.detachedHolders(uri).length === 0 || sync.editorDocument(uri)) return
+  const target = normalize(path)
+  if (!target.startsWith(`${root}/`)) return
+  const text = await fs.read(root, target.slice(root.length + 1))
+  await replaceHeldCopies(uri, text)
+}
+
 export function configureVscodeDocuments(next: VscodeDocumentsDependencies | null): void {
   unsubscribeSaved?.()
   unsubscribeSaved = null
+  stopHeldFileWatches()
   deps = next
   if (next) {
     unsubscribeSaved = next.editor.onSaved((path) => next.sync.saved(next.uriOf(path)))
@@ -270,6 +327,7 @@ async function openDocument(
     if (stat.isDir) throw new Error(`Cannot open ${uri}: it is a directory`)
     const text = await requireDeps().fs.read(root, relPath)
     const version = await sync.openDetached(pluginId, uri, requireDeps().languageOf(path), text)
+    watchHeldFiles(root)
     return { uri, version }
   }
   const text = await provideContent(uri)
@@ -620,6 +678,7 @@ export function clearVscodeDocumentsForPlugin(pluginId: string): void {
 }
 
 export function __resetVscodeDocumentsForTesting(): void {
+  stopHeldFileWatches()
   configureVscodeDocuments(null)
   contentProviders.clear()
   untitledCounters.clear()

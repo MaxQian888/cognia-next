@@ -25,9 +25,24 @@ export function startHost(extensionId, answer = () => null) {
   createInterface({ input: child.stdout }).on("line", (line) => {
     const frame = JSON.parse(line)
     if (frame.method && frame.id !== undefined) {
-      Promise.resolve(answer(frame.method, frame.params)).then((result) =>
-        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result })}\n`)
-      )
+      // A throwing answerer is the renderer refusing: the host gets an error.
+      Promise.resolve()
+        .then(() => answer(frame.method, frame.params))
+        .then(
+          (result) =>
+            child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result })}\n`),
+          (error) =>
+            child.stdin.write(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: frame.id,
+                error: {
+                  code: -32000,
+                  message: error instanceof Error ? error.message : String(error),
+                },
+              })}\n`
+            )
+        )
     } else if (frame.method) {
       notifications.push(frame)
     } else {
