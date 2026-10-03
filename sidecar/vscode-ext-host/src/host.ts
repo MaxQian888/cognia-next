@@ -1,7 +1,7 @@
 /**
  * Sidecar entry point.
  *
- * Spawned by Tauri (`src-tauri/src/plugin_api/vscode/host.rs`) as a child
+ * Spawned by Tauri (`crates/cognia-plugin-runtime/src/vscode/host.rs`) as a child
  * process. Reads JSON-RPC frames on stdin, writes responses on stdout.
  * stderr is reserved for diagnostic logs the renderer captures verbatim.
  *

@@ -3,7 +3,7 @@
  *
  * The Tauri Rust side forwards every sidecar-initiated frame as a Tauri
  * event named `vscode://rpc/<pluginId>` (see
- * `src-tauri/src/plugin_api/vscode/commands.rs`). This module:
+ * `crates/cognia-plugin-runtime/src/vscode/commands.rs`). This module:
  *
  *   1. Owns a global method → handler registry (`registerMethod`).
  *   2. For each inbound frame, looks up the handler by `method`, runs it,

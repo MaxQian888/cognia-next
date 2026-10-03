@@ -1,6 +1,6 @@
 ---
 title: VS Code extensions & LSP
-description: How Cognia runs real VS Code extensions through a shim — sidecar extension host, manifest adaptation, the vscode.* RPC bridge into Monaco, LSP binary policy, and character packs.
+description: How Cognia runs real VS Code extensions as plugins — install and signatures, one Node host per extension, the vscode.* API and what backs it, language features in Monaco, what is not supported, and Cognia's own language servers.
 ---
 
 # VS Code extensions & LSP
@@ -8,140 +8,188 @@ description: How Cognia runs real VS Code extensions through a shim — sidecar 
 <Status variant="experimental" />
 
 <TLDR>
-Cognia runs **real** VS Code extensions through a shim. Extension code executes in a Node sidecar managed by Tauri Rust; the renderer is a thin IPC client. A `.vsix` is extracted (`vsix-installer.ts:81`), its VS Code manifest mapped to a Cognia `PluginManifest` (`manifest-adapter.ts:48`) with statically-inferred permissions (`permission-inference.ts`), and `vscode-loader.ts:167` delegates `activate`/`deactivate` to Tauri commands. Every sidecar-initiated `vscode.*` call arrives as a Tauri event and is routed by `rpc-dispatcher.ts:154` to method-keyed handlers — `vscode.lm` → Cognia AI, `vscode.languages.*` → Monaco, plus webview/terminal/chat/document bridges. LSP servers resolve through the registry, are gated by `lsp-binary-policy.ts:137`, spawn in the sidecar, and surface diagnostics back into Monaco. Browser mode returns warn-stubs (`vscode-loader.ts:182`).
+Cognia runs **real** VS Code extensions as plugins on the desktop. A `.vsix` from Open VSX (signature checked against a pinned key) or a dropped file (trusted by the user, one extension at a time) is unpacked by the Rust runtime into `<data>/cognia/vscode-extensions/<id>`, and its manifest is adapted into a Cognia `PluginManifest`. Each running extension gets its own Node host (`sidecar/vscode-ext-host`) that mounts the VS Code 1.91 API. The host's calls reach the renderer as JSON-RPC and land on Cognia's own services: Monaco for language features, the terminal dock for terminals and tasks, the extension rail for webviews, the configured AI provider for `vscode.lm`. What Cognia does not provide (debug, SCM, notebooks, tests, comments, menus, keybindings, tree views, ESM bundles) is declared, shown on the plugin's page, and refused with a reason. Browser and mobile builds cannot run extensions.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Manifest API" value="vscode.*" hint="lm, languages, commands, tasks, chat, webview, terminal, workspace" />
-  <Stat label="Monaco providers" value="24" hint="completion…linkedEditingRange, monaco-bridge.ts:646-1126" />
-  <Stat label="vsix cap" value="200 MB" hint="MAX_FULL_VSIX_BYTES, vsix-installer.ts:33" />
-  <Stat label="LSP channel" value="1" hint="cognia.lsp-service multiplexed by ownerId" />
-  <Stat label="Doc pool" value="50 models" hint="file-doc-pool.ts MAX_MODELS=50" />
-  <Stat label="Pack schema" value="v2" hint="CHARACTER_PACK_FILE_SCHEMA_VERSION, schema.ts:28" />
+  <Stat label="API level" value="1.91.0" hint="SHIM_VSCODE_API_VERSION, what vscode-languageclient requires" />
+  <Stat label="API members" value="316 / 66" hint="implemented / labelled unsupported, 0 missing (vscode-api-coverage.generated.json)" />
+  <Stat label="Provider kinds" value="28" hint="PROVIDER_REGISTRY in languages-handler.ts" />
+  <Stat label="Hosts" value="1 per extension" hint="a crash takes down one extension" />
+  <Stat label="Restarts" value="5" hint="1 s·2ⁿ backoff capped at 30 s, host-supervisor.ts" />
+  <Stat label="vsix cap" value="200 MB" hint="MAX_FULL_VSIX_BYTES, vsix-installer.ts" />
 </StatGrid>
 
-## 1. Purpose
+## 1. Where things live
 
-Cognia runs real VS Code extensions through a shim. Extension code executes in a Node sidecar (`sidecar/vscode-ext-host/`) managed by Tauri Rust (`src-tauri/src/plugin_api/vscode/`); the renderer is a thin IPC client.
+| Layer | Path | Owns |
+| --- | --- | --- |
+| Rust runtime | `crates/cognia-plugin-runtime/src/vscode/` | install (`installer.rs`), Open VSX download and signature check (`openvsx_download.rs`), host processes (`host.rs`), Mementos (`memento.rs`), the Tauri commands (`commands.rs`, behind `tauri-host`) |
+| Extension host | `sidecar/vscode-ext-host/src/` | `host.ts` (JSON-RPC on stdio), `extension-runner.ts` (sandbox and lifecycle), `require-hook.ts` (module gate), `vscode-shim/` (the API, one file per namespace) |
+| Renderer | `lib/plugin/vscode-shim/` | install, manifest adaptation, the RPC dispatcher and every handler the host calls |
+| Loader | `lib/plugin/core/vscode-loader.ts` | turns an installed extension into a `PluginDefinition`, configures the dispatcher and Monaco once |
+| Types | `types/plugin/plugin-vscode.ts` | `VsCodeExtensionBlock` (the `vscodeExtension` manifest block), unsupported contributions, contributed commands |
+| UI | `components/plugins/detail/plugin-vscode-compat-section.tsx`, `components/plugins/vscode/`, `components/extensions/` | compatibility section, window presenter (messages, quick input, progress), webview frames |
 
-A `.vsix` is extracted by `vsix-installer.ts` → its VS Code manifest mapped to a Cognia `PluginManifest` by `manifest-adapter.ts` (with `permission-inference.ts` statically deriving Cognia permissions) → `vscode-loader.ts` delegates `activate`/`deactivate` to Tauri commands → every sidecar-initiated `vscode.*` call arrives as a Tauri event routed by `rpc-dispatcher.ts` to method-keyed handlers:
+## 2. Install
 
-- `lm-handler.ts` — `vscode.lm` Language Model API → Cognia AI
-- `languages-handler.ts` + `monaco-bridge.ts` — `vscode.languages.*` providers + diagnostics/decorations → Monaco
-- `webview-bridge.ts` — `createWebviewPanel`
-- `terminal-bridge.ts` — `createTerminal`
-- `chat-participant-registry.ts` — `vscode.chat` → virtual Characters
-- `file-doc-pool.ts` — `openTextDocument`
+Every install goes through `install-vscode-extension.ts`, so manifest adaptation cannot be skipped.
 
-LSP servers resolve through `lsp-registry` / `lsp-bootstrap` / `lsp-user-servers`, gated by `lsp-binary-policy`, spawn in the sidecar via `lsp-client-adapter-tauri`, and surface diagnostics back into Monaco. Browser mode returns warn-stubs (`vscode-loader.ts:182`).
+- **Open VSX** (`openvsx-install-flow.ts`). The Rust command `plugin_vscode_download_vsix` downloads the `.vsix` and its SHA-256, and checks the `.sigzip`: a raw Ed25519 signature over the whole file, verified against Open VSX's key, which is pinned in Cognia (`OPENVSX_SIGNING_KEY`), never read from the registry. A signature that does not match, or one the registry advertises that cannot be read, stops the install. A verified download is remembered in the Rust state, and installing it writes a `signature` verification receipt. The marketplace card shows **Signed by Open VSX**.
+- **Dropped `.vsix`** (desktop only). It is installed with no receipt, and the dialog says it will need trust before it starts. Outside the desktop app the drop is refused with a message.
+- **Development folder**. Trusted as the user's own code.
 
-## 2. vscode-shim deep dive
+The renderer side (`vsix-installer.ts`) unpacks `extension/`, and `manifest-adapter.ts` maps `package.json` to a `PluginManifest`:
 
-### vscode-loader.ts
+- id `publisher.name`, `type: "vscode-extension"`, `vscodeMain`, and the `vscodeExtension` block (`VsCodeExtensionBlock`) with the raw activation events, bundle format, contributed commands, configuration schema, `unsupportedContributions` and `unsupportedApis`;
+- permissions inferred by `permission-inference.ts` (a Babel AST walk with a minified-code fallback): `fs` → `filesystem:read/write`, `child_process` → `process:spawn` + `shell:execute`, `http`/`https` → `network:fetch`, `net`/`ws` → `network:websocket`, `vscode.tasks.executeTask` → `terminal:spawn`.
 
-`vscode-loader.ts` (`lib/plugin/core/vscode-loader.ts`) — `loadVscodeDefinition(manifest, pluginPath)` (`:167`) builds a `PluginDefinition`; it requires `vscodeMain` or theme-only contributions (`:171`) and a populated `vscodeExtension.identifier` (`:176`). Non-Tauri → warn stub (`:182`); theme-only → no sidecar (`:198`).
+The Rust installer writes the unpacked files to `<data>/cognia/vscode-extensions/<id>` and discards any verification receipt shipped inside the archive. Each extension's storage, Mementos and log live apart from the install, in `<data>/cognia/vscode-extension-state/<id>/{global,workspace/<hash>,log}`, so they survive updates and reinstalls. Uninstall removes the install directory, and backups include both.
 
-Real path: `plugin_load_vscode` (`:220`), subscribe events (`:229`), `activate` → `plugin_activate_vscode` returning `VscodeActivateResult` with `registeredCommands`, `registeredWebviewViews`, `registeredLanguageProviders`, and `sidecarPid` (`:129`, `:242`), `deactivate` → `plugin_deactivate_vscode` (`:263`).
+### Trust before start
 
-`ensureDispatcherConfigured()` (`:40`) is a one-time bootstrap that wires the dispatcher transport (`:47`), the `lm-handler` default-model resolver (`:58`), `installVscodeRpcHandlers()` (`:68`), lazy-imports `monaco-editor` + `configureMonacoBridge` (`:73`–`:93`, ~3 MB, dormant on failure `:94`), then runs LSP migration + `bootstrapLspRegistry()` (`:105`–`:118`). `invokeVscodeRpc` (`:288`) proxies renderer↔sidecar via `plugin_invoke_vscode_rpc`; `unloadVscodeExtension` (`:312`) tears down.
+`PluginManager` does not run VS Code extensions through the Cognia plugin signature check (no VS Code extension carries a Cognia signature). Instead `requireVscodeExtensionTrust` lets one start when:
 
-### manifest-adapter.ts
+- its install has a `signature` receipt from a verified Open VSX download, or
+- it comes from a development folder, or
+- the user trusted it (the **Trust this extension** switch on its Permissions tab).
 
-`manifest-adapter.ts` — pure, I/O-free (`:8`). `adaptVscodeManifest(input)` (`:48`) → `VsCodeExtensionAdapterResult`. The id is `publisher.name` via `canonicalId` (`:159`); `mapActivationEvent` (`:193`) rewrites `*`→`startup` (`:197`), `onLanguage:*`→`startup`+warning (`:203`), collapses `onDebug*`→`onDebugResolve:*` (`:219`), and preserves the raw events in `vscodeExtension.activationEvents` (`:103`); `inferCapabilities` (`:255`) maps contributes → `PluginCapability[]` (`:262`–`:271`). `runtimeCompatibility.browser` is blocked when `main` is present (`:136`).
+Otherwise enabling it fails with `PluginFrontendTrustError` (`reason: "unsigned-vscode-extension"`), which the plugin list shows as "trust this extension first". Extensions installed before receipts existed need to be trusted once.
 
-```ts
-// manifest-adapter.ts:114
-const manifest: PluginManifest = {
-  id,
-  name: displayName,
-  type: "vscode-extension",
-  capabilities,
-  permissions,
-  activationEvents: cogniaActivation,
-  vscodeMain: pkgJson.main,
-  vscodeExtension: vscodeExtensionBlock,
-}
+## 3. Running an extension
+
+`vscode-loader.ts` builds the plugin definition. A theme, grammar, icon theme, snippet or language-only extension runs in the renderer and starts no host. Anything with `main` is started through `plugin_activate_vscode`:
+
+1. Rust spawns `host.js` for that one extension (`COGNIA_VSCODE_EXTENSION_ID`) with the user's proxy in its environment (proxy changes apply when the host restarts).
+2. `extension:load` sends the install path, `main`, the bundle format and `grantedModules`: the sensitive Node modules the extension's live permissions allow (`commands.rs:granted_node_modules`).
+3. `require-hook.ts` answers `require("vscode")` with that extension's API object and refuses any sensitive module (`fs`, `child_process`, `worker_threads`, `http`/`https`, `net`/`tls`, `ws`) not granted, with `EPERM`. A `require` is attributed by where the requiring file lives, so an extension's own `node_modules` (including a bundled `vscode-languageclient`) is gated as the extension.
+4. `extension-runner.ts` runs the CommonJS bundle in a `vm` context with `queueMicrotask`, `structuredClone`, `AbortController`, `performance`, `atob`/`btoa`, `crypto` and a `process` that cannot exit the host. `fetch` and `WebSocket` work only with `network:fetch` / `network:websocket`, checked per call. ESM bundles are refused with a reason.
+5. Before `activate`, the renderer sends the workspace folders, configuration, installed extensions and window state, and the host awaits them.
+
+**Activation** (`activation-triggers.ts`). An enabled extension starts at launch only for `*`, `onStartupFinished` or contributed views. Otherwise it stays dormant while its contributed commands and languages are listed, and starts on `onCommand:<id>` (then runs the command), `onLanguage:<id>` (an editor opens a document of that language), or `workspaceContains:<glob>` (checked when it becomes dormant and when folders change). Other activation events are recorded as unsupported.
+
+**Crashes** (`host-supervisor.ts`). Rust reports `host:exited` with the stderr it collected (stderr also goes to the plugin log). The supervisor reloads the extension after 1 s·2ⁿ, capped at 30 s, gives up after `MAX_RESTARTS` (5) and forgets earlier crashes after five minutes up. A host that gives up leaves the plugin in an error state until the user enables it again.
+
+**Output channels** and the host's own warnings go to the plugin's runtime log, which the plugin pane links to.
+
+## 4. The API and what backs it
+
+The host mounts the VS Code 1.91 API (`sidecar/vscode-ext-host/src/vscode-shim/index.ts`). `scripts/gates/vscode-api-coverage.mjs` diffs `@types/vscode` against it into `vscode-api-coverage.generated.json` (`pnpm audit:vscode-api-coverage`): every member is implemented or listed as unsupported with a reason, and none is missing. `engine-compat.ts` reads the same report to warn about extensions that use unsupported namespaces. That warning is advisory and never blocks an install.
+
+Calls the host makes arrive as `vscode://rpc/<pluginId>` events. `rpc-dispatcher.ts` routes them by method to the handlers `setup-handlers.ts` installs, and replies through `plugin_vscode_send_response`. Every handler checks the request is the calling extension's own.
+
+| API | Renderer side | Backed by |
+| --- | --- | --- |
+| `languages.*` providers, diagnostics, language configuration | `languages-handler.ts`, `monaco-bridge.ts`, `monaco-results.ts` | Monaco (see section 5) |
+| documents and editors | `document-sync.ts`, `editor-handlers.ts`, `workspace-document-handlers.ts`, `file-doc-pool.ts` | Monaco models, confined file reads and `applyEdit` writes |
+| messages, quick pick, input box, progress, status bar, dialogs | `window-handlers.ts`, `window-ui-store.ts`, `native-dialogs.ts` | `components/plugins/vscode/` presenter, toasts, `statusbar.*` slots, Tauri dialogs |
+| `window.state`, `activeColorTheme` | `window-environment.ts` | window focus and activity (inactive after 10 s idle), the app theme |
+| terminals, `Pseudoterminal` | `terminal-handlers.ts`, `extension-pty-session.ts` | tabs in the terminal dock |
+| tasks | host `tasks.ts`, `lib/plugin/commands/tasks-registry.ts` | shell and process tasks run in a dock terminal, custom executions in an extension terminal |
+| webview panels and views | `webview-handlers.ts`, `webview-bridge.ts`, `webview-document.ts` | the extension rail, sandboxed frames with `acquireVsCodeApi()` |
+| `workspace.fs`, `findFiles`, file watchers, folders | `workspace-file-handlers.ts`, `root-watchers.ts` | file access confined to project folders, `filesystem:read/write` |
+| configuration | `configuration-handlers.ts`, `vscode-configuration-schema.ts` | each plugin's config store, `contributes.configuration` defaults |
+| `extensions.all/getExtension`, `activate()` | `extensions-handlers.ts` | the plugin manager |
+| commands | `runtime-handlers.ts` | `lib/plugin/commands/registry.ts` (contributed titles, categories, `when`) |
+| `env` (clipboard, `openExternal`, `asExternalUri`, URI handler) | `env-handlers.ts` | Tauri clipboard and opener, Cognia deep links |
+| `vscode.lm` | `lm-handler.ts` | the provider and model the user configured, as vendor `cognia`, streaming. Needs `ai:chat`, the plugin rate limit and the PII gate. Extensions never bring their own key |
+| `vscode.chat` participants | `chat-participant-registry.ts` | registered as virtual characters (`vscode-chat:<pluginId>:<id>`). Not invoked yet |
+| secrets, Mementos | `runtime-handlers.ts`, `memento.rs` | the secret store, files in the extension's state directory |
+
+`unavailable-methods.ts` lists host methods the renderer cannot serve. It is empty while every method is backed.
+
+## 5. Language features
+
+**Providers.** `vscode.languages.register*Provider` sends `languages:register` with a token the host minted. `languages-handler.ts` looks the kind up in `PROVIDER_REGISTRY` (28 kinds, kept equal to the host's list by its test) and registers it with Monaco. When Monaco asks, `monaco-bridge.ts` sends `extension:call {extensionId, token, method, callId, payload}` back to that host. Disposing the registration unregisters it.
+
+**Documents.** `document-sync.ts` keeps each host's documents in step with Monaco (`workspace:documentOpened/Changed/Closed`, `window:editorsChanged`). The host keeps them as real `TextDocument`s, and a provider call made against a newer version waits for that edit. Cancellation from Monaco reaches the provider's `CancellationToken`.
+
+**Diagnostics.** A `DiagnosticCollection` sends `languages:setDiagnostics` / `clearDiagnostics`, which become Monaco markers.
+
+**Language servers in extensions.** Most language extensions use `vscode-languageclient`. It runs unchanged: its `child_process` is the extension's `process:spawn`, the server process is the extension's own, and the client's providers and diagnostics take the path above. `tests/host-languageclient.test.mjs` runs a real `vscode-languageclient` against `tests/fixtures/echo-lsp.mjs` on the built host, with the client's dependencies copied into the fixture the way an unbundled extension ships them, and checks the registrations, the server's diagnostics, completion and hover.
+
+**Grammars, themes, snippets, languages.** Contributed languages are registered with Monaco (`contributed-languages-monaco.ts`). Themes and icon themes go through the theme bridges. Grammars color code in chat and previews (`grammars-bridge.ts`, Shiki), not in the Monaco editor. A dormant extension's grammars, themes and snippets appear once it runs.
+
+## 6. Not supported (labelled)
+
+Each item is typed, shown in the plugin detail's **VS Code compatibility** section (`plugin-vscode-compat-section.tsx`), and pinned by tests.
+
+**Contributions** (`VsCodeUnsupportedContribution`, from `manifest-adapter.ts:vscodeUnsupportedContributions`):
+
+| Value | Meaning |
+| --- | --- |
+| `debuggers` | `contributes.debuggers` / `breakpoints`. Cognia has no debugger |
+| `notebooks` | `contributes.notebooks` / `notebookRenderer` |
+| `menus` | menu entries other than `commandPalette`. The commands still run from the command lists |
+| `keybindings` | no shortcut is bound |
+| `views` | tree views, view containers, welcome content. Only webview views are shown, in the extension rail |
+| `editor-grammars` | grammars color chat and previews, not the code editor |
+| `extension-pack` | the listed extensions are not installed with it |
+| `esm-bundle` | an ES module bundle cannot start. The host loads CommonJS, as VS Code 1.91 does |
+
+**API namespaces** (`unsupportedApis`, found in the extension's code): `debug`, `scm`, `tests`, `comments`, `notebooks`. Their registrations return inert disposables, their events never fire, and calls that would act throw `NotSupportedError` with the reason. The host reports each unsupported member once per extension (`vscode:unsupportedApi`), and the plugin log names it.
+
+**Other gaps:** chat participants are registered but not invoked, task problem matchers are ignored, a task terminal's `processId` is `undefined`, and `createTelemetryLogger` sends nothing.
+
+**Browser and mobile.** There is no extension host. The Open VSX origin is hidden, a dropped `.vsix` is refused, and an installed extension with `main` loads as a stub that marks itself in the plugin list.
+
+## 7. Cognia's own language servers
+
+Separate from extensions, the editor runs language servers the user or project configures (`lib/plugin/lsp/`):
+
+| File | Role |
+| --- | --- |
+| `lsp-bootstrap.ts` | `bootstrapLspRegistry` layers builtin ← `settings.lsp` ← project `.cognia/lsp.json`, and follows settings and project changes |
+| `lsp-user-servers.ts` | `editorEligibleServers` drops pure builtins (agent-only, to avoid noisy "crashed" states), `syncUserLspServers` registers the rest |
+| `lsp-registry.ts` | `registerLspServer` / `registerPluginLspServers` (servers a plugin manifest declares), keyed `${ownerId}:${serverId}` |
+| `lsp-client-adapter-tauri.ts` | `TauriLspClientAdapter` over the one `cognia.lsp-service` channel, multiplexed by owner. Routes `lsp:publishDiagnostics` to Monaco markers |
+| `lsp-monaco-runtime.ts` | `registerLspMonacoProviders` registers only the providers an initialized server declared |
+| `vscode-shim/lsp-binary-policy.ts` | `evaluateLspBinary` gates a plugin-declared server binary |
+
+**Binary policy.** A binary outside the plugin's install directory always prompts. One inside prompts until the user approves that exact `(pluginId, path)`, and again if its SHA-256 changes. The plugin's own claims about its publisher are never evidence. `settings.lsp.unsignedAllowed` (dev) turns a prompt into allow-with-prompt. Every decision is written to `automationAuditLog`. User-added servers are registered with `confirmedConsent: true`, as the user configured them.
+
+This policy covers servers Cognia spawns. A server an extension starts itself (as `vscode-languageclient` does) is the extension's `child_process`, gated by its `process:spawn` permission.
+
+## 8. End-to-end flow
+
+```mermaid
+graph TD
+  OVSX["Open VSX download<br/>openvsx_download.rs"] --"sha256 + sigzip"--> RECEIPT["signature receipt"]
+  DROP["dropped .vsix"] --> INSTALL
+  OVSX --> INSTALL["install-vscode-extension.ts<br/>vsix-installer + manifest-adapter"]
+  INSTALL --> RUST["installer.rs<br/>vscode-extensions/&lt;id&gt;"]
+  RUST --> TRUST{"requireVscodeExtensionTrust"}
+  RECEIPT --> TRUST
+  TRUST --"trusted"--> LOAD["vscode-loader.ts"]
+  LOAD --"plugin_activate_vscode"--> HOST["Node host per extension<br/>require-hook + vm sandbox"]
+  HOST --"vscode://rpc/&lt;id&gt;"--> DISP["rpc-dispatcher.ts"]
+  DISP --> LANG["languages-handler<br/>monaco-bridge"]
+  DISP --> WIN["window / terminal / webview<br/>workspace / lm handlers"]
+  LANG --> MONACO["Monaco"]
+  MONACO --"extension:call"--> HOST
+  WIN --> APP["dock, rail, dialogs,<br/>AI provider, files"]
+  SETTINGS["settings.lsp / .cognia/lsp.json"] --> REG["lsp-registry.ts"]
+  REG --> POL["evaluateLspBinary"]
+  POL --"allowed"--> LSP["cognia.lsp-service"]
+  LSP --> MONACO
+
+  classDef entry fill:#1e3a5f,stroke:#4a90d9,color:#fff
+  classDef bridge fill:#2d4a3e,stroke:#5cb88a,color:#fff
+  classDef sidecar fill:#5a3a1e,stroke:#d99a4a,color:#fff
+  classDef sink fill:#3a2d4a,stroke:#a45cb8,color:#fff
+  class OVSX,DROP,SETTINGS entry
+  class INSTALL,RUST,TRUST,LOAD,DISP,LANG,WIN,REG,POL,RECEIPT bridge
+  class HOST,LSP sidecar
+  class MONACO,APP sink
 ```
 
-### rpc-dispatcher.ts
+## 9. Testing
 
-`rpc-dispatcher.ts` — renderer-side JSON-RPC with a method-keyed **global** registry (not `pluginId`-scoped, `:16`). `configureRpcDispatcher({ sendResponse, listen })` (`:61`), `registerMethod(method, handler)` (`:90`), and `subscribeToVscodeEvents(pluginId)` listens on `vscode://rpc/${pluginId}` (`:118`, `:128`). `handleInboundFrame` (`:154`) parses the frame, looks up the handler, and replies via `plugin_vscode_send_response`; an unknown method → JSON-RPC `-32601` (`:177`), a handler throw → `-32000` (`:200`).
+- **Host** (`pnpm sidecar:vscode:test`, which builds `dist/` first): `tests/host-*.test.mjs` drive the built `host.js` over stdio with fixture extensions under `tests/fixtures/` (providers, documents, window, terminals, tasks, webviews, workspace, `vscode.lm`, the sandbox, and `vscode-languageclient` with `echo-lsp.mjs`). The other suites test one module each.
+- **Rust**: `cargo test -p cognia-plugin-runtime --features tauri-host --lib -- vscode::` covers install, uninstall, the state directory, signatures and receipts, and host stderr and exit.
+- **Renderer**: co-located Jest suites under `lib/plugin/vscode-shim/` and the plugin detail components. The coverage gate is `pnpm audit:vscode-api-coverage`.
 
-### lm-handler.ts
-
-`lm-handler.ts` — backs `vscode.lm`. Three canonical Claude models live in `BASE_MODELS` (`:59`; opus-4-7 / sonnet-4-6 / haiku-4-5). `handleSelectChatModels` (`:160`) filters by `vendor` / `family` / `version` / `id` selector (`:169`); `handleSendChatRequest` (`:178`) issues a non-streaming `generateText` via `getProviderModel({ provider: "anthropic" })` (`:190`–`:203`, streaming deferred `:13`). `handleRegisterChatModelProvider` / `…McpServerDefinitionProvider` / `…Tool` (`:243`, `:268`, `:296`) record tokens in a `providerRegistry` Map; `unregisterAllLmFor` (`:324`) clears them. The default model is set via `configureLmHandler` (`:132`), fallback `claude-sonnet-4-6` (`:157`).
-
-### monaco-bridge.ts
-
-`monaco-bridge.ts` — bridges the `vscode.languages.*` / editor API to Monaco (1300 lines). `configureMonacoBridge({ monacoApi, dispatchRpc })` (`:548`). Editor tracking is `notifyEditorMounted` / `Unmounted` / `ActiveEditorChanged` / `SelectionChanged` / `ContentChanged` (`:561`–`:603`), with `getActiveEditorSnapshot` (`:616`).
-
-24 provider registrars each mint a `nanoid` token and route invocations back to the sidecar via `dispatchRpc`: completion (`:646`), hover (`:666`), definition (`:682`), references (`:700`), formatting / range-formatting (`:716`, `:732`), codeLens (`:751`), codeActions (`:767`), rename (`:786`), documentSymbol (`:807`), inlineCompletion (`:829`), signatureHelp (`:849`), workspaceSymbol (`:875`), color (`:908`), foldingRange (`:937`), selectionRange (`:953`), documentLink (`:973`), onTypeFormatting (`:989`), semanticTokens + range (`:1006`, `:1026`), inlayHints (`:1046`), call/type-hierarchy (`:1062`, `:1094`), linkedEditingRange (`:1126`).
-
-`setDiagnostics` (`:1155`) maps to `monaco.editor.setModelMarkers`; `registerDecorationType` / `setDecorations` (`:1172`, `:1190`); `unregisterByToken` / `unregisterByExtension` (`:1200`, `:1216`). Coordinate conversions go through `lsp-protocol-adapter` (`:31`–`:62`).
-
-```ts
-// monaco-bridge.ts:652
-const disposable = monacoApi!.languages.registerCompletionItemProvider(req.selector, {
-  provideCompletionItems: async (model, position) => {
-    const result = await dispatchRpc!(req.extensionId, "provideCompletionItems", {
-      token,
-      uri: model.uri,
-      position: monacoPositionToVscode(position),
-    })
-    return vscodeCompletionResultToMonaco(result)
-  },
-})
-```
-
-### Other handlers
-
-- `webview-bridge.ts` (`:2`) — `createWebviewPanel` / `registerWebviewViewProvider` state machine; reuses the artifact iframe sandbox (`HostFrame` / `attachHostFrame`) and polyfills `acquireVsCodeApi()` (`:14`–`:23`).
-- `terminal-bridge.ts` (`:2`) — `createTerminal` → `ctx.shell.spawn` child + a `vscode.terminal.output` sink; there is **no** xterm/TTY, only RPC stdin/stdout (`:15`).
-- `pty-bridge-adapter.ts` (`:4`) — production injection wiring `terminal-bridge` to a real PTY (`lib/terminal/session.ts`).
-- `languages-handler.ts` (`:2`) — `languages:*` / `window:*` RPC → `monaco-bridge`; `PROVIDER_REGISTRY` is the kind→registrar table for all 24 (`:53`–`:78`).
-- `chat-participant-registry.ts` (`:2`) — `chat.createChatParticipant` → a virtual Character with id `vscode-chat:${pluginId}:${id}` written into the Dexie `characters` table (`:7`, `:128`); invocation is deferred (`:11`).
-- `file-doc-pool.ts` (`:2`) — an LRU `file://`→Monaco `ITextModel` pool capped at `MAX_MODELS=50` (`:11`).
-- `permission-inference.ts` (`:1`) — a pure `@babel/parser` AST walk; `MODULE_PERMISSION_MAP` (`:40`) maps modules → perms: `fs`→`filesystem:read/write` (`:45`), `child_process`→`process:spawn`+`shell:execute` (`:49`), `http`/`https`→`network:fetch` (`:57`), `ws`/`net`→`network:websocket` (`:61`); a minified-fallback string scan lowers confidence; the sidecar runtime `require()` interceptor is authoritative (`:8`–`:11`).
-- `vsix-installer.ts` (`:1`) — `installVsix(ArrayBuffer)` (`:81`) → `VsixInstallResult` with `pkgJson`, `files` Map, `sha256`, `themes`, `lspBinaryCandidates`, and `bundleFormat` (`:52`); JSZip extracts `extension/` (`:39`); a 200 MB cap `MAX_FULL_VSIX_BYTES` (`:33`) applies vs 10 MB theme-only; reuses `importVscodeThemeJson` (`:28`); throws on empty / over-cap / non-ZIP / missing manifest / missing publisher or name (`:71`–`:79`).
-
-### vscode-shim per-file table
-
-| File | Backs | Key exports `:line` |
-| --- | --- | --- |
-| `vscode-loader.ts` | extension lifecycle | `loadVscodeDefinition:167`, `invokeVscodeRpc:288`, `unloadVscodeExtension:312`, `isVscodeHostAvailable:155` |
-| `manifest-adapter.ts` | VSCode manifest→Cognia | `adaptVscodeManifest:48`, `mapActivationEvent:193` |
-| `rpc-dispatcher.ts` | extension-host JSON-RPC | `configureRpcDispatcher:61`, `registerMethod:90`, `subscribeToVscodeEvents:118`, `handleInboundFrame:154` |
-| `lm-handler.ts` | `vscode.lm` | `handleSelectChatModels:160`, `handleSendChatRequest:178`, `configureLmHandler:132` |
-| `monaco-bridge.ts` | `vscode.languages.*`+editor | `configureMonacoBridge:548`, 24 `register*Provider:646-1155`, `setDiagnostics:1155`, `getActiveEditorSnapshot:616` |
-| `languages-handler.ts` | `languages:*`/`window:*` RPC | `PROVIDER_REGISTRY:53`, `handleLanguagesRegister:114` |
-| `webview-bridge.ts` | `createWebviewPanel` | `attachHostFrame:14` |
-| `terminal-bridge.ts` | `createTerminal` | `configureTerminalBridge`, `TerminalRecord:76` |
-| `pty-bridge-adapter.ts` | real PTY injection | prod `ShellSpawnFn` adapter`:4` |
-| `chat-participant-registry.ts` | `vscode.chat` | `handleCreateChatParticipant:115` |
-| `file-doc-pool.ts` | `openTextDocument` | LRU pool `MAX_MODELS=50` |
-| `permission-inference.ts` | manifest→perms | `inferPermissions`, `MODULE_PERMISSION_MAP:40` |
-| `vsix-installer.ts` | `.vsix` extract | `installVsix:81`, `MAX_FULL_VSIX_BYTES=200MB:33` |
-| `setup-handlers.ts` | method table | `installVscodeRpcHandlers:44` |
-| `lsp-protocol-adapter.ts` | Monaco↔VSCode↔LSP coords | pure converters |
-| `lsp-workspace-manager.ts` | `workspaceFolders` | `ensureWorkspace`/`flushDocument`/`resolveWorkspaceFolder:27` |
-
-## 3. LSP
-
-| File | Purpose | Key exports `:line` |
-| --- | --- | --- |
-| `lsp-bootstrap.ts` | app-init wiring (idempotent) | `bootstrapLspRegistry:72`; `defaultResolveEditorServers:160` (layers builtin←settings.lsp←project `.cognia/lsp.json`); subscribes settings/project changes `:173` |
-| `lsp-registry.ts` | renderer orchestrator; tracks `${ownerId}:${serverId}` | `configureLspRegistry:127`, `registerLspServer:169` (gates policy `:197`, spawns `:232`), `unregisterByOwner:280`, `getLspServerForLanguage:296`, `registerPluginLspServers:310`, `lspServerKey:357` |
-| `lsp-user-servers.ts` | editor-side sync from resolver | `editorEligibleServers:36` (drops pure builtins), `syncUserLspServers:50` (`confirmedConsent:true` `:80`), `USER_LSP_PLUGIN_PATH:28` |
-| `lsp-client-adapter-tauri.ts` | prod `LspClientAdapter`→sidecar | `TauriLspClientAdapter:64`, `start:114`/`stop:146`/`request:192` over `LSP_TAURI_CHANNEL_ID="cognia.lsp-service":37`; `install()` registers `lsp:publishDiagnostics:84` |
-| `lsp-binary-policy.ts` | spawn allow/deny gate (pure, Dexie audit) | `evaluateLspBinary:137` → `LspBinaryEvaluation` with `allowed`, `requiresPrompt`, `reason` `:45`; `configureLspBinaryPolicy:101` |
-
-### Flow
-
-`bootstrapLspRegistry` (loader `:111`) → `defaultResolveEditorServers` layers builtin←user(`settings.lsp`)←project → `editorEligibleServers` drops pure builtins (the editor spawns eagerly; pure builtins stay agent-only to avoid noisy "crashed" states, `lsp-user-servers.ts:8`–`:18`) → `syncUserLspServers` → `registerLspServer`.
-
-The registry runs `evaluateLspBinary` (`:197`): a trusted-publisher binary that lives inside the plugin dir → allow; otherwise `requiresPrompt` (consent) unless dev-mode `unsignedLspAllowed`. On allow → `TauriLspClientAdapter.start` sends `lsp:start` over `cognia.lsp-service` via `invokeVscodeRpc` → the sidecar spawns the real LSP process. The server's `publishDiagnostics` → the adapter routes by `lspServerKey` (`:95`) → `lspPublishDiagnosticsToBridgePayload` → `monaco-bridge.setDiagnostics` → `monaco.editor.setModelMarkers`. Completion/hover flows Monaco → `dispatchRpc` / `adapter.request` → sidecar → LSP.
-
-## 4. character-pack (ADR-0030)
+## 10. character-pack (ADR-0030)
 
 | File | Role | `:line` |
 | --- | --- | --- |
@@ -153,56 +201,22 @@ The registry runs `evaluateLspBinary` (`:197`): a trusted-publisher binary that 
 | `platform-availability.ts` | `availableOnPlatforms` gate | `currentRuntimeProfile:14`, `isAvailableOnProfile:22` |
 | `validate-requires.ts` | `requires` dependency check at register (warn-only) | `PackRequiresValidationResult:37` |
 
-## 5. scheduler + commands + operator
+## 11. scheduler + commands + operator
 
 - `scheduler/scheduled-task-registry.ts` — in-memory plugin scheduled-task defs: `registerScheduledTaskDefsForPlugin:40`, `unregisterScheduledTaskDefsByPlugin:59`, `subscribeScheduledTaskDefs:77`.
 - `scheduler/scheduler-plugin-executor.ts` — handler store keyed `${pluginId}:${handlerName}:21`: `registerPluginTaskHandler:28`, `getPluginTaskHandler:44`.
 - `commands/registry.ts` — unified command bus backing `vscode.commands.register`/`execute`/`getCommands:5`; `CommandHandler:22`, `CommandRegistration:24`.
-- `commands/tasks-registry.ts` — `vscode.tasks.*` backing store (npm/gulp/cargo providers) `:4`; execution delegated to `ctx.shell.spawn:12`.
+- `commands/tasks-registry.ts` — the task providers VS Code extensions register, and `fetchTasks` across them. Running a task happens in the extension's host (section 4).
 - `operator/action-types.ts` — unified Computer Use action vocabulary `OperatorActionType` (16 members) `:16`; `Coordinate:34`, `ClickAction`/`ScrollAction`/`DragAction:39-66`.
 - `operator/coordinates.ts` — Anthropic CU coord scaling (≤1568px long edge) `:4`; `getScaleFactor:25`, `computeScaledDisplay:51`, `unscaleCoordinate:67`; `ModelClass = "legacy"|"opus-4-7":23`.
 
-## 6. End-to-end flow
+## 12. Gotchas
 
-```mermaid
-graph TD
-  VSIX[".vsix bytes"] --> INST["installVsix<br/>vsix-installer.ts:81"]
-  INST --> INFER["inferPermissions<br/>permission-inference.ts"]
-  INST --> ADAPT["adaptVscodeManifest<br/>manifest-adapter.ts:48"]
-  INFER --> ADAPT
-  ADAPT --> LOAD["loadVscodeDefinition<br/>vscode-loader.ts:167"]
-  LOAD --"plugin_load/activate_vscode"--> SIDE["Node sidecar (Tauri Rust host)"]
-  SIDE --"vscode rpc event"--> DISP["handleInboundFrame<br/>rpc-dispatcher.ts:154"]
-  DISP --> LM["lm handlers<br/>lm-handler.ts:160"]
-  DISP --> LANG["languages handlers<br/>languages-handler.ts:114"]
-  DISP --> WV["webview<br/>webview-bridge.ts:14"]
-  DISP --> TERM["terminal<br/>terminal-bridge.ts:76"]
-  LANG --> MON["monaco-bridge<br/>monaco-bridge.ts:548"]
-  MON --> MONACO["monaco.editor / languages"]
-  EXT["extension lspServers"] --> REG["registerLspServer<br/>lsp-registry.ts:169"]
-  USER["settings.lsp / project lsp.json"] --> BOOT["bootstrapLspRegistry<br/>lsp-bootstrap.ts:72"]
-  BOOT --> REG
-  REG --> POL["evaluateLspBinary<br/>lsp-binary-policy.ts:137"]
-  POL --"allowed"--> TAU["TauriLspClientAdapter.start<br/>lsp-client-adapter-tauri.ts:114"]
-  TAU --"lsp start"--> SIDE
-  SIDE --"publishDiagnostics"--> TAU
-  TAU --> MON
-
-  classDef entry fill:#1e3a5f,stroke:#4a90d9,color:#fff
-  classDef bridge fill:#2d4a3e,stroke:#5cb88a,color:#fff
-  classDef sidecar fill:#5a3a1e,stroke:#d99a4a,color:#fff
-  classDef sink fill:#3a2d4a,stroke:#a45cb8,color:#fff
-  class VSIX,USER,EXT entry
-  class INST,INFER,ADAPT,LOAD,DISP,LM,LANG,WV,TERM,MON,REG,BOOT,POL,TAU bridge
-  class SIDE sidecar
-  class MONACO sink
-```
-
-## 7. Gotchas
-
-- **Supported `vscode.*` APIs**: `lm` (non-streaming only — streaming deferred `lm-handler.ts:13`); `languages.*` (24 providers via `monaco-bridge`); `commands`, `tasks`, `chat` (registration only — participant invocation not wired `chat-participant-registry.ts:11`); `webview`, `terminal` (RPC stdin/stdout, **no** xterm TTY `terminal-bridge.ts:15`); `workspace.openTextDocument` / `workspaceFolders`. **Stubbed/unsupported**: `onDebug*` → mapped but raises `NotSupportedError` at runtime (`manifest-adapter.ts:222`); `onLanguage:*` deprecated → rewritten to `startup` (`:203`). **Browser mode** = warn-stub for everything with a `main` bundle (`vscode-loader.ts:182`, manifest `browser:blocked` `:136`).
-- **lsp-binary-policy**: allow-without-prompt only when the publisher Ed25519 fingerprint is in the `trustedPublishers` ledger **and** the binary is inside the plugin install dir (`:146`); trusted-but-outside, unknown fingerprint, or no fingerprint → `requiresPrompt` consent (`:152`–`:169`). Dev-mode `settings.developer.unsignedLspAllowed` / `lsp.unsignedAllowed` flips deny→allow+prompt (`:178`–`:192`); it never relaxes if settings are unreadable. Every decision is audited to `automationAuditLog` best-effort (`:194`). User-added servers get `USER_LSP_PLUGIN_PATH = <app_data>/cognia/user-lsp` (`lsp-user-servers.ts:28`) — real binaries live outside it → forces a prompt by design, but `syncUserLspServers` passes `confirmedConsent:true` (`:80`).
-- **Sidecar dependency**: all extension code + LSP processes run in the Node sidecar; the renderer is IPC-only. `monaco-editor` is lazy-imported (~3 MB) and LSP providers stay dormant if it fails to load (`vscode-loader.ts:94`). The single `cognia.lsp-service` channel multiplexes all LSP traffic (no per-extension channel), disambiguated by `ownerId`. Editor eligibility: pure builtin LSPs are agent-only; the editor only spawns user/project/overridden servers to avoid noisy "crashed" states (`lsp-user-servers.ts:8`–`:18`).
+- **Trust is per extension, and the receipt is per install.** Reinstalling from Open VSX writes a fresh receipt. Installing a dropped `.vsix` over a signed install replaces the directory, receipt included, so that copy needs the user's trust.
+- **Permissions decide modules at load.** `grantedModules` is computed when the host starts, because `require()` is synchronous. Granting a permission later takes effect when the extension restarts.
+- **Proxy** settings are read when a host starts.
+- **One host per extension.** `vscode.extensions.getExtension(other).exports` is not shared across hosts. `activate()` on another extension starts it in its own host.
+- **Desktop only.** Everything with `main` needs the Tauri runtime. `isVscodeHostAvailable()` is the check the UI uses.
 
 <Cards>
   <Card title="Plugin bridges" href="./bridges" description="A2UI ⇄ IM and the host-side bridges plugins project surfaces through." />

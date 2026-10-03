@@ -1,12 +1,12 @@
 /**
- * Minimal fake LSP server used by `lsp-client.test.mjs`.
+ * Minimal fake LSP server used by `host-languageclient.test.mjs`, where a
+ * real `vscode-languageclient` extension starts it.
  *
- * Implements just enough of LSP 3.17 to exercise the CogniaLspClient
- * lifecycle: initialize, initialized, textDocument/didOpen,
- * textDocument/didChange, textDocument/completion,
- * textDocument/hover, shutdown, exit. Pushes a canned
+ * Implements just enough of LSP 3.17 to exercise a client's lifecycle:
+ * initialize, initialized, textDocument/didOpen, textDocument/didChange,
+ * textDocument/completion, textDocument/hover, shutdown, exit. Pushes a canned
  * textDocument/publishDiagnostics notification on every didOpen so the
- * client test can assert the diagnostic forwarding path.
+ * test can assert the diagnostic forwarding path.
  *
  * Read state is intentionally minimal — no language analysis happens.
  * The fixture exists to verify protocol semantics, not language

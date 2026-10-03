@@ -46,9 +46,10 @@
  * which extensions ran which binaries.
  *
  * The policy module is pure TypeScript: it reads from Dexie and writes audit
- * rows, but it has no Tauri dependency. The Rust capabilities layer
- * (`src-tauri/src/plugin_api/vscode/capabilities/process.rs`) invokes this
- * policy through a Tauri command before allowing `Command::spawn` to proceed.
+ * rows, but it has no Tauri dependency. `lsp-registry.ts` calls it before
+ * starting a language server a plugin declares. A server an extension starts
+ * itself (`vscode-languageclient`) is the extension's own `child_process`,
+ * gated by its `process:spawn` permission instead.
  */
 
 import { getDb, type ApprovedBinaryRow, type AutomationAuditLogRow } from "@/lib/db/schema"
