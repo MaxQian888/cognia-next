@@ -2,13 +2,6 @@
   "version": 1,
   "exceptions": [
     {
-      "file": "tests/e2e/lsp/vscode-eslint.spec.ts",
-      "rule": "runtime-skip",
-      "occurrences": 1,
-      "reason": "The browser CI project cannot install a VSIX or reach the desktop extension-host sidecar.",
-      "reviewAfter": "2026-10-31"
-    },
-    {
       "file": "tests/e2e/helpers/gestures.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 3,

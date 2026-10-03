@@ -12,8 +12,7 @@
  *   - Real subprocess spawn (verified in
  *     `sidecar/vscode-ext-host/tests/lsp-client.test.mjs`).
  *   - Tauri-side capability gates (verified manually per the plan's
- *     verification section + the Playwright spec in
- *     `tests/e2e/lsp/vscode-eslint.spec.ts`).
+ *     verification section).
  */
 
 const evaluateLspBinaryMock = jest.fn(async (_input: unknown) => ({
