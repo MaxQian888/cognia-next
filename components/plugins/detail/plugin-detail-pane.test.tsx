@@ -128,17 +128,21 @@ describe("PluginDetailPane", () => {
     expect(url.searchParams.get("q")).toBe("alpha")
   })
 
-  it.each(["wasm", "vscode-extension"] as const)(
-    "hides the log link for %s, whose host serves no output channel",
-    (type) => {
-      // A link into a panel that can only ever be empty for this runtime reads
-      // as a broken reader, so the entry is withheld instead.
-      mockPlugin = { ...makePlugin(), type }
-      usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
-      render(<PluginDetailPane />)
-      expect(screen.queryByTestId("plugin-detail-section-logs")).not.toBeInTheDocument()
-    }
-  )
+  it("hides the log link for wasm, whose host serves no output channel", () => {
+    // A link into a panel that can only ever be empty for this runtime reads
+    // as a broken reader, so the entry is withheld instead.
+    mockPlugin = { ...makePlugin(), type: "wasm" }
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    render(<PluginDetailPane />)
+    expect(screen.queryByTestId("plugin-detail-section-logs")).not.toBeInTheDocument()
+  })
+
+  it("links a VS Code extension to its log: its host's output and output channels", () => {
+    mockPlugin = { ...makePlugin(), type: "vscode-extension" }
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    render(<PluginDetailPane />)
+    expect(screen.getByTestId("plugin-detail-section-logs")).toBeInTheDocument()
+  })
 
   it("renders the not-found hint when detailPluginId is set but the row is missing", () => {
     mockPlugin = undefined

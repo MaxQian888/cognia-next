@@ -769,7 +769,48 @@ export interface VsCodeExtensionBlock {
    * contributes none.
    */
   commands?: VsCodeContributedCommand[]
+  /**
+   * What the extension contributes, or how it is built, that Cognia does not
+   * provide (see {@link VsCodeUnsupportedContribution}). The plugin detail's
+   * compatibility section lists them. Absent when there are none, and on
+   * extensions installed before it was recorded.
+   */
+  unsupportedContributions?: VsCodeUnsupportedContribution[]
 }
+
+/**
+ * Parts of a VS Code extension Cognia does not provide (Rule 7: recorded by
+ * `manifest-adapter.ts:vscodeUnsupportedContributions`, listed in the plugin
+ * detail's compatibility section, pinned by `manifest-adapter.test.ts`):
+ *
+ *   - `debuggers`: `contributes.debuggers` / `breakpoints`; Cognia has no debugger.
+ *   - `notebooks`: `contributes.notebooks` / `notebookRenderer`; Cognia has no notebooks.
+ *   - `menus`: menu entries other than `commandPalette` (editor and explorer
+ *     context menus, title bars, ...); the commands themselves still run from
+ *     the command lists.
+ *   - `keybindings`: `contributes.keybindings`; no shortcut is bound.
+ *   - `views`: tree views, view containers and welcome content; Cognia shows
+ *     an extension's webview views in its extension rail and nothing else.
+ *   - `editor-grammars`: `contributes.grammars` color code in chat and
+ *     previews, not in the code editor.
+ *   - `extension-pack`: the extensions an `extensionPack` lists are not
+ *     installed with it.
+ *   - `esm-bundle`: the extension is an ES module; the host, like VS Code
+ *     1.91, loads extensions as CommonJS, so it cannot start.
+ *
+ * The VS Code API namespaces Cognia does not provide (`debug`, `scm`,
+ * `tests`, `comments`, `notebooks`) are recorded separately, from the
+ * extension's code, in `unsupportedApis`.
+ */
+export type VsCodeUnsupportedContribution =
+  | "debuggers"
+  | "notebooks"
+  | "menus"
+  | "keybindings"
+  | "views"
+  | "editor-grammars"
+  | "extension-pack"
+  | "esm-bundle"
 
 /** A command an extension contributes, as Cognia lists it before the extension runs. */
 export interface VsCodeContributedCommand {

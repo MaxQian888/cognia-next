@@ -28742,6 +28742,52 @@
       "empty": "This view container has no views yet.",
       "unavailable": "This view container is no longer available — its plugin may be disabled."
     },
+    "vscodeCompat": {
+      "activation": {
+        "description": "Cognia never fires these, so the extension does not start for them. It still starts for its other activation events.",
+        "title": "Activation events."
+      },
+      "apis": {
+        "description": "Calls to these fail or do nothing, and the extension's log says why. Found by scanning the extension's code, which can miss calls in minified code.",
+        "title": "VS Code APIs."
+      },
+      "contributions": {
+        "debuggers": {
+          "description": "Cognia has no debugger, so its debug configurations and breakpoints are not available.",
+          "title": "Debuggers."
+        },
+        "editorGrammars": {
+          "description": "Its syntax coloring applies to code in chat and previews, not in the code editor.",
+          "title": "Syntax grammars."
+        },
+        "esmBundle": {
+          "description": "The extension is an ES module. Cognia, like VS Code 1.91, runs extensions as CommonJS, so it cannot start.",
+          "title": "ES module."
+        },
+        "extensionPack": {
+          "description": "The extensions this pack lists are not installed with it. Install the ones you want separately.",
+          "title": "Extension pack."
+        },
+        "keybindings": {
+          "description": "Its keyboard shortcuts are not bound. Run its commands from the command lists.",
+          "title": "Keyboard shortcuts."
+        },
+        "menus": {
+          "description": "Its entries in context menus and title bars are not shown. Run its commands from the command lists.",
+          "title": "Menus."
+        },
+        "notebooks": {
+          "description": "Cognia has no notebooks, so its notebook types and renderers are not available.",
+          "title": "Notebooks."
+        },
+        "views": {
+          "description": "Its tree views, view containers and welcome content are not shown. Its webview views appear in the extension rail.",
+          "title": "Views."
+        }
+      },
+      "description": "Parts of this VS Code extension that Cognia does not provide. The rest of the extension works as usual.",
+      "title": "Not available in Cognia"
+    },
     "vscodeWebviews": {
       "close": "Close {title}",
       "empty": "No VS Code extension is showing a webview.",

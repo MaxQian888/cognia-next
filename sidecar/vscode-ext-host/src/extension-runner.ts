@@ -21,9 +21,10 @@
  * Crash isolation: errors thrown inside an extension's activate/deactivate
  * propagate to the caller but never bring down the sidecar process.
  *
- * ESM support: when the bundle's `type` is `"esm"`, we load via
- * `vm.SourceTextModule` (requires `--experimental-vm-modules`). When CJS
- * or unknown, we use `vm.Script` (default).
+ * Bundles load as CommonJS through `vm.Script`, as VS Code 1.91 loads
+ * extensions. An ES module bundle is refused at load with that reason; the
+ * adapter records it (`esm-bundle`) so the plugin detail says so before the
+ * user enables it.
  */
 
 import * as vm from "node:vm"
@@ -262,7 +263,7 @@ export async function loadExtension(req: ExtensionLoadRequest): Promise<void> {
 
   if (req.bundleFormat === "esm") {
     throw new Error(
-      "ESM bundle support requires --experimental-vm-modules. cognia ships ESM support in Phase M3."
+      `Extension "${req.extensionId}" is an ES module. Cognia's extension host, like VS Code 1.91, loads extensions as CommonJS, so it cannot start.`
     )
   }
   vm.createContext(sandbox)

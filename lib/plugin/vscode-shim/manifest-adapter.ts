@@ -28,6 +28,7 @@ import type {
   VsCodeExtensionAdapterResult,
   VsCodeExtensionBlock,
   VsCodePermissionInference,
+  VsCodeUnsupportedContribution,
 } from "@/types/plugin/plugin-vscode"
 import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
 import type { VsixInstallResult } from "./vsix-installer"
@@ -103,6 +104,9 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
   // ── Contributed commands ──────────────────────────────────────────────
   const contributedCommands = vscodeContributedCommands(pkgJson, nls)
 
+  // ── What Cognia does not provide ─────────────────────────────────────
+  const unsupportedContributions = vscodeUnsupportedContributions(pkgJson, vsix.bundleFormat)
+
   // ── Capabilities ──────────────────────────────────────────────────────
   const capabilities = inferCapabilities(pkgJson)
 
@@ -148,6 +152,7 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
       ? { unsupportedActivationEvents: activation.unsupported }
       : {}),
     ...(contributedCommands.length > 0 ? { commands: contributedCommands } : {}),
+    ...(unsupportedContributions.length > 0 ? { unsupportedContributions } : {}),
     activationPlanned: true,
     // Both spread-conditionally: an absent key is "not applicable" (a `.vsix`
     // upload has no registry platform), whereas `[]` would assert "we looked
@@ -463,6 +468,67 @@ export function vscodeContributedCommands(
   }
   return result
 }
+
+/** A contribution list with at least one entry (VS Code also accepts a lone object for some). */
+function hasEntries(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0
+  return Boolean(value) && typeof value === "object"
+}
+
+/**
+ * What the extension contributes, or how it is built, that Cognia does not
+ * provide (`VsCodeUnsupportedContribution` documents each), the ones that
+ * stop the extension from working first.
+ */
+export function vscodeUnsupportedContributions(
+  pkgJson: VsCodeManifest,
+  bundleFormat: VsCodeExtensionBlock["bundleFormat"] | null
+): VsCodeUnsupportedContribution[] {
+  const c =
+    pkgJson.contributes && typeof pkgJson.contributes === "object" ? pkgJson.contributes : {}
+  const found = new Set<VsCodeUnsupportedContribution>()
+  if (hasEntries(c.debuggers) || hasEntries(c.breakpoints)) found.add("debuggers")
+  if (hasEntries(c.notebooks) || hasEntries(c.notebookRenderer)) found.add("notebooks")
+  const menus = c.menus && typeof c.menus === "object" ? c.menus : {}
+  if (
+    Object.entries(menus).some(([menu, items]) => menu !== "commandPalette" && hasEntries(items))
+  ) {
+    found.add("menus")
+  }
+  if (hasEntries(c.keybindings)) found.add("keybindings")
+  const views = c.views && typeof c.views === "object" ? c.views : {}
+  const containers =
+    c.viewsContainers && typeof c.viewsContainers === "object" ? c.viewsContainers : {}
+  if (
+    Object.values(views).some(
+      (list) =>
+        Array.isArray(list) &&
+        list.some((view) => (view as { type?: unknown } | null)?.type !== "webview")
+    ) ||
+    Object.values(containers).some(hasEntries) ||
+    hasEntries(c.viewsWelcome)
+  ) {
+    found.add("views")
+  }
+  if (hasEntries(c.grammars)) found.add("editor-grammars")
+  if (Array.isArray(pkgJson.extensionPack) && pkgJson.extensionPack.length > 0) {
+    found.add("extension-pack")
+  }
+  if (bundleFormat === "esm") found.add("esm-bundle")
+  return UNSUPPORTED_CONTRIBUTION_ORDER.filter((kind) => found.has(kind))
+}
+
+/** An ES module cannot start at all; a missing debugger or view loses a whole feature; the rest lose a way in. */
+const UNSUPPORTED_CONTRIBUTION_ORDER: readonly VsCodeUnsupportedContribution[] = [
+  "esm-bundle",
+  "debuggers",
+  "notebooks",
+  "views",
+  "menus",
+  "keybindings",
+  "editor-grammars",
+  "extension-pack",
+]
 
 /**
  * Map VS Code contributions to the cognia `PluginCapability[]` list. The

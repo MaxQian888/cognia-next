@@ -37,6 +37,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import type { PluginManifest } from "@/types/plugin"
 import { PluginDetailGroup, PluginMetaList, PluginMetaRow } from "./plugin-detail-group"
+import { PluginVscodeCompatSection } from "./plugin-vscode-compat-section"
 
 interface OverviewManifestMeta {
   description?: string
@@ -198,6 +199,8 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
           />
 
           <PluginDependencyPanel manifest={plugin.manifest as unknown as PluginManifest} />
+
+          <PluginVscodeCompatSection manifest={plugin.manifest as unknown as PluginManifest} />
 
           {plugin.readme ? (
             <PluginDetailGroup title={t("readme")}>

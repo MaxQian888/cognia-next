@@ -28742,6 +28742,52 @@
       "empty": "此视图容器还没有任何视图。",
       "unavailable": "此视图容器已不可用——其插件可能已被禁用。"
     },
+    "vscodeCompat": {
+      "activation": {
+        "description": "Cognia 从不触发这些事件，因此扩展不会因它们启动；它仍会因其他激活事件启动。",
+        "title": "激活事件。"
+      },
+      "apis": {
+        "description": "对这些 API 的调用会失败或不起作用，扩展日志会说明原因。此列表通过扫描扩展代码得出，压缩过的代码中的调用可能被遗漏。",
+        "title": "VS Code API。"
+      },
+      "contributions": {
+        "debuggers": {
+          "description": "Cognia 没有调试器，因此其调试配置和断点不可用。",
+          "title": "调试器。"
+        },
+        "editorGrammars": {
+          "description": "其语法着色只用于聊天和预览中的代码，不用于代码编辑器。",
+          "title": "语法高亮规则。"
+        },
+        "esmBundle": {
+          "description": "该扩展是 ES 模块。Cognia 与 VS Code 1.91 一样以 CommonJS 方式运行扩展，因此它无法启动。",
+          "title": "ES 模块。"
+        },
+        "extensionPack": {
+          "description": "此扩展包列出的扩展不会随它一起安装，请单独安装需要的扩展。",
+          "title": "扩展包。"
+        },
+        "keybindings": {
+          "description": "其快捷键不会被绑定，请从命令列表运行其命令。",
+          "title": "快捷键。"
+        },
+        "menus": {
+          "description": "其在右键菜单和标题栏中的条目不会显示，请从命令列表运行其命令。",
+          "title": "菜单。"
+        },
+        "notebooks": {
+          "description": "Cognia 没有笔记本，因此其笔记本类型和渲染器不可用。",
+          "title": "笔记本。"
+        },
+        "views": {
+          "description": "其树视图、视图容器和欢迎内容不会显示；其 Webview 视图显示在扩展栏中。",
+          "title": "视图。"
+        }
+      },
+      "description": "此 VS Code 扩展中 Cognia 不提供的部分。扩展的其余部分照常工作。",
+      "title": "Cognia 中不可用"
+    },
     "vscodeWebviews": {
       "close": "关闭 {title}",
       "empty": "没有 VS Code 扩展正在显示 Webview。",

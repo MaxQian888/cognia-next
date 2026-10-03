@@ -112,9 +112,9 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
   }
 
   const plugin = rowState.row
-  // Logs is a link, not a section. Runtimes whose host serves no log channel
-  // (wasm, vscode-extension) still get no entry at all rather than a link into
-  // a panel that can only ever be empty for them.
+  // Logs is a link, not a section. A runtime whose host serves no log channel
+  // (wasm) gets no entry at all rather than a link into a panel that can only
+  // ever be empty for it.
   const hasLogChannel = isPluginType(plugin.type) && logSourcesFor(plugin.type).runtimes.length > 0
 
   return (

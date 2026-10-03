@@ -277,9 +277,9 @@ function looksLikeNodeBinary(bytes: Uint8Array): boolean {
 }
 
 /**
- * Decide whether the main bundle is CJS, ESM, or mixed. The sidecar's
- * extension-runner needs this to pick between `vm.Script` (CJS) and
- * `vm.Module` (ESM, requires `--experimental-vm-modules`).
+ * Decide whether the main bundle is CJS, ESM, or mixed. The extension host
+ * loads CommonJS only and refuses an ES module; the adapter records one as
+ * the `esm-bundle` unsupported contribution so the plugin detail says so.
  *
  * Returns `null` when the manifest declares no `main` (theme-only,
  * grammar-only extensions never reach the sidecar).

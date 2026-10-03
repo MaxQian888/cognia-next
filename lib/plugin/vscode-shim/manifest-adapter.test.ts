@@ -7,6 +7,7 @@ import {
   adaptVscodeManifest,
   mapActivationEvent,
   UNSUPPORTED_VSCODE_ACTIVATION_PREFIXES,
+  vscodeUnsupportedContributions,
 } from "./manifest-adapter"
 import type { VsCodeManifest, VsCodePermissionInference } from "@/types/plugin/plugin-vscode"
 import type { VsixInstallResult } from "./vsix-installer"
@@ -793,5 +794,103 @@ describe("adaptVscodeManifest W5.1 projections", () => {
     expect(result.manifest.vscodeGrammars).toBeUndefined()
     expect(result.manifest.vscodeIconThemes).toBeUndefined()
     expect(result.manifest.vscodeSnippets).toBeUndefined()
+  })
+})
+
+describe("vscodeUnsupportedContributions", () => {
+  const manifest = (overrides: Partial<VsCodeManifest>): VsCodeManifest => ({
+    name: "ext",
+    publisher: "acme",
+    version: "1.0.0",
+    engines: { vscode: "^1.91.0" },
+    ...overrides,
+  })
+
+  it("records each part Cognia does not provide, the ones that stop it working first", () => {
+    const pkgJson = manifest({
+      contributes: {
+        debuggers: [{ type: "node", label: "Node" }] as never,
+        notebooks: [{ type: "jupyter", displayName: "Jupyter", selector: [] }] as never,
+        views: { explorer: [{ id: "files", name: "Files" }] },
+        menus: {
+          commandPalette: [{ command: "ext.run" }],
+          "editor/context": [{ command: "ext.run" }],
+        },
+        keybindings: [{ command: "ext.run", key: "ctrl+r" }],
+        grammars: [{ language: "x", scopeName: "source.x", path: "x.json" }],
+      },
+      extensionPack: ["acme.other"],
+    })
+    expect(vscodeUnsupportedContributions(pkgJson, "esm")).toEqual([
+      "esm-bundle",
+      "debuggers",
+      "notebooks",
+      "views",
+      "menus",
+      "keybindings",
+      "editor-grammars",
+      "extension-pack",
+    ])
+  })
+
+  it("records nothing for what Cognia provides", () => {
+    const pkgJson = manifest({
+      contributes: {
+        commands: [{ command: "ext.run", title: "Run" }],
+        menus: { commandPalette: [{ command: "ext.run", when: "false" }] },
+        // Webview views show in the extension rail.
+        views: { explorer: [{ id: "chat", name: "Chat", type: "webview" }] },
+        languages: [{ id: "x" }],
+      },
+      extensionPack: [],
+    })
+    expect(vscodeUnsupportedContributions(pkgJson, "cjs")).toEqual([])
+    expect(vscodeUnsupportedContributions(manifest({}), null)).toEqual([])
+  })
+
+  it("counts breakpoints, notebook renderers, view containers and welcome content", () => {
+    expect(
+      vscodeUnsupportedContributions(
+        manifest({ contributes: { breakpoints: [{ language: "x" }] } }),
+        "cjs"
+      )
+    ).toEqual(["debuggers"])
+    expect(
+      vscodeUnsupportedContributions(
+        manifest({ contributes: { notebookRenderer: [{ id: "r" }] as never } }),
+        "cjs"
+      )
+    ).toEqual(["notebooks"])
+    expect(
+      vscodeUnsupportedContributions(
+        manifest({
+          contributes: {
+            viewsContainers: { activitybar: [{ id: "c", title: "C", icon: "i" }], panel: [] },
+          },
+        }),
+        "cjs"
+      )
+    ).toEqual(["views"])
+    expect(
+      vscodeUnsupportedContributions(
+        manifest({ contributes: { viewsWelcome: [{ view: "v", contents: "Hi" }] as never } }),
+        "cjs"
+      )
+    ).toEqual(["views"])
+  })
+
+  it("rides the extension block, and is absent when there is nothing to report", () => {
+    const adapt = (pkgJson: VsCodeManifest, bundleFormat: "cjs" | "esm") =>
+      adaptVscodeManifest({
+        vsix: makeVsixResult(pkgJson, { bundleFormat }),
+        inference: emptyInference,
+        source: "openvsx",
+      }).manifest.vscodeExtension
+    expect(
+      adapt(manifest({ main: "./out/extension.mjs" }), "esm")?.unsupportedContributions
+    ).toEqual(["esm-bundle"])
+    expect(adapt(manifest({ main: "./out/extension.js" }), "cjs")).not.toHaveProperty(
+      "unsupportedContributions"
+    )
   })
 })

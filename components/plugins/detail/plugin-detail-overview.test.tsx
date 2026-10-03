@@ -87,6 +87,24 @@ describe("PluginDetailOverview", () => {
     expect(screen.getByText("https://example.com")).toBeInTheDocument()
   })
 
+  it("says what a VS Code extension uses that Cognia does not provide", () => {
+    mockPlugin = makePlugin({
+      type: "vscode-extension",
+      manifest: {
+        id: "alpha",
+        type: "vscode-extension",
+        vscodeExtension: { unsupportedContributions: ["keybindings"] },
+      } as unknown as PluginRow["manifest"],
+    })
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByTestId("plugin-vscode-compat-keybindings")).toBeInTheDocument()
+  })
+
+  it("shows no compatibility section for other plugins", () => {
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.queryByTestId("plugin-vscode-compat-section")).not.toBeInTheDocument()
+  })
+
   it("shows the error card when plugin.error is set", () => {
     mockPlugin = makePlugin({ error: "boom", status: "error" })
     render(<PluginDetailOverview pluginId="alpha" />)
