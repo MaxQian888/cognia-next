@@ -28274,6 +28274,8 @@
       "publisherVerified": "Publisher verified by Open VSX",
       "publisherVerifiedTooltip": "Open VSX states that this publisher controls the \"{namespace}\" namespace. That is Open VSX's claim about ownership, not cognia's, and not a claim that the extension is safe.",
       "searchPlaceholder": "Search Open VSX extensions…",
+      "unsupportedActivation": "Won't start for: {events}",
+      "unsupportedActivationTooltip": "Cognia never fires these activation events ({events}), so the extension does not start for them. It still starts for its other activation events, if it has any.",
       "unsupportedApis": "May not work: {apis}",
       "unsupportedApisTooltip": "This extension uses APIs cognia doesn't implement ({apis}) — it may not work. Detected by scanning the extension's code, which is best-effort: a minified extension can hide its API use, so this is a hint, not a guarantee.",
       "vscodeEmpty": "No extensions matched. Try a different search.",

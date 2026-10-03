@@ -2284,7 +2284,7 @@ describe("Plugin Validation", () => {
 
     it("should report warning diagnostics for retired activation events in warn mode", () => {
       const manifest = createValidManifest()
-      manifest.activationEvents = ["onLanguage:typescript"]
+      manifest.activationEvents = ["onFile:**/*.md"]
 
       const result = validatePluginManifest(manifest, { governanceMode: "warn" })
 
@@ -2302,7 +2302,7 @@ describe("Plugin Validation", () => {
 
     it("should fail validation for retired activation events in block mode", () => {
       const manifest = createValidManifest()
-      manifest.activationEvents = ["onLanguage:typescript"]
+      manifest.activationEvents = ["onFile:**/*.md"]
 
       const result = validatePluginManifest(manifest, { governanceMode: "block" })
 

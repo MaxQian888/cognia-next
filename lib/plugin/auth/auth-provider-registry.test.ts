@@ -11,6 +11,7 @@ import {
   setSecretsAdapter,
   unregisterAuthenticationProvider,
   unregisterProvidersByPlugin,
+  waitForProvider,
   type AuthSession,
   type AuthSessionOptions,
   type AuthenticationProvider,
@@ -239,5 +240,40 @@ describe("auth provider registry", () => {
         warn.mockRestore()
       }
     })
+  })
+})
+
+describe("waitForProvider", () => {
+  beforeEach(() => {
+    __resetAuthRegistryForTesting()
+  })
+
+  it("answers at once for a registered provider", async () => {
+    const provider = makeProvider()
+    registerAuthenticationProvider(provider)
+    await expect(waitForProvider(provider.id, 10)).resolves.toBe(provider)
+  })
+
+  it("answers when the provider is registered, for every waiter", async () => {
+    const provider = makeProvider()
+    const first = waitForProvider(provider.id, 1_000)
+    const second = waitForProvider(provider.id, 1_000)
+    registerAuthenticationProvider(provider)
+    await expect(first).resolves.toBe(provider)
+    await expect(second).resolves.toBe(provider)
+  })
+
+  it("gives up after the timeout", async () => {
+    jest.useFakeTimers()
+    try {
+      const waiting = waitForProvider("never", 500)
+      jest.advanceTimersByTime(500)
+      await expect(waiting).resolves.toBeUndefined()
+      // A late registration finds no one waiting.
+      registerAuthenticationProvider(makeProvider({ id: "never" }))
+      expect(getProvider("never")).toBeDefined()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

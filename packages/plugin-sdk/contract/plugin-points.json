@@ -2084,12 +2084,9 @@
     {
       "id": "onLanguage:*",
       "kind": "activation",
-      "stability": "deprecated",
-      "status": "deprecated",
-      "introducedIn": "0.1.0",
-      "deprecatedIn": "0.2.0",
-      "replacementId": "startup",
-      "retirementNote": "No language-based runtime dispatch in Cognia; declare startup activation and filter inside the plugin."
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0"
     },
     {
       "id": "onFile:*",
@@ -2111,16 +2108,18 @@
     {
       "id": "onWebviewPanel:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Restoring webview panels after a restart is not supported."
     },
     {
       "id": "onCustomEditor:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Cognia has no custom editors."
     },
     {
       "id": "onAuthenticationRequest",
@@ -2132,24 +2131,26 @@
     {
       "id": "onTaskType:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Fetching tasks does not start extensions."
     },
     {
       "id": "onFileSystem:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Cognia does not read files through extension file systems."
     },
     {
       "id": "onDebugResolve:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.5.0",
-      "retirementNote": "Validated as a known pattern but the sidecar's vscode-shim raises NotSupportedError at runtime — Cognia has no DAP viewport."
+      "retirementNote": "Cognia has no debugger."
     },
     {
       "id": "onStartupFinished",
@@ -2168,44 +2169,50 @@
     {
       "id": "onTerminal",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Opening a terminal does not start extensions."
     },
     {
       "id": "onTerminalProfile:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Cognia has no extension terminal profiles."
     },
     {
       "id": "onNotebook:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Cognia has no notebooks."
     },
     {
       "id": "onWalkthrough:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Cognia has no walkthroughs."
     },
     {
       "id": "onChatParticipant:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Extension chat participants are not invoked."
     },
     {
       "id": "onLanguageModelTool:*",
       "kind": "activation",
-      "stability": "stable",
-      "status": "implemented",
-      "introducedIn": "0.5.0"
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.5.0",
+      "retirementNote": "Models never call extension tools."
     },
     {
       "id": "workspaceContains:*",

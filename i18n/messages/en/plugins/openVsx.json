@@ -7,6 +7,8 @@
   "searchPlaceholder": "Search Open VSX extensions…",
   "unsupportedApis": "May not work: {apis}",
   "unsupportedApisTooltip": "This extension uses APIs cognia doesn't implement ({apis}) — it may not work. Detected by scanning the extension's code, which is best-effort: a minified extension can hide its API use, so this is a hint, not a guarantee.",
+  "unsupportedActivation": "Won't start for: {events}",
+  "unsupportedActivationTooltip": "Cognia never fires these activation events ({events}), so the extension does not start for them. It still starts for its other activation events, if it has any.",
   "vscodeEmpty": "No extensions matched. Try a different search.",
   "vscodeError": "Open VSX error: {message}",
   "vscodeLoadMore": "Load more ({shown}/{total})",

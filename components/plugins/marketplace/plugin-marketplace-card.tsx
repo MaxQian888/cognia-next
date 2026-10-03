@@ -19,6 +19,7 @@ import {
   BadgeCheckIcon,
   FileCheckIcon,
   PlugZapIcon,
+  PowerOffIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -77,6 +78,11 @@ interface Props {
    * the install dialog. Best-effort — see `engine-compat.ts`.
    */
   unsupportedApis?: string[]
+  /**
+   * Activation events the extension declares that Cognia never fires, read
+   * back from the installed manifest (`vscodeExtension.unsupportedActivationEvents`).
+   */
+  unsupportedActivationEvents?: string[]
   onView: (id: string) => void
   onInstall: (id: string, version?: string) => void
   onUninstall: (id: string) => void
@@ -118,6 +124,7 @@ export function PluginMarketplaceCard({
   verifiedPublisher,
   integrityChecked,
   unsupportedApis,
+  unsupportedActivationEvents,
   onView,
   onInstall,
   onUninstall,
@@ -208,6 +215,19 @@ export function PluginMarketplaceCard({
               tooltip={tv("unsupportedApisTooltip", { apis: unsupportedApis.join(", ") })}
               variant="destructive"
               testId={`plugin-openvsx-unsupported-${entry.id}`}
+            />
+          )}
+          {unsupportedActivationEvents && unsupportedActivationEvents.length > 0 && (
+            <ExplainedBadge
+              icon={PowerOffIcon}
+              label={tv("unsupportedActivation", {
+                events: unsupportedActivationEvents.join(", "),
+              })}
+              tooltip={tv("unsupportedActivationTooltip", {
+                events: unsupportedActivationEvents.join(", "),
+              })}
+              variant="outline"
+              testId={`plugin-openvsx-unsupported-activation-${entry.id}`}
             />
           )}
         </div>

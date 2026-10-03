@@ -214,6 +214,38 @@ describe("PluginMarketplaceCard", () => {
       expect(screen.getByTestId("plugin-openvsx-unsupported-p1")).toBeInTheDocument()
     })
 
+    it("says which declared activation events the extension never starts for", () => {
+      const cb = callbacks()
+      render(
+        <PluginMarketplaceCard
+          entry={baseEntry}
+          installed
+          installing={false}
+          unsupportedActivationEvents={["onDebug", "onNotebook:jupyter"]}
+          {...cb}
+        />
+      )
+      expect(screen.getByTestId("plugin-openvsx-unsupported-activation-p1")).toHaveTextContent(
+        "unsupportedActivation"
+      )
+    })
+
+    it("an empty unsupportedActivationEvents list renders no badge", () => {
+      const cb = callbacks()
+      render(
+        <PluginMarketplaceCard
+          entry={baseEntry}
+          installed
+          installing={false}
+          unsupportedActivationEvents={[]}
+          {...cb}
+        />
+      )
+      expect(
+        screen.queryByTestId("plugin-openvsx-unsupported-activation-p1")
+      ).not.toBeInTheDocument()
+    })
+
     it("renders no Open VSX badges at all when the props are absent", () => {
       // The additive-prop contract: a cognia-registry entry renders exactly as
       // it did before these props existed.
@@ -224,6 +256,9 @@ describe("PluginMarketplaceCard", () => {
       expect(screen.queryByTestId("plugin-openvsx-verified-p1")).not.toBeInTheDocument()
       expect(screen.queryByTestId("plugin-openvsx-integrity-p1")).not.toBeInTheDocument()
       expect(screen.queryByTestId("plugin-openvsx-unsupported-p1")).not.toBeInTheDocument()
+      expect(
+        screen.queryByTestId("plugin-openvsx-unsupported-activation-p1")
+      ).not.toBeInTheDocument()
       // ...and `signed: true` still maps to the signature badge exactly as it
       // did for cognia entries — the props are additive, not a rewrite.
       expect(container.querySelector(".lucide-shield-check")).not.toBeNull()

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+VS Code extensions now start when VS Code would start them instead of all at launch. An enabled extension starts at launch only for `*`, `onStartupFinished` or contributed views; otherwise it starts when you run one of its commands, open a file in a language it handles (`onLanguage`), open a project folder containing a file it looks for (`workspaceContains`), follow one of its links (`onUri`), or when something asks for its sign-in provider (`onAuthenticationRequest`), including the events VS Code infers from contributed commands, languages and authentication providers. Until it starts, its commands are listed with their titles, categories and `when` clauses, and its languages are known to the editor. Activation events Cognia never fires (debugging, notebooks, custom editors, restoring webview panels, terminal profiles, tasks, file systems, walkthroughs, chat participants, language model tools) are shown on the extension's card. Extensions installed before this keep starting at launch until they are reinstalled or updated.

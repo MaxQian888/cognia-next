@@ -47,6 +47,7 @@ export type VsCodeActivationEvent =
   | `onLanguage:${string}`
   | "onLanguage"
   | `onCommand:${string}`
+  | `onAuthenticationRequest:${string}`
   | `onView:${string}`
   | `onWebviewPanel:${string}`
   | `onCustomEditor:${string}`
@@ -744,4 +745,36 @@ export interface VsCodeExtensionBlock {
   bundleFormat: "cjs" | "esm" | "mixed"
   /** Activation events declared in the VS Code manifest, preserved verbatim. */
   activationEvents: VsCodeActivationEvent[]
+  /**
+   * Declared activation events Cognia never fires (debugging, notebooks,
+   * custom editors, restoring webview panels, terminal profiles, tasks,
+   * file-system providers, walkthroughs, chat participants and language
+   * model tools). The extension does not start for them; the extension card
+   * says so. Absent when there are none.
+   */
+  unsupportedActivationEvents?: string[]
+  /**
+   * Set when the manifest's activation events were planned as VS Code plans
+   * them (`manifest-adapter.ts:planVscodeActivation`): the extension then
+   * starts only on those events. Absent on extensions installed before; when
+   * enabled they start at launch, as they did.
+   */
+  activationPlanned?: true
+  /**
+   * `contributes.commands`, with titles and categories resolved from
+   * `package.nls.json` and the `when` clause of the command's
+   * `menus.commandPalette` entry. They are listed (and run, starting the
+   * extension first) before the extension is running. Absent when it
+   * contributes none.
+   */
+  commands?: VsCodeContributedCommand[]
+}
+
+/** A command an extension contributes, as Cognia lists it before the extension runs. */
+export interface VsCodeContributedCommand {
+  command: string
+  title: string
+  category?: string
+  /** When the command shows in the command lists (`menus.commandPalette`). */
+  when?: string
 }

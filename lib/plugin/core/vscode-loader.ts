@@ -169,6 +169,11 @@ export async function ensureDispatcherConfigured(): Promise<void> {
       sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
     })
   )
+  // What starts an enabled extension that waits for its activation events,
+  // and the commands and languages it shows until then.
+  const { installVscodeActivationTriggers, createVscodeActivationTriggerDependencies } =
+    await import("@/lib/plugin/vscode-shim/activation-triggers")
+  installVscodeActivationTriggers(createVscodeActivationTriggerDependencies())
   // `vscode.lm`: the app's own model, through the plugin AI API.
   const { configureVscodeLm, createVscodeLmDependencies } =
     await import("@/lib/plugin/vscode-shim/lm-handler")

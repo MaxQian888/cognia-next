@@ -441,11 +441,41 @@ describe("vscode-loader — Tauri mode", () => {
     const configureMonacoBridge = jest.fn()
     jest.doMock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
       configureMonacoBridge,
+      // The activation triggers listen for editors opening documents.
+      onEditorChange: jest.fn(() => () => {}),
+      getEditorById: jest.fn(),
     }))
 
     const { loadVscodeDefinition } = await import("./vscode-loader")
     await expect(loadVscodeDefinition(baseManifest, "/tmp/plugin")).resolves.toBeDefined()
     expect(configureMonacoBridge).not.toHaveBeenCalled()
+  })
+})
+
+describe("vscode-loader — activation triggers", () => {
+  beforeEach(() => {
+    installTauriWindow()
+    jest.resetModules()
+    jest.clearAllMocks()
+  })
+
+  afterAll(() => {
+    removeTauriWindow()
+    jest.dontMock("@/lib/plugin/vscode-shim/activation-triggers")
+  })
+
+  it("starts watching for dormant extensions' activation events when the dispatcher comes up", async () => {
+    jest.doMock("@tauri-apps/api/event", () => ({ listen: jest.fn(async () => () => {}) }))
+    jest.doMock("@tauri-apps/api/core", () => ({ invoke: jest.fn(async () => undefined) }))
+    const installVscodeActivationTriggers = jest.fn()
+    const dependencies = { marker: true }
+    jest.doMock("@/lib/plugin/vscode-shim/activation-triggers", () => ({
+      installVscodeActivationTriggers,
+      createVscodeActivationTriggerDependencies: () => dependencies,
+    }))
+    const { ensureDispatcherConfigured } = await import("./vscode-loader")
+    await ensureDispatcherConfigured()
+    expect(installVscodeActivationTriggers).toHaveBeenCalledWith(dependencies)
   })
 })
 

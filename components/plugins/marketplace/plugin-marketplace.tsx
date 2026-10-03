@@ -57,6 +57,29 @@ import { usePluginsStore } from "@/stores/plugins"
 
 const PAGE_SIZE = 12
 
+/**
+ * Per installed VS Code extension, a string list the adapter persisted on its
+ * `vscodeExtension` block (`unsupportedApis`, `unsupportedActivationEvents`).
+ */
+function installedVscodeLists(
+  rows: ReadonlyArray<{ id: string; manifest?: unknown }> | undefined,
+  field: "unsupportedApis" | "unsupportedActivationEvents"
+): Map<string, string[]> {
+  const map = new Map<string, string[]>()
+  for (const row of rows ?? []) {
+    const block = (row.manifest as { vscodeExtension?: Record<string, unknown> } | undefined)
+      ?.vscodeExtension
+    const values = block?.[field]
+    if (Array.isArray(values) && values.length > 0) {
+      map.set(
+        row.id,
+        values.filter((value): value is string => typeof value === "string")
+      )
+    }
+  }
+  return map
+}
+
 export function PluginMarketplace() {
   const t = useTranslations("plugins.marketplace")
   const tv = useTranslations("plugins.openVsx")
@@ -149,22 +172,15 @@ export function PluginMarketplace() {
    * a warning that only existed in the install dialog would vanish exactly
    * when the extension starts misbehaving.
    */
-  const unsupportedApisById = useMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const row of installedRows ?? []) {
-      const block = (
-        row.manifest as { vscodeExtension?: { unsupportedApis?: unknown } } | undefined
-      )?.vscodeExtension
-      const apis = block?.unsupportedApis
-      if (Array.isArray(apis) && apis.length > 0) {
-        map.set(
-          row.id,
-          apis.filter((a): a is string => typeof a === "string")
-        )
-      }
-    }
-    return map
-  }, [installedRows])
+  const unsupportedApisById = useMemo(
+    () => installedVscodeLists(installedRows, "unsupportedApis"),
+    [installedRows]
+  )
+  /** Likewise, the activation events the extension declares that Cognia never fires. */
+  const unsupportedActivationById = useMemo(
+    () => installedVscodeLists(installedRows, "unsupportedActivationEvents"),
+    [installedRows]
+  )
 
   // Lazy-loaded client wraps the marketplace singleton; passed to the
   // pre-install hook so the orchestrator can pull manifests + call
@@ -496,6 +512,7 @@ export function PluginMarketplace() {
                   // haven't done.
                   integrityChecked={isVscodeSection && installedIds.has(entry.id)}
                   unsupportedApis={unsupportedApisById.get(entry.id)}
+                  unsupportedActivationEvents={unsupportedActivationById.get(entry.id)}
                   onView={() => setSelectedEntry(entry)}
                   onInstall={(id, version) => onInstallById(id, version)}
                   onUninstall={(id) => requestUninstall(id, entry.name)}

@@ -129,6 +129,8 @@ function emit(event: AuthSessionChangeEvent): void {
   })
 }
 
+const providerWaiters = new Map<string, Set<(provider: AuthenticationProvider) => void>>()
+
 export function registerAuthenticationProvider(provider: AuthenticationProvider): () => void {
   if (providers.has(provider.id)) {
     console.warn(
@@ -136,7 +138,34 @@ export function registerAuthenticationProvider(provider: AuthenticationProvider)
     )
   }
   providers.set(provider.id, provider)
+  const waiters = providerWaiters.get(provider.id)
+  providerWaiters.delete(provider.id)
+  for (const resolve of waiters ?? []) resolve(provider)
   return () => unregisterAuthenticationProvider(provider.id)
+}
+
+/**
+ * The provider registered as `id`, waiting up to `timeoutMs` for one to be
+ * registered (by an extension that was just started for it).
+ */
+export function waitForProvider(
+  id: string,
+  timeoutMs: number
+): Promise<AuthenticationProvider | undefined> {
+  const existing = providers.get(id)
+  if (existing) return Promise.resolve(existing)
+  return new Promise((resolve) => {
+    const waiters = providerWaiters.get(id) ?? new Set()
+    providerWaiters.set(id, waiters)
+    const settle = (provider: AuthenticationProvider | undefined) => {
+      clearTimeout(timer)
+      waiters.delete(settle)
+      if (waiters.size === 0 && providerWaiters.get(id) === waiters) providerWaiters.delete(id)
+      resolve(provider)
+    }
+    const timer = setTimeout(() => settle(undefined), timeoutMs)
+    waiters.add(settle)
+  })
 }
 
 export function unregisterAuthenticationProvider(id: string): void {
@@ -273,6 +302,7 @@ export function __makeSession(input: {
 
 export function __resetAuthRegistryForTesting(): void {
   providers.clear()
+  providerWaiters.clear()
   sessionListeners.clear()
   secretsAdapter = null
 }

@@ -26,12 +26,14 @@ import {
   getProvider,
   getSession,
   registerAuthenticationProvider,
+  waitForProvider,
   unregisterAuthenticationProvider,
   unregisterProvidersByPlugin as unregisterAuthProvidersByPlugin,
   type AuthSessionOptions,
 } from "@/lib/plugin/auth/auth-provider-registry"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import { listPluginPermissions } from "@/lib/plugin/core/transport"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { registerMethod, type RpcContext } from "./rpc-dispatcher"
 import { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "./unavailable-methods"
 
@@ -50,6 +52,54 @@ export function configureVscodeRuntimeHandlersForTesting(impl: InvokeSidecar | n
       const { invokeVscodeRpc } = await import("@/lib/plugin/core/vscode-loader")
       return invokeVscodeRpc(pluginId, method, payload)
     })
+}
+
+type ActivateEvent = (event: `onAuthenticationRequest:${string}`) => Promise<void>
+
+const managerActivate: ActivateEvent = async (event) => {
+  const { getPluginManager } = await import("@/lib/plugin/core/manager")
+  await getPluginManager().handleActivationEvent(event)
+}
+let activateEvent: ActivateEvent = managerActivate
+
+/** Test-only override of how an activation event reaches the plugin manager. */
+export function configureVscodeRuntimeActivationForTesting(impl: ActivateEvent | null): void {
+  activateEvent = impl ?? managerActivate
+}
+
+/** How long an extension started for a provider has to register it. */
+export const AUTH_PROVIDER_WAIT_MS = 5_000
+
+/**
+ * A provider nobody has registered yet may belong to an extension that has
+ * not started: start the ones that declared it (`onAuthenticationRequest`)
+ * and give them a moment to register it.
+ */
+async function ensureAuthProvider(providerId: string): Promise<void> {
+  if (getProvider(providerId)) return
+  try {
+    await activateEvent(`onAuthenticationRequest:${providerId}`)
+  } catch {
+    // The manager is not running; nothing more can start.
+    return
+  }
+  await waitForProvider(providerId, AUTH_PROVIDER_WAIT_MS)
+}
+
+/** The title, category and `when` the extension's manifest gives a command. */
+function contributedCommand(pluginId: string, command: string) {
+  const entry = usePluginStore
+    .getState()
+    .plugins[pluginId]?.manifest.vscodeExtension?.commands?.find(
+      (candidate) => candidate.command === command
+    )
+  return entry
+    ? {
+        title: entry.title,
+        ...(entry.category ? { category: entry.category } : {}),
+        ...(entry.when ? { when: entry.when } : {}),
+      }
+    : {}
 }
 
 function payloadObject(payload: unknown): Record<string, unknown> {
@@ -114,6 +164,7 @@ export function installVscodeRuntimeRpcHandlers(): Array<() => void> {
       const dispose = registerCommand({
         id: command,
         pluginId: context.pluginId,
+        ...contributedCommand(context.pluginId, command),
         handler: (...args) =>
           invokeSidecar(context.pluginId, "extension:call", { token, payload: args }),
       })
@@ -269,6 +320,7 @@ export function installVscodeRuntimeRpcHandlers(): Array<() => void> {
     registerMethod("authentication:getSession", async (payload, context) => {
       const value = ownedPayload(payload, context)
       await requirePermission(context.pluginId, "secrets:read")
+      await ensureAuthProvider(requiredString(value, "providerId"))
       return getSession(
         requiredString(value, "providerId"),
         Array.isArray(value.scopes) ? (value.scopes as string[]) : [],
@@ -280,6 +332,7 @@ export function installVscodeRuntimeRpcHandlers(): Array<() => void> {
     registerMethod("authentication:getAccounts", async (payload, context) => {
       const value = ownedPayload(payload, context)
       await requirePermission(context.pluginId, "secrets:read")
+      await ensureAuthProvider(requiredString(value, "providerId"))
       const provider = getProvider(requiredString(value, "providerId"))
       if (!provider) return []
       const sessions = await provider.getSessions(undefined, { silent: true })

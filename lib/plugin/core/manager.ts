@@ -450,7 +450,17 @@ function isPluginStatus(value: unknown): value is PluginStatus {
 }
 
 type PluginActivationRuntimeEvent =
-  "startup" | `onCommand:${string}` | `onTool:${string}` | `onView:${string}` | `onUri:${string}`
+  | "startup"
+  | `onCommand:${string}`
+  | `onTool:${string}`
+  | `onView:${string}`
+  | `onUri:${string}`
+  /** An editor opened a document of this language. */
+  | `onLanguage:${string}`
+  /** The host found a file matching the addressed plugin's `workspaceContains:` globs. */
+  | `workspaceContains:${string}`
+  /** Something asked for a session from this authentication provider. */
+  | `onAuthenticationRequest:${string}`
 
 interface PluginDiscoveryProjection {
   source: PluginSource
@@ -466,6 +476,12 @@ interface ParsedActivationSpec {
   viewEvents: string[]
   /** True when the plugin declares `onUri` (it handles its own deep-links). */
   uriActivation: boolean
+  /** Language ids from `onLanguage:<id>`. */
+  languageEvents: string[]
+  /** True when the plugin declares any `workspaceContains:<glob>`. */
+  workspaceContains: boolean
+  /** Provider ids from `onAuthenticationRequest:<id>`; `*` for the bare event. */
+  authenticationEvents: string[]
   rawEvents: PluginActivationEvent[]
 }
 
@@ -2296,7 +2312,8 @@ export class PluginManager {
           (plugin) =>
             plugin.status === "installed" &&
             intents.get(plugin.manifest.id) !== "disabled" &&
-            (intents.get(plugin.manifest.id) === "enabled" ||
+            ((intents.get(plugin.manifest.id) === "enabled" &&
+              !this.startsOnItsEvents(plugin.manifest)) ||
               this.config.autoEnable ||
               this.shouldActivateOnStartup(plugin.manifest)) &&
             // Preflight both the plugin and every required dependency. A
@@ -4995,6 +5012,26 @@ export class PluginManager {
     // it arrives. Accept the bare `onUri` and the `onUri:*` wildcard form.
     const uriActivation = rawEvents.some((event) => event === "onUri" || event.startsWith("onUri:"))
 
+    const languageEvents = rawEvents
+      .filter((event) => event.startsWith("onLanguage:"))
+      .map((event) => event.slice("onLanguage:".length))
+      .filter(Boolean)
+
+    const workspaceContains = rawEvents.some(
+      (event) =>
+        event.startsWith("workspaceContains:") && event.length > "workspaceContains:".length
+    )
+
+    const authenticationEvents = rawEvents
+      .filter(
+        (event) =>
+          event === "onAuthenticationRequest" || event.startsWith("onAuthenticationRequest:")
+      )
+      .map((event) =>
+        event === "onAuthenticationRequest" ? "*" : event.slice("onAuthenticationRequest:".length)
+      )
+      .filter(Boolean)
+
     for (const event of rawEvents) {
       const validation = validateActivationEvent(event, {
         governanceMode: this.pluginPointGovernanceMode,
@@ -5028,10 +5065,27 @@ export class PluginManager {
       toolEvents,
       viewEvents,
       uriActivation,
+      languageEvents,
+      workspaceContains,
+      authenticationEvents,
       rawEvents,
     }
     this.activationSpecCache.set(manifest, parsed)
     return parsed
+  }
+
+  /**
+   * A VS Code extension the user enabled still starts only when its activation
+   * events say so, as in VS Code: at launch for `startup`, otherwise on the
+   * event (`lib/plugin/vscode-shim/activation-triggers.ts` fires the ones the
+   * editor and the workspace produce). Other plugins the user enabled start at
+   * launch, and so do extensions installed before their events were planned
+   * that way (no `vscodeExtension.activationPlanned`).
+   */
+  private startsOnItsEvents(manifest: PluginManifest): boolean {
+    return (
+      manifest.type === "vscode-extension" && manifest.vscodeExtension?.activationPlanned === true
+    )
   }
 
   private shouldActivateOnStartup(manifest: PluginManifest): boolean {
@@ -5091,6 +5145,24 @@ export class PluginManager {
       // declared `onUri` activates.
       const targetPluginId = event.slice("onUri:".length)
       return spec.uriActivation && targetPluginId === manifest.id
+    }
+
+    if (event.startsWith("onLanguage:")) {
+      const language = event.slice("onLanguage:".length)
+      return spec.languageEvents.some((pattern) => this.matchesActivation(pattern, language))
+    }
+
+    if (event.startsWith("workspaceContains:")) {
+      // The host evaluates a plugin's globs itself and addresses the plugin
+      // whose glob matched, as `onUri:` addresses the plugin a link names.
+      return spec.workspaceContains && event.slice("workspaceContains:".length) === manifest.id
+    }
+
+    if (event.startsWith("onAuthenticationRequest:")) {
+      const providerId = event.slice("onAuthenticationRequest:".length)
+      return spec.authenticationEvents.some(
+        (pattern) => pattern === "*" || this.matchesActivation(pattern, providerId)
+      )
     }
 
     // Unknown runtime event prefix — never activate (previously this fell

@@ -11,9 +11,11 @@
  *   • It is loss-aware: cognia-side fields that have no VS Code analogue
  *     stay empty; VS Code-side fields that have no cognia analogue land in
  *     `manifest.vscodeExtension` so the sidecar can re-consult them.
- *   • Activation events flow through `mapActivationEvent` which rewrites
- *     `onLanguage:*` (deprecated in cognia) to `startup` (with the original
- *     events preserved in `vscodeExtension.activationEvents`).
+ *   • Activation events flow through `planVscodeActivation`: the events
+ *     Cognia fires pass through (some become `startup`), VS Code's implicit
+ *     events for contributed commands, languages and authentication providers
+ *     are added, and the rest are recorded as unsupported. The originals stay
+ *     in `vscodeExtension.activationEvents`.
  *   • Synthetic id is always `publisher.name`. The sidecar uses this same id
  *     to namespace storage, secrets, and Dexie tables.
  */
@@ -22,6 +24,7 @@ import type { PluginManifest, PluginCapability, PluginPermission } from "@/types
 import type {
   VsCodeManifest,
   VsCodeActivationEvent,
+  VsCodeContributedCommand,
   VsCodeExtensionAdapterResult,
   VsCodeExtensionBlock,
   VsCodePermissionInference,
@@ -94,19 +97,11 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
 
   // ── Activation events ──────────────────────────────────────────────────
   const rawActivation = Array.isArray(pkgJson.activationEvents) ? pkgJson.activationEvents : []
-  const cogniaActivation: ActivationEventDeclaration[] = []
-  for (const ev of rawActivation) {
-    const mapped = mapActivationEvent(ev, warnings)
-    if (mapped && !cogniaActivation.includes(mapped)) {
-      cogniaActivation.push(mapped)
-    }
-  }
-  // If the extension declares no activation events at all, VS Code 1.74+
-  // implicitly activates on first matching contribution. We mirror that by
-  // adding `startup` so the sidecar at least loads it on app start.
-  if (cogniaActivation.length === 0 && hasAnyContribution(pkgJson)) {
-    cogniaActivation.push("startup")
-  }
+  const activation = planVscodeActivation(pkgJson, warnings)
+  const cogniaActivation = activation.events
+
+  // ── Contributed commands ──────────────────────────────────────────────
+  const contributedCommands = vscodeContributedCommands(pkgJson, nls)
 
   // ── Capabilities ──────────────────────────────────────────────────────
   const capabilities = inferCapabilities(pkgJson)
@@ -149,6 +144,11 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     source,
     bundleFormat: vsix.bundleFormat ?? "cjs",
     activationEvents: rawActivation as VsCodeActivationEvent[],
+    ...(activation.unsupported.length > 0
+      ? { unsupportedActivationEvents: activation.unsupported }
+      : {}),
+    ...(contributedCommands.length > 0 ? { commands: contributedCommands } : {}),
+    activationPlanned: true,
     // Both spread-conditionally: an absent key is "not applicable" (a `.vsix`
     // upload has no registry platform), whereas `[]` would assert "we looked
     // and found none" — a claim the minified path cannot support.
@@ -305,82 +305,163 @@ function resolveRepositoryUrl(repo: VsCodeManifest["repository"]): string | unde
 }
 
 /**
- * Whether the manifest declares anything that would trigger implicit VS Code
- * activation (1.74+). If yes, the adapter inserts a `startup` event when
- * the manifest left `activationEvents` empty.
+ * VS Code activation events with no Cognia trigger. An extension does not
+ * start for them; they are recorded in `vscodeExtension.unsupportedActivationEvents`
+ * and shown on the extension's card.
  */
-function hasAnyContribution(pkgJson: VsCodeManifest): boolean {
-  return Boolean(
-    pkgJson.contributes &&
-    typeof pkgJson.contributes === "object" &&
-    Object.keys(pkgJson.contributes).length > 0
-  )
-}
+export const UNSUPPORTED_VSCODE_ACTIVATION_PREFIXES: readonly string[] = [
+  "onDebug",
+  "onWebviewPanel:",
+  "onCustomEditor:",
+  "onTaskType:",
+  "onFileSystem:",
+  "onTerminal",
+  "onNotebook:",
+  "onRenderer:",
+  "onSearch:",
+  "onWalkthrough:",
+  "onChatParticipant:",
+  "onLanguageModelTool:",
+  "onEditSession",
+  "onIssueReporterOpened",
+  "onOpenExternalUri",
+]
 
 /**
- * Translate one VS Code activation event into a cognia
- * `ActivationEventDeclaration`. Returns `undefined` to skip an event the
- * cognia registry has no slot for (the original event is still preserved
- * in `vscodeExtension.activationEvents`).
+ * Translate one VS Code activation event into the event Cognia fires for it.
+ * Returns `undefined` (with a warning) for one Cognia never fires.
  *
- * - `*` (eager) → `startup`
- * - `onLanguage:*` (cognia-deprecated) → `startup` + warning
- * - VS Code patterns with a 1:1 cognia analogue pass through unchanged.
+ * - `*` and `onStartupFinished` start the extension at launch.
+ * - `onView:<id>` also starts it at launch: Cognia shows an extension's views
+ *   only once it is running, so there is no view to open before that.
+ * - `onCommand:`, `onLanguage:`, `workspaceContains:`, `onUri` and
+ *   `onAuthenticationRequest` start it when they happen.
  */
 export function mapActivationEvent(
   event: string,
   warnings: string[]
 ): ActivationEventDeclaration | undefined {
-  if (event === "*") return "startup"
-  if (event === "onStartupFinished") return "onStartupFinished"
-  if (event === "onAuthenticationRequest") return "onAuthenticationRequest"
+  if (event === "*" || event === "onStartupFinished") return "startup"
   if (event === "onUri") return "onUri"
-  if (event === "onTerminal") return "onTerminal"
-
-  if (event.startsWith("onLanguage:") && event !== "onLanguage:*") {
-    // cognia's onLanguage:* is deprecated; rewrite to startup. The original
-    // event remains in vscodeExtension.activationEvents so the sidecar can
-    // still match against `vscode.languages.onDidChangeActiveTextEditor`.
+  if (event === "onAuthenticationRequest") return "onAuthenticationRequest"
+  if (event.startsWith("onAuthenticationRequest:") && event.length > 24) {
+    return event as ActivationEventDeclaration
+  }
+  if (
+    (event.startsWith("onCommand:") ||
+      event.startsWith("onLanguage:") ||
+      event.startsWith("workspaceContains:")) &&
+    !event.endsWith(":")
+  ) {
+    return event as ActivationEventDeclaration
+  }
+  if (event.startsWith("onView:")) {
     warnings.push(
-      `onLanguage activation rewritten to startup for "${event}" (cognia deprecates onLanguage:*).`
+      `"${event}" starts the extension at launch: Cognia shows an extension's views only once it is running.`
     )
     return "startup"
   }
-
-  if (event.startsWith("onCommand:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onView:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onWebviewPanel:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onCustomEditor:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onTaskType:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onFileSystem:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onDebug")) {
-    // Collapse all onDebug* variants to onDebugResolve:* (validator-friendly).
-    if (event === "onDebug" || event === "onDebugAdapterProtocolTracker") {
-      warnings.push(
-        `Debug activation event "${event}" mapped to onDebugResolve:* — cognia raises NotSupportedError at runtime.`
-      )
-      return "onDebugResolve:*"
-    }
-    if (
-      event.startsWith("onDebugResolve:") ||
-      event.startsWith("onDebugInitialConfigurations") ||
-      event.startsWith("onDebugDynamicConfigurations")
-    ) {
-      return "onDebugResolve:*"
-    }
-  }
-  if (event.startsWith("onTerminalProfile:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onNotebook:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onWalkthrough:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onChatParticipant:")) return event as ActivationEventDeclaration
-  if (event.startsWith("onLanguageModelTool:")) return event as ActivationEventDeclaration
-  if (event.startsWith("workspaceContains:")) return event as ActivationEventDeclaration
-
-  // Unknown event — the sidecar still receives it via vscodeExtension.activationEvents.
   warnings.push(
-    `Unknown VS Code activation event "${event}" — preserved verbatim for the sidecar but not advertised to cognia.`
+    UNSUPPORTED_VSCODE_ACTIVATION_PREFIXES.some((prefix) => event.startsWith(prefix))
+      ? `Activation event "${event}" is not supported in Cognia; the extension does not start for it.`
+      : `Unknown VS Code activation event "${event}"; the extension does not start for it.`
   )
   return undefined
+}
+
+/**
+ * The events that start an extension in Cognia, and the declared ones that
+ * never will.
+ *
+ * VS Code (1.74 and later) adds events implied by contributions, and so do
+ * we: `onCommand:` for each contributed command, `onLanguage:` for each
+ * contributed language, `onAuthenticationRequest:` for each authentication
+ * provider, and launch for contributed views (see `mapActivationEvent`).
+ *
+ * An extension left with no event at all and no unsupported one starts at
+ * launch: one without code has only declarative contributions, which Cognia
+ * applies while the extension is enabled, and one with code would otherwise
+ * never run. One whose only events are unsupported does not start.
+ */
+export function planVscodeActivation(
+  pkgJson: VsCodeManifest,
+  warnings: string[]
+): { events: ActivationEventDeclaration[]; unsupported: string[] } {
+  const events: ActivationEventDeclaration[] = []
+  const unsupported: string[] = []
+  const add = (event: ActivationEventDeclaration) => {
+    if (!events.includes(event)) events.push(event)
+  }
+  const declared = Array.isArray(pkgJson.activationEvents) ? pkgJson.activationEvents : []
+  for (const event of declared) {
+    if (typeof event !== "string") continue
+    const mapped = mapActivationEvent(event, warnings)
+    if (mapped) add(mapped)
+    else if (!unsupported.includes(event)) unsupported.push(event)
+  }
+
+  const contributes = pkgJson.contributes
+  if (contributes && typeof contributes === "object") {
+    for (const command of Array.isArray(contributes.commands) ? contributes.commands : []) {
+      if (typeof command?.command === "string" && command.command) {
+        add(`onCommand:${command.command}`)
+      }
+    }
+    for (const language of Array.isArray(contributes.languages) ? contributes.languages : []) {
+      const id = (language as { id?: unknown } | null)?.id
+      if (typeof id === "string" && id) add(`onLanguage:${id}`)
+    }
+    for (const provider of Array.isArray(contributes.authentication)
+      ? contributes.authentication
+      : []) {
+      if (typeof provider?.id === "string" && provider.id) {
+        add(`onAuthenticationRequest:${provider.id}` as ActivationEventDeclaration)
+      }
+    }
+    const views =
+      contributes.views && typeof contributes.views === "object" ? contributes.views : {}
+    if (Object.values(views).some((list) => Array.isArray(list) && list.length > 0)) {
+      add("startup")
+    }
+  }
+
+  if (events.length === 0 && unsupported.length === 0) add("startup")
+  return { events, unsupported }
+}
+
+/**
+ * `contributes.commands` as Cognia lists them before the extension runs:
+ * titles and categories resolved from `package.nls.json`, and the `when`
+ * clause of the command's `menus.commandPalette` entry (`"false"` hides it).
+ */
+export function vscodeContributedCommands(
+  pkgJson: VsCodeManifest,
+  nls: Parameters<typeof resolveNls>[1]
+): VsCodeContributedCommand[] {
+  const contributes = pkgJson.contributes
+  const commands = Array.isArray(contributes?.commands) ? contributes.commands : []
+  const palette = Array.isArray(contributes?.menus?.commandPalette)
+    ? contributes.menus.commandPalette
+    : []
+  const result: VsCodeContributedCommand[] = []
+  for (const entry of commands) {
+    if (typeof entry?.command !== "string" || !entry.command) continue
+    if (result.some((existing) => existing.command === entry.command)) continue
+    const title =
+      typeof entry.title === "string" && entry.title ? resolveNls(entry.title, nls) : entry.command
+    const category =
+      typeof entry.category === "string" && entry.category
+        ? resolveNls(entry.category, nls)
+        : undefined
+    const when = palette.find((item) => item?.command === entry.command)?.when
+    result.push({
+      command: entry.command,
+      title,
+      ...(category ? { category } : {}),
+      ...(typeof when === "string" && when ? { when } : {}),
+    })
+  }
+  return result
 }
 
 /**

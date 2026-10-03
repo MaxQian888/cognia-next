@@ -542,7 +542,10 @@ describe("PluginMarketplace", () => {
         name: "Prettier",
         version: "1.0.0",
         manifest: {
-          vscodeExtension: { unsupportedApis: ["vscode.debug"] },
+          vscodeExtension: {
+            unsupportedApis: ["vscode.debug"],
+            unsupportedActivationEvents: ["onDebug"],
+          },
         },
       } as never)
       mockOpenVsxSearch()
@@ -555,6 +558,9 @@ describe("PluginMarketplace", () => {
           screen.getByTestId("plugin-openvsx-unsupported-esbenp.prettier-vscode")
         ).toBeInTheDocument()
       )
+      expect(
+        screen.getByTestId("plugin-openvsx-unsupported-activation-esbenp.prettier-vscode")
+      ).toBeInTheDocument()
       // ...and the integrity badge appears only because it IS installed.
       expect(
         screen.getByTestId("plugin-openvsx-integrity-esbenp.prettier-vscode")

@@ -3859,6 +3859,47 @@ describe("PluginManager", () => {
       expect(enableSpy.mock.calls).toEqual([["github-delivery"], ["github-devin-bot"]])
     })
 
+    it("starts an enabled VS Code extension at launch only when its planned events say so", async () => {
+      const extension = (id: string, events: PluginManifest["activationEvents"], planned = true) =>
+        ({
+          manifest: {
+            ...createManifest(id),
+            type: "vscode-extension",
+            activationEvents: events,
+            vscodeExtension: {
+              identifier: id,
+              version: "1.0.0",
+              engineVscode: "^1.91.0",
+              vsixSha256: "0",
+              source: "openvsx",
+              bundleFormat: "cjs",
+              activationEvents: [],
+              ...(planned ? { activationPlanned: true as const } : {}),
+            },
+          },
+          status: "installed",
+          source: "local",
+          path: `/ext/${id}`,
+          config: {},
+        }) as Plugin
+      const lifecycleStateAdapter = new InMemoryPluginLifecycleStateAdapter()
+      for (const id of ["acme.eager", "acme.lazy", "acme.legacy"]) {
+        await lifecycleStateAdapter.write(id, 0, { intent: "enabled" })
+      }
+      mockGetState.mockReturnValue({
+        plugins: {
+          "acme.eager": extension("acme.eager", ["startup"]),
+          "acme.lazy": extension("acme.lazy", ["onLanguage:python", "onCommand:acme.run"]),
+          // Installed before activation was planned: keeps starting at launch.
+          "acme.legacy": extension("acme.legacy", ["onCommand:acme.legacy"], false),
+        },
+      })
+      const manager = new PluginManager({ pluginDirectory: "", lifecycleStateAdapter })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      expect(enableSpy.mock.calls.map(([id]) => id).sort()).toEqual(["acme.eager", "acme.legacy"])
+    })
+
     it("auto-enables runtime-compatible builtins but skips browser-blocked ones", async () => {
       // Reproduces the mobile/web boot flood: a mix of startup builtins where
       // only the browser-supported one should be auto-enabled. The blocked one
@@ -4920,6 +4961,36 @@ describe("PluginManager", () => {
   })
 
   describe("plugin point governance", () => {
+    it("matches language, workspace and authentication activation events", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const shouldActivate = (
+        manager as unknown as {
+          shouldActivateForEvent: (manifest: PluginManifest, event: string) => boolean
+        }
+      ).shouldActivateForEvent.bind(manager)
+      const manifest: PluginManifest = {
+        ...createManifest("acme.ext"),
+        activationEvents: [
+          "onLanguage:python",
+          "workspaceContains:**/pyproject.toml",
+          "onAuthenticationRequest:github",
+        ],
+      }
+      expect(shouldActivate(manifest, "onLanguage:python")).toBe(true)
+      expect(shouldActivate(manifest, "onLanguage:rust")).toBe(false)
+      // The host checks the globs; the event names the plugin whose glob matched.
+      expect(shouldActivate(manifest, "workspaceContains:acme.ext")).toBe(true)
+      expect(shouldActivate(manifest, "workspaceContains:other.ext")).toBe(false)
+      expect(shouldActivate(manifest, "onAuthenticationRequest:github")).toBe(true)
+      expect(shouldActivate(manifest, "onAuthenticationRequest:microsoft")).toBe(false)
+      const anyProvider: PluginManifest = {
+        ...createManifest("acme.auth"),
+        activationEvents: ["onAuthenticationRequest"],
+      }
+      expect(shouldActivate(anyProvider, "onAuthenticationRequest:microsoft")).toBe(true)
+      expect(shouldActivate(createManifest("acme.none"), "workspaceContains:acme.none")).toBe(false)
+    })
+
     it("reuses precompiled activation specs and wildcard matchers", () => {
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
       const manifest: PluginManifest = {
@@ -4946,7 +5017,7 @@ describe("PluginManager", () => {
 
       const manifest: PluginManifest = {
         ...createManifest("blocked-activation"),
-        activationEvents: ["onLanguage:typescript"],
+        activationEvents: ["onFile:**/*.md"],
       }
 
       expect(() =>
@@ -4988,7 +5059,7 @@ describe("PluginManager", () => {
 
       const manifest: PluginManifest = {
         ...createManifest("toggled-activation"),
-        activationEvents: ["onLanguage:typescript"],
+        activationEvents: ["onFile:**/*.md"],
       }
       expect(() =>
         (

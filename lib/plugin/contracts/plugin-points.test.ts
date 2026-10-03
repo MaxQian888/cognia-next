@@ -99,6 +99,21 @@ describe("plugin point contracts", () => {
       // render, which cannot carry the deadline and revocation semantics every
       // other point relies on.
       "ui.surface.project",
+      // VS Code activation events Cognia has nothing to fire for. These were
+      // dormant all along but registered as implemented, bound to a host
+      // function that did not exist; `manifest-adapter.ts` records them as an
+      // extension's unsupported events.
+      "onWebviewPanel:*",
+      "onCustomEditor:*",
+      "onTaskType:*",
+      "onFileSystem:*",
+      "onDebugResolve:*",
+      "onTerminal",
+      "onTerminalProfile:*",
+      "onNotebook:*",
+      "onWalkthrough:*",
+      "onChatParticipant:*",
+      "onLanguageModelTool:*",
     ]
     const virtualIds = PLUGIN_POINT_CONTRACTS.filter((e) => e.status === "virtual")
       .map((e) => e.id)
@@ -255,7 +270,7 @@ describe("plugin point contracts", () => {
   })
 
   it("blocks retired activation events in block mode", () => {
-    const result = validateActivationEvent("onLanguage:typescript", { governanceMode: "block" })
+    const result = validateActivationEvent("onFile:**/*.md", { governanceMode: "block" })
     expect(result.allowed).toBe(false)
     expect(result.diagnostics).toEqual(
       expect.arrayContaining([
@@ -360,11 +375,45 @@ describe("plugin point contracts", () => {
       }
     })
 
-    it("validates each VS Code activation pattern in block mode", () => {
-      for (const pattern of vscodePatterns) {
+    const firedPatterns = [
+      "onView:*",
+      "onAuthenticationRequest",
+      "onStartupFinished",
+      "onUri",
+      "workspaceContains:*",
+    ] as const
+
+    it("allows the VS Code activation patterns Cognia fires, even in block mode", () => {
+      for (const pattern of firedPatterns) {
         const result = validateActivationEvent(pattern, { governanceMode: "block" })
         expect({ pattern, allowed: result.allowed }).toEqual({ pattern, allowed: true })
       }
+    })
+
+    it("reports the others as declared but never fired", () => {
+      for (const pattern of vscodePatterns) {
+        if ((firedPatterns as readonly string[]).includes(pattern)) continue
+        const result = validateActivationEvent(pattern, { governanceMode: "warn" })
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([expect.objectContaining({ code: "plugin.point.virtual" })])
+        )
+        expect(validateActivationEvent(pattern, { governanceMode: "block" }).allowed).toBe(false)
+      }
+    })
+
+    it("accepts onAuthenticationRequest with a provider id", () => {
+      expect(resolveActivationPattern("onAuthenticationRequest:github")).toBe(
+        "onAuthenticationRequest"
+      )
+    })
+
+    it("dispatches onLanguage, which editors fire as they open documents", () => {
+      const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === "onLanguage:*")
+      expect(contract?.status).toBe("implemented")
+      expect(contract?.binding).toMatch(/activation-triggers\.ts/)
+      expect(
+        validateActivationEvent("onLanguage:python", { governanceMode: "block" }).allowed
+      ).toBe(true)
     })
 
     it("resolves concrete VS Code activation events to their canonical wildcard", () => {
@@ -376,21 +425,18 @@ describe("plugin point contracts", () => {
       expect(resolveActivationPattern("onTaskType:npm")).toBe("onTaskType:*")
     })
 
-    it("flags onDebugResolve:* with the runtime-not-supported note", () => {
+    it("says why each unfired pattern never fires", () => {
       const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === "onDebugResolve:*")
-      expect(contract).toBeDefined()
-      expect(contract?.retirementNote).toMatch(/NotSupportedError/i)
+      expect(contract?.status).toBe("virtual")
+      expect(contract?.retirementNote).toBe("Cognia has no debugger.")
     })
 
-    it("binds VS Code activation dispatch to the sidecar host", () => {
-      const vscodeContracts = PLUGIN_POINT_CONTRACTS.filter(
-        (c) =>
-          c.kind === "activation" &&
-          (vscodePatterns as readonly string[]).includes(c.id as (typeof vscodePatterns)[number])
-      )
-      expect(vscodeContracts).toHaveLength(vscodePatterns.length)
-      for (const contract of vscodeContracts) {
-        expect(contract.binding).toBe("sidecar/vscode-ext-host/src/host.ts:handleActivationEvent")
+    it("binds each fired VS Code pattern to what fires it", () => {
+      for (const pattern of firedPatterns) {
+        const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === pattern)
+        expect({ pattern, status: contract?.status }).toEqual({ pattern, status: "implemented" })
+        expect(contract?.binding).not.toMatch(/sidecar\/vscode-ext-host/)
+        expect(contract?.binding.length).toBeGreaterThan(0)
       }
     })
   })

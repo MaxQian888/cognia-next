@@ -15,6 +15,11 @@ jest.mock("@/lib/plugin/core/transport", () => ({
   listPluginPermissions: (...args: unknown[]) => listPermissions(...args),
 }))
 
+const mockPlugins: Record<string, unknown> = {}
+jest.mock("@/stores/plugin-runtime", () => ({
+  usePluginStore: { getState: () => ({ plugins: mockPlugins }) },
+}))
+
 // Every method the host sends is backed today, so the refusal path is
 // exercised with a stand-in for one the host gains before the renderer does.
 jest.mock("./unavailable-methods", () => ({
@@ -24,16 +29,21 @@ jest.mock("./unavailable-methods", () => ({
 import {
   __resetCommandRegistryForTesting,
   executeCommand,
+  getCommand,
   getCommands,
 } from "@/lib/plugin/commands/registry"
 import { __resetTaskRegistryForTesting, fetchTasks } from "@/lib/plugin/commands/tasks-registry"
 import {
+  __makeSession,
   __resetAuthRegistryForTesting,
   getProvider,
+  registerAuthenticationProvider,
 } from "@/lib/plugin/auth/auth-provider-registry"
 import {
+  AUTH_PROVIDER_WAIT_MS,
   EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS,
   cleanupVscodeRuntimeRegistrations,
+  configureVscodeRuntimeActivationForTesting,
   configureVscodeRuntimeHandlersForTesting,
   installVscodeRuntimeRpcHandlers,
 } from "./runtime-handlers"
@@ -127,6 +137,96 @@ describe("VS Code host-neutral runtime handlers", () => {
       command: "extension.run",
     })
     expect(getCommands()).not.toContain("extension.run")
+  })
+
+  it("gives an extension's command the title, category and when its manifest contributes", async () => {
+    mockPlugins["publisher.extension"] = {
+      manifest: {
+        vscodeExtension: {
+          commands: [
+            { command: "extension.run", title: "Run", category: "Ext", when: "editorFocus" },
+          ],
+        },
+      },
+    }
+    try {
+      await request("commands:register", {
+        extensionId: "publisher.extension",
+        command: "extension.run",
+        token: "cmd-token",
+      })
+      expect(getCommand("extension.run")).toMatchObject({
+        title: "Run",
+        category: "Ext",
+        when: "editorFocus",
+      })
+      await request("commands:register", {
+        extensionId: "publisher.extension",
+        command: "extension.other",
+        token: "other-token",
+      })
+      expect(getCommand("extension.other")?.title).toBeUndefined()
+    } finally {
+      delete mockPlugins["publisher.extension"]
+    }
+  })
+
+  it("starts the extension that provides an unregistered auth provider before asking it", async () => {
+    const session = __makeSession({
+      accessToken: "t",
+      account: { id: "me", label: "Me" },
+      scopes: [],
+    })
+    const activate = jest.fn(async (_event: string) => {
+      registerAuthenticationProvider({
+        id: "github",
+        label: "GitHub",
+        pluginId: "publisher.github",
+        getSessions: async () => [session],
+        createSession: async () => session,
+        removeSession: async () => {},
+      })
+    })
+    configureVscodeRuntimeActivationForTesting(activate)
+    try {
+      expect(
+        await request("authentication:getSession", {
+          extensionId: "publisher.extension",
+          providerId: "github",
+          scopes: [],
+        })
+      ).toMatchObject({ result: { id: session.id } })
+      expect(activate).toHaveBeenCalledWith("onAuthenticationRequest:github")
+      // Registered now: nothing more to start.
+      await request("authentication:getAccounts", {
+        extensionId: "publisher.extension",
+        providerId: "github",
+      })
+      expect(activate).toHaveBeenCalledTimes(1)
+    } finally {
+      configureVscodeRuntimeActivationForTesting(null)
+    }
+  })
+
+  it("reports a provider nobody registers once the wait is over", async () => {
+    jest.useFakeTimers()
+    const activate = jest.fn(async () => {})
+    configureVscodeRuntimeActivationForTesting(activate)
+    try {
+      const pending = request("authentication:getSession", {
+        extensionId: "publisher.extension",
+        providerId: "nobody",
+        scopes: [],
+      })
+      await jest.advanceTimersByTimeAsync(AUTH_PROVIDER_WAIT_MS)
+      expect(await pending).toMatchObject({
+        error: { message: expect.stringContaining('No auth provider registered for id "nobody"') },
+      })
+      expect(activate).toHaveBeenCalledWith("onAuthenticationRequest:nobody")
+    } finally {
+      configureVscodeRuntimeActivationForTesting(null)
+      jest.useRealTimers()
+    }
   })
 
   it("uses the canonical permission ledger and namespaced keyring for secrets", async () => {

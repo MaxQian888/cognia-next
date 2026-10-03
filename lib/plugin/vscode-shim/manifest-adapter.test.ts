@@ -3,7 +3,11 @@
  * than synthesising real `.vsix` archives — adapter is a pure function.
  */
 
-import { adaptVscodeManifest, mapActivationEvent } from "./manifest-adapter"
+import {
+  adaptVscodeManifest,
+  mapActivationEvent,
+  UNSUPPORTED_VSCODE_ACTIVATION_PREFIXES,
+} from "./manifest-adapter"
 import type { VsCodeManifest, VsCodePermissionInference } from "@/types/plugin/plugin-vscode"
 import type { VsixInstallResult } from "./vsix-installer"
 
@@ -349,99 +353,132 @@ describe("adaptVscodeManifest", () => {
     expect(result.manifest.permissions).toEqual(["filesystem:read", "filesystem:write"])
   })
 
-  it("translates onCommand and onView activation events 1:1", () => {
-    const result = adaptVscodeManifest({
+  const adaptActivation = (manifest: Partial<VsCodeManifest>) =>
+    adaptVscodeManifest({
       vsix: makeVsixResult({
         name: "act",
         publisher: "cognia",
         version: "1.0.0",
         engines: { vscode: ">=1.74.0" },
-        activationEvents: ["onCommand:act.run", "onView:act.tree", "onStartupFinished"],
+        main: "./extension.js",
+        ...manifest,
       }),
       inference: emptyInference,
       source: "vsix-upload",
     })
-    expect(result.manifest.activationEvents).toEqual(
-      expect.arrayContaining(["onCommand:act.run", "onView:act.tree", "onStartupFinished"])
-    )
+
+  it("keeps the events Cognia fires and starts `*`, onStartupFinished and onView at launch", () => {
+    const result = adaptActivation({
+      activationEvents: [
+        "onCommand:act.run",
+        "onLanguage:python",
+        "workspaceContains:**/pyproject.toml",
+        "onUri",
+        "onAuthenticationRequest:github",
+        "onView:act.tree",
+        "onStartupFinished",
+        "*",
+      ],
+    })
+    expect(result.manifest.activationEvents).toEqual([
+      "onCommand:act.run",
+      "onLanguage:python",
+      "workspaceContains:**/pyproject.toml",
+      "onUri",
+      "onAuthenticationRequest:github",
+      "startup",
+    ])
+    expect(result.manifest.vscodeExtension?.activationPlanned).toBe(true)
+    expect(result.manifest.vscodeExtension?.unsupportedActivationEvents).toBeUndefined()
+    expect(result.warnings.join("\n")).toMatch(/"onView:act\.tree" starts the extension at launch/)
   })
 
-  it("rewrites onLanguage: events to startup with a warning", () => {
-    const result = adaptVscodeManifest({
-      vsix: makeVsixResult({
-        name: "lang",
-        publisher: "cognia",
-        version: "1.0.0",
-        engines: { vscode: ">=1.74.0" },
-        activationEvents: ["onLanguage:typescript"],
-      }),
-      inference: emptyInference,
-      source: "vsix-upload",
+  it("records the events Cognia never fires as unsupported", () => {
+    const result = adaptActivation({
+      activationEvents: ["onDebug", "onWebviewPanel:cat", "onNotebook:jupyter", "onCommand:a.b"],
     })
-    expect(result.manifest.activationEvents).toEqual(["startup"])
-    expect(result.warnings.join("\n")).toMatch(/onLanguage activation rewritten/)
+    expect(result.manifest.activationEvents).toEqual(["onCommand:a.b"])
+    expect(result.manifest.vscodeExtension?.unsupportedActivationEvents).toEqual([
+      "onDebug",
+      "onWebviewPanel:cat",
+      "onNotebook:jupyter",
+    ])
+    expect(result.warnings.join("\n")).toMatch(/"onDebug" is not supported in Cognia/)
   })
 
-  it("maps `*` to startup", () => {
-    const result = adaptVscodeManifest({
-      vsix: makeVsixResult({
-        name: "eager",
-        publisher: "cognia",
-        version: "1.0.0",
-        engines: { vscode: ">=1.74.0" },
-        activationEvents: ["*"],
-      }),
-      inference: emptyInference,
-      source: "vsix-upload",
-    })
-    expect(result.manifest.activationEvents).toEqual(["startup"])
-  })
-
-  it("collapses onDebug variants to onDebugResolve:*", () => {
-    const result = adaptVscodeManifest({
-      vsix: makeVsixResult({
-        name: "debug",
-        publisher: "cognia",
-        version: "1.0.0",
-        engines: { vscode: ">=1.74.0" },
-        activationEvents: ["onDebug", "onDebugResolve:node"],
-      }),
-      inference: emptyInference,
-      source: "vsix-upload",
-    })
-    expect(result.manifest.activationEvents).toEqual(["onDebugResolve:*"])
-    expect(result.warnings.join("\n")).toMatch(/NotSupportedError/)
-  })
-
-  it("adds startup when manifest has contributions but no activation events", () => {
-    const result = adaptVscodeManifest({
-      vsix: makeVsixResult({
-        name: "implicit",
-        publisher: "cognia",
-        version: "1.0.0",
-        engines: { vscode: ">=1.74.0" },
-        contributes: {
-          commands: [{ command: "implicit.hello", title: "Hello" }],
-        },
-      }),
-      inference: emptyInference,
-      source: "vsix-upload",
-    })
-    expect(result.manifest.activationEvents).toEqual(["startup"])
-  })
-
-  it("leaves activationEvents empty when there are neither events nor contributions", () => {
-    const result = adaptVscodeManifest({
-      vsix: makeVsixResult({
-        name: "nothing",
-        publisher: "cognia",
-        version: "1.0.0",
-        engines: { vscode: ">=1.74.0" },
-      }),
-      inference: emptyInference,
-      source: "vsix-upload",
-    })
+  it("does not start an extension whose only events are unsupported", () => {
+    const result = adaptActivation({ activationEvents: ["onCustomEditor:x.y"] })
     expect(result.manifest.activationEvents).toEqual([])
+  })
+
+  it("adds VS Code's implicit events for contributed commands, languages and auth providers", () => {
+    const result = adaptActivation({
+      activationEvents: ["onCommand:act.run"],
+      contributes: {
+        commands: [
+          { command: "act.run", title: "Run" },
+          { command: "act.stop", title: "Stop" },
+        ],
+        languages: [{ id: "actlang" }],
+        authentication: [{ id: "act-auth", label: "Act" }],
+      },
+    })
+    expect(result.manifest.activationEvents).toEqual([
+      "onCommand:act.run",
+      "onCommand:act.stop",
+      "onLanguage:actlang",
+      "onAuthenticationRequest:act-auth",
+    ])
+  })
+
+  it("starts an extension with contributed views at launch", () => {
+    const result = adaptActivation({
+      contributes: { views: { explorer: [{ id: "act.view", name: "Act" }] } },
+    })
+    expect(result.manifest.activationEvents).toEqual(["startup"])
+  })
+
+  it("starts an extension with no activation event at all at launch", () => {
+    expect(adaptActivation({}).manifest.activationEvents).toEqual(["startup"])
+  })
+
+  it("lists contributed commands with resolved titles, categories and palette when clauses", () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult(
+        {
+          name: "act",
+          publisher: "cognia",
+          version: "1.0.0",
+          engines: { vscode: ">=1.74.0" },
+          main: "./extension.js",
+          contributes: {
+            commands: [
+              { command: "act.run", title: "%run.title%", category: "%category%" },
+              { command: "act.hidden", title: "Hidden" },
+              { command: "act.run", title: "Duplicate" },
+            ],
+            menus: {
+              commandPalette: [
+                { command: "act.hidden", when: "false" },
+                { command: "act.run", when: "editorLangId == python" },
+              ],
+            },
+          },
+        },
+        {
+          files: new Map([
+            ["package.nls.json", encode({ "run.title": "Run Act", category: "Act" })],
+          ]),
+        }
+      ),
+      inference: emptyInference,
+      source: "vsix-upload",
+    })
+    expect(result.manifest.vscodeExtension?.commands).toEqual([
+      { command: "act.run", title: "Run Act", category: "Act", when: "editorLangId == python" },
+      { command: "act.hidden", title: "Hidden", when: "false" },
+    ])
   })
 
   it("surfaces unknown VS Code activation events as warnings", () => {
@@ -659,31 +696,45 @@ describe("mapActivationEvent", () => {
     warnings.length = 0
   })
 
-  it("returns undefined for events with no cognia analogue", () => {
+  it("returns undefined, with a warning, for an unknown event", () => {
     expect(mapActivationEvent("onMadeUpEvent", warnings)).toBeUndefined()
-    expect(warnings.length).toBe(1)
+    expect(warnings).toEqual([
+      'Unknown VS Code activation event "onMadeUpEvent"; the extension does not start for it.',
+    ])
   })
 
-  it("passes through the static-suffix VS Code events", () => {
-    expect(mapActivationEvent("onWebviewPanel:foo", warnings)).toBe("onWebviewPanel:foo")
-    expect(mapActivationEvent("onCustomEditor:bar", warnings)).toBe("onCustomEditor:bar")
-    expect(mapActivationEvent("onTaskType:npm", warnings)).toBe("onTaskType:npm")
-    expect(mapActivationEvent("onFileSystem:ftp", warnings)).toBe("onFileSystem:ftp")
-    expect(mapActivationEvent("onTerminalProfile:bash", warnings)).toBe("onTerminalProfile:bash")
-    expect(mapActivationEvent("onNotebook:jupyter", warnings)).toBe("onNotebook:jupyter")
-    expect(mapActivationEvent("onWalkthrough:onboard", warnings)).toBe("onWalkthrough:onboard")
-    expect(mapActivationEvent("onChatParticipant:a", warnings)).toBe("onChatParticipant:a")
-    expect(mapActivationEvent("onLanguageModelTool:t", warnings)).toBe("onLanguageModelTool:t")
-    expect(mapActivationEvent("workspaceContains:**/foo", warnings)).toBe(
-      "workspaceContains:**/foo"
-    )
+  it.each(
+    UNSUPPORTED_VSCODE_ACTIVATION_PREFIXES.map((prefix) => [
+      `${prefix}${prefix.endsWith(":") ? "x" : ""}`,
+    ])
+  )("returns undefined for the unsupported %s", (event) => {
+    expect(mapActivationEvent(event, warnings)).toBeUndefined()
+    expect(warnings[0]).toMatch(/is not supported in Cognia/)
   })
 
-  it("passes through bare events", () => {
-    expect(mapActivationEvent("onStartupFinished", warnings)).toBe("onStartupFinished")
-    expect(mapActivationEvent("onAuthenticationRequest", warnings)).toBe("onAuthenticationRequest")
-    expect(mapActivationEvent("onUri", warnings)).toBe("onUri")
-    expect(mapActivationEvent("onTerminal", warnings)).toBe("onTerminal")
+  it("passes through the events Cognia fires", () => {
+    for (const event of [
+      "onCommand:a.b",
+      "onLanguage:python",
+      "workspaceContains:**/foo",
+      "onUri",
+      "onAuthenticationRequest",
+      "onAuthenticationRequest:github",
+    ]) {
+      expect(mapActivationEvent(event, warnings)).toBe(event)
+    }
+    expect(warnings).toEqual([])
+  })
+
+  it("starts `*`, onStartupFinished and onView at launch", () => {
+    expect(mapActivationEvent("*", warnings)).toBe("startup")
+    expect(mapActivationEvent("onStartupFinished", warnings)).toBe("startup")
+    expect(mapActivationEvent("onView:x", warnings)).toBe("startup")
+  })
+
+  it("refuses an event with an empty suffix", () => {
+    expect(mapActivationEvent("onCommand:", warnings)).toBeUndefined()
+    expect(mapActivationEvent("onAuthenticationRequest:", warnings)).toBeUndefined()
   })
 })
 

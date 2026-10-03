@@ -28274,6 +28274,8 @@
       "publisherVerified": "发布者由 Open VSX 验证",
       "publisherVerifiedTooltip": "Open VSX 声明该发布者拥有「{namespace}」命名空间。这是 Open VSX 对归属权的声明，不是 cognia 的声明，也不代表该扩展是安全的。",
       "searchPlaceholder": "搜索 Open VSX 扩展…",
+      "unsupportedActivation": "不会因以下事件启动：{events}",
+      "unsupportedActivationTooltip": "Cognia 从不触发这些激活事件（{events}），因此扩展不会因它们启动。如果扩展还声明了其他激活事件，仍会因那些事件启动。",
       "unsupportedApis": "可能无法工作：{apis}",
       "unsupportedApisTooltip": "该扩展使用了 cognia 未实现的 API（{apis}），可能无法工作。此结论通过扫描扩展代码得出，属于尽力而为：经过压缩混淆的扩展可能隐藏其 API 调用，因此这只是提示，而非保证。",
       "vscodeEmpty": "没有匹配的扩展，换个关键词试试。",

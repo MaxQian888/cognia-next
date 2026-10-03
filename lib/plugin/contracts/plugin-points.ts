@@ -833,6 +833,7 @@ export type ActivationEventDeclaration =
   | "onCustomEditor:*"
   | `onCustomEditor:${string}`
   | "onAuthenticationRequest"
+  | `onAuthenticationRequest:${string}`
   | "onTaskType:*"
   | `onTaskType:${string}`
   | "onFileSystem:*"
@@ -1678,17 +1679,13 @@ const activationPatternContracts: Record<CanonicalActivationPattern, PluginPoint
   "onLanguage:*": {
     id: "onLanguage:*",
     kind: "activation",
-    stability: "deprecated",
-    status: "deprecated",
+    stability: "stable",
+    status: "implemented",
     owner: "plugin-platform",
-    binding: "retired (not dispatched)",
+    binding: "lib/plugin/vscode-shim/activation-triggers.ts:onEditorLanguage",
     docs: ACTIVATION_POINT_DOCS,
     requiredTests: ACTIVATION_POINT_TESTS,
     introducedIn: "0.1.0",
-    deprecatedIn: "0.2.0",
-    replacementId: "startup",
-    retirementNote:
-      "No language-based runtime dispatch in Cognia; declare startup activation and filter inside the plugin.",
   },
   "onFile:*": {
     id: "onFile:*",
@@ -1705,45 +1702,79 @@ const activationPatternContracts: Record<CanonicalActivationPattern, PluginPoint
     retirementNote:
       "No file-open runtime dispatch in Cognia; declare startup activation and filter inside the plugin.",
   },
-  // VS Code activation patterns — handled by
-  // sidecar/vscode-ext-host (M0) and surfaced through the cognia plugin
-  // manager. Bindings reference the activation pump in the sidecar to make
-  // the contract registry honest about where dispatch happens.
-  "onView:*": vscodeActivationContract("onView:*"),
-  "onWebviewPanel:*": vscodeActivationContract("onWebviewPanel:*"),
-  "onCustomEditor:*": vscodeActivationContract("onCustomEditor:*"),
-  onAuthenticationRequest: vscodeActivationContract("onAuthenticationRequest"),
-  "onTaskType:*": vscodeActivationContract("onTaskType:*"),
-  "onFileSystem:*": vscodeActivationContract("onFileSystem:*"),
-  "onDebugResolve:*": vscodeActivationContract("onDebugResolve:*", {
-    note: "Validated as a known pattern but the sidecar's vscode-shim raises NotSupportedError at runtime — Cognia has no DAP viewport.",
+  // VS Code activation patterns. The ones Cognia fires name where; the rest
+  // are declared by VS Code extensions but never fire here (`virtual`), and
+  // `manifest-adapter.ts` records them as the extension's unsupported events.
+  "onView:*": vscodeActivationContract("onView:*", {
+    binding: "components/plugins/plugin-extension-slot.tsx:handleActivationEvent",
   }),
-  onStartupFinished: vscodeActivationContract("onStartupFinished"),
-  onUri: vscodeActivationContract("onUri"),
-  onTerminal: vscodeActivationContract("onTerminal"),
-  "onTerminalProfile:*": vscodeActivationContract("onTerminalProfile:*"),
-  "onNotebook:*": vscodeActivationContract("onNotebook:*"),
-  "onWalkthrough:*": vscodeActivationContract("onWalkthrough:*"),
-  "onChatParticipant:*": vscodeActivationContract("onChatParticipant:*"),
-  "onLanguageModelTool:*": vscodeActivationContract("onLanguageModelTool:*"),
-  "workspaceContains:*": vscodeActivationContract("workspaceContains:*"),
+  "onWebviewPanel:*": vscodeActivationContract("onWebviewPanel:*", {
+    note: "Restoring webview panels after a restart is not supported.",
+  }),
+  "onCustomEditor:*": vscodeActivationContract("onCustomEditor:*", {
+    note: "Cognia has no custom editors.",
+  }),
+  onAuthenticationRequest: vscodeActivationContract("onAuthenticationRequest", {
+    binding: "lib/plugin/vscode-shim/runtime-handlers.ts:authentication:getSession",
+  }),
+  "onTaskType:*": vscodeActivationContract("onTaskType:*", {
+    note: "Fetching tasks does not start extensions.",
+  }),
+  "onFileSystem:*": vscodeActivationContract("onFileSystem:*", {
+    note: "Cognia does not read files through extension file systems.",
+  }),
+  "onDebugResolve:*": vscodeActivationContract("onDebugResolve:*", {
+    note: "Cognia has no debugger.",
+  }),
+  onStartupFinished: vscodeActivationContract("onStartupFinished", {
+    binding: "lib/plugin/vscode-shim/manifest-adapter.ts:mapActivationEvent (startup)",
+  }),
+  onUri: vscodeActivationContract("onUri", {
+    binding: "lib/plugin/uri/route-deep-link.ts:routePluginDeepLink",
+  }),
+  onTerminal: vscodeActivationContract("onTerminal", {
+    note: "Opening a terminal does not start extensions.",
+  }),
+  "onTerminalProfile:*": vscodeActivationContract("onTerminalProfile:*", {
+    note: "Cognia has no extension terminal profiles.",
+  }),
+  "onNotebook:*": vscodeActivationContract("onNotebook:*", {
+    note: "Cognia has no notebooks.",
+  }),
+  "onWalkthrough:*": vscodeActivationContract("onWalkthrough:*", {
+    note: "Cognia has no walkthroughs.",
+  }),
+  "onChatParticipant:*": vscodeActivationContract("onChatParticipant:*", {
+    note: "Extension chat participants are not invoked.",
+  }),
+  "onLanguageModelTool:*": vscodeActivationContract("onLanguageModelTool:*", {
+    note: "Models never call extension tools.",
+  }),
+  "workspaceContains:*": vscodeActivationContract("workspaceContains:*", {
+    binding: "lib/plugin/vscode-shim/activation-triggers.ts:evaluateWorkspaceContains",
+  }),
 }
 
+/**
+ * A VS Code activation pattern: implemented where `binding` names what fires
+ * it, otherwise `virtual` with `note` saying why it never fires.
+ */
 function vscodeActivationContract(
   id: CanonicalActivationPattern,
-  opts: { note?: string } = {}
+  opts: { binding: string } | { note: string }
 ): PluginPointContract {
+  const implemented = "binding" in opts
   return {
     id,
     kind: "activation",
-    stability: "stable",
-    status: "implemented",
+    stability: implemented ? "stable" : "experimental",
+    status: implemented ? "implemented" : "virtual",
     owner: "plugin-platform",
-    binding: "sidecar/vscode-ext-host/src/host.ts:handleActivationEvent",
+    binding: implemented ? opts.binding : "",
     docs: ACTIVATION_POINT_DOCS,
     requiredTests: ACTIVATION_POINT_TESTS,
     introducedIn: "0.5.0",
-    ...(opts.note ? { retirementNote: opts.note } : {}),
+    ...(implemented ? {} : { retirementNote: opts.note }),
   }
 }
 
@@ -1861,6 +1892,8 @@ export function resolveActivationPattern(event: string): CanonicalActivationPatt
     ["onChatParticipant:", "onChatParticipant:*"],
     ["onLanguageModelTool:", "onLanguageModelTool:*"],
     ["workspaceContains:", "workspaceContains:*"],
+    // VS Code names the provider; the contract is the bare event.
+    ["onAuthenticationRequest:", "onAuthenticationRequest"],
   ]
 
   for (const [prefix, wildcard] of wildcardPrefixes) {
