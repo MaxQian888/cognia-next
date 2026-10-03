@@ -183,6 +183,13 @@ export async function ensureDispatcherConfigured(): Promise<void> {
       hosts: () => [...vscodeGenerations.keys()],
     })
   )
+  // `vscode.window.state` and `activeColorTheme`: the app window's focus and theme.
+  const { configureVscodeWindowEnvironment } =
+    await import("@/lib/plugin/vscode-shim/window-environment")
+  configureVscodeWindowEnvironment({
+    sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+    hosts: () => [...vscodeGenerations.keys()],
+  })
   // Extensions' terminals, as dock tabs.
   const { configureVscodeTerminals, createVscodeTerminalDependencies } =
     await import("@/lib/plugin/vscode-shim/terminal-handlers")

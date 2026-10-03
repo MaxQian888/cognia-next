@@ -17,6 +17,12 @@ export function createNotebooksNamespace() {
     registerRendererMessaging(_rendererId: string): never {
       throw new NotSupportedError("notebooks.registerRendererMessaging")
     },
+    createRendererMessaging(_rendererId: string): never {
+      throw new NotSupportedError("notebooks.createRendererMessaging")
+    },
+    registerNotebookCellStatusBarItemProvider(_notebookType: string, _provider: unknown): never {
+      throw new NotSupportedError("notebooks.registerNotebookCellStatusBarItemProvider")
+    },
     onDidOpenNotebookDocument: dummy.event,
     onDidChangeNotebookDocument: dummy.event,
     onDidSaveNotebookDocument: dummy.event,

@@ -479,6 +479,40 @@ describe("vscode-loader — activation triggers", () => {
   })
 })
 
+describe("vscode-loader — window environment", () => {
+  beforeEach(() => {
+    installTauriWindow()
+    jest.resetModules()
+    jest.clearAllMocks()
+  })
+
+  afterAll(() => {
+    removeTauriWindow()
+    jest.dontMock("@/lib/plugin/vscode-shim/window-environment")
+  })
+
+  it("tells running hosts the window's focus and theme", async () => {
+    jest.doMock("@tauri-apps/api/event", () => ({ listen: jest.fn(async () => () => {}) }))
+    const invoke = jest.fn(async (..._args: unknown[]) => undefined)
+    jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
+    const configureVscodeWindowEnvironment = jest.fn()
+    jest.doMock("@/lib/plugin/vscode-shim/window-environment", () => ({
+      configureVscodeWindowEnvironment,
+      installVscodeWindowEnvironmentHandlers: () => [],
+    }))
+    const { ensureDispatcherConfigured } = await import("./vscode-loader")
+    await ensureDispatcherConfigured()
+    expect(configureVscodeWindowEnvironment).toHaveBeenCalledTimes(1)
+    const [deps] = configureVscodeWindowEnvironment.mock.calls[0] as [
+      {
+        hosts(): string[]
+        sendToHost(pluginId: string, method: string, payload: unknown): unknown
+      },
+    ]
+    expect(deps.hosts()).toEqual([])
+  })
+})
+
 describe("vscode-loader — headless brain mode", () => {
   beforeEach(() => {
     removeTauriWindow()

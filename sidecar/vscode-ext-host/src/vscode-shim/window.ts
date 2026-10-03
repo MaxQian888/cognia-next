@@ -40,13 +40,23 @@ import type { WorkspaceFolder } from "./workspace-folders"
 import type { ShimDependencies } from "./index"
 import { createTerminalWindowMembers } from "./terminal"
 import { createWebviewWindowMembers } from "./webviews"
+import { createUnsupportedApiReporter, createUnsupportedWindowMembers } from "./unsupported-members"
+import type { ColorTheme, WindowState } from "./window-state"
 
 type MessageItem = string | { title: string; isCloseAffordance?: boolean }
 
 type TerminalWindowMembers = ReturnType<typeof createTerminalWindowMembers>
 type WebviewWindowMembers = ReturnType<typeof createWebviewWindowMembers>
+type UnsupportedWindowMembers = ReturnType<typeof createUnsupportedWindowMembers>
 
-interface SidecarWindow extends TerminalWindowMembers, WebviewWindowMembers {
+interface SidecarWindow
+  extends TerminalWindowMembers, WebviewWindowMembers, UnsupportedWindowMembers {
+  // The app window's focus and theme (`window-state.ts`).
+  readonly state: WindowState
+  onDidChangeWindowState(listener: (e: WindowState) => void): Disposable
+  readonly activeColorTheme: ColorTheme
+  onDidChangeActiveColorTheme(listener: (e: ColorTheme) => void): Disposable
+
   // Messages: `(message, ...items)` or `(message, options, ...items)`.
   showInformationMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
   showWarningMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
@@ -93,6 +103,7 @@ interface SidecarWindow extends TerminalWindowMembers, WebviewWindowMembers {
   onDidChangeTextEditorSelection(listener: (e: unknown) => void): Disposable
   onDidChangeTextEditorVisibleRanges(listener: (e: unknown) => void): Disposable
   onDidChangeTextEditorOptions(listener: (e: unknown) => void): Disposable
+  onDidChangeTextEditorViewColumn(listener: (e: unknown) => void): Disposable
   createTextEditorDecorationType(options: Record<string, unknown>): {
     key: string
     dispose(): void
@@ -285,6 +296,21 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
     onDidChangeTextEditorOptions(listener) {
       return documents.onDidChangeOptions.event(listener)
     },
+    // Every editor is in the one editor area (`viewColumn` is always 1), so
+    // its column never changes.
+    onDidChangeTextEditorViewColumn: new EventEmitter<unknown>().event,
+    get state() {
+      return deps.windowEnvironment.state
+    },
+    onDidChangeWindowState(listener) {
+      return deps.windowEnvironment.onDidChangeState.event(listener)
+    },
+    get activeColorTheme() {
+      return deps.windowEnvironment.colorTheme
+    },
+    onDidChangeActiveColorTheme(listener) {
+      return deps.windowEnvironment.onDidChangeColorTheme.event(listener)
+    },
     createWebviewPanel: webviews.createWebviewPanel,
     registerWebviewViewProvider: webviews.registerWebviewViewProvider,
     registerWebviewPanelSerializer: webviews.registerWebviewPanelSerializer,
@@ -343,6 +369,7 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
       setStatusBarMessage(connection, extensionId, text, hideAfter),
     createOutputChannel: (name, options) =>
       createOutputChannel(connection, extensionId, name, options),
+    ...createUnsupportedWindowMembers(createUnsupportedApiReporter(connection, extensionId)),
   }
   return api
 }

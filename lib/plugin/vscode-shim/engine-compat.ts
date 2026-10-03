@@ -115,9 +115,9 @@ const UNAVAILABLE = new Set([
 
 /**
  * The API a `vscode.…` member chain reaches that Cognia does not provide, as
- * the path to report (`vscode.debug`, `vscode.window.createTreeView`,
- * `vscode.TreeItemCheckboxState`), or `null` when the shim provides it or the
- * chain is not API this level declares.
+ * the path to report (`vscode.debug`, `vscode.window.createTreeView`), or
+ * `null` when the shim provides it or the chain is not API this level
+ * declares.
  */
 export function unavailableVscodeApi(chain: string): string | null {
   if (!chain.startsWith("vscode.")) return null
@@ -127,6 +127,15 @@ export function unavailableVscodeApi(chain: string): string | null {
   if (second && UNAVAILABLE.has(`${first}.${second}`)) return `vscode.${first}.${second}`
   if (!isNamespace(first) && UNAVAILABLE.has(first)) return `vscode.${first}`
   return null
+}
+
+/**
+ * Why `api` (`window.createTreeView`, or a member of an unsupported namespace
+ * such as `debug.startDebugging`) is unsupported, or `null` when it is not.
+ */
+export function unsupportedVscodeApiReason(api: string): string | null {
+  const { unsupported } = VSCODE_API_COVERAGE
+  return unsupported[api] ?? unsupported[api.split(".")[0]!] ?? null
 }
 
 /** Unavailable member paths (`window.createTreeView`), for the text scan. */

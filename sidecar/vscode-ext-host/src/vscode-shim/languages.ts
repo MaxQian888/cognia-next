@@ -50,6 +50,10 @@ import {
   type WireRange,
 } from "./provider-wire"
 import { Disposable, EventEmitter, type CancellationToken, type Uri } from "./types"
+import {
+  createUnsupportedApiReporter,
+  createUnsupportedLanguagesMembers,
+} from "./unsupported-members"
 
 type GlobPattern = string | { base?: string; baseUri?: Uri; pattern: string }
 
@@ -942,5 +946,6 @@ export function createLanguagesNamespace(deps: ShimDependencies) {
         void connection.sendNotification("languages:disposeLanguageConfiguration", { handle })
       })
     },
+    ...createUnsupportedLanguagesMembers(createUnsupportedApiReporter(connection, extensionId)),
   }
 }

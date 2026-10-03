@@ -48,5 +48,10 @@ export function createDebugNamespace() {
     onDidTerminateDebugSession: dummyEmitter.event,
     onDidReceiveDebugSessionCustomEvent: dummyEmitter.event,
     onDidChangeBreakpoints: dummyEmitter.event,
+    activeStackItem: undefined,
+    onDidChangeActiveStackItem: dummyEmitter.event,
+    asDebugSourceUri(_source: unknown, _session?: unknown): never {
+      throw new NotSupportedError("debug.asDebugSourceUri")
+    },
   }
 }

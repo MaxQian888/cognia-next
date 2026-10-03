@@ -36,6 +36,7 @@ import {
   ViewColumn,
 } from "./types"
 import * as apiTypes from "./api-types"
+import * as valueTypes from "./value-types"
 import type { DocumentStore } from "./documents"
 import type { ConfigurationStore } from "./configuration"
 import type { ExtensionRegistry } from "./extensions"
@@ -59,6 +60,7 @@ import { createCommentsNamespace } from "./comments"
 import { createNotebooksNamespace } from "./notebooks"
 import type { WebviewRegistry } from "./webviews"
 import type { LanguageModels } from "./lm"
+import type { WindowEnvironment } from "./window-state"
 import {
   TerminalExitReason,
   TerminalLocation,
@@ -82,6 +84,8 @@ export interface ShimDependencies {
   webviews: WebviewRegistry
   /** The app's language models as the renderer last described them (`lm.ts`). */
   languageModels: LanguageModels
+  /** The app window's focus and theme as the renderer last reported them (`window-state.ts`). */
+  windowEnvironment: WindowEnvironment
   /** The open workspace folders and file-watcher routing (`workspace-folders.ts`). */
   folders: WorkspaceFolders
   /** The extension's own directories, which `workspace.fs` may use without asking. */
@@ -107,9 +111,11 @@ export interface ShimDependencies {
 export const SHIM_VSCODE_API_VERSION = "1.91.0"
 
 export function createVscodeShim(deps: ShimDependencies): unknown {
+  const tasks = createTasksNamespace(deps)
   return {
     // Value types beyond the core ones below.
     ...apiTypes,
+    ...valueTypes,
     // Data types
     Position,
     Range,
@@ -136,11 +142,11 @@ export function createVscodeShim(deps: ShimDependencies): unknown {
     // Namespaces — each is its own module so the surface is auditable.
     commands: createCommandsNamespace(deps),
     window: createWindowNamespace(deps),
-    workspace: createWorkspaceNamespace(deps),
+    workspace: createWorkspaceNamespace(deps, tasks),
     languages: createLanguagesNamespace(deps),
     env: createEnvNamespace(deps),
     authentication: createAuthenticationNamespace(deps),
-    tasks: createTasksNamespace(deps),
+    tasks,
     lm: createLmNamespace(deps),
     chat: createChatNamespace(deps),
     extensions: createExtensionsNamespace(deps),

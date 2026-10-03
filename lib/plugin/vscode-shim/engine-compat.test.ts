@@ -6,6 +6,7 @@ import {
   UNIMPLEMENTED_VSCODE_NAMESPACES,
   SHIM_VSCODE_VERSION,
   unavailableVscodeApi,
+  unsupportedVscodeApiReason,
   VSCODE_API_COVERAGE,
 } from "./engine-compat"
 import { inferPermissions } from "./permission-inference"
@@ -212,6 +213,16 @@ describe("VSCODE_API_COVERAGE", () => {
     expect(UNAVAILABLE_VSCODE_MEMBERS).toContain("window.createTreeView")
     // Whole unsupported namespaces are reported as the namespace, not per member.
     expect(UNAVAILABLE_VSCODE_MEMBERS.some((path) => path.startsWith("debug."))).toBe(false)
+  })
+
+  it("gives the reason an API is unsupported, falling back to its namespace's", () => {
+    expect(unsupportedVscodeApiReason("window.createTreeView")).toBe(
+      VSCODE_API_COVERAGE.unsupported["window.createTreeView"]
+    )
+    expect(unsupportedVscodeApiReason("debug.startDebugging")).toBe(
+      VSCODE_API_COVERAGE.unsupported.debug
+    )
+    expect(unsupportedVscodeApiReason("window.showInformationMessage")).toBeNull()
   })
 })
 

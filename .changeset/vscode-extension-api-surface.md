@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+VS Code extensions find the rest of the VS Code 1.91 API in place. Every class and enum it declares now exists (tasks, notebooks, debugging, testing and coverage, drag and drop, chat history, terminal links and profiles), so an extension that builds these objects no longer fails on `undefined`. `window.state` and `window.activeColorTheme` follow the app window's focus and its light or dark theme, `env` reports the desktop app, your shell and its install directory, `workspace.registerTaskProvider` works, and `env.createTelemetryLogger` returns a logger that sends nothing, because Cognia never sends extension telemetry. The parts Cognia does not provide (tree views, custom editors, file decorations, editor tabs, notebooks, file-operation events, save-as, file system providers, language status items, drop edits) are still present: registrations are accepted and never used, their events never fire, and calls that have to produce something fail with the reason. The first time an extension meets one of them, its log says what is not supported and why. Only `tasks.onDidStartTaskProcess` and `onDidEndTaskProcess` remain missing.

@@ -35,6 +35,7 @@ import { ExtensionRegistry } from "./vscode-shim/extensions"
 import { TerminalRegistry } from "./vscode-shim/terminal"
 import { WebviewRegistry } from "./vscode-shim/webviews"
 import { LanguageModels } from "./vscode-shim/lm"
+import { WindowEnvironment } from "./vscode-shim/window-state"
 import { installEnvProxy } from "./network"
 import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
 import type { OwnedPaths } from "./vscode-shim/workspace-fs"
@@ -166,6 +167,9 @@ const WEBVIEWS = new WebviewRegistry()
 WEBVIEWS.attach(connection)
 const LANGUAGE_MODELS = new LanguageModels()
 LANGUAGE_MODELS.attach(connection)
+/** The app window's focus and theme, for `window.state` and `window.activeColorTheme`. */
+const WINDOW_ENVIRONMENT = new WindowEnvironment()
+WINDOW_ENVIRONMENT.attach(connection)
 
 /** Per extension, the directories it owns (install, storage, logs). */
 const OWNED_PATHS = new Map<string, OwnedPaths>()
@@ -242,6 +246,7 @@ setVscodeShimFactory((extensionId) => {
     terminals: TERMINALS,
     webviews: WEBVIEWS,
     languageModels: LANGUAGE_MODELS,
+    windowEnvironment: WINDOW_ENVIRONMENT,
     ownedPaths: () => OWNED_PATHS.get(extensionId) ?? { readOnly: [], readWrite: [] },
     registerProviderCallback,
   })
@@ -279,6 +284,11 @@ connection.onRequest("extension:activate", async (params) => {
     readOnly: [req.extensionPath],
     readWrite: [req.globalStoragePath, ...(req.storagePath ? [req.storagePath] : []), req.logPath],
   })
+  // `window.state` and `window.activeColorTheme` are read synchronously, so
+  // they are known before any extension runs.
+  await WINDOW_ENVIRONMENT.load(connection, (message) =>
+    process.stderr.write(`[vscode-ext-host] WARN ${message}\n`)
+  )
   const context = buildContext(req)
   ACTIVE_CONTEXTS.set(req.extensionId, context)
   const exports = await activateExtension(req.extensionId, context)

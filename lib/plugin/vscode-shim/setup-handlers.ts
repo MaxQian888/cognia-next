@@ -43,6 +43,8 @@ import { clearVscodeEnvForPlugin, installVscodeEnvHandlers } from "./env-handler
 import { clearVscodeTerminalsForPlugin, installVscodeTerminalHandlers } from "./terminal-handlers"
 import { clearVscodeWebviewsForPlugin, installVscodeWebviewHandlers } from "./webview-handlers"
 import { appendVscodeLog, stderrLevel } from "./vscode-log-buffer"
+import { installVscodeUnsupportedApiHandler } from "./unsupported-api-handler"
+import { installVscodeWindowEnvironmentHandlers } from "./window-environment"
 
 let installed = false
 
@@ -174,6 +176,8 @@ export function installVscodeRpcHandlers(): () => void {
   disposers.push(...installVscodeEnvHandlers())
   disposers.push(...installVscodeTerminalHandlers())
   disposers.push(...installVscodeWebviewHandlers())
+  disposers.push(...installVscodeWindowEnvironmentHandlers())
+  disposers.push(...installVscodeUnsupportedApiHandler())
 
   // host:* — notifications the Rust host emits about the Node process itself
   // (not the extension): its stderr, and how it ended.

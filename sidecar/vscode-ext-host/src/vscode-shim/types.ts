@@ -6,6 +6,8 @@
  * never import this module — extensions get the shim via `require("vscode")`.
  */
 
+import { unsupportedReason } from "./unsupported"
+
 export class Position {
   constructor(
     public readonly line: number,
@@ -323,9 +325,8 @@ export class CancellationTokenSource {
 
 export class NotSupportedError extends Error {
   constructor(api: string) {
-    super(
-      `vscode.${api} is not supported in cognia. See the VS Code reuse plan: ~/.claude/plans/vscode-snug-squid.md`
-    )
+    const reason = unsupportedReason(api)
+    super(`vscode.${api} is not supported in Cognia${reason ? `: ${reason}` : "."}`)
     this.name = "NotSupportedError"
   }
 }

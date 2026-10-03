@@ -13,6 +13,11 @@ import type { ShimDependencies } from "./index"
 import { createWorkspaceConfiguration } from "./configuration"
 import { createWorkspaceFileSystem } from "./workspace-fs"
 import type { FileSystemEventKind } from "./workspace-folders"
+import {
+  createUnsupportedApiReporter,
+  createUnsupportedWorkspaceMembers,
+} from "./unsupported-members"
+import type { createTasksNamespace } from "./tasks"
 
 /** A `GlobPattern`: a glob string, or a `RelativePattern` (`{ baseUri | base, pattern }`). */
 type GlobPattern = string | { baseUri?: Uri; base?: string; pattern: string }
@@ -27,7 +32,14 @@ function wireGlob(pattern: GlobPattern): { base?: string; pattern: string } {
   return { ...(base ? { base: base.toString() } : {}), pattern: pattern.pattern }
 }
 
-export function createWorkspaceNamespace(deps: ShimDependencies) {
+/**
+ * `tasks` is the namespace's own task registration, which
+ * `workspace.registerTaskProvider` (VS Code's deprecated spelling) shares.
+ */
+export function createWorkspaceNamespace(
+  deps: ShimDependencies,
+  tasks: Pick<ReturnType<typeof createTasksNamespace>, "registerTaskProvider">
+) {
   const { connection, extensionId, folders } = deps
   const documents = deps.documents
   const fileSystem = createWorkspaceFileSystem({
@@ -273,5 +285,7 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
         })
       })
     },
+    registerTaskProvider: tasks.registerTaskProvider,
+    ...createUnsupportedWorkspaceMembers(createUnsupportedApiReporter(connection, extensionId)),
   }
 }
