@@ -54,7 +54,7 @@ Rust 安装器把解压后的文件写入 `<data>/cognia/vscode-extensions/<id>`
 - 来自开发文件夹；
 - 用户信任了它（其权限页上的 **信任此扩展** 开关）。
 
-否则启用会失败并抛出 `PluginFrontendTrustError`（`reason: "unsigned-vscode-extension"`），插件列表显示为"请先信任此扩展"。在回执出现之前安装的扩展需要信任一次。
+否则在它加载时会失败并抛出 `PluginFrontendTrustError`（`reason: "unsigned-vscode-extension"`）：在启动时运行的扩展于启用时加载，休眠的扩展于首个激活事件（例如打开一个 YAML 文件）时加载。插件列表显示为"请先信任此扩展"。在回执出现之前安装的扩展需要信任一次。
 
 ## 3. 运行扩展
 

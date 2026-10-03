@@ -54,7 +54,7 @@ The Rust installer writes the unpacked files to `<data>/cognia/vscode-extensions
 - it comes from a development folder, or
 - the user trusted it (the **Trust this extension** switch on its Permissions tab).
 
-Otherwise enabling it fails with `PluginFrontendTrustError` (`reason: "unsigned-vscode-extension"`), which the plugin list shows as "trust this extension first". Extensions installed before receipts existed need to be trusted once.
+Otherwise starting it fails with `PluginFrontendTrustError` (`reason: "unsigned-vscode-extension"`) when it loads: at enable for an extension that starts at launch, or at its first activation event (opening a YAML file, say) for a dormant one. The plugin list shows it as "trust this extension first". Extensions installed before receipts existed need to be trusted once.
 
 ## 3. Running an extension
 

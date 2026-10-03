@@ -64,7 +64,10 @@ pub enum InstallError {
     Io(#[from] std::io::Error),
 }
 
+/// What the install commands answer. The renderer reads it in camelCase
+/// (`extensionId`, `installPath`, ...; `install-vscode-extension.ts`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallResult {
     pub extension_id: String,
     pub install_path: PathBuf,
@@ -326,6 +329,24 @@ mod tests {
             zip.finish().unwrap();
         }
         buf
+    }
+
+    /// The renderer checks `extensionId` against the id it derived and
+    /// stores `installPath`; in snake_case both read as undefined and every
+    /// install fails.
+    #[test]
+    fn install_result_reaches_the_renderer_in_camel_case() {
+        let root = tempfile::tempdir().unwrap();
+        let result = install_vsix(&make_test_vsix(), &root.path().to_path_buf(), None).unwrap();
+        let wire = serde_json::to_value(&result).unwrap();
+        assert_eq!(wire["extensionId"], "cognia.hello");
+        assert_eq!(
+            wire["installPath"],
+            result.install_path.to_string_lossy().as_ref()
+        );
+        assert_eq!(wire["sha256Hex"], result.sha256_hex.as_str());
+        assert_eq!(wire["packageJson"]["name"], "hello");
+        assert!(wire.get("extension_id").is_none());
     }
 
     #[test]
