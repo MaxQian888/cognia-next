@@ -1,7 +1,10 @@
 import {
   __resetMonacoBridgeForTesting,
   configureMonacoBridge,
+  disposeLanguageConfiguration,
+  getActiveEditorId,
   getActiveEditorSnapshot,
+  getDiagnostics,
   getEditorById,
   notifyActiveEditorChanged,
   notifyContentChanged,
@@ -15,9 +18,11 @@ import {
   registerCodeLensProvider,
   registerColorProvider,
   registerCompletionItemProvider,
+  registerDeclarationProvider,
   registerDecorationType,
   registerDefinitionProvider,
   registerDocumentFormattingProvider,
+  registerDocumentHighlightProvider,
   registerDocumentLinkProvider,
   registerDocumentRangeFormattingProvider,
   registerDocumentRangeSemanticTokensProvider,
@@ -25,6 +30,7 @@ import {
   registerDocumentSymbolProvider,
   registerFoldingRangeProvider,
   registerHoverProvider,
+  registerImplementationProvider,
   registerInlayHintsProvider,
   registerInlineCompletionProvider,
   registerLinkedEditingRangeProvider,
@@ -33,259 +39,86 @@ import {
   registerRenameProvider,
   registerSelectionRangeProvider,
   registerSignatureHelpProvider,
+  registerTypeDefinitionProvider,
   registerTypeHierarchyProvider,
   registerWorkspaceSymbolProvider,
+  reviveRegExps,
   searchWorkspaceSymbols,
   setDecorations,
   setDiagnostics,
+  setDocumentLanguage,
+  setLanguageConfiguration,
   unregisterByExtension,
   unregisterByToken,
   type DispatchRpc,
   type MonacoApi,
+  type MonacoCancellationToken,
   type MonacoEditor,
+  type MonacoMarker,
+  type MonacoRegistrarName,
   type MonacoTextModel,
 } from "./monaco-bridge"
 
-interface InvocationTriggerBag {
-  rename?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number },
-    newName: string
-  ) => Promise<unknown>
-  inlineCompletion?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  signatureHelp?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  color?: (m: MonacoTextModel) => Promise<unknown>
-  foldingRange?: (m: MonacoTextModel) => Promise<unknown>
-  selectionRange?: (
-    m: MonacoTextModel,
-    positions: Array<{ lineNumber: number; column: number }>
-  ) => Promise<unknown>
-  documentLink?: (m: MonacoTextModel) => Promise<unknown>
-  onTypeFormat?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number },
-    ch: string
-  ) => Promise<unknown>
-  semanticTokens?: (m: MonacoTextModel) => Promise<unknown>
-  rangeSemanticTokens?: (
-    m: MonacoTextModel,
-    range: {
-      startLineNumber: number
-      startColumn: number
-      endLineNumber: number
-      endColumn: number
-    }
-  ) => Promise<unknown>
-  inlayHints?: (
-    m: MonacoTextModel,
-    range: {
-      startLineNumber: number
-      startColumn: number
-      endLineNumber: number
-      endColumn: number
-    }
-  ) => Promise<unknown>
-  callHierarchy?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  callHierarchyIncoming?: (item: unknown) => Promise<unknown>
-  callHierarchyOutgoing?: (item: unknown) => Promise<unknown>
-  typeHierarchy?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  typeHierarchySuper?: (item: unknown) => Promise<unknown>
-  typeHierarchySub?: (item: unknown) => Promise<unknown>
-  linkedEditingRange?: (
-    m: MonacoTextModel,
-    p: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-}
+type ProviderObject = Record<string, (...args: unknown[]) => unknown>
 
-function makeFakeApi(): MonacoApi & {
-  calls: Array<{ method: string; selector: string | string[] }>
-  disposers: Array<jest.Mock>
-  triggerCompletion?: (
-    model: MonacoTextModel,
-    position: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  triggerHover?: (
-    model: MonacoTextModel,
-    position: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  triggerDefinition?: (
-    model: MonacoTextModel,
-    position: { lineNumber: number; column: number }
-  ) => Promise<unknown>
-  triggerFormatting?: (model: MonacoTextModel) => Promise<unknown>
-  triggerSetModelMarkers?: jest.Mock
-  invocationTriggers: InvocationTriggerBag
-} {
-  const calls: Array<{ method: string; selector: string | string[] }> = []
-  const disposers: jest.Mock[] = []
-  let triggerCompletion:
-    | ((m: MonacoTextModel, p: { lineNumber: number; column: number }) => Promise<unknown>)
-    | undefined
-  let triggerHover:
-    | ((m: MonacoTextModel, p: { lineNumber: number; column: number }) => Promise<unknown>)
-    | undefined
-  let triggerDefinition:
-    | ((m: MonacoTextModel, p: { lineNumber: number; column: number }) => Promise<unknown>)
-    | undefined
-  let triggerFormatting: ((m: MonacoTextModel) => Promise<unknown>) | undefined
-  const invocationTriggers: InvocationTriggerBag = {}
-  const setModelMarkers = jest.fn()
-  const makeDisposable = () => {
-    const dispose = jest.fn()
-    disposers.push(dispose)
-    return { dispose }
+/** Standalone Monaco 0.57 has no call- or type-hierarchy registrars. */
+const MISSING_IN_MONACO = new Set<MonacoRegistrarName>([
+  "registerCallHierarchyProvider",
+  "registerTypeHierarchyProvider",
+])
+
+function makeFakeApi(openUris: string[] = []) {
+  const registered: Array<{
+    registrar: MonacoRegistrarName
+    selector: unknown
+    provider: ProviderObject
+    dispose: jest.Mock
+  }> = []
+  const languages = new Proxy({} as MonacoApi["languages"], {
+    get(_target, name: string) {
+      if (MISSING_IN_MONACO.has(name as MonacoRegistrarName)) return undefined
+      return (selector: unknown, provider: ProviderObject) => {
+        const dispose = jest.fn()
+        registered.push({ registrar: name as MonacoRegistrarName, selector, provider, dispose })
+        return { dispose }
+      }
+    },
+  })
+  const open = new Set(openUris)
+  const setModelMarkers = jest.fn((uri: string, _owner: string, _markers: MonacoMarker[]) =>
+    open.has(uri)
+  )
+  const languageConfigurations: Array<{
+    languageId: string
+    configuration: unknown
+    dispose: jest.Mock
+  }> = []
+  const setModelLanguage = jest.fn((uri: string, _languageId: string) => open.has(uri))
+  const api: MonacoApi = {
+    languages,
+    editor: { setModelMarkers },
+    parseUri: (uri) => ({ parsed: uri }),
+    setLanguageConfiguration: (languageId, configuration) => {
+      const dispose = jest.fn()
+      languageConfigurations.push({ languageId, configuration, dispose })
+      return { dispose }
+    },
+    setModelLanguage,
+  }
+  /** The provider object the last registration through `registrar` handed Monaco. */
+  const providerOf = (registrar: MonacoRegistrarName): ProviderObject => {
+    const entry = [...registered].reverse().find((r) => r.registrar === registrar)
+    if (!entry) throw new Error(`nothing registered through ${registrar}`)
+    return entry.provider
   }
   return {
-    calls,
-    disposers,
-    triggerSetModelMarkers: setModelMarkers,
-    invocationTriggers,
-    get triggerCompletion() {
-      return triggerCompletion
-    },
-    get triggerHover() {
-      return triggerHover
-    },
-    get triggerDefinition() {
-      return triggerDefinition
-    },
-    get triggerFormatting() {
-      return triggerFormatting
-    },
-    languages: {
-      registerCompletionItemProvider(selector, provider) {
-        calls.push({ method: "completion", selector })
-        triggerCompletion = (m, p) => provider.provideCompletionItems(m, p)
-        return makeDisposable()
-      },
-      registerHoverProvider(selector, provider) {
-        calls.push({ method: "hover", selector })
-        triggerHover = (m, p) => provider.provideHover(m, p)
-        return makeDisposable()
-      },
-      registerDefinitionProvider(selector, provider) {
-        calls.push({ method: "definition", selector })
-        triggerDefinition = (m, p) => provider.provideDefinition(m, p)
-        return makeDisposable()
-      },
-      registerReferenceProvider(selector) {
-        calls.push({ method: "references", selector })
-        return makeDisposable()
-      },
-      registerDocumentFormattingEditProvider(selector, provider) {
-        calls.push({ method: "format", selector })
-        triggerFormatting = (m) => provider.provideDocumentFormattingEdits(m)
-        return makeDisposable()
-      },
-      registerDocumentRangeFormattingEditProvider(selector) {
-        calls.push({ method: "rangeFormat", selector })
-        return makeDisposable()
-      },
-      registerCodeLensProvider(selector) {
-        calls.push({ method: "codeLens", selector })
-        return makeDisposable()
-      },
-      registerCodeActionProvider(selector) {
-        calls.push({ method: "codeAction", selector })
-        return makeDisposable()
-      },
-      registerRenameProvider(selector, provider) {
-        calls.push({ method: "rename", selector })
-        invocationTriggers.rename = (m, p, newName) => provider.provideRenameEdits(m, p, newName)
-        return makeDisposable()
-      },
-      registerDocumentSymbolProvider(selector) {
-        calls.push({ method: "documentSymbol", selector })
-        return makeDisposable()
-      },
-      registerInlineCompletionsProvider(selector, provider) {
-        calls.push({ method: "inlineCompletion", selector })
-        invocationTriggers.inlineCompletion = (m, p) => provider.provideInlineCompletions(m, p)
-        return makeDisposable()
-      },
-      registerSignatureHelpProvider(selector, provider) {
-        calls.push({ method: "signatureHelp", selector })
-        invocationTriggers.signatureHelp = (m, p) => provider.provideSignatureHelp(m, p)
-        return makeDisposable()
-      },
-      registerColorProvider(selector, provider) {
-        calls.push({ method: "color", selector })
-        invocationTriggers.color = (m) => provider.provideDocumentColors(m)
-        return makeDisposable()
-      },
-      registerFoldingRangeProvider(selector, provider) {
-        calls.push({ method: "foldingRange", selector })
-        invocationTriggers.foldingRange = (m) => provider.provideFoldingRanges(m)
-        return makeDisposable()
-      },
-      registerSelectionRangeProvider(selector, provider) {
-        calls.push({ method: "selectionRange", selector })
-        invocationTriggers.selectionRange = (m, positions) =>
-          provider.provideSelectionRanges(m, positions)
-        return makeDisposable()
-      },
-      registerLinkProvider(selector, provider) {
-        calls.push({ method: "documentLink", selector })
-        invocationTriggers.documentLink = (m) => provider.provideLinks(m)
-        return makeDisposable()
-      },
-      registerOnTypeFormattingEditProvider(selector, provider) {
-        calls.push({ method: "onTypeFormat", selector })
-        invocationTriggers.onTypeFormat = (m, p, ch) =>
-          provider.provideOnTypeFormattingEdits(m, p, ch)
-        return makeDisposable()
-      },
-      registerDocumentSemanticTokensProvider(selector, provider) {
-        calls.push({ method: "semanticTokens", selector })
-        invocationTriggers.semanticTokens = (m) => provider.provideDocumentSemanticTokens(m)
-        return makeDisposable()
-      },
-      registerDocumentRangeSemanticTokensProvider(selector, provider) {
-        calls.push({ method: "rangeSemanticTokens", selector })
-        invocationTriggers.rangeSemanticTokens = (m, range) =>
-          provider.provideDocumentRangeSemanticTokens(m, range)
-        return makeDisposable()
-      },
-      registerInlayHintsProvider(selector, provider) {
-        calls.push({ method: "inlayHints", selector })
-        invocationTriggers.inlayHints = (m, range) => provider.provideInlayHints(m, range)
-        return makeDisposable()
-      },
-      registerCallHierarchyProvider(selector, provider) {
-        calls.push({ method: "callHierarchy", selector })
-        invocationTriggers.callHierarchy = (m, p) => provider.prepareCallHierarchy(m, p)
-        invocationTriggers.callHierarchyIncoming = (item) => provider.provideIncomingCalls(item)
-        invocationTriggers.callHierarchyOutgoing = (item) => provider.provideOutgoingCalls(item)
-        return makeDisposable()
-      },
-      registerTypeHierarchyProvider(selector, provider) {
-        calls.push({ method: "typeHierarchy", selector })
-        invocationTriggers.typeHierarchy = (m, p) => provider.prepareTypeHierarchy(m, p)
-        invocationTriggers.typeHierarchySuper = (item) => provider.provideSupertypes(item)
-        invocationTriggers.typeHierarchySub = (item) => provider.provideSubtypes(item)
-        return makeDisposable()
-      },
-      registerLinkedEditingRangeProvider(selector, provider) {
-        calls.push({ method: "linkedEditingRange", selector })
-        invocationTriggers.linkedEditingRange = (m, p) => provider.provideLinkedEditingRanges(m, p)
-        return makeDisposable()
-      },
-    },
-    editor: {
-      setModelMarkers,
-    },
+    api,
+    registered,
+    providerOf,
+    setModelMarkers,
+    setModelLanguage,
+    languageConfigurations,
+    open,
   }
 }
 
@@ -309,673 +142,602 @@ function makeFakeEditor(id: string, uri: string, language = "typescript"): Monac
   }
 }
 
-// jest.fn() narrows the return generic to the concrete type returned by the
-// implementation (e.g. `Promise<null>`), which doesn't unify with the
-// generic `DispatchRpc<T>`. Cast through unknown so the mock satisfies the
-// declared parameter signature without losing call-tracking.
+/** A model as Monaco passes providers: a `Uri` object, a version, a word lookup. */
+const model = {
+  uri: { toString: () => "file:///a.ts" },
+  getVersionId: () => 7,
+  getWordUntilPosition: () => ({ startColumn: 3, endColumn: 6 }),
+}
+const at = { lineNumber: 2, column: 6 }
+const wireAt = { line: 1, character: 5 }
+const doc = { token: "host-token", uri: "file:///a.ts", version: 7 }
+const range1 = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 4 }
+const wireRange1 = { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }
+
+function setup(answer: unknown = null, openUris: string[] = []) {
+  const fake = makeFakeApi(openUris)
+  const dispatch = jest.fn(async () => answer) as unknown as jest.MockedFunction<DispatchRpc>
+  configureMonacoBridge({ monacoApi: fake.api, dispatchRpc: dispatch })
+  const base = { extensionId: "ext.a", selector: ["typescript"], token: "host-token" }
+  return { ...fake, dispatch, base }
+}
+
 const fakeDispatch = jest.fn(async () => null) as unknown as DispatchRpc
 
-describe("monaco-bridge", () => {
-  beforeEach(() => __resetMonacoBridgeForTesting())
+beforeEach(() => __resetMonacoBridgeForTesting())
 
-  describe("configuration", () => {
-    it("throws when providers register before configuration", () => {
-      expect(() =>
-        registerCompletionItemProvider({
-          extensionId: "x",
-          selector: ["typescript"],
-        })
-      ).toThrow(/not configured/i)
+describe("configuration", () => {
+  it("throws when providers register before configuration", () => {
+    expect(() => registerCompletionItemProvider({ extensionId: "x", selector: ["ts"] })).toThrow(
+      /not configured/i
+    )
+  })
+})
+
+describe("editor lifecycle", () => {
+  it("tracks mounted editors and exposes the active one", () => {
+    configureMonacoBridge({ monacoApi: makeFakeApi().api, dispatchRpc: fakeDispatch })
+    const editor = makeFakeEditor("e1", "file:///foo.ts")
+    notifyEditorMounted(editor)
+    notifyActiveEditorChanged("e1")
+    expect(getActiveEditorSnapshot()).toMatchObject({
+      editorId: "e1",
+      uri: "file:///foo.ts",
+      language: "typescript",
     })
+    expect(getActiveEditorId()).toBe("e1")
+    expect(getEditorById("e1")).toBe(editor)
   })
 
-  describe("editor lifecycle", () => {
-    it("tracks mounted editors and exposes the active one", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const editor = makeFakeEditor("e1", "file:///foo.ts")
-      notifyEditorMounted(editor)
-      notifyActiveEditorChanged("e1")
-      const snapshot = getActiveEditorSnapshot()
-      expect(snapshot?.editorId).toBe("e1")
-      expect(snapshot?.uri).toBe("file:///foo.ts")
-      expect(snapshot?.language).toBe("typescript")
-      expect(getEditorById("e1")).toBe(editor)
-    })
-
-    it("emits active-editor-changed events", async () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const editor = makeFakeEditor("e1", "file:///foo.ts")
-      notifyEditorMounted(editor)
-      const events: Array<MonacoEditor | null> = []
-      const dispose = onActiveEditorChanged((e) => events.push(e))
-      notifyActiveEditorChanged("e1")
-      notifyActiveEditorChanged(null)
-      await new Promise((r) => setTimeout(r, 0))
-      expect(events).toEqual([editor, null])
-      dispose()
-    })
-
-    it("emits selection + content + open + close change events", async () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const editor = makeFakeEditor("e1", "file:///foo.ts")
-      const events: string[] = []
-      const dispose = onEditorChange((e) => events.push(`${e.kind}:${e.uri}`))
-      notifyEditorMounted(editor)
-      notifySelectionChanged("e1")
-      notifyContentChanged("e1")
-      notifyEditorUnmounted("e1")
-      await new Promise((r) => setTimeout(r, 0))
-      expect(events).toEqual([
-        "open:file:///foo.ts",
-        "change-selection:file:///foo.ts",
-        "change-content:file:///foo.ts",
-        "close:file:///foo.ts",
-      ])
-      dispose()
-    })
-
-    it("clears the active editor when it unmounts", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      notifyEditorMounted(makeFakeEditor("e1", "file:///foo.ts"))
-      notifyActiveEditorChanged("e1")
-      notifyEditorUnmounted("e1")
-      expect(getActiveEditorSnapshot()).toBeNull()
-    })
-
-    it("ignores selection/content notifications for unknown editors", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      expect(() => notifySelectionChanged("nope")).not.toThrow()
-      expect(() => notifyContentChanged("nope")).not.toThrow()
-      expect(() => notifyEditorUnmounted("nope")).not.toThrow()
-    })
+  it("emits active-editor-changed events", async () => {
+    configureMonacoBridge({ monacoApi: makeFakeApi().api, dispatchRpc: fakeDispatch })
+    const editor = makeFakeEditor("e1", "file:///foo.ts")
+    notifyEditorMounted(editor)
+    const events: Array<MonacoEditor | null> = []
+    const dispose = onActiveEditorChanged((e) => events.push(e))
+    notifyActiveEditorChanged("e1")
+    notifyActiveEditorChanged(null)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(events).toEqual([editor, null])
+    dispose()
   })
 
-  describe("provider registrations", () => {
-    it("registers a completion provider and proxies invocations to the sidecar", async () => {
-      const api = makeFakeApi()
-      // Sidecar returns VS Code-shape items (flat array form). The bridge
-      // routes them through `vscodeCompletionResultToMonaco` before handing
-      // them to Monaco, so `kind` becomes the Monaco numeric enum (Text=18
-      // when omitted) and `insertText` falls back to `label`.
-      const dispatch = jest.fn(async () => [
-        { label: "x", insertText: "x" },
-      ]) as unknown as jest.MockedFunction<DispatchRpc>
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
-      registerCompletionItemProvider({
-        extensionId: "ext.a",
-        selector: ["typescript"],
-        triggerCharacters: ["."],
-      })
-      expect(api.calls[0]).toEqual({ method: "completion", selector: ["typescript"] })
+  it("emits selection, content, open and close events", async () => {
+    configureMonacoBridge({ monacoApi: makeFakeApi().api, dispatchRpc: fakeDispatch })
+    const events: string[] = []
+    const dispose = onEditorChange((e) => events.push(`${e.kind}:${e.uri}`))
+    notifyEditorMounted(makeFakeEditor("e1", "file:///foo.ts"))
+    notifySelectionChanged("e1")
+    notifyContentChanged("e1")
+    notifyEditorUnmounted("e1")
+    await new Promise((r) => setTimeout(r, 0))
+    expect(events).toEqual([
+      "open:file:///foo.ts",
+      "change-selection:file:///foo.ts",
+      "change-content:file:///foo.ts",
+      "close:file:///foo.ts",
+    ])
+    dispose()
+  })
 
-      const model: MonacoTextModel = {
-        uri: "file:///x.ts",
-        language: "typescript",
-        getValue: () => "",
-        setValue: () => {},
-        getLineCount: () => 1,
-        getLineContent: () => "",
-        isDisposed: () => false,
-      }
-      const result = await api.triggerCompletion!(model, { lineNumber: 1, column: 1 })
-      // Position is dispatched in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext.a",
-        "provideCompletionItems",
-        expect.objectContaining({
-          uri: "file:///x.ts",
-          position: { line: 0, character: 0 },
-        })
+  it("clears the active editor when it unmounts", () => {
+    configureMonacoBridge({ monacoApi: makeFakeApi().api, dispatchRpc: fakeDispatch })
+    notifyEditorMounted(makeFakeEditor("e1", "file:///foo.ts"))
+    notifyActiveEditorChanged("e1")
+    notifyEditorUnmounted("e1")
+    expect(getActiveEditorSnapshot()).toBeNull()
+    expect(getActiveEditorId()).toBeNull()
+  })
+
+  it("ignores notifications for unknown editors", () => {
+    configureMonacoBridge({ monacoApi: makeFakeApi().api, dispatchRpc: fakeDispatch })
+    expect(() => notifySelectionChanged("nope")).not.toThrow()
+    expect(() => notifyContentChanged("nope")).not.toThrow()
+    expect(() => notifyEditorUnmounted("nope")).not.toThrow()
+  })
+})
+
+describe("provider calls", () => {
+  it("completion: sends the host's token, the document version and context, and fills the range", async () => {
+    const { base, dispatch, providerOf } = setup({
+      isIncomplete: true,
+      items: [
+        { label: "foo", kind: 3 },
+        { label: "bar", range: wireRange1 },
+      ],
+    })
+    const registration = registerCompletionItemProvider({ ...base, triggerCharacters: ["."] })
+    expect(registration).toMatchObject({ token: "host-token", supported: true })
+    const provider = providerOf("registerCompletionItemProvider")
+    expect(provider.triggerCharacters).toEqual(["."])
+    const result = (await provider.provideCompletionItems(model, at, {
+      triggerKind: 1,
+      triggerCharacter: ".",
+    })) as { suggestions: Array<{ range: unknown; kind: number }>; incomplete: boolean }
+    expect(dispatch).toHaveBeenCalledWith(
+      "ext.a",
+      "provideCompletionItems",
+      { ...doc, position: wireAt, context: { triggerKind: 1, triggerCharacter: "." } },
+      undefined
+    )
+    expect(result.incomplete).toBe(true)
+    // No range: the word before the cursor, as VS Code does.
+    expect(result.suggestions[0].range).toEqual({
+      startLineNumber: 2,
+      startColumn: 3,
+      endLineNumber: 2,
+      endColumn: 6,
+    })
+    expect(result.suggestions[1].range).toEqual(range1)
+  })
+
+  it("hover: contents become Markdown strings Monaco renders", async () => {
+    const { base, providerOf } = setup({
+      contents: [{ kind: "markdown", value: "**x**" }, "plain"],
+    })
+    registerHoverProvider(base)
+    const result = (await providerOf("registerHoverProvider").provideHover(model, at)) as {
+      contents: Array<{ value: string }>
+    }
+    expect(result.contents).toEqual([{ value: "**x**" }, { value: "plain" }])
+  })
+
+  it.each([
+    [registerDefinitionProvider, "registerDefinitionProvider", "provideDefinition"],
+    [registerDeclarationProvider, "registerDeclarationProvider", "provideDeclaration"],
+    [registerTypeDefinitionProvider, "registerTypeDefinitionProvider", "provideTypeDefinition"],
+    [registerImplementationProvider, "registerImplementationProvider", "provideImplementation"],
+  ] as const)("%p answers with Monaco URIs", async (register, registrar, method) => {
+    const { base, dispatch, providerOf } = setup({ uri: "file:///b.ts", range: wireRange1 })
+    register(base)
+    const result = await providerOf(registrar)[method](model, at)
+    expect(dispatch).toHaveBeenCalledWith("ext.a", method, { ...doc, position: wireAt }, undefined)
+    expect(result).toEqual([{ uri: { parsed: "file:///b.ts" }, range: range1 }])
+  })
+
+  it("references pass includeDeclaration", async () => {
+    const { base, dispatch, providerOf } = setup([])
+    registerReferenceProvider(base)
+    await providerOf("registerReferenceProvider").provideReferences(model, at, {
+      includeDeclaration: false,
+    })
+    expect(dispatch.mock.calls[0][2]).toMatchObject({ context: { includeDeclaration: false } })
+  })
+
+  it("document highlights map LSP kinds to Monaco's", async () => {
+    const { base, providerOf } = setup([{ range: wireRange1, kind: 3 }, { range: wireRange1 }])
+    registerDocumentHighlightProvider(base)
+    const result = await providerOf("registerDocumentHighlightProvider").provideDocumentHighlights(
+      model,
+      at
+    )
+    expect(result).toEqual([
+      { range: range1, kind: 2 },
+      { range: range1, kind: 0 },
+    ])
+  })
+
+  it("formatting passes Monaco's options; on-type formatting registers its trigger characters", async () => {
+    const { base, dispatch, providerOf } = setup([{ range: wireRange1, newText: "x" }])
+    registerDocumentFormattingProvider(base)
+    registerDocumentRangeFormattingProvider(base)
+    registerOnTypeFormattingProvider({
+      ...base,
+      firstTriggerCharacter: ";",
+      moreTriggerCharacter: ["}"],
+    })
+    const options = { tabSize: 4, insertSpaces: false }
+    expect(
+      await providerOf("registerDocumentFormattingEditProvider").provideDocumentFormattingEdits(
+        model,
+        options
       )
-      expect(result).toEqual({
-        suggestions: [
-          expect.objectContaining({
-            label: "x",
-            insertText: "x",
-            kind: 18, // Monaco Text fallback for missing VS Code kind.
-          }),
-        ],
-      })
-    })
+    ).toEqual([{ range: range1, text: "x" }])
+    await providerOf(
+      "registerDocumentRangeFormattingEditProvider"
+    ).provideDocumentRangeFormattingEdits(model, range1, options)
+    const onType = providerOf("registerOnTypeFormattingEditProvider")
+    expect(onType.autoFormatTriggerCharacters).toEqual([";", "}"])
+    await onType.provideOnTypeFormattingEdits(model, at, ";", options)
+    expect(dispatch.mock.calls.map((call) => call[2])).toEqual([
+      { ...doc, options },
+      { ...doc, range: wireRange1, options },
+      { ...doc, position: wireAt, ch: ";", options },
+    ])
+  })
 
-    it("hover/definition/formatting providers route through dispatchRpc", async () => {
-      const api = makeFakeApi()
-      const dispatch = jest.fn(async () => null) as unknown as jest.MockedFunction<DispatchRpc>
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
-      registerHoverProvider({ extensionId: "ext", selector: ["typescript"] })
-      registerDefinitionProvider({ extensionId: "ext", selector: ["typescript"] })
-      registerDocumentFormattingProvider({ extensionId: "ext", selector: ["typescript"] })
-
-      const model: MonacoTextModel = {
-        uri: "file:///y.ts",
-        language: "typescript",
-        getValue: () => "",
-        setValue: () => {},
-        getLineCount: () => 1,
-        getLineContent: () => "",
-        isDisposed: () => false,
+  it("code actions: markers go out as diagnostics, actions come back as a CodeActionList", async () => {
+    const { base, dispatch, providerOf } = setup([
+      {
+        title: "Fix it",
+        kind: "quickfix",
+        isPreferred: true,
+        edit: { changes: { "file:///a.ts": [{ range: wireRange1, newText: "y" }] } },
+      },
+      { title: "Run", command: "ext.run", arguments: [1] },
+    ])
+    registerCodeActionsProvider(base)
+    const result = (await providerOf("registerCodeActionProvider").provideCodeActions(
+      model,
+      range1,
+      {
+        markers: [{ severity: 8, message: "bad", ...range1 }],
+        only: "quickfix",
+        trigger: 2,
       }
-      await api.triggerHover!(model, { lineNumber: 1, column: 1 })
-      await api.triggerDefinition!(model, { lineNumber: 1, column: 1 })
-      await api.triggerFormatting!(model)
-
-      const methods = dispatch.mock.calls.map((args) => args[1])
-      expect(methods).toEqual([
-        "provideHover",
-        "provideDefinition",
-        "provideDocumentFormattingEdits",
-      ])
+    )) as { actions: unknown[]; dispose: () => void }
+    expect(dispatch.mock.calls[0][2]).toMatchObject({
+      context: {
+        diagnostics: [{ range: wireRange1, severity: 0, message: "bad" }],
+        only: "quickfix",
+        triggerKind: 2,
+      },
     })
-
-    it("supports the remaining provider kinds without crashing", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      registerReferenceProvider({ extensionId: "x", selector: ["js"] })
-      registerDocumentRangeFormattingProvider({ extensionId: "x", selector: ["js"] })
-      registerCodeLensProvider({ extensionId: "x", selector: ["js"] })
-      registerCodeActionsProvider({ extensionId: "x", selector: ["js"] })
-      registerRenameProvider({ extensionId: "x", selector: ["js"] })
-      registerDocumentSymbolProvider({ extensionId: "x", selector: ["js"] })
-      const methods = api.calls.map((c) => c.method)
-      expect(methods).toEqual(
-        expect.arrayContaining([
-          "references",
-          "rangeFormat",
-          "codeLens",
-          "codeAction",
-          "rename",
-          "documentSymbol",
-        ])
-      )
-    })
-
-    it("converts rename workspace edits for every affected document", async () => {
-      const api = makeFakeApi()
-      const dispatch = jest.fn(async () => ({
-        changes: {
-          "file:///a.ts": [
+    expect(result.actions).toEqual([
+      {
+        title: "Fix it",
+        kind: "quickfix",
+        isPreferred: true,
+        edit: {
+          edits: [
             {
-              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
-              newText: "next",
-            },
-          ],
-          "file:///b.ts": [
-            {
-              range: { start: { line: 1, character: 1 }, end: { line: 1, character: 4 } },
-              newText: "next",
+              resource: { parsed: "file:///a.ts" },
+              textEdit: { range: range1, text: "y" },
+              versionId: undefined,
             },
           ],
         },
-      })) as unknown as jest.MockedFunction<DispatchRpc>
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
-      registerRenameProvider({ extensionId: "ext", selector: ["typescript"] })
-      const model: MonacoTextModel = {
-        uri: "file:///a.ts",
-        language: "typescript",
-        getValue: () => "old",
-        setValue: () => {},
-        getLineCount: () => 1,
-        getLineContent: () => "old",
-        isDisposed: () => false,
-      }
-
-      await expect(
-        api.invocationTriggers.rename!(model, { lineNumber: 1, column: 1 }, "next")
-      ).resolves.toEqual({
-        edits: [
-          {
-            resource: "file:///a.ts",
-            edits: [expect.objectContaining({ text: "next" })],
-          },
-          {
-            resource: "file:///b.ts",
-            edits: [expect.objectContaining({ text: "next" })],
-          },
-        ],
-      })
-    })
+      },
+      { title: "Run", command: { id: "ext.run", title: "Run", arguments: [1] } },
+    ])
+    expect(typeof result.dispose).toBe("function")
   })
 
-  describe("registration tokens", () => {
-    it("unregisterByToken disposes the underlying Monaco registration", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const { token } = registerCompletionItemProvider({
-        extensionId: "x",
-        selector: ["ts"],
-      })
-      expect(unregisterByToken(token)).toBe(true)
-      expect(api.disposers[0]).toHaveBeenCalled()
-      // Idempotent.
-      expect(unregisterByToken(token)).toBe(false)
+  it("rename: edits become Monaco's workspace edit, and a rejected prepare carries its reason", async () => {
+    const { base, dispatch, providerOf } = setup([{ range: wireRange1, newText: "renamed" }])
+    registerRenameProvider(base)
+    const provider = providerOf("registerRenameProvider")
+    expect(await provider.provideRenameEdits(model, at, "renamed")).toEqual({
+      edits: [
+        {
+          resource: { parsed: "file:///a.ts" },
+          textEdit: { range: range1, text: "renamed" },
+          versionId: undefined,
+        },
+      ],
     })
-
-    it("unregisterByExtension cleans up every token for an extension", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      registerCompletionItemProvider({ extensionId: "ext.a", selector: ["ts"] })
-      registerHoverProvider({ extensionId: "ext.a", selector: ["ts"] })
-      registerCompletionItemProvider({ extensionId: "ext.b", selector: ["ts"] })
-      const removed = unregisterByExtension("ext.a")
-      expect(removed).toBe(2)
+    dispatch.mockResolvedValueOnce({ rejectReason: "Not a symbol" })
+    expect(await provider.resolveRenameLocation(model, at)).toMatchObject({
+      rejectReason: "Not a symbol",
     })
-
-    it("survives a disposable that throws", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const { token } = registerCompletionItemProvider({
-        extensionId: "x",
-        selector: ["ts"],
-      })
-      api.disposers[0]!.mockImplementation(() => {
-        throw new Error("dispose boom")
-      })
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
-      try {
-        expect(unregisterByToken(token)).toBe(true)
-        expect(warn).toHaveBeenCalled()
-      } finally {
-        warn.mockRestore()
-      }
-    })
+    dispatch.mockResolvedValueOnce({ range: wireRange1, text: "abc" })
+    expect(await provider.resolveRenameLocation(model, at)).toEqual({ range: range1, text: "abc" })
+    dispatch.mockResolvedValueOnce(null)
+    expect(await provider.resolveRenameLocation(model, at)).toBeUndefined()
   })
 
-  describe("diagnostics + decorations", () => {
-    it("setDiagnostics forwards to monaco.editor.setModelMarkers", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const editor = makeFakeEditor("e1", "file:///x.ts")
-      notifyEditorMounted(editor)
-      setDiagnostics({
-        extensionId: "ext.eslint",
-        uri: "file:///x.ts",
-        markers: [
-          {
-            severity: "error",
-            message: "boom",
-            range: {
-              startLineNumber: 1,
-              startColumn: 1,
-              endLineNumber: 1,
-              endColumn: 5,
-            },
-          },
-        ],
-      })
-      expect(api.triggerSetModelMarkers).toHaveBeenCalledWith(
-        editor.getModel(),
-        "ext.eslint",
-        expect.any(Array)
-      )
+  it("signature help and code lenses come back with dispose, symbols with tags", async () => {
+    const { base, dispatch, providerOf } = setup()
+    registerSignatureHelpProvider({ ...base, triggerCharacters: ["("], retriggerCharacters: [","] })
+    registerCodeLensProvider(base)
+    registerDocumentSymbolProvider(base)
+
+    dispatch.mockResolvedValueOnce({ signatures: [{ label: "f(a)" }], activeSignature: 0 })
+    const help = (await providerOf("registerSignatureHelpProvider").provideSignatureHelp(
+      model,
+      at,
+      undefined,
+      { triggerKind: 2, triggerCharacter: "(", isRetrigger: false }
+    )) as { value: { signatures: unknown[] }; dispose: () => void }
+    expect(help.value.signatures).toHaveLength(1)
+    expect(typeof help.dispose).toBe("function")
+    expect(dispatch.mock.calls[0][2]).toMatchObject({
+      context: { triggerKind: 2, triggerCharacter: "(", isRetrigger: false },
     })
 
-    it("setDiagnostics silently no-ops when no editor has the URI", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      setDiagnostics({ extensionId: "x", uri: "file:///nope.ts", markers: [] })
-      expect(api.triggerSetModelMarkers).not.toHaveBeenCalled()
+    dispatch.mockResolvedValueOnce([{ range: wireRange1, command: { command: "c", title: "T" } }])
+    expect(await providerOf("registerCodeLensProvider").provideCodeLenses(model)).toMatchObject({
+      lenses: [{ range: range1, command: { id: "c", title: "T" } }],
     })
 
-    it("registerDecorationType returns a stable typeId", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const { typeId } = registerDecorationType({
-        extensionId: "ext.gitlens",
-        options: { className: "blame-line" },
-      })
-      expect(typeId).toBeDefined()
-    })
-
-    it("setDecorations forwards to the editor", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const editor = makeFakeEditor("e1", "file:///x.ts")
-      notifyEditorMounted(editor)
-      const { typeId } = registerDecorationType({
-        extensionId: "ext.gitlens",
-        options: { className: "blame-line" },
-      })
-      setDecorations({
-        editorId: "e1",
-        typeId,
-        decorations: [
-          {
-            range: {
-              startLineNumber: 1,
-              startColumn: 1,
-              endLineNumber: 1,
-              endColumn: 1,
-            },
-            options: { isWholeLine: true },
-          },
-        ],
-      })
-      expect(editor.setDecorations).toHaveBeenCalledWith(typeId, expect.any(Array))
-    })
-
-    it("setDecorations silently no-ops for an unknown editor", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      const { typeId } = registerDecorationType({
-        extensionId: "ext.gitlens",
-        options: {},
-      })
-      // Should not throw.
-      setDecorations({ editorId: "nope", typeId, decorations: [] })
-    })
-
-    it("unregisterByExtension also cleans up decoration types", () => {
-      const api = makeFakeApi()
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: fakeDispatch })
-      registerDecorationType({ extensionId: "ext.a", options: { className: "x" } })
-      registerDecorationType({ extensionId: "ext.b", options: { className: "y" } })
-      unregisterByExtension("ext.a")
-      // Re-registering after cleanup should work.
-      const { typeId } = registerDecorationType({
-        extensionId: "ext.a",
-        options: { className: "z" },
-      })
-      expect(typeId).toBeDefined()
-    })
+    dispatch.mockResolvedValueOnce([
+      { name: "A", kind: 4, range: wireRange1, selectionRange: wireRange1 },
+    ])
+    expect(
+      await providerOf("registerDocumentSymbolProvider").provideDocumentSymbols(model)
+    ).toEqual([expect.objectContaining({ name: "A", kind: 4, tags: [] })])
   })
 
-  describe("Phase B providers — Tier 2 additions", () => {
-    function setup(dispatchResult: unknown = null) {
-      const api = makeFakeApi()
-      const dispatch = jest.fn(
-        async () => dispatchResult
-      ) as unknown as jest.MockedFunction<DispatchRpc>
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
-      const model: MonacoTextModel = {
-        uri: "file:///a.ts",
-        language: "typescript",
-        getValue: () => "",
-        setValue: () => {},
-        getLineCount: () => 1,
-        getLineContent: () => "",
-        isDisposed: () => false,
-      }
-      const pos = { lineNumber: 3, column: 7 }
-      const range = { startLineNumber: 1, startColumn: 1, endLineNumber: 5, endColumn: 1 }
-      return { api, dispatch, model, pos, range }
+  it("inline completions translate the trigger kind and can be disposed", async () => {
+    const { base, dispatch, providerOf } = setup({ items: [{ insertText: "x" }] })
+    registerInlineCompletionProvider(base)
+    const provider = providerOf("registerInlineCompletionsProvider")
+    await provider.provideInlineCompletions(model, at, { triggerKind: 1 })
+    await provider.provideInlineCompletions(model, at, { triggerKind: 0 })
+    // Monaco Explicit (1) is VS Code Invoke (0); Monaco Automatic (0) is VS Code Automatic (1).
+    expect(dispatch.mock.calls.map((call) => (call[2] as { context: unknown }).context)).toEqual([
+      { triggerKind: 0 },
+      { triggerKind: 1 },
+    ])
+    expect(typeof provider.disposeInlineCompletions).toBe("function")
+  })
+
+  it("colors, folding, selection ranges, links, semantic tokens and inlay hints become Monaco shapes", async () => {
+    const { base, dispatch, providerOf } = setup()
+    registerColorProvider(base)
+    registerFoldingRangeProvider(base)
+    registerSelectionRangeProvider(base)
+    registerDocumentLinkProvider(base)
+    registerDocumentSemanticTokensProvider({
+      ...base,
+      legend: { tokenTypes: ["a"], tokenModifiers: [] },
+    })
+    registerDocumentRangeSemanticTokensProvider({
+      ...base,
+      legend: { tokenTypes: ["a"], tokenModifiers: [] },
+    })
+    registerInlayHintsProvider(base)
+    registerLinkedEditingRangeProvider(base)
+
+    dispatch.mockResolvedValueOnce([
+      { label: "red", textEdit: { range: wireRange1, newText: "#f00" } },
+    ])
+    expect(
+      await providerOf("registerColorProvider").provideColorPresentations(model, {
+        range: range1,
+        color: { red: 1, green: 0, blue: 0, alpha: 1 },
+      })
+    ).toEqual([{ label: "red", textEdit: { range: range1, text: "#f00" } }])
+    expect(dispatch.mock.calls[0][2]).toMatchObject({
+      colorInfo: { range: wireRange1, color: { red: 1, green: 0, blue: 0, alpha: 1 } },
+    })
+
+    dispatch.mockResolvedValueOnce([{ startLine: 0, endLine: 3, kind: "region" }])
+    expect(
+      await providerOf("registerFoldingRangeProvider").provideFoldingRanges(model, {})
+    ).toEqual([{ start: 1, end: 4, kind: { value: "region" } }])
+
+    dispatch.mockResolvedValueOnce([[{ range: wireRange1, parent: { range: wireRange1 } }]])
+    expect(
+      await providerOf("registerSelectionRangeProvider").provideSelectionRanges(model, [at])
+    ).toEqual([[{ range: range1 }, { range: range1 }]])
+
+    dispatch.mockResolvedValueOnce({ links: [{ range: wireRange1, target: "https://x.dev" }] })
+    expect(await providerOf("registerLinkProvider").provideLinks(model)).toEqual({
+      links: [{ range: range1, url: { parsed: "https://x.dev" } }],
+    })
+
+    dispatch.mockResolvedValueOnce({ data: [0, 1, 2, 0, 0], resultId: "r1" })
+    const tokens = (await providerOf(
+      "registerDocumentSemanticTokensProvider"
+    ).provideDocumentSemanticTokens(model, null)) as { data: Uint32Array; resultId: string }
+    expect(tokens.data).toBeInstanceOf(Uint32Array)
+    expect(Array.from(tokens.data)).toEqual([0, 1, 2, 0, 0])
+    expect(providerOf("registerDocumentSemanticTokensProvider").getLegend()).toEqual({
+      tokenTypes: ["a"],
+      tokenModifiers: [],
+    })
+
+    dispatch.mockResolvedValueOnce({ data: [1] })
+    expect(
+      await providerOf(
+        "registerDocumentRangeSemanticTokensProvider"
+      ).provideDocumentRangeSemanticTokens(model, range1)
+    ).toMatchObject({ data: Uint32Array.from([1]) })
+
+    dispatch.mockResolvedValueOnce({ hints: [{ position: wireAt, label: ": number", kind: 1 }] })
+    const hints = (await providerOf("registerInlayHintsProvider").provideInlayHints(
+      model,
+      range1
+    )) as {
+      hints: unknown[]
+      dispose: () => void
     }
+    expect(hints.hints).toEqual([{ label: ": number", position: at, kind: 1 }])
+    expect(typeof hints.dispose).toBe("function")
 
-    it("registerInlineCompletionProvider routes provideInlineCompletionItems", async () => {
-      const { api, dispatch, model, pos } = setup({
-        items: [
-          {
-            insertText: { value: "hi(${1:name})" },
-            range: { start: { line: 2, character: 1 }, end: { line: 2, character: 3 } },
-          },
-        ],
+    dispatch.mockResolvedValueOnce({ ranges: [wireRange1], wordPattern: "[a-z]+" })
+    const linked = (await providerOf(
+      "registerLinkedEditingRangeProvider"
+    ).provideLinkedEditingRanges(model, at)) as { ranges: unknown[]; wordPattern: RegExp }
+    expect(linked.ranges).toEqual([range1])
+    expect(linked.wordPattern).toEqual(/[a-z]+/)
+  })
+
+  it("call and type hierarchy are inert in standalone Monaco, yet unregister cleanly", () => {
+    const { base, registered } = setup()
+    const call = registerCallHierarchyProvider(base)
+    const type = registerTypeHierarchyProvider({ ...base, token: "host-token-2" })
+    expect(call).toMatchObject({ token: "host-token", supported: false })
+    expect(type.supported).toBe(false)
+    expect(registered).toHaveLength(0)
+    expect(unregisterByToken("host-token")).toBe(true)
+    expect(unregisterByToken("host-token-2")).toBe(true)
+  })
+
+  it("passes Monaco's cancellation token on, and skips a call it already cancelled", async () => {
+    const { base, dispatch, providerOf } = setup({ contents: ["x"] })
+    registerHoverProvider(base)
+    const live: MonacoCancellationToken = {
+      isCancellationRequested: false,
+      onCancellationRequested: () => ({ dispose() {} }),
+    }
+    await providerOf("registerHoverProvider").provideHover(model, at, live)
+    expect(dispatch.mock.calls[0][3]).toBe(live)
+    const cancelled = { ...live, isCancellationRequested: true }
+    expect(await providerOf("registerHoverProvider").provideHover(model, at, cancelled)).toBeNull()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  it("a registration without a host token gets a fresh one", () => {
+    const { providerOf } = setup()
+    const registration = registerHoverProvider({ extensionId: "lsp", selector: ["go"] })
+    expect(registration.token).toEqual(expect.any(String))
+    expect(registration.token).not.toBe("host-token")
+    expect(providerOf("registerHoverProvider")).toBeDefined()
+  })
+})
+
+describe("registration tokens", () => {
+  it("unregisterByToken disposes the Monaco registration once", () => {
+    const { base, registered } = setup()
+    const { token } = registerCompletionItemProvider(base)
+    expect(unregisterByToken(token)).toBe(true)
+    expect(registered[0].dispose).toHaveBeenCalled()
+    expect(unregisterByToken(token)).toBe(false)
+  })
+
+  it("unregisterByExtension removes every registration of that extension", () => {
+    setup()
+    registerCompletionItemProvider({ extensionId: "ext.a", selector: ["ts"] })
+    registerHoverProvider({ extensionId: "ext.a", selector: ["ts"] })
+    registerCompletionItemProvider({ extensionId: "ext.b", selector: ["ts"] })
+    expect(unregisterByExtension("ext.a")).toBe(2)
+  })
+
+  it("survives a disposable that throws", () => {
+    const { base, registered } = setup()
+    const { token } = registerCompletionItemProvider(base)
+    registered[0].dispose.mockImplementation(() => {
+      throw new Error("dispose boom")
+    })
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      expect(unregisterByToken(token)).toBe(true)
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+describe("workspace symbols", () => {
+  it("aggregates every provider and survives one throwing", async () => {
+    const { dispatch } = setup()
+    registerWorkspaceSymbolProvider({ extensionId: "ext.a", token: "ws-a" })
+    registerWorkspaceSymbolProvider({ extensionId: "ext.b", token: "ws-b" })
+    dispatch.mockResolvedValueOnce([{ name: "A" }]).mockRejectedValueOnce(new Error("down"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      expect(await searchWorkspaceSymbols("A")).toEqual([{ name: "A" }])
+    } finally {
+      warn.mockRestore()
+    }
+    expect(dispatch).toHaveBeenCalledWith(
+      "ext.a",
+      "provideWorkspaceSymbols",
+      { token: "ws-a", query: "A" },
+      undefined
+    )
+    unregisterByExtension("ext.a")
+    unregisterByExtension("ext.b")
+    expect(await searchWorkspaceSymbols("A")).toEqual([])
+  })
+})
+
+describe("diagnostics", () => {
+  const marker: MonacoMarker = { severity: "error", message: "boom", range: range1 }
+
+  it("keeps diagnostics for an unopened file and applies them when it opens", () => {
+    const { setModelMarkers } = setup()
+    setDiagnostics({ extensionId: "ext.eslint", uri: "file:///x.ts", markers: [marker] })
+    expect(setModelMarkers).toHaveBeenCalledWith("file:///x.ts", "ext.eslint", [marker])
+    expect(getDiagnostics("file:///x.ts")).toEqual([{ owner: "ext.eslint", markers: [marker] }])
+    setModelMarkers.mockClear()
+    notifyEditorMounted(makeFakeEditor("e1", "file:///x.ts"))
+    expect(setModelMarkers).toHaveBeenCalledWith("file:///x.ts", "ext.eslint", [marker])
+  })
+
+  it("an empty set clears them, and an extension's cleanup clears its own", () => {
+    const { setModelMarkers } = setup()
+    setDiagnostics({ extensionId: "ext.a", uri: "file:///x.ts", markers: [marker] })
+    setDiagnostics({ extensionId: "ext.b", uri: "file:///x.ts", markers: [marker] })
+    setDiagnostics({ extensionId: "ext.b", uri: "file:///x.ts", markers: [] })
+    expect(getDiagnostics("file:///x.ts").map((entry) => entry.owner)).toEqual(["ext.a"])
+    unregisterByExtension("ext.a")
+    expect(getDiagnostics("file:///x.ts")).toEqual([])
+    expect(setModelMarkers).toHaveBeenLastCalledWith("file:///x.ts", "ext.a", [])
+  })
+})
+
+describe("decorations", () => {
+  it("registers a type and forwards decorations to the editor", () => {
+    setup()
+    const editor = makeFakeEditor("e1", "file:///x.ts")
+    notifyEditorMounted(editor)
+    const { typeId } = registerDecorationType({
+      extensionId: "ext.gitlens",
+      options: { className: "blame-line" },
+    })
+    setDecorations({
+      editorId: "e1",
+      typeId,
+      decorations: [{ range: range1, options: { isWholeLine: true } }],
+    })
+    expect(editor.setDecorations).toHaveBeenCalledWith(typeId, expect.any(Array))
+    expect(() => setDecorations({ editorId: "nope", typeId, decorations: [] })).not.toThrow()
+  })
+})
+
+describe("language configuration and language changes", () => {
+  it("revives RegExps that crossed JSON", () => {
+    expect(
+      reviveRegExps({
+        wordPattern: { $regexp: "\\w+", flags: "g" },
+        onEnterRules: [{ beforeText: { $regexp: "^\\s*//" } }],
+        comments: { lineComment: "//" },
       })
-      registerInlineCompletionProvider({
-        extensionId: "ext.continue",
-        selector: ["typescript"],
-        triggerCharacters: ["."],
-      })
-      const result = await api.invocationTriggers.inlineCompletion!(model, pos)
-      // Position dispatches in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext.continue",
-        "provideInlineCompletionItems",
-        expect.objectContaining({
-          uri: "file:///a.ts",
-          position: { line: pos.lineNumber - 1, character: pos.column - 1 },
-        })
-      )
-      expect(result).toEqual({
-        items: [
-          {
-            insertText: { snippet: "hi(${1:name})" },
-            range: {
-              startLineNumber: 3,
-              startColumn: 2,
-              endLineNumber: 3,
-              endColumn: 4,
-            },
-          },
-        ],
-      })
+    ).toEqual({
+      wordPattern: /\w+/g,
+      onEnterRules: [{ beforeText: /^\s*\/\// }],
+      comments: { lineComment: "//" },
     })
+  })
 
-    it("registerSignatureHelpProvider routes provideSignatureHelp and passes trigger chars", async () => {
-      // Sidecar returns VS Code-shape SignatureHelp directly (no { value: } wrapper).
-      const { api, dispatch, model, pos } = setup({
-        signatures: [],
-        activeSignature: 0,
-        activeParameter: 0,
-      })
-      registerSignatureHelpProvider({
-        extensionId: "ext.lsp",
-        selector: ["typescript"],
-        triggerCharacters: ["("],
-        retriggerCharacters: [","],
-      })
-      const result = await api.invocationTriggers.signatureHelp!(model, pos)
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext.lsp",
-        "provideSignatureHelp",
-        expect.objectContaining({ uri: "file:///a.ts" })
-      )
-      // Bridge wraps in { value: } for Monaco's signature help provider shape.
-      expect(result).toMatchObject({ value: { signatures: [] } })
+  it("applies a configuration, replaces it under the same handle, and disposes it", () => {
+    const { languageConfigurations } = setup()
+    setLanguageConfiguration({
+      extensionId: "ext.a",
+      handle: "h1",
+      language: "go",
+      configuration: { wordPattern: { $regexp: "[a-z]+" } },
     })
+    expect(languageConfigurations[0]).toMatchObject({
+      languageId: "go",
+      configuration: { wordPattern: /[a-z]+/ },
+    })
+    setLanguageConfiguration({
+      extensionId: "ext.a",
+      handle: "h1",
+      language: "go",
+      configuration: {},
+    })
+    expect(languageConfigurations[0].dispose).toHaveBeenCalled()
+    expect(disposeLanguageConfiguration("h1")).toBe(true)
+    expect(languageConfigurations[1].dispose).toHaveBeenCalled()
+    expect(disposeLanguageConfiguration("h1")).toBe(false)
 
-    it("registerWorkspaceSymbolProvider routes through searchWorkspaceSymbols", async () => {
-      const { dispatch } = setup([{ name: "FooBar" }])
-      registerWorkspaceSymbolProvider({ extensionId: "ext.search" })
-      const out = await searchWorkspaceSymbols("Foo")
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext.search",
-        "provideWorkspaceSymbols",
-        expect.objectContaining({ query: "Foo" })
-      )
-      expect(out).toEqual([{ name: "FooBar" }])
+    setLanguageConfiguration({
+      extensionId: "ext.a",
+      handle: "h2",
+      language: "go",
+      configuration: {},
     })
+    unregisterByExtension("ext.a")
+    expect(languageConfigurations[2].dispose).toHaveBeenCalled()
+  })
 
-    it("searchWorkspaceSymbols aggregates across providers + survives a throw", async () => {
-      const api = makeFakeApi()
-      let counter = 0
-      const dispatch = jest.fn(async () => {
-        counter += 1
-        if (counter === 1) return [{ id: 1 }]
-        if (counter === 2) throw new Error("boom")
-        return [{ id: 3 }]
-      }) as unknown as jest.MockedFunction<DispatchRpc>
-      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
-      registerWorkspaceSymbolProvider({ extensionId: "ext.a" })
-      registerWorkspaceSymbolProvider({ extensionId: "ext.b" })
-      registerWorkspaceSymbolProvider({ extensionId: "ext.c" })
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
-      try {
-        const out = await searchWorkspaceSymbols("Q")
-        expect(out).toEqual([{ id: 1 }, { id: 3 }])
-        expect(warn).toHaveBeenCalled()
-      } finally {
-        warn.mockRestore()
-      }
-    })
-
-    it("registerColorProvider routes both provideDocumentColors and presentations", async () => {
-      const { api, dispatch, model } = setup([])
-      registerColorProvider({ extensionId: "ext", selector: ["css"] })
-      await api.invocationTriggers.color!(model)
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideDocumentColors",
-        expect.objectContaining({ uri: "file:///a.ts" })
-      )
-    })
-
-    it("registerFoldingRangeProvider proxies provideFoldingRanges", async () => {
-      // Sidecar returns VS Code/LSP `FoldingRange` shape (0-based `startLine`/`endLine`).
-      // Bridge converts to Monaco shape (1-based `start`/`end`).
-      const { api, dispatch, model } = setup([{ startLine: 0, endLine: 3 }])
-      registerFoldingRangeProvider({ extensionId: "ext", selector: ["ts"] })
-      const out = await api.invocationTriggers.foldingRange!(model)
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideFoldingRanges",
-        expect.objectContaining({ uri: "file:///a.ts" })
-      )
-      expect(out).toEqual([{ start: 1, end: 4, kind: undefined }])
-    })
-
-    it("registerSelectionRangeProvider forwards positions", async () => {
-      const { api, dispatch, model, pos } = setup([])
-      registerSelectionRangeProvider({ extensionId: "ext", selector: ["ts"] })
-      await api.invocationTriggers.selectionRange!(model, [pos])
-      // Positions dispatch in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideSelectionRanges",
-        expect.objectContaining({
-          positions: [{ line: pos.lineNumber - 1, character: pos.column - 1 }],
-        })
-      )
-    })
-
-    it("registerDocumentLinkProvider proxies provideLinks", async () => {
-      const { api, dispatch, model } = setup({ links: [] })
-      registerDocumentLinkProvider({ extensionId: "ext", selector: ["markdown"] })
-      await api.invocationTriggers.documentLink!(model)
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideDocumentLinks",
-        expect.objectContaining({ uri: "file:///a.ts" })
-      )
-    })
-
-    it("registerOnTypeFormattingProvider forwards trigger characters and the typed ch", async () => {
-      const { api, dispatch, model, pos } = setup([])
-      registerOnTypeFormattingProvider({
-        extensionId: "ext",
-        selector: ["ts"],
-        firstTriggerCharacter: ";",
-        moreTriggerCharacter: ["}", "\n"],
-      })
-      await api.invocationTriggers.onTypeFormat!(model, pos, ";")
-      // Position dispatches in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideOnTypeFormattingEdits",
-        expect.objectContaining({
-          ch: ";",
-          position: { line: pos.lineNumber - 1, character: pos.column - 1 },
-        })
-      )
-    })
-
-    it("registerDocumentSemanticTokensProvider preserves the legend through getLegend()", async () => {
-      const legend = { tokenTypes: ["keyword"], tokenModifiers: ["readonly"] }
-      const { api, dispatch, model } = setup({ data: [0, 0, 1, 0, 0], resultId: "r1" })
-      registerDocumentSemanticTokensProvider({
-        extensionId: "ext",
-        selector: ["ts"],
-        legend,
-      })
-      const out = await api.invocationTriggers.semanticTokens!(model)
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideDocumentSemanticTokens",
-        expect.objectContaining({ uri: "file:///a.ts" })
-      )
-      expect(out).toMatchObject({ resultId: "r1" })
-    })
-
-    it("registerDocumentRangeSemanticTokensProvider routes range invocations", async () => {
-      const { api, dispatch, model, range } = setup({ data: [] })
-      registerDocumentRangeSemanticTokensProvider({
-        extensionId: "ext",
-        selector: ["ts"],
-        legend: { tokenTypes: [], tokenModifiers: [] },
-      })
-      await api.invocationTriggers.rangeSemanticTokens!(model, range)
-      // Range dispatches in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideDocumentRangeSemanticTokens",
-        expect.objectContaining({
-          range: {
-            start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
-            end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
-          },
-        })
-      )
-    })
-
-    it("registerInlayHintsProvider routes provideInlayHints with a range", async () => {
-      const { api, dispatch, model, range } = setup({ hints: [] })
-      registerInlayHintsProvider({ extensionId: "ext", selector: ["ts"] })
-      await api.invocationTriggers.inlayHints!(model, range)
-      // Range dispatches in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideInlayHints",
-        expect.objectContaining({
-          range: {
-            start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
-            end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
-          },
-        })
-      )
-    })
-
-    it("registerCallHierarchyProvider routes prepare/incoming/outgoing", async () => {
-      const { api, dispatch, model, pos } = setup([{ name: "func" }])
-      registerCallHierarchyProvider({ extensionId: "ext", selector: ["ts"] })
-      await api.invocationTriggers.callHierarchy!(model, pos)
-      await api.invocationTriggers.callHierarchyIncoming!({ ref: 1 })
-      await api.invocationTriggers.callHierarchyOutgoing!({ ref: 2 })
-      const methods = dispatch.mock.calls.map((c) => c[1])
-      expect(methods).toEqual([
-        "prepareCallHierarchy",
-        "provideIncomingCalls",
-        "provideOutgoingCalls",
-      ])
-    })
-
-    it("registerTypeHierarchyProvider routes prepare/super/sub", async () => {
-      const { api, dispatch, model, pos } = setup([])
-      registerTypeHierarchyProvider({ extensionId: "ext", selector: ["ts"] })
-      await api.invocationTriggers.typeHierarchy!(model, pos)
-      await api.invocationTriggers.typeHierarchySuper!({ ref: 1 })
-      await api.invocationTriggers.typeHierarchySub!({ ref: 2 })
-      const methods = dispatch.mock.calls.map((c) => c[1])
-      expect(methods).toEqual(["prepareTypeHierarchy", "provideSupertypes", "provideSubtypes"])
-    })
-
-    it("registerLinkedEditingRangeProvider routes provideLinkedEditingRanges", async () => {
-      const { api, dispatch, model, pos } = setup({ ranges: [] })
-      registerLinkedEditingRangeProvider({ extensionId: "ext", selector: ["html"] })
-      await api.invocationTriggers.linkedEditingRange!(model, pos)
-      // Position dispatches in VSCode (0-based) shape.
-      expect(dispatch).toHaveBeenCalledWith(
-        "ext",
-        "provideLinkedEditingRanges",
-        expect.objectContaining({
-          position: { line: pos.lineNumber - 1, character: pos.column - 1 },
-        })
-      )
-    })
-
-    it("unregisterByExtension also clears workspace symbol providers", async () => {
-      const { dispatch } = setup([{ name: "x" }])
-      registerWorkspaceSymbolProvider({ extensionId: "ext.toRemove" })
-      registerWorkspaceSymbolProvider({ extensionId: "ext.keep" })
-      const before = await searchWorkspaceSymbols("Q")
-      expect(before).toEqual([{ name: "x" }, { name: "x" }])
-      unregisterByExtension("ext.toRemove")
-      const after = await searchWorkspaceSymbols("Q")
-      expect(after).toEqual([{ name: "x" }])
-      // dispatch was called 2+1 = 3 times total.
-      expect(dispatch).toHaveBeenCalledTimes(3)
-    })
+  it("switching a document's language tells the editors showing it", async () => {
+    const { setModelLanguage } = setup(null, ["file:///x.ts"])
+    notifyEditorMounted(makeFakeEditor("e1", "file:///x.ts"))
+    await new Promise((r) => setTimeout(r, 0))
+    const events: string[] = []
+    const dispose = onEditorChange((e) => events.push(`${e.kind}:${e.editorId}`))
+    expect(setDocumentLanguage("file:///x.ts", "javascript")).toBe(true)
+    expect(setDocumentLanguage("file:///closed.ts", "javascript")).toBe(false)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(setModelLanguage).toHaveBeenCalledWith("file:///x.ts", "javascript")
+    expect(events).toEqual(["change-language:e1"])
+    dispose()
   })
 })

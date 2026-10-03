@@ -17,6 +17,8 @@
  * in later phases of the plan (~/.claude/plans/vscode-snug-squid.md).
  */
 
+import { nanoid } from "nanoid"
+
 import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
 import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
@@ -35,6 +37,38 @@ const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
 
 let dispatcherConfigured = false
 const vscodeGenerations = new Map<string, string>()
+let documentSync: import("@/lib/plugin/vscode-shim/document-sync").DocumentSync | null = null
+
+/**
+ * Call a provider an extension registered. The host finds it by the token it
+ * gave at registration (`payload.token`); the call id lets Monaco's
+ * cancellation reach the provider's `CancellationToken`.
+ */
+async function callVscodeProvider<T>(
+  pluginId: string,
+  method: string,
+  payload: unknown,
+  cancellation?: { onCancellationRequested(listener: () => unknown): { dispose(): void } }
+): Promise<T> {
+  const { token, ...args } = (payload ?? {}) as { token?: string } & Record<string, unknown>
+  const callId = nanoid()
+  const subscription = cancellation?.onCancellationRequested(() => {
+    void invokeVscodeRpc(pluginId, "extension:cancel", { callId }).catch(() => {
+      // The call already finished, or the host is gone; nothing to cancel.
+    })
+  })
+  try {
+    return await invokeVscodeRpc<T>(pluginId, "extension:call", {
+      extensionId: pluginId,
+      token,
+      method,
+      callId,
+      payload: args,
+    })
+  } finally {
+    subscription?.dispose()
+  }
+}
 
 export interface VscodeLoadResult {
   generation: string
@@ -109,24 +143,50 @@ export async function ensureDispatcherConfigured(): Promise<void> {
   // compiling the full monaco-editor ESM source graph during every dev start.
   try {
     const monaco = await loadConfiguredMonaco()
-    const { configureMonacoBridge } = await import("@/lib/plugin/vscode-shim/monaco-bridge")
-    configureMonacoBridge({
-      // The bridge's `MonacoApi` interface is structurally compatible with
-      // monaco's `languages` and `editor` namespaces; casting through
-      // `unknown` short-circuits the deep generic instantiation TS would
-      // otherwise insist on.
+    const bridge = await import("@/lib/plugin/vscode-shim/monaco-bridge")
+    const { toMonacoMarkers } = await import("@/lib/plugin/vscode-shim/monaco-results")
+    bridge.configureMonacoBridge({
+      // `monaco.languages` is structurally the bridge's registrar table;
+      // casting through `never` skips TS's deep generic instantiation.
       monacoApi: {
         languages: monaco.languages as never,
         editor: {
-          setModelMarkers: (model, owner, markers) =>
+          setModelMarkers: (uri, owner, markers) => {
+            const model = monaco.editor.getModel(monaco.Uri.parse(uri))
+            if (!model) return false
             monaco.editor.setModelMarkers(
-              model as unknown as Parameters<typeof monaco.editor.setModelMarkers>[0],
+              model,
               owner,
-              markers as unknown as Parameters<typeof monaco.editor.setModelMarkers>[2]
-            ),
+              toMonacoMarkers(markers) as Parameters<typeof monaco.editor.setModelMarkers>[2]
+            )
+            return true
+          },
+        },
+        parseUri: (uri) => monaco.Uri.parse(uri),
+        setLanguageConfiguration: (languageId, configuration) =>
+          monaco.languages.setLanguageConfiguration(
+            languageId,
+            configuration as Parameters<typeof monaco.languages.setLanguageConfiguration>[1]
+          ),
+        setModelLanguage: (uri, languageId) => {
+          const model = monaco.editor.getModel(monaco.Uri.parse(uri))
+          if (!model) return false
+          monaco.editor.setModelLanguage(model, languageId)
+          return true
         },
       },
-      dispatchRpc: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+      dispatchRpc: (pluginId, method, payload, cancellation) =>
+        callVscodeProvider(pluginId, method, payload, cancellation),
+    })
+
+    const { createDocumentSync } = await import("@/lib/plugin/vscode-shim/document-sync")
+    documentSync = createDocumentSync({
+      send: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+      hosts: () => [...vscodeGenerations.keys()],
+      getEditor: bridge.getEditorById,
+      getActiveEditorId: bridge.getActiveEditorId,
+      onEditorChange: bridge.onEditorChange,
+      onActiveEditorChanged: bridge.onActiveEditorChanged,
     })
 
     // Consume `contributes.languages[]` (populated by the manager via
@@ -317,6 +377,8 @@ export async function loadVscodeDefinition(
     activate: async (context) => {
       context.logger.info(`Activating VS Code extension ${manifest.id}`)
       try {
+        // Open documents and editors first: `activate()` may read them.
+        await documentSync?.replay(manifest.id)
         const result = await invoke<VscodeActivateResult>("plugin_activate_vscode", {
           pluginId: manifest.id,
           generation: requireVscodeGeneration(manifest.id),
@@ -410,6 +472,7 @@ export async function unloadVscodeExtension(
     await invoke("plugin_unload_vscode", { pluginId, generation })
     if (vscodeGenerations.get(pluginId) === generation) {
       vscodeGenerations.delete(pluginId)
+      documentSync?.forget(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

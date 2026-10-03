@@ -73,6 +73,7 @@ export interface IMonacoModel {
   getLineCount(): number
   getLineContent(line: number): string
   isDisposed(): boolean
+  getVersionId?(): number
   onDidChangeContent(listener: () => void): IDisposable
 }
 
@@ -94,6 +95,12 @@ export interface IMonacoEditor {
   setModel(model: IMonacoModel | null): void
   getPosition(): IMonacoPosition | null
   getSelection(): IMonacoRange | null
+  getSelections?(): Array<{
+    selectionStartLineNumber: number
+    selectionStartColumn: number
+    positionLineNumber: number
+    positionColumn: number
+  }> | null
   onDidFocusEditorWidget(listener: () => void): IDisposable
   onDidBlurEditorWidget(listener: () => void): IDisposable
   onDidChangeCursorSelection(listener: () => void): IDisposable
@@ -209,10 +216,16 @@ function adaptEditorForBridge(editor: IMonacoEditor): BridgeMonacoEditor {
         getLineCount: () => m.getLineCount(),
         getLineContent: (line: number) => m.getLineContent(line),
         isDisposed: () => m.isDisposed(),
+        ...(m.getVersionId ? { getVersionId: () => m.getVersionId!() } : {}),
       }
       return adapted
     },
     getPosition: () => editor.getPosition(),
+    getSelections: () =>
+      (editor.getSelections?.() ?? []).map((s) => ({
+        anchor: { lineNumber: s.selectionStartLineNumber, column: s.selectionStartColumn },
+        active: { lineNumber: s.positionLineNumber, column: s.positionColumn },
+      })),
     getSelection: () => {
       const s = editor.getSelection()
       if (!s) return null

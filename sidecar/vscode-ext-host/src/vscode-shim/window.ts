@@ -12,6 +12,7 @@
  */
 
 import { Disposable, EventEmitter, type Uri } from "./types"
+import type { TextEditor } from "./documents"
 import type { ShimDependencies } from "./index"
 
 interface RpcShowMessageButtons {
@@ -49,9 +50,10 @@ interface SidecarWindow {
   ): Promise<T>
 
   // Editors & decorations
-  readonly activeTextEditor: { document: { uri: Uri; languageId: string } } | undefined
-  readonly visibleTextEditors: ReadonlyArray<{ document: { uri: Uri; languageId: string } }>
-  onDidChangeActiveTextEditor(listener: (e: unknown) => void): Disposable
+  readonly activeTextEditor: TextEditor | undefined
+  readonly visibleTextEditors: readonly TextEditor[]
+  onDidChangeActiveTextEditor(listener: (e: TextEditor | undefined) => void): Disposable
+  onDidChangeVisibleTextEditors(listener: (e: readonly TextEditor[]) => void): Disposable
   onDidChangeTextEditorSelection(listener: (e: unknown) => void): Disposable
   createTextEditorDecorationType(options: Record<string, unknown>): {
     key: string
@@ -147,21 +149,7 @@ export interface OutputChannel {
 
 export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
   const { connection, extensionId } = deps
-  let activeEditor: SidecarWindow["activeTextEditor"] = undefined
-  let visibleEditors: SidecarWindow["visibleTextEditors"] = []
-  const activeEditorEmitter = new EventEmitter<unknown>()
-  const selectionEmitter = new EventEmitter<unknown>()
-
-  connection.onNotification("window:activeEditorChanged", (params) => {
-    activeEditor = params as SidecarWindow["activeTextEditor"]
-    activeEditorEmitter.fire(activeEditor)
-  })
-  connection.onNotification("window:visibleEditorsChanged", (params) => {
-    visibleEditors = (params as SidecarWindow["visibleTextEditors"]) ?? []
-  })
-  connection.onNotification("window:editorSelectionChanged", (params) => {
-    selectionEmitter.fire(params)
-  })
+  const documents = deps.documents
 
   const api: SidecarWindow = {
     async showInformationMessage<T extends string>(
@@ -232,16 +220,19 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
       }
     },
     get activeTextEditor() {
-      return activeEditor
+      return documents.activeEditor
     },
     get visibleTextEditors() {
-      return visibleEditors
+      return documents.visibleEditors
     },
     onDidChangeActiveTextEditor(listener) {
-      return activeEditorEmitter.event(listener)
+      return documents.onDidChangeActiveEditor.event(listener)
+    },
+    onDidChangeVisibleTextEditors(listener) {
+      return documents.onDidChangeVisibleEditors.event(listener)
     },
     onDidChangeTextEditorSelection(listener) {
-      return selectionEmitter.event(listener)
+      return documents.onDidChangeSelection.event(listener)
     },
     createTextEditorDecorationType(options) {
       const key = `deco:${extensionId}:${Math.random().toString(36).slice(2, 10)}`

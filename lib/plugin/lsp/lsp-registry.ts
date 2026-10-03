@@ -156,7 +156,7 @@ export interface LspBridgeAdapter {
     listener: (event: {
       editorId: string
       uri: string
-      kind: "open" | "close" | "change-selection" | "change-content"
+      kind: "open" | "close" | "change-selection" | "change-content" | "change-language"
     }) => void
   ): () => void
   getEditorById?(editorId: string):
@@ -565,9 +565,16 @@ async function handleEditorChange(
   event: {
     editorId: string
     uri: string
-    kind: "open" | "close" | "change-selection" | "change-content"
+    kind: "open" | "close" | "change-selection" | "change-content" | "change-language"
   }
 ): Promise<void> {
+  if (event.kind === "change-language") {
+    // The document may belong to another server now: close it where it was
+    // and open it with the server for its new language.
+    await handleEditorChange(input, { ...event, kind: "close" })
+    await handleEditorChange(input, { ...event, kind: "open" })
+    return
+  }
   const model = input.bridge.getEditorById?.(event.editorId)?.getModel()
   if (event.kind === "close") {
     const route = documentServers.get(event.uri)

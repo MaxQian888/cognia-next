@@ -291,7 +291,12 @@ export class CancellationTokenSource {
     get isCancellationRequested(): boolean {
       return false
     },
-    onCancellationRequested: (listener) => this.emitter.event(listener),
+    // As in VS Code, a listener added after cancellation still runs (soon).
+    onCancellationRequested: (listener) => {
+      if (!this.cancelled) return this.emitter.event(listener)
+      const timer = setTimeout(listener, 0)
+      return new Disposable(() => clearTimeout(timer))
+    },
   }
   constructor() {
     Object.defineProperty(this.token, "isCancellationRequested", {

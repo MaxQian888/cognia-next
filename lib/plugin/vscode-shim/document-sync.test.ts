@@ -1,0 +1,168 @@
+import { createDocumentSync, type DocumentSyncDependencies } from "./document-sync"
+import type { MonacoEditor, MonacoEditorChangeEvent } from "./monaco-bridge"
+
+function makeEditor(id: string, uri: string) {
+  const state = { text: "one", version: 1, language: "typescript" }
+  const editor: MonacoEditor = {
+    id,
+    getModel: () => ({
+      uri,
+      get language() {
+        return state.language
+      },
+      getValue: () => state.text,
+      setValue: () => {},
+      getLineCount: () => 1,
+      getLineContent: () => state.text,
+      isDisposed: () => false,
+      getVersionId: () => state.version,
+    }),
+    getPosition: () => ({ lineNumber: 1, column: 1 }),
+    getSelection: () => null,
+    getSelections: () => [
+      { anchor: { lineNumber: 1, column: 1 }, active: { lineNumber: 1, column: 4 } },
+    ],
+    applyEdits: () => {},
+    setDecorations: () => {},
+  }
+  return { editor, state }
+}
+
+function harness(hosts = ["ext.a"]) {
+  const sent: Array<[string, string, unknown]> = []
+  const editors = new Map<string, MonacoEditor>()
+  let change: (event: MonacoEditorChangeEvent) => void = () => {}
+  let active: (editor: MonacoEditor | null) => void = () => {}
+  let activeId: string | null = null
+  const deps: DocumentSyncDependencies = {
+    send: jest.fn(async (pluginId: string, method: string, payload: unknown) => {
+      sent.push([pluginId, method, payload])
+    }),
+    hosts: () => hosts,
+    getEditor: (id) => editors.get(id),
+    getActiveEditorId: () => activeId,
+    onEditorChange: (listener) => {
+      change = listener
+      return () => {}
+    },
+    onActiveEditorChanged: (listener) => {
+      active = listener
+      return () => {}
+    },
+  }
+  const sync = createDocumentSync(deps)
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  return {
+    sync,
+    sent,
+    deps,
+    flush,
+    mount(id: string, uri: string) {
+      const made = makeEditor(id, uri)
+      editors.set(id, made.editor)
+      change({ editorId: id, uri, kind: "open" })
+      return made
+    },
+    fire: (event: MonacoEditorChangeEvent) => change(event),
+    unmount(id: string, uri: string) {
+      editors.delete(id)
+      change({ editorId: id, uri, kind: "close" })
+    },
+    focus(id: string | null) {
+      activeId = id
+      active(id ? editors.get(id)! : null)
+    },
+  }
+}
+
+const methods = (sent: Array<[string, string, unknown]>) => sent.map(([, method]) => method)
+
+describe("document sync", () => {
+  it("reports open, edit, editors and close to every host, in order", async () => {
+    const h = harness(["ext.a", "ext.b"])
+    const { state } = h.mount("e1", "file:///a.ts")
+    h.focus("e1")
+    state.text = "two"
+    state.version = 2
+    h.fire({ editorId: "e1", uri: "file:///a.ts", kind: "change-content" })
+    h.unmount("e1", "file:///a.ts")
+    await h.flush()
+
+    const forA = h.sent.filter(([id]) => id === "ext.a")
+    expect(methods(forA)).toEqual([
+      "workspace:documentOpened",
+      "window:editorsChanged",
+      "window:editorsChanged",
+      "workspace:documentChanged",
+      "workspace:documentClosed",
+      "window:editorsChanged",
+    ])
+    expect(forA[0][2]).toEqual({
+      uri: "file:///a.ts",
+      languageId: "typescript",
+      version: 1,
+      text: "one",
+    })
+    expect(forA[2][2]).toEqual({
+      activeId: "e1",
+      editors: [
+        {
+          id: "e1",
+          uri: "file:///a.ts",
+          selections: [{ anchor: { line: 0, character: 0 }, active: { line: 0, character: 3 } }],
+        },
+      ],
+    })
+    expect(forA[3][2]).toEqual({ uri: "file:///a.ts", version: 2, text: "two" })
+    expect(h.sent.filter(([id]) => id === "ext.b")).toHaveLength(forA.length)
+  })
+
+  it("closes a document only when its last editor goes", async () => {
+    const h = harness()
+    h.mount("e1", "file:///a.ts")
+    h.mount("e2", "file:///a.ts")
+    h.unmount("e1", "file:///a.ts")
+    await h.flush()
+    expect(methods(h.sent).filter((m) => m.startsWith("workspace:"))).toEqual([
+      "workspace:documentOpened",
+    ])
+    h.unmount("e2", "file:///a.ts")
+    await h.flush()
+    expect(methods(h.sent)).toContain("workspace:documentClosed")
+    expect(h.sync.openDocuments()).toEqual([])
+  })
+
+  it("reports a language switch, and skips content events that changed nothing", async () => {
+    const h = harness()
+    const { state } = h.mount("e1", "file:///a.ts")
+    h.fire({ editorId: "e1", uri: "file:///a.ts", kind: "change-content" })
+    state.language = "javascript"
+    h.fire({ editorId: "e1", uri: "file:///a.ts", kind: "change-language" })
+    await h.flush()
+    expect(methods(h.sent)).toEqual([
+      "workspace:documentOpened",
+      "window:editorsChanged",
+      "workspace:documentLanguageChanged",
+    ])
+  })
+
+  it("brings a host that starts later up to date", async () => {
+    const h = harness([])
+    h.mount("e1", "file:///a.ts")
+    await h.flush()
+    expect(h.sent).toEqual([])
+    await h.sync.replay("ext.late")
+    expect(h.sent.map(([id, method]) => `${id} ${method}`)).toEqual([
+      "ext.late workspace:documentOpened",
+      "ext.late window:editorsChanged",
+    ])
+  })
+
+  it("keeps going for other reports when a host refuses one", async () => {
+    const h = harness()
+    ;(h.deps.send as jest.Mock).mockRejectedValueOnce(new Error("host gone"))
+    h.mount("e1", "file:///a.ts")
+    await h.flush()
+    expect(methods(h.sent)).toEqual(["window:editorsChanged"])
+  })
+})

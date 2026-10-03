@@ -25,9 +25,6 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "fs:rename",
   "fs:stat",
   "fs:writeFile",
-  "languages:getDiagnostics",
-  "languages:setLanguageConfiguration",
-  "languages:setTextDocumentLanguage",
   "terminal:create",
   "terminal:dispose",
   "terminal:hide",
@@ -78,5 +75,6 @@ export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
   "workspace:findFiles",
   "workspace:openTextDocument",
   "workspace:registerTextDocumentContentProvider",
+  "workspace:saveTextDocument",
   "workspace:unregisterTextDocumentContentProvider",
 ] as const

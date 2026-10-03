@@ -7,26 +7,14 @@
  * state pushed by the renderer.
  */
 
-import { Disposable, EventEmitter, type Uri } from "./types"
+import { Disposable, EventEmitter, Uri } from "./types"
 import type { ShimDependencies } from "./index"
 
 export function createWorkspaceNamespace(deps: ShimDependencies) {
   const { connection, extensionId } = deps
-  const didOpen = new EventEmitter<unknown>()
-  const didChange = new EventEmitter<unknown>()
-  const didSave = new EventEmitter<unknown>()
-  const didClose = new EventEmitter<unknown>()
+  const documents = deps.documents
   const didChangeConfig = new EventEmitter<{ affectsConfiguration: (key: string) => boolean }>()
   let workspaceFolders: ReadonlyArray<{ uri: Uri; name: string; index: number }> = []
-  let textDocuments: ReadonlyArray<{ uri: Uri; languageId: string }> = []
-
-  connection.onNotification("workspace:textDocumentsChanged", (params) => {
-    textDocuments = (params as typeof textDocuments) ?? []
-  })
-  connection.onNotification("workspace:documentOpened", (data) => didOpen.fire(data))
-  connection.onNotification("workspace:documentChanged", (data) => didChange.fire(data))
-  connection.onNotification("workspace:documentSaved", (data) => didSave.fire(data))
-  connection.onNotification("workspace:documentClosed", (data) => didClose.fire(data))
   connection.onNotification("workspace:configurationChanged", (data) =>
     didChangeConfig.fire(data as { affectsConfiguration: (key: string) => boolean })
   )
@@ -39,7 +27,7 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
       return workspaceFolders
     },
     get textDocuments() {
-      return textDocuments
+      return documents.all()
     },
     get isTrusted() {
       // cognia always treats extensions as trusted within the sandbox —
@@ -52,28 +40,31 @@ export function createWorkspaceNamespace(deps: ShimDependencies) {
       queueMicrotask(listener)
       return new Disposable(() => {})
     },
-    onDidOpenTextDocument(listener: (e: unknown) => void) {
-      return didOpen.event(listener)
-    },
-    onDidChangeTextDocument(listener: (e: unknown) => void) {
-      return didChange.event(listener)
-    },
-    onDidSaveTextDocument(listener: (e: unknown) => void) {
-      return didSave.event(listener)
-    },
-    onDidCloseTextDocument(listener: (e: unknown) => void) {
-      return didClose.event(listener)
-    },
+    onDidOpenTextDocument: documents.onDidOpen.event,
+    onDidChangeTextDocument: documents.onDidChange.event,
+    onDidSaveTextDocument: documents.onDidSave.event,
+    onDidCloseTextDocument: documents.onDidClose.event,
     onDidChangeConfiguration(
       listener: (e: { affectsConfiguration: (k: string) => boolean }) => void
     ) {
       return didChangeConfig.event(listener)
     },
-    openTextDocument(uriOrOptions: Uri | { content?: string; language?: string }) {
-      return connection.sendRequest("workspace:openTextDocument", {
-        extensionId,
-        argument: uriOrOptions,
-      })
+    async openTextDocument(uriOrOptions?: Uri | string | { content?: string; language?: string }) {
+      // An open document is answered here; anything else the renderer opens,
+      // and its report puts it in the store before this answer returns.
+      const uri =
+        typeof uriOrOptions === "string"
+          ? Uri.file(uriOrOptions).toString()
+          : uriOrOptions instanceof Uri
+            ? uriOrOptions.toString()
+            : undefined
+      const open = uri ? documents.get(uri) : undefined
+      if (open) return open
+      const opened = await connection.sendRequest<{ uri: string; version: number }>(
+        "workspace:openTextDocument",
+        { extensionId, argument: uri ?? uriOrOptions ?? {} }
+      )
+      return (await documents.waitForVersion(opened.uri, opened.version)) ?? null
     },
     getConfiguration(section?: string, scope?: unknown) {
       return new ProxyConfiguration(connection, extensionId, section, scope)

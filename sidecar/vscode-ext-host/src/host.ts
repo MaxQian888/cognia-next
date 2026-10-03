@@ -29,7 +29,8 @@ import {
   setGrantedModules,
 } from "./require-hook"
 import { ExtensionMode } from "./vscode-shim/api-types"
-import { Uri } from "./vscode-shim/types"
+import { DocumentStore } from "./vscode-shim/documents"
+import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
 import {
   activateExtension,
   deactivateExtension,
@@ -63,12 +64,22 @@ interface ActivateRequest {
 
 interface CallExtensionRequest {
   extensionId: string
-  /** Method name, e.g. `provideCompletionItems`. */
+  /** Provider method, e.g. `provideCompletionItems`. */
   method: string
-  /** Opaque token the renderer's bridge generated when the provider registered. */
+  /** The token the shim gave the provider when it registered. */
   token: string
+  /** Names the call for `extension:cancel`. */
+  callId?: string
   payload: unknown
 }
+
+/** What `extension:call` passes a callback besides the payload. */
+export interface ProviderCall {
+  method: string
+  cancellation: CancellationToken
+}
+
+type ProviderCallback = (payload: unknown, call: ProviderCall) => Promise<unknown> | unknown
 
 /** The sidecar package itself: its own code and dependencies are never an extension's. */
 const HOST_PACKAGE_ROOT = nodePath.resolve(__dirname, "..")
@@ -76,9 +87,20 @@ const HOST_PACKAGE_ROOT = nodePath.resolve(__dirname, "..")
 const EXTENSION_ROOTS = new Map<string, string>()
 
 const ACTIVE_CONTEXTS = new Map<string, SidecarExtensionContext>()
-const PROVIDER_CALLBACKS = new Map<string, (payload: unknown) => Promise<unknown> | unknown>()
+const PROVIDER_CALLBACKS = new Map<string, ProviderCallback>()
+/** Calls in flight, by call id, so the renderer can cancel them. */
+const PENDING_CALLS = new Map<string, CancellationTokenSource>()
 
 const connection = new RpcConnection(process.stdin, process.stdout)
+
+/**
+ * The open documents and editors every extension in this host sees. Saving
+ * goes to the renderer, which owns the text.
+ */
+const DOCUMENTS = new DocumentStore((document) =>
+  connection.sendRequest<boolean>("workspace:saveTextDocument", { uri: document.uri.toString() })
+)
+DOCUMENTS.attach(connection)
 
 // Phase B of the LSP reuse work — see
 // `lib/plugin/lsp/lsp-registry.ts` and
@@ -139,13 +161,15 @@ installRequireHook()
 setVscodeShimFactory((extensionId) => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createVscodeShim } = require("./vscode-shim") as typeof import("./vscode-shim")
-  return createVscodeShim({ extensionId, connection, registerProviderCallback })
+  return createVscodeShim({
+    extensionId,
+    connection,
+    documents: DOCUMENTS,
+    registerProviderCallback,
+  })
 })
 
-function registerProviderCallback(
-  token: string,
-  cb: (payload: unknown) => Promise<unknown> | unknown
-): () => void {
+function registerProviderCallback(token: string, cb: ProviderCallback): () => void {
   PROVIDER_CALLBACKS.set(token, cb)
   return () => {
     PROVIDER_CALLBACKS.delete(token)
@@ -209,8 +233,20 @@ connection.onRequest("extension:call", async (params) => {
       message: `No provider callback registered for token ${req.token}`,
     } as RpcError
   }
-  const result = await cb(req.payload)
-  return result ?? null
+  const source = new CancellationTokenSource()
+  if (req.callId) PENDING_CALLS.set(req.callId, source)
+  try {
+    const result = await cb(req.payload, { method: req.method, cancellation: source.token })
+    return result ?? null
+  } finally {
+    if (req.callId) PENDING_CALLS.delete(req.callId)
+    source.dispose()
+  }
+})
+
+connection.onRequest("extension:cancel", (params) => {
+  PENDING_CALLS.get((params as { callId: string }).callId)?.cancel()
+  return null
 })
 
 // ────────────────────────────────────────────────────────────────────────

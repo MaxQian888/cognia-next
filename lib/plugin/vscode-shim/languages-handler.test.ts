@@ -1,10 +1,16 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
+
 import {
+  handleDisposeLanguageConfiguration,
   handleExtensionCleanup,
   handleLanguagesRegister,
   handleLanguagesRegisterDecorationType,
   handleLanguagesSetDecorations,
   handleLanguagesSetDiagnostics,
   handleLanguagesUnregister,
+  handleSetLanguageConfiguration,
+  handleSetTextDocumentLanguage,
   handleWindowActiveTextEditorGet,
   listSupportedLanguagesKinds,
 } from "./languages-handler"
@@ -15,12 +21,16 @@ jest.mock("./monaco-bridge", () => {
     jest.fn(() => {
       const tok = `tok-${suffix}-${tokenByCall.length}`
       tokenByCall.push(tok)
-      return { token: tok, dispose: jest.fn() }
+      return { token: tok, supported: suffix !== "callHierarchy", dispose: jest.fn() }
     })
   return {
     registerCompletionItemProvider: make("completion"),
     registerHoverProvider: make("hover"),
     registerDefinitionProvider: make("definition"),
+    registerDeclarationProvider: make("declaration"),
+    registerTypeDefinitionProvider: make("typeDefinition"),
+    registerImplementationProvider: make("implementation"),
+    registerDocumentHighlightProvider: make("documentHighlight"),
     registerReferenceProvider: make("references"),
     registerDocumentFormattingProvider: make("docFormat"),
     registerDocumentRangeFormattingProvider: make("rangeFormat"),
@@ -45,6 +55,9 @@ jest.mock("./monaco-bridge", () => {
     registerDecorationType: jest.fn(() => ({ typeId: "decotype-1", dispose: jest.fn() })),
     setDecorations: jest.fn(),
     setDiagnostics: jest.fn(),
+    setLanguageConfiguration: jest.fn(),
+    disposeLanguageConfiguration: jest.fn(() => true),
+    setDocumentLanguage: jest.fn(() => true),
     unregisterByExtension: jest.fn(() => 3),
     unregisterByToken: jest.fn(() => true),
     getActiveEditorSnapshot: jest.fn(() => ({
@@ -66,10 +79,41 @@ beforeEach(() => {
 })
 
 describe("languages-handler", () => {
-  it("lists all 24 provider kinds", () => {
-    const kinds = listSupportedLanguagesKinds()
-    expect(kinds).toHaveLength(24)
-    expect(kinds).toEqual(expect.arrayContaining(["completionItem", "hover", "definition"]))
+  it("lists exactly the provider kinds the extension host registers", () => {
+    // Every `registerProvider("<kind>"` and `registerLocationProvider("<kind>"`
+    // in the sidecar's `vscode.languages` must have a bridge entry, and the
+    // bridge must not list kinds nothing sends.
+    const source = readFileSync(
+      path.join(process.cwd(), "sidecar/vscode-ext-host/src/vscode-shim/languages.ts"),
+      "utf8"
+    )
+    const sent = new Set(
+      [...source.matchAll(/register(?:Location)?Provider\(\s*"([A-Za-z]+)"/g)].map(
+        (match) => match[1]
+      )
+    )
+    expect(sent.size).toBeGreaterThan(20)
+    expect(listSupportedLanguagesKinds()).toEqual([...sent].sort())
+  })
+
+  it("reports when the editor has no such feature", () => {
+    expect(
+      handleLanguagesRegister({ kind: "callHierarchy", extensionId: "ext", selector: ["ts"] })
+    ).toMatchObject({ supported: false })
+    expect(
+      handleLanguagesRegister({ kind: "declaration", extensionId: "ext", selector: ["ts"] })
+    ).toMatchObject({ supported: true })
+  })
+
+  it("routes language configuration and language switches to the bridge", () => {
+    const configuration = { handle: "h", extensionId: "ext", language: "go", configuration: {} }
+    expect(handleSetLanguageConfiguration(configuration)).toBeNull()
+    expect(bridge.setLanguageConfiguration).toHaveBeenCalledWith(configuration)
+    expect(handleDisposeLanguageConfiguration({ handle: "h" })).toEqual({ removed: true })
+    expect(handleSetTextDocumentLanguage({ uri: "file:///a.go", languageId: "go" })).toEqual({
+      changed: true,
+    })
+    expect(bridge.setDocumentLanguage).toHaveBeenCalledWith("file:///a.go", "go")
   })
 
   it("routes completionItem registration to the bridge", () => {

@@ -1,69 +1,11 @@
 // Spawns the real built host (`dist/host.js`) the way the Rust host does and
-// drives it over its line-delimited JSON-RPC: the only test that runs an
-// actual extension through `host.ts` and `extension-runner.ts`.
+// drives it over its line-delimited JSON-RPC, running an actual extension
+// through `host.ts` and `extension-runner.ts`.
 import assert from "node:assert/strict"
-import { spawn } from "node:child_process"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
-import { createInterface } from "node:readline"
+import { join } from "node:path"
 import { test } from "node:test"
-import { fileURLToPath } from "node:url"
 
-const here = dirname(fileURLToPath(import.meta.url))
-const HOST = join(here, "..", "dist", "host.js")
-const FIXTURES = join(here, "fixtures")
-
-/** One host process, with a renderer-side answerer for host → renderer requests. */
-function startHost(extensionId, answer = () => null) {
-  const child = spawn(process.execPath, [HOST, "--cognia-extension", extensionId], {
-    env: { ...process.env, COGNIA_VSCODE_EXTENSION_ID: extensionId },
-    stdio: ["pipe", "pipe", "pipe"],
-  })
-  const pending = new Map()
-  const notifications = []
-  let nextId = 1
-  createInterface({ input: child.stdout }).on("line", (line) => {
-    const frame = JSON.parse(line)
-    if (frame.method && frame.id !== undefined) {
-      Promise.resolve(answer(frame.method, frame.params)).then((result) =>
-        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result })}\n`)
-      )
-    } else if (frame.method) {
-      notifications.push(frame)
-    } else {
-      const settle = pending.get(frame.id)
-      pending.delete(frame.id)
-      if (frame.error) settle?.reject(Object.assign(new Error(frame.error.message), frame.error))
-      else settle?.resolve(frame.result)
-    }
-  })
-  child.stderr.resume()
-  return {
-    notifications,
-    request(method, params) {
-      const id = nextId++
-      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`)
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }))
-    },
-    stop: () => child.kill(),
-  }
-}
-
-function activation(extensionId, extensionPath, overrides = {}) {
-  const state = mkdtempSync(join(tmpdir(), "vscode-state-"))
-  return {
-    extensionId,
-    extensionPath,
-    globalStoragePath: join(state, "global"),
-    storagePath: join(state, "workspace dir"),
-    logPath: join(state, "log"),
-    extensionMode: "production",
-    initialGlobalState: { activations: 2 },
-    initialWorkspaceState: {},
-    ...overrides,
-  }
-}
+import { activation, FIXTURES, startHost } from "./host-harness.mjs"
 
 test("an extension gets a real context, a semver vscode, mementos that persist, and gated modules", async () => {
   const id = "cognia.context-extension"

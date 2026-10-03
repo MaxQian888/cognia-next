@@ -333,6 +333,10 @@ describe("vscode-loader — Tauri mode", () => {
     const configureMonacoBridge = jest.fn()
     jest.doMock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
       configureMonacoBridge,
+      getEditorById: jest.fn(),
+      getActiveEditorId: jest.fn(() => null),
+      onEditorChange: jest.fn(() => () => {}),
+      onActiveEditorChanged: jest.fn(() => () => {}),
     }))
 
     const { loadVscodeDefinition } = await import("./vscode-loader")
@@ -342,14 +346,43 @@ describe("vscode-loader — Tauri mode", () => {
     const arg = configureMonacoBridge.mock.calls[0][0]
     expect(arg.monacoApi).toBeDefined()
     expect(typeof arg.dispatchRpc).toBe("function")
-    // dispatchRpc closure routes through plugin_invoke_vscode_rpc.
+    // A provider call goes to the host as `extension:call`, carrying the
+    // host's token, the method, a call id for cancellation, and the arguments.
     invoke.mockResolvedValueOnce(JSON.stringify({ ok: true }))
-    const out = await arg.dispatchRpc("cognia.test-ext", "anyMethod", { x: 1 })
-    expect(invoke).toHaveBeenCalledWith(
-      "plugin_invoke_vscode_rpc",
-      expect.objectContaining({ pluginId: "cognia.test-ext", method: "anyMethod" })
+    let cancel = () => {}
+    const cancellation = {
+      isCancellationRequested: false,
+      onCancellationRequested: (listener: () => void) => {
+        cancel = listener
+        return { dispose: jest.fn() }
+      },
+    }
+    const out = await arg.dispatchRpc(
+      "cognia.test-ext",
+      "provideHover",
+      { token: "host-token", uri: "file:///a.ts" },
+      cancellation
     )
     expect(out).toEqual({ ok: true })
+    const call = invoke.mock.calls.find(
+      (entry) => (entry as unknown[])[0] === "plugin_invoke_vscode_rpc"
+    ) as unknown as [string, { method: string; payloadJson: string }]
+    expect(call[1].method).toBe("extension:call")
+    const sent = JSON.parse(call[1].payloadJson)
+    expect(sent).toMatchObject({
+      extensionId: "cognia.test-ext",
+      token: "host-token",
+      method: "provideHover",
+      payload: { uri: "file:///a.ts" },
+    })
+    // Cancelling forwards `extension:cancel` with the same call id.
+    invoke.mockResolvedValueOnce(JSON.stringify(null))
+    cancel()
+    await Promise.resolve()
+    const cancelCall = invoke.mock.calls
+      .map((entry) => entry as unknown as [string, { method?: string; payloadJson?: string }])
+      .find(([, args]) => args?.method === "extension:cancel")
+    expect(JSON.parse(cancelCall![1].payloadJson!)).toEqual({ callId: sent.callId })
   })
 
   it("survives configured Monaco failing to load (logs warn + continues activation)", async () => {

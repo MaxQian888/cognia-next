@@ -25,12 +25,15 @@ import {
   handleUnregisterChatVariableResolver,
 } from "./chat-participant-registry"
 import {
+  handleDisposeLanguageConfiguration,
   handleExtensionCleanup,
   handleLanguagesRegister,
   handleLanguagesRegisterDecorationType,
   handleLanguagesSetDecorations,
   handleLanguagesSetDiagnostics,
   handleLanguagesUnregister,
+  handleSetLanguageConfiguration,
+  handleSetTextDocumentLanguage,
   handleWindowActiveTextEditorGet,
 } from "./languages-handler"
 import { vscodeDiagnosticToMonacoMarker, type VscodeDiagnostic } from "./lsp-protocol-adapter"
@@ -166,6 +169,21 @@ export function installVscodeRpcHandlers(): () => void {
   )
   disposers.push(
     registerMethod("languages:setDecorations", (p) => handleLanguagesSetDecorations(p as never))
+  )
+  disposers.push(
+    registerMethod("languages:setLanguageConfiguration", (p) =>
+      handleSetLanguageConfiguration(p as never)
+    )
+  )
+  disposers.push(
+    registerMethod("languages:disposeLanguageConfiguration", (p) =>
+      handleDisposeLanguageConfiguration(p as never)
+    )
+  )
+  disposers.push(
+    registerMethod("languages:setTextDocumentLanguage", (p) =>
+      handleSetTextDocumentLanguage(p as never)
+    )
   )
   disposers.push(
     registerMethod("extension:cleanup", (p) => {

@@ -36,6 +36,8 @@ import {
   ViewColumn,
 } from "./types"
 import * as apiTypes from "./api-types"
+import type { DocumentStore } from "./documents"
+import type { CancellationToken } from "./types"
 import { createCommandsNamespace } from "./commands"
 import { createWindowNamespace } from "./window"
 import { createWorkspaceNamespace } from "./workspace"
@@ -57,9 +59,18 @@ import { createL10nNamespace } from "./l10n"
 export interface ShimDependencies {
   extensionId: string
   connection: RpcConnection
+  /** The host's open documents and editors (`documents.ts`). */
+  documents: DocumentStore
+  /**
+   * Answer `extension:call`s carrying `token`. `call` names the method the
+   * renderer asked for and carries the call's cancellation token.
+   */
   registerProviderCallback: (
     token: string,
-    cb: (payload: unknown) => Promise<unknown> | unknown
+    cb: (
+      payload: unknown,
+      call: { method: string; cancellation: CancellationToken }
+    ) => Promise<unknown> | unknown
   ) => () => void
 }
 

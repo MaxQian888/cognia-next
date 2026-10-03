@@ -585,7 +585,7 @@ describe("lsp-registry", () => {
         | ((event: {
             editorId: string
             uri: string
-            kind: "open" | "close" | "change-selection" | "change-content"
+            kind: "open" | "close" | "change-selection" | "change-content" | "change-language"
           }) => void)
         | undefined
       const { client, bridge } = makeFakeAdapters()
@@ -615,10 +615,20 @@ describe("lsp-registry", () => {
       text = "const value = 2"
       emitEditorEvent?.({ editorId: "editor-1", uri: monacoUri, kind: "change-content" })
       await new Promise((resolve) => setTimeout(resolve, FLUSH_DEBOUNCE_MS + 10))
+      // A language switch closes the document where it was and reopens it.
+      emitEditorEvent?.({ editorId: "editor-1", uri: monacoUri, kind: "change-language" })
+      await new Promise((resolve) => setTimeout(resolve, 0))
       emitEditorEvent?.({ editorId: "editor-1", uri: monacoUri, kind: "close" })
       await new Promise((resolve) => setTimeout(resolve, 0))
 
-      expect(events).toEqual(["didOpen", "write:const value = 2", "didChange", "didClose"])
+      expect(events).toEqual([
+        "didOpen",
+        "write:const value = 2",
+        "didChange",
+        "didClose",
+        "didOpen",
+        "didClose",
+      ])
       expect([...files.values()]).toContain("const value = 2")
     })
   })
