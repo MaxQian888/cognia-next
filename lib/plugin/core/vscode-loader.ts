@@ -181,6 +181,14 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     presenter: windowPresenter,
     sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
   })
+  // Extensions' terminals, as dock tabs.
+  const { configureVscodeTerminals, createVscodeTerminalDependencies } =
+    await import("@/lib/plugin/vscode-shim/terminal-handlers")
+  configureVscodeTerminals(
+    createVscodeTerminalDependencies({
+      sendToHost: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
+    })
+  )
   env.configureVscodeEnv(
     env.createVscodeEnvDependencies({
       confirmOpenExternal: (pluginId, url) => windowPresenter.confirmOpenExternal(pluginId, url),
@@ -568,6 +576,9 @@ export async function unloadVscodeExtension(
       clearVscodeExtensionsForPlugin(pluginId)
       const { clearVscodeEnvForPlugin } = await import("@/lib/plugin/vscode-shim/env-handlers")
       clearVscodeEnvForPlugin(pluginId)
+      const { clearVscodeTerminalsForPlugin } =
+        await import("@/lib/plugin/vscode-shim/terminal-handlers")
+      clearVscodeTerminalsForPlugin(pluginId)
     }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {

@@ -32,6 +32,7 @@ import { ExtensionMode } from "./vscode-shim/api-types"
 import { DocumentStore, type EditOutcome } from "./vscode-shim/documents"
 import { ConfigurationStore } from "./vscode-shim/configuration"
 import { ExtensionRegistry } from "./vscode-shim/extensions"
+import { TerminalRegistry } from "./vscode-shim/terminal"
 import { WorkspaceFolders } from "./vscode-shim/workspace-folders"
 import type { OwnedPaths } from "./vscode-shim/workspace-fs"
 import { CancellationTokenSource, Uri, type CancellationToken } from "./vscode-shim/types"
@@ -156,6 +157,8 @@ CONFIGURATION.attach(connection)
 /** The installed VS Code extensions, and the exports of this host's own. */
 const EXTENSIONS = new ExtensionRegistry()
 EXTENSIONS.attach(connection)
+const TERMINALS = new TerminalRegistry()
+TERMINALS.attach(connection)
 
 /** Per extension, the directories it owns (install, storage, logs). */
 const OWNED_PATHS = new Map<string, OwnedPaths>()
@@ -226,6 +229,7 @@ setVscodeShimFactory((extensionId) => {
     folders: FOLDERS,
     configuration: CONFIGURATION,
     extensions: EXTENSIONS,
+    terminals: TERMINALS,
     ownedPaths: () => OWNED_PATHS.get(extensionId) ?? { readOnly: [], readWrite: [] },
     registerProviderCallback,
   })
@@ -281,6 +285,7 @@ connection.onRequest("extension:deactivate", async (params) => {
   await deactivateExtension(extensionId)
   ACTIVE_CONTEXTS.delete(extensionId)
   EXTENSIONS.clearExports(extensionId)
+  TERMINALS.closeAll(extensionId)
   return { ok: true }
 })
 

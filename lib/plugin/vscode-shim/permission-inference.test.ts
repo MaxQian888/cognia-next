@@ -200,6 +200,47 @@ describe("inferPermissions", () => {
       )
     })
 
+    it("asks to open and type into terminals for createTerminal, by AST and by string scan", () => {
+      const parsed = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          {
+            "out/extension.js": `const vscode = require("vscode"); vscode.window.createTerminal("x").sendText("ls")`,
+          }
+        ),
+      })
+      expect(parsed.permissions).toEqual(
+        expect.arrayContaining(["terminal:spawn", "terminal:write"])
+      )
+      expect(parsed.reasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            permission: "terminal:spawn",
+            trigger: { kind: "vscode-api", api: "vscode.window.createTerminal" },
+          }),
+        ])
+      )
+      const scanned = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          { "out/extension.js": `vscode.window.createTerminal({}); ((( unbalanced` }
+        ),
+      })
+      expect(scanned.permissions).toEqual(
+        expect.arrayContaining(["terminal:spawn", "terminal:write"])
+      )
+      // Other window calls need nothing.
+      const window = inferPermissions({
+        vsix: makeVsix(
+          { ...HEAD, main: "out/extension.js" },
+          {
+            "out/extension.js": `const vscode = require("vscode"); vscode.window.showInformationMessage("hi")`,
+          }
+        ),
+      })
+      expect(window.permissions).not.toContain("terminal:spawn")
+    })
+
     it("finds the file APIs by string scan when the bundle does not parse", () => {
       const result = inferPermissions({
         vsix: makeVsix(

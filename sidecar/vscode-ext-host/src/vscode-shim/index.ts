@@ -57,7 +57,12 @@ import { createScmNamespace } from "./scm"
 import { createTestsNamespace } from "./tests"
 import { createCommentsNamespace } from "./comments"
 import { createNotebooksNamespace } from "./notebooks"
-import { createTerminalNamespace } from "./terminal"
+import {
+  TerminalExitReason,
+  TerminalLocation,
+  TerminalShellExecutionCommandLineConfidence,
+  type TerminalRegistry,
+} from "./terminal"
 import { createL10nNamespace } from "./l10n"
 
 export interface ShimDependencies {
@@ -69,6 +74,8 @@ export interface ShimDependencies {
   extensions: ExtensionRegistry
   /** The settings the renderer reports (`configuration.ts`). */
   configuration: ConfigurationStore
+  /** The terminals the host's extensions created (`terminal.ts`). */
+  terminals: TerminalRegistry
   /** The open workspace folders and file-watcher routing (`workspace-folders.ts`). */
   folders: WorkspaceFolders
   /** The extension's own directories, which `workspace.fs` may use without asking. */
@@ -110,6 +117,9 @@ export function createVscodeShim(deps: ShimDependencies): unknown {
     MarkdownString,
 
     // Enums
+    TerminalExitReason,
+    TerminalLocation,
+    TerminalShellExecutionCommandLineConfidence,
     FileType,
     TextDocumentSaveReason,
     StatusBarAlignment,
@@ -133,7 +143,6 @@ export function createVscodeShim(deps: ShimDependencies): unknown {
     tests: createTestsNamespace(),
     comments: createCommentsNamespace(),
     notebooks: createNotebooksNamespace(),
-    terminal: createTerminalNamespace(deps),
     l10n: createL10nNamespace(deps),
 
     // Convenience errors so extensions can `instanceof` them.

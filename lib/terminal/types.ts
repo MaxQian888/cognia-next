@@ -92,9 +92,11 @@ export interface SessionInfo {
    * `serial` never does: a serial port is not a host session, it is a device
    * node this client opened, and it appears here only so the dock can label
    * the tab and skip the affordances (resize, exit code, shell integration)
-   * that a cable has no answer for.
+   * that a cable has no answer for. `extension` is a VS Code extension's
+   * `Pseudoterminal` (`lib/plugin/vscode-shim/extension-pty-session.ts`): no
+   * process, so nothing to restart, and it ends with its extension.
    */
-  kind?: "localPty" | "ssh" | "serial"
+  kind?: "localPty" | "ssh" | "serial" | "extension"
   profileId?: string
   /**
    * TOFU verdict for the remote server key, present only on `kind: "ssh"`

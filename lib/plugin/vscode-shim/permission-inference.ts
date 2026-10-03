@@ -39,11 +39,16 @@ export interface InferPermissionsInput {
 }
 
 /**
- * `vscode.workspace` calls that reach the user's files. Opening a document,
+ * `vscode.*` calls that need a permission.
+ *
+ * `vscode.workspace` calls reach the user's files. Opening a document,
  * searching or watching reads them; `applyEdit` and the write side of `workspace.fs`
  * change them (and `applyEdit` reads a file before editing it).
+ *
+ * `window.createTerminal` opens a shell in the dock, and `sendText` (a method
+ * on the terminal it returns, so not visible here) types into it.
  */
-const VSCODE_FILE_API_PERMISSIONS: ReadonlyArray<{
+const VSCODE_API_PERMISSIONS: ReadonlyArray<{
   api: string
   permissions: ReadonlyArray<PluginPermission>
 }> = [
@@ -62,6 +67,7 @@ const VSCODE_FILE_API_PERMISSIONS: ReadonlyArray<{
     api: "vscode.workspace.fs.createDirectory",
     permissions: ["filesystem:read", "filesystem:write"],
   },
+  { api: "vscode.window.createTerminal", permissions: ["terminal:spawn", "terminal:write"] },
 ]
 
 /**
@@ -411,6 +417,8 @@ function orderedPermissions(set: Set<PluginPermission>): PluginPermission[] {
     "sandbox:web-execute",
     "secrets:read",
     "secrets:write",
+    "terminal:spawn",
+    "terminal:write",
   ]
   return order.filter((p) => set.has(p))
 }
@@ -553,8 +561,8 @@ function walkAst(
             },
             `vscode.authentication OAuth flows dial out`
           )
-        } else if (root.startsWith("vscode.workspace.")) {
-          for (const entry of VSCODE_FILE_API_PERMISSIONS) {
+        } else if (root.startsWith("vscode.workspace.") || root.startsWith("vscode.window.")) {
+          for (const entry of VSCODE_API_PERMISSIONS) {
             if (root !== entry.api && !root.startsWith(`${entry.api}.`)) continue
             for (const permission of entry.permissions) {
               addPermission(
@@ -776,7 +784,7 @@ function scanStrings(
       `string-scan matched vscode.authentication`
     )
   }
-  for (const entry of VSCODE_FILE_API_PERMISSIONS) {
+  for (const entry of VSCODE_API_PERMISSIONS) {
     const pattern = new RegExp(`\\b${entry.api.split(".").join("\\s*\\.\\s*")}\\b`)
     if (!pattern.test(source)) continue
     for (const permission of entry.permissions) {

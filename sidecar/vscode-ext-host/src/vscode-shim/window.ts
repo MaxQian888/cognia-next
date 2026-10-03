@@ -38,10 +38,13 @@ import {
 import type { TextDocument, TextEditor } from "./documents"
 import type { WorkspaceFolder } from "./workspace-folders"
 import type { ShimDependencies } from "./index"
+import { createTerminalWindowMembers } from "./terminal"
 
 type MessageItem = string | { title: string; isCloseAffordance?: boolean }
 
-interface SidecarWindow {
+type TerminalWindowMembers = ReturnType<typeof createTerminalWindowMembers>
+
+interface SidecarWindow extends TerminalWindowMembers {
   // Messages: `(message, ...items)` or `(message, options, ...items)`.
   showInformationMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
   showWarningMessage(message: string, ...rest: unknown[]): Promise<MessageItem | undefined>
@@ -106,15 +109,6 @@ interface SidecarWindow {
   ): Disposable
   registerUriHandler(handler: { handleUri: (uri: Uri) => unknown }): Disposable
 
-  // Terminal
-  createTerminal(options: {
-    name: string
-    shellPath?: string
-    shellArgs?: string[]
-    cwd?: string
-    env?: Record<string, string>
-  }): Terminal
-
   // Status bar
   createStatusBarItem(...args: unknown[]): StatusBarItem
   setStatusBarMessage(text: string, hideAfter?: number | Thenable<unknown>): Disposable
@@ -167,22 +161,17 @@ export interface Webview {
   asWebviewUri(uri: Uri): Uri
 }
 
-export interface Terminal {
-  readonly name: string
-  readonly processId: Promise<number | undefined>
-  sendText(text: string, addNewLine?: boolean): void
-  show(preserveFocus?: boolean): void
-  hide(): void
-  dispose(): void
-  readonly exitStatus: { code: number | null } | undefined
-}
-
 export type OutputChannel = ReturnType<typeof createOutputChannel>
 
 export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
   const { connection, extensionId } = deps
   const documents = deps.documents
   let uriHandlerRegistered = false
+  const terminals = createTerminalWindowMembers({
+    registry: deps.terminals,
+    connection,
+    extensionId,
+  })
 
   /**
    * `show*Message(message, ...items)` or `(message, options, ...items)`.
@@ -390,9 +379,20 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
         void connection.sendNotification("window:unregisterUriHandler", { extensionId })
       })
     },
-    createTerminal(options) {
-      return buildTerminal(connection, extensionId, options)
+    createTerminal: terminals.createTerminal,
+    get terminals() {
+      return terminals.terminals
     },
+    get activeTerminal() {
+      return terminals.activeTerminal
+    },
+    onDidOpenTerminal: terminals.onDidOpenTerminal,
+    onDidCloseTerminal: terminals.onDidCloseTerminal,
+    onDidChangeActiveTerminal: terminals.onDidChangeActiveTerminal,
+    onDidChangeTerminalState: terminals.onDidChangeTerminalState,
+    onDidChangeTerminalShellIntegration: terminals.onDidChangeTerminalShellIntegration,
+    onDidStartTerminalShellExecution: terminals.onDidStartTerminalShellExecution,
+    onDidEndTerminalShellExecution: terminals.onDidEndTerminalShellExecution,
     createStatusBarItem: (...args) => createStatusBarItem(connection, extensionId, args),
     setStatusBarMessage: (text, hideAfter) =>
       setStatusBarMessage(connection, extensionId, text, hideAfter),
@@ -544,52 +544,6 @@ function buildWebviewView(
     },
     set visible(_value: boolean) {
       // VS Code spec: this is read-only at runtime, but extensions can show()/hide().
-    },
-  }
-}
-
-function buildTerminal(
-  connection: ShimDependencies["connection"],
-  extensionId: string,
-  options: {
-    name: string
-    shellPath?: string
-    shellArgs?: string[]
-    cwd?: string
-    env?: Record<string, string>
-  }
-): Terminal {
-  const terminalId = `term:${extensionId}:${Math.random().toString(36).slice(2, 10)}`
-  const pidPromise = connection.sendRequest<number | undefined>("terminal:create", {
-    extensionId,
-    terminalId,
-    options,
-  })
-  let exitStatus: Terminal["exitStatus"] = undefined
-  connection.onNotification(`terminal:${terminalId}:close`, (params) => {
-    exitStatus = { code: (params as { code: number | null }).code }
-  })
-  return {
-    name: options.name,
-    processId: pidPromise,
-    sendText(text, addNewLine = true) {
-      void connection.sendNotification("terminal:sendText", {
-        terminalId,
-        text,
-        addNewLine,
-      })
-    },
-    show(preserveFocus) {
-      void connection.sendNotification("terminal:show", { terminalId, preserveFocus })
-    },
-    hide() {
-      void connection.sendNotification("terminal:hide", { terminalId })
-    },
-    dispose() {
-      void connection.sendNotification("terminal:dispose", { terminalId })
-    },
-    get exitStatus() {
-      return exitStatus
     },
   }
 }

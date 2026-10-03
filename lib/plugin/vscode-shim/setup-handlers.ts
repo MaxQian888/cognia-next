@@ -49,6 +49,7 @@ import { installVscodeWorkspaceFileHandlers } from "./workspace-file-handlers"
 import { installVscodeConfigurationHandlers } from "./configuration-handlers"
 import { installVscodeExtensionsHandlers } from "./extensions-handlers"
 import { clearVscodeEnvForPlugin, installVscodeEnvHandlers } from "./env-handlers"
+import { clearVscodeTerminalsForPlugin, installVscodeTerminalHandlers } from "./terminal-handlers"
 import { appendVscodeLog, stderrLevel } from "./vscode-log-buffer"
 
 let installed = false
@@ -188,6 +189,7 @@ export function installVscodeRpcHandlers(): () => void {
       cleanupVscodeRuntimeRegistrations(payload.extensionId)
       clearVscodeWindowUi(payload.extensionId)
       clearVscodeEnvForPlugin(payload.extensionId)
+      clearVscodeTerminalsForPlugin(payload.extensionId)
       return handleExtensionCleanup(payload)
     })
   )
@@ -203,6 +205,7 @@ export function installVscodeRpcHandlers(): () => void {
   disposers.push(...installVscodeConfigurationHandlers())
   disposers.push(...installVscodeExtensionsHandlers())
   disposers.push(...installVscodeEnvHandlers())
+  disposers.push(...installVscodeTerminalHandlers())
 
   // host:* — notifications the Rust host emits about the Node process itself
   // (not the extension): its stderr, and how it ended.
@@ -223,9 +226,11 @@ export function installVscodeRpcHandlers(): () => void {
           : `VS Code extension host exited unexpectedly (${exit.signal !== null ? `signal ${exit.signal}` : `code ${exit.code}`})`,
         kind: "host",
       })
-      // Whatever the host had on screen went with it, and its URI handler.
+      // Whatever the host had on screen went with it, its URI handler and its
+      // extension terminals.
       clearVscodeWindowUi(ctx.pluginId)
       clearVscodeEnvForPlugin(ctx.pluginId)
+      clearVscodeTerminalsForPlugin(ctx.pluginId)
       getVscodeHostSupervisor().onExited(ctx.pluginId, exit)
       return null
     })

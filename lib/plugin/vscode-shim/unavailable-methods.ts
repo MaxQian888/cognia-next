@@ -11,11 +11,6 @@
  * "method not found" noise.
  */
 export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
-  "terminal:create",
-  "terminal:dispose",
-  "terminal:hide",
-  "terminal:sendText",
-  "terminal:show",
   "webview:dispose",
   "webview:postMessage",
   "webview:reveal",

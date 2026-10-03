@@ -258,12 +258,20 @@ export class Disposable {
 
 export class EventEmitter<T> {
   private listeners: Array<(value: T) => void> = []
-  public readonly event = (listener: (value: T) => void): Disposable => {
-    this.listeners.push(listener)
-    return new Disposable(() => {
-      const idx = this.listeners.indexOf(listener)
+  /** VS Code's `Event<T>`: `listener` runs with `thisArgs`, and the subscription joins `disposables`. */
+  public readonly event = (
+    listener: (value: T) => void,
+    thisArgs?: unknown,
+    disposables?: Array<{ dispose(): unknown }>
+  ): Disposable => {
+    const bound = thisArgs === undefined ? listener : (value: T) => listener.call(thisArgs, value)
+    this.listeners.push(bound)
+    const subscription = new Disposable(() => {
+      const idx = this.listeners.indexOf(bound)
       if (idx >= 0) this.listeners.splice(idx, 1)
     })
+    if (Array.isArray(disposables)) disposables.push(subscription)
+    return subscription
   }
   fire(value: T): void {
     for (const listener of this.listeners.slice()) {
