@@ -214,6 +214,19 @@ export function generateReport() {
   return { report, errors: [...errors, ...result.errors] }
 }
 
+/**
+ * Whether the committed report says what `report` says. The content is
+ * compared, not the text: the commit hook's prettier may lay a short array
+ * out differently from `JSON.stringify`.
+ */
+export function sameReport(committedText, report) {
+  try {
+    return JSON.stringify(JSON.parse(committedText)) === JSON.stringify(report)
+  } catch {
+    return false
+  }
+}
+
 function main() {
   const check = process.argv.includes("--check")
   const { report, errors } = generateReport()
@@ -222,8 +235,7 @@ function main() {
   const { implemented, unsupported, missing } = report.summary
   const summary = `${implemented} implemented, ${unsupported} unsupported, ${missing} missing (vscode ${report.apiVersion})`
   if (check) {
-    const committed = existsSync(REPORT_PATH) ? readFileSync(REPORT_PATH, "utf8") : ""
-    if (committed !== text) {
+    if (!sameReport(existsSync(REPORT_PATH) ? readFileSync(REPORT_PATH, "utf8") : "", report)) {
       console.error(
         "[vscode-api-coverage] ERROR the shim and lib/plugin/vscode-shim/vscode-api-coverage.generated.json disagree; run `pnpm vscode-api-coverage:generate` and commit the report"
       )

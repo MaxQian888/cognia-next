@@ -3,7 +3,12 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { classify, declaredApi, inertDependencies } from "./check-vscode-api-coverage.mjs"
+import {
+  classify,
+  declaredApi,
+  inertDependencies,
+  sameReport,
+} from "./check-vscode-api-coverage.mjs"
 
 const DECLARATIONS = `
 declare module 'vscode' {
@@ -102,4 +107,11 @@ test("inertDependencies answers anything with something callable", () => {
   assert.equal(typeof deps.connection.onRequest, "function")
   assert.equal(typeof deps.connection.onRequest("x", () => {}).dispose, "function")
   assert.equal(deps.then, undefined)
+})
+
+test("sameReport compares content, whatever the layout", () => {
+  const report = { missing: ["a", "b"], summary: { missing: 2 } }
+  assert.equal(sameReport('{"missing":[\n  "a",\n  "b"\n],"summary":{"missing":2}}', report), true)
+  assert.equal(sameReport(JSON.stringify({ ...report, missing: ["a"] }), report), false)
+  assert.equal(sameReport("", report), false)
 })
