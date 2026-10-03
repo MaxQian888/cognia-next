@@ -32,6 +32,8 @@ import {
   installVscodeExtensionFromBytes,
   prepareVscodeExtension,
   vscodeInstallOrigin,
+  VscodeExtensionsUnavailableError,
+  type PreparedVscodeExtension,
 } from "./install-vscode-extension"
 import { putInstallOrigin } from "@/lib/db/plugin-install-origins"
 import type { VsCodeExtensionBlock } from "@/types/plugin/plugin-vscode"
@@ -62,8 +64,23 @@ const BENIGN = {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  canUseTauriInvokeMock.mockReturnValue(false)
+  canUseTauriInvokeMock.mockReturnValue(true)
 })
+
+/** Commit as the desktop does, with Rust unpacking to the extension's own directory. */
+function commit(
+  prepared: PreparedVscodeExtension,
+  provenance?: Parameters<typeof commitVscodeExtension>[1]
+) {
+  const id = prepared.adapted.manifest.id
+  invokeMock.mockResolvedValueOnce({
+    extensionId: id,
+    installPath: `/data/cognia/vscode-extensions/${id}`,
+    sha256Hex: prepared.vsix.sha256,
+    packageJson: {},
+  })
+  return commitVscodeExtension(prepared, provenance)
+}
 
 describe("prepareVscodeExtension", () => {
   it("produces the fields the loader requires, which the raw package.json lacks", async () => {
@@ -112,7 +129,7 @@ describe("prepareVscodeExtension", () => {
 describe("commitVscodeExtension", () => {
   it("persists the adapted manifest, never the raw package.json", async () => {
     const prepared = await prepareVscodeExtension(await buildVsix(BENIGN), "vsix-upload")
-    await commitVscodeExtension(prepared)
+    await commit(prepared)
 
     const draft = upsertPluginMock.mock.calls[0]![0]
     expect(draft.manifest).toBe(prepared.adapted.manifest)
@@ -128,7 +145,7 @@ describe("commitVscodeExtension", () => {
       "openvsx",
       "darwin-arm64"
     )
-    await commitVscodeExtension(prepared, {
+    await commit(prepared, {
       viaCogpack: { cogpackId: "coder", version: "2.0.0", fingerprint: "f" },
     })
     expect(putInstallOrigin).toHaveBeenCalledWith(
@@ -149,7 +166,7 @@ describe("commitVscodeExtension", () => {
 
   it("records a dropped .vsix as local, since there is nothing to fetch again", async () => {
     const prepared = await prepareVscodeExtension(await buildVsix(BENIGN), "vsix-upload")
-    await commitVscodeExtension(prepared)
+    await commit(prepared)
     expect(putInstallOrigin).toHaveBeenCalledWith(
       expect.objectContaining({ origin: { kind: "local", via: "vsix" } })
     )
@@ -159,17 +176,16 @@ describe("commitVscodeExtension", () => {
     // `PluginSource` has no "openvsx" member — the two fields share a name but
     // not a domain.
     const fromRegistry = await prepareVscodeExtension(await buildVsix(BENIGN), "openvsx")
-    await commitVscodeExtension(fromRegistry)
+    await commit(fromRegistry)
     expect(upsertPluginMock.mock.calls[0]![0].source).toBe("marketplace")
 
     upsertPluginMock.mockClear()
     const fromDisk = await prepareVscodeExtension(await buildVsix(BENIGN), "vsix-upload")
-    await commitVscodeExtension(fromDisk)
+    await commit(fromDisk)
     expect(upsertPluginMock.mock.calls[0]![0].source).toBe("local")
   })
 
   it("uses the Rust install path and rejects an id the two sides disagree on", async () => {
-    canUseTauriInvokeMock.mockReturnValue(true)
     invokeMock.mockResolvedValue({
       extensionId: "cognia.hello",
       installPath: "/data/cognia/vscode-extensions/cognia.hello",
@@ -195,9 +211,35 @@ describe("commitVscodeExtension", () => {
     await expect(commitVscodeExtension(prepared)).rejects.toThrow(/id mismatch/)
     expect(upsertPluginMock).not.toHaveBeenCalled()
   })
+
+  it("refuses an install where VS Code extensions cannot run, recording nothing", async () => {
+    canUseTauriInvokeMock.mockReturnValue(false)
+    const prepared = await prepareVscodeExtension(await buildVsix(BENIGN), "vsix-upload")
+    await expect(commitVscodeExtension(prepared)).rejects.toBeInstanceOf(
+      VscodeExtensionsUnavailableError
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
+    expect(upsertPluginMock).not.toHaveBeenCalled()
+    expect(putInstallOrigin).not.toHaveBeenCalled()
+  })
 })
 
 describe("hostile manifests", () => {
+  // Rust unpacks the archive and derives the id from its own package.json.
+  beforeEach(() => {
+    invokeMock.mockImplementation(async (_command: string, args: { vsixBase64: string }) => {
+      const zip = await JSZip.loadAsync(args.vsixBase64, { base64: true })
+      const pkg = JSON.parse(await zip.file("extension/package.json")!.async("string"))
+      const id = canonicalExtensionId(pkg.publisher, pkg.name)
+      return {
+        extensionId: id,
+        installPath: `/data/cognia/vscode-extensions/${id}`,
+        sha256Hex: "",
+        packageJson: pkg,
+      }
+    })
+  })
+
   const HOSTILE = {
     publisher: "evil",
     name: "x",

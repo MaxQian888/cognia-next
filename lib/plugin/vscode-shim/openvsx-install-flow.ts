@@ -157,6 +157,7 @@ async function defaultUninstall(row: PluginRow): Promise<void> {
   // inert; a row pointing at a deleted directory is a plugin the manager will
   // try to load and fail on.
   await deletePlugin(row.id)
+  // `vsix://` paths are rows older browser builds recorded without unpacking.
   if (row.path && !row.path.startsWith("vsix://")) {
     await removeFile(row.path, { recursive: true })
   }

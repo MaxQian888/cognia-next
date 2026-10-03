@@ -27,8 +27,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { isVscodeHostAvailable } from "@/lib/plugin/core/vscode-loader"
 import {
   curationAnswerableBy,
+  discoverOriginsFor,
+  effectiveDiscoverOrigin,
   usePluginsStore,
   type PluginDiscoverCuration,
   type PluginDiscoverOrigin,
@@ -37,13 +40,6 @@ import {
 import { PluginSectionToolbar, type PluginSectionToolbarProps } from "../plugin-section-toolbar"
 
 const CURATIONS: readonly PluginDiscoverCuration[] = ["all", "featured", "popular", "recent"]
-const ORIGINS: readonly PluginDiscoverOrigin[] = [
-  "all",
-  "registry",
-  "builtin",
-  "workspace",
-  "vscode",
-]
 
 export interface PluginDiscoverHeaderProps {
   layout?: PluginSectionToolbarProps["layout"]
@@ -61,7 +57,13 @@ export function PluginDiscoverHeader({ layout }: PluginDiscoverHeaderProps = {})
   const query = usePluginsStore((s) => s.filters.query)
   const setQuery = usePluginsStore((s) => s.setQuery)
   const curation = usePluginsStore((s) => s.discoverCuration)
-  const origin = usePluginsStore((s) => s.discoverOrigin)
+  // Open VSX is offered only where VS Code extensions can run.
+  const vscodeAvailable = isVscodeHostAvailable()
+  const origins = discoverOriginsFor(vscodeAvailable)
+  const origin = effectiveDiscoverOrigin(
+    usePluginsStore((s) => s.discoverOrigin),
+    vscodeAvailable
+  )
   const setCuration = usePluginsStore((s) => s.setDiscoverCuration)
   const setOrigin = usePluginsStore((s) => s.setDiscoverOrigin)
 
@@ -112,7 +114,7 @@ export function PluginDiscoverHeader({ layout }: PluginDiscoverHeaderProps = {})
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {ORIGINS.map((value) => (
+              {origins.map((value) => (
                 <SelectItem key={value} value={value}>
                   {t(`origin.${value}` as never)}
                 </SelectItem>

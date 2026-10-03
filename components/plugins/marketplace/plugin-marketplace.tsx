@@ -53,7 +53,8 @@ import { PluginErrorCard } from "../_shared/plugin-error-card"
 import { useOpenVsxMarketplace } from "@/hooks/plugins/use-openvsx-marketplace"
 import { pluginDetailHref } from "@/hooks/plugins/plugin-links"
 import { pluginUninstallBlockReason } from "@/hooks/plugins/use-plugin-uninstall"
-import { usePluginsStore } from "@/stores/plugins"
+import { isVscodeHostAvailable } from "@/lib/plugin/core/vscode-loader"
+import { effectiveDiscoverOrigin, usePluginsStore } from "@/stores/plugins"
 
 const PAGE_SIZE = 12
 
@@ -95,7 +96,11 @@ export function PluginMarketplace() {
   const market = usePluginMarketplace()
   const builtinEntries = useBuiltinPluginEntries()
   const curation = usePluginsStore((s) => s.discoverCuration)
-  const origin = usePluginsStore((s) => s.discoverOrigin)
+  // A remembered Open VSX choice shows everything where extensions cannot run.
+  const origin = effectiveDiscoverOrigin(
+    usePluginsStore((s) => s.discoverOrigin),
+    isVscodeHostAvailable()
+  )
   // Open VSX is a third-party registry: nothing is fetched until the user
   // actually selects it as the origin. `enabled` is the whole gate.
   const openVsx = useOpenVsxMarketplace({ enabled: origin === "vscode", pageSize: PAGE_SIZE })

@@ -105,44 +105,48 @@ export async function prepareVscodeExtension(
   return { bytes, vsix, adapted }
 }
 
+/** Raised when an extension is installed where VS Code extensions cannot run. */
+export class VscodeExtensionsUnavailableError extends Error {
+  constructor() {
+    super("VS Code extensions can only be installed in the desktop app")
+    this.name = "VscodeExtensionsUnavailableError"
+  }
+}
+
 /**
- * Unpack a prepared extension to disk (Tauri only) and record it in Dexie.
- *
- * Browser mode skips the native unpack and records a `vsix://` placeholder
- * path, matching how the loader already degrades outside Tauri.
+ * Unpack a prepared extension to disk and record it in Dexie. Desktop only:
+ * elsewhere there is no extension host to run it, so the install is refused
+ * instead of recording a row nothing can load.
  */
 export async function commitVscodeExtension(
   prepared: PreparedVscodeExtension,
   provenance: { viaCogpack?: CogpackProvenance } = {}
 ): Promise<PluginRow> {
   const { bytes, vsix, adapted, stagedPath } = prepared
-  let installPath: string | null = null
+  if (!canUseTauriInvoke()) throw new VscodeExtensionsUnavailableError()
 
-  if (canUseTauriInvoke()) {
-    const { invoke } = await import("@tauri-apps/api/core")
-    // Two commands, one installer behind them. `..._from_path` is used when the
-    // downloader already put a verified copy on disk; the base64 form is for
-    // bytes that only ever existed in the renderer (drag-drop).
-    const result = stagedPath
-      ? await invoke<RustInstallResult>("plugin_vscode_install_vsix_from_path", {
-          tempPath: stagedPath,
-        })
-      : await invoke<RustInstallResult>("plugin_vscode_install_vsix", {
-          vsixBase64: bytesToBase64(bytes),
-        })
-    installPath = result.installPath
+  const { invoke } = await import("@tauri-apps/api/core")
+  // Two commands, one installer behind them. `..._from_path` is used when the
+  // downloader already put a verified copy on disk; the base64 form is for
+  // bytes that only ever existed in the renderer (drag-drop).
+  const result = stagedPath
+    ? await invoke<RustInstallResult>("plugin_vscode_install_vsix_from_path", {
+        tempPath: stagedPath,
+      })
+    : await invoke<RustInstallResult>("plugin_vscode_install_vsix", {
+        vsixBase64: bytesToBase64(bytes),
+      })
 
-    // Rust derives the id under the same strict rule (`sanitize_plugin_id_strict`)
-    // before it touches the filesystem. If the two ever disagree, the Dexie row
-    // and the on-disk directory would describe different extensions — surface
-    // that as a hard failure rather than persisting a mismatched row.
-    if (result.extensionId !== adapted.manifest.id) {
-      throw new Error(
-        `VS Code extension id mismatch: renderer derived "${adapted.manifest.id}", ` +
-          `Rust unpacked to "${result.extensionId}". The id rules have drifted — ` +
-          `lib/plugin/vscode-shim/extension-id.ts and sanitize_plugin_id_strict must agree.`
-      )
-    }
+  // Rust derives the id under the same strict rule (`sanitize_plugin_id_strict`)
+  // before it touches the filesystem. If the two ever disagree, the Dexie row
+  // and the on-disk directory would describe different extensions — surface
+  // that as a hard failure rather than persisting a mismatched row.
+  if (result.extensionId !== adapted.manifest.id) {
+    throw new Error(
+      `VS Code extension id mismatch: renderer derived "${adapted.manifest.id}", ` +
+        `Rust unpacked to "${result.extensionId}". The id rules have drifted — ` +
+        `lib/plugin/vscode-shim/extension-id.ts and sanitize_plugin_id_strict must agree.`
+    )
   }
 
   const row = await upsertPlugin({
@@ -152,7 +156,7 @@ export async function commitVscodeExtension(
     status: "discovered",
     source: pluginRowSource(adapted.manifest.vscodeExtension?.source ?? null),
     type: "vscode-extension",
-    path: installPath ?? `vsix://${adapted.manifest.id}@${vsix.sha256.slice(0, 12)}`,
+    path: result.installPath,
     // The whole point of this module: the *adapted* manifest, never `pkgJson`.
     manifest: adapted.manifest as unknown as Record<string, unknown>,
     enabled: false,

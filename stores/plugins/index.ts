@@ -2,6 +2,8 @@ export {
   usePluginsStore,
   DEFAULT_PLUGIN_FILTERS,
   curationAnswerableBy,
+  discoverOriginsFor,
+  effectiveDiscoverOrigin,
   type PluginSortMode,
   type PluginFilters,
   type PluginImportStaging,

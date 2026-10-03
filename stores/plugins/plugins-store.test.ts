@@ -3,6 +3,8 @@ import { act, renderHook } from "@testing-library/react"
 import {
   usePluginsStore,
   DEFAULT_PLUGIN_FILTERS,
+  discoverOriginsFor,
+  effectiveDiscoverOrigin,
   type PluginImportStaging,
   type ConflictSummary,
 } from "./plugins-store"
@@ -10,6 +12,21 @@ import * as barrel from "./"
 
 it("barrel re-exports usePluginsStore", () => {
   expect(barrel.usePluginsStore).toBe(usePluginsStore)
+  expect(barrel.discoverOriginsFor).toBe(discoverOriginsFor)
+  expect(barrel.effectiveDiscoverOrigin).toBe(effectiveDiscoverOrigin)
+})
+
+describe("Discover origins", () => {
+  it("offers Open VSX only where VS Code extensions can run", () => {
+    expect(discoverOriginsFor(true)).toEqual(["all", "registry", "builtin", "workspace", "vscode"])
+    expect(discoverOriginsFor(false)).toEqual(["all", "registry", "builtin", "workspace"])
+  })
+
+  it("shows everything for a remembered Open VSX choice where it is not offered", () => {
+    expect(effectiveDiscoverOrigin("vscode", true)).toBe("vscode")
+    expect(effectiveDiscoverOrigin("vscode", false)).toBe("all")
+    expect(effectiveDiscoverOrigin("builtin", false)).toBe("builtin")
+  })
 })
 
 const RESET = {

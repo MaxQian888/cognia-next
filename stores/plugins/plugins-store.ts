@@ -78,6 +78,30 @@ export type PluginSourceFilter = string | "all"
 export type PluginDiscoverCuration = "all" | "featured" | "popular" | "recent"
 export type PluginDiscoverOrigin = "all" | "registry" | "builtin" | "workspace" | "vscode"
 
+const DISCOVER_ORIGINS: readonly PluginDiscoverOrigin[] = [
+  "all",
+  "registry",
+  "builtin",
+  "workspace",
+  "vscode",
+]
+
+/**
+ * The origins Discover offers. Open VSX only where VS Code extensions can run
+ * (the desktop app): elsewhere they could be browsed but never installed.
+ */
+export function discoverOriginsFor(vscodeAvailable: boolean): readonly PluginDiscoverOrigin[] {
+  return vscodeAvailable ? DISCOVER_ORIGINS : DISCOVER_ORIGINS.filter((o) => o !== "vscode")
+}
+
+/** The origin Discover shows: a remembered Open VSX choice falls back to all where it is not offered. */
+export function effectiveDiscoverOrigin(
+  origin: PluginDiscoverOrigin,
+  vscodeAvailable: boolean
+): PluginDiscoverOrigin {
+  return discoverOriginsFor(vscodeAvailable).includes(origin) ? origin : "all"
+}
+
 export function curationAnswerableBy(origin: PluginDiscoverOrigin): boolean {
   return origin === "all" || origin === "registry"
 }

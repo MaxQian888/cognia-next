@@ -5,6 +5,10 @@
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 
 const mockCanUseTauriInvoke = jest.fn(() => true)
+let mockVscodeAvailable = true
+jest.mock("@/lib/plugin/core/vscode-loader", () => ({
+  isVscodeHostAvailable: () => mockVscodeAvailable,
+}))
 jest.mock("@/lib/native/utils", () => ({
   ...jest.requireActual("@/lib/native/utils"),
   // `InstallButton` gates install on the desktop host, because the download
@@ -135,6 +139,7 @@ const ENTRIES = [
 ]
 
 beforeEach(() => {
+  mockVscodeAvailable = true
   // Both Discover axes live in the plugins store now, so reset them or a
   // previous case leaks its origin into the next one.
   usePluginsStore.setState({ discoverCuration: "all", discoverOrigin: "all" })
@@ -420,6 +425,17 @@ describe("PluginMarketplace", () => {
 
       act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
       await waitFor(() => expect(searchExtensions).toHaveBeenCalled())
+    })
+
+    it("never queries Open VSX where VS Code extensions cannot run", async () => {
+      mockVscodeAvailable = false
+      const searchExtensions = mockOpenVsxSearch()
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
+      render(<PluginMarketplace />)
+      // A remembered Open VSX choice shows everything instead.
+      await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
+      expect(searchExtensions).not.toHaveBeenCalled()
+      expect(getOpenVsxClientMock).not.toHaveBeenCalled()
     })
 
     it("vscode_section_queries_open_vsx_not_cognia_registry", async () => {

@@ -7,6 +7,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+let mockVscodeAvailable = true
+jest.mock("@/lib/plugin/core/vscode-loader", () => ({
+  isVscodeHostAvailable: () => mockVscodeAvailable,
+}))
+
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -15,6 +20,7 @@ import { usePluginsStore } from "@/stores/plugins"
 import { PluginDiscoverHeader } from "./plugin-discover-header"
 
 beforeEach(() => {
+  mockVscodeAvailable = true
   usePluginsStore.setState({
     discoverCuration: "all",
     discoverOrigin: "all",
@@ -55,6 +61,17 @@ describe("PluginDiscoverHeader", () => {
     render(<PluginDiscoverHeader />)
     expect(screen.getByTestId("plugin-discover-curation")).toBeDisabled()
     expect(screen.getByTestId("plugin-discover-curation-blocked")).toBeInTheDocument()
+  })
+
+  it("offers Open VSX only where VS Code extensions can run", async () => {
+    mockVscodeAvailable = false
+    usePluginsStore.setState({ discoverOrigin: "vscode" })
+    render(<PluginDiscoverHeader />)
+    // A remembered Open VSX choice reads as everything, with a live ranking.
+    expect(screen.getByTestId("plugin-discover-curation")).not.toBeDisabled()
+    await userEvent.click(screen.getByTestId("plugin-discover-origin"))
+    expect(screen.queryByRole("option", { name: "origin.vscode" })).toBeNull()
+    expect(screen.getByRole("option", { name: "origin.registry" })).toBeInTheDocument()
   })
 
   it("leaves the ranking live for registry-backed origins", () => {
