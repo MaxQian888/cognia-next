@@ -54,7 +54,7 @@ async function startTasks({ refuseTerminals = false } = {}) {
         )
       return params.kind === "pty"
         ? { dimensions: { columns: 80, rows: 24 } }
-        : { name: params.name }
+        : { name: params.name, processId: 4242 }
     }
     return null
   })
@@ -113,7 +113,8 @@ test("a shell task runs in a dock terminal, and its end carries the exit code", 
     assert.equal(running, 0)
     assert.deepEqual(events, [
       { kind: "start", task: "build" },
-      { kind: "startProcess", task: "build" },
+      // The process id the dock reported for the task's terminal.
+      { kind: "startProcess", task: "build", processId: 4242 },
       { kind: "endProcess", task: "build", exitCode: 2 },
       { kind: "end", task: "build" },
     ])

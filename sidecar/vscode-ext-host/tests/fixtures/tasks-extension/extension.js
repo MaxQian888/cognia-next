@@ -11,7 +11,9 @@ exports.activate = (context) => {
       events.push({ kind, task: event.execution.task.name, ...extra(event) })
   context.subscriptions.push(
     vscode.tasks.onDidStartTask(record("start")),
-    vscode.tasks.onDidStartTaskProcess(record("startProcess")),
+    vscode.tasks.onDidStartTaskProcess(
+      record("startProcess", (event) => ({ processId: event.processId }))
+    ),
     vscode.tasks.onDidEndTaskProcess(
       record("endProcess", (event) => ({ exitCode: event.exitCode }))
     ),

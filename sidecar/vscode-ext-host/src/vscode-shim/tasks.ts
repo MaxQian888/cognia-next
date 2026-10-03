@@ -37,9 +37,9 @@
  *
  * Not supported, and stated in the plugin docs: problem matchers (no
  * diagnostics are made from a task's output), `dependsOn` and
- * `runOptions`. The dock does not report process ids, so
- * `TaskProcessStartEvent.processId` is `undefined`. An extension sees only
- * the executions it started, since every extension has its own host.
+ * `runOptions`. `TaskProcessStartEvent.processId` is the task terminal's
+ * shell or program, as the dock reports it. An extension sees only the
+ * executions it started, since every extension has its own host.
  */
 
 import * as os from "node:os"

@@ -1357,6 +1357,7 @@ mod tests {
             extension_id: None,
             origin: SessionOrigin::Remote,
             shell: "/bin/zsh".to_string(),
+            process_id: Some(4242),
             created_at: 1,
             last_activity_at: 2,
             current_controller: Some("device-a".to_string()),

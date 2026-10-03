@@ -34,7 +34,7 @@ exports.activate = (context) => {
   const close = new vscode.EventEmitter()
   const rename = new vscode.EventEmitter()
 
-  register("terminalFixture.process", () => {
+  register("terminalFixture.process", async () => {
     build = vscode.window.createTerminal({
       name: "Build",
       shellPath: "/bin/sh",
@@ -51,6 +51,7 @@ exports.activate = (context) => {
       name: build.name,
       own: vscode.window.terminals.map((terminal) => terminal.name),
       noShellIntegration: build.shellIntegration === undefined,
+      processId: await build.processId,
     }
   })
   register("terminalFixture.legacy", async () => {

@@ -129,7 +129,7 @@ Each item is typed, shown in the plugin detail's **VS Code compatibility** secti
 
 **API namespaces** (`unsupportedApis`, found in the extension's code): `debug`, `scm`, `tests`, `comments`, `notebooks`. Their registrations return inert disposables, their events never fire, and calls that would act throw `NotSupportedError` with the reason. The host reports each unsupported member once per extension (`vscode:unsupportedApi`), and the plugin log names it.
 
-**Other gaps:** chat participants are registered but not invoked, task problem matchers are ignored, a task terminal's `processId` is `undefined`, and `createTelemetryLogger` sends nothing.
+**Other gaps:** chat participants are registered but not invoked, task problem matchers are ignored, and `createTelemetryLogger` sends nothing. `Terminal.processId` is the shell's process id for a terminal running on this machine, and `undefined` for an extension's `Pseudoterminal`.
 
 **Browser and mobile.** There is no extension host. The Open VSX origin is hidden, a dropped `.vsix` is refused, and an installed extension with `main` loads as a stub that marks itself in the plugin list.
 

@@ -207,6 +207,11 @@ pub struct HostSessionInfo {
     pub extension_id: Option<String>,
     pub origin: SessionOrigin,
     pub shell: String,
+    /// OS process id of a local PTY's child, captured at spawn (VS Code
+    /// extensions read it as `Terminal.processId`). Absent for SSH sessions
+    /// and from hosts that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
     pub created_at: u64,
     pub last_activity_at: u64,
     pub current_controller: Option<String>,
@@ -385,6 +390,13 @@ pub trait HostedTerminalProcess: Send + Sync {
     /// than pretending the pause took.
     fn set_flow_paused(&self, paused: bool) -> Result<(), String>;
 
+    /// OS process id of what runs in the session, when that is a process on
+    /// this machine. `None` otherwise: an SSH session's shell runs on the
+    /// remote machine.
+    fn process_id(&self) -> Option<u32> {
+        None
+    }
+
     /// Live state of this session's SSH port forwards.
     ///
     /// Empty for anything that cannot forward — a local PTY has no tunnels, and
@@ -424,6 +436,10 @@ impl HostedTerminalProcess for PtySession {
 
     fn replay(&self) -> Arc<ReplayBuffer> {
         self.replay()
+    }
+
+    fn process_id(&self) -> Option<u32> {
+        self.pid()
     }
 }
 
@@ -2066,6 +2082,7 @@ fn session_info(
             SessionOrigin::Local
         },
         shell: session.shell.clone(),
+        process_id: session.process.process_id(),
         created_at: session.created_at,
         last_activity_at: session.last_activity_at,
         current_controller: session
@@ -2450,6 +2467,10 @@ mod tests {
         fn set_flow_paused(&self, paused: bool) -> Result<(), String> {
             self.flow_transitions.lock().push(paused);
             Ok(())
+        }
+
+        fn process_id(&self) -> Option<u32> {
+            Some(4242)
         }
     }
 
@@ -2955,6 +2976,27 @@ mod tests {
             viewer.events.recv().await,
             Some(HostEvent::ReplayGap { .. })
         ));
+    }
+
+    /// VS Code extensions read a terminal's `processId` from the session info.
+    #[test]
+    fn session_info_carries_the_process_id() {
+        let (host, client, _process, session_id) = local_host();
+        let listed = host.list(&client.connection_id).unwrap();
+        let info = listed
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert_eq!(info.process_id, Some(4242));
+        assert_eq!(serde_json::to_value(info).unwrap()["processId"], 4242);
+
+        // A session with no local process omits it, and reads back as none.
+        let mut remote = info.clone();
+        remote.process_id = None;
+        let wire = serde_json::to_value(&remote).unwrap();
+        assert!(wire.get("processId").is_none());
+        let back: HostSessionInfo = serde_json::from_value(wire).unwrap();
+        assert_eq!(back.process_id, None);
     }
 
     #[test]

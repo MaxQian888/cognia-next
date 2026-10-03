@@ -129,7 +129,7 @@ Rust 安装器把解压后的文件写入 `<data>/cognia/vscode-extensions/<id>`
 
 **API 命名空间**（`unsupportedApis`，从扩展代码中找出）：`debug`、`scm`、`tests`、`comments`、`notebooks`。它们的注册返回无效果的 disposable，事件从不触发，会产生动作的调用抛出带原因的 `NotSupportedError`。宿主对每个扩展的每个不支持成员只报告一次（`vscode:unsupportedApi`），插件日志会写明。
 
-**其他缺口：** 聊天参与者只注册不调用，任务的问题匹配器被忽略，任务终端的 `processId` 为 `undefined`，`createTelemetryLogger` 不发送任何内容。
+**其他缺口：** 聊天参与者只注册不调用，任务的问题匹配器被忽略，`createTelemetryLogger` 不发送任何内容。对于在本机运行的终端，`Terminal.processId` 是 shell 的进程 id，扩展的 `Pseudoterminal` 则为 `undefined`。
 
 **浏览器与移动端。** 没有扩展宿主。Open VSX 来源被隐藏，拖入的 `.vsix` 被拒绝，已安装的带 `main` 的扩展以桩形式加载，并在插件列表中标明。
 

@@ -34,7 +34,11 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 }))
 
 import { BaseTerminalSession } from "@/lib/terminal/base-session"
-import { getLiveSession, __clearLiveSessionsForTesting } from "@/lib/terminal/session-registry"
+import {
+  getLiveSession,
+  registerLiveSession,
+  __clearLiveSessionsForTesting,
+} from "@/lib/terminal/session-registry"
 import type { SessionInfo } from "@/lib/terminal/types"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -222,6 +226,20 @@ describe("process terminals", () => {
     )
     await expect(h.call("terminal:create", { terminalId: "t2", kind: "process" })).rejects.toThrow(
       /already exists/
+    )
+  })
+
+  it("answer with the shell's process id when the dock reports one", async () => {
+    const h = setup()
+    ;(h.deps.spawn as jest.Mock).mockResolvedValueOnce({
+      sessionId: "shell-9",
+      title: "zsh",
+      processId: 4242,
+    })
+    h.live.set("shell-9", new FakeShell("shell-9"))
+    h.tabs.add("shell-9")
+    await expect(h.call("terminal:create", { terminalId: "t1", kind: "process" })).resolves.toEqual(
+      { name: "zsh", processId: 4242 }
     )
   })
 
@@ -427,6 +445,16 @@ describe("createVscodeTerminalDependencies", () => {
     await expect(
       deps.spawn({ pluginId: "acme.ext", name: "Build", shell: "", projectId: "p1" })
     ).resolves.toEqual({ sessionId: "s1", title: "/bin/zsh" })
+    // The host reports the shell's process id on the session it spawned.
+    const spawned = new FakeShell("s2")
+    spawned.info.processId = 4242
+    registerLiveSession(spawned)
+    mockSpawnFromDock.mockResolvedValueOnce({ kind: "spawned", sessionId: "s2", shell: "/bin/zsh" })
+    await expect(deps.spawn({ pluginId: "acme.ext", shell: "" })).resolves.toEqual({
+      sessionId: "s2",
+      title: "/bin/zsh",
+      processId: 4242,
+    })
     expect(mockSpawnFromDock).toHaveBeenCalledWith(
       expect.objectContaining({
         req: expect.objectContaining({ extensionId: "acme.ext", shell: "", rows: 24, cols: 80 }),

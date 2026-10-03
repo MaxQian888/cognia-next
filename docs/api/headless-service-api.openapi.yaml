@@ -139909,7 +139909,7 @@ paths:
                   type: object
                   x-cognia-wire-source: cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs
                     via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always
-                    present as null — the two ssh_host_key_* fields are the exception and do skip.
+                    present as null — process_id and the two ssh_host_key_* fields are the exceptions and do skip.
                   required:
                     - id
                     - hostId
@@ -139953,6 +139953,9 @@ paths:
                         - remote
                     shell:
                       type: string
+                    processId:
+                      type: integer
+                      minimum: 0
                     createdAt:
                       type: integer
                       minimum: 0
@@ -140210,7 +140213,7 @@ paths:
                   type: object
                   x-cognia-wire-source: cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs
                     via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always
-                    present as null — the two ssh_host_key_* fields are the exception and do skip.
+                    present as null — process_id and the two ssh_host_key_* fields are the exceptions and do skip.
                   required:
                     - id
                     - hostId
@@ -140254,6 +140257,9 @@ paths:
                         - remote
                     shell:
                       type: string
+                    processId:
+                      type: integer
+                      minimum: 0
                     createdAt:
                       type: integer
                       minimum: 0

@@ -74,8 +74,13 @@ export interface VscodeTerminalSpawn {
 
 export interface VscodeTerminalDependencies {
   permissions(pluginId: string): Promise<readonly string[]>
-  /** Spawn a dock PTY for the extension; resolves with the new session's id and tab title. */
-  spawn(request: VscodeTerminalSpawn): Promise<{ sessionId: string; title: string }>
+  /**
+   * Spawn a dock PTY for the extension; resolves with the new session's id,
+   * tab title and, when the host reports one, its process id.
+   */
+  spawn(
+    request: VscodeTerminalSpawn
+  ): Promise<{ sessionId: string; title: string; processId?: number }>
   /** Give an extension terminal a dock tab. */
   addPtySession(session: ExtensionPtySession, title: string): void
   session(sessionId: string): BaseTerminalSession | undefined
@@ -131,9 +136,11 @@ export function createVscodeTerminalDependencies(input: {
         )
       }
       if (outcome.kind === "error") throw new Error(outcome.message)
+      const processId = getLiveSession(outcome.sessionId)?.info.processId
       return {
         sessionId: outcome.sessionId,
         title: store().sessions[outcome.sessionId]?.title ?? outcome.shell,
+        ...(typeof processId === "number" ? { processId } : {}),
       }
     },
     addPtySession(session, title) {
@@ -349,7 +356,7 @@ async function createProcessTerminal(
   pluginId: string,
   terminalId: string,
   value: Record<string, unknown>
-): Promise<{ name: string }> {
+): Promise<{ name: string; processId?: number }> {
   await requirePermission(pluginId, "terminal:spawn")
   const d = requireDeps()
   const name = typeof value.name === "string" && value.name ? value.name : undefined
@@ -370,7 +377,7 @@ async function createProcessTerminal(
       : undefined
   const projectId = d.activeProjectId()
   const previous = d.activeSessionId()
-  const { sessionId, title } = await d.spawn({
+  const { sessionId, title, processId } = await d.spawn({
     pluginId,
     name,
     shell: typeof value.shellPath === "string" ? value.shellPath : "",
@@ -396,7 +403,8 @@ async function createProcessTerminal(
   if (value.hideFromUser === true) d.setActive(projectId, previous)
   applyColor(sessionId, value.color)
   watchDock()
-  return { name: name ?? title }
+  // `Terminal.processId` in the host; undefined when the host reported none.
+  return { name: name ?? title, ...(processId === undefined ? {} : { processId }) }
 }
 
 function createPtyTerminal(

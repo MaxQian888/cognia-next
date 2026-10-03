@@ -79,6 +79,11 @@ export interface SessionInfo {
   origin: SessionOrigin
   shell: string
   /**
+   * OS process id of a local PTY's child, captured at spawn. Absent for SSH,
+   * serial and extension sessions, and from hosts that predate it.
+   */
+  processId?: number
+  /**
    * Whether the PTY child is still running. Rust keeps exited sessions in its
    * store so scrollback survives the shell exiting, so a listed session is not
    * necessarily a live one. Optional: remote (WS/RTC) transports predate the

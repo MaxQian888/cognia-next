@@ -53,12 +53,16 @@ async function startTerminals(answer = () => undefined) {
 }
 
 test("a process terminal: created as asked, typed into in order, shown, hidden", async () => {
-  const { host, run, sent } = await startTerminals()
+  // The dock reports the shell's process id with the new tab.
+  const { host, run, sent } = await startTerminals((method, params) =>
+    method === "terminal:create" ? { name: params.name, processId: 4242 } : undefined
+  )
   try {
     assert.deepEqual(await run("terminalFixture.process"), {
       name: "Build",
       own: ["Build"],
       noShellIntegration: true,
+      processId: 4242,
     })
     const [create] = sent("terminal:create")
     assert.equal(create.params.extensionId, ID)
