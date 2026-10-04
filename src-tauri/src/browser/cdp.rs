@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State, Webview};
 
 use super::embedded::{eval_embed_with_result, EmbeddedBrowserLease, EMBED_LABEL};
 
@@ -87,13 +87,13 @@ fn validate_grant(grant: &NativeCdpGrant) -> Result<(), String> {
 
 #[tauri::command]
 pub fn browser_cdp_grant(
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     grants: State<'_, NativeCdpGrants>,
     owner_token: String,
     mut grant: NativeCdpGrant,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     validate_grant(&grant)?;
     grant.origin = normalized_origin(&grant.origin)?;
     grants.0.lock().insert(grant.id.clone(), grant);
@@ -102,13 +102,13 @@ pub fn browser_cdp_grant(
 
 #[tauri::command]
 pub fn browser_cdp_revoke(
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     grants: State<'_, NativeCdpGrants>,
     owner_token: String,
     grant_id: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     grants.0.lock().remove(&grant_id);
     Ok(())
 }
@@ -119,7 +119,7 @@ pub fn browser_cdp_revoke(
 #[allow(clippy::too_many_arguments)]
 pub async fn browser_cdp_execute(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     grants: State<'_, NativeCdpGrants>,
     owner_token: String,
@@ -132,7 +132,7 @@ pub async fn browser_cdp_execute(
     params: Value,
     execution_target: String,
 ) -> Result<NativeCdpResult, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     if execution_target != "local" {
         return Err("CDP is local-Tauri-only".to_string());
     }

@@ -36,7 +36,7 @@ use cognia_local_browser::extensions::{
 use cognia_local_browser::installer;
 use serde::Serialize;
 use serde_json::json;
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Webview};
 
 use crate::browser::cookie_import::require_main_window;
 
@@ -273,10 +273,10 @@ pub(crate) fn same_permissions(
 #[tauri::command]
 pub async fn browser_extension_install_webstore(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     id_or_url: String,
 ) -> Result<PendingExtensionInstall, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let prodversion = prodversion(&app)?;
     let id = parse_webstore_id(&id_or_url).ok_or_else(|| {
         ExtensionError::new(
@@ -308,9 +308,9 @@ pub async fn browser_extension_install_webstore(
 #[tauri::command]
 pub async fn browser_extension_install_crx(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
 ) -> Result<Option<PendingExtensionInstall>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     prodversion(&app)?;
     let builder = {
         use tauri_plugin_dialog::DialogExt;
@@ -359,9 +359,9 @@ pub async fn browser_extension_install_crx(
 #[tauri::command]
 pub async fn browser_extension_install_unpacked(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
 ) -> Result<Option<PendingExtensionInstall>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     prodversion(&app)?;
     let builder = {
         use tauri_plugin_dialog::DialogExt;
@@ -386,10 +386,10 @@ pub async fn browser_extension_install_unpacked(
 #[tauri::command]
 pub async fn browser_extension_install_confirm(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     pending_id: String,
 ) -> Result<BrowserExtension, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     prodversion(&app)?;
     let pending = take_pending(&pending_id).ok_or_else(pending_expired)?;
     let store = extension_store(&app)?;
@@ -425,10 +425,10 @@ pub async fn browser_extension_install_confirm(
 /// Drop a previewed install the user declined.
 #[tauri::command]
 pub async fn browser_extension_install_cancel(
-    window: WebviewWindow,
+    webview: Webview,
     pending_id: String,
 ) -> Result<(), String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     take_pending(&pending_id);
     Ok(())
 }

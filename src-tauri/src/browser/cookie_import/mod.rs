@@ -21,7 +21,7 @@ mod sinks;
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, WebviewWindow};
+use tauri::{Manager, Webview};
 
 use cognia_browser_cookies::browsers::{Browser, HostDirs, Os};
 use cognia_browser_cookies::import::{
@@ -139,8 +139,8 @@ fn summarize(injected: &[ImportedCookie], skipped_app_bound: usize) -> CookieImp
 /// Every browser cookies can be imported from, with its profiles or the
 /// reason it cannot be used. No Keychain, DPAPI or Secret Service access.
 #[tauri::command]
-pub async fn browser_cookie_sources(window: WebviewWindow) -> Result<Vec<SourceInfo>, String> {
-    require_main_window(window.label())?;
+pub async fn browser_cookie_sources(webview: Webview) -> Result<Vec<SourceInfo>, String> {
+    require_main_window(webview.label())?;
     tokio::task::spawn_blocking(|| cookie_sources(Os::current(), &HostDirs::detect()))
         .await
         .map_err(|_| "cookie source worker failed".to_string())
@@ -149,11 +149,11 @@ pub async fn browser_cookie_sources(window: WebviewWindow) -> Result<Vec<SourceI
 /// A profile's sites and cookie counts, read without decrypting any value.
 #[tauri::command]
 pub async fn browser_cookie_domains(
-    window: WebviewWindow,
+    webview: Webview,
     browser: Browser,
     profile: String,
 ) -> Result<Vec<DomainCount>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     tokio::task::spawn_blocking(move || {
         cookie_domains(browser, &profile, Os::current(), &HostDirs::detect())
     })
@@ -247,14 +247,14 @@ async fn require_presence(reason: &'static str) -> Result<(), String> {
 #[tauri::command]
 pub async fn browser_cookie_import_v2(
     app: tauri::AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     browser: Browser,
     profile: String,
     scope: CookieScope,
     sink: CookieSinkKind,
     session_id: Option<String>,
 ) -> Result<CookieImportV2Result, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     if import_needs_presence(&scope, sink) {
         require_presence(presence_reason(&scope)).await?;
     }
@@ -298,8 +298,8 @@ const FULL_DISK_ACCESS_URL: &str =
 /// Open System Settings at Full Disk Access (macOS). The URL is fixed; the
 /// renderer passes nothing.
 #[tauri::command]
-pub async fn browser_open_full_disk_access_settings(window: WebviewWindow) -> Result<(), String> {
-    require_main_window(window.label())?;
+pub async fn browser_open_full_disk_access_settings(webview: Webview) -> Result<(), String> {
+    require_main_window(webview.label())?;
     #[cfg(target_os = "macos")]
     {
         let status = tokio::process::Command::new("/usr/bin/open")

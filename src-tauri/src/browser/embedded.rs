@@ -13,7 +13,7 @@
 //! positioning is verified via `pnpm tauri dev` smoke; the API surface is
 //! compiler-verified by the `unstable` build.
 
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, Webview};
 
 use super::commands::{handle_navigation, js_string, validate_external_url};
 use super::overlay;
@@ -436,7 +436,7 @@ async fn navigate_existing_embed(
 #[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_create(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     url: String,
@@ -446,7 +446,7 @@ pub async fn browser_embed_create(
     height: f64,
 ) -> Result<String, String> {
     let parsed = validate_external_url(&url)?;
-    let window_label = invoking_window.label().to_string();
+    let window_label = invoking_webview.label().to_string();
     let newly_claimed = lease.claim(&owner_token, &window_label)?;
     let result: Result<String, String> = async {
         #[cfg(desktop)]
@@ -478,7 +478,7 @@ pub async fn browser_embed_create(
     } else if newly_claimed {
         let lease_app = app.clone();
         let lease_window_label = window_label.clone();
-        invoking_window.on_window_event(move |event| {
+        invoking_webview.window().on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 lease_app
                     .state::<EmbeddedBrowserLease>()
@@ -494,7 +494,7 @@ pub async fn browser_embed_create(
 #[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_set_bounds(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     x: f64,
@@ -502,7 +502,7 @@ pub async fn browser_embed_set_bounds(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         use tauri::Manager;
@@ -527,7 +527,7 @@ pub async fn browser_embed_set_bounds(
 #[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_set_visible(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     visible: bool,
@@ -536,7 +536,7 @@ pub async fn browser_embed_set_visible(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         use tauri::Manager;
@@ -662,12 +662,12 @@ fn unwrap_js_string(raw: String) -> String {
 #[tauri::command]
 pub async fn browser_embed_snapshot(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     args: Option<String>,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let opts = args.unwrap_or_else(|| "{}".to_string());
@@ -687,11 +687,11 @@ pub async fn browser_embed_snapshot(
 #[tauri::command]
 pub async fn browser_embed_drain_selection(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let raw = eval_embed_with_result(&app, "window.__cogniaGetSelection()").await?;
@@ -774,12 +774,12 @@ fn truncate_eval(mut raw: String) -> String {
 #[tauri::command]
 pub async fn browser_embed_evaluate(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     expr: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let wrapped = format!(
@@ -803,12 +803,12 @@ pub async fn browser_embed_evaluate(
 #[tauri::command]
 pub async fn browser_embed_has_selector(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     selector: String,
 ) -> Result<bool, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let call = format!("window.__cogniaHasSelector({})", js_string(&selector)?);
@@ -827,11 +827,11 @@ pub async fn browser_embed_has_selector(
 #[tauri::command]
 pub async fn browser_embed_network_state(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -849,14 +849,14 @@ pub async fn browser_embed_network_state(
 #[tauri::command]
 pub async fn browser_embed_act(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     reference: String,
     action: String,
     args: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let call = build_act_call(&reference, &action, &args)?;
@@ -872,11 +872,11 @@ pub async fn browser_embed_act(
 #[tauri::command]
 pub async fn browser_embed_drain_console(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -893,11 +893,11 @@ pub async fn browser_embed_drain_console(
 #[tauri::command]
 pub async fn browser_embed_drain_network(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -922,12 +922,12 @@ fn build_ref_for_call(selector: &str) -> Result<String, String> {
 #[tauri::command]
 pub async fn browser_embed_ref_for(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     selector: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let call = build_ref_for_call(&selector)?;
@@ -950,11 +950,11 @@ pub async fn browser_embed_ref_for(
 #[tauri::command]
 pub async fn browser_embed_start_record(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -975,11 +975,11 @@ pub async fn browser_embed_start_record(
 #[tauri::command]
 pub async fn browser_embed_resume_record(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -996,11 +996,11 @@ pub async fn browser_embed_resume_record(
 #[tauri::command]
 pub async fn browser_embed_stop_record(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -1018,11 +1018,11 @@ pub async fn browser_embed_stop_record(
 #[tauri::command]
 pub async fn browser_embed_drain_record(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         // `__cogniaDrainRecord` returns a JSON array *as a string*: without this
@@ -1137,11 +1137,11 @@ async fn native_document_title(app: &AppHandle) -> Result<Option<String>, String
 #[tauri::command]
 pub async fn browser_embed_back(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         embed_history_step(&app, HistoryStep::Back).await
@@ -1156,11 +1156,11 @@ pub async fn browser_embed_back(
 #[tauri::command]
 pub async fn browser_embed_forward(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         embed_history_step(&app, HistoryStep::Forward).await
@@ -1175,11 +1175,11 @@ pub async fn browser_embed_forward(
 #[tauri::command]
 pub async fn browser_embed_stop(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         eval_embed(&app, "window.stop()")
@@ -1197,12 +1197,12 @@ pub async fn browser_embed_stop(
 #[tauri::command]
 pub async fn browser_embed_has_text(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     text: String,
 ) -> Result<bool, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let call = format!("window.__cogniaHasText({})", js_string(&text)?);
@@ -1219,11 +1219,11 @@ pub async fn browser_embed_has_text(
 #[tauri::command]
 pub async fn browser_embed_get_url(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         Ok(unwrap_js_string(
@@ -1240,11 +1240,11 @@ pub async fn browser_embed_get_url(
 #[tauri::command]
 pub async fn browser_embed_get_title(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<String, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         if let Some(title) = native_document_title(&app).await? {
@@ -1267,13 +1267,13 @@ pub async fn browser_embed_get_title(
 #[tauri::command]
 pub async fn browser_embed_navigate(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     url: String,
 ) -> Result<(), String> {
     let parsed = validate_external_url(&url)?;
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let proxy = crate::proxy_config::current().map_err(|error| error.to_string())?;
@@ -1290,11 +1290,11 @@ pub async fn browser_embed_navigate(
 #[tauri::command]
 pub async fn browser_embed_reload(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         use tauri::Manager;
@@ -1323,12 +1323,12 @@ fn clamp_zoom(zoom: f64) -> f64 {
 #[tauri::command]
 pub async fn browser_embed_set_zoom(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     zoom: f64,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     let zoom = clamp_zoom(zoom);
     #[cfg(desktop)]
     {
@@ -1351,12 +1351,12 @@ pub async fn browser_embed_set_zoom(
 #[tauri::command]
 pub async fn browser_embed_set_select_mode(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     on: bool,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         eval_embed(&app, &format!("window.__cogniaSetSelectMode({})", on))
@@ -1373,11 +1373,11 @@ pub async fn browser_embed_set_select_mode(
 #[tauri::command]
 pub async fn browser_embed_clear_selection(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         eval_embed(&app, "window.__cogniaClearSelection()")
@@ -1406,12 +1406,12 @@ fn build_set_panel_labels_call(labels_json: &str) -> Result<String, String> {
 #[tauri::command]
 pub async fn browser_embed_set_panel_labels(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     labels: String,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         eval_embed(&app, &build_set_panel_labels_call(&labels)?)
@@ -1448,12 +1448,12 @@ fn parse_set_frozen_result(raw: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn browser_embed_set_frozen(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     on: bool,
 ) -> Result<(), String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         let raw = eval_embed_with_result(&app, &build_set_frozen_call(on)).await?;
@@ -1475,7 +1475,7 @@ pub async fn browser_embed_set_frozen(
 #[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_capture(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
     x: f64,
@@ -1483,7 +1483,7 @@ pub async fn browser_embed_capture(
     width: f64,
     height: f64,
 ) -> Result<Screenshot, String> {
-    lease.assert_owner(&owner_token, invoking_window.label())?;
+    lease.assert_owner(&owner_token, invoking_webview.label())?;
     #[cfg(desktop)]
     {
         use tauri::Manager;
@@ -1525,11 +1525,11 @@ pub async fn browser_embed_capture(
 #[tauri::command]
 pub async fn browser_embed_destroy(
     app: AppHandle,
-    invoking_window: WebviewWindow,
+    invoking_webview: Webview,
     lease: State<'_, EmbeddedBrowserLease>,
     owner_token: String,
 ) -> Result<(), String> {
-    let window_label = invoking_window.label();
+    let window_label = invoking_webview.label();
     lease.assert_owner(&owner_token, window_label)?;
     #[cfg(desktop)]
     {

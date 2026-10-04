@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State, Webview};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use cognia_browser_cookies::browsers::{Browser, HostDirs, Os};
@@ -302,19 +302,19 @@ impl FillResult {
 }
 
 #[tauri::command]
-pub async fn browser_password_sources(window: WebviewWindow) -> Result<Vec<SourceInfo>, String> {
-    require_main_window(window.label())?;
+pub async fn browser_password_sources(webview: Webview) -> Result<Vec<SourceInfo>, String> {
+    require_main_window(webview.label())?;
     blocking(|| Ok(password_sources(Os::current(), &HostDirs::detect()))).await
 }
 
 #[tauri::command]
 pub async fn browser_password_import_browser(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     browser: Browser,
     profile: String,
 ) -> Result<PasswordImportResult, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || {
         let keychain = host_keychain();
@@ -364,12 +364,12 @@ fn csv_source(format: Option<CsvFormat>) -> String {
 
 #[tauri::command]
 pub async fn browser_password_import_csv(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     path: String,
     format: Option<CsvFormat>,
 ) -> Result<PasswordImportResult, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || {
         let metadata = std::fs::metadata(&path).map_err(|_| "file_unreadable".to_string())?;
@@ -399,32 +399,32 @@ pub async fn browser_password_import_csv(
 
 #[tauri::command]
 pub async fn browser_password_list(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
 ) -> Result<Vec<CredentialMeta>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || inner.vault.list().map_err(code)).await
 }
 
 #[tauri::command]
 pub async fn browser_password_matches(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     url: String,
 ) -> Result<Vec<CredentialMeta>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || inner.vault.matches(&url).map_err(code)).await
 }
 
 #[tauri::command]
 pub async fn browser_password_save(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     input: SaveCredentialInput,
 ) -> Result<CredentialMeta, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || {
         let SaveCredentialInput {
@@ -456,11 +456,11 @@ pub async fn browser_password_save(
 
 #[tauri::command]
 pub async fn browser_password_update(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     input: UpdateCredentialInput,
 ) -> Result<CredentialMeta, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || {
         let UpdateCredentialInput {
@@ -487,11 +487,11 @@ pub async fn browser_password_update(
 
 #[tauri::command]
 pub async fn browser_password_delete(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     id: String,
 ) -> Result<(), String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || inner.vault.delete(&id).map_err(code)).await
 }
@@ -499,11 +499,11 @@ pub async fn browser_password_delete(
 /// Return one password after OS user presence.
 #[tauri::command]
 pub async fn browser_password_reveal(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     id: String,
 ) -> Result<RevealedPassword, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     let lookup_id = id.clone();
     // Fail fast on an unknown id before prompting.
@@ -535,11 +535,11 @@ fn clipboard_digest(text: &str) -> [u8; 32] {
 #[tauri::command]
 pub async fn browser_password_copy(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     id: String,
 ) -> Result<(), String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     let lookup_id = id.clone();
     blocking(move || {
@@ -591,10 +591,10 @@ pub async fn browser_password_copy(
 #[tauri::command]
 pub async fn browser_password_export(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
 ) -> Result<Option<ExportResult>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     require_presence("export saved passwords").await?;
     let builder = {
         use tauri_plugin_dialog::DialogExt;
@@ -667,11 +667,11 @@ fn write_private_file(
 /// What a pending save prompt is about, without its password.
 #[tauri::command]
 pub async fn browser_password_pending_get(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     pending_id: String,
 ) -> Result<Option<PendingSaveInfo>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let inner = state.inner.clone();
     blocking(move || {
         let (origin, username, password) = {
@@ -701,12 +701,12 @@ pub async fn browser_password_pending_get(
 
 #[tauri::command]
 pub async fn browser_password_pending_resolve(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     pending_id: String,
     action: PendingAction,
 ) -> Result<Option<CredentialMeta>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let Some(pending) = state.take(&pending_id) else {
         return Err("pending_not_found".into());
     };
@@ -862,11 +862,11 @@ fn fill_outcome(value: &serde_json::Value) -> Result<(), &'static str> {
 #[tauri::command]
 pub async fn browser_credential_fill(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, PasswordVaultState>,
     request: FillRequest,
 ) -> Result<FillResult, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let mut resolved_page_id: Option<String> = None;
     let page_url = match request.target {
         FillTarget::Embedded => app

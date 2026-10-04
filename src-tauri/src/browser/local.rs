@@ -525,9 +525,9 @@ fn prune_staged_uploads(uploads: &std::path::Path, ttl: std::time::Duration) {
 #[tauri::command]
 pub async fn browser_local_stage_upload(
     app: AppHandle,
-    window: tauri::WebviewWindow,
+    webview: tauri::Webview,
 ) -> Result<Vec<String>, String> {
-    crate::browser::cookie_import::require_main_window(window.label())?;
+    crate::browser::cookie_import::require_main_window(webview.label())?;
     let builder = {
         use tauri_plugin_dialog::DialogExt;
         app.dialog().file()

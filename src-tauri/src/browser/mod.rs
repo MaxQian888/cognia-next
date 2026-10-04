@@ -25,3 +25,35 @@ pub mod local;
 pub mod local_content;
 pub mod overlay;
 pub mod passwords;
+
+/// Every browser command is invoked from the main window, which hosts the
+/// embedded preview as a child webview. Tauri only resolves a command's
+/// window-typed argument while every webview in the window shares the window's
+/// label, so once the preview exists such a command fails with "current
+/// webview is not a WebviewWindow". Commands take the calling `Webview` instead.
+#[cfg(test)]
+mod tests {
+    const WINDOW_TYPED_ARGUMENT: &str = concat!("Webview", "Window");
+
+    #[test]
+    fn browser_commands_take_the_calling_webview_not_its_window() {
+        let sources = [
+            ("cdp.rs", include_str!("cdp.rs")),
+            ("commands.rs", include_str!("commands.rs")),
+            ("cookie_import/mod.rs", include_str!("cookie_import/mod.rs")),
+            ("downloads.rs", include_str!("downloads.rs")),
+            ("embedded.rs", include_str!("embedded.rs")),
+            ("extensions.rs", include_str!("extensions.rs")),
+            ("local.rs", include_str!("local.rs")),
+            ("local_content.rs", include_str!("local_content.rs")),
+            ("passwords.rs", include_str!("passwords.rs")),
+        ];
+        for (file, source) in sources {
+            assert!(
+                !source.contains(WINDOW_TYPED_ARGUMENT),
+                "{file} names the window-typed command argument; take `tauri::Webview` so the \
+                 command still resolves while the embedded preview is a child of the main window"
+            );
+        }
+    }
+}

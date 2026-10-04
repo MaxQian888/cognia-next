@@ -37,7 +37,7 @@ use cognia_local_browser::local_files::{
     filename_from_url, sanitize_filename, unique_destination_with,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, Webview};
 
 use crate::browser::cookie_import::require_main_window;
 
@@ -500,9 +500,9 @@ fn dir_info<R: Runtime>(app: &AppHandle<R>) -> DownloadsDirInfo {
 #[tauri::command]
 pub async fn browser_downloads_dir_get(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
 ) -> Result<DownloadsDirInfo, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     tauri::async_runtime::spawn_blocking(move || dir_info(&app))
         .await
         .map_err(|error| error.to_string())
@@ -514,10 +514,10 @@ pub async fn browser_downloads_dir_get(
 #[tauri::command]
 pub async fn browser_downloads_dir_choose(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     ask_where_to_save: bool,
 ) -> Result<Option<DownloadsDirInfo>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let start_dir = {
         let app = app.clone();
         tauri::async_runtime::spawn_blocking(move || current_downloads_dir(&app))
@@ -553,9 +553,9 @@ pub async fn browser_downloads_dir_choose(
 #[tauri::command]
 pub async fn browser_downloads_dir_reset(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
 ) -> Result<DownloadsDirInfo, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     tauri::async_runtime::spawn_blocking(move || {
         let current = load_settings(&app);
         save_settings(
@@ -576,10 +576,10 @@ pub async fn browser_downloads_dir_reset(
 #[tauri::command]
 pub async fn browser_downloads_dir_set(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     ask_where_to_save: bool,
 ) -> Result<DownloadsDirInfo, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     tauri::async_runtime::spawn_blocking(move || {
         let current = load_settings(&app);
         save_settings(
@@ -632,11 +632,11 @@ pub(crate) fn check_readable(metadata: &std::fs::Metadata) -> Result<(), String>
 /// the user can change. Refuses files over 64 MB (`download_too_large`).
 #[tauri::command]
 pub async fn browser_download_read(
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, BrowserDownloadsState>,
     path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let path = authorize_download_path_in(&state, &path)?;
     let metadata = tokio::fs::metadata(&path)
         .await
@@ -655,12 +655,12 @@ pub async fn browser_download_read(
 #[tauri::command]
 pub async fn browser_download_reveal(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, BrowserDownloadsState>,
     path: String,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let path = authorize_download_path_in(&state, &path)?;
     app.opener()
         .reveal_item_in_dir(&path)
@@ -673,12 +673,12 @@ pub async fn browser_download_reveal(
 #[tauri::command]
 pub async fn browser_download_open(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, BrowserDownloadsState>,
     path: String,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     let path = authorize_download_path_in(&state, &path)?;
     if !path.is_file() || !is_safe_to_open(&path) {
         return Err("download_open_blocked_executable".to_string());
@@ -715,12 +715,12 @@ fn download_save_payload(session_id: &str, download_id: &str, target: &Path) -> 
 #[tauri::command]
 pub async fn browser_download_save_as(
     app: AppHandle,
-    window: WebviewWindow,
+    webview: Webview,
     state: State<'_, BrowserDownloadsState>,
     session_id: String,
     download_id: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    require_main_window(window.label())?;
+    require_main_window(webview.label())?;
     if session_id.trim().is_empty() || download_id.trim().is_empty() {
         return Err("download_not_found".to_string());
     }
