@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
   ...storybook.configs["flat/recommended"],
   globalIgnores([
     ".next/**",
+    ".next-mobile-dev/**",
     "out/**",
     "build/**",
     // Storybook static build output (`pnpm build-storybook`) — minified vendor
@@ -46,6 +47,10 @@ const eslintConfig = defineConfig([
     "plugins/**/types/**",
     "plugins/**/dist/**",
     "plugins/**/target/**",
+    // Untouched upstream snapshot (plugins/pi-latex-workbench/VENDOR.md) with
+    // its own strict tsconfig; verified byte-for-byte by
+    // `pnpm plugin:pi-latex-workbench:check`, never edited or linted here.
+    "plugins/pi-latex-workbench/vendor/**",
     "next-env.d.ts",
     "docs/.next/**",
     "docs/.source/**",

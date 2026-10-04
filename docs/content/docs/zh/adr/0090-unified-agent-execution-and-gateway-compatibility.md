@@ -16,31 +16,15 @@ Cognia 当前实际存在三条 Agent 运行轨：
 
 1. Node sidecar 内的 Claude Agent SDK 运行轨；
 2. 同一 sidecar 内、提供商中立的 AI SDK 工具循环运行轨；
-3. 由单个 `ExternalAgentManager` 管理的外部 Agent 运行轨，其下包含 ACP、Codex
-   app-server、OpenCode 与 A2A 协议适配器。
+3. 由单个 `ExternalAgentManager` 管理的外部 Agent 运行轨，其下包含 ACP、Codex app-server、OpenCode 与 A2A 协议适配器。
 
-Chat、插件、Workflow 和 Agent Team 是调用方或编排层。Gateway 与直连是路由选择。原生
-subagent 与 Cognia 编排子 Agent 是委派方式。桌面、headless 和远程是执行宿主。这些维度
-都不会形成新的运行轨。`executeAgent` 的 text channel 是无工具的 completion 降级路径，
-不是第四条 Agent 运行轨。
+Chat、插件、Workflow 和 Agent Team 是调用方或编排层。Gateway 与直连是路由选择。原生 subagent 与 Cognia 编排子 Agent 是委派方式。桌面、headless 和远程是执行宿主。这些维度都不会形成新的运行轨。`executeAgent` 的 text channel 是无工具的 completion 降级路径，不是第四条 Agent 运行轨。
 
-当前实现没有清楚表达这个事实。sidecar 只有在 provider id 字面值为 `anthropic` 时才选择
-Claude Agent SDK，否则选择 AI SDK。`claude-host.mjs` 同时承载两个引擎，却暴露
-Claude 专属命令。Agent 执行策略散落在各调用方配置中。部分调用方在桌面 sidecar 不可用时
-会静默降级为文本 completion。内置 Gateway 已提供 Anthropic `/v1/messages` 接口与跨协议
-转换，但目前只由 Tauri 应用启动，依赖 renderer 生成路由快照，也没有完整实现持续演进的
-Claude Code Gateway 契约。
+当前实现没有清楚表达这个事实。sidecar 只有在 provider id 字面值为 `anthropic` 时才选择 Claude Agent SDK，否则选择 AI SDK。`claude-host.mjs` 同时承载两个引擎，却暴露 Claude 专属命令。Agent 执行策略散落在各调用方配置中。部分调用方在桌面 sidecar 不可用时会静默降级为文本 completion。内置 Gateway 已提供 Anthropic `/v1/messages` 接口与跨协议转换，但目前只由 Tauri 应用启动，依赖 renderer 生成路由快照，也没有完整实现持续演进的 Claude Code Gateway 契约。
 
-许多提供商都提供 Anthropic wire 端点，GLM 和 Kimi 只是例子，不是需要特殊处理的名称。
-协议相似不代表 Claude Agent SDK 兼容：流式细节、工具调用分片、错误结构、beta header、
-session 行为、prompt caching、thinking block 与未来 Claude Code 字段都可能不同。
-Anthropic 也明确不支持通过 Gateway 把 Claude Code 路由到非 Claude 模型。因此 Cognia
-必须建立自己的版本化兼容契约，不能把第三方端点描述成官方支持的 Claude 部署。
+许多提供商都提供 Anthropic wire 端点，GLM 和 Kimi 只是例子，不是需要特殊处理的名称。协议相似不代表 Claude Agent SDK 兼容：流式细节、工具调用分片、错误结构、beta header、session 行为、prompt caching、thinking block 与未来 Claude Code 字段都可能不同。Anthropic 也明确不支持通过 Gateway 把 Claude Code 路由到非 Claude 模型。因此 Cognia 必须建立自己的版本化兼容契约，不能把第三方端点描述成官方支持的 Claude 部署。
 
-Headless Cognia 已有 `HeadlessSidecarHost` 和外部进程控制面，但没有实例化内置 LLM
-Gateway。Agent Team 已有持久化 Workflow 编排、权限级联、预算、恢复和委派控制。新方案
-必须深化这些模块，不能再实现一套 headless Gateway、Team 引擎、权限总线、预算治理器或
-session 格式。
+Headless Cognia 已有 `HeadlessSidecarHost` 和外部进程控制面，但没有实例化内置 LLM Gateway。Agent Team 已有持久化 Workflow 编排、权限级联、预算、恢复和委派控制。新方案必须深化这些模块，不能再实现一套 headless Gateway、Team 引擎、权限总线、预算治理器或 session 格式。
 
 ## 决策
 
@@ -77,9 +61,7 @@ Agent SDK 工具循环
 - 通用 Node `agent-host.mjs`，包含 Claude Agent SDK 与 AI SDK 适配器；
 - 现有外部 Agent manager 及其进程/传输边界。
 
-外部 Agent 会接入统一逻辑服务，但不会被强行塞进 Node sidecar。`agent_send` 与
-`agent://message` 成为规范命令和事件名；迁移期间继续保留 `claude_*` 命令和
-`claude://message` 兼容别名。
+外部 Agent 会接入统一逻辑服务，但不会被强行塞进 Node sidecar。`agent_send` 与 `agent://message` 成为规范命令和事件名；迁移期间继续保留 `claude_*` 命令和 `claude://message` 兼容别名。
 
 ### 2. 每个 Agent session 都先解析并冻结
 
@@ -93,18 +75,11 @@ Agent SDK 工具循环
 - 显式 fallback policy；
 - 适用时的 Team 委派和深度限制。
 
-唯一的 `resolveAgentExecutionSpec()` 先求硬约束交集，再应用偏好，为一个 session 产出
-不可变的 `ResolvedAgentExecutionSpec`。该 spec 固定运行时适配器、deployment、模型绑定、
-路由、宿主、兼容证据、能力投影、credential lease 引用和 execution fingerprint。session
-运行中不得静默切换路由或宿主。
+唯一的 `resolveAgentExecutionSpec()` 先求硬约束交集，再应用偏好，为一个 session 产出不可变的 `ResolvedAgentExecutionSpec`。该 spec 固定运行时适配器、deployment、模型绑定、路由、宿主、兼容证据、能力投影、credential lease 引用和 execution fingerprint。session 运行中不得静默切换路由或宿主。
 
-桌面默认 `gateway-preferred`；headless 与受管部署默认 `gateway-required`，管理员可以锁定。
-preferred 只允许在 Gateway 尚未联系 upstream 前发生基础设施故障时回退直连。策略拒绝、
-配额拒绝、upstream 错误或已经产生任何响应字节，都禁止直连重放。
+桌面默认 `gateway-preferred`；headless 与受管部署默认 `gateway-required`，管理员可以锁定。preferred 只允许在 Gateway 尚未联系 upstream 前发生基础设施故障时回退直连。策略拒绝、配额拒绝、upstream 错误或已经产生任何响应字节，都禁止直连重放。
 
-`auto` 只有在执行路径属于原生、厂商认证或 Cognia 验证时才选择 Claude Agent SDK。普通
-兼容端点仍走 AI SDK。用户可以显式选择实验性 Claude Agent SDK 路径，但 UI 与 trace 必须
-明确标识为 experimental。
+`auto` 只有在执行路径属于原生、厂商认证或 Cognia 验证时才选择 Claude Agent SDK。普通兼容端点仍走 AI SDK。用户可以显式选择实验性 Claude Agent SDK 路径，但 UI 与 trace 必须明确标识为 experimental。
 
 ### 3. 拆分 provider、deployment、transport 与 compatibility
 
@@ -112,68 +87,42 @@ preferred 只允许在 Gateway 尚未联系 upstream 前发生基础设施故障
 
 - `ProviderProfile` 表示厂商或账户；
 - `DeploymentProfile` 表示端点、协议、区域、credential 引用和模型清单；
-- `TransportProfile` 表示 wire 行为，包括协议、base URL、认证方式、允许的静态/语义
-  header 和模型绑定；
+- `TransportProfile` 表示 wire 行为，包括协议、base URL、认证方式、允许的静态/语义 header 和模型绑定；
 - `AgentRuntimeCompatibility` 表示某一具体执行路径的兼容证据。
 
-这会取代 `zhipu` 加 `glm-anthropic`、`moonshot` 加 `kimi-anthropic` 等重载 provider id
-的表达方式。现有 id 在迁移期保留为 legacy deployment alias。任何运行时或 Gateway
-分支都不得硬编码 GLM、Kimi、MiniMax、OpenRouter 或其他提供商名称。
+这会取代 `zhipu` 加 `glm-anthropic`、`moonshot` 加 `kimi-anthropic` 等重载 provider id 的表达方式。现有 id 在迁移期保留为 legacy deployment alias。任何运行时或 Gateway 分支都不得硬编码 GLM、Kimi、MiniMax、OpenRouter 或其他提供商名称。
 
-Transport profile 采用数据驱动。支持 `x-api-key`、bearer 和白名单 custom header 等认证
-形式。profile 不得提供保留 header、hop-by-hop header、浏览器转发 header 或内部
-`x-cognia-*` header。secret 始终保存在平台 Secret Store 中，只通过 id 引用；不得进入
-resolved spec、事件日志、导出或 trace。
+Transport profile 采用数据驱动。支持 `x-api-key`、bearer 和白名单 custom header 等认证形式。profile 不得提供保留 header、hop-by-hop header、浏览器转发 header 或内部 `x-cognia-*` header。secret 始终保存在平台 Secret Store 中，只通过 id 引用；不得进入 resolved spec、事件日志、导出或 trace。
 
-桌面端通过现有 settings/Dexie 投影持久化非敏感 profile，通过 OS keyring 保存 secret。
-Headless 通过现有 SQLite/AppStore 边界和加密 secret store 保存。CLI、admin/service RPC
-和声明式导入负责管理 headless profile。环境变量、mounted secret 或 stdin 只用于 bootstrap，
-不能成为长期事实来源。
+桌面端通过现有 settings/Dexie 投影持久化非敏感 profile，通过 OS keyring 保存 secret。Headless 通过现有 SQLite/AppStore 边界和加密 secret store 保存。CLI、admin/service RPC 和声明式导入负责管理 headless profile。环境变量、mounted secret 或 stdin 只用于 bootstrap，不能成为长期事实来源。
 
 ### 4. 兼容性是矩阵，也是认证产物
 
-`anthropic` 协议、`anthropic-native` 与 Claude Agent SDK 兼容性彼此正交。兼容证据必须
-绑定以下完整路径：
+`anthropic` 协议、`anthropic-native` 与 Claude Agent SDK 兼容性彼此正交。兼容证据必须绑定以下完整路径：
 
 ```text
 runtime + ingress protocol + route mode + translation mode + deployment + model
         + Agent SDK version + Claude Code version + Gateway version + suite version
 ```
 
-证据等级为 `native`、`vendor-certified`、`cognia-verified`、`experimental` 和
-`unsupported`。能力等级为 `core`、`extended`、`full`，并通过明确字段描述 streaming、
-普通/并行工具、分片 JSON、tool result/error、MCP、权限中断/恢复、多轮与 session resume、
-prompt caching、thinking、context management、图片、beta、限流、upstream error 和
-stream interruption。
+证据等级为 `native`、`vendor-certified`、`cognia-verified`、`experimental` 和 `unsupported`。能力等级为 `core`、`extended`、`full`，并通过明确字段描述 streaming、普通/并行工具、分片 JSON、tool result/error、MCP、权限中断/恢复、多轮与 session resume、prompt caching、thinking、context management、图片、beta、限流、upstream error 和 stream interruption。
 
-有效能力集合是 model metadata、runtime、Gateway/transport、host/platform、兼容证据、
-权限和可用资源的交集。硬要求未知即视为不支持。任务声明 `requires` 与 `prefers`；不满足
-硬要求时必须在消耗模型 turn 前失败。可选但不支持的能力在请求前关闭，并记录到 trace。
+有效能力集合是 model metadata、runtime、Gateway/transport、host/platform、兼容证据、权限和可用资源的交集。硬要求未知即视为不支持。任务声明 `requires` 与 `prefers`；不满足硬要求时必须在消耗模型 turn 前失败。可选但不支持的能力在请求前关闭，并记录到 trace。
 
-Connectivity probe 只能证明端点可调用，不能升级兼容等级。显式、可能计费的 Agent Core
-smoke test 可以生成本地证据。官方/CI certification 运行完整套件并产出签名 manifest。
-跨协议 Claude Agent SDK 路径只有在包含 Gateway 转换的完整执行路径通过认证后，才允许被
-`auto` 选择。
+Connectivity probe 只能证明端点可调用，不能升级兼容等级。显式、可能计费的 Agent Core smoke test 可以生成本地证据。官方/CI certification 运行完整套件并产出签名 manifest。跨协议 Claude Agent SDK 路径只有在包含 Gateway 转换的完整执行路径通过认证后，才允许被 `auto` 选择。
 
-内置 `@anthropic-ai/claude-agent-sdk` 必须精确锁版本。Agent SDK、内嵌 Claude Code、
-Gateway 或测试套件版本任一变化，匹配的兼容证据都变为 stale，并要求重新认证。上一份已
-认证产物需要保留用于回滚。
+内置 `@anthropic-ai/claude-agent-sdk` 必须精确锁版本。Agent SDK、内嵌 Claude Code、Gateway 或测试套件版本任一变化，匹配的兼容证据都变为 stale，并要求重新认证。上一份已认证产物需要保留用于回滚。
 
 ### 5. Gateway 是首选的安全与路由边界
 
-现有 `cognia-gateway` crate 被深化为 host-neutral 服务。`GatewayHost` 边界提供事件、设置、
-secret 解析和持久化：
+现有 `cognia-gateway` crate 被深化为 host-neutral 服务。`GatewayHost` 边界提供事件、设置、secret 解析和持久化：
 
 - Tauri 使用 Tauri event、settings 与 keyring；
 - headless 使用 EventBus、SQLite/AppStore 与加密 secret store。
 
-`GatewayState` 纳入 `HeadlessServices`，由 `cognia-server` 启动。桌面和 headless 使用同一份
-provider-profile 投影与同一套 Gateway 实现。没有 renderer 时，Gateway 仍可使用最后一份
-有效快照继续服务；路由事实来源不再依赖窗口保持打开。
+`GatewayState` 纳入 `HeadlessServices`，由 `cognia-server` 启动。桌面和 headless 使用同一份 provider-profile 投影与同一套 Gateway 实现。没有 renderer 时，Gateway 仍可使用最后一份有效快照继续服务；路由事实来源不再依赖窗口保持打开。
 
-Agent session 使用显式、短期有效的 `GatewayRouteTicket`。Agent Host 解析 execution spec 后，
-请求 Gateway 签发 ticket；其 secret 作为本地 Gateway credential 提供给 Claude Code。
-ticket 绑定：
+Agent session 使用显式、短期有效的 `GatewayRouteTicket`。Agent Host 解析 execution spec 后，请求 Gateway 签发 ticket；其 secret 作为本地 Gateway credential 提供给 Claude Code。ticket 绑定：
 
 - route pin id 与 execution fingerprint；
 - 冻结且有序的 deployment/model candidate；
@@ -181,102 +130,54 @@ ticket 绑定：
 - session lineage、route policy 与过期时间；
 - credential-affinity 与 failover 限制。
 
-有 ticket 的请求不再经过实时 alias 重路由。Gateway 只能在 ticket 冻结的 candidate 列表中，
-且只在产生响应字节前切换。原生 subagent 继承父 ticket；Cognia 编排的子 session 独立获得
-ticket。ticket secret 不持久化；恢复时只能为同一冻结 spec 重新签发，否则暂停或失败。
+有 ticket 的请求不再经过实时 alias 重路由。Gateway 只能在 ticket 冻结的 candidate 列表中，且只在产生响应字节前切换。原生 subagent 继承父 ticket；Cognia 编排的子 session 独立获得 ticket。ticket secret 不持久化；恢复时只能为同一冻结 spec 重新签发，否则暂停或失败。
 
-模型角色 `primary`、`fast`、`powerful` 把 Claude 入站 selector（如 `sonnet`、`haiku`、
-`opus`）映射到具体 deployment model。一个 deployment 可以把全部角色映射到同一模型。
-绑定按 session 冻结，未映射 selector 必须失败。普通 Chat 与 AI SDK 流量仍可继续使用动态
-全局 alias。
+模型角色 `primary`、`fast`、`powerful` 把 Claude 入站 selector（如 `sonnet`、`haiku`、`opus`）映射到具体 deployment model。一个 deployment 可以把全部角色映射到同一模型。绑定按 session 冻结，未映射 selector 必须失败。普通 Chat 与 AI SDK 流量仍可继续使用动态全局 alias。
 
-Agent credential affinity 默认 `sticky-with-failover`；completion 流量可以保持 per-request。
-Agent session 持有一个 credential lease，仅在允许的瞬态故障时切换到另一个已预授权
-credential，之后继续保持粘滞。401/403 后默认禁止账户 failover，除非 profile 明确允许。
-管理员撤销凭证时，相关 ticket 和 lease 一并失效。
+Agent credential affinity 默认 `sticky-with-failover`；completion 流量可以保持 per-request。Agent session 持有一个 credential lease，仅在允许的瞬态故障时切换到另一个已预授权 credential，之后继续保持粘滞。401/403 后默认禁止账户 failover，除非 profile 明确允许。管理员撤销凭证时，相关 ticket 和 lease 一并失效。
 
-同协议流量下，Gateway 是“带安全中介的语义透明层”：在替换认证并剥离 hop-by-hop、浏览器
-和内部 header 的同时，保留安全的 Anthropic version/beta/semantic header、兼容响应 header、
-SSE 字节顺序、状态码与 upstream error body。跨协议流量经过规范 IR，并报告所有语义损失。
-Gateway 自身生成的错误只用于 Gateway 拒绝、candidate 耗尽与转换失败。
+同协议流量下，Gateway 是“带安全中介的语义透明层”：在替换认证并剥离 hop-by-hop、浏览器和内部 header 的同时，保留安全的 Anthropic version/beta/semantic header、兼容响应 header、SSE 字节顺序、状态码与 upstream error body。跨协议流量经过规范 IR，并报告所有语义损失。Gateway 自身生成的错误只用于 Gateway 拒绝、candidate 耗尽与转换失败。
 
 ### 6. Agent Host 通用化并隔离环境
 
-`claude-host.mjs` 演进为 `agent-host.mjs`，桌面和 headless 使用同一 host supervisor。两个
-内置 runtime adapter 接受相同 resolved spec，并输出相同规范事件。
+`claude-host.mjs` 演进为 `agent-host.mjs`，桌面和 headless 使用同一 host supervisor。两个内置 runtime adapter 接受相同 resolved spec，并输出相同规范事件。
 
-每次 query 的环境先从 subprocess 必需的白名单基础环境构建，再叠加当前 session 的解析结果。
-在应用路由前，必须显式删除继承的 provider route 与认证变量。当前
-`{ ...process.env, ...sendOptions.env }` 会造成凭证跨 session 泄漏，不能继续原样使用；但
-也不能只传 `sendOptions.env`，因为 Agent SDK 0.3.183 会把它视为 Claude Code subprocess 的
-完整环境。
+每次 query 的环境先从 subprocess 必需的白名单基础环境构建，再叠加当前 session 的解析结果。在应用路由前，必须显式删除继承的 provider route 与认证变量。当前 `{ ...process.env, ...sendOptions.env }` 会造成凭证跨 session 泄漏，不能继续原样使用；但也不能只传 `sendOptions.env`，因为 Agent SDK 0.3.183 会把它视为 Claude Code subprocess 的完整环境。
 
-Gateway 路由只注入本地 Gateway endpoint 和 ticket，upstream secret 留在 Gateway。直连路由
-在 execution host 上临时解析 credential 引用。原生 subagent 继承父环境和 ticket；编排子
-Agent 独立解析 session。
+Gateway 路由只注入本地 Gateway endpoint 和 ticket，upstream secret 留在 Gateway。直连路由在 execution host 上临时解析 credential 引用。原生 subagent 继承父环境和 ticket；编排子 Agent 独立解析 session。
 
 ### 7. 区分原生 subagent 与异构 Team
 
-Claude Agent SDK 原生 `AgentDefinition` 可以改变模型、工具和 prompt，但不能提供独立
-provider、base URL、credential、route、runtime 或 host。因此：
+Claude Agent SDK 原生 `AgentDefinition` 可以改变模型、工具和 prompt，但不能提供独立 provider、base URL、credential、route、runtime 或 host。因此：
 
 - 相同 runtime、相同 Gateway ticket、仅变更模型角色时，优先使用原生 subagent；
-- provider/deployment、credential、route、runtime、host 或硬能力不同时，Cognia 创建编排
-  子 Agent session。
+- provider/deployment、credential、route、runtime、host 或硬能力不同时，Cognia 创建编排子 Agent session。
 
-Team member 通过 `inherit`、固定 profile 或批准的 pool 选择执行目标。coordinator 只选择
-candidate id，不能接触原始 URL、header 或 key。优先级依次为 member pinned/pool、Team run
-policy、Team default、应用默认；只有显式 administrator force-all policy 可以覆盖。
+Team member 通过 `inherit`、固定 profile 或批准的 pool 选择执行目标。coordinator 只选择 candidate id，不能接触原始 URL、header 或 key。优先级依次为 member pinned/pool、Team run policy、Team default、应用默认；只有显式 administrator force-all policy 可以覆盖。
 
-嵌套 Team 复用现有 `delegation-orchestrator`。父子各自维护独立持久 board，只交换可序列化
-`HandoffEnvelope`。`maxTeamDelegationDepth` 可配置，默认 2：root 深度 0、child 深度 1、
-grandchild 深度 2，后者不得继续委派。该限制与原生 `subagentDepth` 分开。
+嵌套 Team 复用现有 `delegation-orchestrator`。父子各自维护独立持久 board，只交换可序列化 `HandoffEnvelope`。`maxTeamDelegationDepth` 可配置，默认 2：root 深度 0、child 深度 1、grandchild 深度 2，后者不得继续委派。该限制与原生 `subagentDepth` 分开。
 
-Team lead 默认与 workspace owner 同宿主。Headless Cognia 本身是本地 execution host。原生
-subagent 永远保持同宿主。编排子 Agent 只有在 handoff 可序列化、workspace/resource 使用稳定
-引用、目标满足 runtime/tool/sandbox/credential policy，且 ADR-0082 允许时才能跨宿主。
-credential 始终留在 host 本地。存在副作用的工作在恢复时不得静默迁移。
+Team lead 默认与 workspace owner 同宿主。Headless Cognia 本身是本地 execution host。原生 subagent 永远保持同宿主。编排子 Agent 只有在 handoff 可序列化、workspace/resource 使用稳定引用、目标满足 runtime/tool/sandbox/credential policy，且 ADR-0082 允许时才能跨宿主。credential 始终留在 host 本地。存在副作用的工作在恢复时不得静默迁移。
 
 ### 8. 复用现有权限、预算、重试与恢复权威
 
-现有 permission cascade 保持权威。有效权限是 Team policy、parent ceiling、child request
-与 runtime capability 的交集。未知权限 fail closed。Agent Host 是工具权限权威，Gateway
-不是。Headless 没有交互审批人时，除非预声明 policy 已授权，否则必须拒绝。
+现有 permission cascade 保持权威。有效权限是 Team policy、parent ceiling、child request 与 runtime capability 的交集。未知权限 fail closed。Agent Host 是工具权限权威，Gateway 不是。Headless 没有交互审批人时，除非预声明 policy 已授权，否则必须拒绝。
 
-现有 Team budget guard 被提取/复用为 Team/run 唯一 `RunBudgetGovernor`，统一限制 identity
-层级中的总 execution、并发、fan-out 与花费。重复的 plugin budget 计数需要迁移或删除。
-Gateway tenant/API-key quota 与 usage 继续作为 transport 层限制。所有失败 attempt 都计入
-预算。
+现有 Team budget guard 被提取/复用为 Team/run 唯一 `RunBudgetGovernor`，统一限制 identity 层级中的总 execution、并发、fan-out 与花费。重复的 plugin budget 计数需要迁移或删除。Gateway tenant/API-key quota 与 usage 继续作为 transport 层限制。所有失败 attempt 都计入预算。
 
-禁止 external Agent 静默回退到内置 runtime。Gateway 只负责单次请求内、响应前的 candidate
-failover。runtime adapter 负责自身 handshake 与 transport 恢复。Workflow/Team 负责任务
-retry 与 reassignment。副作用未知或不可逆时禁止自动 replay。
+禁止 external Agent 静默回退到内置 runtime。Gateway 只负责单次请求内、响应前的 candidate failover。runtime adapter 负责自身 handshake 与 transport 恢复。Workflow/Team 负责任务 retry 与 reassignment。副作用未知或不可逆时禁止自动 replay。
 
-恢复复用现有 Workflow event log、checkpoint、lease 与 idempotency。Zustand 只是 UI 投影。
-桌面 Dexie 与 headless persistence 实现同一 port。approval 不得在恢复时被推断为已批准。
+恢复复用现有 Workflow event log、checkpoint、lease 与 idempotency。Zustand 只是 UI 投影。桌面 Dexie 与 headless persistence 实现同一 port。approval 不得在恢复时被推断为已批准。
 
-恢复输入可以来自 Cognia 规范日志、runtime artifact、checkpoint 和导入 session。Cognia
-深化现有 session-import registry，通过规范 hub-and-spoke codec 转换，而不是实现 N×N
-converter。转换保真度为 `native-exact`、`structured`、`contextual`、`summary-only` 或
-`unsupported`，并附显式 loss report。runtime artifact 可以重建缺失/损坏的 canonical store；
-当目标 runtime 支持时，canonical history 可以物化为新 runtime session。若 SDK 没有公开
-导入 API，Cognia 不会伪造私有 Claude JSONL。
+恢复输入可以来自 Cognia 规范日志、runtime artifact、checkpoint 和导入 session。Cognia 深化现有 session-import registry，通过规范 hub-and-spoke codec 转换，而不是实现 N×N converter。转换保真度为 `native-exact`、`structured`、`contextual`、`summary-only` 或 `unsupported`，并附显式 loss report。runtime artifact 可以重建缺失/损坏的 canonical store；当目标 runtime 支持时，canonical history 可以物化为新 runtime session。若 SDK 没有公开导入 API，Cognia 不会伪造私有 Claude JSONL。
 
-`RecoveryPlanner` 只有在某候选方案可证明严格占优时才自动执行。tool 或副作用冲突一律暂停，
-禁止 last-modified-wins。Headless 按 policy 进入 `recovery_required` 或失败。
+`RecoveryPlanner` 只有在某候选方案可证明严格占优时才自动执行。tool 或副作用冲突一律暂停，禁止 last-modified-wins。Headless 按 policy 进入 `recovery_required` 或失败。
 
 ### 9. 统一 event envelope、handle 与 identity 层级
 
-规范事件契约深化现有 `CaptureStreamEvent`，不创建平行事件流。每个事件 envelope 包含
-event id、sequence、session、run、turn、attempt、parent、host、runtime 与 timestamp。
-事件类型覆盖 lifecycle、message、thinking、tool、permission、subagent、usage、compact、
-checkpoint、warning 与 failure。Claude Agent SDK、AI SDK 和 external adapter 都映射到该
-事件。原始 runtime event 只作为诊断附件。
+规范事件契约深化现有 `CaptureStreamEvent`，不创建平行事件流。每个事件 envelope 包含 event id、sequence、session、run、turn、attempt、parent、host、runtime 与 timestamp。事件类型覆盖 lifecycle、message、thinking、tool、permission、subagent、usage、compact、checkpoint、warning 与 failure。Claude Agent SDK、AI SDK 和 external adapter 都映射到该事件。原始 runtime event 只作为诊断附件。
 
-Workflow 以 at-least-once 方式持久化 envelope，consumer 必须幂等。`AgentExecutionHandle`
-暴露 id、resolved spec、events、send、cancel、interrupt、`resolvePermission`，以及受能力
-约束的 `steer`、`setModel`、`setPermissionMode` 与 checkpoint。command 带 idempotency id。
-`setModel` 只能选择冻结 ticket 中的 binding；不支持的操作返回强类型 capability error。
+Workflow 以 at-least-once 方式持久化 envelope，consumer 必须幂等。`AgentExecutionHandle` 暴露 id、resolved spec、events、send、cancel、interrupt、`resolvePermission`，以及受能力约束的 `steer`、`setModel`、`setPermissionMode` 与 checkpoint。command 带 idempotency id。`setModel` 只能选择冻结 ticket 中的 binding；不支持的操作返回强类型 capability error。
 
 Identity 层级为：
 
@@ -284,15 +185,11 @@ Identity 层级为：
 session -> run -> turn -> attempt -> providerAttempt
 ```
 
-Gateway 在响应前切换 candidate 只产生新的 `providerAttempt`。host resume 为同一 run/turn
-创建新 attempt。Team reassignment 创建新 child run。原生 subagent 也是规范 child run，
-其 SDK id 只保存为 `runtimeBinding`。
+Gateway 在响应前切换 candidate 只产生新的 `providerAttempt`。host resume 为同一 run/turn 创建新 attempt。Team reassignment 创建新 child run。原生 subagent 也是规范 child run，其 SDK id 只保存为 `runtimeBinding`。
 
 ### 10. Completion fallback 必须显式配置
 
-Agent 请求的硬能力无法满足时默认 fail closed。`toolsEnabled: false` 表示主动选择 completion。
-只有显式 `fallbackPolicy: "completion"` 才允许降级，结果必须携带 `degradedReason`。
-Headless 与受管环境默认禁止 completion fallback。
+Agent 请求的硬能力无法满足时默认 fail closed。`toolsEnabled: false` 表示主动选择 completion。只有显式 `fallbackPolicy: "completion"` 才允许降级，结果必须携带 `degradedReason`。Headless 与受管环境默认禁止 completion fallback。
 
 旧配置迁移规则如下：
 
@@ -303,13 +200,11 @@ Headless 与受管环境默认禁止 completion fallback。
 | `toolsEnabled: true`、`requireTools` 缺失/false | 显式 completion fallback，并标记 `legacyMigrated: true` |
 | 新 Agent 配置 | 除非显式选择，否则不允许 fallback |
 
-受管 policy 可以覆盖 legacy 兼容行为。旧 `runtime: "claude"`、`proxyMode`、provider relay id
-与 `claude_set_*` 只保留为读取/命令适配器；所有新写入使用新 schema。
+受管 policy 可以覆盖 legacy 兼容行为。旧 `runtime: "claude"`、`proxyMode`、provider relay id 与 `claude_set_*` 只保留为读取/命令适配器；所有新写入使用新 schema。
 
 ## 首个交付切片
 
-第一个 vertical slice 证明“任意自定义 Anthropic 协议 deployment，经内置 Gateway 进入
-Claude Agent SDK”，并同时支持桌面与 headless：
+第一个 vertical slice 证明“任意自定义 Anthropic 协议 deployment，经内置 Gateway 进入 Claude Agent SDK”，并同时支持桌面与 headless：
 
 - 显式 `runtimePolicy: "claude-agent-sdk"`；
 - 显式 `routePolicy: "gateway-required"`；
@@ -317,38 +212,27 @@ Claude Agent SDK”，并同时支持桌面与 headless：
 - 不硬编码 provider 名称；
 - Gateway 不可用时明确失败，绝不直连 fallback。
 
-验收覆盖真实 SSE、普通/并行工具、分片 tool JSON、tool result/error、MCP、权限中断/恢复、
-多轮、原生 subagent model binding、credential sticky、重启/恢复和无 secret trace。CI 使用
-确定性的 Anthropic conformance server；真实 provider certification 是可选且显式计费的
-job。异构 Team 与跨协议自动选择只能在该切片稳定后继续。
+验收覆盖真实 SSE、普通/并行工具、分片 tool JSON、tool result/error、MCP、权限中断/恢复、多轮、原生 subagent model binding、credential sticky、重启/恢复和无 secret trace。CI 使用确定性的 Anthropic conformance server；真实 provider certification 是可选且显式计费的 job。异构 Team 与跨协议自动选择只能在该切片稳定后继续。
 
 ## 结果
 
 - Cognia 得到一套可理解的 Agent 执行契约，同时保留已有且可工作的引擎。
-- Anthropic 兼容提供商在显式选择并验证后可以使用 Claude Agent SDK；AI SDK 仍是生产级
-  provider-neutral 路径。
+- Anthropic 兼容提供商在显式选择并验证后可以使用 Claude Agent SDK；AI SDK 仍是生产级 provider-neutral 路径。
 - 桌面和 headless 共用相同 Agent Host 与 Gateway 语义。
-- 使用 Cognia 编排时，Team member 可以使用不同模型、deployment、runtime、credential 和
-  host；原生 subagent 刻意不支持这些差异。
+- 使用 Cognia 编排时，Team member 可以使用不同模型、deployment、runtime、credential 和 host；原生 subagent 刻意不支持这些差异。
 - session 的 route、host、model binding、兼容证据与 credential affinity 都可检查且稳定。
-- 方案会增加 TypeScript、Node 和 Rust 的契约与迁移工作；SDK 和 Gateway 版本演进时必须
-  持续维护认证。
+- 方案会增加 TypeScript、Node 和 Rust 的契约与迁移工作；SDK 和 Gateway 版本演进时必须持续维护认证。
 
 ## 被否决的替代方案
 
-- **所有模型都通过 Claude Agent SDK。** 这会把私有且持续演进的 Claude Code 契约变成
-  provider-neutral runtime，也违反 Anthropic 的支持边界。
+- **所有模型都通过 Claude Agent SDK。** 这会把私有且持续演进的 Claude Code 契约变成 provider-neutral runtime，也违反 Anthropic 的支持边界。
 - **把每个 Anthropic wire 端点都视为兼容。** 协议标签不能证明 Agent 语义。
 - **单独实现 headless Gateway。** 会重复安全、路由、转换和 quota 逻辑。
-- **把 external Agent 搬进 Node sidecar。** 其进程与协议边界已有共享 manager 和 headless
-  transport。
-- **用 Agent SDK 原生 subagent 实现异构 Team。** 原生 definition 无法携带独立 provider、
-  route、credential、runtime 或 host。
-- **允许静默文本 completion 或 runtime fallback。** 会隐藏工具丢失，并可能用不同语义重放
-  副作用。
+- **把 external Agent 搬进 Node sidecar。** 其进程与协议边界已有共享 manager 和 headless transport。
+- **用 Agent SDK 原生 subagent 实现异构 Team。** 原生 definition 无法携带独立 provider、route、credential、runtime 或 host。
+- **允许静默文本 completion 或 runtime fallback。** 会隐藏工具丢失，并可能用不同语义重放副作用。
 - **成对转换恢复格式。** N×N 转换不可维护，也会掩盖数据损失。
-- **Agent session 内让 Gateway 使用实时全局 alias。** 会破坏可复现性、credential affinity
-  与恢复。
+- **Agent session 内让 Gateway 使用实时全局 alias。** 会破坏可复现性、credential affinity 与恢复。
 
 ## 安全与运维要求
 
@@ -361,36 +245,19 @@ job。异构 Team 与跨协议自动选择只能在该切片稳定后继续。
 
 ## 附录（2026-07-24）— 实施记录
 
-Phase 0–8 已在 `dev` 落地（契约 → 档案 → gateway → agent host → conformance
-→ 认证 → 调用方迁移 → 团队 → 恢复）。本附录记录计划要求写明的运维事实。
+Phase 0–8 已在 `dev` 落地（契约 → 档案 → gateway → agent host → conformance → 认证 → 调用方迁移 → 团队 → 恢复）。本附录记录计划要求写明的运维事实。
 
 ### Conformance 套件位置
 
-`tests/conformance/`（顶层,纯 `node:test`）:确定性 Anthropic 协议服务器
-（`anthropic-server/`）、场景矩阵、harness（真 `cognia-server` 二进制 + 真
-sidecar）与用例。先 `pnpm conformance:prepare` 再 `pnpm test:conformance`。
-认证 bundle 由同一套件产出（`--emit-manifest`）;回滚用
-`scripts/certify/rollback-bundle.mjs`,恢复上一 bundle 指针并报告需一并
-移动的已安装工件版本漂移。上下文物化路径有独立端到端用例
-（`cases/session-materialize.test.mjs`,经共享 fixture 与 codec 重放 prompt
-字节级互钉）;崩溃的 agent run 在启动时经恢复 planner 对账
-（`lib/ai/agent/recovery/reconcile-crashed-runs.ts`——停靠或
-`recovery_required`,绝不重放）。
+`tests/conformance/`（顶层,纯 `node:test`）:确定性 Anthropic 协议服务器（`anthropic-server/`）、场景矩阵、harness（真 `cognia-server` 二进制 + 真 sidecar）与用例。先 `pnpm conformance:prepare` 再 `pnpm test:conformance`。认证 bundle 由同一套件产出（`--emit-manifest`）;回滚用 `scripts/certify/rollback-bundle.mjs`,恢复上一 bundle 指针并报告需一并移动的已安装工件版本漂移。上下文物化路径有独立端到端用例（`cases/session-materialize.test.mjs`,经共享 fixture 与 codec 重放 prompt 字节级互钉）;崩溃的 agent run 在启动时经恢复 planner 对账（`lib/ai/agent/recovery/reconcile-crashed-runs.ts`——停靠或 `recovery_required`,绝不重放）。
 
 ### R1 spike 结论（冻结）
 
-`sidecar/dispatch/session-materialize.spike.live.test.mjs` 对真 SDK 运行:
-不存在公开的"从外部消息创建会话"API;外来 id resume 绝不以该 id 静默成功;
-绝不伪造私有 JSONL。因此 claude-code codec 的 `materialize` 保真度为
-**contextual**（重放 prompt）。spike 是 SDK 升级绊线——若 materialize API
-出现,其 surface 断言失败,结论必须复议。
+`sidecar/dispatch/session-materialize.spike.live.test.mjs` 对真 SDK 运行: 不存在公开的"从外部消息创建会话"API;外来 id resume 绝不以该 id 静默成功; 绝不伪造私有 JSONL。因此 claude-code codec 的 `materialize` 保真度为 **contextual**（重放 prompt）。spike 是 SDK 升级绊线——若 materialize API 出现,其 surface 断言失败,结论必须复议。
 
 ### 退役时点表（Phase 9）
 
-每个 legacy 路径删除都受遥测门控,独立提交并带 flag 逃生。观察计数器:
-sidecar `legacy_dispatch`（无 spec 发送）、Rust `DeprecatedCommandCounters`
-/ `agent_command_telemetry`（`claude_*` 别名调用）、以及
-`agent.execution.resolved` 事件量。
+每个 legacy 路径删除都受遥测门控,独立提交并带 flag 逃生。观察计数器: sidecar `legacy_dispatch`（无 spec 发送）、Rust `DeprecatedCommandCounters` / `agent_command_telemetry`（`claude_*` 别名调用）、以及 `agent.execution.resolved` 事件量。
 
 | 步骤 | 前置条件（观察窗） | 动作 |
 | --- | --- | --- |
@@ -399,8 +266,7 @@ sidecar `legacy_dispatch`（无 spec 发送）、Rust `DeprecatedCommandCounters
 | 3 | `claude_*` 别名计数连续 14 天为 0 | `claude_set_*` 三段退役:转发+计数 → dev 报错 → 删除（+ ACL/注册更新）,每段 tauri-smoke |
 | 4 | 步骤 1 完成 | 清理重复 writer:executeAgent flag-off legacy 分支、relay provider 创建路径（reader 保留并注明 LTS）;renderer snapshot publisher 退为纯控制面（闭合 R3） |
 
-在步骤 1 前置条件满足之前,flag-off legacy 路径就是生产主路径,必须保持
-字节级一致行为（由 Phase 6 的逐调用方 parity 测试钉住）。
+在步骤 1 前置条件满足之前,flag-off legacy 路径就是生产主路径,必须保持字节级一致行为（由 Phase 6 的逐调用方 parity 测试钉住）。
 
 ## 附录（2026-08-03）— Claude Agent SDK 0.3.220 完整能力
 
@@ -412,40 +278,23 @@ Conformance 套件版本 `2` 将认证扩展到完整的 40 项能力词表。SD
 
 ### 长期门禁
 
-`check:provider-name-branches`（grep 运行时代码的 provider 名特判）、
-`check:runtime-versions`（stale 判定版本钉）、suite-manifest hash 钉、
-colocated-test 审计,均在 `check:all` 中。
+`check:provider-name-branches`（grep 运行时代码的 provider 名特判）、`check:runtime-versions`（stale 判定版本钉）、suite-manifest hash 钉、colocated-test 审计,均在 `check:all` 中。
 
 ## 附录（2026-08-04）— Gateway 本地路由策略 V2
 
-Gateway 快照现在携带版本化且不含密钥的路由策略。Rust Gateway 在本地按
-`priority`、`weighted` 或 `round-robin` 分配显式 alias；虚拟模型 `auto`
-使用已配置的内置策略。Chat、Responses、embedding 与上游探测不再等待
-renderer 的 `gateway://decide` 往返。旧快照继续按优先级顺序读取；无效 V2
-快照整体拒绝，并继续服务上一份有效策略。
+Gateway 快照现在携带版本化且不含密钥的路由策略。Rust Gateway 在本地按 `priority`、`weighted` 或 `round-robin` 分配显式 alias；虚拟模型 `auto` 使用已配置的内置策略。Chat、Responses、embedding 与上游探测不再等待 renderer 的 `gateway://decide` 往返。旧快照继续按优先级顺序读取；无效 V2 快照整体拒绝，并继续服务上一份有效策略。
 
-部署选择先于现有的 provider 凭据轮换。轮询 cursor 仅在进程内保存，以候选
-集合为作用域，从第一个成员开始，并在策略变化时安全重置。若凭据池全部处于
-冷却状态则快速失败；可重试故障使用有上限的指数退避，并可遵循上游恢复时间。
-会话亲和与 route ticket 的冻结候选仍优先于逐请求分配，且响应字节提交后绝不
-执行 fallback。
+部署选择先于现有的 provider 凭据轮换。轮询 cursor 仅在进程内保存，以候选集合为作用域，从第一个成员开始，并在策略变化时安全重置。若凭据池全部处于冷却状态则快速失败；可重试故障使用有上限的指数退避，并可遵循上游恢复时间。会话亲和与 route ticket 的冻结候选仍优先于逐请求分配，且响应字节提交后绝不执行 fallback。
 
-可执行协议边界仍限于 OpenAI-compatible 与 Anthropic；其他 provider 协议不会
-被静默视为兼容协议。
+可执行协议边界仍限于 OpenAI-compatible 与 Anthropic；其他 provider 协议不会被静默视为兼容协议。
 
 ## 补充记录（2026-08-06）—— AgentFleet 投影与控制面
 
-AgentFleet 是本 ADR canonical execution 模型的观测与控制投影；它不是第四条 runtime 轨道，
-也不是独立的事件权威。内置、Team、Workflow、Claude Code、Codex 和 OpenCode session 都附着到
-canonical identity 层级，并通过现有 event envelope 发布。Fleet 快照和历史是该 journal 的投影。
+AgentFleet 是本 ADR canonical execution 模型的观测与控制投影；它不是第四条 runtime 轨道，也不是独立的事件权威。内置、Team、Workflow、Claude Code、Codex 和 OpenCode session 都附着到 canonical identity 层级，并通过现有 event envelope 发布。Fleet 快照和历史是该 journal 的投影。
 
-外部 adapter 发布版本化 capability descriptor。原生 lifecycle 事件优先于 Task/tool heuristic，
-由推断得到的 lineage 必须标记来源。监控停止时，仍活跃的外部 session 应转为 `detached`，
-而不是伪造 `SessionEnd`。启动时通过 provider identity 和持久 lineage 进行协调，绝不仅依赖 PID。
+外部 adapter 发布版本化 capability descriptor。原生 lifecycle 事件优先于 Task/tool heuristic，由推断得到的 lineage 必须标记来源。监控停止时，仍活跃的外部 session 应转为 `detached`，而不是伪造 `SessionEnd`。启动时通过 provider identity 和持久 lineage 进行协调，绝不仅依赖 PID。
 
-控制命令使用持久、幂等的 envelope，并支持 lease、acknowledgement、retry、expiry 与脱敏结果审计。
-OpenCode 的 question reply/reject 和单 session interrupt/abort 在能力存在时使用 bound client 的原生 API。
-Claude Code 和 Codex 只暴露 runtime 已验证的控制能力；Fleet 不使用注入终端按键来伪装协议能力。
+控制命令使用持久、幂等的 envelope，并支持 lease、acknowledgement、retry、expiry 与脱敏结果审计。OpenCode 的 question reply/reject 和单 session interrupt/abort 在能力存在时使用 bound client 的原生 API。Claude Code 和 Codex 只暴露 runtime 已验证的控制能力；Fleet 不使用注入终端按键来伪装协议能力。
 
 规范明细事件保留 30 天。脱敏后的摘要/历史行保留到用户明确删除。原始 provider payload 不会升级为持久或远程投影。
 
@@ -497,33 +346,22 @@ Fleet session 与 subagent 携带 `lifecycleConfidence`：
 
 ## 2026-08-21 修订 —— 外部 Agent 能力单一事实源
 
-`resolveAgentExecutionSpec()` 仍是唯一的执行决策权威。本次修订修的是：当
-`runtimeAdapter: "external"` 时，喂给它的输入本身就是错的。
+`resolveAgentExecutionSpec()` 仍是唯一的执行决策权威。本次修订修的是：当 `runtimeAdapter: "external"` 时，喂给它的输入本身就是错的。
 
 ### 问题
 
-`ResolvedAgentExecutionSpec` v2 携带一套**闭集**能力词汇，由两个内建 runtime 与
-sidecar 共用。外部 Agent 装不进这套词汇：已注册的协议有七个，各有各的答案，而且答案还取决于
-preset、Cognia 适配器实现了哪些可选方法、握手协商出什么、以及宿主环境。v2 契约里没有任何东西能表达
-「这一项我们还没测过」，于是每个需要按协议作答的界面都长出了自己的表：
+`ResolvedAgentExecutionSpec` v2 携带一套**闭集**能力词汇，由两个内建 runtime 与 sidecar 共用。外部 Agent 装不进这套词汇：已注册的协议有七个，各有各的答案，而且答案还取决于 preset、Cognia 适配器实现了哪些可选方法、握手协商出什么、以及宿主环境。v2 契约里没有任何东西能表达「这一项我们还没测过」，于是每个需要按协议作答的界面都长出了自己的表：
 
 - `RUNTIME_CAPABILITIES.external` —— 一张表覆盖所有外部 Agent；
 - `cli/src/agent/runtime/backend-select.ts` 里的 `PROTOCOL_CAPABILITIES`；
 - `cli/src/tui/runtime/backend-capabilities.ts` 里的 `externalCapabilities()`；
 - `permission-modes.ts` 里的 `PROTOCOL_PERMISSION_MODE_SUPPORT`。
 
-它们互相矛盾，而且矛盾都是用户会撞上的那种：CLI 声称 OpenCode 支持 `steer`，可它的适配器根本没有
-`steerTurn`，于是 `--requires steer` 在选择阶段被放行、在第一次 steer 时失败；TUI 对所有外部后端都报告
-支持 MCP，包括那四个根本没有按会话传递 MCP 通道的协议；权限表给 DeepSeek Harness SDK 通道列出全部五种模式，
-而它的 `respondToPermission` 直接抛错。
+它们互相矛盾，而且矛盾都是用户会撞上的那种：CLI 声称 OpenCode 支持 `steer`，可它的适配器根本没有 `steerTurn`，于是 `--requires steer` 在选择阶段被放行、在第一次 steer 时失败；TUI 对所有外部后端都报告支持 MCP，包括那四个根本没有按会话传递 MCP 通道的协议；权限表给 DeepSeek Harness SDK 通道列出全部五种模式，而它的 `respondToPermission` 直接抛错。
 
 ### 决策
 
-在 spec 之外，另立一个**独立版本**的 `ExternalAgentCapabilityProfileV1`
-（`@cognia/agent-config-types/external-agent-capability`）。它是「外部 Agent 能做什么」的权威；
-spec 仍然是「这一回合怎么执行」的权威。二者只通过
-`projectExternalAgentCapabilitiesToSpec()` 相连，而该投影只讲 v2 词汇。不引入
-`specVersion: 3`，也不向闭集追加任何 id。
+在 spec 之外，另立一个**独立版本**的 `ExternalAgentCapabilityProfileV1`（`@cognia/agent-config-types/external-agent-capability`）。它是「外部 Agent 能做什么」的权威；spec 仍然是「这一回合怎么执行」的权威。二者只通过 `projectExternalAgentCapabilitiesToSpec()` 相连，而该投影只讲 v2 词汇。不引入 `specVersion: 3`，也不向闭集追加任何 id。
 
 五个合并层，优先级固定：
 
@@ -533,119 +371,57 @@ spec 仍然是「这一回合怎么执行」的权威。二者只通过
 4. **live** —— 握手、宿主设施与探测；
 5. **ceiling** —— 平台与策略上限，只做交集。
 
-第 2、3 层只能细化 `unknown` 或收紧，绝不放宽：preset 作者没有资格推翻线协议。第 4 层可以双向覆盖
-—— 它测的是眼前这个 Agent —— 出现矛盾时记录为 `drift` 而非吞掉，因为被实测推翻的清单行需要更新。
+第 2、3 层只能细化 `unknown` 或收紧，绝不放宽：preset 作者没有资格推翻线协议。第 4 层可以双向覆盖—— 它测的是眼前这个 Agent —— 出现矛盾时记录为 `drift` 而非吞掉，因为被实测推翻的清单行需要更新。
 
 `unknown` 是一等状态，且永远无法满足硬要求。正是这个区分让准入变成两阶段：
 
-- **静态预检**（`preflightExternalAgent`）只拒绝已经明确错误的配置 —— 没有适配器的协议，或清单明确记为
-  `unsupported` 的硬要求。`unknown` 放行，因为在这里拒绝会误杀一个还没来得及作答的 Agent。
-- **协商后准入**（`admitNegotiatedExternalAgent`）在握手之后执行，此时 `unknown` 是致命的：
-  「能问的都问过了，仍然不知道」不足以支撑任何承诺。`negotiated` 为 false 的 profile 会被直接拒绝，
-  而且 `resolveAgentExecutionSpec` 自己也会丢弃这种投影，任何调用方都无法绕过。
+- **静态预检**（`preflightExternalAgent`）只拒绝已经明确错误的配置 —— 没有适配器的协议，或清单明确记为 `unsupported` 的硬要求。`unknown` 放行，因为在这里拒绝会误杀一个还没来得及作答的 Agent。
+- **协商后准入**（`admitNegotiatedExternalAgent`）在握手之后执行，此时 `unknown` 是致命的：「能问的都问过了，仍然不知道」不足以支撑任何承诺。`negotiated` 为 false 的 profile 会被直接拒绝，而且 `resolveAgentExecutionSpec` 自己也会丢弃这种投影，任何调用方都无法绕过。
 
 ### 不再静默替身
 
-`dispatchTeammate` 过去在 teammate 的外部 Agent 解析失败时，会给 resolver 传
-`runtime: "claude"`，弹一次警告，然后用内建引擎跑这个任务。冻结下来的 spec 于是记录成内建轨道 ——
-模型、工具、会话存储、成本归属，全都描述了一次用户从未要求过的运行。现在这会抛
-`ExternalRuntimeUnavailableError`。唯一合法的回退是 teammate **显式声明**的回退，而目前并不存在这样的字段。
+`dispatchTeammate` 过去在 teammate 的外部 Agent 解析失败时，会给 resolver 传 `runtime: "claude"`，弹一次警告，然后用内建引擎跑这个任务。冻结下来的 spec 于是记录成内建轨道 ——模型、工具、会话存储、成本归属，全都描述了一次用户从未要求过的运行。现在这会抛 `ExternalRuntimeUnavailableError`。唯一合法的回退是 teammate **显式声明**的回退，而目前并不存在这样的字段。
 
 ### 对其他决策的影响
 
-- **§4（兼容性证据）** —— 由外部 profile 解析出的 spec 记 `evidence: "experimental"`，
-  并把 profile digest 作为 `recordRef`。digest 是一份能力答案的身份；profile 本体留在
-  execution handle 上，不去撑大 wire envelope。
-- **ADR-0059 D6 / R11（spawn 策略）** —— 启动侧白名单迁到
-  `protocol/external-agent-security-policy.json`。TypeScript 直接消费；
-  `crates/cognia-external-agent` 保留编译期字面量（安全白名单不能依赖运行时解析 JSON），
-  由 `pnpm audit:agent-capabilities` 保证两边一致。它一上线就抓出三处真实漂移：Rust 拒绝了随包
-  `claude-code` preset 实际启动的 `claude-agent-acp`；带着一条没有任何 preset 引用的 `cline`；
-  两边都没给 OpenCode 可写状态目录 —— 以致 `opencode serve` 无法持久化会话，恢复每次都从头开始。
+- **§4（兼容性证据）** —— 由外部 profile 解析出的 spec 记 `evidence: "experimental"`，并把 profile digest 作为 `recordRef`。digest 是一份能力答案的身份；profile 本体留在 execution handle 上，不去撑大 wire envelope。
+- **ADR-0059 D6 / R11（spawn 策略）** —— 启动侧白名单迁到 `protocol/external-agent-security-policy.json`。TypeScript 直接消费；`crates/cognia-external-agent` 保留编译期字面量（安全白名单不能依赖运行时解析 JSON），由 `pnpm audit:agent-capabilities` 保证两边一致。它一上线就抓出三处真实漂移：Rust 拒绝了随包 `claude-code` preset 实际启动的 `claude-agent-acp`；带着一条没有任何 preset 引用的 `cline`；两边都没给 OpenCode 可写状态目录 —— 以致 `opencode serve` 无法持久化会话，恢复每次都从头开始。
 - **ADR-0049（沙箱）** —— 平台门禁现在会在用户配置 Agent **之前**显示在设置里，而不是在 spawn 时以异常出现。
-- **ADR-0119（Pi）** —— Pi 的策略与 system prompt 注入没有改动，本来也不是缺陷。变得诚实的是工具宿主：
-  渲染端没有 broker，因此由工具宿主提供的能力如实报 `unsupported` 并给出 `noToolHost`，不再默认存在。
-- **旧协议** —— `http` / `websocket` / `custom` 从来没有注册过适配器。它们保持可读，以便旧配置能显示与迁移，
-  但从所有选择器中移除；此前把它们标成「coming soon」的两个对话框，现在从已注册集合派生选项。
+- **ADR-0119（Pi）** —— Pi 的策略与 system prompt 注入没有改动，本来也不是缺陷。变得诚实的是工具宿主：渲染端没有 broker，因此由工具宿主提供的能力如实报 `unsupported` 并给出 `noToolHost`，不再默认存在。
+- **旧协议** —— `http` / `websocket` / `custom` 从来没有注册过适配器。它们保持可读，以便旧配置能显示与迁移，但从所有选择器中移除；此前把它们标成「coming soon」的两个对话框，现在从已注册集合派生选项。
 
 ### 明确不做的事
 
 - 不新增通用 A2A executable preset：A2A 需要用户提供 endpoint，仍是手工配置。
-- 不退休 `BackendFeature`。它是 TUI 的展示词汇，与 capability id 并非一一对应 ——
-  `skills` 和 `plugins` 描述的是 Cognia 工具宿主而不是 Agent 本身的能力，把它们映射到
-  `skills.native` / `plugins.native` 只是用一个新的假声明替换旧的。
-- gate 不试图证明插件生命周期行为。启用时注册、禁用时拆除都是运行时事实；用正则声称「已验证」会被当成覆盖率。
-  这部分由测试来钉住。
+- 不退休 `BackendFeature`。它是 TUI 的展示词汇，与 capability id 并非一一对应 ——`skills` 和 `plugins` 描述的是 Cognia 工具宿主而不是 Agent 本身的能力，把它们映射到 `skills.native` / `plugins.native` 只是用一个新的假声明替换旧的。
+- gate 不试图证明插件生命周期行为。启用时注册、禁用时拆除都是运行时事实；用正则声称「已验证」会被当成覆盖率。这部分由测试来钉住。
 
 ## 2026-08-29 修订 —— 导入会话的原生恢复
 
-导入 transcript 本身不能证明来源 runtime 仍可恢复它。canonical header 可以携带 `runtimeBinding`，
-但只有四项实时检查通过后才能执行恢复：匹配 preset 已配置、runtime 已连接且可执行、协商后的扩展状态为
-`session/resume: supported`，并且记录的工作目录仍存在。随后 Cognia 执行恢复握手；只有成功才把所有权从
-`source-mirror` 改为 `native-bound`。失败会保留只读镜像并给出具体诊断。验证过的 native session id
-会保存为 session composition 的 runtime binding，并由后续 `ExternalAgentManager.execute` 复用。
+导入 transcript 本身不能证明来源 runtime 仍可恢复它。canonical header 可以携带 `runtimeBinding`，但只有四项实时检查通过后才能执行恢复：匹配 preset 已配置、runtime 已连接且可执行、协商后的扩展状态为 `session/resume: supported`，并且记录的工作目录仍存在。随后 Cognia 执行恢复握手；只有成功才把所有权从 `source-mirror` 改为 `native-bound`。失败会保留只读镜像并给出具体诊断。验证过的 native session id 会保存为 session composition 的 runtime binding，并由后续 `ExternalAgentManager.execute` 复用。
 
 
 ## 2026-09-11 修订 — 外部任务使用 Cognia 模型
 
-两个 Agent 编辑入口共用 Cognia 模型选择面板，外部 Agent 可以从中选择内部
-provider/model。对话明确选择的 Cognia 模型优先于 Agent 默认值。绑定保存
-`providerId`、`modelId` 和可选的订阅 `accountId`，不会把上游密钥复制到外部
-Agent 配置中。
+两个 Agent 编辑入口共用 Cognia 模型选择面板，外部 Agent 可以从中选择内部 provider/model。对话明确选择的 Cognia 模型优先于 Agent 默认值。绑定保存 `providerId`、`modelId` 和可选的订阅 `accountId`，不会把上游密钥复制到外部 Agent 配置中。
 
-托管路径支持本地 Codex app-server/ACP、OpenCode server/ACP、Pi RPC、Claude
-Agent ACP 和 Qwen Code ACP。Codex 使用网关的 Responses 入口，OpenCode、Pi 和 Qwen 使用 Chat
-Completions，Claude 使用 Anthropic Messages。没有受支持的隔离启动协议的
-运行时、已连接的远程服务器及非本地进程后端会被拒绝。支持 ACP 本身不代表支持
-此模式。这些任务当前使用 OpenAI 或 Anthropic 上游，具体组合受网关协议兼容性
-检查约束。
+托管路径支持本地 Codex app-server/ACP、OpenCode server/ACP、Pi RPC、Claude Agent ACP 和 Qwen Code ACP。Codex 使用网关的 Responses 入口，OpenCode、Pi 和 Qwen 使用 Chat Completions，Claude 使用 Anthropic Messages。没有受支持的隔离启动协议的运行时、已连接的远程服务器及非本地进程后端会被拒绝。支持 ACP 本身不代表支持此模式。这些任务当前使用 OpenAI 或 Anthropic 上游，具体组合受网关协议兼容性检查约束。
 
-进程启动前，`prepareExternalAgentGatewayRoute` 重新构建并发布补全后的
-provider 快照，且要求宿主确认接收。快照包含 `apiFlavor` 和模型信息：总上下文、
-最大输入、最大输出、工具调用、推理、视觉、音频、视频、流式及结构化输出。
-缺失的信息保持未知。明确选择订阅账号时，模型信息通过该账号临时解析，避免
-静默使用另一个账号缓存的限制。模型明确不支持工具或流式时，启动适配器会拒绝
-任务。
+进程启动前，`prepareExternalAgentGatewayRoute` 重新构建并发布补全后的 provider 快照，且要求宿主确认接收。快照包含 `apiFlavor` 和模型信息：总上下文、最大输入、最大输出、工具调用、推理、视觉、音频、视频、流式及结构化输出。缺失的信息保持未知。明确选择订阅账号时，模型信息通过该账号临时解析，避免静默使用另一个账号缓存的限制。模型明确不支持工具或流式时，启动适配器会拒绝任务。
 
-每个任务的网关 ticket lease 独立保存 provider 覆盖配置。并行任务可以选择不同
-账号，而不改写共享 provider 快照或 Cognia 的当前订阅账号。恢复任务时使用保留
-的实际账号绑定：省略账号表示启动时解析，冻结后的 `null` 表示使用配置中的手动
-API 凭据。ticket 只开放需要的推理操作，以及模型发现和 token 计数。准备或网关
-路由失败时不会退回直连上游。本地账号代次变化和已注册订阅的 vault 变更会使相关
-网关授权失效。
+每个任务的网关 ticket lease 独立保存 provider 覆盖配置。并行任务可以选择不同账号，而不改写共享 provider 快照或 Cognia 的当前订阅账号。恢复任务时使用保留的实际账号绑定：省略账号表示启动时解析，冻结后的 `null` 表示使用配置中的手动 API 凭据。ticket 只开放需要的推理操作，以及模型发现和 token 计数。准备或网关路由失败时不会退回直连上游。本地账号代次变化和已注册订阅的 vault 变更会使相关网关授权失效。
 
-管理器创建任务专属的子 Agent 进程，在宿主管理的任务状态目录中生成运行时配置。
-原生和 Node 启动器从运行时必需的环境变量开始，再加入隔离配置目录和网关凭据，
-不继承原有 provider/auth 变量。上游密钥保留在 Cognia；生成的 provider 文件引用
-环境变量，不包含网关密钥。原生子进程继承父任务的路由，不会独立获得切换其他
-provider 或账号的权限。
+管理器创建任务专属的子 Agent 进程，在宿主管理的任务状态目录中生成运行时配置。原生和 Node 启动器从运行时必需的环境变量开始，再加入隔离配置目录和网关凭据，不继承原有 provider/auth 变量。上游密钥保留在 Cognia；生成的 provider 文件引用环境变量，不包含网关密钥。原生子进程继承父任务的路由，不会独立获得切换其他 provider 或账号的权限。
 
-任务完成、取消或失败时会撤销 lease 并停止任务进程。生成的 provider 文件会被
-移除，原生对话历史和不含密钥的绑定保留用于恢复。保留的绑定同时记录所属
-Cognia 本地账号，即使手动 provider/model 选择相同，其他本地账号也不能恢复
-同一任务。恢复沿用任务标识和绑定，同时申请新的 lease；变更 provider、模型或账号需要新建任务。删除外部会话会调用
-`external_agent_delete_gateway_task`，该命令拒绝仍有活动进程的任务，并删除
-保留的任务状态。原生和 companion 接口共用后端实现与 Agent Control 能力授权。
+任务完成、取消或失败时会撤销 lease 并停止任务进程。生成的 provider 文件会被移除，原生对话历史和不含密钥的绑定保留用于恢复。保留的绑定同时记录所属 Cognia 本地账号，即使手动 provider/model 选择相同，其他本地账号也不能恢复同一任务。恢复沿用任务标识和绑定，同时申请新的 lease；变更 provider、模型或账号需要新建任务。删除外部会话会调用 `external_agent_delete_gateway_task`，该命令拒绝仍有活动进程的任务，并删除保留的任务状态。原生和 companion 接口共用后端实现与 Agent Control 能力授权。
 
-配置和凭据隔离与文件、网络沙箱是不同的边界。此模式不会自动创建 worktree 或
-容器，不会禁止所有外网访问，也不能阻止具有完整权限的二进制读取任意宿主文件。
-这些保证由已有工作区及所选沙箱策略提供。不能根据 loopback URL 推断远程网关
-已经连通。
+配置和凭据隔离与文件、网络沙箱是不同的边界。此模式不会自动创建 worktree 或容器，不会禁止所有外网访问，也不能阻止具有完整权限的二进制读取任意宿主文件。这些保证由已有工作区及所选沙箱策略提供。不能根据 loopback URL 推断远程网关已经连通。
 
-实现入口：`lib/gateway/mint-session-ticket.ts`、
-`lib/gateway/snapshot-publisher.ts`、`lib/ai/agent/external/config/gateway-task.ts`、
-`lib/ai/agent/external/manager.ts`、
-`crates/cognia-external-agent/src/gateway_task.rs` 和
-`cli/src/runtime/external/gateway-task.ts`。
+实现入口：`lib/gateway/mint-session-ticket.ts`、`lib/gateway/snapshot-publisher.ts`、`lib/ai/agent/external/config/gateway-task.ts`、`lib/ai/agent/external/manager.ts`、`crates/cognia-external-agent/src/gateway_task.rs` 和 `cli/src/runtime/external/gateway-task.ts`。
 
 ### 网关协议字段与兼容边界
 
-推理入口包括 `POST /v1/chat/completions`、`POST /v1/responses` 和
-`POST /v1/messages`。OpenAI provider 快照使用 `apiFlavor: "chat"` 或
-`apiFlavor: "responses"`，Anthropic provider 使用 Messages 协议。同协议请求
-在经过网关安全检查、模型选择、配置字段剥离和模型限制后保留原生 wire 结构。
-原生 Responses 明确传入的 `store: false` 会保留。跨协议请求直接经过 `ChatIR`，
-Responses 请求也不再以 Chat Completions 请求作为中间表示。
+推理入口包括 `POST /v1/chat/completions`、`POST /v1/responses` 和 `POST /v1/messages`。OpenAI provider 快照使用 `apiFlavor: "chat"` 或 `apiFlavor: "responses"`，Anthropic provider 使用 Messages 协议。同协议请求在经过网关安全检查、模型选择、配置字段剥离和模型限制后保留原生 wire 结构。原生 Responses 明确传入的 `store: false` 会保留。跨协议请求直接经过 `ChatIR`，Responses 请求也不再以 Chat Completions 请求作为中间表示。
 
 | 能力 | Chat Completions | Responses | Anthropic Messages |
 | --- | --- | --- | --- |
@@ -658,80 +434,77 @@ Responses 请求也不再以 Chat Completions 请求作为中间表示。
 | 用户图片 | 文本/图片数组，支持 data URL | `input_text`/`input_image` 数组 | 文本/图片块，URL 或 base64 source |
 | 工具结果中的图片 | 没有等价表示，拒绝 | `function_call_output.output` 文本/图片数组 | `tool_result.content` 文本/图片数组 |
 
-JSON schema 和明确的 strict 标志会保留，不会放宽 schema。Anthropic 结构化输出
-没有与 OpenAI 包装层对应的 schema 名称、描述和非严格模式：只向
-`output_config.format` 发送 schema；Anthropic schema 转为 OpenAI 请求时会补充
-生成的名称和 `strict: true`。OpenAI `json_object` 在 Anthropic 上没有等价能力，
-因此拒绝转换。非法工具选择类型、未声明的指定工具、重复工具名称及格式错误的
-strict/parallel 标志都会在转换前拒绝。支持的转换保留文本/图片顺序和图片数据；
-assistant 图片内容及带 provider file ID 的工具结果尚无跨协议表示，会明确拒绝，
-不会压成纯文本。
+JSON schema 和明确的 strict 标志会保留，不会放宽 schema。Anthropic 结构化输出没有与 OpenAI 包装层对应的 schema 名称、描述和非严格模式：只向 `output_config.format` 发送 schema；Anthropic schema 转为 OpenAI 请求时会补充生成的名称和 `strict: true`。OpenAI `json_object` 在 Anthropic 上没有等价能力，因此拒绝转换。非法工具选择类型、未声明的指定工具、重复工具名称及格式错误的 strict/parallel 标志都会在转换前拒绝。支持的转换保留文本/图片顺序和图片数据；assistant 图片内容及带 provider file ID 的工具结果尚无跨协议表示，会明确拒绝，不会压成纯文本。
 
-Effort 映射保留相对意图，不表示精确的推理 token 预算。跨协议 Anthropic effort
-会记录为近似，因为它也影响非 thinking 输出。两类协议共同接受的转换值为
-`low`、`medium`、`high` 和 `xhigh`；`none`/`minimal` 仅适用于 OpenAI，`max`
-仅适用于 Anthropic。目标协议不接受的值，以及向 OpenAI 转换时明确指定的
-Anthropic `thinking` 模式/token 预算，都会被拒绝。Responses 的 summary 详细
-程度没有跨协议等价控制；网关记录近似，并转发上游实际产生的推理文本。
+Effort 映射保留相对意图，不表示精确的推理 token 预算。跨协议 Anthropic effort 会记录为近似，因为它也影响非 thinking 输出。两类协议共同接受的转换值为 `low`、`medium`、`high` 和 `xhigh`；`none`/`minimal` 仅适用于 OpenAI，`max` 仅适用于 Anthropic。目标协议不接受的值，以及向 OpenAI 转换时明确指定的 Anthropic `thinking` 模式/token 预算，都会被拒绝。Responses 的 summary 详细程度没有跨协议等价控制；网关记录近似，并转发上游实际产生的推理文本。
 
-Responses 的非流式和流式轮次支持函数调用/结果、带 namespace 的函数工具和文本
-custom 工具。转换路径把 custom 工具表示为接收字符串 `input` 的函数。custom
-语法会作为描述约束发送，并记录为近似；转换路径**不会**强制执行原生语法。
-Hosted tools 和加密推理状态需要原来的原生 Responses 上游。原生透传不代表已经
-认证所有 provider 专有功能或模型。
+Responses 的非流式和流式轮次支持函数调用/结果、带 namespace 的函数工具和文本 custom 工具。转换路径把 custom 工具表示为接收字符串 `input` 的函数。custom 语法会作为描述约束发送，并记录为近似；转换路径**不会**强制执行原生语法。Hosted tools 和加密推理状态需要原来的原生 Responses 上游。原生透传不代表已经认证所有 provider 专有功能或模型。
 
-转换后的 Responses 流包含增量文本、推理摘要和工具参数事件；上游流被截断时
-报告失败，不会伪造成功的空响应。`previous_response_id` 按网关账号代次、ticket/key
-和模型隔离。内存续接缓存最多 32 条、每条 2 MiB，保留一小时。未知、过期或不属于
-当前作用域的 ID 会被拒绝，并要求重发完整输入。原生 Responses ID 仍依赖上游
-状态；`store: false` 不保证原生续接成功。
+转换后的 Responses 流包含增量文本、推理摘要和工具参数事件；上游流被截断时报告失败，不会伪造成功的空响应。`previous_response_id` 按网关账号代次、ticket/key 和模型隔离。内存续接缓存最多 32 条、每条 2 MiB，保留一小时。未知、过期或不属于当前作用域的 ID 会被拒绝，并要求重发完整输入。原生 Responses ID 仍依赖上游状态；`store: false` 不保证原生续接成功。
 
-`GET /v1/models` 与 `GET /v1/models/{model}` 仅公开 ticket 可见的模型。已发布的
-`maxInputTokens`、`maxOutputTokens` 和 `contextLength` 约束请求；输入量使用
-已有网关估算器，不声称与 provider tokenizer 完全一致。明确为 false 的
-`supportsTools`、`supportsStreaming`、`supportsStructuredOutput`、
-`supportsReasoning`、`supportsVision`、`supportsAudio` 和 `supportsVideo`
-会拒绝冲突请求。未知事实保持未知；能力元数据不会凭空提供尚不支持的协议转换。
-Ticket 输出预留量同时受任务剩余预算限制。
+`GET /v1/models` 与 `GET /v1/models/{model}` 仅公开 ticket 可见的模型。已发布的 `maxInputTokens`、`maxOutputTokens` 和 `contextLength` 约束请求；输入量使用已有网关估算器，不声称与 provider tokenizer 完全一致。明确为 false 的 `supportsTools`、`supportsStreaming`、`supportsStructuredOutput`、`supportsReasoning`、`supportsVision`、`supportsAudio` 和 `supportsVideo` 会拒绝冲突请求。未知事实保持未知；能力元数据不会凭空提供尚不支持的协议转换。Ticket 输出预留量同时受任务剩余预算限制。
 
-任务 ticket 的推理和 Anthropic token 计数转发在上游发送前共用
-`cognia_net::outbound_pii::has_no_leaking_pii`。检查覆盖提示、历史、工具输入/
-结果/定义和结构化输出 schema，排除传输凭据和无关请求 metadata。原生 Responses
-透传也经过同一检查。Ticket 撤销、过期、账号变化及下游取消仍会终止请求或流。
-已有普通网关 key 策略保持不变。
+任务 ticket 的推理和 Anthropic token 计数转发在上游发送前共用 `cognia_net::outbound_pii::has_no_leaking_pii`。检查覆盖提示、历史、工具输入/ 结果/定义和结构化输出 schema，排除传输凭据和无关请求 metadata。原生 Responses 透传也经过同一检查。Ticket 撤销、过期、账号变化及下游取消仍会终止请求或流。已有普通网关 key 策略保持不变。
 
-实现入口：`crates/cognia-gateway/src/translate/`、
-`crates/cognia-gateway/src/server.rs`、`crates/cognia-gateway/src/snapshot.rs` 和
-`crates/cognia-gateway/src/route_ticket.rs`。验证证据包括定向 Rust 单元/loopback
-集成检查，以及已安装 Codex CLI 对 loopback fixture 的工具往返。这些证据不代表
-已验证真实 Kimi、CommandCode 或其他订阅 provider 的网络兼容性。
+实现入口：`crates/cognia-gateway/src/translate/`、`crates/cognia-gateway/src/server.rs`、`crates/cognia-gateway/src/snapshot.rs` 和 `crates/cognia-gateway/src/route_ticket.rs`。验证证据包括定向 Rust 单元/loopback 集成检查，以及已安装 Codex CLI 对 loopback fixture 的工具往返。这些证据不代表已验证真实 Kimi、CommandCode 或其他订阅 provider 的网络兼容性。
 
-2026-09-11 核对来源：
-[Anthropic 结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)、
-[Anthropic effort](https://platform.claude.com/docs/en/build-with-claude/effort)、
-[Anthropic 工具结果](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)、
-[OpenAI 函数调用](https://developers.openai.com/api/docs/guides/function-calling) 和
-[OpenAI Responses 流式事件](https://developers.openai.com/api/docs/guides/streaming-responses)。
+2026-09-11 核对来源：[Anthropic 结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)、[Anthropic effort](https://platform.claude.com/docs/en/build-with-claude/effort)、[Anthropic 工具结果](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)、[OpenAI 函数调用](https://developers.openai.com/api/docs/guides/function-calling) 和 [OpenAI Responses 流式事件](https://developers.openai.com/api/docs/guides/streaming-responses)。
 
 ### Team 与插件子代理调度
 
-外部队友可通过共用模型面板设置 `TeammateConfig.cogniaModel`。插件作者可在
-`PluginSubagentDef` 中声明相同绑定，也可在单次 `ctx.agent.dispatchSubagent`
-调用中覆盖。调用参数明确传入 `null` 表示使用原生模型配置；省略参数则使用
-子代理定义。选择可执行程序预设不会继承另一个同预设 Agent 保存的模型或账号。
-绑定 Cognia 模型的调度会等待任务网关配置准备完毕，再启动原生进程。
+外部队友可通过共用模型面板设置 `TeammateConfig.cogniaModel`。插件作者可在 `PluginSubagentDef` 中声明相同绑定，也可在单次 `ctx.agent.dispatchSubagent` 调用中覆盖。调用参数明确传入 `null` 表示使用原生模型配置；省略参数则使用子代理定义。选择可执行程序预设不会继承另一个同预设 Agent 保存的模型或账号。绑定 Cognia 模型的调度会等待任务网关配置准备完毕，再启动原生进程。
 
-任务启动、SDK 声明、清单验证、动态子代理注册和调用共用同一个绑定校验器，
-仅接受 provider、model 和可选账号引用，拒绝非法值及密钥字段。原生模型名称
-仍是独立选项；网关绑定在任务准备阶段确定实际模型。
+任务启动、SDK 声明、清单验证、动态子代理注册和调用共用同一个绑定校验器，仅接受 provider、model 和可选账号引用，拒绝非法值及密钥字段。原生模型名称仍是独立选项；网关绑定在任务准备阶段确定实际模型。
 
-Team 调度将映射后的公开外部会话 ID 保存到已有的 durable child 记录。
-引导、暂停和终止都定位到这个明确会话，不会在共享预设中任选一个活动会话。
-恢复 durable child 时，把保留的网关会话传回管理器，由管理器检查原账号、模型
-及所属 Cognia 账号，并申请新的 lease。调度结束后移除实时控制注册，保留已有
-的中止信号和 PII 防护链路。
+Team 调度将映射后的公开外部会话 ID 保存到已有的 durable child 记录。引导、暂停和终止都定位到这个明确会话，不会在共享预设中任选一个活动会话。恢复 durable child 时，把保留的网关会话传回管理器，由管理器检查原账号、模型及所属 Cognia 账号，并申请新的 lease。调度结束后移除实时控制注册，保留已有的中止信号和 PII 防护链路。
 
-实现入口：`lib/ai/agent/team/teammate/resolve-external-backing.ts`、
-`lib/ai/agent/team/teammate/dispatch-teammate.ts`、`lib/plugin/agent-sdk/dispatch.ts` 和
-`types/agent/external-agent.ts`。CLI/TUI 的 backend 选择尚未开放此项明确的
-Cognia 模型绑定，其原生模型选择仍是独立功能。
+实现入口：`lib/ai/agent/team/teammate/resolve-external-backing.ts`、`lib/ai/agent/team/teammate/dispatch-teammate.ts`、`lib/plugin/agent-sdk/dispatch.ts` 和 `types/agent/external-agent.ts`。CLI/TUI 的 backend 选择尚未开放此项明确的 Cognia 模型绑定，其原生模型选择仍是独立功能。
+
+## 2026-10-02 修订 — 按 Agent 明确选择 Cognia 模型
+
+### 选择按会话、按 Agent 记录
+
+会话在 `ChatSession.externalAgentModels` 中按 Agent 记录对每个外部 Agent 的明确模型选择。每一项有三种状态，并在整条链路上保持区分：缺省表示沿用 Agent 配置自身的 `cogniaModel`；`null` 表示明确使用 Agent 的原生模型配置；绑定（`providerId`、`modelId`、可选 `accountId`）表示通过网关以 Cognia 模型运行。内置 Agent 的模型选择是独立的一个维度，与任何外部 Agent 的选择互不影响。模型是否可列出由同一个纯函数决定：`lib/ai/agent/external/config/cognia-model-options.ts`，桌面端模型面板和下文的主机目录共用它。条件为：OpenAI 或 Anthropic 协议；未明确声明不支持工具调用或流式输出；网关可用的凭据（手动密钥、API Key 订阅或无需密钥的供应商）。
+
+### 支持的运行时
+
+托管路径在 Codex、OpenCode、Pi、Claude Agent ACP 和 Qwen Code 之外，新增 Kimi CLI 和 DeepSeek Harness（ACP 的 `dsh` 与 `dsh-sdk` 配置）。`config/gateway-task.ts` 中的 `cogniaGatewaySupport(config)` 是“此配置能否使用 Cognia 模型”的唯一答案，并给出拒绝原因（`network-endpoint`、`remote-server`、`no-process`、`unsupported-runtime`）。最终清单（包括后续新增的运行时）以 `GATEWAY_RUNTIME_TRAITS` 为准：
+
+| 运行时 | 入口协议 | 连续性 | 说明 |
+| --- | --- | --- | --- |
+| Codex（app-server、ACP） | Responses | 原生恢复 | |
+| Claude Agent ACP | Anthropic Messages | 原生恢复 | |
+| OpenCode（ACP、带进程的 V2）、Pi、Qwen Code、DeepSeek Harness ACP | Chat Completions | 原生恢复 | |
+| DeepSeek Harness SDK（`dsh-sdk`） | Chat Completions | 转录续接 | |
+| Kimi Code | Chat Completions | 原生恢复 | `KIMI_MODEL_*` 环境变量；模型别名 `__kimi_env_model__`；`KIMI_CODE_HOME` 归任务所有 |
+| Goose | Chat Completions | 原生恢复 | 密钥来自环境变量，禁用钥匙串 |
+| GitHub Copilot CLI | Chat Completions | 原生恢复 | 启动时传 `--model`（该路径没有模型选项）；GitHub 令牌变量设为占位值，不支持自带模型的版本会直接启动失败，而不会悄悄改用 GitHub 的模型 |
+| Aider | Chat Completions | 转录续接 | |
+| OpenCode server（自动启动） | Chat Completions | 原生恢复 | 已验证生成的配置；旧协议的 server 路径本身未端到端运行 |
+
+带原因拒绝：Cline（`unsupported-runtime`：密钥只能明文写在 `providers.json`）、Gemini CLI（网关没有 Gemini 入口）、Cursor、Kiro、Devin、Qoder、Droid（没有经过验证的自带模型方式，或需要账号认证），以及接入的远程服务（`remote-server` / `network-endpoint`）。选择器会把它们显示为不可用并说明原因。
+
+在 Cognia 模型 A → B 之间切换时，只要 Cognia 所有者账号、设备和运行时不变，就通过任务内 **重新绑定** 保留 Agent 自己的历史（由管理器以及 sandboxd/CLI 对保留的绑定共同强制）。主机通道无法重新绑定：切换会新开任务并移交对话记录。在原生模型与 Cognia 模型之间切换时，总是启动或恢复对应一侧，并移交该侧没有见过的轮次。
+
+### 主机通道
+
+与主机配对的手机或浏览器，可以让主机拥有的外部 Agent 以 Cognia 模型运行。绑定随每一轮通过 `external_agent_run_turn.cogniaModel` 传递（可为 null 的对象，只含 `providerId`、`modelId` 和可为 null 的 `accountId`，`additionalProperties: false`）。主机用 `normalizeCogniaModelBinding` 校验，拒绝任何多余字段或密钥字段，再交给 `ExternalAgentManager.execute`。网关任务在主机上使用主机自己的供应商设置和凭据库准备（`prepareExternalAgentGatewayRoute` 的本地分支）；凭据、请求头和 base URL 在两个方向上都不会经过网络。RPC 层在服务端注入的调用设备 ID 经 `context.custom.callerDeviceId` 传入，使网关任务绑定到发起它的设备。启动这样一轮所需的权限与其他主机运行的轮次相同：`process.spawn` 加交互式管理租约。
+
+`external_agent_cognia_models { configId }` 是一个读操作（`process.spawn`，无需审批），返回 `CogniaGatewayModelCatalog`：要么是 `{ supported: true, providers }`，每个供应商只包含 ID、名称、可选的凭据库 `accountIds` 和各模型的能力信息；要么是 `{ supported: false, reason }`，原因为 `host-update-required`、`unsupported-runtime`、`no-eligible-models`、`account-locked` 或 `public-https-required`。主机在 `external-agent.host-configs` 下声明这个读操作，以及能力标记 `external_agent_run_turn_cognia_model`。看不到该标记的客户端，在需要发送绑定或恢复网关会话时，会抛出可翻译的“请更新主机”错误，而不是发送旧主机封闭 schema 会拒绝的字段。明确的 `null` 不会发给这类主机。主机仍按自身配置决定，与以往一致。对绑定了 Cognia 模型的轮次或 `cognia-gateway:` 会话，运行服务不发送轮次结束时的模型报告：此时任务子进程已释放，报告会把网关路由误当作 Agent 的原生模型。
+
+两种主机都声明这两个操作，只是准备路径不同。桌面主机走上文的本地分支。无头主机的 brain 既不加载 TypeScript 供应商设置，也不加载订阅凭据库，因此 `prepareExternalAgentGatewayRoute` 把任务租约委托给 Rust 网关（`lib/gateway/host-task-lease.ts`）。具体工作由三个仅限服务调用的命令完成：`agent_gateway_host_task_prepare`、`agent_gateway_host_task_renew` 和 `agent_gateway_host_task_revoke`。
+
+- **准备。** `crates/cognia-gateway/src/task_lease.rs` 中的 `mint_host_task_lease` 从网关已在服务的快照中复制一个供应商，生成该任务私有的部署。它与设备租约使用同一个 `task_mint_request` 结构：单一模型、`gateway-required`、chat 或 responses 加上 models 和 count-tokens、2 分钟 TTL、不做故障转移。租约限定于该任务和发起设备，该设备被吊销时租约随之失效。
+- **续期。** brain 每 30 秒续期一次，续期失败即中止该轮次。
+- **吊销。** 轮次结束时 brain 吊销租约。
+- **拒绝。** 无头主机拒绝显式携带 `accountId` 的绑定，因为 profile 供应商没有凭据库账号。在 `cognia-server` 上，带网关任务的服务级进程启动必须持有该任务、该设备的有效主机租约，且端点一致。
+
+在无头主机上，模型目录读取基于 `provider_profiles_list` 与 `gateway_provider_capabilities`，只返回名称、启用状态、协议族（OpenAI 或 Anthropic）以及是否已配置凭据，从不返回凭据、base URL 或请求头。
+
+运维人员通过 Rust provider profile store 为无头主机配置供应商。凭据可以是 `env` 引用，也可以是 `secret-store` 引用。secret-store 的值须在服务器停止时写入：`cognia-server profiles credential-set --id <id>` 从 stdin 读取该值，并用主密钥加密保存；`credential-delete` 与 `credential-list` 用于管理已保存的值。部署再通过 `credentialProfileRef: { kind: "secret-store", secretId }` 引用它。运行中的服务器会缓存 secret store，因此改动在下次启动时生效。凭据永远不会发送到设备。
+
+### 切换模型与连续性
+
+不同的供应商、模型或账号意味着新的网关任务。切换时创建新任务并把会话交接给它；原任务的原生历史保留，供其自身恢复。只有在所属 Cognia 账号、设备和运行时都相同时，才允许在已有任务内重新绑定，并且总是申请新的租约。任务如何延续取决于运行时的连续性特征：`native-resume` 运行时从保留的任务目录恢复自身会话；`transcript` 运行时（DSH SDK 配置、Aider）则依靠 Cognia 回放的会话记录继续。
+
+实现入口：`lib/ai/agent/external/config/cognia-model-options.ts`、`lib/ai/agent/external/config/host-config-service.ts`（`getHostCogniaModelCatalog`）、`lib/ai/agent/external/runtimes/remote/{remote-execute,remote-run-client,remote-run-service,remote-host-configs}.ts`、`lib/companion/desktop-write-source.ts`、`lib/platform/host-feature-manifest.ts`、`protocol/companion-request-schemas.json` 和 `protocol/companion-response-schemas.json`。

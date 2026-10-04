@@ -29,7 +29,7 @@ description: OpenCodeClientAdapter 通过官方 @opencode-ai/sdk + SSE 工作，
 
 ## ProtocolAdapter 契约
 
-`protocol-adapter.ts` 是让两种迥异线缆协议在 Manager 眼里长得一样的抽象。三件套：
+`protocol-adapter.ts` 为两种不同的传输协议提供统一抽象，使 Manager 使用相同接口。该抽象包含三部分：
 
 | 符号 | 行 | 角色 |
 | --- | --- | --- |
@@ -37,19 +37,15 @@ description: OpenCodeClientAdapter 通过官方 @opencode-ai/sdk + SSE 工作，
 | `BaseProtocolAdapter` | 258 | 带共享状态（status/capabilities/tools/sessions）的抽象基类，以及一个**具体 `execute()`**（`:310`）把异步 `prompt()` 流抽干成 `ExternalAgentResult`。 |
 | `ProtocolAdapterRegistry` | 474 | 按协议字符串为键的工厂注册表；`create(protocol)`（`:499`）实例化正确的适配器。全局单例是 `protocolAdapterRegistry`（`:523`）。 |
 
-`SessionCreateOptions`（`:223`）是共享的会话建立载荷（cwd、mcpServers、permissionMode、
-`instructionEnvelope` `:233`、systemPrompt、`briefMode` `:248`）。
+`SessionCreateOptions`（`:223`）是共享的会话建立载荷（cwd、mcpServers、permissionMode、`instructionEnvelope` `:233`、systemPrompt、`briefMode` `:248`）。
 
 ### 为什么没有协议 `switch`
 
-选择是**注册 + 查找**，而非分叉。Manager 在 `registerDefaultAdapters`（`manager.ts:563`）登记默认工厂，
-并以 `protocolAdapterRegistry.create(config.protocol)`（`manager.ts:978`）解析一个。ACP 登记在 `"acp"`，
-OpenCode 在 `"opencode"`（`opencode-client.ts:123`）。加第三种协议是一次注册，而非对 Manager 的编辑。
+选择是**注册 + 查找**，而非分叉。Manager 在 `registerDefaultAdapters`（`manager.ts:563`）登记默认工厂，并以 `protocolAdapterRegistry.create(config.protocol)`（`manager.ts:978`）解析一个。ACP 登记在 `"acp"`，OpenCode 在 `"opencode"`（`opencode-client.ts:123`）。加第三种协议是一次注册，而非对 Manager 的编辑。
 
 ### 共享的 execute() 折叠
 
-`BaseProtocolAdapter.execute()`（`:310`）是 headless 路径调用的东西。它消费协议无关的事件流并折叠成一个
-结果——`:334` 的 switch：
+`BaseProtocolAdapter.execute()`（`:310`）是 headless 路径调用的东西。它消费协议无关的事件流并折叠成一个结果——`:334` 的 switch：
 
 | 事件 | 折叠动作 | 行 |
 | --- | --- | --- |
@@ -65,9 +61,7 @@ OpenCode 在 `"opencode"`（`opencode-client.ts:123`）。加第三种协议是�
 
 ## OpenCode：连接 → 运行 → 流式
 
-不同于 ACP，OpenCode 是一个**服务端 SDK**：没有 stdin/stdout 成帧，会话扩展也未经探测即声明支持
-（`getSessionExtensionSupport` `:609`）。适配器甚至**合成** ACP 形状的初始化元数据
-（`getAcpInitializationMetadata` `:625`，硬编码 `protocolVersion: 1`），让 Manager 的协商代码统一工作。
+不同于 ACP，OpenCode 是一个**服务端 SDK**：没有 stdin/stdout 成帧，会话扩展也未经探测即声明支持（`getSessionExtensionSupport` `:609`）。适配器甚至**合成** ACP 形状的初始化元数据（`getAcpInitializationMetadata` `:625`，硬编码 `protocolVersion: 1`），让 Manager 的协商代码统一工作。
 
 ```mermaid
 sequenceDiagram
@@ -95,34 +89,19 @@ sequenceDiagram
   C-->>M: finally → abort signal（关闭 SSE）+ yield done
 ```
 
-`prompt` 解析 system/model/agent 覆盖，并在文件内容为传输而编码之前执行 Cognia 出站 PII 检查：UTF-8
-文件直接扫描，base64 的文本类文件先解码再扫描，最终 wire payload 还会再检查一次。随后它把一个
-`AbortController` 接到 `options.signal`，并在调用 `session.promptAsync` **之前先打开
-`event.subscribe({ signal })`**。先订阅是关键：
-SSE 流没有回放，若在提交之后才打开就会漏掉早到的 `message.part.updated` parts。若服务端接受请求之前异步
-提交失败，适配器会回退到同步 `session.prompt`；一旦 `promptAsync` 已接受请求，后续 SSE 故障只会上报为
-可恢复错误，**绝不会再次提交**，否则同一用户轮次会执行两遍。`finally` 会 abort 控制器并拆掉 SSE fetch。
+`prompt` 解析 system/model/agent 覆盖，并在文件内容为传输而编码之前执行 Cognia 出站 PII 检查：UTF-8 文件直接扫描，base64 的文本类文件先解码再扫描，最终 wire payload 还会再检查一次。随后它把一个 `AbortController` 接到 `options.signal`，并在调用 `session.promptAsync` **之前先打开 `event.subscribe({ signal })`**。先订阅是关键：SSE 流没有回放，若在提交之后才打开就会漏掉早到的 `message.part.updated` parts。若服务端接受请求之前异步提交失败，适配器会回退到同步 `session.prompt`；一旦 `promptAsync` 已接受请求，后续 SSE 故障只会上报为可恢复错误，**绝不会再次提交**，否则同一用户轮次会执行两遍。`finally` 会 abort 控制器并拆掉 SSE fetch。
 
 OpenCode 会话时间戳本来就是 Unix 毫秒（`Date.now()`）；适配器在映射 `createdAt` 与 `updatedAt` 时保持该单位。
 
 ## 当前支持与有意保留的缺口
 
-对当前 OpenCode 版本，标准化入口是 `OpenCode (ACP)` 预设，它通过 Cognia 通用 ACP 适配器启动
-`opencode acp`。原生 HTTP/SSE 仍是使用 OpenCode 专属服务端 API 与 question 事件的高保真路径。
+对当前 OpenCode 版本，标准化入口是 `OpenCode (ACP)` 预设，它通过 Cognia 通用 ACP 适配器启动 `opencode acp`。原生 HTTP/SSE 仍是使用 OpenCode 专属服务端 API 与 question 事件的高保真路径。
 
-稳定适配器支持多轮会话、列表/分叉/恢复、模型与 Agent 选择、reasoning 事件、URL/base64 图片和文件输入、
-工具结果/错误、权限回复、OpenCode 问题事件、命令发现/执行、压缩，以及 OpenCode 专属 MCP/file/VCS/PTY/TUI
-封装。通用能力清单仍保持保守：OpenCode 的全局 MCP 管理不等同于逐会话 MCP 注入；经权限 UI 映射的问题
-事件也不等同于专用的 `respondToElicitation` 契约。
+稳定适配器支持多轮会话、列表/分叉/恢复、模型与 Agent 选择、reasoning 事件、URL/base64 图片和文件输入、工具结果/错误、权限回复、OpenCode 问题事件、命令发现/执行、压缩，以及 OpenCode 专属 MCP/file/VCS/PTY/TUI 封装。通用能力清单仍保持保守：OpenCode 的全局 MCP 管理不等同于逐会话 MCP 注入；经权限 UI 映射的问题事件也不等同于专用的 `respondToElicitation` 契约。
 
-不透明二进制与图片附件只能检查元数据，文本 PII 检测器无法检查其内容；它们沿用 Cognia 现有多模态附件
-策略。若要宣称像素级 PII 检测，还需要 OCR/内容分类能力。
+不透明二进制与图片附件只能检查元数据，文本 PII 检测器无法检查其内容；它们沿用 Cognia 现有多模态附件策略。若要宣称像素级 PII 检测，还需要 OCR/内容分类能力。
 
-`OpenCodeV2ClientAdapter` 是通过本地 sidecar 发现的独立旧版预览路径，只绑定精确的
-`2.0.0-beta.1` 契约，目前已降为**仅文档**支持。当前 OpenCode V2 的版本标识、扁平 prompt body、持久会话
-日志、完成语义和 MCP 表面均与其不兼容。适配器在旧契约内支持会话生命周期、reasoning/工具事件、权限回复、
-模型/命令发现、压缩和 `PromptInput.files`，对其他 V2 服务全部 fail closed。当前可执行入口应使用稳定
-HTTP/SSE 或 ACP。
+`OpenCodeV2ClientAdapter` 是通过本地 sidecar 发现的独立旧版预览路径，只绑定精确的 `2.0.0-beta.1` 契约，目前已降为**仅文档**支持。当前 OpenCode V2 的版本标识、扁平 prompt body、持久会话日志、完成语义和 MCP 表面均与其不兼容。适配器在旧契约内支持会话生命周期、reasoning/工具事件、权限回复、模型/命令发现、压缩和 `PromptInput.files`，对其他 V2 服务全部 fail closed。当前可执行入口应使用稳定 HTTP/SSE 或 ACP。
 
 > **为什么 `event.subscribe()` 没有 `.payload`。** `client.event.subscribe()` 直接产出 `Event` 对象
 > （`{ type, properties }` 判别联合）。只有 `client.global.event()` 才把每个事件包进 `{ directory, payload }`
@@ -133,20 +112,14 @@ HTTP/SSE 或 ACP。
 `resolveBaseUrl` 按优先级挑选服务端：
 
 1. **显式端点** —— `network.endpoint` 永远优先（连到已运行的服务端）。
-2. **自动拉起（桌面）** —— 当设置了 `metadata.autoSpawnServer`（或配置了 `process.command`）时，
-   `spawnServer` 经现成的 external-agent 进程桥（`lib/native/external-agent.ts` →
-   `src-tauri/.../external_agent`）拉起 `opencode serve --hostname=127.0.0.1 --port=0`，解析 stdout 的
-   **`opencode server listening on <url>`** 行以发现真实端口，再连接。`disconnect()` 会杀掉拉起的进程。
-   需要 Tauri 运行时；Web 端会抛出清晰错误。
+2. **自动拉起（桌面）** —— 当设置了 `metadata.autoSpawnServer`（或配置了 `process.command`）时，`spawnServer` 经现成的 external-agent 进程桥（`lib/native/external-agent.ts` → `src-tauri/.../external_agent`）拉起 `opencode serve --hostname=127.0.0.1 --port=0`，解析 stdout 的 **`opencode server listening on <url>`** 行以发现真实端口，再连接。`disconnect()` 会杀掉拉起的进程。需要 Tauri 运行时；Web 端会抛出清晰错误。
 3. **默认** —— `http://127.0.0.1:4096`（或 `metadata.hostname`/`metadata.port`）。
 
-解析完后，`connect` 用一次廉价的 **`config.get()`** 探测就绪（而非旧代码泄漏的持久 `global.event()` SSE）。
-当服务端是刚自动拉起的，探测会短暂重试，以覆盖「listening 日志行」与「HTTP 服务端开始接受请求」之间的间隙。
+解析完后，`connect` 用一次廉价的 **`config.get()`** 探测就绪（而非旧代码泄漏的持久 `global.event()` SSE）。当服务端是刚自动拉起的，探测会短暂重试，以覆盖「listening 日志行」与「HTTP 服务端开始接受请求」之间的间隙。
 
 ## 鉴权
 
-`buildAuthFetch` 返回一个自定义 `fetch`（传给 `createOpencodeClient`），在每个请求（含 SSE 流）上注入
-`Authorization` 头：
+`buildAuthFetch` 返回一个自定义 `fetch`（传给 `createOpencodeClient`），在每个请求（含 SSE 流）上注入 `Authorization` 头：
 
 | 来源 | 头 |
 | --- | --- |
@@ -158,8 +131,7 @@ HTTP/SSE 或 ACP。
 
 ## SDK 事件翻译
 
-两条路径汇聚到规范事件流：经 `translateSdkEvent`（`:1257`）的活 SSE，以及经 `emitEventsFromMessage`
-（`:1446`）的同步回退。SSE switch（`:1261`）：
+两条路径汇聚到规范事件流：经 `translateSdkEvent`（`:1257`）的活 SSE，以及经 `emitEventsFromMessage`（`:1446`）的同步回退。SSE switch（`:1261`）：
 
 | OpenCode SDK 事件 | → 规范事件 | 行 |
 | --- | --- | --- |
@@ -173,9 +145,7 @@ HTTP/SSE 或 ACP。
 | `session.error` | `error`（recoverable:true） | 1407 |
 | `server.connected` / `session.*` 生命周期 | 空操作（parts 另行到达） | 1262 |
 
-流循环以 `session.status.type === "idle"` 或一个 `session.idle` 事件检测完成，并**遇 `done` 早返回**。
-SSE 流的拆除靠 abort 传给 `event.subscribe({ signal })` 的 `AbortSignal`（适配器在 `prompt` 的 `finally`
-里 abort 它）。
+流循环以 `session.status.type === "idle"` 或一个 `session.idle` 事件检测完成，并**遇 `done` 早返回**。SSE 流的拆除靠 abort 传给 `event.subscribe({ signal })` 的 `AbortSignal`（适配器在 `prompt` 的 `finally` 里 abort 它）。
 
 ## ACP vs OpenCode 一览
 

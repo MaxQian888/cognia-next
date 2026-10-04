@@ -5,9 +5,7 @@ description: 持久化同步游标、Dexie-first 读取、Capacitor mDNS、Serwi
 
 # ADR-0027 — 移动端离线容忍与服务器发现
 
-**状态**: 已接受 (2026-05-19, Wave 4.0)
-**关联**: 扩展 ADR-0014 (Capacitor 外壳)、ADR-0015 (Wave 1.x 移动端补全)、ADR-0021 (WebRTC 通道)
-**作者**: Max Qian + Claude Opus 4.7
+**状态**: 已接受 (2026-05-19, Wave 4.0) **关联**: 扩展 ADR-0014 (Capacitor 外壳)、ADR-0015 (Wave 1.x 移动端补全)、ADR-0021 (WebRTC 通道) **作者**: Max Qian + Claude Opus 4.7
 
 ## 背景
 
@@ -92,66 +90,24 @@ PNG manifest、mobile Inbox、backup/import/reminder、Twin long-press/redaction
 
 ## 同步正确性与有界查询修订（2026-09-11）
 
-消息创建时间不能代表消息变更：流式持久化和编辑会修改已有消息，而不改变
-`createdAt`。Dexie v226 新增本地 `messageSyncClock` 和消息索引
-`[syncRevision+id]`。写入中间件在消息事务内分配单调递增的 revision，覆盖并发
-写入、导入和流式更新。删除最新消息不会重置时钟；事务回滚也会回滚时钟。
-迁移直接向原始记录添加元数据，不解密或重写已有加密正文。
+消息创建时间不能代表消息变更：流式持久化和编辑会修改已有消息，而不改变 `createdAt`。Dexie v226 新增本地 `messageSyncClock` 和消息索引 `[syncRevision+id]`。写入中间件在消息事务内分配单调递增的 revision，覆盖并发写入、导入和流式更新。删除最新消息不会重置时钟；事务回滚也会回滚时钟。迁移直接向原始记录添加元数据，不解密或重写已有加密正文。
 
-messages 的不透明游标升级为 version 2。收到 version-1 游标时，按 revision
-索引分批补齐，不能把创建时间误作 revision。全新客户端仍获取最近 500 条消息，
-并在同一读事务中记录时钟检查点；之后对更早消息的修改会进入后续增量。更早历史
-继续通过专用 transcript 分页读取。行游标与删除游标保持独立。
+messages 的不透明游标升级为 version 2。收到 version-1 游标时，按 revision 索引分批补齐，不能把创建时间误作 revision。全新客户端仍获取最近 500 条消息，并在同一读事务中记录时钟检查点；之后对更早消息的修改会进入后续增量。更早历史继续通过专用 transcript 分页读取。行游标与删除游标保持独立。
 
-同一 schema 版本为 workflow runs 新增 `[syncActivityAt+id]` 索引，其元数据为
-`max(startedAt, completedAt)`，由写入中间件维护。Host 在数据库查询阶段限制
-每页大小，不再每页读取并排序所有剩余运行记录。
+同一 schema 版本为 workflow runs 新增 `[syncActivityAt+id]` 索引，其元数据为 `max(startedAt, completedAt)`，由写入中间件维护。Host 在数据库查询阶段限制每页大小，不再每页读取并排序所有剩余运行记录。
 
-同步在请求发起时捕获 Host 配置代次和数据库，在每批写入前验证，包括异步解密或
-准备工作完成之后。迟到结果不能写入新选中 Host 的数据库。启动流程清理时取消
-其同步任务。定向失效通知和分阶段拉取共用每个 Host 的并发预算，新增定向任务
-不会额外获得一套独立并发额度。
+同步在请求发起时捕获 Host 配置代次和数据库，在每批写入前验证，包括异步解密或准备工作完成之后。迟到结果不能写入新选中 Host 的数据库。启动流程清理时取消其同步任务。定向失效通知和分阶段拉取共用每个 Host 的并发预算，新增定向任务不会额外获得一套独立并发额度。
 
 ## PWA 安装链路修订（2026-09-14）
 
-Wave-4 的 PWA 层停在"技术上可安装"：manifest 与 Serwist worker 已产出，
-但产品侧从未捕获 `beforeinstallprompt`。本修订记录现已交付的产品化安装
-链路：
+Wave-4 的 PWA 层停在"技术上可安装"：manifest 与 Serwist worker 已产出，但产品侧从未捕获 `beforeinstallprompt`。本修订记录现已交付的产品化安装链路：
 
-- `lib/pwa/install-state.ts` 将单次性的安装提示事件捕获进一个不依赖
-  React 的外部 store。`PwaLifecycleInitializer` 挂在 `LocaleGate` 内、
-  `AccountGate` 之上——事件可能在保管库锁屏挡住 gate 时触发，错过捕获
-  会让安装入口直到刷新前都不可用。`hooks/use-install-prompt.ts` 是其
-  `useSyncExternalStore` 视图。
-- 唯一的应用内入口是 设置 → 关于（`InstallAppCard`），以
-  `detectPlatform() === "web"` 门控。四种状态：`installable`（原生
-  对话框按钮）、`installed`、`ios-manual`（"分享 → 添加到主屏幕"
-  步骤——iOS Safari 永不触发 `beforeinstallprompt`）、`unavailable`
-  （引导浏览器菜单的文案）。卡片文案明确说明 PWA 是该部署的客户端，
-  而非桌面宿主。
-- `app/manifest.ts` 新增 `id`（显式身份——缺失时 Chrome 用
-  `start_url` 推导，日后变更会使既有安装全部失联）、`lang`、`dir`、
-  `categories`、`launch_handler: focus-existing`、`shortcuts`、
-  `screenshots` 与 `protocol_handlers`（`web+cognia` →
-  `/deep-link?u=%s`，复用现有深链页面）。单一静态 manifest 保持英文
-  身份文案——相对按 locale 拆 manifest 路由是刻意的取舍。
-- `app/sw.ts` 预缓存 `public/offline.html`（revision 取应用版本号，每次
-  发版重新预缓存），并为 `destination: "document"` 注册 Serwist
-  `fallbacks` 条目。离线时未缓存的导航现在得到双语离线页，而非浏览器
-  错误页——后者在 `standalone` 窗口中没有退路。
-- `PwaBadgeInitializer` 挂在 gate 之内（需要解锁后的 Dexie），在
-  `display-mode: standalone` 下将移动端未读会话数镜像到
-  `navigator.setAppBadge`。
-- 遥测：`app` 类别下新增 `app.pwa.install.shown|accepted|dismissed` 与
-  `app.pwa.installed`。`app/layout.tsx` 的 metadata 修正为 Cognia 品牌
-  文案，并补齐 `appleWebApp` 与 `themeColor` viewport 项。
-- 截图素材由 `pnpm screenshots:pwa`
-  （`scripts/screenshots/capture-pwa-screenshots.mjs`）基于
-  `NEXT_PUBLIC_E2E=1` 静态导出、用一次性 E2E 账户生成——绝不含真实
-  用户数据。
+- `lib/pwa/install-state.ts` 将单次性的安装提示事件捕获进一个不依赖 React 的外部 store。`PwaLifecycleInitializer` 挂在 `LocaleGate` 内、`AccountGate` 之上——事件可能在保管库锁屏挡住 gate 时触发，错过捕获会让安装入口直到刷新前都不可用。`hooks/use-install-prompt.ts` 是其 `useSyncExternalStore` 视图。
+- 唯一的应用内入口是 设置 → 关于（`InstallAppCard`），以 `detectPlatform() === "web"` 门控。四种状态：`installable`（原生对话框按钮）、`installed`、`ios-manual`（"分享 → 添加到主屏幕" 步骤——iOS Safari 永不触发 `beforeinstallprompt`）、`unavailable`（引导浏览器菜单的文案）。卡片文案明确说明 PWA 是该部署的客户端，而非桌面宿主。
+- `app/manifest.ts` 新增 `id`（显式身份——缺失时 Chrome 用 `start_url` 推导，日后变更会使既有安装全部失联）、`lang`、`dir`、`categories`、`launch_handler: focus-existing`、`shortcuts`、`screenshots` 与 `protocol_handlers`（`web+cognia` → `/deep-link?u=%s`，复用现有深链页面）。单一静态 manifest 保持英文身份文案——相对按 locale 拆 manifest 路由是刻意的取舍。
+- `app/sw.ts` 预缓存 `public/offline.html`（revision 取应用版本号，每次发版重新预缓存），并为 `destination: "document"` 注册 Serwist `fallbacks` 条目。离线时未缓存的导航现在得到双语离线页，而非浏览器错误页——后者在 `standalone` 窗口中没有退路。
+- `PwaBadgeInitializer` 挂在 gate 之内（需要解锁后的 Dexie），在 `display-mode: standalone` 下将移动端未读会话数镜像到 `navigator.setAppBadge`。
+- 遥测：`app` 类别下新增 `app.pwa.install.shown|accepted|dismissed` 与 `app.pwa.installed`。`app/layout.tsx` 的 metadata 修正为 Cognia 品牌文案，并补齐 `appleWebApp` 与 `themeColor` viewport 项。
+- 截图素材由 `pnpm screenshots:pwa`（`scripts/screenshots/capture-pwa-screenshots.mjs`）基于 `NEXT_PUBLIC_E2E=1` 静态导出、用一次性 E2E 账户生成——绝不含真实用户数据。
 
-定位不变：已安装的 PWA 是 headless 部署的客户端（`web-standalone`
-宿主档案）。它不会获得 sidecar、文件系统、MCP 或 connector 运行时能力
-——卡片文案已写明。Web Push 仍不在范围内（需要 VAPID 密钥与服务端订阅
-存储）。`window-controls-overlay` 标题栏复用是刻意的后续项，不属于本次
-交付。Tauri SW 注册验证仍是上方的开放项。
+定位不变：已安装的 PWA 是 headless 部署的客户端（`web-standalone` 宿主档案）。它不会获得 sidecar、文件系统、MCP 或 connector 运行时能力——卡片文案已写明。Web Push 仍不在范围内（需要 VAPID 密钥与服务端订阅存储）。`window-controls-overlay` 标题栏复用是刻意的后续项，不属于本次交付。Tauri SW 注册验证仍是上方列出的待完成事项。

@@ -9,6 +9,79 @@ import { parse } from "yaml"
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
 
+test("iOS tagged releases verify the IPA before uploading to TestFlight and gate publication", async () => {
+  const { jobs } = parse(await readWorkflow("release.yml"))
+  const ios = jobs["build-ios"]
+  assert.ok(ios)
+  assert.deepEqual(ios.needs, ["quality", "test"])
+  assert.equal(ios.permissions.contents, "read")
+  const steps = ios.steps
+  const build = steps.findIndex((s) => s.name === "Build offline iOS assets")
+  const preflight = steps.findIndex((s) => s.id === "ios-signing")
+  const archive = steps.findIndex((s) => s.run === "node mobile/scripts/ios-release.mjs package")
+  const upload = steps.findIndex((s) =>
+    s.uses?.startsWith("apple-actions/upload-testflight-build@")
+  )
+  assert.ok(build >= 0 && build < preflight && preflight < archive && archive < upload)
+  assert.match(steps[build].run, /pnpm mobile:prepare/)
+  assert.match(steps[build].run, /pnpm --filter mobile run sync:ios/)
+  assert.equal(ios.env.NEXT_PUBLIC_PLATFORM, "mobile")
+  assert.equal(ios.env.COGNIA_MOBILE_DEV, "0")
+  assert.equal(steps[upload].with["app-path"], "${{ steps.ios-package.outputs.ipa_path }}")
+  // Stage build numbers repeat across marketing versions; upstream polling does not
+  // filter the marketing version and could incorrectly accept an older build.
+  assert.equal(steps[upload].with["wait-for-processing"], "false")
+  assert.equal(steps.find((s) => s.name === "Clean up iOS signing").if, "always()")
+  assert.equal(ios.env.IOS_CERTIFICATE_PASSWORD, undefined)
+  assert.ok(jobs["build-tauri"].needs.includes("build-ios"))
+  assert.ok(
+    steps.some(
+      (s) => s.uses?.startsWith("actions/upload-artifact@") && s.with.name === "ios-release"
+    )
+  )
+  assert.ok(!steps.some((s) => /submit.*review|release.*app/.test(s.run ?? "")))
+})
+
+test("tagged releases require verified Android artifacts before publishing the desktop draft", async () => {
+  const { jobs } = parse(await readWorkflow("release.yml"))
+  const android = jobs["build-android"]
+  assert.ok(android, "Android is part of the release job graph")
+  assert.deepEqual(android.needs, ["quality", "test"])
+  assert.equal(android.permissions.contents, "read")
+  const preflight = android.steps.findIndex((s) => s.id === "android-signing")
+  const build = android.steps.findIndex((s) => s.run === "pnpm mobile:build:android --release")
+  const sign = android.steps.findIndex(
+    (s) => s.run === "node mobile/scripts/android-release.mjs package"
+  )
+  const upload = android.steps.findIndex((s) => s.uses?.startsWith("actions/upload-artifact@"))
+  assert.ok(preflight >= 0 && preflight < build && build < sign && sign < upload)
+  assert.equal(android.steps[upload].with.name, "android-release")
+  assert.equal(android.steps[upload].with["if-no-files-found"], "error")
+  assert.ok(jobs["build-tauri"].needs.includes("build-android"))
+  assert.equal(jobs["build-tauri"].with.androidArtifact, "android-release")
+  const cleanup = android.steps.find((s) => s.name === "Remove temporary signing material")
+  assert.equal(cleanup.if, "always()")
+  assert.equal(android.env?.ANDROID_KEYSTORE_PASSWORD, undefined)
+  assert.equal(android.steps[build].env?.ANDROID_KEYSTORE_PASSWORD, undefined)
+  assert.match(android.steps[preflight].env.ANDROID_SIGNING_CERT_SHA256, /secrets\./)
+})
+
+test("publication attaches Android artifacts and keeps prereleases out of latest", async () => {
+  const workflow = parse(await readWorkflow("build-tauri.yml"))
+  assert.equal(workflow.on.workflow_call.inputs.androidArtifact.default, "")
+  const steps = workflow.jobs["publish-release"].steps
+  const download = steps.findIndex((s) => s.uses?.startsWith("actions/download-artifact@"))
+  const upload = steps.findIndex((s) => s.name === "Attach verified Android release")
+  const publish = steps.findIndex((s) => s.name === "Publish verified release")
+  assert.ok(download >= 0 && download < upload && upload < publish)
+  assert.equal(steps[download].if, "inputs.androidArtifact != ''")
+  assert.equal(steps[upload].if, "inputs.androidArtifact != ''")
+  assert.match(steps[upload].run, /gh release upload/)
+  assert.match(steps[upload].run, /sha256sum --check/)
+  assert.match(steps[publish].run, /--prerelease --latest=false/)
+  assert.match(steps[publish].run, /--draft=false --latest/)
+})
+
 test("frontend build caches cover each build mode without sharing incompatible compilation state", async () => {
   const scopes = new Set()
   for (const [workflow, jobName, cachePath] of [

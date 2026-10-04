@@ -15,12 +15,12 @@
  *   - the SPA application (web) with `<web origin>/logto/callback`,
  *   - the organization roles collab-server assigns (`owner`, `member`),
  *   - the social connectors (GitHub, Feishu) from their factories, and
- *   - the sign-in experience, social-only unless told otherwise.
+ *   - social sign-in options, preserving existing login and security policies.
  *
  * Connector targets are READ from `GET /api/connector-factories`, never
- * assumed: Logto's Feishu connector is `@logto/connector-feishu-web` and its
- * target is `feishu-web`, which is what `COGNIA_LOGTO_SOCIAL_PROVIDERS` must
- * carry and what the client passes as `direct_sign_in`. The script prints the
+ * assumed: Logto 1.44's Feishu factory is `feishu-web`, while its target is
+ * `feishu`, which is what `COGNIA_LOGTO_SOCIAL_PROVIDERS` must carry and what
+ * the client passes as `direct_sign_in`. The script prints the
  * `.env` lines with the real values at the end.
  *
  * Environment:
@@ -148,7 +148,7 @@ export function envLines(input) {
 // Management API client
 // ---------------------------------------------------------------------------
 
-class Management {
+export class Management {
   constructor(endpoint, token, dryRun) {
     this.endpoint = endpoint.replace(/\/+$/, "")
     this.token = token
@@ -157,7 +157,7 @@ class Management {
 
   async call(method, path, body) {
     if (this.dryRun && method !== "GET") {
-      console.log(`[dry-run] ${method} ${path} ${body ? JSON.stringify(body) : ""}`)
+      console.log(`[dry-run] ${method} ${path} fields=${Object.keys(body ?? {}).join(",")}`)
       return {}
     }
     const response = await fetch(`${this.endpoint}${path}`, {
@@ -172,7 +172,9 @@ class Management {
     if (!response.ok) {
       throw new Error(`${method} ${path} answered ${response.status}: ${text}`)
     }
-    return text ? JSON.parse(text) : {}
+    return text && response.headers.get("content-type")?.includes("application/json")
+      ? JSON.parse(text)
+      : {}
   }
 
   get(path) {
@@ -237,7 +239,7 @@ async function ensureResource(api, audience) {
   return resource
 }
 
-async function ensureApplication(api, applications, name, type, redirectUris) {
+export async function ensureApplication(api, applications, name, type, redirectUris) {
   let application = applications.find((row) => row.name === name && row.type === type)
   const metadata = { redirectUris, postLogoutRedirectUris: [] }
   if (!application) {
@@ -245,36 +247,70 @@ async function ensureApplication(api, applications, name, type, redirectUris) {
       name,
       type,
       oidcClientMetadata: metadata,
+      customClientMetadata: {
+        alwaysIssueRefreshToken: true,
+        rotateRefreshToken: true,
+        refreshTokenTtlInDays: 7,
+      },
     })
     console.log(`created ${type} application "${name}" (${application.id ?? "dry-run"})`)
     return application
   }
   const current = application.oidcClientMetadata?.redirectUris ?? []
   const missing = redirectUris.filter((uri) => !current.includes(uri))
-  if (missing.length > 0) {
+  const needsRefreshPolicy =
+    application.customClientMetadata?.alwaysIssueRefreshToken !== true ||
+    application.customClientMetadata?.rotateRefreshToken !== true
+  if (missing.length > 0 || needsRefreshPolicy) {
     await api.patch(`/api/applications/${application.id}`, {
       oidcClientMetadata: {
         ...application.oidcClientMetadata,
         redirectUris: [...current, ...missing],
       },
+      customClientMetadata: {
+        ...application.customClientMetadata,
+        alwaysIssueRefreshToken: true,
+        rotateRefreshToken: true,
+      },
     })
-    console.log(`updated ${type} application "${name}": added ${missing.join(", ")}`)
+    console.log(`updated ${type} application "${name}": callback and refresh-token policy`)
   } else {
     console.log(`${type} application "${name}" present (${application.id})`)
   }
   return application
 }
 
-async function ensureOrganizationRoles(api) {
+export async function ensureOrganizationRoles(api, resource) {
   const roles = await api.get("/api/organization-roles")
+  const scopes = resource?.id ? await api.get(`/api/resources/${resource.id}/scopes`) : []
   for (const role of ORGANIZATION_ROLES) {
-    if (roles.some((row) => row.name === role.name)) continue
-    await api.post("/api/organization-roles", role)
-    console.log(`created organization role ${role.name}`)
+    let existing = roles.find((row) => row.name === role.name)
+    if (!existing) {
+      existing = await api.post("/api/organization-roles", role)
+      console.log(`created organization role ${role.name}`)
+    }
+    if (!existing.id || !resource?.id) continue // A dry run has no created ids.
+    const assigned = await api.get(`/api/organization-roles/${existing.id}/resource-scopes`)
+    const allowed = API_SCOPES.filter(
+      (scope) => role.name === "owner" || scope.name !== "brain:admin"
+    )
+    const missing = scopes.filter(
+      (scope) =>
+        allowed.some((item) => item.name === scope.name) &&
+        !assigned.some((item) => item.id === scope.id)
+    )
+    if (missing.length > 0) {
+      await api.post(`/api/organization-roles/${existing.id}/resource-scopes`, {
+        scopeIds: missing.map((scope) => scope.id),
+      })
+      console.log(
+        `assigned ${role.name} API permissions: ${missing.map((scope) => scope.name).join(", ")}`
+      )
+    }
   }
 }
 
-async function ensureConnectors(api, environment) {
+export async function ensureConnectors(api, environment) {
   const factories = await api.get("/api/connector-factories")
   const existing = await api.get("/api/connectors")
   const plan = planConnectors(factories, existing, environment)
@@ -294,18 +330,32 @@ async function ensureConnectors(api, environment) {
   return plan.targets
 }
 
-async function ensureSignInExperience(api, targets) {
-  if (targets.length === 0) {
-    console.log("no social connectors configured: sign-in experience left as is")
-    return
+/** Provider redirects use the connector instance ID, not its factory or target. */
+export function connectorCallbacks(endpoint, connectors, targets) {
+  return connectors
+    .filter((connector) => targets.includes(connector.target))
+    .map((connector) => ({
+      target: connector.target,
+      uri: `${endpoint.replace(/\/+$/, "")}/callback/${encodeURIComponent(connector.id)}`,
+    }))
+}
+
+export async function ensureSignInExperience(api, targets) {
+  const current = await api.get("/api/sign-in-exp")
+  const existing = current.socialSignInConnectorTargets ?? []
+  const merged = [...new Set([...existing, ...targets])]
+  if (
+    merged.length === existing.length &&
+    merged.every((target, index) => target === existing[index])
+  ) {
+    console.log("social sign-in options unchanged; existing security policies preserved")
+    return merged
   }
   await api.patch("/api/sign-in-exp", {
-    socialSignInConnectorTargets: targets,
-    signUp: { identifiers: [], password: false, verify: false },
-    signIn: { methods: [] },
-    socialSignIn: { automaticAccountLinking: true },
+    socialSignInConnectorTargets: merged,
   })
-  console.log(`sign-in experience: social only (${targets.join(", ")})`)
+  console.log(`social sign-in options: ${merged.join(", ")}; existing security policies preserved`)
+  return merged
 }
 
 export async function seed(environment, { dryRun = false } = {}) {
@@ -327,7 +377,7 @@ export async function seed(environment, { dryRun = false } = {}) {
   const token = await managementToken(endpoint, clientId, clientSecret)
   const api = new Management(endpoint, token, dryRun)
 
-  await ensureResource(api, audience)
+  const resource = await ensureResource(api, audience)
   const applications = await api.get("/api/applications")
   const native = await ensureApplication(
     api,
@@ -343,9 +393,8 @@ export async function seed(environment, { dryRun = false } = {}) {
     "SPA",
     webRedirectUris(webOrigin)
   )
-  await ensureOrganizationRoles(api)
-  const targets = await ensureConnectors(api, environment)
-  await ensureSignInExperience(api, targets)
+  await ensureOrganizationRoles(api, resource)
+  const targets = await ensureSignInExperience(api, await ensureConnectors(api, environment))
 
   const lines = envLines({
     endpoint,
@@ -360,8 +409,9 @@ export async function seed(environment, { dryRun = false } = {}) {
   for (const line of lines) console.log(`  ${line}`)
   if (targets.length > 0) {
     console.log("\nRegister these callback URLs at the identity providers:")
-    for (const target of targets) {
-      console.log(`  ${target}: ${endpoint.replace(/\/+$/, "")}/callback/${target}`)
+    const connectors = await api.get("/api/connectors")
+    for (const callback of connectorCallbacks(endpoint, connectors, targets)) {
+      console.log(`  ${callback.target}: ${callback.uri}`)
     }
   }
   return { native, spa, targets, lines }

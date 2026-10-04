@@ -15,7 +15,7 @@ description: cognia 插件作者 CLI —— 一个独立的 Rust 二进制，覆
   字节做 Ed25519）、inspect（`info`，支持 `.zip` bundle 或 unpacked 目录）以及 live-develop
   （`dev`，250 ms 去抖的 watch → rebuild → hot-reload）。`install` 同时支持 `.zip` bundle 和
   unpacked 目录。`status`/`install`/`uninstall`/`list`/`reload`/`dev` 命令通过一个 **仅 loopback 的 axum bridge**
-  （`src-tauri/src/cli_bridge/server.rs:28`）触达运行中的桌面端 —— 该 bridge 绑定到临时的
+  （`src-tauri/src/cli_bridge/server.rs:28`）调用运行中的桌面端 —— 该 bridge 绑定到临时的
   `127.0.0.1` 端口，经由 `<config_dir>/cognia/cli-endpoint.json` 发现，并由一个每次启动生成、以
   常量时间比对的 64-hex dev token 门控。渲染端从 Plugin DevTools 完成检测、下载（SHA-256 + 可选的
   Ed25519 验证）和启动 CLI。顶层工具还覆盖 `cognia acp`、`cognia release-key` 与
@@ -31,10 +31,7 @@ description: cognia 插件作者 CLI —— 一个独立的 Rust 二进制，覆
   <Stat label="渲染端表面" value="4 + 4" hint="lib/cli-bridge (4 modules) + DevTools status card / install dialog / launcher / status chip" />
 </StatGrid>
 
-CLI 的存在是为了让插件作者能在 GUI **之外** 工作：拓印一个起步项目，用文件监听的 dev 循环迭代并对运行中的
-cognia 做 hot-reload，最终产出一个已签名、可验证的 `.zip` bundle。它可以独立于应用安装
-（`cargo install --locked --path crates/cognia-cli`），并独立于宿主进行版本管理。本节逐模块记录
-**当前实现**；面向用户的安装指南见 [CLI Prerequisites](../../dev/cli-prerequisites)。
+CLI 的存在是为了让插件作者能在 GUI **之外** 工作：拓印一个起步项目，用文件监听的 dev 循环迭代并对运行中的 cognia 做 hot-reload，最终产出一个已签名、可验证的 `.zip` bundle。它可以独立于应用安装（`cargo install --locked --path crates/cognia-cli`），并独立于宿主进行版本管理。本节逐模块记录**当前实现**；面向用户的安装指南见 [CLI Prerequisites](../../dev/cli-prerequisites)。
 
 ## 四个层次
 
@@ -113,12 +110,9 @@ scripts/release-sync-keys.mjs       # 3-copy release-key sync (--check in CI)
 
 ## 命令表面
 
-插件作者操作嵌套在 `cognia plugin <cmd>` 下
-（`TopCommand::Plugin`，位于 `crates/cognia-cli/src/main.rs`），旁边还有 `cognia acp`、
-`cognia release-key` 和 `cognia release-verify` 这样的顶层工具命令。全局 flag 处处生效：
+插件作者操作嵌套在 `cognia plugin <cmd>` 下（`TopCommand::Plugin`，位于 `crates/cognia-cli/src/main.rs`），旁边还有 `cognia acp`、`cognia release-key` 和 `cognia release-verify` 这样的顶层工具命令。全局 flag 处处生效：
 `--color auto|always|never`、`--no-color`、`-q/--quiet`、`-v/--verbose`（最多 `-vv`）、
-`-y/--yes`（预确认每个 prompt；CI 必需）。Verbose 模式会为人类运行在
-stderr 打印一条解析后的命令诊断；`--quiet` 和每个命令的 `--json` 都会抑制它。
+`-y/--yes`（预确认每个 prompt；CI 必需）。Verbose 模式会为人类运行在 stderr 打印一条解析后的命令诊断；`--quiet` 和每个命令的 `--json` 都会抑制它。
 
 | 命令 | 作用 | 模块 | 是否与应用通信？ |
 | --- | --- | --- | --- |

@@ -1,114 +1,71 @@
 ---
 title: "0202 — 记忆会老化，每次修改都可以撤销"
-description: "长期记忆引入从 ai-memory 移植的老化与可逆机制：每次文本修改都把旧文本保留为修订（可恢复、可按时间点召回）；带访问强化的保留分数驱动遗忘；信念强度来自佐证证据；可选的每日清理会压缩或合并冷情节；基于规则的检查报告值得关注的记忆；召回新增过往会话路由与有界的 LLM 重排；召回的事实置于仅数据的信任边界之后；脱敏识别更多密钥形态；并用带标注的双语评测锁定检索质量。"
+description: "长期记忆从 ai-memory 引入老化与可逆机制。文本修改保存修订，支持恢复与时间点召回。带访问强化的保留分数控制遗忘，佐证证据决定信念强度。可选每日清理压缩或合并冷情节，规则检查提示待审查记忆。召回支持过往会话路由和有界 LLM 重排，事实受仅数据信任边界约束。脱敏识别更多密钥形态，带标注双语评测验证检索质量。"
 ---
 
 # ADR 0202 — 记忆会老化，每次修改都可以撤销
 
-**状态：** 已接受
-**日期：** 2026-09-29
-**相关：** [ADR-0069](./0069-long-term-memory-external-api-surfaces)（记忆子系统与 API 面）、[ADR-0115](./0115-unified-memory-rag-infrastructure)（检索内核、治理、信任边界）
+**状态：** 已接受**日期：** 2026-09-29 **相关：** [ADR-0069](./0069-long-term-memory-external-api-surfaces)（记忆子系统与 API 面）、[ADR-0115](./0115-unified-memory-rag-infrastructure)（检索内核、治理、信任边界）
 
 ## 背景
 
-[ai-memory](https://github.com/akitaonrails/ai-memory) 是面向编码 agent 的记忆服务。
-与它对比，Cognia 的记忆在治理上领先（来源信任、污染门控、PII 失败即关闭、加密内容、
-租约作业、证据行、审核队列），但在四个方面落后：
+[ai-memory](https://github.com/akitaonrails/ai-memory) 是面向编码 agent 的记忆服务。与它对比，Cognia 的记忆在治理上领先（来源信任、污染门控、PII 失败即关闭、加密内容、租约作业、证据行、审核队列），但在四个方面落后：
 
-1. **可逆性。** 合并时的 UPDATE、API 补丁或控制台编辑会原地替换 `text`，旧措辞随之丢失。
-   `memory-row.tsx` 的注释承诺了恢复功能，但从未实现。
-2. **老化。** 衰减只作为排序中的新近度因子存在。`accessCount` 被存储却从未读取，
-   因此一条用户反复需要的记忆，在触及每个范围的上限时和无人问津的记忆一样被遗忘。
-3. **召回信号的广度。** 只有两条腿（BM25 + 向量）；无法识别“问题在问过去的对话”，
-   没有佐证信号，也没有重排。
+1. **可逆性。** 合并时的 UPDATE、API 补丁或控制台编辑会原地替换 `text`，旧措辞随之丢失。`memory-row.tsx` 的注释承诺了恢复功能，但从未实现。
+2. **老化。** 衰减只作为排序中的新近度因子存在。`accessCount` 被存储却从未读取，因此一条用户反复需要的记忆，在触及每个范围的上限时和无人问津的记忆一样被遗忘。
+3. **召回信号的广度。** 只有两条腿（BM25 + 向量）；无法识别“问题在问过去的对话”，没有佐证信号，也没有重排。
 4. **评测。** ADR-0115 要求固定的双语检索评测，但并不存在。
 
-另有两处与安全相关：召回的个人事实以裸列表项进入提示词（ADR-0115 §2 要求仅数据边界），
-脱敏器也漏掉了几种常见的密钥形态。
+另有两处与安全相关：召回的个人事实以裸列表项进入提示词（ADR-0115 §2 要求仅数据边界），脱敏器也漏掉了几种常见的密钥形态。
 
 ## 决策
 
 ### 1. 取代而不覆盖——修订存于同一张表
 
-每次修改记忆的 `text`，都会在同一个事务内把旧文本写成 `memories` 表中的一行**修订快照**
-（`preserveRevisionIfTextChanges`，由两个写入咽喉 `updateMemory` 与 `runMemoryMutation` 调用）。
-快照为 `status: "invalidated"`，`revisionOf` = `supersededById` = 活动记忆的 id，
-且不带 `vectorDocId`、`key`、`sourceMessageId` 或 `sourceSessionId`。
+每次修改记忆的 `text`，都会在同一个事务内把旧文本写成 `memories` 表中的一行**修订快照**（`preserveRevisionIfTextChanges`，由两个写入咽喉 `updateMemory` 与 `runMemoryMutation` 调用）。快照为 `status: "invalidated"`，`revisionOf` = `supersededById` = 活动记忆的 id，且不带 `vectorDocId`、`key`、`sourceMessageId` 或 `sourceSessionId`。
 
-不新增表、不升级 schema 版本：`invalidated` 行本就被召回、淘汰和所有活动行查询排除；
-新字段（`revisionOf`、`revisionReason`、`revisedAt`、`compactedAt`、`beliefInputs`）不建索引；
-快照随表继承加密、同步与备份。`listMemories` 默认隐藏快照（除非 `includeRevisions`）；
-外部接口从不按 id 暴露快照，也拒绝编辑或遗忘快照。删除记忆会连同其历史一起删除；
-清空已遗忘记忆也会清空历史。
+不新增表、不升级 schema 版本：`invalidated` 行本就被召回、淘汰和所有活动行查询排除；新字段（`revisionOf`、`revisionReason`、`revisedAt`、`compactedAt`、`beliefInputs`）不建索引；快照随表继承加密、同步与备份。`listMemories` 默认隐藏快照（除非 `includeRevisions`）；外部接口从不按 id 暴露快照，也拒绝编辑或遗忘快照。删除记忆时一并删除该记忆的历史。清空已遗忘记忆也会清空历史。
 
-活动行保持 id 与版本计数不变，因此 MCP / 插件 / 设备调用方与比较并交换校验不受影响。
-`restore-revision` 把较早的文本放回，并把被替换的文本保留为最新修订，所以恢复本身也可撤销。
+活动行保持 id 与版本计数不变，因此 MCP / 插件 / 设备调用方与比较并交换校验不受影响。`restore-revision` 把较早的文本放回，并把被替换的文本保留为最新修订，所以恢复本身也可撤销。
 
 ### 2. 历史（`asOf`）召回
 
-`[revisedAt ?? createdAt, invalidatedAt)` 是一行文本处于生效状态的窗口（按录入时间，
-与 ai-memory 的 bi-temporal-lite 一致）。带 `asOf` 时，检索器在 `loadHistoricalCandidates`
-中按 `wasLiveAt` 以及该行当时的治理排除条件过滤——只走词法（向量描述的是当前文本），
-不累加访问、不重排。通过 `searchMemoriesExternal`、MCP `memory_search(asOf)` 与插件
-`ctx.memory.search({ asOf })` 暴露；命中若为较早措辞，会带 `revisionId` / `validFrom` / `validTo`，
-而 `id` 仍是记忆本身的 id。
+`[revisedAt ?? createdAt, invalidatedAt)` 是一行文本处于生效状态的窗口（按录入时间，与 ai-memory 的 bi-temporal-lite 一致）。带 `asOf` 时，检索器在 `loadHistoricalCandidates` 中按 `wasLiveAt` 以及该行当时的治理排除条件过滤——只走词法（向量描述的是当前文本），不累加访问、不重排。通过 `searchMemoriesExternal`、MCP `memory_search(asOf)` 与插件 `ctx.memory.search({ asOf })` 暴露；命中若为较早措辞，会带 `revisionId` / `validFrom` / `validTo`，而 `id` 仍是记忆本身的 id。
 
 ### 3. 保留分数驱动遗忘，而不是排序
 
-`retention = salience·e^(−λ·age) + σ·ln(1+accessCount)·e^(−μ·idle)`
-（λ 0.02，σ 0.6，μ 0.04；salience 由现有的召回反馈推导）。淘汰按归一化的保留分数加重要度排序。
-访问强化默认开启（`accessReinforcementWeight`，设为 0 关闭），因为它只会让记忆保留得更久。
-每条记忆的访问累加有 60 秒冷却。与 ai-memory 一致，保留分数从不进入召回排序：
-一条记忆不应仅因被召回过就排得更靠前。
+`retention = salience·e^(−λ·age) + σ·ln(1+accessCount)·e^(−μ·idle)`（λ 0.02，σ 0.6，μ 0.04；salience 由现有的召回反馈推导）。淘汰按归一化的保留分数加重要度排序。访问强化默认开启（`accessReinforcementWeight`，设为 0 关闭），因为它只会让记忆保留得更久。每条记忆的访问累加有 60 秒冷却。与 ai-memory 一致，保留分数从不进入召回排序：一条记忆不应仅因被召回过就排得更靠前。
 
 ### 4. 由佐证得出的信念强度
 
-每当证据变化时重算 `beliefInputs`（有效证据数、不同会话数、最新证据时间）。
-`belief = clamp(support·recency·1/(1+contradictions), 0, 0.95)`，常量沿用 ai-memory；
-没有证据时为 `null`（遗留行是“未知”，绝不是“不可信”）。合并判定的 NOOP 现在会指明已经
-涵盖候选的那条记忆，并把本轮证据附加上去——重复陈述是新的见证而非编辑，也绝不会重置审核状态。
-信念强度在检查器中展示；只有 `beliefRankingWeight > 0`（默认 0）时才参与排序。
+每当证据变化时重算 `beliefInputs`（有效证据数、不同会话数、最新证据时间）。`belief = clamp(support·recency·1/(1+contradictions), 0, 0.95)`，常量沿用 ai-memory；没有证据时为 `null`（遗留行是“未知”，绝不是“不可信”）。合并判定的 NOOP 现在会指明已经涵盖候选的那条记忆，并把本轮证据附加上去——重复陈述是新的见证而非编辑，也绝不会重置审核状态。信念强度在检查器中展示；只有 `beliefRankingWeight > 0`（默认 0）时才参与排序。
 
 ### 5. 可选的生命周期清理
 
-每日的 `memory-lifecycle-sweep` 作业（只有开启了某项处理时才入队）挑选冷记忆——情节型、
-未置顶、不是项目断言、从未压缩、保留分数低于 `coldRetentionThreshold`——最冷的优先，最多 500 条：
+每日的 `memory-lifecycle-sweep` 作业（只有开启了某项处理时才入队）挑选冷记忆——情节型、未置顶、不是项目断言、从未压缩、保留分数低于 `coldRetentionThreshold`——最冷的优先，最多 500 条：
 
-- **去重**（`dedupColdClusters`）：按命名空间在已存向量上运行 DBSCAN，自适应半径上限为余弦距离 0.15；
-  每个簇合并到保留分数最高的成员，其文本吸收所有成员的持久标记；其余成员被取代，
-  证据重新挂到幸存者上。与 ai-memory 的差异：k 距离半径使用 `k = minPts − 1`，
-  修复了一个导致两成员组永远无法合并的差一错误。
-- **压缩**（`compactColdEpisodic`）：摘要（≤ 500 字节）加最多 48 个持久标记
-  （URL、路径、文件名、错误码、HTTP 状态码、行内代码、常量、标识符）。
+- **去重**（`dedupColdClusters`）：按命名空间在已存向量上运行 DBSCAN，自适应半径上限为余弦距离 0.15；每个簇合并到保留分数最高的成员，其文本吸收所有成员的持久标记；其余成员被取代，证据重新挂到幸存者上。与 ai-memory 的差异：k 距离半径使用 `k = minPts − 1`，修复了一个导致两成员组永远无法合并的差一错误。
+- **压缩**（`compactColdEpisodic`）：摘要（≤ 500 字节）加最多 48 个持久标记（URL、路径、文件名、错误码、HTTP 状态码、行内代码、常量、标识符）。
 
 两者都经由修订路径写入；不会硬删除任何内容。
 
 ### 6. 记忆检查
 
-控制台“健康”页中的只读检查：从未使用、已变冷、置顶但会过期、重复、被反馈标记、未解决冲突、
-证据失效、偏好等待审核，以及可能矛盾（持久记忆之间余弦相似度在 [0.4, 0.75)，取最冷的 60 条，
-最多 25 条发现）。发现只携带 id 与数值。
+控制台“健康”页中的只读检查：从未使用、已变冷、置顶但会过期、重复、被反馈标记、未解决冲突、证据失效、偏好等待审核，以及可能矛盾（持久记忆之间余弦相似度在 [0.4, 0.75)，取最冷的 60 条，最多 25 条发现）。发现只携带 id 与数值。
 
 ### 7. 召回新增能力
 
-- **过往会话路由**（`sessionRecallRouting`，可选）：双语“last time / 上次”标记把情节记忆的分数乘以 1.25——
-  即 ai-memory 在乘性权威因子上的 +0.25，映射到 Cognia 的加性分数上。
-- **有界 LLM 重排**（`llmRerank`，可选）：每次召回最多一次调用、最多 30 个候选、进程内最多 4 个并发，
-  全有或全无的校验，查询先脱敏，候选被标注为不可信数据；任何失败都保留本地排序。
+- **过往会话路由**（`sessionRecallRouting`，可选）：双语“last time / 上次”标记把情节记忆的分数乘以 1.25——即 ai-memory 在乘性权威因子上的 +0.25，映射到 Cognia 的加性分数上。
+- **有界 LLM 重排**（`llmRerank`，可选）：每次召回最多一次调用、最多 30 个候选、进程内最多 4 个并发，全有或全无的校验，查询先脱敏，候选被标注为不可信数据；任何失败都保留本地排序。
 - 依赖构建器把这些偏好作为 `defaults` 携带，所有召回入口共享同一设置；合并时的相似度查询显式退出。
 
 ### 8. 信任边界与脱敏
 
-召回的事实在原标题后附加仅数据的前言（聊天与桌面宠物共用）；经过验证的工作偏好改为附加优先级说明，
-因为它们经过用户批准。脱敏器（以及 Rust 出站门）现在能识别 Stripe、完整的 GitHub token 家族、
-AWS `ASIA`、Google OAuth 刷新令牌、Meta、Telegram 与 Slack 应用令牌、`Bearer` 令牌、
-环境变量形式的密钥赋值和凭据目录路径，并会扫描去除转义与双向控制字符后的副本。
+召回的事实在原标题后附加仅数据的前言（聊天与桌面宠物共用）；经过验证的工作偏好改为附加优先级说明，因为它们经过用户批准。脱敏器（以及 Rust 出站门）现在能识别 Stripe、完整的 GitHub token 家族、AWS `ASIA`、Google OAuth 刷新令牌、Meta、Telegram 与 Slack 应用令牌、`Bearer` 令牌、环境变量形式的密钥赋值和凭据目录路径，并会扫描去除转义与双向控制字符后的副本。
 
 ### 9. 带标注的检索评测
 
-`packages/memory/src/eval` 在固定的双语黄金集（事实、偏好、改写、中文、情节、佐证、历史）上运行
-真实检索器，按配置与类别报告 hit@k、recall@k 与 MRR，并给出相对词法基线的差值。
-其测试要求 recall@5 不低于 0.7，并要求路由绝不影响非情节问题。`pnpm memory:eval` 会打印结果表。
+`packages/memory/src/eval` 在固定的双语黄金集（事实、偏好、改写、中文、情节、佐证、历史）上运行真实检索器，按配置与类别报告 hit@k、recall@k 与 MRR，并给出相对词法基线的差值。其测试要求 recall@5 不低于 0.7，并要求路由绝不影响非情节问题。`pnpm memory:eval` 会打印结果表。
 
 ## 未采纳
 
@@ -116,8 +73,7 @@ AWS `ASIA`、Google OAuth 刷新令牌、Meta、Telegram 与 Slack 应用令牌�
 - **通过 hook 把工具输出捕获为记忆**——违反污染规则（外部上下文绝不会自动生成记忆）。
 - **跨工具的一次性认领交接**——Cognia 已有会话交接（ADR-0103）；ai-memory 的方案是借助共享服务器解决多 CLI 连续性。
 - **基于规则的会话摘要、按路径/类型的权威乘数**——Cognia 的记忆没有页面类型，其 LLM 情节提炼受 PII 门控。
-- **配对设备 RPC 的 `asOf`**——配对设备的 `memory_search` 契约需跨协议、OpenAPI、CLI 与 Rust 目录生成；
-  留待后续单独完成契约评审。
+- **配对设备 RPC 的 `asOf`**——配对设备的 `memory_search` 契约需跨协议、OpenAPI、CLI 与 Rust 目录生成；留待后续单独完成契约评审。
 
 ## 影响
 

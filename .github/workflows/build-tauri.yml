@@ -34,6 +34,11 @@ on:
         type: string
         required: false
         default: ""
+      androidArtifact:
+        description: "Verified Android artifact from this run, attached before publication."
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
 
 jobs:
@@ -195,6 +200,7 @@ jobs:
           # Every matrix leg uploads to the same draft. The publish-release job
           # makes it visible only after all signed artifacts are complete.
           releaseDraft: true
+          prerelease: ${{ contains(inputs.tagName, '-') }}
           uploadUpdaterJson: true
 
   publish-release:
@@ -204,8 +210,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Download verified Android release
+        if: inputs.androidArtifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.androidArtifact }}
+          path: android-release
+      - name: Attach verified Android release
+        if: inputs.androidArtifact != ''
+        working-directory: android-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tagName }}
+        run: |
+          sha256sum --check ./*.sha256
+          gh release upload "$RELEASE_TAG" ./*.apk ./*.sha256 ./*.metadata.json ./android-mapping.txt --clobber
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tagName }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+        run: |
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi

@@ -1,282 +1,148 @@
 ---
 title: "0174: Bot 控制面"
-description: "六种触发器乘四个执行器，共用一条持久投递队列；等待中的运行离开队列而不是堵住宿主；手机可以武装与重放而无需拥有 runner；每种宿主上「入站 webhook 该指向哪里」只有一个答案。"
+description: "六种触发器和四个执行器共用持久投递队列。等待中的运行离开队列，避免阻塞宿主。手机可武装与重放，无需持有 runner。每种宿主提供明确的入站 webhook 目标。"
 ---
 
 # ADR 0174: Bot 控制面
 
-**Status:** Accepted
-**状态:** 已接受
-**日期:** 2026-09-07
-**修订:** ADR-0009（平台连接器）
-**修正:** 2026-09-15（Bot 插件 API 面，docs/plans/2026-09-15-bot-plugin-api-surface.md）
-**相关:** ADR-0026（插件扩展点）、ADR-0027（移动端同步）、ADR-0045（计划中枢）、ADR-0128（调度器宿主放置）、ADR-0131（IM 委派与中继）、ADR-0137（一次委派一张卡）、ADR-0155（插件作者边界）
+**Status:** Accepted **状态:** 已接受**日期:** 2026-09-07 **修订:** ADR-0009（平台连接器）**修正:** 2026-09-15（Bot 插件 API 面，docs/plans/2026-09-15-bot-plugin-api-surface.md）**相关:** ADR-0026（插件扩展点）、ADR-0027（移动端同步）、ADR-0045（计划中枢）、ADR-0128（调度器宿主放置）、ADR-0131（IM 委派与中继）、ADR-0137（一次委派一张卡）、ADR-0155（插件作者边界）
 
 ## 背景
 
-这个仓库里有两样东西都叫 bot，但它们不是一回事。
+仓库中有两个都名为 bot 的概念，含义不同。
 
-第一样是 IM 连接器，建立在 ADR-0009 及其后续之上。它很成熟：11 个平台适配器、
-一条入站管线、三道准入闸，以及一个扇出到三个执行目标的五值路由决策。
-其中每一种可达模式此前都已经接线完毕。
+第一样是 IM 连接器，建立在 ADR-0009 及其后续之上。它很成熟：11 个平台适配器、一条入站管线、三道准入闸，以及一个扇出到三个执行目标的五值路由决策。其中每一种可达模式此前都已经接线完毕。
 
-第二样是 `lib/bot/`，由 5 个提交落地，没有 ADR 也没有 changeset。
-它才是「哪些任务能自己跑起来」的通用答案：6 种触发器乘 4 个执行器，
-跑在一套持久 step 运行时之上，已完成的步骤会被记忆化，所以崩溃的宿主从顶部
-重入时不会重做已完成的工作。运行时本身质量很高，但它外面的这层平面从任何地方
-都够不到，而且带着一个会让工作永久搁浅的缺陷。
+第二样是 `lib/bot/`，由 5 个提交落地，没有 ADR 也没有 changeset。它才是「哪些任务能自己跑起来」的通用答案：6 种触发器乘 4 个执行器，跑在一套持久 step 运行时之上，已完成的步骤会被记忆化，所以崩溃的宿主从顶部重入时不会重做已完成的工作。运行时本身质量很高，但它外面的这层平面从任何地方都够不到，而且带着一个会让工作永久搁浅的缺陷。
 
 ## 决定
 
 ### Bot 是一个绑定，不是一个引擎
 
-Bot 定义指向的执行器都是既有的：工作流、Squad、agent 回合，或插件 handler。
-它不贡献任何新的执行方式。价值在于绑定本身，也就是「何时」与「做什么」的配对，
-以及这个配对所携带的策略上限。这就是 `installBot` 只写一行而不注册运行时的原因。
+Bot 定义指向的执行器都是既有的：工作流、Squad、agent 回合，或插件 handler。它不贡献任何新的执行方式。价值在于绑定本身，也就是「何时」与「做什么」的配对，以及这个配对所携带的策略上限。这就是 `installBot` 只写一行而不注册运行时的原因。
 
 ### 投递是扇出的单元，而且绝不能搁浅
 
-`listDueBotDeliveries` 把 `running` 判为「未到期」，同时
-`countActiveBotDeliveriesForKey` 又把 `running` 无条件算作并发键上的活跃项。
-宿主在运行中死掉，那条投递就永久停在 `running`：不重试、不死信、不清理，
-而且它的 `concurrencyKey` 从此报废，后续每一条投递都被跳过为 `serialised`。
-于是一次崩溃干掉的不是一次运行，而是一整条工作分支。
+`listDueBotDeliveries` 把 `running` 判为「未到期」，同时 `countActiveBotDeliveriesForKey` 又把 `running` 无条件算作并发键上的活跃项。宿主在运行中死掉，那条投递就永久停在 `running`：不重试、不死信、不清理，而且它的 `concurrencyKey` 从此报废，后续每一条投递都被跳过为 `serialised`。于是一次崩溃干掉的不是一次运行，而是一整条工作分支。
 
-现在租约过期会让 `running` 到期，与 `leased` 早已具备的行为一致；
-领取时通过共用的 `decideNextAttempt` 记一次恢复尝试，
-所以一条能把宿主搞死的投递最终会进死信，而不是被永远重新领取。
+现在租约过期会让 `running` 到期，与 `leased` 早已具备的行为一致；领取时通过共用的 `decideNextAttempt` 记一次恢复尝试，所以一条能把宿主搞死的投递最终会进死信，而不是被永远重新领取。
 
 ### 停泊，而不是阻塞
 
-`waitForApproval` 过去在串行 drain 循环里原地轮询，于是一个等待人类的 Bot
-会把该宿主上所有其他 Bot 一起堵住。等待中的运行现在会停泊：投递转入 `parked`
-并带一个恢复时间，租约清空，而且**不消耗重试预算**去烧人类的思考时间。
+`waitForApproval` 过去在串行 drain 循环里原地轮询，于是一个等待人类的 Bot 会把该宿主上所有其他 Bot 一起堵住。等待中的运行现在会停泊：投递转入 `parked` 并带一个恢复时间，租约清空，而且**不消耗重试预算**去烧人类的思考时间。
 
-`parked` 是一个新状态，而不是「`pending` + 未来的 `nextAttemptAt`」。
-若用 `pending`，这条投递就不再算作并发键上的活跃项，同一分支上的第二次推送
-会在第一次还在等待时开跑，那个键就静默地不再串行化任何东西了。
+`parked` 是一个新状态，而不是「`pending` + 未来的 `nextAttemptAt`」。若用 `pending`，这条投递就不再算作并发键上的活跃项，同一分支上的第二次推送会在第一次还在等待时开跑，那个键就静默地不再串行化任何东西了。
 
 ### 自动重排，而不是 `recovery_required`
 
-连接器面把被打断的单元标为 `recovery_required` 并等人处理，因为它的工作单元
-是一整个模型回合且没有记忆化，重放就等于重发。Bot 面正相反：run id 由 delivery id
-派生，步骤被记忆化，审批中断 id 也是派生的。重入本来就是它写在文档里的契约，
-所以被打断的投递会被自动重排，并记一次尝试。
+连接器面把被打断的单元标为 `recovery_required` 并等人处理，因为它的工作单元是一整个模型回合且没有记忆化，重放就等于重发。Bot 面正相反：run id 由 delivery id 派生，步骤被记忆化，审批中断 id 也是派生的。重入本来就是它写在文档里的契约，所以被打断的投递会被自动重排，并记一次尝试。
 
 ### `interaction` 让 Bot 成为观察者，而不是路由目标
 
-一个 IM 会话可以绑定到单角色、团队或工作流。它不能绑定到 Bot，
-`ImTargetKind` 也刻意没有新增 `bot` 取值。
+一个 IM 会话可以绑定到单角色、团队或工作流。它不能绑定到 Bot，`ImTargetKind` 也刻意没有新增 `bot` 取值。
 
-Bot 观察入站流的位置与工作流触发器相同，在同伴 bot 环路守卫表态**之后**。
-放在守卫之前，会让一条守卫刚刚拒绝的消息去驱动一条 Bot 环路，
-并把互动预算花在守卫已经关掉的路径上。放进路由决策里，
-则会让它去争抢一个已经有答案的会话。
+Bot 观察入站流的位置与工作流触发器相同，在同伴 bot 环路守卫表态**之后**。放在守卫之前，会让一条守卫刚刚拒绝的消息去驱动一条 Bot 环路，并把互动预算花在守卫已经关掉的路径上。放进路由决策里，则会让它去争抢一个已经有答案的会话。
 
 ### 镜像围栏放在队列的咽喉处
 
-`botRunId` 由 delivery id 确定性派生，而 `executionRuns` 本来就在同步。
-所以 `botEventDeliveries` 一跨过 companion 平面，第二个宿主排掉一条镜像投递时
-就会铸出与原宿主**同 id** 的 `ExecutionRun`，两边在同一张共享表上互相覆盖。
+`botRunId` 由 delivery id 确定性派生，而 `executionRuns` 本来就在同步。所以 `botEventDeliveries` 一跨过 companion 平面，第二个宿主排掉一条镜像投递时就会铸出与原宿主**同 id** 的 `ExecutionRun`，两边在同一张共享表上互相覆盖。
 
-镜像行带 `syncedFromHost: true`，并在 `listDueBotDeliveries` 内部被排除，
-那里是 `drainBotDeliveries`、`claimBotDelivery` 和
-`countActiveBotDeliveriesForKey` 共同流经的唯一咽喉。
-围栏放在 runner 里会漏掉三条路中的两条。
+镜像行带 `syncedFromHost: true`，并在 `listDueBotDeliveries` 内部被排除，那里是 `drainBotDeliveries`、`claimBotDelivery` 和 `countActiveBotDeliveriesForKey` 共同流经的唯一咽喉。围栏放在 runner 里会漏掉三条路中的两条。
 
-`BotInstallationRow` 带同一个标志，但理由不同：没有它，
-`syncBotTriggerSchedules` 会把另一台宿主已武装的 cron 变成本机调度任务，
-于是两台宿主都会触发。
+`BotInstallationRow` 带同一个标志，但理由不同：没有它，`syncBotTriggerSchedules` 会把另一台宿主已武装的 cron 变成本机调度任务，于是两台宿主都会触发。
 
 ### `botRunSteps` 永不跨端
 
-两个理由，任何一个单独成立都足够。它的 `output` 是刻意逐字存储的，
-因为脱敏会毁掉从中恢复的 handler，而逐字输出恰恰是每一条投影都会剥掉的东西。
-结构上，它的主键**就是**记忆化键，所以镜像了它的 companion 会把别人宿主的
-备忘读成自己的。
+两个理由，任何一个单独成立都足够。它的 `output` 是刻意逐字存储的，因为脱敏会毁掉从中恢复的 handler，而逐字输出恰恰是每一条投影都会剥掉的东西。结构上，它的主键**就是**记忆化键，所以镜像了它的 companion 会把别人宿主的备忘读成自己的。
 
 ### 可用性是两个问题，不是一个
 
-`resolveBotWriteRoute` 是三值且按命令区分的，因为武装触发器只需要数据库，
-而运行和重放需要一个活着的 runner。
-`resolveBotLifecycleWriteAvailability` 是二值的，因为安装、配置、绑定和卸载
-根本没有远端腿。
+`resolveBotWriteRoute` 是三值且按命令区分的，因为武装触发器只需要数据库，而运行和重放需要一个活着的 runner。`resolveBotLifecycleWriteAvailability` 是二值的，因为安装、配置、绑定和卸载根本没有远端腿。
 
-两者都先问「远端宿主是否活跃」，再问本地能力。`always-on` 是一条静态基线，
-一台正在驱动远端 Cognia 的桌面在本地运行时已经拆掉的情况下仍然会报告它，
-所以先查能力会把写入路由进一个没有任何东西能执行它的进程。
+两者都先问「远端宿主是否活跃」，再问本地能力。`always-on` 是一条静态基线，一台正在驱动远端 Cognia 的桌面在本地运行时已经拆掉的情况下仍然会报告它，所以先查能力会把写入路由进一个没有任何东西能执行它的进程。
 
 ### 幂等键编码的是「重放必须做什么」
 
 武装用的键命名的是它设定的**取值**：`bot-arm:<inst>:<trigger>:<0|1>`，
-于是「武装、解除、再武装」是三条不同的行，重放第一条之后宿主仍然是已武装。
-一个 toggle 命令在任何键下都无法做到安全，这正是这个写入是绝对值而非相对值的原因。
+于是「武装、解除、再武装」是三条不同的行，重放第一条之后宿主仍然是已武装。一个 toggle 命令在任何键下都无法做到安全，这正是这个写入是绝对值而非相对值的原因。
 
-手动运行每次按下都新铸一个键，因为两次按下**就是**两次运行，
-只有新键才能把它和「同一次的重试」区分开。重放派生自己的键，
-宿主臂另外要求该行仍然是死信状态，于是重复请求什么也找不到可做。
+手动运行每次按下都新铸一个键，因为两次按下**就是**两次运行，只有新键才能把它和「同一次的重试」区分开。重放派生自己的键，宿主臂另外要求该行仍然是死信状态，于是重复请求什么也找不到可做。
 
 ### 插件描述它的 webhook 验证，而不是实现它
 
-`verify_webhook` 只有四个平台的手写分支，其余一律拒绝，
-所以一个声明了 `webhook` 传输的插件连接器，拿到的是一个什么都不回应的公网端点。
+`verify_webhook` 只有四个平台的手写分支，其余一律拒绝，所以一个声明了 `webhook` 传输的插件连接器，拿到的是一个什么都不回应的公网端点。
 
-现在这套方案在清单里声明、由 Rust 执行。回调进插件代码被否决有三个理由，
-最后一条是决定性的：不存在宿主到插件方向的请求原语；
-要紧的那几个平台要求握手在约 3 秒内作答；
-而回调会把一个**未经认证的公开请求正文**先交给插件代码，
-早于任何东西确立它从哪里来。
+现在这套方案在清单里声明、由 Rust 执行。回调进插件代码被否决有三个理由，最后一条是决定性的：不存在宿主到插件方向的请求原语；要紧的那几个平台要求握手在约 3 秒内作答；而回调会把一个**未经认证的公开请求正文**先交给插件代码，早于任何东西确立它从哪里来。
 
-`secretKey` 命名的是 keyring 条目，绝不是内联密钥，因为清单在安装目录下是
-所有人可读的。basestring 必须覆盖正文：签名若不覆盖正文，
-它认证的是「某个请求」的发送者，而不是「这个请求」。
+`secretKey` 命名的是 keyring 条目，绝不是内联密钥，因为清单在安装目录下是所有人可读的。basestring 必须覆盖正文：签名若不覆盖正文，它认证的是「某个请求」的发送者，而不是「这个请求」。
 
 ### 入口形态跟随宿主画像
 
-六个适配器表单和隧道页签各自推导公网回调 URL，而且全都假设 cloudflared 隧道。
-云端安装没有隧道也不需要，于是它被展示了另一种宿主的建议，
-而真正能用的地址 `https://host/connectors/webhook/<type>/<id>`
-在整个产品里根本没出现过。
+六个适配器表单和隧道页签各自推导公网回调 URL，而且全都假设 cloudflared 隧道。云端安装没有隧道也不需要，于是它被展示了另一种宿主的建议，而真正能用的地址 `https://host/connectors/webhook/<type>/<id>` 在整个产品里根本没出现过。
 
-现在由一个 hook 回答，依据是宿主画像，而不是 `isTauri()`，
-也不是连接器可达性。后者是另一个问题，在 headless 画像上读作 true。
-手机只读取它所配对宿主的隧道来源：它同时也知道一个 LAN 基址，
-但那是私有地址，把它交给平台控制台等于广告一个平台永远够不到的地方。
+现在由一个 hook 回答，依据是宿主画像，而不是 `isTauri()`，也不是连接器可达性。后者是另一个问题，在 headless 画像上读作 true。手机只读取它所配对宿主的隧道来源：它同时也知道一个 LAN 基址，但那是私有地址，把它交给平台控制台等于广告一个平台永远够不到的地方。
 
-空态保持分离。缺隧道、缺云端来源、以及背后根本没有宿主的浏览器，
-是三种不同的补救方式，把它们压成一个，正是云端场景被展示桌面建议的成因。
+空态保持分离。缺隧道、缺云端来源、以及背后根本没有宿主的浏览器，是三种不同的补救方式，把它们压成一个，正是云端场景被展示桌面建议的成因。
 
 ### 声明的传输压过行
 
-`adapterNeedsInboundServer` 读 `row.transportMode`，对 webhook 要求精确匹配，
-而 reverse-WebSocket 分支却是防御式的。Lark、Slack 和 Telegram 声明的是
-由 `settings.transport` 算出的**单一**传输，那是一个独立的持久化字段，
-既没有迁移也没有不变量把两者绑在一起；而 WeChat OA 只会 webhook。
-无论哪种情况，一条通不过精确匹配的行都不会启动接收器，
-而没有接收器的适配器会报告健康却什么也答不了。
+`adapterNeedsInboundServer` 读 `row.transportMode`，对 webhook 要求精确匹配，而 reverse-WebSocket 分支却是防御式的。Lark、Slack 和 Telegram 声明的是由 `settings.transport` 算出的**单一**传输，那是一个独立的持久化字段，既没有迁移也没有不变量把两者绑在一起；而 WeChat OA 只会 webhook。无论哪种情况，一条通不过精确匹配的行都不会启动接收器，而没有接收器的适配器会报告健康却什么也答不了。
 
-现在，适配器声明的 `transportModes` 只要恰好命名一种传输就由它决定，
-行只在适配器真的是双模式时才起消歧作用。
+现在，适配器声明的 `transportModes` 只要恰好命名一种传输就由它决定，行只在适配器真的是双模式时才起消歧作用。
 
 ## 修正 2026-09-15：插件的门变大了，引擎没有
 
-Bot 平面此前只能从控制台触达，插件代码够不着——这意味着 TypeScript
-handler 拥有的 durable-step 表面，Python handler 只能看着。
-本次修正把平面开放给插件，但没有新增任何引擎：所有新东西要么是定义上的
-声明式字段，要么是 `ctx.bots` 上的纯值宿主调用。投递队列、停泊协议、
-以及记忆化的 step 表都没有变。
+Bot 平面此前只能从控制台触达，插件代码够不着——这意味着 TypeScript handler 拥有的 durable-step 表面，Python handler 只能看着。本次修正把平面开放给插件，但没有新增任何引擎：所有新东西要么是定义上的声明式字段，要么是 `ctx.bots` 上的纯值宿主调用。投递队列、停泊协议、以及记忆化的 step 表都没有变。
 
 ### Step 对等以纯值跨进程，而不是闭包
 
-`BotRunContextV1` 带着 `AbortSignal`、`step` 对象和两个回调；
-这些都过不了 stdio。Python handler 拿到的是 `BotRunSnapshotV1`，
-通过以 `runId` 为键的 `ctx.bots.*` 宿主调用触达同一表面
-（`lib/plugin/api/bots-api.ts`、`plugin-sdk/python/src/cognia/bot.py` 的 `BotRun`）。
+`BotRunContextV1` 带着 `AbortSignal`、`step` 对象和两个回调；这些都过不了 stdio。Python handler 拿到的是 `BotRunSnapshotV1`，通过以 `runId` 为键的 `ctx.bots.*` 宿主调用触达同一表面（`lib/plugin/api/bots-api.ts`、`plugin-sdk/python/src/cognia/bot.py` 的 `BotRun`）。
 
-宿主答不了的等待返回 `{ status: "parked", ... }` 而不是抛出，
-因为 `wrapFailure` 跨边界只保留 `message`——错误的身份过不去。
-宿主把停泊意图记进 `pendingParks`，`bots-bridge` 在 `run` 落定后
-重新抛出记录下来的 `BotRunParkedError`，于是记录下的意图同时压过
-正常结果和代理错误。SDK 抛出的 Python `BotRunParked` 只是礼貌性的。
+宿主答不了的等待返回 `{ status: "parked", ... }` 而不是抛出，因为 `wrapFailure` 跨边界只保留 `message`——错误的身份过不去。宿主把停泊意图记进 `pendingParks`，`bots-bridge` 在 `run` 落定后重新抛出记录下来的 `BotRunParkedError`，于是记录下的意图同时压过正常结果和代理错误。SDK 抛出的 Python `BotRunParked` 只是礼貌性的。
 
 ### 读取按提问的运行限定范围，emit 带命名空间
 
-每个 `ctx.bots` 方法都门控在 `agent:control` 与 `requireOwnedBotRun` 上，
-handler 只能看到自己安装的 `BotInstallationSnapshot`
-（由 `lib/bot/installation-snapshot.ts` 投影：槽位只有绑定与否的布尔值，
-绝不带出底下的 account/session/adapter id）、自己的投递
-（`listDeliveries`，有界，排除 `syncedFromHost`）、以及兄弟运行的结果
-（`getRunResult` 对「不存在」和「别人的」都答 `null`——
-存在性预言本身就是一种泄露）。
+每个 `ctx.bots` 方法都门控在 `agent:control` 与 `requireOwnedBotRun` 上，handler 只能看到自己安装的 `BotInstallationSnapshot`（由 `lib/bot/installation-snapshot.ts` 投影：槽位只有绑定与否的布尔值，绝不带出底下的 account/session/adapter id）、自己的投递（`listDeliveries`，有界，排除 `syncedFromHost`）、以及兄弟运行的结果（`getRunResult` 对「不存在」和「别人的」都答 `null`——存在性预言本身就是一种泄露）。
 
-`emit` 必须带 `<pluginId>.<type>` 命名空间；自由形态的类型可以伪造
-`run.completed` 这类宿主类型或别的插件的类型。
-`writeTriggerState` 只接受 `cursor`/`watermark`，因为宿主自有的键
-（边沿记忆、去抖、上次触发）正是把边沿触发器变成电平触发器的那几个。
+`emit` 必须带 `<pluginId>.<type>` 命名空间；自由形态的类型可以伪造 `run.completed` 这类宿主类型或别的插件的类型。`writeTriggerState` 只接受 `cursor`/`watermark`，因为宿主自有的键（边沿记忆、去抖、上次触发）正是把边沿触发器变成电平触发器的那几个。
 
 ### 定义层说得更多，但依然是声明式的
 
-`conditions.match` 对以事件根为起点的点分路径做标量相等或成员判断
-（`lib/bot/events/conditions.ts`）：缺失或非标量的叶子永不匹配。
-这是路由，不是授权。
+`conditions.match` 对以事件根为起点的点分路径做标量相等或成员判断（`lib/bot/events/conditions.ts`）：缺失或非标量的叶子永不匹配。这是路由，不是授权。
 
-`cronConfigKey`、`timezoneConfigKey`、`everyMsConfigKey` 让配置值
-覆盖声明的调度；值缺失或非法时，reconciler 用声明值并把原因记进
-trigger state 的 `configFallback`（`missing`、`invalid-cron`、
-`invalid-timezone`、`below-floor`），由控制台呈现出来，
-而不是与 manifest 默默地不一致。
+`cronConfigKey`、`timezoneConfigKey`、`everyMsConfigKey` 让配置值覆盖声明的调度；值缺失或非法时，reconciler 用声明值并把原因记进 trigger state 的 `configFallback`（`missing`、`invalid-cron`、`invalid-timezone`、`below-floor`），由控制台呈现出来，而不是与 manifest 默默地不一致。
 
-触发器的 `retry` 只会收窄队列策略、绝不放宽——`decideNextAttempt`
-以宿主上限为界（`lib/queue/retry-policy.ts`）。策略在入队时快照到
-`BotEventDeliveryRow.retry` 上，重试决策永远不需要再解析一次定义。
+触发器的 `retry` 只会收窄队列策略、绝不放宽——`decideNextAttempt` 以宿主上限为界（`lib/queue/retry-policy.ts`）。策略在入队时快照到 `BotEventDeliveryRow.retry` 上，重试决策永远不需要再解析一次定义。
 
-`waitForApproval` 的 `risk` 经过校验、持久化为中断上的 `approvalRisk`
-（`types/execution/run.ts`），并并入内容漂移比较——控制台可以展示
-一个人即将批准的风险等级，重放也无法悄悄改掉它。
+`waitForApproval` 的 `risk` 经过校验、持久化为中断上的 `approvalRisk`（`types/execution/run.ts`），并并入内容漂移比较——控制台可以展示一个人即将批准的风险等级，重放也无法悄悄改掉它。
 
 ### 生命周期钩子是解析出来的导出，不是事件
 
-`PluginBotLifecycleDef` 最多命名四个钩子。bridge 在注册时解析它们，
-方式和 handler 完全一样——JS 取 `lifecycle.entry ?? entry` 的具名导出，
-Python 取 contribution 对象上的同名方法
-（`lib/plugin/bridge/bots-bridge.ts`）——坏钩子让整个 Bot 注册失败，
-而不是留下半个注册好的定义。
+`PluginBotLifecycleDef` 最多命名四个钩子。bridge 在注册时解析它们，方式和 handler 完全一样——JS 取 `lifecycle.entry ?? entry` 的具名导出，Python 取 contribution 对象上的同名方法（`lib/plugin/bridge/bots-bridge.ts`）——坏钩子让整个 Bot 注册失败，而不是留下半个注册好的定义。
 
-它们在拥有该安装的宿主上、于管理性变更内部执行
-（`lib/bot/control-writes/lifecycle-hooks.ts`），没有 `runId`，
-因为根本没有运行；并且必须在 `BOT_LIFECYCLE_HOOK_TIMEOUT_MS`（30 秒）
-内完成。`onInstall`、`onConfigure`、`onArm` 可以否决；
-`onUninstall` 是建议性的，失败只记日志——一个拦不住删除的钩子，
-也绝不能让它把删除搁浅。远程调用方经 `mutateBotInstallationOnHost`
-恰好触发一次，绝不会每个 peer 各触发一次。
+它们在拥有该安装的宿主上、于管理性变更内部执行（`lib/bot/control-writes/lifecycle-hooks.ts`），没有 `runId`，因为根本没有运行；并且必须在 `BOT_LIFECYCLE_HOOK_TIMEOUT_MS`（30 秒）内完成。`onInstall`、`onConfigure`、`onArm` 可以否决；`onUninstall` 是建议性的，失败只记日志——一个拦不住删除的钩子，也绝不能让它把删除搁浅。远程调用方经 `mutateBotInstallationOnHost` 恰好触发一次，绝不会每个 peer 各触发一次。
 
 ### 载荷上限长在信封里，不在调用方
 
-`BOT_EVENT_PAYLOAD_MAX_BYTES`（64 KiB）在
-`lib/bot/events/envelope.ts` 的 `enqueue` 与 `emit` 内部断言，
-按 JSON 的 UTF-8 字节数计量，`undefined` 记为零，
-于是每条生产路径以同一方式拒绝超大载荷，
-而不是各自长出自己的估算。
+`BOT_EVENT_PAYLOAD_MAX_BYTES`（64 KiB）在 `lib/bot/events/envelope.ts` 的 `enqueue` 与 `emit` 内部断言，按 JSON 的 UTF-8 字节数计量，`undefined` 记为零，于是每条生产路径以同一方式拒绝超大载荷，而不是各自长出自己的估算。
 
 ## 已知限制
 
 这些记在这里，而不是留给下一个人去发现。
 
-1. **companion 无法回答 Bot 审批。** `executionRunInterrupts` 不在
-   `COMPANION_SYNC_PROTOCOL_TABLE_NAMES` 里，在 `lib/sync/` 和 `companion_api/`
-   中也零引用。唯一渲染 `bot_approval` 中断的界面是桌面的注意力面板。
-   手机可以武装触发器、启动运行、重放死信，但不能审批。
-2. **`botEventDeliveries` 没有 `updatedAt` 索引。** 其他每一张被状态投影的表都有。
-   加索引意味着每个现存数据库都要重置，一个镜像不值这个价，
-   所以跨端读取是按 `receivedAt` 开窗的有界扫描加内存过滤。
-   它是整个同步集里最贵的一次读。
-3. **`bots:read` 与 `bots:execute` 按决定仍未实现。** 每个 `ctx.bots`
-   方法都门控在 `agent:control` 上；这两个更细的权限仍只在
-   `types/plugin/plugin.ts` 出现一次，全树再无第二处。
-   日后引入这套词表是增量式的：catalog 的 `requiredPermissions` 增长，
-   `agent:control` 再被接受一个小版本。
-4. **WeCom 与 DingTalk 有一条未建的第二传输。** 两个平台都提供 HTTP 回调，
-   这里只实现了它们的 gateway 路径。`SINGLE_TRANSPORT_PLATFORMS` 把这记为
-   `unbuilt` 而不是平台限制，因为它是一个有明确实现路径的 backlog 项，
-   而且 WeCom 的方案已经为 WeChat OA 实现过了。
+1. **companion 无法回答 Bot 审批。** `executionRunInterrupts` 不在 `COMPANION_SYNC_PROTOCOL_TABLE_NAMES` 里，在 `lib/sync/` 和 `companion_api/` 中也零引用。唯一渲染 `bot_approval` 中断的界面是桌面的注意力面板。手机可以武装触发器、启动运行、重放死信，但不能审批。
+2. **`botEventDeliveries` 没有 `updatedAt` 索引。** 其他每一张被状态投影的表都有。加索引意味着每个现存数据库都要重置，仅为镜像增加索引不值得付出重置成本，所以跨端读取是按 `receivedAt` 开窗的有界扫描加内存过滤。它是整个同步集里最贵的一次读。
+3. **`bots:read` 与 `bots:execute` 按决定仍未实现。** 每个 `ctx.bots` 方法都门控在 `agent:control` 上；这两个更细的权限仍只在 `types/plugin/plugin.ts` 出现一次，全树再无第二处。日后引入这套词表是增量式的：catalog 的 `requiredPermissions` 增长，`agent:control` 再被接受一个小版本。
+4. **WeCom 与 DingTalk 有一条未建的第二传输。** 两个平台都提供 HTTP 回调，这里只实现了它们的 gateway 路径。`SINGLE_TRANSPORT_PLATFORMS` 把这记为 `unbuilt` 而不是平台限制，因为它是一个有明确实现路径的 backlog 项，而且 WeCom 的方案已经为 WeChat OA 实现过了。
 
 ## 后果
 
-Bot 平面可达了：`/bots` 可以安装、配置、绑定凭据、武装触发器、按需运行、
-重放死信，并通过本来就存在的 cockpit 展示运行历史。
-配对设备看到同一份列表，并能驱动那三个不需要本地 runner 的控制。
+Bot 平面可达了：`/bots` 可以安装、配置、绑定凭据、武装触发器、按需运行、重放死信，并通过本来就存在的 cockpit 展示运行历史。配对设备看到同一份列表，并能驱动那三个不需要本地 runner 的控制。
 
 崩溃不再让一条工作分支搁浅，等待人类的运行也不再堵住宿主。
 
-`plugins/cognia-scheduler-tools` 贡献了第一个 Bot，
-这才让插件路径成为一条被测过的路径，而不是一座没有消费者的桥。
+`plugins/cognia-scheduler-tools` 贡献了第一个 Bot，这才让插件路径成为一条被测过的路径，而不是一座没有消费者的桥。
 
-在连接器一侧，云端安装可以被告知自己的回调在哪里，
-插件连接器可以通过 webhook 接收，
-两个传输字段互相矛盾的适配器也不再静默地躺平。
+在连接器一侧，云端安装可以被告知自己的回调在哪里，插件连接器可以通过 webhook 接收，两个传输字段互相矛盾的适配器也不再静默地躺平。
 
-2026-09-15 的修正让插件 Bot 成为作者可以交付的一等物：
-TypeScript 与 Python handler 持有同一个 durable-step 表面，
-manifest 可以就「何时触发、频率几何、如何重试」说得更多，
-四个生命周期钩子让定义得以参与自己的安装、配置、武装与移除——
-同时永远不可能把一次移除搁浅。
+2026-09-15 的修正让插件 Bot 成为作者可以交付的一等物：TypeScript 与 Python handler 持有同一个 durable-step 表面，manifest 可以就「何时触发、频率几何、如何重试」说得更多，四个生命周期钩子让定义得以参与自己的安装、配置、武装与移除——同时永远不可能把一次移除搁浅。

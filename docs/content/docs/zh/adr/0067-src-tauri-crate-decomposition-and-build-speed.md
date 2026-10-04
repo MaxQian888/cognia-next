@@ -1,12 +1,11 @@
 ---
 title: "ADR-0067 — src-tauri crate 拆分与构建提速计划"
-description: "Tauri后端是单crate（`app_lib`）中有17万LOC Rust，所以每次编辑都会重新编译并重新链接整个树。本ADR记录了研究结论——分解非常可行，因为每个重依赖都有一个拥有者模块，命令函数已隔离在薄适配器中，跨模块耦合较浅——并提出了分层工作区（`cognia-core` / `cognia-telemetry` / 每子系统库 crate / 瘦应用壳）、一组排名零重构的编译速度优势（LLD 链接器、sccache、开发配置文件 debuginfo， AV排除、功能门槛），以及低风险的分阶段迁移，快速着陆优先，并提取一个叶子crate作为可重用模板。"
+description: "Tauri后端是单crate（`app_lib`）中有17万LOC Rust，所以每次编辑都会重新编译并重新链接整个树。本ADR记录了研究结论——分解非常可行，因为每个重依赖都有一个拥有者模块，命令函数已隔离在薄适配器中，跨模块耦合较浅——并提出了分层工作区（`cognia-core` / `cognia-telemetry` / 每子系统库 crate / 瘦应用壳）、一组按优先级排序且无需重构的编译提速措施（LLD 链接器、sccache、开发配置文件 debuginfo， AV排除、功能门槛），以及低风险的分阶段迁移，优先交付低风险改动，并提取一个叶子crate作为可重用模板。"
 ---
 
 # ADR-0067 — src-tauri crate 拆分与构建提速计划
 
-**状态**：已接受（2026-07-13）——**W1已获批**（2026-07-30）;**A级登陆**（7 crate）;**B级+后续订单已落地**（2026-07-13，crate又13个）;C 层与防止拆分回涨的分层规则由 [ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked) 延续
-**作者**：Max Qian + Claude Opus 4.8 **基于**构建**：现有的工作区拆分模式（`crates/cognia-cli`、`crates/cognia-sandbox-runner`——后者明确提取“只编译少数`cargo check -p cognia-sandbox-runner` crate而非整个Tauri树”），根`Cargo.toml`覆盖release/test配置文件，以及后端已有的每个模块`commands.rs`“薄薄Tauri适配器”惯例。
+**状态**：已接受（2026-07-13）——**W1已获批**（2026-07-30）;**A级登陆**（7 crate）;**B级+后续订单已落地**（2026-07-13，crate又13个）;C 层与防止拆分回涨的分层规则由 [ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked) 延续**作者**：Max Qian + Claude Opus 4.8 **基于**构建**：现有的工作区拆分模式（`crates/cognia-cli`、`crates/cognia-sandbox-runner`——后者明确提取“只编译少数`cargo check -p cognia-sandbox-runner` crate而非整个Tauri树”），根`Cargo.toml`覆盖release/test配置文件，以及后端已有的每个模块`commands.rs`“薄薄Tauri适配器”惯例。
 
 ## 背景
 
@@ -160,7 +159,7 @@ Layer 0 — foundation (no tauri)
 | `cognia-mcp-server` | 3.9k | 嵌入式MCP服务器（可流式HTTP） | 无（使用Cognia-Automation Dispatcher） |
 | `cognia-external-agent` | 4.9k | 执行后端;**路桩**/**kube** 在crate特征后面（`container-exec`/`k8s-exec`现在从app_lib前转） | `BusAgentEmitter`因`companion_api::rpc`移至crate `AgentEventEmitter`特质后方;环境突变测试获得了crate本地锁，取代了借来的`ws_bridge`测试锁 |
 
-** 什么是故意留在应用端（Tier C）:** `companion_api`（28.2k — 每个非目标的编排器枢纽）、`fleet`（5.7k — tray/window/monitor耦合）、`claude`（3.1k — sidecar hooks/companion_api/api_key 的生命周期）、`cli_bridge`（2.7k — 取决于companion_api）、`logging`/`crash`/`perf`遥测剩余部分（5.3k — tauri/app提取`cognia-instrument`核心周围的布线）、windowing/app壳（`pet_window`、`tray`、`menu`、`shortcuts`、`browser` —嵌入WebView窗格依赖Tauri不稳定的 API `window_*`）、`headless`/`bin`装配、承载命令壳的门面模块（`subscription/commands.rs`、`proxy_config/`、`keyring_secrets.rs`）以及小于 1k 的叶子（`agents`、`github`、`twin`、`parse`、`wallpaper`、`capture`、`canvas`、`plugins`、`a2ui_bridge`），其中工作区成员的开销大于编译单元的优势。`files.rs`（2.2k）和`settings.rs`设计上是应用层面的。
+**保留在应用端的模块（Tier C）：** `companion_api`（28.2k — 每个非目标的编排器枢纽）、`fleet`（5.7k — tray/window/monitor耦合）、`claude`（3.1k — sidecar hooks/companion_api/api_key 的生命周期）、`cli_bridge`（2.7k — 取决于companion_api）、`logging`/`crash`/`perf`遥测剩余部分（5.3k — tauri/app提取`cognia-instrument`核心周围的布线）、windowing/app壳（`pet_window`、`tray`、`menu`、`shortcuts`、`browser` —嵌入WebView窗格依赖Tauri不稳定的 API `window_*`）、`headless`/`bin`装配、承载命令壳的门面模块（`subscription/commands.rs`、`proxy_config/`、`keyring_secrets.rs`）以及小于 1k 的叶子（`agents`、`github`、`twin`、`parse`、`wallpaper`、`capture`、`canvas`、`plugins`、`a2ui_bridge`），这些模块独立成为工作区成员的开销大于划分编译单元的收益。`files.rs`（2.2k）和`settings.rs`设计上是应用层面的。
 
 **门禁运行：** 每crate套件（13个新crate≈1,100次测试），针对每个移动缝隙的app_lib套件，`cargo check --workspace`绿色（0错误），功能转发路径`cargo check -p cognia-next --features container-exec`。与 Tier A 类似，最终的应用二进制链接由 CI / `pnpm tauri build` 覆盖，而非本地重运行。
 

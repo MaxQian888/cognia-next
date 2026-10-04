@@ -28,6 +28,9 @@ junit.xml
 
 # next.js
 /.next/
+/.next-mobile-dev/
+/mobile/.dev-web/
+/mobile/android/.cognia-build.lock
 # SWC plugin cache written by next build/dev.
 /.swc/
 /out/
@@ -270,3 +273,14 @@ packages/agent-host-*/integrity.json
 
 # Generated Node 18-compatible A2UI MCP bundle.
 /sidecar/a2ui-mcp.mjs
+
+# Pi LaTeX Workbench plugin: vendor/ is an untouched upstream snapshot
+# (plugins/pi-latex-workbench/VENDOR.md). What the Pi package `prepare` step,
+# `latexwb provision-toolchain` / `provision-renderer` and a CLI run with
+# vendor/ as cwd write into it is local machine state, never source.
+/plugins/pi-latex-workbench/vendor/node_modules/
+/plugins/pi-latex-workbench/vendor/runtime/toolchain/
+/plugins/pi-latex-workbench/vendor/runtime/render/
+/plugins/pi-latex-workbench/vendor/.latexwb/
+/plugins/pi-latex-workbench/vendor/.latexwb-materialize/
+/plugins/pi-latex-workbench/.latexwb/

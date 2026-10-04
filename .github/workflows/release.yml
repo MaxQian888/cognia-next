@@ -11,6 +11,8 @@ name: Release
 # 2. Builds Tauri desktop apps for all platforms via tauri-action, which also
 #    creates the draft GitHub release and uploads installers + the updater
 #    signatures (*.sig) and latest.json manifest the in-app updater consumes.
+# 3. Builds and verifies a signed Android APK before desktop release publication.
+# 4. Archives a signed iOS build and uploads it to App Store Connect/TestFlight.
 #
 # `secrets: inherit` forwards updater signing plus Developer ID/notarization
 # credentials to the reusable build-tauri workflow. Tagged macOS jobs fail
@@ -38,12 +40,161 @@ jobs:
     name: Test Suite
     uses: ./.github/workflows/test.yml
 
+  build-android:
+    name: Build signed Android release
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm version:sync:check
+      - run: node --test scripts/sync/version-sync.test.mjs mobile/scripts/android-release.test.mjs
+      - name: Validate tag and prepare release signing
+        id: android-signing
+        run: node mobile/scripts/android-release.mjs preflight
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+      - name: Build offline release APK
+        run: pnpm mobile:build:android --release
+      - name: Sign and verify Android artifact
+        run: node mobile/scripts/android-release.mjs package
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.android-signing.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+      - name: Preserve release crash mapping
+        run: cp mobile/android/app/build/outputs/mapping/release/mapping.txt dist/mobile/android-mapping.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-release
+          path: dist/mobile/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary signing material
+        if: always()
+        env:
+          SIGNING_DIRECTORY: ${{ steps.android-signing.outputs.signing_directory }}
+        run: |
+          if [[ -n "$SIGNING_DIRECTORY" && "$SIGNING_DIRECTORY" == "$RUNNER_TEMP"/cognia-android-signing-* ]]; then
+            rm -rf -- "$SIGNING_DIRECTORY"
+          fi
+
+  build-ios:
+    name: Build and upload iOS release
+    needs: [quality, test]
+    runs-on: macos-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      NEXT_PUBLIC_PLATFORM: mobile
+      COGNIA_MOBILE_DEV: "0"
+      NODE_OPTIONS: --max-old-space-size=16384
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm version:sync:check
+      - run: node --test scripts/sync/version-sync.test.mjs mobile/scripts/ios-release.test.mjs
+      - name: Require App Store Connect upload credentials
+        env:
+          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          node -e 'for (const key of ["APPSTORE_ISSUER_ID", "APPSTORE_API_KEY_ID", "APPSTORE_API_PRIVATE_KEY"]) { if (!process.env[key]?.trim()) throw new Error("Missing " + key) }'
+      - name: Build offline iOS assets
+        run: |
+          pnpm mobile:prepare
+          pnpm exec next build --webpack
+          pnpm --filter mobile run sync:ios
+      - name: Validate iOS distribution signing
+        id: ios-signing
+        run: node mobile/scripts/ios-release.mjs preflight
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_SIGNING_CERT_SHA256: ${{ secrets.IOS_SIGNING_CERT_SHA256 }}
+      - name: Archive and verify iOS release
+        id: ios-package
+        run: node mobile/scripts/ios-release.mjs package
+        env:
+          IOS_SIGNING_DIRECTORY: ${{ steps.ios-signing.outputs.signing_directory }}
+      - name: Preserve verified iOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-release
+          path: dist/ios/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload verified IPA to App Store Connect
+        uses: apple-actions/upload-testflight-build@v5
+        with:
+          app-path: ${{ steps.ios-package.outputs.ipa_path }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          backend: AppStoreAPI
+          # The action polls by build number only, which repeats across marketing versions.
+          # Confirm upload here; check this version's processing status in App Store Connect.
+          wait-for-processing: "false"
+      - name: Clean up iOS signing
+        if: always()
+        run: node mobile/scripts/ios-release.mjs cleanup
+        env:
+          IOS_SIGNING_DIRECTORY: ${{ steps.ios-signing.outputs.signing_directory }}
+
   # Build Tauri apps for all platforms AND publish the draft release with
   # signed updater artifacts + latest.json (tauri-action owns release creation
   # because the manifest needs the uploaded asset URLs).
   build-tauri:
     name: Build Tauri
-    needs: [quality, test]
+    needs: [quality, test, build-android, build-ios]
     # The write scope lives on the CALLER, not inside build-tauri.yml: a
     # reusable workflow cannot request more than its caller holds, and the
     # other caller (ci.yml) runs read-only. tauri-action needs `contents:
@@ -54,6 +205,7 @@ jobs:
     uses: ./.github/workflows/build-tauri.yml
     with:
       tagName: ${{ github.ref_name }}
+      androidArtifact: android-release
     secrets: inherit
 
   publish-agent-hosts:

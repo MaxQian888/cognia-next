@@ -320,11 +320,13 @@
       "port": "端口",
       "privateKeyPath": "私钥路径",
       "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
-      "username": "用户名"
+      "username": "用户名",
+      "secretSavedOnConnect": "连接时保存到系统钥匙串。",
+      "secretDesktopOnly": "密码和私钥口令保存在桌面端的系统钥匙串中，只能在桌面应用中填写。"
     },
     "forwarding": {
       "add": "添加规则",
-      "desktopApplies": "在这里配置，由桌面端生效。跳板链和转发规则会从发给宿主的 profile 里剥掉，所以在配对设备上这些字段只被记录、不会生效：手机指定一个 profile 得到的是 shell，永远不是监听端口。",
+      "desktopApplies": "端口转发只由发起连接的桌面端应用。主机端收到的配置包含跳板机，因此配对设备经由主机建立的连接会走同样的路由，但主机端永远不会收到转发规则：手机按名称打开配置只会得到一个 shell，绝不会开启监听端口。",
       "errors": {
         "duplicate_local_port": "已有其他规则监听这个本地端口。",
         "duplicate_remote_port": "已有其他规则占用服务器上的这个端口。",
@@ -371,29 +373,108 @@
       "desktopOnly": "忘记旧密钥需要写入这台机器的 known_hosts，只有桌面应用能做到。两个指纹都在上面：请通过其他渠道核实新指纹，然后在桌面端重新信任。"
     },
     "newName": "新 SSH 主机",
-    "notSynced": "只保存在本设备。把这些推送给宿主的是桌面端，所以在这里新增的主机在桌面同步之前不会存在于宿主上，点连接会提示 profile 不在宿主上。跳板机和端口转发按设计永远不会同步。",
+    "notSynced": "仅保存在本设备上。由桌面应用负责将这些主机推送到主机端，因此在桌面端同步之前，这里新增的主机在主机端并不存在，连接时会提示该配置不在主机上。主机端收到的配置包含跳板机；端口转发按设计永不同步。",
     "remove": "移除 SSH 主机",
     "title": "SSH 主机",
     "toasts": {
-      "agentUnavailable": "无法连接到 SSH agent",
-      "connectFailed": "SSH 连接失败",
-      "credentialRequired": "连接前请输入密码。",
       "hostKeyForgetFailed": "无法更新 known_hosts",
-      "hostKeyForgotten": "已忘记旧的主机密钥。重新连接即可信任新密钥。",
+      "hostKeyForgotten": "已忘记旧的主机密钥，正在重新连接以信任新密钥…",
       "importJumpsDropped": "以下主机的跳板机未被导入，将直接连接：{names}",
       "imported": "已新增 {created} 个、覆盖 {replaced} 个 SSH 主机",
-      "learned": "已连接并保存主机指纹",
       "removeFailed": "无法移除 SSH 主机",
       "syncFailed": "无法与终端主机同步 SSH 配置",
-      "verified": "已通过主机指纹校验并连接",
-      "connectedViaHost": "已通过宿主连接，宿主用它保存的副本核对了服务器密钥。"
+      "credentialClearFailed": "无法从钥匙串中删除已保存的密钥",
+      "credentialCleared": "已删除保存的密钥",
+      "credentialSaveFailed": "无法将密钥保存到钥匙串"
+    },
+    "summary": {
+      "untitled": "未命名主机",
+      "auth": {
+        "password": "密码",
+        "privateKey": "私钥",
+        "agent": "SSH agent"
+      },
+      "via": "经由 {names}",
+      "forwards": "{count, plural, other {# 条转发}}",
+      "issue": {
+        "chainBroken": "跳板机缺失",
+        "passwordMissing": "未保存密码",
+        "invalid": {
+          "name": "需要名称",
+          "host": "需要主机地址",
+          "port": "端口无效",
+          "username": "需要用户名",
+          "privateKeyPath": "需要私钥路径"
+        }
+      }
+    },
+    "filterPlaceholder": "按名称、用户或地址筛选",
+    "noMatch": "没有与“{query}”匹配的已保存主机。",
+    "emptyHint": "在此添加服务器，或导入 ~/.ssh/config 中已有的主机。",
+    "copyName": "{name}（副本）",
+    "collapse": "收起 {name}",
+    "expand": "编辑 {name}",
+    "forgetCredential": "清除已保存的密钥",
+    "browseFiles": "浏览文件",
+    "duplicate": "复制",
+    "probe": {
+      "action": "测试连接",
+      "running": "测试中…",
+      "cost": "测试会建立一次真实连接：它会依次通过每个跳板机认证、出现在它们的日志中、可能向 ssh-agent 请求口令，并在首次连接时信任主机密钥。测试不会开启任何端口转发。",
+      "desktopOnly": "测试连接需从本机发起，因此只能在桌面应用中进行。",
+      "reachableLearned": "可连接。这是首次连接，主机密钥 {fingerprint} 已被信任并保存。",
+      "reachableVerified": "可连接。主机密钥 {fingerprint} 与已信任的一致。",
+      "unreachable": "无法连接：{message}",
+      "invalid": {
+        "name": "未测试：缺少显示名称。",
+        "host": "未测试：主机地址为空或包含空格。",
+        "port": "未测试：端口不在 1–65535 范围内。",
+        "username": "未测试：用户名为空或包含空格。",
+        "privateKeyPath": "未测试：私钥认证缺少私钥路径。",
+        "profile": "未测试：某个已保存字段无效。",
+        "jumpChain": "未测试：跳板机缺失、形成循环或配置不完整。",
+        "localForward": "未测试：某条本地转发规则无效。",
+        "remoteForward": "未测试：某条远程转发规则无效。"
+      }
+    },
+    "removeConfirm": {
+      "title": "删除“{name}”？",
+      "body": "该主机将从本设备和终端主机中删除。已打开的会话不受影响。",
+      "bodyWithCredential": "该主机及其保存在系统钥匙串中的密码或口令都将被删除。已打开的会话不受影响。",
+      "dependents": "{names} 通过此主机作为跳板连接。删除后它们将拒绝连接，直到你为其另选跳板机。",
+      "cancel": "取消",
+      "confirm": "删除主机"
+    },
+    "trustedKeys": {
+      "title": "受信任的主机密钥",
+      "description": "本桌面信任的 SSH 服务器密钥，包括跳板机。切换 Cognia 主机不会改变本桌面的信任记录。",
+      "desktopOnly": "请在桌面应用中查看或忘记该桌面信任的 SSH 主机密钥。配对浏览器和手机无法管理此信任文件。",
+      "refresh": "刷新密钥",
+      "loading": "正在读取受信任的主机密钥…",
+      "loadFailed": "无法读取本桌面受信任的主机密钥。",
+      "retry": "重试",
+      "empty": "本桌面尚未信任任何 SSH 主机密钥。",
+      "keyType": "密钥类型",
+      "fingerprint": "SHA256 指纹",
+      "profiles": "已保存的配置：{names}",
+      "noProfiles": "没有已保存的配置指向此地址和端口。",
+      "forget": "忘记",
+      "forgetEntry": "忘记 {address} 的密钥 {fingerprint}",
+      "forgetting": "正在忘记…",
+      "forgetFailed": "无法忘记此主机密钥。受信任的密钥可能已更改，请取消并刷新列表后重试。",
+      "confirm": {
+        "title": "忘记 {address} 的受信任密钥？",
+        "body": "下次连接将信任此服务器提供的密钥。重新连接前，请通过其他渠道核实其指纹。已保存的配置、凭据和现有连接不会更改。",
+        "cancel": "取消",
+        "action": "忘记密钥"
+      }
     }
   },
   "stickyScroll": {
     "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
     "label": "粘性滚动"
   },
-  "subheading": "底部终端面板的默认 shell、字体和回滚行数。按工作区覆盖优先于全局默认。",
+  "subheading": "终端面板的外观与行为、保持会话存活的主机进程，以及新标签页可以连接的目标：启动配置与已保存的 SSH 主机。按工作区覆盖优先于这些默认值。",
   "unattended": {
     "askPolicy": {
       "consent": "在终端面板中询问",
@@ -404,5 +485,58 @@
     },
     "helper": "允许工作流的终端步骤在后台无界面执行 shell 命令 — 不占用终端标签页、无需逐条确认。每条命令都会先经过安全分类器筛查；明确危险的命令始终被拦截。",
     "label": "允许无人值守执行"
+  },
+  "nav": {
+    "title": "终端主题",
+    "mobileTrigger": "主题",
+    "sshCountAria": "{count, plural, other {已保存 # 个 SSH 主机}}",
+    "groups": {
+      "generalGroup": "终端",
+      "hostGroup": "主机",
+      "connectGroup": "连接",
+      "workspaceGroup": "工作区"
+    },
+    "items": {
+      "appearance": {
+        "label": "外观",
+        "description": "字体、光标、配色与渲染。"
+      },
+      "shell": {
+        "label": "Shell 与会话",
+        "description": "默认 shell、回滚行数、编码与沙箱。"
+      },
+      "behavior": {
+        "label": "行为",
+        "description": "复制粘贴、响铃、滚动与关闭标签页。"
+      },
+      "productivity": {
+        "label": "效率工具",
+        "description": "快速修复、命令操作与粘性滚动。"
+      },
+      "ai": {
+        "label": "AI 自动补全",
+        "description": "输入时的行内建议。"
+      },
+      "host": {
+        "label": "持久终端主机",
+        "description": "保持会话存活的进程、远程访问及其限额。"
+      },
+      "agents": {
+        "label": "代理与自动化",
+        "description": "代理可在终端面板中运行什么，以及无人值守运行如何请求确认。"
+      },
+      "profiles": {
+        "label": "启动配置文件",
+        "description": "新建标签页菜单可打开的命名 shell。"
+      },
+      "ssh": {
+        "label": "SSH 主机",
+        "description": "已保存的服务器、认证方式、跳板机与端口转发。"
+      },
+      "project": {
+        "label": "按工作区覆盖",
+        "description": "工作区自己的 shell、工作目录与环境变量。"
+      }
+    }
   }
 }

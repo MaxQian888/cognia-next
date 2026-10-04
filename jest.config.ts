@@ -160,6 +160,10 @@ const baseTestPathIgnorePatterns = [
   // collides with Jest's Babel/CJS transform. They are exercised by
   // `pnpm sidecar:test` and dedicated `node --test` invocations.
   "/scripts/.*\\.test\\.mjs$",
+  // The Pi LaTeX Workbench vendor/ snapshot excludes upstream tests by
+  // construction (scripts/sync-vendor.mjs); this keeps a future upstream file
+  // named *.test.ts from being collected against Cognia's toolchain.
+  "/plugins/pi-latex-workbench/vendor/",
   // Worktree-local override: the parent `jest.config.ts` adds
   // `/\\.claude/worktrees/` here so the root suite doesn't pick up worktree
   // copies of test files; this worktree's local config drops those entries
@@ -379,6 +383,10 @@ const projectCommon: Config = {
     "<rootDir>/.next/",
     "<rootDir>/target/",
     "<rootDir>/.claude/worktrees/",
+    // Untouched upstream snapshot (strict ESM, `.ts` import suffixes, its own
+    // `@latexwb/*` package.json names). Keep it out of the haste map and module
+    // resolution; the plugin's tests read it from disk, never `require` it.
+    "<rootDir>/plugins/pi-latex-workbench/vendor/",
   ],
 
   // A list of paths to modules that run some code to configure or set up the testing framework before each test.

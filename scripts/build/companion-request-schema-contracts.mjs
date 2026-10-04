@@ -151,6 +151,7 @@ const scheduledTaskTypes = [
   "issue-wakeup",
   "radar-report",
   "provider-diagnostics-refresh",
+  "conversation-auto-archive",
 ]
 
 const scheduledTaskType = z.enum(scheduledTaskTypes)

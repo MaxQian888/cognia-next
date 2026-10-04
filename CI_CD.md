@@ -18,14 +18,15 @@ what to do when one goes red, and how to set up the optional integrations.
 
 ## Tiers
 
-| Tier         | Trigger                           | Runs                                                                      |
-| ------------ | --------------------------------- | ------------------------------------------------------------------------- |
-| **Hot path** | push to `dev`/`master`, any PR    | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`      |
-| **Nightly**  | `nightly.yml`, 03:00 UTC + manual | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E |
-| **Release**  | `v*` tag                          | `release.yml` → quality + test + signed Tauri release                     |
-| **Report**   | `workflow_run` after the hot path | `report.yml` → PR comment + job summary                                   |
-| **Services** | changes under `services/**`       | `share-server.yml`, `signaling-server.yml`, `compose-e2e.yml`             |
-| **Deploy**   | manual, opt-in                    | `deploy.yml` (see below)                                                  |
+| Tier         | Trigger                                                   | Runs                                                                      |
+| ------------ | --------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Hot path** | push to `dev`/`master`, any PR                            | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`      |
+| **Nightly**  | `nightly.yml`, 03:00 UTC + manual                         | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E |
+| **Release**  | `v*` tag                                                  | `release.yml` → quality + test + signed Tauri release                     |
+| **Report**   | `workflow_run` after the hot path                         | `report.yml` → PR comment + job summary                                   |
+| **Services** | changes under `services/**`                               | `share-server.yml`, `signaling-server.yml`, `compose-e2e.yml`             |
+| **Deploy**   | manual, opt-in                                            | `deploy.yml` (see below)                                                  |
+| **Feishu**   | source workflow completion, opt-in digest, manual preview | `feishu-notify.yml` → signed group cards and delivery diagnostics         |
 
 Tauri **bundling** is deliberately off the hot path — it is the largest
 wall-clock item in the repo. The Tauri crate is compiled for affected PRs and full runs:
@@ -431,6 +432,179 @@ documented in each service README: R2 bucket, KV namespace,
 ### Codecov
 
 - `CODECOV_TOKEN` — the integration is commented out in `test.yml`.
+
+### Feishu workflow notifications
+
+`feishu-notify.yml` listens for completion of all 15 source workflows. It runs
+independently of `report.yml`, so a broken report cannot hide a CI failure, and
+a Feishu outage fails only the notification workflow. Reusable jobs appear
+inside their caller's aggregated result; their standalone manual runs are also
+covered. The workflow reads source run/job conclusions, rather than treating its
+own successful execution as evidence that the build or deployment succeeded.
+
+This integration sends signed **Card JSON 2.0** cards through Feishu group custom
+robots. The colored status header, route/status tags and two-column metric rows
+lead into sections for failures, change context, test evidence and downloads.
+Buttons open the relevant GitHub evidence. There are no card callbacks, GitHub
+mutation credentials, in-Feishu approvals or rerun buttons.
+Those capabilities require a separately authorized application robot and callback
+service; the group webhook does not provide them.
+
+#### Card content and evidence
+
+- **Run overview:** passed, failed and skipped job counts, run duration, source
+  conclusion and attempt. Recovery has an explicit label. These are job counts,
+  not test counts.
+- **Needs attention:** failed job names and failed steps, with links anchored to
+  the corresponding log step when GitHub provides a step number. Long lists are
+  bounded and link back to the full workflow.
+- **Change context:** branch, event, actor, commit and associated PR links. If the
+  source run has no PR associations, the notifier looks them up by commit and
+  validates the base repository and head/merge SHA before linking them.
+- **Test evidence:** available Jest pass/fail/skip counts and failed test names;
+  Playwright total, failed and flaky counts, first-pass rate and p95 test duration;
+  and bundle size when available. Counts come only from the current attempt's
+  report artifacts. Missing or incomplete artifacts are disclosed; they are not
+  interpreted as zero tests, full-suite success or evidence from a previous run.
+- **Downloads:** up to three current-attempt Actions artifact links with sizes
+  and expiry dates. GitHub sign-in and artifact retention still apply. Published
+  releases additionally show the release page and up to two direct asset
+  downloads, preferring installable builds; the release page contains all assets.
+
+The card's sections, text and links are bounded to fit the webhook payload limit;
+truncated content carries an omission notice and a GitHub entry point. Metrics
+are scoped to available evidence, with no cross-attempt or baseline comparison.
+
+#### Setup and routing
+
+1. Add a custom robot to the destination Feishu group and enable signature
+   verification in the robot's security settings.
+2. Store its URL as the repository Actions secret `FEISHU_WEBHOOK_URL` and its
+   signing key as `FEISHU_SIGNING_SECRET`. Keep both values out of repository
+   variables, source files and workflow inputs.
+3. Run **Feishu Notifications → Run workflow** with a recent source `run_id`
+   and the default `dry_run=true`. Inspect the workflow summary and the
+   `preview.json` artifact. Download and open `preview.html` for a local visual
+   approximation of the same outbound payload. Preview works while the integration
+   is disabled and does not require a configured webhook. The HTML is not the
+   Feishu renderer; verify final fonts, spacing and links in the real Feishu client.
+4. Set repository variable `FEISHU_ENABLED=true` to enable live delivery.
+   Dispatch the same source with `dry_run=false` to verify the real group's
+   card, signature and links. Enable the daily digest separately if wanted.
+
+An unset `FEISHU_ENABLED` disables automatic delivery. Optional route overrides
+use **pairs** of secrets; configure both members or neither. A partially
+configured pair fails validation rather than mixing a route URL with the default
+signing key.
+
+| Route      | Workflows                                                                                                                               | Optional secret pair                                          |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| CI         | CI/CD Pipeline, Code Quality, Test Suite, CI Report, Nightly, Compose E2E, Share Server, Signaling Server, Standalone bootstrap scripts | `FEISHU_CI_WEBHOOK_URL`, `FEISHU_CI_SIGNING_SECRET`           |
+| Release    | Release, Build Tauri, Images                                                                                                            | `FEISHU_RELEASE_WEBHOOK_URL`, `FEISHU_RELEASE_SIGNING_SECRET` |
+| Operations | Deploy, Refresh website evidence, Sync model catalog, daily digest                                                                      | `FEISHU_OPS_WEBHOOK_URL`, `FEISHU_OPS_SIGNING_SECRET`         |
+
+An absent route override falls back to the default pair. URLs and signing keys
+are passed only to the two notification CLI steps. The workflow checks out the
+repository's trusted default branch even when a source run belongs to a fork or
+a manual dispatch selects another ref. Its `GITHUB_TOKEN` has only
+`contents: read`, `actions: read` and `pull-requests: read`. The PR permission
+allows the commit-associated PR lookup when GitHub omits the run's PR list,
+including fork runs. No source artifact code or PR code is executed, and no
+package installation is needed.
+
+#### Notification policy
+
+Set repository variable `FEISHU_MODE` to one of these values:
+
+| Mode                | Behavior                                                                                                                                                                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `changes` (default) | Report new failures and changed failure signatures, recovery after a failure, and release/deployment/image publication results. Repeated failures are suppressed only when the matching previous notification was accepted. Routine green CI and cancelled/skipped runs are quiet. |
+| `failures`          | Report failing or unverified outcomes; suppress success and recovery messages.                                                                                                                                                                                                     |
+| `all`               | Report every completed source result, including cancellation, skips and disabled deployment targets. Delivery deduplication still applies.                                                                                                                                         |
+
+Matrix jobs are summarized in one card. Deployment targets preserve individual
+skipped and failed states; an all-skipped deployment is not described as deployed.
+A successful workflow alone is not a public-network health check or proof of app
+store availability. Release cards refer to the source release workflow's complete
+result, including downstream publishing jobs.
+
+History is bounded to the latest 100 runs in the same workflow/branch/event and
+the preceding attempt of a rerun. Repeated-failure suppression searches up to
+10 predecessors for a matching accepted notification within the last 24 hours;
+older or unavailable evidence causes a fresh failure alert. A history outage
+does not hide a new failure. Current-delivery receipt lookup still fails closed.
+
+`FEISHU_DAILY_DIGEST=true` opts into the scheduled digest at **01:17 UTC
+(09:17 Asia/Shanghai)**. The digest covers the previous UTC calendar day and
+routes to Operations. Leave the manual `run_id` empty to preview or send that
+same digest. Scheduled delivery requires both `FEISHU_ENABLED` and
+`FEISHU_DAILY_DIGEST`; live manual delivery requires `FEISHU_ENABLED`.
+
+The digest samples supported source runs **created** during the previous UTC
+calendar day, using their latest observed result, including the latest rerun
+attempt. It shows total runs, failures requiring attention, pending runs and a
+success rate. The denominator is **successful + failed/action-required completed
+runs**; pending, cancelled, skipped, neutral and unknown runs do not enter that
+rate, and their counts are shown separately. An empty denominator displays
+`N/A`. Workflow breakdowns are ordered by failure count, with direct links to
+failing runs. This is a daily run-volume/status view, not a deployment-health
+check or an aggregation of test counts across attempts.
+
+#### Delivery safety and recovery
+
+The notification prepares a secret-free plan and preview, persists a delivery
+claim as a GitHub artifact, and verifies the durable claim before sending a POST.
+It then persists a receipt with the precise delivery result. The sender validates
+Feishu's business response code as well as HTTP status; HTTP 200 alone is not an
+accepted message. The card is bounded by UTF-8 bytes to respect Feishu's 20 KB
+request limit.
+
+Claims and receipts have **90-day retention**. Manual source runs older than
+**60 days** are rejected so accepted-delivery checks stay within the retention
+window. Keep the repository's artifact retention policy at least 90 days and do
+not delete notification artifacts/runs: deletion forfeits the corresponding
+deduplication evidence. JSON/HTML previews and diagnostic artifacts are retained
+for 14 days; the local plan is never uploaded. Public-repository artifacts and cards
+contain source run metadata, so avoid placing secrets in job or workflow names.
+Before sending, the notifier checks the exact uploaded claim ID and its actual
+expiry; a claim covering less than 60 days is rejected without a POST.
+
+A timeout, network loss, interrupted delivery, or persisted claim without a
+conclusive receipt is **unknown**, because Feishu may already have accepted the
+card. Automatic retries do not resend an unknown delivery. Check the destination
+group first, then manually dispatch the source with `dry_run=false` and
+`resend_unknown=true` only if a possible duplicate is acceptable. A confirmed
+accepted receipt suppresses a duplicate even when that override is selected.
+This is a bounded deduplication mechanism, not an exactly-once guarantee.
+
+Distinct source runs use separate concurrency groups and never replace each
+other's pending notifications. Dispatches for the same source serialize; GitHub
+may replace an older pending dispatch in that same group. A rerun of the source
+has a distinct attempt identity, while rerunning only the notifier retains the
+same source identity. A changed destination URL starts a new destination identity.
+
+If a send fails, inspect the notification summary and `diagnostic.json`, repair
+the configured secret pair or destination policy, and dispatch the source again.
+Do not clear claims/receipts to force retries. Missing report artifacts degrade
+report detail; they do not change the source run's conclusion.
+
+Optional report extraction has a 45-second cumulative work budget, plus at most
+the in-flight request/extraction timeout. Available JUnit and Playwright evidence
+reuses the existing report assembler; missing or oversized artifacts are marked
+unavailable. The webhook permits at most three HTTP attempts, each bounded to
+10 seconds including response reads. Only explicit rate limits are retried;
+`Retry-After` above the 30-second wait budget stops delivery for a later retry.
+
+Local validation is `node --test scripts/ci/feishu/*.test.mjs`; the same suites
+are included in the existing `scripts:test:ci` quality gate. Fixture tests do
+not send live messages. Actual Feishu delivery and GitHub-hosted orchestration
+must be verified after the workflow is available on the default branch and the
+destination has been configured.
+
+References: [Feishu custom robots](https://open.feishu.cn/document/ukTMukTMukTM/ucTM5YjL3ETO24yNxkjN),
+[GitHub workflow_run security](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run),
+[GitHub commit-associated PR permissions](https://docs.github.com/en/rest/commits/commits#list-pull-requests-associated-with-a-commit),
+[GitHub concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 
 ### Windows code signing
 

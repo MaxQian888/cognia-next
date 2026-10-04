@@ -25,8 +25,11 @@ packages:
 # - @capacitor/push-notifications: `register()` crashed the process on a build
 #   without google-services.json; it now rejects so JS reports "unavailable".
 patchedDependencies:
+  "capacitor-secure-storage-plugin@0.13.0": patches/capacitor-secure-storage-plugin@0.13.0.patch
+  "capacitor-zeroconf@4.0.0": patches/capacitor-zeroconf@4.0.0.patch
   "@capacitor/android@8.5.2": patches/@capacitor__android@8.5.2.patch
   "@capacitor/push-notifications@8.1.2": patches/@capacitor__push-notifications@8.1.2.patch
+  "@capgo/capacitor-native-biometric@8.7.0": patches/@capgo__capacitor-native-biometric@8.7.0.patch
   "@sinonjs/fake-timers@15.4.0": patches/@sinonjs__fake-timers@15.4.0.patch
 
 # Security floors for transitive dependencies whose direct parents currently

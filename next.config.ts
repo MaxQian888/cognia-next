@@ -10,8 +10,8 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
 const isProd = process.env.NODE_ENV === "production"
 
 /**
- * Is this the Capacitor build? `pnpm mobile:sync` is the only path that sets
- * it, and the flag already decides Serwist below — one signal, so a target
+ * Is this the Capacitor build or Live Reload server? Mobile commands set
+ * this flag, which also decides Serwist below — one signal, so a target
  * swap can never disagree with the platform the bundle declares.
  *
  * There is deliberately no `tauri` target: the desktop shell consumes the very
@@ -37,11 +37,18 @@ const isMobileBuild = process.env.NEXT_PUBLIC_PLATFORM === "mobile"
  * consulted — an alias keyed on a `@/…` request is silently ignored. Extension
  * order applies inside the plugin's own resolution pass, so it survives.
  *
- * Turbopack (`pnpm dev`) needs no counterpart: dev never builds for Capacitor,
- * and the default variants are supersets that self-gate at runtime, so a dev
- * server behaves identically — it only carries more code than a phone needs.
+ * Mobile Live Reload uses the same extension order with either bundler.
+ * Ordinary web/desktop development keeps the default responsive variants.
  */
 const MOBILE_PLATFORM_EXTENSIONS = [".mobile.tsx", ".mobile.ts"]
+const distDir = process.env.COGNIA_NEXT_DIST_DIR ?? ".next"
+if (![".next", ".next-mobile-dev"].includes(distDir) || (isProd && distDir !== ".next")) {
+  // Next's static exporter treats a custom distDir as the export destination
+  // and still uses .next internally. Keep the shared production out contract.
+  throw new Error(
+    "COGNIA_NEXT_DIST_DIR must be .next (production) or .next-mobile-dev (development)"
+  )
+}
 
 // Build-time metadata surfaced on the About page (components/settings/about/*).
 // Resolved here in Node at config-eval time and inlined into the client bundle
@@ -262,6 +269,7 @@ const NODE_ONLY_MODULES = [
 // don't reject runtime navigation to dynamic routes whose params aren't pre-listed
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
+  distDir,
   output: isProd ? "export" : undefined,
   // Next 16.3's Turbopack dev runtime can attach more than ten `drain`
   // listeners to one Gzip stream while concurrent RSC responses are under
@@ -385,7 +393,8 @@ const nextConfig: NextConfig = {
   // `next dev --port <port>` continues to work when 3000 is unavailable.
   // Tauri sets TAURI_DEV_HOST when its WebView needs an explicit cross-origin
   // asset host; preserve that path without forcing every dev session to :3000.
-  assetPrefix: !isProd && internalHost ? `http://${internalHost}:3000` : undefined,
+  assetPrefix:
+    !isProd && !isMobileBuild && internalHost ? `http://${internalHost}:3000` : undefined,
   // Turbopack (pnpm dev): alias Node.js built-ins to the empty stub so none of
   // their (third-party) callers enter the browser bundle.
   turbopack: {
@@ -395,6 +404,21 @@ const nextConfig: NextConfig = {
     // `pnpm-workspace.yaml`, emitting a "multiple lockfiles" warning and
     // potentially resolving modules from the wrong tree.
     root: __dirname,
+    // A custom list replaces Turbopack defaults, so retain every default suffix.
+    ...(isMobileBuild
+      ? {
+          resolveExtensions: [
+            ...MOBILE_PLATFORM_EXTENSIONS,
+            ".mdx",
+            ".tsx",
+            ".ts",
+            ".jsx",
+            ".js",
+            ".mjs",
+            ".json",
+          ],
+        }
+      : {}),
     resolveAlias: {
       // `{ browser: … }` conditional form, NOT a bare string: unlike the
       // webpack branch below (gated on `!isServer`), Turbopack applies

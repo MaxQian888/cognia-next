@@ -1,6 +1,6 @@
 ---
 title: AI 操作与建议
-description: Canvas 的 AI 循环 —— 十个操作 prompt、diff 审阅落地管线（整体替换 / 选区拼接）、结构化建议 JSON 流及其接受/拒绝，以及为建议 prompt 提供作用域块的 context-analyzer。
+description: Canvas 的 AI 循环 —— 十个操作提示词、差异审阅与应用流程（整体替换 / 选区拼接）、结构化建议 JSON 流及其接受/拒绝，以及为建议 prompt 提供作用域块的 context-analyzer。
 ---
 
 # AI 操作与建议
@@ -12,8 +12,8 @@ description: Canvas 的 AI 循环 —— 十个操作 prompt、diff 审阅落地
   运行 `ACTION_PROMPTS`（`lib/ai/generation/canvas-actions.ts:47`）中的十个 prompt 之一，并把结果作为
   可审阅的 diff 写回（`buildCanvasReview:438` → `applyAcceptedCanvasReviewItems:508`）。**建议**
   （`useCanvasSuggestions`，`hooks/canvas/use-canvas-suggestions.ts:89`）向模型请求一个 JSON 列表，并把
-  每条推入 `useArtifactStore.addSuggestion`，在侧栏接受/拒绝。`ContextAnalyzer` 为
-  `useCanvasSuggestions` 提供一段有界的作用域块；`useCanvasActions` 则刻意不用它。
+  每条建议传给 `useArtifactStore.addSuggestion`，在侧栏接受/拒绝。`ContextAnalyzer` 为
+  `useCanvasSuggestions` 提供一段有界的作用域块；`useCanvasActions` 则不使用该作用域块。
 </TLDR>
 
 ## 十个操作
@@ -33,8 +33,7 @@ description: Canvas 的 AI 循环 —— 十个操作 prompt、diff 审阅落地
 | `format` | `:106` | 重新格式化（温度 0.3，同 `fix`） |
 | `run` | `:114` | 面向执行的 prompt |
 
-`review` 与 `explain` 是叙述型操作 —— `CanvasPanel.runAction` 对它们提前返回，使其填充输出面板而不改动文档
-（`canvas-panel.tsx:262`）。
+`review` 与 `explain` 是叙述型操作 —— `CanvasPanel.runAction` 对它们提前返回，使其填充输出面板而不改动文档（`canvas-panel.tsx:262`）。
 
 ## 操作管线
 
@@ -68,10 +67,7 @@ sequenceDiagram
 编辑器写回在 `canvas-actions.ts` 中有两种实现：
 
 - **`applyCanvasActionResult`（`:256`）** —— 无选区 → 整体替换；有选区 → 把结果拼接进定位到的区间。
-- **`buildCanvasReview`（`:438`）+ `applyAcceptedCanvasReviewItems`（`:508`）** —— diff 审阅路径。
-  `generateDiffPreview`（`:345`）产出行级 `added`/`removed`/`unchanged` 行；`buildCanvasReview` 将它们
-  分组为打上 `insert` / `delete` / `replace` 标签的审阅项；被接受的项**自底向上**应用（按起始行降序排序，
-  `:515`），经 `lines.splice(...)`（`:522`）落地，使靠前的编辑不会移动靠后的行号。
+- **`buildCanvasReview`（`:438`）+ `applyAcceptedCanvasReviewItems`（`:508`）** —— diff 审阅路径。`generateDiffPreview`（`:345`）产出行级 `added`/`removed`/`unchanged` 行；`buildCanvasReview` 将它们分组为打上 `insert` / `delete` / `replace` 标签的审阅项；被接受的项**自底向上**应用（按起始行降序排序，`:515`），经 `lines.splice(...)`（`:522`）落地，使靠前的编辑不会移动靠后的行号。
 
 ## 建议流
 
@@ -102,14 +98,11 @@ sequenceDiagram
 
 `CanvasSuggestion` 类型（`types/artifact/artifact.ts:324`）携带 `{ id, type, range, originalText,
 suggestedText, explanation, status }`。接受（`applySuggestion`，`artifact-store.ts:1079`）把
-`suggestedText` 拼接进 `doc.content` 的 `[range.startLine .. range.endLine+1]`；拒绝把 `status` 设为
-`"rejected"`。
+`suggestedText` 拼接进 `doc.content` 的 `[range.startLine .. range.endLine+1]`；拒绝把 `status` 设为 `"rejected"`。
 
 ## 五标签侧栏
 
-`CanvasSidePanels`（`canvas-side-panels.tsx:49`）是一个 Radix `Tabs`，其值绑定到
-`useCanvasLayoutStore.activeRightTab`。一个 `ResizeObserver` 在低于
-`CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280` px（`:47`）时把标签文字收为纯图标。每个标签显示实时角标：
+`CanvasSidePanels`（`canvas-side-panels.tsx:49`）是一个 Radix `Tabs`，其值绑定到 `useCanvasLayoutStore.activeRightTab`。一个 `ResizeObserver` 在低于 `CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280` px（`:47`）时把标签文字收为纯图标。每个标签显示实时角标：
 
 | 标签 | Host | 渲染 | 角标 |
 | --- | --- | --- | --- |
@@ -119,25 +112,15 @@ suggestedText, explanation, status }`。接受（`applySuggestion`，`artifact-s
 | 协作 | `CollaborationHost`（`:423`） | `CollaborationPanel`（`:436`） | `0`（`:83`） |
 | 执行 | `ExecutionHost`（`:456`） | `CodeExecutionPanel`（`:460`） | `0`（`:84`） |
 
-`SuggestionsHost` 直接读 `doc.aiSuggestions`（`:283`），即 `addSuggestion` 的实时连接；`SuggestionsPanel`
-（`suggestions-panel.tsx:20`）过滤到 `status === "pending"`，并为每条建议渲染一个 `SuggestionItem`
-（`suggestion-item.tsx:32`），带可折叠的原文-对-建议 diff。
+`SuggestionsHost` 直接读 `doc.aiSuggestions`（`:283`），即 `addSuggestion` 的实时连接；`SuggestionsPanel`（`suggestions-panel.tsx:20`）过滤到 `status === "pending"`，并为每条建议渲染一个 `SuggestionItem`（`suggestion-item.tsx:32`），带可折叠的原文-对-建议 diff。
 
 ## Context-Analyzer
 
-`ContextAnalyzer`（`lib/canvas/ai/context-analyzer.ts`）提取 imports、exports、光标作用域
-（`inFunction` / `inClass` / `inBlock`）、模式（react-component、async-await、try-catch、…）、裸依赖，
-以及 `low`/`medium`/`high` 复杂度估计。**符号不在这里解析**：它委托给 `symbolParser`
-（`lib/canvas/symbols/symbol-parser.ts:52`）——大纲面板渲染的就是这一个，于是读者能看到的符号，
-就是模型被告知的符号。它过去自带第二张正则表，且已经漂移（不支持 Python、不支持嵌套）。
+`ContextAnalyzer`（`lib/canvas/ai/context-analyzer.ts`）提取 imports、exports、光标作用域（`inFunction` / `inClass` / `inBlock`）、模式（react-component、async-await、try-catch、…）、裸依赖，以及 `low`/`medium`/`high` 复杂度估计。**符号不在这里解析**：它委托给 `symbolParser`（`lib/canvas/symbols/symbol-parser.ts:52`）——大纲面板渲染的就是这一个，于是读者能看到的符号，就是模型被告知的符号。它过去自带第二张正则表，且已经漂移（不支持 Python、不支持嵌套）。
 
-`buildScopeBlock(content, position, language)` 是唯一面向 prompt 的入口。它对**整篇**文档做分析、
-渲染 `generateContextualPrompt`，并把结果截到 `SCOPE_BLOCK_MAX_CHARS`（400）。它从不抛异常——
-文档畸形时降级为"没有块"，而不是让整轮失败。
+`buildScopeBlock(content, position, language)` 是唯一面向 prompt 的入口。它对**整篇**文档做分析、渲染 `generateContextualPrompt`，并把结果截到 `SCOPE_BLOCK_MAX_CHARS`（400）。它从不抛异常——文档畸形时降级为"没有块"，而不是让整轮失败。
 
-**它用在哪，以及刻意不用在哪。** `useCanvasSuggestions` 会附上这段块，因为它的 prompt 发的是光标附近的
-一个*窗口*（`sliceContextWindow`），而这个窗口丢掉的恰恰是"我在哪个函数里""这个文件导出了什么"。
-`useCanvasActions` 不用：整篇重写的 prompt 拿符号大纲没有收益，却要在每次动作上付这份 token。
+**它用在哪，以及刻意不用在哪。** `useCanvasSuggestions` 会附上这段块，因为它的 prompt 发的是光标附近的一个*窗口*（`sliceContextWindow`），而这个窗口丢掉的恰恰是"我在哪个函数里""这个文件导出了什么"。`useCanvasActions` 不用：整篇重写的 prompt 拿符号大纲没有收益，却要在每次动作上付这份 token。
 
 <Callout type="warn">
   派生出来的 prompt 文本不得改变其来源的形状。`extractDependencies` 过去用 `replace("@", "")` 去掉 npm

@@ -29,18 +29,12 @@ description: AcpClientAdapter（acp-client.ts，2632 行）—— Agent Client P
 
 ## 传输与成帧
 
-适配器继承 `BaseProtocolAdapter` 并声明 `protocol = "acp"`。`connect`（`:327`）按传输分叉：
+适配器继承 `BaseProtocolAdapter`，并声明 `protocol = "acp"`。`connect`（`:327`）根据传输方式选择不同路径：
 
-- **stdio（桌面）** —— `connectViaStdio`（`:377`）以 `buildSpawnArgs`（`:271`，那个幂等追加
-  `--bare`/`--debug` 的导出纯辅助）给出的拉起参数 invoke `spawn_external_agent`（`:397`），然后订阅
-  `external-agent://stdout` → `handleIncomingMessage`（`:410`）。
-- **http / websocket / sse** —— `connectViaNetwork`（`:447`）用于远程 Agent，连接探测期间容忍 404/405
-  （`:462`）。
+- **stdio（桌面）** —— `connectViaStdio`（`:377`）以 `buildSpawnArgs`（`:271`，那个幂等追加 `--bare`/`--debug` 的导出纯辅助）给出的拉起参数 invoke `spawn_external_agent`（`:397`），然后订阅 `external-agent://stdout` → `handleIncomingMessage`（`:410`）。
+- **http / websocket / sse** —— `connectViaNetwork`（`:447`）用于远程 Agent，连接探测期间容忍 404/405（`:462`）。
 
-入站字节被缓冲，并在 `processMessageBuffer`（`:1739`/`:1747`）按 `\n` 切分；每行 JSON 解析后由
-`routeMessage`（`:1752`）路由：一个带非空 `id` **且**带 `method` 的对象是**Agent→客户端请求**（见反转
-处理器）；带 `method` 而无 `id` 的是**通知**（见流式）；裸 `id` 是对我方某请求的**响应**
-（`handleResponse` `:1777`）。
+入站字节被缓冲，并在 `processMessageBuffer`（`:1739`/`:1747`）按 `\n` 切分；每行 JSON 解析后由 `routeMessage`（`:1752`）路由：一个带非空 `id` **且**带 `method` 的对象是**Agent→客户端请求**（见反转处理器）；带 `method` 而无 `id` 的是**通知**（见流式）；裸 `id` 是对我方某请求的**响应**（`handleResponse` `:1777`）。
 
 ## 握手与 prompt turn
 
@@ -80,13 +74,11 @@ sequenceDiagram
 | `cancel` | 1117 | 通知 `session/cancel`（`:1124`），仅在执行中。 |
 | `authenticate` | 741 | 对 `_authMethods` 校验，发 `authenticate {method, …credentials}`（`:753`）。 |
 
-`prompt` **不**内联等待 `session/prompt` 请求——其响应是*本轮结束*信号，而真正内容在请求与其 resolve
-之间以通知形式流入。
+`prompt` **不**内联等待 `session/prompt` 请求——其响应是*本轮结束*信号，而真正内容在请求与其 resolve 之间以通知形式流入。
 
 ## 反转处理器 —— Agent 反调进来
 
-这是 ACP 区别于普通 RPC 客户端之处：一旦本轮运行，Agent 把请求发**给 Cognia**。`handleAgentRequest`
-（`:1796`）是那个 switch。
+这是 ACP 区别于普通 RPC 客户端之处：一旦本轮运行，Agent 把请求发**给 Cognia**。`handleAgentRequest`（`:1796`）是那个 switch。
 
 | ACP 方法 | 处理器（行） | 桥接到 |
 | --- | --- | --- |
@@ -100,31 +92,21 @@ sequenceDiagram
 | `terminal/wait_for_exit` | `handleTerminalWaitForExit`（2096） | `acpTerminalWaitForExit` → `{exitCode, exitStatus}`。 |
 | `_` 前缀扩展 | `extensionHandlers.get(method)`（1839） | 插件经 `registerExtensionHandler`（`:1584`）登记；未知 → `-32601`。 |
 
-终端方法桥接到 `@/lib/native/external-agent`，后者调用 Rust 的 ACP-terminal 子协议
-（`src-tauri/src/external_agent/commands.rs` 里的 `acp_terminal_*`）。成功的处理器结果以 `sendResponse`
-（`:1862`）回传；抛错变成 `-32603`（`:1855`）。
+终端方法桥接到 `@/lib/native/external-agent`，后者调用 Rust 的 ACP-terminal 子协议（`src-tauri/src/external_agent/commands.rs` 里的 `acp_terminal_*`）。成功的处理器结果以 `sendResponse`（`:1862`）回传；抛错变成 `-32603`（`:1855`）。
 
 ## 权限桥
 
 当 Agent 想跑一个工具时，它发 `session/request_permission`。`handlePermissionRequest`（`:1931`）是那座桥：
 
-1. **先自动判定。** `bypassPermissions` 模式自动选一个 allow 选项（`:1984`）；`acceptEdits` + 写类工具也
-   自动选（`:1994`）。
-2. **否则把它呈上。** 它把参数归一化成一个 `AcpPermissionRequest`（`:1963`）、发射一个
-   `permission_request` 事件（`:2017`）、返回一个按 `requestId` 存进 `pendingPermissions` 的 Promise
-   （`:2009`），并带一个 **5 分钟**超时 resolve 成 `cancelled`（`:2001`）。
-3. **解析。** `respondToPermission`（`:1067`）查到待决 Promise 并 resolve 成
-   `{outcome: granted ? "selected" : "cancelled", optionId}`（`:1071`），随后发射 `permission_response`
-   （`:1077`）。
+1. **先自动判定。** `bypassPermissions` 模式自动选一个 allow 选项（`:1984`）；`acceptEdits` + 写类工具也自动选（`:1994`）。
+2. **否则把它呈上。** 它把参数归一化成一个 `AcpPermissionRequest`（`:1963`）、发射一个 `permission_request` 事件（`:2017`）、返回一个按 `requestId` 存进 `pendingPermissions` 的 Promise（`:2009`），并带一个 **5 分钟**超时 resolve 成 `cancelled`（`:2001`）。
+3. **解析。** `respondToPermission`（`:1067`）查到待决 Promise 并 resolve 成 `{outcome: granted ? "selected" : "cancelled", optionId}`（`:1071`），随后发射 `permission_response`（`:1077`）。
 
-挑哪个 allow 选项由 `pickAllowPermissionOption`（`:1605`）决定：优先 `allow_once`、再默认 `allow`、再
-任意 `allow`。这是 [hooks 闸门](./observability-hooks) 在 Manager 里拦截的接缝——一个 settings.json
-`PreToolUse` hook 能在用户看到请求*之前*就拒绝。
+挑哪个 allow 选项由 `pickAllowPermissionOption`（`:1605`）决定：优先 `allow_once`、再默认 `allow`、再任意 `allow`。这是 [hooks 闸门](./observability-hooks) 在 Manager 里拦截的接缝——一个 settings.json `PreToolUse` hook 能在用户看到请求*之前*就拒绝。
 
 ## 会话扩展
 
-`session/list`、`session/fork`、`session/resume` 是**不稳定**的 ACP 扩展。适配器追踪逐方法支持
-（`createDefaultSessionExtensionSupport` `:253`，探测前全为 `"unknown"`），并在 Agent 未实现某个时静默降级。
+`session/list`、`session/fork`、`session/resume` 是**不稳定**的 ACP 扩展。适配器追踪逐方法支持（`createDefaultSessionExtensionSupport` `:253`，探测前全为 `"unknown"`），并在 Agent 未实现某个时静默降级。
 
 | 扩展 | 方法（行） | 行为 |
 | --- | --- | --- |
@@ -132,13 +114,11 @@ sequenceDiagram
 | `session/fork` | `forkSession`（1372） | 由 `sessionCapabilities.fork === false` 把守；相同错误分类。 |
 | `session/resume` | `resumeSession`（1457） | 当存在 `loadSession` 能力时回退到 `session/load`（`:1466`、`:1538`）而非失败。 |
 
-错误分类委托给 [`session-extension-errors.ts`](./canonical-readiness)
-（`isExternalAgentMethodNotFoundError`、`isExternalAgentSessionExtensionUnsupportedForMethod`）。
+错误分类委托给 [`session-extension-errors.ts`](./canonical-readiness)（`isExternalAgentMethodNotFoundError`、`isExternalAgentSessionExtensionUnsupportedForMethod`）。
 
 ## 流式 —— session/update → 事件
 
-通知经 `handleNotification`（`:2117`）→ `notificationToEvent`（`:2341`）路由。主路径是 `session/update`
-（`:2348`）→ `handleSessionUpdate`（`:2128`），一个对 `update.sessionUpdate` 的 switch：
+通知经 `handleNotification`（`:2117`）→ `notificationToEvent`（`:2341`）路由。主路径是 `session/update`（`:2348`）→ `handleSessionUpdate`（`:2128`），一个对 `update.sessionUpdate` 的 switch：
 
 | ACP 更新 | → 规范事件 | 行 |
 | --- | --- | --- |
@@ -153,13 +133,10 @@ sequenceDiagram
 | `current_mode_update` | `mode_update` | 2297 |
 | `config_options_update` | `config_options_update` | 2321 |
 
-`emitEvent`（`:2555`）把事件扇出到逐会话监听器；`prompt` 生成器已在 `:965` 注册了它的监听器，并产出落进
-其队列的一切。遗留通知方法（`message/*`、`tool/*`、`thinking`、`progress`、`error`）也在
-`notificationToEvent`（`:2351`–`:2504`）里映射，以兼容早于统一 `session/update` 的 Agent。
+`emitEvent`（`:2555`）把事件扇出到逐会话监听器；`prompt` 生成器已在 `:965` 注册了它的监听器，并产出落进其队列的一切。遗留通知方法（`message/*`、`tool/*`、`thinking`、`progress`、`error`）也在 `notificationToEvent`（`:2351`–`:2504`）里映射，以兼容早于统一 `session/update` 的 Agent。
 
 ## 可靠性
 
 - **请求超时** —— `sendRequest` 默认 30 秒（`:1630`）；`healthCheck` 以 5 秒 ping（`:1574`）。
-- **进程退出** —— `handleProcessExit`（`:2575`）拒绝所有待决请求、标记会话关闭，并（若 `restartOnCrash`）
-  触发 `attemptReconnection`（`:2602`），指数退避至多 3 次（`:2608`）。
+- **进程退出** —— `handleProcessExit`（`:2575`）拒绝所有待决请求、标记会话关闭，并（若 `restartOnCrash`）触发 `attemptReconnection`（`:2602`），指数退避至多 3 次（`:2608`）。
 - **断开清理** —— 把待决权限清成 `cancelled`、待决请求，以及扩展支持缓存（`:821`–`:827`）。

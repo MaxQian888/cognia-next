@@ -12,10 +12,9 @@ description: MCP 服务器行的来源 —— 15 个内置预设（lib/claude/mc
   （`MCP_PRESETS`，`lib/claude/mcp-presets.ts:46`）—— filesystem、github、postgres、slack、deepwiki 以及
   通用 http/sse —— 每个都声明带类型的 `fields`（env 变量、arg token、URL、header），由
   `applyPresetFields` 替换进一个配置 blob。插件通过一个 **overlay 注册表**
-  （`registerMcpServerPreset`）添加自己的预设，叠加在静态目录之上。导入则
-  朝相反方向拉取：**导入对话框** 读取外部 CLI 的配置文件（Claude Desktop
+  （`registerMcpServerPreset`）添加自己的预设，叠加在静态目录之上。导入流程读取现有配置：**导入对话框** 读取外部 CLI 的配置文件（Claude Desktop
   等），预览它找到的服务器，再由 `bulkImportMcpServers` 以 跳过/覆盖/复制 的冲突策略
-  写入所选项。每条路径最终都落在同一个 `mcpServers` 行上。
+  写入所选项。每条路径最终都写入同一个 `mcpServers` 行上。
 </TLDR>
 
 ## 内置预设目录
@@ -70,9 +69,7 @@ export interface McpPresetField {
 }
 ```
 
-`applyPresetFields` 深拷贝模板配置，并把每个字段写入它的 placement ——
-env 变量写入 `config.env`、token 替换贯穿 `config.args`、http/sse 的 URL/header ——
-然后返回一个全新对象（绝不修改目录本身）：
+`applyPresetFields` 深拷贝模板配置，并把每个字段写入它的 placement ——env 变量写入 `config.env`、token 替换贯穿 `config.args`、http/sse 的 URL/header ——然后返回一个全新对象（绝不修改目录本身）：
 
 ```typescript title="lib/claude/mcp-presets.ts:365"
 export function applyPresetFields(
@@ -97,9 +94,7 @@ export function applyPresetFields(
 
 ## 插件预设 overlay
 
-插件通过一个 **overlay 注册表**（`createOverlayRegistry`，
-`lib/plugin/registries/mcp-server-preset-registry.ts:24`）扩展目录 —— 动态条目叠加在静态
-`MCP_PRESETS` 之上，并带有干净的按插件拆除机制：
+插件通过一个 **overlay 注册表**（`createOverlayRegistry`，`lib/plugin/registries/mcp-server-preset-registry.ts:24`）扩展目录 —— 动态条目叠加在静态 `MCP_PRESETS` 之上，并带有干净的按插件拆除机制：
 
 ```typescript title="lib/plugin/registries/mcp-server-preset-registry.ts:28"
 export const registerMcpServerPreset = registry.register
@@ -109,8 +104,7 @@ export const getMcpServerPreset = registry.get
 export const listMcpServerPresetEntries = registry.listEntries // id + preset + pluginId, registration order
 ```
 
-插件作者用纯类型辅助函数 `defineMcpServerPreset` 包裹其 manifest 条目，以获得 IDE
-自动补全和编译期校验（它在运行时不做任何事）：
+插件作者用纯类型辅助函数 `defineMcpServerPreset` 包裹其 manifest 条目，以获得 IDE 自动补全和编译期校验（它在运行时不做任何事）：
 
 ```typescript title="lib/plugin/sdk/define-mcp-server-preset.ts:11"
 const playwright = defineMcpServerPreset({
@@ -121,8 +115,7 @@ const playwright = defineMcpServerPreset({
 })
 ```
 
-插件预设类型（`types/plugin/plugin-mcp-preset.ts:15`）镜像内置的 `McpPreset`，并
-新增一个 `runtime` 判别符，使预设可以面向特定的 agent runtime：
+插件预设类型（`types/plugin/plugin-mcp-preset.ts:15`）镜像内置的 `McpPreset`，并新增一个 `runtime` 判别符，使预设可以面向特定的 agent runtime：
 
 ```typescript title="types/plugin/plugin-mcp-preset.ts:15"
 export interface PluginMcpServerPresetDef {
@@ -143,12 +136,8 @@ export interface PluginMcpServerPresetDef {
 
 `components/settings/mcp/mcp-preset-grid.tsx` 以两种模式渲染目录：
 
-- **画廊模式**（第 131 行）—— 搜索框 + 标签 chip + 响应式网格；每张卡片显示 图标/名称/
-  描述，当已存在同名服务器时显示 “added” 徽标。`custom` 预设
-  始终可重新选择。
-- **配置模式**（第 77 行）—— 选定某预设后，逐字段的表单（`secret` 字段为
-  密码输入框）、重名警告，以及可选的文档链接。在必填字段填好且名称未被占用前，
-  “Add Server” 处于禁用状态。
+- **画廊模式**（第 131 行）—— 搜索框 + 标签 chip + 响应式网格；每张卡片显示 图标/名称/ 描述，当已存在同名服务器时显示 “added” 徽标。`custom` 预设始终可重新选择。
+- **配置模式**（第 77 行）—— 选定某预设后，逐字段的表单（`secret` 字段为密码输入框）、重名警告，以及可选的文档链接。在必填字段填好且名称未被占用前，“Add Server” 处于禁用状态。
 
 ```typescript title="components/settings/mcp/mcp-preset-grid.tsx:39"
 const presets = useMemo(() => {
@@ -162,14 +151,11 @@ const presets = useMemo(() => {
 }, [query, activeTag])
 ```
 
-提交时它发出 `onPresetSelected(preset, values)`；面板运行 `applyPresetFields` 并调用
-`createMcpServer`。
+提交时它发出 `onPresetSelected(preset, values)`；面板运行 `applyPresetFields` 并调用 `createMcpServer`。
 
 ### 空白服务器种子
 
-当你从零添加一个服务器（而非来自预设）时，`blankServerSeed` 会把它预投影到 **每一个
-可写 agent**，使手工创建的服务器默认落入你的各 CLI 配置 —— 你随后是把 chip 关掉，
-而非逐个打开：
+当你从零添加一个服务器（而非来自预设）时，`blankServerSeed` 会把它预投影到 **每一个可写 agent**，使手工创建的服务器默认落入你的各 CLI 配置 —— 你随后是把 chip 关掉，而非逐个打开：
 
 ```typescript title="components/settings/mcp/server-seed.ts:15"
 export async function blankServerSeed(): Promise<McpEditorSeed> {
@@ -181,8 +167,7 @@ export async function blankServerSeed(): Promise<McpEditorSeed> {
 
 ## 从 CLI 配置导入
 
-导入对话框（`components/settings/mcp-import-dialog.tsx`，仅桌面端，受 `isTauri()` 守卫）走
-相反方向 —— 从外部 agent 的配置文件中读取服务器 *出来*。它是一个三步流程：
+导入对话框（`components/settings/mcp-import-dialog.tsx`，仅桌面端，受 `isTauri()` 守卫）走相反方向 —— 从外部 agent 的配置文件中读取服务器 *出来*。它是一个三步流程：
 
 <Steps>
 <Step>**选择 agent** —— 打开时并行探测每个 agent slot（`readAgentConfig` → `{ parsed, path, exists, parseError }`），每个再经其 adapter 重新解析以算出草稿数量。没有服务器 / 解析错误的 slot 会被禁用。</Step>
@@ -203,16 +188,14 @@ async function importFromAgentWithSelection(agentId, drafts, strategy) {
 }
 ```
 
-结果 toast 汇总 `{ created, updated, skipped, errored }`，随后
-`refreshAgentAvailability()` 更新整个面板的 chip 状态。
+结果 toast 汇总 `{ created, updated, skipped, errored }`，随后 `refreshAgentAvailability()` 更新整个面板的 chip 状态。
 
 > CCSwitch 提供一个 *并行* 的导入器，从 CCSwitch 托管的 CLI 中拉取 MCP 配置 —— 参见
 > [消费面](./consumption-surfaces#ccswitch-mcp-tab) 页面。
 
 ## 粘贴添加与导出
 
-几乎每个公开的 MCP 服务器，自我介绍的方式要么是一条 `… mcp add …` 命令，要么是一段 `mcpServers` JSON，
-所以 `lib/mcp/config-transfer.ts` 两种都读，也两种都能写回去。
+几乎每个公开的 MCP 服务器，自我介绍的方式要么是一条 `… mcp add …` 命令，要么是一段 `mcpServers` JSON，所以 `lib/mcp/config-transfer.ts` 两种都读，也两种都能写回去。
 
 ```typescript title="lib/mcp/config-transfer.ts:597"
 export function parseMcpTransferInput(input: string): McpTransferParse {
@@ -234,13 +217,11 @@ export function parseMcpTransferInput(input: string): McpTransferParse {
 | `https://mcp.example.com/mcp` | 裸 URL → http 服务器 |
 | `{"mcpServers": …}` / `servers` / `mcp_servers` / 单条目 | agent 会写出的全部四种包装 |
 
-条目走的是 `normalizeMcpEntry`——和每个 agent adapter 用的是同一个归一化器，所以粘贴进来的配置与导入文件的解析方式完全一致。
-名称会被规整到命名空间字符集；任何猜测或改名都会作为提示显示出来，而不是悄悄生效。
+条目走的是 `normalizeMcpEntry`——和每个 agent adapter 用的是同一个归一化器，所以粘贴进来的配置与导入文件的解析方式完全一致。名称会被规整到命名空间字符集；任何猜测或改名都会作为提示显示出来，而不是悄悄生效。
 
 ### 反方向
 
-`buildMcpInstallCommand` 与 `buildMcpTransferJson` 把已配置的服务器渲染回去。面向具体 agent 的 JSON 交由该 adapter 自己的
-`project()` 生成，所以输出与同步写入器产生的内容逐字节一致；命令只在 POSIX shell 确实需要时才加引号。
+`buildMcpInstallCommand` 与 `buildMcpTransferJson` 把已配置的服务器渲染回去。面向具体 agent 的 JSON 交由该 adapter 自己的 `project()` 生成，所以输出与同步写入器产生的内容逐字节一致；命令只在 POSIX shell 确实需要时才加引号。
 
 ```typescript title="lib/mcp/config-transfer.ts:643"
 export function buildMcpInstallCommand(server: InstallCommandInput, agent?: AgentId): string {

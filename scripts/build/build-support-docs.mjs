@@ -15,12 +15,7 @@ import { z } from "zod"
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(HERE, "..", "..")
 const DOCS_ROOT = path.join(REPO_ROOT, "docs", "content", "docs")
-const OUT_FILE = path.join(
-  REPO_ROOT,
-  "lib",
-  "support-agent",
-  "support-docs.generated.json"
-)
+const OUT_FILE = path.join(REPO_ROOT, "lib", "support-agent", "support-docs.generated.json")
 const MAX_DOCUMENT_CHARS = 2_400
 
 function markdownFiles(root) {
@@ -48,11 +43,7 @@ export function extractDocument(relativePath, source) {
   const title = cleanMarkdown(String(data?.title ?? heading ?? path.basename(relativePath)))
   const description = typeof data?.description === "string" ? cleanMarkdown(data.description) : ""
   const body = cleanMarkdown(content)
-  const text = [description, body]
-    .filter(Boolean)
-    .join(" ")
-    .slice(0, MAX_DOCUMENT_CHARS)
-    .trim()
+  const text = [description, body].filter(Boolean).join(" ").slice(0, MAX_DOCUMENT_CHARS).trim()
   return { path: relativePath.split(path.sep).join(path.posix.sep), title, text }
 }
 
@@ -70,6 +61,13 @@ export function buildCorpus(root = DOCS_ROOT) {
 
 export function renderCorpusModule(corpus) {
   return `${JSON.stringify({ schemaVersion: 1, locales: corpus })}\n`
+}
+
+export function writeCorpusIfChanged(root = DOCS_ROOT, output = OUT_FILE) {
+  const rendered = renderCorpusModule(buildCorpus(root))
+  if (existsSync(output) && readFileSync(output, "utf8") === rendered) return false
+  writeFileAtomic.sync(output, rendered)
+  return true
 }
 
 const cliSchema = z.object({ check: z.boolean().default(false) })
@@ -98,16 +96,16 @@ export function parseArgs(argv) {
 function main(argv) {
   const options = parseArgs(argv)
   if (!options) return
-  const rendered = renderCorpusModule(buildCorpus())
   if (options.check) {
+    const rendered = renderCorpusModule(buildCorpus())
     if (!existsSync(OUT_FILE) || readFileSync(OUT_FILE, "utf8") !== rendered) {
       console.error("Support documentation corpus is stale; run pnpm support:docs:build")
       process.exitCode = 1
     }
     return
   }
-  writeFileAtomic.sync(OUT_FILE, rendered)
-  console.log(`Generated ${path.relative(REPO_ROOT, OUT_FILE)}`)
+  const changed = writeCorpusIfChanged()
+  console.log(`${changed ? "Generated" : "Unchanged"} ${path.relative(REPO_ROOT, OUT_FILE)}`)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

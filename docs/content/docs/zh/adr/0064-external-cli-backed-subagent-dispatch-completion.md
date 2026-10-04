@@ -1,6 +1,6 @@
 ---
 title: "ADR-0064 — 外部 CLI 驱动的子智能体调度补全（Claude Code / Codex / …）"
-description: "完成半成功能，主代理派遣由外部CLI代理支持的子代理（Claude Code、Codex、Gemini、Cursor 等）。修复启动命令 ACP故障，使命名代理真正生成，停止无声的错误引擎降级，线程 MCP 服务器 + 实时进度进入两个调度接口（Agent Team队友 A1 和任务工具子代理 A2），优先使用原生Codex应用服务器，并为外部子代理添加一流的设置创作UI。"
+description: "完成此前的部分实现，主代理派遣由外部CLI代理支持的子代理（Claude Code、Codex、Gemini、Cursor 等）。修复启动命令 ACP故障，使命名 Agent 实际启动，停止无声的错误引擎降级，将 MCP 服务器与实时进度接入两个调度接口（Agent Team队友 A1 和任务工具子代理 A2），优先使用原生Codex应用服务器，并为外部子代理添加完整的设置编辑 UI。"
 ---
 
 # ADR-0064 — 外部 CLI 驱动的子智能体调度补全（Claude Code / Codex / …）
@@ -47,7 +47,7 @@ Codex（`@zed-industries/codex-acp` shim 和 native `codex app-server`）已经�
 
 ### 5 ·外部子代理的一级创作（A2）
 
-主代理可以派遣外部子代理，但没有一流的“创建*子代理（只有markdown frontmatter/plugin SDK）。`SubAgentConfig`获得`externalPresetId`;`projectSubagentTemplate`将它带到可调度`AgentDefinition`;子代理模板编辑器会获得一个“外部运行时”选择器，列出所有可执行预设（双语，仅桌面提示）。共享`BUILTIN_EXECUTABLE_PRESET_IDS`（源自`EXTERNAL_AGENT_PRESETS`，无漂移）是外部运行时选矿器的唯一来源。
+主 Agent 可以派遣外部子 Agent，但只能通过 markdown frontmatter/plugin SDK 创建子 Agent。`SubAgentConfig` 增加 `externalPresetId`；`projectSubagentTemplate` 将其传给可调度的 `AgentDefinition`；子 Agent 模板编辑器增加「外部运行时」选择器，列出所有可执行预设（双语，仅桌面提示）。共享`BUILTIN_EXECUTABLE_PRESET_IDS`（源自`EXTERNAL_AGENT_PRESETS`，无漂移）是外部运行时选择器的唯一来源。
 
 ## 超出范围（追踪后续）
 

@@ -19,6 +19,11 @@ export const ROOT_LOADING_RULES = [
     reason: "E2E surface enumeration must stay behind a dynamic import.",
   },
   {
+    file: "components/runtime/app-runtime.tsx",
+    forbidden: ["@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness"],
+    reason: "Client runtime composition must preserve the E2E lazy-loading boundary.",
+  },
+  {
     file: "components/providers/tauri-provider.tsx",
     forbidden: ["@/hooks/chat"],
     reason: "Import the notification hook directly; the chat barrel reaches the full chat runtime.",

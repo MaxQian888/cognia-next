@@ -1,6 +1,6 @@
 ---
 title: ADR-0028 — 按会话隔离 Claude Code
-description: "Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理隔离，通过per-`query()`环境（无WarmQuery池——spike显示所有选项都以`startup()`、接近零命中率烘焙;作为单次预热后续推迟），以及五层混合执行沙箱（Cognia限制令牌的Windows运行器 + 沙盒执行器 + bwrap，加上Node 24 `--permission`、Wasmtime、端对端microVM和`computer_use`的每个动作策略门禁）。"
+description: "Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理隔离，通过per-`query()`环境（无 WarmQuery 池：探索确认所有选项都在 `startup()` 时固定，池命中率接近零；单次预热留作后续），以及五层混合执行沙箱（Cognia限制令牌的Windows运行器 + 沙盒执行器 + bwrap，加上Node 24 `--permission`、Wasmtime、端对端microVM和`computer_use`的每个动作策略门禁）。"
 ---
 
 # ADR-0028 — 按会话隔离 Claude Code
@@ -53,7 +53,7 @@ ADR-0025已经发布了多账户保险库（`src-tauri/src/subscription/vault.rs
 
 ### 冷启动成本——已接受，无池
 
-SDK暴露了一个`startup()` API（自v0.2.111起），返回一个`WarmQuery`以摊销CLI子进程的~12秒冷启动。context7对v0.2.111+的激增解决了计划标记为应急的问题：**每个`Options`字段——包括`cwd`、`model`、`mcpServers`、`agents`、`allowedTools`、`additionalDirectories`、`permissionMode`、`canUseTool`、`resume`、`forkSession`——都在`startup()`该时烘焙**，`WarmQuery`实例只能执行一次`.query()`调用，之后被丢弃。在Cognia中，`additionalDirectories`（由`@`-references驱动）、`appendSystemPrompt`（由目标注入/工作流程快照驱动）以及其他几个字段每条消息都会变化，所以元组键温池的命中率几乎为零。复杂度并不值得它应付。
+SDK 自 v0.2.111 起提供 `startup()` API，返回 `WarmQuery`，用于分摊 CLI 子进程 ~12 秒的冷启动开销。context7 针对 v0.2.111+ 的探索确认了计划中保留的问题：**每个 `Options` 字段——包括 `cwd`、`model`、`mcpServers`、`agents`、`allowedTools`、`additionalDirectories`、`permissionMode`、`canUseTool`、`resume`、`forkSession`——都在 `startup()` 时固定**。一个 `WarmQuery` 实例只能执行一次 `.query()` 调用，之后便被丢弃。在 Cognia 中，`additionalDirectories`（由 `@`-references 驱动）、`appendSystemPrompt`（由目标注入 / 工作流快照驱动）与其他几个字段都会随消息变化。因此，以元组为键的预热池命中率几乎为零，增加复杂度的收益有限。
 
 **决策**：池被丢弃。每个`query()`支付~12秒冷启动;sidecar在成本中处理流输入，因此用户每_send_看到一次旋转器，而非每回合。`sidecar/dispatch/anthropic.mjs`中的流输入流保持不变。未来的优化可以在`session_ended`后预热每会话`WarmQuery`，并在下一条消息中交换，_if_选项未变——作为后续跟踪而非V1范围。
 
@@ -83,19 +83,12 @@ T1拦截路径：一个新的树内插件`plugins/cognia-sandboxed-tools/`注册
 
 #### T3 — Wasmtime + WASI for plugin WASM
 
-Rust/Wasmtime 是唯一生产权威。`PluginLoader` 保存原生宿主返回的 generation，
-`PluginManager` 把同一个 generation 绑定到每个已声明工具和 workflow node 投影。
-缺少 generation 时 activation 失败；原生宿主会在 activate、call、deactivate 与 unload
-时拒绝陈旧 generation。未使用的浏览器 WASM runtime 及其未实现 JCO component 路径已移除。
-原生 load 前仍通过 `lib/plugin/security/wasm-grant.ts` 对账 manifest preopen。
+Rust/Wasmtime 是唯一生产权威。`PluginLoader` 保存原生宿主返回的 generation，`PluginManager` 把同一个 generation 绑定到每个已声明工具和 workflow node 投影。缺少 generation 时 activation 失败；原生宿主会在 activate、call、deactivate 与 unload 时拒绝陈旧 generation。未使用的浏览器 WASM runtime 及其未实现 JCO component 路径已移除。原生 load 前仍通过 `lib/plugin/security/wasm-grant.ts` 对账 manifest preopen。
 
 #### T4 — e2b Firecracker microVM作为选择加入的等级
 
 `Character.computerUseSettings.sandboxTier?: "os" | "microvm"`。只有正在接受新绑定的 E2B
-adapter 已注册，且能认领一个存活的 E2B workspace handle，microVM binding 才符合条件。
-插件 drain 时，runtime record 保留原 adapter，因此现有 owner 可以完成而新 owner 严格失败。
-workspace-handle ownership 与 runtime-ref ownership 独立；两者都归零后 VM 才恰好关闭一次，
-close/release 失败会保留并可重试。
+adapter 已注册，且能认领一个存活的 E2B workspace handle，microVM binding 才符合条件。插件 drain 时，runtime record 保留原 adapter，因此现有 owner 可以完成而新 owner 严格失败。workspace-handle ownership 与 runtime-ref ownership 独立；两者都归零后 VM 才恰好关闭一次，close/release 失败会保留并可重试。
 
 #### T5 — `computer_use`的每个行动策略 门禁
 
@@ -115,11 +108,7 @@ SDK的`--resume`忽略`CLAUDE_CONFIG_DIR`（只在默认`~/.claude/projects/`下
 
 ### 审计 + 可观测性
 
-`automation/audit.rs` 提供 `Surface::Sandbox`。每次沙盒调用（允许/拒绝/错误）都会在既有
-payload 中记录有效 tier/provider、拒绝或终止原因、请求 timeout、是否超时、两个流的截断标志、
-exit code 与 duration。5000 条上限的 VecDeque 与 Dexie `automationAuditLog` 同时承载原生和
-E2B 事件。Diagnostics 直接调用 `listAuditRows({ surface: "sandbox" })`，因此无关的近期审计行
-不会遮住沙盒事件。
+`automation/audit.rs` 提供 `Surface::Sandbox`。每次沙盒调用（允许/拒绝/错误）都会在既有 payload 中记录有效 tier/provider、拒绝或终止原因、请求 timeout、是否超时、两个流的截断标志、exit code 与 duration。5000 条上限的 VecDeque 与 Dexie `automationAuditLog` 同时承载原生和 E2B 事件。Diagnostics 直接调用 `listAuditRows({ surface: "sandbox" })`，因此无关的近期审计行不会遮住沙盒事件。
 
 ### UI 接口
 
@@ -195,19 +184,8 @@ E2B 事件。Diagnostics 直接调用 `listAuditRows({ surface: "sandbox" })`，
 
 ## 附录——不可变沙盒运行时绑定（2026-08-24）
 
-沙盒放置现在由窄模块 `SandboxSessionRuntime` 解析。`resolveSendOptions` 在发送前
-绑定会话，并通过现有插件工具 envelope 透传不透明的 `SandboxRuntimeRef`。引用会
-冻结单个 generation 的 tier、target、policy、confinement 与启用 surface，但不
-保存凭证或健康状态。设置变化会创建新 generation；已经执行中的调用继续沿用原路由。
+沙盒放置现在由窄模块 `SandboxSessionRuntime` 解析。`resolveSendOptions` 在发送前绑定会话，并通过现有插件工具 envelope 透传不透明的 `SandboxRuntimeRef`。引用会冻结单个 generation 的 tier、target、policy、confinement 与启用 surface，但不保存凭证或健康状态。设置变化会创建新 generation；已经执行中的调用继续沿用原路由。
 
-sandboxed-tools 插件采用穷尽路由：`os` 使用既有 `sandbox_exec`，`microvm` 使用
-已注册 E2B adapter，`cua-desktop` 直接拒绝。runtime ref、adapter、实时连接、
-能力或 running 状态任一缺失，都会在任何宿主机执行前失败。
+sandboxed-tools 插件采用穷尽路由：`os` 使用既有 `sandbox_exec`，`microvm` 使用已注册 E2B adapter，`cua-desktop` 直接拒绝。runtime ref、adapter、实时连接、能力或 running 状态任一缺失，都会在任何宿主机执行前失败。
 
-E2B 现在与现有 workspace backend 共用一个实例池。microVM runtime 只能绑定到
-存活的 E2B workspace handle，不会另行 clone 或同步第二份目录。同一 runtime ref
-的连续调用复用同一 VM；同一会话的配置 generation 会共同保留该 workspace，直到
-所有 owner 释放，而不同 workspace handle 保持隔离。会话释放与插件停用只关闭一次；
-关闭失败会继续被跟踪并向上抛出，以便重试。network mode 属于实例创建事实；当前基于
-Git 的 handle 创建时必须联网，因此在 adapter 能证明落实前，offline 请求、allowlist
-与 CPU/内存上限都会被拒绝。
+E2B 现在与现有 workspace backend 共用一个实例池。microVM runtime 只能绑定到存活的 E2B workspace handle，不会另行 clone 或同步第二份目录。同一 runtime ref 的连续调用复用同一 VM；同一会话的配置 generation 会共同保留该 workspace，直到所有 owner 释放，而不同 workspace handle 保持隔离。会话释放与插件停用只关闭一次；关闭失败会继续被跟踪并向上抛出，以便重试。network mode 属于实例创建事实；当前基于 Git 的 handle 创建时必须联网，因此在 adapter 能证明落实前，offline 请求、allowlist 与 CPU/内存上限都会被拒绝。

@@ -1,5 +1,6 @@
 node_modules
 .next
+.next-mobile-dev
 out
 build
 coverage
@@ -87,3 +88,10 @@ browser-extension/.output/
 # `<Steps>` / `<Step>` whitespace (prettier(input) !== prettier(prettier(input))).
 # The docs workspace owns its own formatting.
 docs/content
+# Pi LaTeX Workbench plugin: vendor/ is an untouched upstream snapshot whose
+# bytes are pinned by git blob id, and VENDOR.md / vendor-lock.json are
+# rendered by scripts/sync-vendor.mjs and compared byte-for-byte by
+# `pnpm plugin:pi-latex-workbench:check` — a reformat would fail that check.
+plugins/pi-latex-workbench/vendor
+plugins/pi-latex-workbench/VENDOR.md
+plugins/pi-latex-workbench/vendor-lock.json

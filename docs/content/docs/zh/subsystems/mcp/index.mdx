@@ -8,7 +8,7 @@ description: Cognia 完整的 Model Context Protocol 体系——它如何消费
 <Status variant="stable">Governed · Dexie schema v151 · 3 transports · scoped runtime</Status>
 
 <TLDR>
-  Cognia 拥有 **四张 MCP 面孔**。作为 **client**，它把用户/插件/内置服务器定义存放在
+  Cognia 承担 **四种 MCP 角色**。作为 **client**，它把用户/插件/内置服务器定义存放在
   一张 Dexie 表（`mcpServers`）里，并把每一轮（per-turn）的子集解析进 Claude Agent SDK 的 `mcpServers`
   选项（`build-options.ts:resolveSendOptions` → `buildMcpServerMap`）。作为 **mirror**，它把每个
   服务器的 `appsEnabled` 矩阵投射进七个外部 CLI 的磁盘配置（Claude Code、Cursor、
@@ -16,7 +16,7 @@ description: Cognia 完整的 Model Context Protocol 体系——它如何消费
   sidecar 为每个会话挂载两个进程内 SDK MCP 服务器——`cognia-tools`（横跨
   7 个类别的 44 个内置工具，由 `safety.mjs` 把关）和 `a2ui-bridge`（5 个 surface 工具）。作为 **面向外部的 server**，
   Cognia 通过 stdio/HTTP 暴露自己的知识 + 动作面——那一层属于
-  [External Bridge](../external-bridge) 子系统。本节记录前三张面孔。
+  [External Bridge](../external-bridge) 子系统。本节介绍前三种角色。
 </TLDR>
 
 <StatGrid>
@@ -151,10 +151,7 @@ export interface McpServer {
 }
 ```
 
-新建、手工导入、插件与 preset 定义都以 pending、禁用、无投射开始；legacy 定义继续可用。
-Registry 变更在一个事务中更新移动端脱敏摘要并入队 durable Agent sync job。Workflow 与 plan
-调用统一经过 `McpRuntimeGateway`：复用仅限单个 session/run，连接并发为 4，能力 TTL 为 5 分钟，
-工具调用绝不自动重试。
+新建、手工导入、插件与 preset 定义都以 pending、禁用、无投射开始；legacy 定义继续可用。Registry 变更在一个事务中更新移动端脱敏摘要并入队 durable Agent sync job。Workflow 与 plan 调用统一经过 `McpRuntimeGateway`：复用仅限单个 session/run，连接并发为 4，能力 TTL 为 5 分钟，工具调用绝不自动重试。
 
 ## 何时使用本节
 

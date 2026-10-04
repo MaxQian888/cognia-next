@@ -185,9 +185,11 @@
     "services/status-server",
     "out",
     ".next",
+    ".next-mobile-dev",
     "target",
     "cli/dist",
     "packages/*/dist",
-    "packages/*/tsup.config.ts"
+    "packages/*/tsup.config.ts",
+    "plugins/pi-latex-workbench/vendor"
   ]
 }

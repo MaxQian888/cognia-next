@@ -1,6 +1,6 @@
 ---
 title: Bridge 服务端
-description: 共享回环 bridge 的桌面端 —— 临时 127.0.0.1 端口、每次启动认证、供两个本地 CLI 使用的 12 条路由、插件操作、会话事件与 renderer-backed twin/team request。
+description: 共享回环桥接服务的桌面端 —— 临时 127.0.0.1 端口、每次启动认证、供两个本地 CLI 使用的 12 条路由、插件操作、会话事件与 renderer-backed twin/team request。
 ---
 
 # Bridge 服务端 —— `src-tauri/src/cli_bridge`
@@ -9,7 +9,7 @@ description: 共享回环 bridge 的桌面端 —— 临时 127.0.0.1 端口、�
   `cli_bridge::init()`（`mod.rs:158-183`）在 Tauri `setup()` 钩子内的一个 spawned task 里运行：
   生成一个 32 字节 / 64-hex 的 dev token，`server::spawn()` 一个绑定到
   **`127.0.0.1:0`**（OS 分配的临时端口）的 axum router，写入 `cli-endpoint.json`（Unix 上 `0o600`），
-  并把 `RunningBridge {bound_port, shutdown}` 存进 managed state，以便应用退出时
+  并把 `RunningBridge {bound_port, shutdown}` 存入应用管理的状态，以便应用退出时
   优雅关闭（`lib.rs:1249-1251`）。每个请求都经过一个 middleware（`server.rs:88-115`）：
   非回环对端得到 403 `remote_blocked`；错误/缺失的 `X-Cognia-Dev-Token` 在一次常量时间比较后
   得到 401 `bad_dev_token`。插件 handler 直接改动 `PluginRuntimeState`；
@@ -29,11 +29,7 @@ flowchart LR
   EXIT[RunEvent::Exit<br/>lib.rs:1249] --> SHUT[shutdown → watch signal<br/>graceful drain<br/>mod.rs:345-350]
 ```
 
-启动是 **best-effort** 的：端点文件写入失败只记日志、不致命，而一次 bridge
-启动失败会记下 `cli_bridge auto-start failed` 而不阻塞应用。token 每次启动轮换；
-文件每次启动重写，因此一个来自崩溃会话的陈旧文件只是
-带着一个失效的端口 + token。当前原生 startup block 没有显式的移动端编译门控；renderer listener
-与同步控制受 desktop/Tauri gate 保护。
+启动是 **best-effort** 的：端点文件写入失败只记日志、不致命，而一次 bridge 启动失败会记下 `cli_bridge auto-start failed` 而不阻塞应用。token 每次启动轮换；文件每次启动重写，因此一个来自崩溃会话的陈旧文件只是带着一个失效的端口 + token。当前原生 startup block 没有显式的移动端编译门控；renderer listener 与同步控制受 desktop/Tauri gate 保护。
 
 ## 认证 middleware
 
@@ -53,9 +49,7 @@ async fn auth_middleware(State(state), ConnectInfo(addr), request, next) -> Resp
 }
 ```
 
-`constant_time_eq`（`server.rs:127-136`）对所有字节做 XOR 累加 —— 没有提前退出，没有
-时序旁路。该 middleware 经 `from_fn_with_state`（`server.rs:80`）包裹 **所有** 路由，
-包括 `health`，并位于一个 4 MiB 的 `RequestBodyLimitLayer`（`server.rs:81`）之下。
+`constant_time_eq`（`server.rs:127-136`）对所有字节做 XOR 累加 —— 没有提前退出，没有时序旁路。该 middleware 经 `from_fn_with_state`（`server.rs:80`）包裹 **所有** 路由，包括 `health`，并位于一个 4 MiB 的 `RequestBodyLimitLayer`（`server.rs:81`）之下。
 
 ## 路由
 
@@ -76,9 +70,7 @@ Router::new()
     .route("/api/v1/dev/teams/run-status",  post(handlers::teams_run_status))
 ```
 
-所有响应共用信封 `{"ok": true, "pluginId"?, "warnings"?: []}` /
-`{"ok": false, "error", "code"?}`。handler 的失败为 422；`reload` 中缺失的必填字段
-为 400。
+所有响应共用信封 `{"ok": true, "pluginId"?, "warnings"?: []}` /`{"ok": false, "error", "code"?}`。handler 的失败为 422；`reload` 中缺失的必填字段为 400。
 
 | Handler | 核心逻辑 | 行号 |
 | --- | --- | --- |
@@ -92,18 +84,11 @@ Router::new()
 
 ### install_inner（`handlers.rs:403-429`）
 
-校验 bundle 路径（必须为绝对路径且存在）→ 读取 zip → 提取 manifest 取得
-`plugin_id` → 擦除该插件目录的任何旧版本 → 解压 → `register_installed_plugin`
-进 `PluginRuntimeState`。解压会防范 **zip-slip**：解析到目标目录之外的
-条目会被跳过（测试 `extract_zip_into_skips_path_traversal_entries`，
-`handlers.rs:741-766`）。
+校验 bundle 路径（必须为绝对路径且存在）→ 读取 zip → 提取 manifest 取得 `plugin_id` → 擦除该插件目录的任何旧版本 → 解压 → `register_installed_plugin` 进 `PluginRuntimeState`。解压会防范 **zip-slip**：解析到目标目录之外的条目会被跳过（测试 `extract_zip_into_skips_path_traversal_entries`，`handlers.rs:741-766`）。
 
 ### install_from_directory_inner
 
-校验 source 路径（必须为绝对路径、必须存在、必须是含 `plugin.json` 的目录）→
-读取 manifest 得到 `plugin_id` → 擦除该插件目录的任何旧版本 → 递归复制文件到宿主插件目录 →
-`register_installed_plugin`。Symlink 会被刻意跳过，避免 load-unpacked 工作流把所选目录外的
-内容复制进插件安装目录。
+校验 source 路径（必须为绝对路径、必须存在、必须是含 `plugin.json` 的目录）→ 读取 manifest 得到 `plugin_id` → 擦除该插件目录的任何旧版本 → 递归复制文件到宿主插件目录 → `register_installed_plugin`。Symlink 会被刻意跳过，避免 load-unpacked 工作流把所选目录外的内容复制进插件安装目录。
 
 ### reload 的三种模式
 
@@ -113,10 +98,7 @@ Router::new()
 | B —— 重装 unpacked 目录 | body 含 `source_dir` | 完整 `install_from_directory_inner`，随后 hot-reload 事件带 `via: "install-directory"` |
 | C —— 仅热重载 | body 仅含 `plugin_id` | 不做文件操作；事件带 `via: "reload"`，请渲染端重新读取已在磁盘上的 artifact |
 
-每次成功 emit **两个** 事件：每插件通道 `plugin-hot-reload:<plugin_id>` 带
-`{"source": "cli-bridge"}`（已知道自己 id 的旧订阅者），以及全局
-`plugin-hot-reload` 带 `{"plugin_id", "source": "cli-bridge", "via"}`（集中式的
-热重载历史 store）。
+每次成功 emit **两个** 事件：每插件通道 `plugin-hot-reload:<plugin_id>` 带 `{"source": "cli-bridge"}`（已知道自己 id 的旧订阅者），以及全局 `plugin-hot-reload` 带 `{"plugin_id", "source": "cli-bridge", "via"}`（集中式的热重载历史 store）。
 
 ## 状态与并发
 
@@ -125,18 +107,11 @@ Router::new()
 pub struct CliBridgeState { dev_token: String, app_handle: AppHandle }   // Arc<…> = SharedState
 ```
 
-token 每次启动不可变 —— 无锁。服务端生命周期位于
-`CliBridgeServerState { inner: parking_lot::Mutex<Option<RunningBridge>> }`（`mod.rs:75-110`），
-仅在 insert/take 时持有。插件改动走 `PluginRuntimeState` 的逐字段
-`Arc<RwLock<HashMap<…>>>`（`plugin_api/mod.rs:91-108`）—— 请求彼此独立；没有
-single-flight 守卫，与单开发者-回环的威胁模型相称。
+token 每次启动不可变 —— 无锁。服务端生命周期位于 `CliBridgeServerState { inner: parking_lot::Mutex<Option<RunningBridge>> }`（`mod.rs:75-110`），仅在 insert/take 时持有。插件改动走 `PluginRuntimeState` 的逐字段 `Arc<RwLock<HashMap<…>>>`（`plugin_api/mod.rs:91-108`）—— 请求彼此独立；没有 single-flight 守卫，与单开发者-回环的威胁模型相称。
 
 ## 渲染端往返
 
-插件与会话通知是 **fire-and-forget** 的。Twin context 与三条 team 路由会创建 Rust pending
-oneshot、emit `cli-bridge://renderer-request`，再由 `cli_bridge_renderer_response` Tauri command
-resolve。Rust 在 30 秒后过期 request；Agent CLI 在 10 秒后 abort fetch。Renderer event hook
-处理异步插件/会话 channel：
+插件与会话通知是 **fire-and-forget** 的。Twin context 与三条 team 路由会创建 Rust pending oneshot、emit `cli-bridge://renderer-request`，再由 `cli_bridge_renderer_response` Tauri command resolve。Rust 在 30 秒后过期 request；Agent CLI 在 10 秒后 abort fetch。Renderer event hook 处理异步插件/会话 channel：
 
 | 事件 | Payload | 渲染端动作 |
 | --- | --- | --- |
@@ -147,13 +122,6 @@ resolve。Rust 在 30 秒后过期 request；Agent CLI 在 10 秒后 abort fetch
 
 ## 相邻的 Tauri 命令
 
-与 HTTP bridge 一同注册（`lib.rs:435-439`）：`cli_bridge_status`（渲染端状态
-探针）、`plugin_install_from_directory` + `preview_local_manifest`（DevTools 的「load unpacked」
-路径，现在与 standalone CLI bridge 暴露的目录安装路由共用同一套 helper —— `copy_dir_recursive` 位于
-`handlers.rs:569-588`，并在 `handlers.rs:719-738` 受测）、`detect::detect_binary`、以及 `download::download_cognia_cli`
-（[下一页](./detection-and-managed-install)）。
+与 HTTP bridge 一同注册（`lib.rs:435-439`）：`cli_bridge_status`（渲染端状态探针）、`plugin_install_from_directory` + `preview_local_manifest`（DevTools 的「load unpacked」路径，现在与 standalone CLI bridge 暴露的目录安装路由共用同一套 helper —— `copy_dir_recursive` 位于 `handlers.rs:569-588`，并在 `handlers.rs:719-738` 受测）、`detect::detect_binary`、以及 `download::download_cognia_cli`（[下一页](./detection-and-managed-install)）。
 
-42 个聚焦 in-file 测试覆盖 token 形状/唯一性（`mod.rs:355-367`）、回环检测
-（`:369-377`）、端点文件往返（`:379-420`）、`constant_time_eq`（`server.rs:143-150`）、
-从 zip 提取 manifest 与各拒绝路径，以及 zip-slip 防御
-（`handlers.rs:638-766`）。
+42 个聚焦 in-file 测试覆盖 token 形状/唯一性（`mod.rs:355-367`）、回环检测（`:369-377`）、端点文件往返（`:379-420`）、`constant_time_eq`（`server.rs:143-150`）、从 zip 提取 manifest 与各拒绝路径，以及 zip-slip 防御（`handlers.rs:638-766`）。

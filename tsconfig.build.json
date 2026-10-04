@@ -13,6 +13,8 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
+    ".next-mobile-dev/types/**/*.ts",
+    ".next-mobile-dev/dev/types/**/*.ts",
     "**/*.mts"
   ],
   "exclude": [
@@ -24,9 +26,13 @@
     "services/status-server",
     "out",
     ".next",
+    ".next-mobile-dev",
     "tests/e2e",
     "playwright.config.ts",
     "packages/*/tsup.config.ts",
+    // Untouched upstream snapshot with its own strict ESM tsconfig (`.ts`
+    // import suffixes, Pi peer types); see plugins/pi-latex-workbench/VENDOR.md.
+    "plugins/pi-latex-workbench/vendor",
     "**/*.stories.tsx",
     "**/*.stories.ts",
     "lib/storybook/**"

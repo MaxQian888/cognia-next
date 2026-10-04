@@ -8,7 +8,7 @@ description: cognia-next 的完整可观测性面 —— 一个统一的日志�
 <Status variant="stable" />
 
 <TLDR>
-  Cognia 的可观测性是**五个协作平面**，而不是一个日志盒子。(1) **日志（Logging）** ——
+  Cognia 的可观测性是**五个协作模块**。(1) **日志（Logging）** ——
   `createLogger("module")` 进入单一的浏览器管道（`lib/logging/core.ts:404`：level-gate →
   sample → context-merge → redact → fan-out），写出到至多 9 个 transport；Rust 一侧
   （`src-tauri/src/logging/`）通过 `fern` + `tauri-plugin-log` 让相同的记录进入 OS
@@ -21,7 +21,7 @@ description: cognia-next 的完整可观测性面 —— 一个统一的日志�
   Rust 进程树、Tokio 运行时和 span 热点，以约 1 Hz 经 `perf://sample` 采样。(5)
   **崩溃上报（Crash reporting）** —— `src-tauri/src/crash/` 在进程内捕获 Rust panic，在进程外
   捕获原生硬崩溃（minidump），由一个干净退出的 **sentinel（哨兵）** 门控。Token/成本用量
-  （`lib/claude/usage.ts`、Anthropic 配额探测、收件箱遥测）补全了整幅图景。
+  （`lib/claude/usage.ts`、Anthropic 配额探测、收件箱遥测）提供额外的用量数据。
 </TLDR>
 
 <StatGrid>
@@ -37,15 +37,9 @@ description: cognia-next 的完整可观测性面 —— 一个统一的日志�
 
 ## 它是什么
 
-cognia-next 里的“可观测性”是一切回答*“应用在做什么、出了什么错”*的东西 —— 横跨浏览器运行时、
-Tauri Rust 后端、捆绑的 Node sidecar、插件以及外部 agent。由于应用以 **静态导出**
-的形式发布、由 Tauri 和 Capacitor 包裹，设计因此干净地一分为二：任何需要 OS 级能力（真实的日志文件、Windows Event
-Log、minidump 处理器、进程树）的东西都驻留在 Rust 里；浏览器拥有统一入口点、
-IndexedDB 持久化和仪表盘。两半通过一小组 Tauri 命令和事件相遇。
+cognia-next 里的“可观测性”是一切回答*“应用在做什么、出了什么错”*的东西 —— 横跨浏览器运行时、Tauri Rust 后端、捆绑的 Node sidecar、插件以及外部 agent。由于应用以 **静态导出**的形式发布、由 Tauri 和 Capacitor 包裹，设计因此干净地一分为二：任何需要 OS 级能力（真实的日志文件、Windows Event Log、minidump 处理器、进程树）的东西都驻留在 Rust 里；浏览器拥有统一入口点、IndexedDB 持久化和仪表盘。两半通过一小组 Tauri 命令和事件相遇。
 
-这五个平面彼此足够独立，可以以任意顺序阅读，但它们共享一条脊柱：**带 `traceId` 的结构化
-记录**。一次 `logger.info()` 和一个 agent-trace span 都携带 trace id，因此日志面板、追踪仪表盘
-和崩溃报告都能被关联回单一的用户操作。
+这五个平面彼此足够独立，可以以任意顺序阅读，但它们共享一条脊柱：**带 `traceId` 的结构化记录**。一次 `logger.info()` 和一个 agent-trace span 都携带 trace id，因此日志面板、追踪仪表盘和崩溃报告都能被关联回单一的用户操作。
 
 ## 两条路由（外加一个对话框）
 
@@ -103,22 +97,11 @@ flowchart TB
 
 ## 设计不变量
 
-- **唯一的状态枚举。** Transport 健康精确为 `healthy | degraded | offline`
-  （`types/logging/transport.ts:8`）。任何地方都没有 `unhealthy` 状态 —— 早先文档中命名过该状态的
-  都是错的。
-- **脱敏先于 transport。** `redactStructuredLogEntry`（`lib/logging/redaction.ts:92`）在管道中、
-  *任何* sink 看到记录*之前*运行，因此即便泄露了 IndexedDB 或 remote 备份也绝不会
-  包含密钥。崩溃 bundle 会再次重新清洗，附加路径/URL 模式。
-- **零空闲成本。** perf 采样器是引用计数的 —— 仅在 `/performance` 挂载时运行
-  （`perf_start_sampling` / `perf_stop_sampling`），与 Windows 任务管理器使用的模型相同。日志
-  采样丢弃高频低价值条目（`mouse` 按 1 %、`keyboard` 按 10 %），但绝不丢弃
-  `error`/`fatal`。
-- **浏览器是 offline-first 的。** 日志面板的实时更新来自跨标签页的
-  `BroadcastChannel`（`cognia-logs-updates`），而非服务器。remote transport 保有一条*持久的*
-  IndexedDB 重试队列，因此网络瞬断也不会丢失任何东西。
-- **trace id 是连接键。** 日志、agent-trace span 和仪表盘瀑布都以
-  `traceId` 为键；日志面板可以转入“仅此 trace”，仪表盘也从同一 id 下钻到 span
-  瀑布。
+- **唯一的状态枚举。** Transport 健康精确为 `healthy | degraded | offline`（`types/logging/transport.ts:8`）。任何地方都没有 `unhealthy` 状态 —— 早先文档中命名过该状态的都是错的。
+- **脱敏先于 transport。** `redactStructuredLogEntry`（`lib/logging/redaction.ts:92`）在管道中、*任何* sink 看到记录*之前*运行，因此即便泄露了 IndexedDB 或 remote 备份也绝不会包含密钥。崩溃 bundle 会再次重新清洗，附加路径/URL 模式。
+- **零空闲成本。** perf 采样器是引用计数的 —— 仅在 `/performance` 挂载时运行（`perf_start_sampling` / `perf_stop_sampling`），与 Windows 任务管理器使用的模型相同。日志采样丢弃高频低价值条目（`mouse` 按 1 %、`keyboard` 按 10 %），但绝不丢弃 `error`/`fatal`。
+- **浏览器是 offline-first 的。** 日志面板的实时更新来自跨标签页的 `BroadcastChannel`（`cognia-logs-updates`），而非服务器。remote transport 保有一条*持久的* IndexedDB 重试队列，因此网络瞬断也不会丢失任何东西。
+- **trace id 是连接键。** 日志、agent-trace span 和仪表盘瀑布都以 `traceId` 为键；日志面板可以转入“仅此 trace”，仪表盘也从同一 id 下钻到 span 瀑布。
 
 ## 相关文档
 
