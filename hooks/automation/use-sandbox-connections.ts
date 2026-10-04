@@ -12,13 +12,13 @@ import {
   type SandboxConnectionRow,
 } from "@/lib/db/sandbox-connections"
 import {
+  hasSandboxConnectionLifecycleAdapter,
   runSandboxConnectionOperation,
   serializeSandboxConnectionOperation,
   type SandboxConnectionOperationResult,
 } from "@/lib/sandbox/connection-lifecycle"
+import { DEFAULT_DOCKER_SANDBOX_IMAGE } from "@/lib/sandbox/docker-adapter"
 import type { SandboxProviderConfig, SandboxWorkspaceMount } from "@/types/sandbox"
-
-const DEFAULT_IMAGE = "ghcr.io/trycua/cua-xfce:latest"
 
 export interface CreateSandboxConnectionInput {
   name: string
@@ -63,7 +63,7 @@ export function useSandboxConnections() {
         driver: "computer-server",
         config: {
           provider: "docker",
-          image: input.image?.trim() || DEFAULT_IMAGE,
+          image: input.image?.trim() || DEFAULT_DOCKER_SANDBOX_IMAGE,
           host: input.host?.trim() || "127.0.0.1",
           port: 0,
           ...(input.networkMode ? { networkMode: input.networkMode } : {}),
@@ -86,11 +86,23 @@ export function useSandboxConnections() {
       const row = await getSandboxConnection(id)
       if (!row) return
       await updateSandboxConnectionState(id, { state: "deleting", now: Date.now() })
-      // Best-effort teardown, then always drop the row. A container that was
-      // never created, an unreachable Docker daemon, or a provider with no
-      // lifecycle adapter yet must not leave the user with a connection they
-      // can never delete from Settings.
-      await runSandboxConnectionOperation(row, "delete").catch(() => undefined)
+      // Keep ownership until teardown succeeds: dropping the row on a daemon
+      // outage would orphan a still-running desktop and remove its retry path.
+      // Compatibility-only rows have never had a managed lifecycle here.
+      if (hasSandboxConnectionLifecycleAdapter(row)) {
+        try {
+          await runSandboxConnectionOperation(row, "delete")
+        } catch (error) {
+          await updateSandboxConnectionState(id, {
+            state: "error",
+            lastHealthStatus: "error",
+            lastHealthError: error instanceof Error ? error.message : String(error),
+            lastHealthCheckAt: Date.now(),
+            now: Date.now(),
+          })
+          throw error
+        }
+      }
       await deleteSandboxConnection(id)
     })
   }, [])
@@ -181,13 +193,27 @@ export function useSandboxConnections() {
         .then((result) => ({
           ok: result.health === true,
           report: result.healthReport,
+          containerState: result.containerState,
           error: undefined as string | undefined,
         }))
         .catch((error: unknown) => ({
           ok: false,
           report: undefined,
+          containerState: undefined,
           error: error instanceof Error ? error.message : String(error),
         }))
+
+      let observedConfig: SandboxProviderConfig | undefined
+      if (row.config.provider === "docker") {
+        if (probe.containerState === null) {
+          observedConfig = { ...row.config, port: 0 }
+          delete observedConfig.containerId
+        } else if (probe.ok && probe.containerState) {
+          observedConfig = { ...row.config, containerId: probe.containerState.containerId }
+        } else if (probe.containerState && !probe.containerState.running) {
+          observedConfig = { ...row.config, port: 0 }
+        }
+      }
 
       await updateSandboxConnectionState(id, {
         lastHealthStatus: probe.ok ? "ok" : "unreachable",
@@ -202,6 +228,7 @@ export function useSandboxConnections() {
         // that state. When the probe itself could not run there is no
         // evidence, and `state` is left alone rather than guessed at.
         ...(probe.report ? { state: probe.report.state } : {}),
+        ...(observedConfig ? { config: observedConfig } : {}),
         lastHealthCheckAt: Date.now(),
         now: Date.now(),
       })

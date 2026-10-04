@@ -12,13 +12,14 @@
 //! is not a machine. Removal is therefore explicit, via `docker_remove`.
 
 use std::collections::BTreeMap;
-use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::automation::types::{AutomationError, Result};
+
+#[path = "lifecycle_execution.rs"]
+pub(super) mod execution;
 
 /// The process cap frozen into the container (`--pids-limit`). High enough
 /// for a desktop session's normal fan-out, far below a fork bomb's reach.
@@ -34,6 +35,7 @@ pub const DEFAULT_EXEC_USER: &str = "cua";
 /// restarts, so an adopted container still carries the exec-user bound it was
 /// created with, and attestation can compare it against what was asked.
 pub const EXEC_USER_LABEL: &str = "cognia.cua.exec-user";
+pub const AUTH_TOKEN_ENV: &str = "COGNIA_CUA_AUTH_TOKEN";
 
 /// Container-level isolation settings. Docker fixes all of these at create
 /// time: `docker exec` cannot change the network mode or the cpu/memory
@@ -221,6 +223,8 @@ pub fn run_args(spec: &SpawnSpec) -> Vec<String> {
         "-d".into(),
         "-p".into(),
         format!("{}:0:8000", policy.publish_addr),
+        "--env".into(),
+        AUTH_TOKEN_ENV.into(),
     ];
     if let Some(network) = &policy.network_mode {
         args.push("--network".into());
@@ -297,38 +301,285 @@ pub fn create_args(spec: &SpawnSpec) -> Vec<String> {
 
 /// Run a `docker` subcommand, failing on a non-zero exit. Returns trimmed stdout.
 async fn docker(args: &[&str], what: &str) -> Result<String> {
-    let out = Command::new("docker")
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| {
-            backend_err(format!(
-                "{what} could not spawn (is Docker installed?): {e}"
-            ))
-        })?;
-    if !out.status.success() {
+    let (status, stdout, stderr) =
+        execution::control(Command::new("docker").args(args), what).await?;
+    if !status.success() {
         return Err(backend_err(format!(
             "{what} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+            stderr.text().trim()
         )));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    if stdout.truncated {
+        return Err(backend_err(format!(
+            "{what} response exceeds its output limit"
+        )));
+    }
+    Ok(stdout.text().trim().to_string())
+}
+
+const IMAGE_ID_LABEL: &str = "cognia.cua.image-id";
+const IMAGE_REFERENCE_LABEL: &str = "cognia.cua.image-reference";
+pub const BUILTIN_DESKTOP_IMAGE: &str = "cognia-cua-desktop:0.3.46-1";
+
+fn builtin_image_context() -> Result<tempfile::TempDir> {
+    let context = tempfile::Builder::new()
+        .prefix("cognia-cua-desktop-")
+        .tempdir()
+        .map_err(|e| backend_err(format!("could not prepare desktop build context: {e}")))?;
+    for (name, content) in [
+        ("Dockerfile", include_str!("image/Dockerfile")),
+        ("entrypoint.sh", include_str!("image/entrypoint.sh")),
+        ("startup.py", include_str!("image/startup.py")),
+        ("server.py", include_str!("image/server.py")),
+        ("menu.xml", include_str!("image/menu.xml")),
+    ] {
+        std::fs::write(context.path().join(name), content).map_err(|e| {
+            backend_err(format!(
+                "could not write desktop build resource {name}: {e}"
+            ))
+        })?;
+    }
+    Ok(context)
+}
+
+async fn build_builtin_image(executable: &std::ffi::OsStr) -> Result<()> {
+    // The tiny context is embedded in the desktop binary. No checkout,
+    // writable server script or user-supplied Dockerfile participates.
+    let context = builtin_image_context()?;
+    let (status, stdout, stderr) = execution::control_with_timeout(
+        Command::new(executable)
+            .args([
+                "build",
+                "--progress",
+                "plain",
+                "--tag",
+                BUILTIN_DESKTOP_IMAGE,
+            ])
+            .arg(context.path()),
+        "build built-in Linux desktop image",
+        Duration::from_secs(900),
+    )
+    .await?;
+    if !status.success() {
+        return Err(backend_err(format!(
+            "Could not build the built-in Linux desktop image. Check Docker disk space and access to Docker Hub, Debian and PyPI. {} {}",
+            stderr.text().trim(), stdout.text().trim()
+        )));
+    }
+    Ok(())
+}
+
+async fn pinned_spec(spec: &SpawnSpec) -> Result<SpawnSpec> {
+    pinned_spec_with(spec, std::ffi::OsStr::new("docker")).await
+}
+
+async fn pinned_spec_with(spec: &SpawnSpec, executable: &std::ffi::OsStr) -> Result<SpawnSpec> {
+    let inspect_args = ["image", "inspect", "--format", "{{.Id}}", &spec.image];
+    let (mut status, mut stdout, mut stderr) = execution::control(
+        Command::new(executable).args(inspect_args),
+        "resolve desktop image",
+    )
+    .await?;
+    if !status.success() && is_no_such_image(&stderr.text()) {
+        // Provisioning the configured desktop includes installing its image.
+        // Only a positively identified missing image triggers a pull; daemon,
+        // permissions and malformed-reference errors must retain their cause.
+        if spec.image == BUILTIN_DESKTOP_IMAGE {
+            build_builtin_image(executable).await?;
+        } else {
+            let (pull_status, _, pull_stderr) = execution::control_with_timeout(
+                Command::new(executable).args(["pull", &spec.image]),
+                "pull configured desktop image",
+                Duration::from_secs(600),
+            )
+            .await?;
+            if !pull_status.success() {
+                return Err(backend_err(format!(
+                    "could not pull configured desktop image: {}",
+                    pull_stderr.text().trim()
+                )));
+            }
+        }
+        (status, stdout, stderr) = execution::control(
+            Command::new(executable).args(inspect_args),
+            "resolve provisioned desktop image",
+        )
+        .await?;
+    }
+    if !status.success() {
+        return Err(backend_err(format!(
+            "could not resolve configured desktop image: {}",
+            stderr.text().trim()
+        )));
+    }
+    if stdout.truncated {
+        return Err(backend_err("Docker image identity response exceeds limit"));
+    }
+    let image = stdout.text().trim().to_owned();
+    if !valid_image_id(&image) {
+        return Err(backend_err(
+            "Docker did not return an immutable sha256 image identity",
+        ));
+    }
+    Ok(SpawnSpec {
+        image,
+        ..spec.clone()
+    })
+}
+
+fn is_no_such_image(stderr: &str) -> bool {
+    stderr.to_ascii_lowercase().contains("no such image:")
+}
+
+fn valid_image_id(image: &str) -> bool {
+    image.strip_prefix("sha256:").is_some_and(|digest| {
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
+fn add_image_labels(args: &mut Vec<String>, identity: &str, reference: &str) {
+    let at = args.len() - 1;
+    args.splice(
+        at..at,
+        [
+            "--label".into(),
+            format!("{IMAGE_ID_LABEL}={identity}"),
+            "--label".into(),
+            format!("{IMAGE_REFERENCE_LABEL}={reference}"),
+        ],
+    );
+}
+
+/// Verify an adopted machine still has its creation-time immutable identity
+/// and the requested image configuration. A mutable registry tag is never
+/// re-resolved during adoption: updating a tag cannot silently replace a VM.
+pub async fn docker_attest_image(container: &str, configured_image: &str) -> Result<()> {
+    let text = docker(
+        &[
+            "inspect",
+            "--format",
+            "{{.Image}}\n{{json .Config.Labels}}",
+            container,
+        ],
+        "attest desktop image",
+    )
+    .await?;
+    attest_image_response(&text, configured_image)
+}
+
+/// Resume/reconnect verifies the identity retained on the container itself
+/// when no new configuration is being supplied by the caller.
+pub async fn docker_attest_stored_image(container: &str) -> Result<()> {
+    let text = docker(
+        &[
+            "inspect",
+            "--format",
+            "{{.Image}}\n{{json .Config.Labels}}",
+            container,
+        ],
+        "attest retained desktop image",
+    )
+    .await?;
+    let (_, labels) = text
+        .split_once('\n')
+        .ok_or_else(|| backend_err("Docker image identity response is incomplete"))?;
+    let labels: BTreeMap<String, String> = serde_json::from_str(labels)
+        .map_err(|_| backend_err("Desktop image identity is missing; recreate this sandbox"))?;
+    let reference = labels
+        .get(IMAGE_REFERENCE_LABEL)
+        .filter(|reference| !reference.is_empty())
+        .ok_or_else(|| backend_err("Desktop image reference is missing; recreate this sandbox"))?;
+    attest_image_response(&text, reference)
+}
+
+fn attest_image_response(text: &str, configured_image: &str) -> Result<()> {
+    let (actual, labels) = text
+        .split_once('\n')
+        .ok_or_else(|| backend_err("Docker image identity response is incomplete"))?;
+    let labels: BTreeMap<String, String> = serde_json::from_str(labels)
+        .map_err(|_| backend_err("Desktop image identity is missing; recreate this sandbox"))?;
+    if !valid_image_id(actual)
+        || labels.get(IMAGE_ID_LABEL).map(String::as_str) != Some(actual)
+        || labels.get(IMAGE_REFERENCE_LABEL).map(String::as_str) != Some(configured_image)
+    {
+        return Err(backend_err(
+            "Desktop image identity or configured reference changed; recreate this sandbox",
+        ));
+    }
+    Ok(())
 }
 
 /// Create and start the container. Returns its container id.
 pub async fn docker_run(spec: &SpawnSpec) -> Result<String> {
-    let args = run_args(spec);
+    let pinned = pinned_spec(spec).await?;
+    let mut args = run_args(&pinned);
+    add_image_labels(&mut args, &pinned.image, &spec.image);
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    docker(&borrowed, "docker run").await
+    create_with_private_token(&borrowed, "docker run").await
 }
 
 /// Create the container without starting it. Returns its container id.
 pub async fn docker_create(spec: &SpawnSpec) -> Result<String> {
-    let args = create_args(spec);
+    let pinned = pinned_spec(spec).await?;
+    let mut args = create_args(&pinned);
+    add_image_labels(&mut args, &pinned.image, &spec.image);
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    docker(&borrowed, "docker create").await
+    create_with_private_token(&borrowed, "docker create").await
+}
+
+async fn create_with_private_token(args: &[&str], what: &str) -> Result<String> {
+    let token = hex::encode(rand::random::<[u8; 32]>());
+    let (status, stdout, stderr) = execution::control(
+        Command::new("docker").args(args).env(AUTH_TOKEN_ENV, token),
+        what,
+    )
+    .await?;
+    if !status.success() {
+        return Err(backend_err(format!(
+            "{what} failed: {}",
+            stderr.text().trim()
+        )));
+    }
+    if stdout.truncated {
+        return Err(backend_err("Docker creation response exceeds limit"));
+    }
+    Ok(stdout.text().trim().to_owned())
+}
+
+/// Docker metadata is the private recovery store; this credential must never
+/// be serialized into renderer connection state or included in diagnostics.
+pub async fn docker_auth_token(container: &str) -> Result<String> {
+    let (status, stdout, _) = execution::control(
+        Command::new("docker").args(["inspect", "--format", "{{json .Config.Env}}", container]),
+        "read private desktop credential",
+    )
+    .await?;
+    if !status.success() || stdout.truncated {
+        return Err(backend_err(
+            "Could not recover private desktop credential; inspect the sandbox state",
+        ));
+    }
+    parse_auth_token(&stdout.bytes)
+}
+
+fn parse_auth_token(bytes: &[u8]) -> Result<String> {
+    let env: Vec<String> = serde_json::from_slice(bytes).map_err(|_| {
+        backend_err("Invalid private desktop credential metadata; recreate this sandbox")
+    })?;
+    let prefix = format!("{AUTH_TOKEN_ENV}=");
+    let tokens: Vec<_> = env
+        .iter()
+        .filter_map(|entry| entry.strip_prefix(&prefix))
+        .collect();
+    if tokens.len() != 1
+        || tokens[0].len() != 64
+        || !tokens[0].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(backend_err(
+            "Missing protected desktop endpoint credential; recreate with a compatible image",
+        ));
+    }
+    Ok(tokens[0].to_owned())
 }
 
 /// `docker start <id>` on a container that already exists but is stopped.
@@ -395,15 +646,13 @@ fn parse_port(s: &str) -> Option<u16> {
 /// create". Every other failure (daemon down, permission denied) still errors,
 /// because treating those as "absent" would silently create a second machine.
 pub async fn docker_inspect(name_or_id: &str) -> Result<Option<ContainerState>> {
-    let out = Command::new("docker")
-        .args(["inspect", "--format", INSPECT_FORMAT, name_or_id])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| backend_err(format!("docker inspect could not spawn: {e}")))?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
+    let (status, stdout, stderr) = execution::control(
+        Command::new("docker").args(["inspect", "--format", INSPECT_FORMAT, name_or_id]),
+        "docker inspect",
+    )
+    .await?;
+    if !status.success() {
+        let stderr = stderr.text();
         if is_no_such_object(&stderr) {
             return Ok(None);
         }
@@ -412,7 +661,10 @@ pub async fn docker_inspect(name_or_id: &str) -> Result<Option<ContainerState>> 
             stderr.trim()
         )));
     }
-    let text = String::from_utf8_lossy(&out.stdout);
+    if stdout.truncated {
+        return Err(backend_err("docker inspect response exceeds limit"));
+    }
+    let text = stdout.text();
     parse_inspect(&text)
         .map(Some)
         .ok_or_else(|| backend_err(format!("unparseable `docker inspect` output: {text:?}")))
@@ -562,12 +814,41 @@ pub fn attest_adopted(policy: &ContainerPolicy, state: &ContainerState) -> Resul
 
 /// `docker exec <id> true` succeeds only while the container is running.
 pub async fn docker_health(container_id: &str) -> bool {
-    Command::new("docker")
-        .args(["exec", container_id, "true"])
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    docker(
+        &[
+            "exec",
+            "--env",
+            "COGNIA_CUA_AUTH_TOKEN=",
+            container_id,
+            "true",
+        ],
+        "docker health",
+    )
+    .await
+    .is_ok()
+}
+
+/// Verify the execution protocol on the actual running image and bound user.
+/// A Docker container can be healthy while missing our required Python/Linux
+/// supervision capabilities; admission must not infer one from the other.
+pub async fn docker_probe_execution(container: &str, exec_user: Option<&str>) -> Result<()> {
+    let result = docker_exec(
+        container,
+        &["true".into()],
+        None,
+        &BTreeMap::new(),
+        None,
+        Duration::from_secs(5),
+        exec_user,
+    )
+    .await?;
+    if result.timed_out || result.exit_code != 0 {
+        return Err(backend_err(format!(
+            "Desktop execution protocol probe failed: {}",
+            result.stderr
+        )));
+    }
+    Ok(())
 }
 
 /// Build the argument vector for `docker exec`. `argv` is passed through as
@@ -607,9 +888,8 @@ pub fn exec_args<'a>(
 
 /// Run one command inside the container.
 ///
-/// A timeout kills the `docker exec` client, which does NOT kill the process
-/// inside the container. `timed_out` says so honestly rather than implying the
-/// work stopped.
+/// The in-container supervisor owns the timeout and caller lease. Returning a
+/// timed-out outcome confirms process cleanup; missing confirmation is an error.
 pub async fn docker_exec(
     container: &str,
     argv: &[String],
@@ -619,61 +899,71 @@ pub async fn docker_exec(
     timeout: Duration,
     exec_user: Option<&str>,
 ) -> Result<ExecOutcome> {
+    Ok(
+        supervised_exec(container, argv, cwd, env, stdin, timeout, exec_user)
+            .await?
+            .outcome,
+    )
+}
+
+async fn supervised_exec(
+    container: &str,
+    argv: &[String],
+    cwd: Option<&str>,
+    env: &BTreeMap<String, String>,
+    stdin: Option<&str>,
+    timeout: Duration,
+    exec_user: Option<&str>,
+) -> Result<execution::SupervisedOutput> {
+    supervised_exec_with_limits(
+        container,
+        argv,
+        cwd,
+        env,
+        stdin,
+        timeout,
+        exec_user,
+        MAX_STREAM_BYTES,
+        MAX_STREAM_BYTES,
+    )
+    .await
+}
+
+pub(super) async fn supervised_exec_with_limits(
+    container: &str,
+    argv: &[String],
+    cwd: Option<&str>,
+    env: &BTreeMap<String, String>,
+    stdin: Option<&str>,
+    timeout: Duration,
+    exec_user: Option<&str>,
+    input_limit: usize,
+    stdout_limit: usize,
+) -> Result<execution::SupervisedOutput> {
     if argv.is_empty() {
         return Err(backend_err("docker exec requires a command to run"));
     }
-    let args = exec_args(container, argv, cwd, env, stdin.is_some(), exec_user);
-    let started = Instant::now();
-    let mut child = Command::new("docker")
-        .args(&args)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| backend_err(format!("docker exec could not spawn: {e}")))?;
-
-    if let Some(input) = stdin {
-        if let Some(mut pipe) = child.stdin.take() {
-            // A closed stdin means the command exited before reading it, which
-            // is a normal outcome rather than a failure of this call.
-            let _ = pipe.write_all(input.as_bytes()).await;
-            let _ = pipe.shutdown().await;
-        }
-    }
-
-    match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(result) => {
-            let out =
-                result.map_err(|e| backend_err(format!("docker exec could not complete: {e}")))?;
-            let (stdout, stdout_truncated) = cap_stream(&out.stdout);
-            let (stderr, stderr_truncated) = cap_stream(&out.stderr);
-            Ok(ExecOutcome {
-                exit_code: out.status.code().unwrap_or(-1),
-                stdout,
-                stderr,
-                duration_ms: started.elapsed().as_millis() as u64,
-                timed_out: false,
-                stdout_truncated,
-                stderr_truncated,
-            })
-        }
-        Err(_) => Ok(ExecOutcome {
-            exit_code: -1,
-            stdout: String::new(),
-            stderr: format!(
-                "timed out after {}ms waiting for `docker exec`. The command may still be running inside the container.",
-                timeout.as_millis()
-            ),
-            duration_ms: started.elapsed().as_millis() as u64,
-            timed_out: true,
-            stdout_truncated: false,
-            stderr_truncated: false,
-        }),
-    }
+    let wrapper = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        execution::PYTHON_BOOTSTRAP.into(),
+        "cognia-supervised-exec".into(),
+        execution::SUPERVISOR.into(),
+    ];
+    // Requested PATH/PYTHONPATH must never influence the supervisor itself.
+    // Only the requested child receives these values in its environment.
+    let bootstrap_env = BTreeMap::from([(AUTH_TOKEN_ENV.to_owned(), String::new())]);
+    let args = exec_args(container, &wrapper, cwd, &bootstrap_env, true, exec_user);
+    execution::supervised_with_limits(
+        Command::new("docker").args(&args),
+        argv,
+        stdin,
+        timeout,
+        env,
+        input_limit,
+        stdout_limit,
+    )
+    .await
 }
 
 /// Read one file from inside the container. Reads ride the same exec channel
@@ -685,8 +975,8 @@ pub async fn docker_read_file(
     max_bytes: usize,
     exec_user: Option<&str>,
 ) -> Result<String> {
-    let argv = vec!["cat".to_string(), path.to_string()];
-    let outcome = docker_exec(
+    let argv = vec!["cat".to_string(), "--".to_string(), path.to_string()];
+    let result = supervised_exec(
         container,
         &argv,
         None,
@@ -696,6 +986,15 @@ pub async fn docker_read_file(
         exec_user,
     )
     .await?;
+    validate_file_read(path, max_bytes, result)
+}
+
+fn validate_file_read(
+    path: &str,
+    max_bytes: usize,
+    result: execution::SupervisedOutput,
+) -> Result<String> {
+    let outcome = result.outcome;
     if outcome.timed_out {
         return Err(backend_err(format!("reading '{path}' timed out")));
     }
@@ -705,45 +1004,344 @@ pub async fn docker_read_file(
             outcome.stderr.trim()
         )));
     }
-    if outcome.stdout.len() > max_bytes {
+    if outcome.stdout_truncated {
+        return Err(backend_err(format!(
+            "'{path}' exceeds the {MAX_STREAM_BYTES} byte transport read limit"
+        )));
+    }
+    if result.stdout_bytes.len() > max_bytes {
         return Err(backend_err(format!(
             "'{path}' is larger than the {max_bytes} byte read limit"
         )));
     }
-    Ok(outcome.stdout)
-}
-
-/// Truncate to the per-stream cap on a char boundary, reporting whether it hit.
-fn cap_stream(raw: &[u8]) -> (String, bool) {
-    if raw.len() <= MAX_STREAM_BYTES {
-        return (String::from_utf8_lossy(raw).into_owned(), false);
-    }
-    let mut end = MAX_STREAM_BYTES;
-    while end > 0 && !raw.is_char_boundary_at(end) {
-        end -= 1;
-    }
-    (String::from_utf8_lossy(&raw[..end]).into_owned(), true)
-}
-
-/// `str::is_char_boundary` over a byte slice, without an intermediate `String`.
-trait CharBoundary {
-    fn is_char_boundary_at(&self, index: usize) -> bool;
-}
-
-impl CharBoundary for [u8] {
-    fn is_char_boundary_at(&self, index: usize) -> bool {
-        // A UTF-8 continuation byte matches 0b10xxxxxx. Any other byte, and the
-        // end of the slice, starts a new character.
-        match self.get(index) {
-            None => true,
-            Some(byte) => (*byte as i8) >= -0x40,
-        }
-    }
+    String::from_utf8(result.stdout_bytes)
+        .map_err(|_| backend_err(format!("'{path}' is not valid UTF-8 text")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires Docker and the built-in native desktop image; operates only a new isolated container"]
+    async fn live_builtin_desktop_authenticated_lifecycle_and_real_input() {
+        use crate::automation::permission::ScreenshotScalingSettings;
+        use crate::automation::session::{
+            ActionRequest, ActionStrategy, ActionTarget, AppLocator, GetAppStateOptions,
+            PixelTarget, UiAction, UiStateRevision,
+        };
+        use crate::automation::types::{KeyChord, Locator, Point};
+        use crate::cua_sandbox::registry::CuaSandboxRegistry;
+        use base64::Engine as _;
+        let id = format!(
+            "native-desktop-proof-{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..12]
+        );
+        let name = format!("cua-{id}");
+        docker(
+            &[
+                "image",
+                "inspect",
+                "--format",
+                "{{.Id}}",
+                BUILTIN_DESKTOP_IMAGE,
+            ],
+            "require the prebuilt desktop image for live acceptance",
+        )
+        .await
+        .expect("build the bundled image before running this opt-in live test");
+        let registry = CuaSandboxRegistry::default();
+        let result: Result<()> = Box::pin(async {
+            registry.create(&id, BUILTIN_DESKTOP_IMAGE, ContainerPolicy::default()).await?;
+            let placement = registry.start(&id, BUILTIN_DESKTOP_IMAGE, ContainerPolicy::default()).await?;
+            println!("native desktop started: {} port {}", placement.container_id, placement.port);
+            // connect() itself verifies that an unauthenticated WebSocket is
+            // rejected before establishing the private authenticated channel.
+            let frame = registry.desktop_frame(&id).await?;
+            if (frame.width, frame.height) != (1280, 800) { return Err(backend_err("unexpected native frame dimensions")); }
+            std::fs::write("/tmp/cognia-cua-desktop-native.png", base64::engine::general_purpose::STANDARD.decode(&frame.bytes).map_err(|e| backend_err(e.to_string()))?).map_err(|e| backend_err(e.to_string()))?;
+            let credentials = registry.exec(&id,
+                &["/usr/local/bin/python3".into(), "-c".into(),
+                  "import os; assert 'COGNIA_CUA_AUTH_TOKEN' not in os.environ\ntry:\n open('/proc/1/environ','rb').read(); raise RuntimeError('desktop credential process is readable')\nexcept PermissionError:\n print('credential-protected')".into()],
+                None, &BTreeMap::new(), None, Duration::from_secs(5)).await?;
+            if credentials.exit_code != 0 || credentials.stdout.trim() != "credential-protected" {
+                return Err(backend_err(format!("guest credential isolation failed: {}", credentials.stderr)));
+            }
+            let app = registry.remote_list_apps(&id).await?.into_iter().next().ok_or_else(|| backend_err("no remote desktop application"))?;
+            let locator = AppLocator::BundleId { bundle_id: app.bundle_id.ok_or_else(|| backend_err("missing desktop identity"))? };
+            let action = |revision: &UiStateRevision| ActionRequest {
+                turn_token: revision.turn_token.clone(), strategy: ActionStrategy::Pixel,
+                target: ActionTarget::Pixel { target: PixelTarget {
+                    session_id: revision.session_id.clone(), lineage_id: revision.lineage_id.clone(), revision: revision.revision,
+                    point: Point { x: 10, y: 10 }, screenshot_width: revision.surface.pixel_width, screenshot_height: revision.surface.pixel_height,
+                } }, action: UiAction::PressKey { chord: KeyChord("Escape".into()) },
+            };
+            let revision = registry.remote_get_app_state(&id, "live-session".into(), "live-turn".into(), locator.clone(), GetAppStateOptions::default(), ScreenshotScalingSettings { enabled: false, ..Default::default() }).await?;
+            registry.remote_query_elements(&id, &revision.session_id, &revision.lineage_id, revision.revision, &Locator::default(), 10).await?;
+            registry.remote_perform_action(&id, action(&revision), "live-turn").await?;
+            let revision = registry.remote_get_app_state(&id, "live-session".into(), "live-turn".into(), locator, GetAppStateOptions::default(), ScreenshotScalingSettings { enabled: false, ..Default::default() }).await?;
+            let lease = registry.acquire_control(&id).await?;
+            if registry.remote_perform_action(&id, action(&revision), "live-turn").await.is_ok() {
+                return Err(backend_err("agent desktop action was not blocked during human control"));
+            }
+            if registry.exec(&id, &["true".into()], None, &BTreeMap::new(), None, Duration::from_secs(5)).await.is_ok() {
+                return Err(backend_err("agent execution was not blocked during human control"));
+            }
+            // Full transfer budget, arbitrary binary bytes, immutable placement
+            // and collision behavior all pass through the public registry.
+            let binary: Vec<u8> = (0..super::super::file_transfer::MAX_TRANSFER_BYTES).map(|index| index as u8).collect();
+            let binary_base64 = base64::engine::general_purpose::STANDARD.encode(&binary);
+            let binary_hash = super::super::file_transfer::sha256(&binary);
+            let uploaded = registry.upload_file(&id, &placement.container_id, &lease.token, "/home/cua/binary-proof.bin", &binary_base64).await?;
+            if uploaded.size != binary.len() as u64 || uploaded.sha256 != binary_hash { return Err(backend_err("binary upload mismatch")); }
+            registry.renew_control(&id, &lease.token).await?;
+            if registry.upload_file(&id, &placement.container_id, &lease.token, "/home/cua/binary-proof.bin", "").await.is_ok() { return Err(backend_err("binary upload silently replaced an existing file")); }
+            // Acknowledged EEXIST must not quarantine or discard human control.
+            registry.renew_control(&id, &lease.token).await?;
+            let downloaded = registry.download_file(&id, &placement.container_id, "/home/cua/binary-proof.bin").await?;
+            if downloaded.data_base64 != binary_base64 || downloaded.sha256 != binary_hash { return Err(backend_err("binary download mismatch")); }
+            if registry.download_file(&id, &"0".repeat(64), "/home/cua/binary-proof.bin").await.is_ok() { return Err(backend_err("transfer accepted a replaced container identity")); }
+            registry.renew_control(&id, &lease.token).await?;
+            registry.upload_file(&id, &placement.container_id, &lease.token, "/home/cua/empty-proof.bin", "").await?;
+            if registry.download_file(&id, &placement.container_id, "/home/cua/empty-proof.bin").await?.size != 0 { return Err(backend_err("empty binary transfer mismatch")); }
+            registry.control_input(&id, &lease.token, Some(Point { x: 100, y: 650 }), UiAction::Click { button: None, count: Some(1) }).await?;
+            registry.control_input(&id, &lease.token, None, UiAction::TypeText {
+                text: "printf 'native-ui-proof' > /home/cua/ui-proof.txt".into(),
+            }).await?;
+            registry.control_input(&id, &lease.token, None, UiAction::PressKey { chord: KeyChord("Enter".into()) }).await?;
+            registry.release_control(&id, &lease.token).await?;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let frame = registry.desktop_frame(&id).await?;
+            std::fs::write("/tmp/cognia-cua-desktop-native-input.png", base64::engine::general_purpose::STANDARD.decode(&frame.bytes).map_err(|e| backend_err(e.to_string()))?).map_err(|e| backend_err(e.to_string()))?;
+            if registry.read_file(&id, "/home/cua/ui-proof.txt", 1024).await? != "native-ui-proof" {
+                return Err(backend_err("real desktop keyboard input did not create the expected file"));
+            }
+            // Kill the actual Linux helper after its anonymous file is open.
+            // The same unprivileged user must leave no partial name behind.
+            let helper_json = serde_json::to_string(super::super::file_transfer::HELPER).unwrap();
+            let kill_upload = format!(r#"import os,signal,tempfile,time
+namespace={{'__name__':'transfer_test'}}
+exec({helper_json},namespace)
+root=tempfile.mkdtemp(prefix='cognia-transfer-kill-',dir='/home/cua')
+parent,name=namespace['open_parent'](root+'/partial')
+r,w=os.pipe()
+child=os.fork()
+if child==0:
+ os.close(r)
+ original=os.write
+ def blocked(fd,data):
+  original(w,b'ready')
+  time.sleep(60)
+  return original(fd,data)
+ os.write=blocked
+ namespace['upload'](parent,name,b'never published')
+ os._exit(2)
+os.close(w)
+assert os.read(r,5)==b'ready'
+os.kill(child,signal.SIGKILL)
+os.waitpid(child,0)
+os.close(r)
+os.close(parent)
+assert os.listdir(root)==[],os.listdir(root)
+os.rmdir(root)
+print('anonymous-upload-clean')
+"#);
+            let cleaned = registry.exec(&id, &["/usr/local/bin/python3".into(), "-I".into(), "-c".into(), kill_upload], None, &BTreeMap::new(), None, Duration::from_secs(10)).await?;
+            if cleaned.exit_code != 0 || cleaned.stdout.trim() != "anonymous-upload-clean" { return Err(backend_err(format!("anonymous upload cancellation failed: {}", cleaned.stderr))); }
+            registry.suspend(&id).await?;
+            if !docker_inspect(&name).await?.is_some_and(|state| state.paused) { return Err(backend_err("desktop did not pause")); }
+            registry.resume(&id).await?;
+            registry.desktop_frame(&id).await?;
+            registry.disconnect_all().await;
+            let restarted_host = CuaSandboxRegistry::default();
+            restarted_host.desktop_frame(&id).await?;
+            restarted_host.stop(&id).await?;
+            restarted_host.start(&id, BUILTIN_DESKTOP_IMAGE, ContainerPolicy::default()).await?;
+            if restarted_host.read_file(&id, "/home/cua/ui-proof.txt", 1024).await? != "native-ui-proof" {
+                return Err(backend_err("desktop file did not survive restart"));
+            }
+            let persisted = restarted_host.download_file(&id, &placement.container_id, "/home/cua/binary-proof.bin").await?;
+            if persisted.sha256 != binary_hash || persisted.data_base64 != binary_base64 { return Err(backend_err("binary transfer did not survive restart")); }
+            restarted_host.disconnect_all().await;
+            println!("native screenshot, authenticated input, credential isolation, control lease, pause/resume, cold reconnect and persistent restart: PASS");
+            Ok(())
+        }).await;
+        if result.is_err() {
+            eprintln!(
+                "desktop diagnostics: {}",
+                docker(&["logs", "--tail", "60", &name], "read smoke diagnostics")
+                    .await
+                    .unwrap_or_default()
+            );
+        }
+        let cleanup = registry.delete(&id).await;
+        result.unwrap();
+        cleanup.unwrap();
+        assert!(docker_inspect(&name).await.unwrap().is_none());
+    }
+
+    #[test]
+    fn private_credential_metadata_rejects_duplicates_missing_and_malformed_values() {
+        let token = "a".repeat(64);
+        let entry = format!("{AUTH_TOKEN_ENV}={token}");
+        assert_eq!(
+            parse_auth_token(&serde_json::to_vec(&vec![entry.clone()]).unwrap()).unwrap(),
+            token
+        );
+        for bytes in [
+            b"[]".to_vec(),
+            b"not-json-secret".to_vec(),
+            serde_json::to_vec(&vec![entry.clone(), entry]).unwrap(),
+        ] {
+            let error = parse_auth_token(&bytes).unwrap_err().to_string();
+            assert!(!error.contains(&token));
+            assert!(!error.contains("not-json-secret"));
+        }
+        let args = create_args(&spec(ContainerPolicy::default()));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--env", AUTH_TOKEN_ENV]));
+        assert!(!args.iter().any(|arg| arg.contains(&token)));
+    }
+
+    #[test]
+    fn adopted_image_is_bound_to_creation_identity_and_configuration() {
+        let identity = format!("sha256:{}", "a".repeat(64));
+        let labels = serde_json::json!({
+            IMAGE_ID_LABEL: identity,
+            IMAGE_REFERENCE_LABEL: "desktop:latest",
+        });
+        let response = format!("{identity}\n{labels}");
+        assert!(attest_image_response(&response, "desktop:latest").is_ok());
+        assert!(attest_image_response(&response, "different:latest").is_err());
+        assert!(attest_image_response(
+            &format!("sha256:{}\n{labels}", "b".repeat(64)),
+            "desktop:latest"
+        )
+        .is_err());
+        assert!(attest_image_response(&format!("{identity}\n{{}}"), "desktop:latest").is_err());
+    }
+
+    #[test]
+    fn pinned_creation_preserves_image_as_the_final_argument() {
+        let identity = format!("sha256:{}", "f".repeat(64));
+        let mut spec = spec(ContainerPolicy::default());
+        spec.image = identity.clone();
+        let mut args = create_args(&spec);
+        add_image_labels(&mut args, &identity, "image:latest");
+        assert_eq!(args.last(), Some(&identity));
+        assert!(args.contains(&format!("{IMAGE_REFERENCE_LABEL}=image:latest")));
+        assert!(valid_image_id(&identity));
+        assert!(!valid_image_id("sha256:not-a-digest"));
+    }
+
+    #[test]
+    fn file_reads_reject_truncation_even_when_the_requested_limit_is_larger() {
+        let output = |bytes: Vec<u8>, truncated| execution::SupervisedOutput {
+            stdout_bytes: bytes.clone(),
+            outcome: ExecOutcome {
+                stdout: String::from_utf8_lossy(&bytes).into_owned(),
+                stderr: String::new(),
+                exit_code: 0,
+                duration_ms: 0,
+                timed_out: false,
+                stdout_truncated: truncated,
+                stderr_truncated: false,
+            },
+        };
+        assert!(validate_file_read(
+            "file",
+            MAX_STREAM_BYTES * 2,
+            output(vec![b'x'; MAX_STREAM_BYTES], true)
+        )
+        .is_err());
+        assert!(validate_file_read("file", 1, output(b"ab".to_vec(), false)).is_err());
+        assert!(validate_file_read("file", 100, output(vec![0xff], false)).is_err());
+        assert_eq!(
+            validate_file_read("file", 3, output("你".as_bytes().to_vec(), false)).unwrap(),
+            "你"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn provisioning_pulls_only_a_confirmed_missing_image_then_pins_its_id() {
+        use std::os::unix::fs::PermissionsExt;
+        for (requested_image, missing) in [
+            ("requested:tag", true),
+            ("requested:tag", false),
+            (BUILTIN_DESKTOP_IMAGE, true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let executable = directory.path().join("fake-docker");
+            let log = directory.path().join("calls.jsonl");
+            let state = directory.path().join("pulled");
+            let script = format!(
+                r#"#!/usr/bin/env python3
+import sys,json,os
+with open({log:?},'a') as log: log.write(json.dumps(sys.argv[1:])+'\n')
+if sys.argv[1] == 'build':
+ assert set(os.listdir(sys.argv[-1])) == {{'Dockerfile','entrypoint.sh','startup.py','server.py','menu.xml'}}
+ assert 'cua-computer-server[linux]==0.3.46' in open(os.path.join(sys.argv[-1],'Dockerfile')).read()
+if sys.argv[1] in ['pull','build']:
+ open({state:?},'w').close()
+ sys.exit(0)
+if os.path.exists({state:?}):
+ print('sha256:'+'a'*64)
+ sys.exit(0)
+print({error:?},file=sys.stderr)
+sys.exit(1)
+"#,
+                log = log.to_str().unwrap(),
+                state = state.to_str().unwrap(),
+                error = if missing {
+                    "Error response from daemon: No such image: requested:tag"
+                } else {
+                    "Cannot connect to the Docker daemon"
+                }
+            );
+            std::fs::write(&executable, script).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let mut requested = spec(ContainerPolicy::default());
+            requested.image = requested_image.into();
+            let result = pinned_spec_with(&requested, executable.as_os_str()).await;
+            let calls: Vec<Vec<String>> = std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            assert_eq!(
+                calls[0],
+                ["image", "inspect", "--format", "{{.Id}}", requested_image]
+            );
+            if missing {
+                assert_eq!(result.unwrap().image, format!("sha256:{}", "a".repeat(64)));
+                assert_eq!(calls.len(), 3);
+                if requested_image == BUILTIN_DESKTOP_IMAGE {
+                    assert_eq!(
+                        &calls[1][..5],
+                        [
+                            "build",
+                            "--progress",
+                            "plain",
+                            "--tag",
+                            BUILTIN_DESKTOP_IMAGE
+                        ]
+                    );
+                    assert!(
+                        !std::path::Path::new(&calls[1][5]).exists(),
+                        "build context must be removed"
+                    );
+                } else {
+                    assert_eq!(calls[1], ["pull", requested_image]);
+                }
+                assert_eq!(calls[2], calls[0]);
+            } else {
+                assert!(result.unwrap_err().to_string().contains("Cannot connect"));
+                assert_eq!(calls.len(), 1);
+            }
+        }
+    }
 
     fn spec(policy: ContainerPolicy) -> SpawnSpec {
         SpawnSpec {
@@ -1062,11 +1660,11 @@ mod tests {
         assert!(!args.contains(&"-u".to_string()));
     }
 
-    /// Image used by the live tests. Deliberately whatever is already on the
-    /// machine rather than the cua desktop image: what is being proven here is
-    /// the container lifecycle and the exec channel, and neither depends on
-    /// which image is running.
-    const LIVE_IMAGE: &str = "caddy:2.10.2-alpine";
+    /// Locally built fixture: `FROM python:3.12-alpine` with
+    /// `CMD ["sleep", "infinity"]`, tagged cognia-cua-lifecycle-test:local.
+    /// Python3 is an explicit supervised-exec capability; the old caddy-only
+    /// fixture could not exercise the current execution protocol.
+    const LIVE_IMAGE: &str = "cognia-cua-lifecycle-test:local";
     const LIVE_NAME: &str = "cua-lifecycle-selftest";
 
     async fn cleanup_live() {
@@ -1108,7 +1706,7 @@ mod tests {
     /// machine. If this ever stops holding, the tier is silently running the
     /// model's shell commands on someone's real desktop.
     #[tokio::test]
-    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    #[ignore = "requires Docker and a local cognia-cua-lifecycle-test:local Python3 fixture"]
     async fn live_exec_runs_inside_the_container() {
         cleanup_live().await;
         let container = docker_run(&live_spec(ContainerPolicy {
@@ -1163,7 +1761,7 @@ mod tests {
     /// Without `--rm`, stopping keeps the container and everything written in
     /// it. This is the difference between a machine and a scratch process.
     #[tokio::test]
-    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    #[ignore = "requires Docker and a local cognia-cua-lifecycle-test:local Python3 fixture"]
     async fn live_files_survive_a_stop_and_start() {
         cleanup_live().await;
         docker_run(&live_spec(relaxed_live_policy()))
@@ -1207,7 +1805,7 @@ mod tests {
     /// running. A stopped container reports the opposite, which is exactly why
     /// implementing suspend with stop would be a lie about the session.
     #[tokio::test]
-    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    #[ignore = "requires Docker and a local cognia-cua-lifecycle-test:local Python3 fixture"]
     async fn live_pause_is_a_suspend_not_a_stop() {
         cleanup_live().await;
         docker_run(&live_spec(relaxed_live_policy()))
@@ -1232,7 +1830,7 @@ mod tests {
     /// its deterministic name, and a second `docker run` fails forever after.
     /// `docker_inspect` answering `Some` is what lets the registry reuse it.
     #[tokio::test]
-    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    #[ignore = "requires Docker and a local cognia-cua-lifecycle-test:local Python3 fixture"]
     async fn live_a_second_run_conflicts_but_inspect_can_adopt() {
         cleanup_live().await;
         docker_run(&live_spec(relaxed_live_policy()))
@@ -1260,15 +1858,15 @@ mod tests {
     /// filesystem refuses writes. A container that can reach the daemon is
     /// root on the host, which is exactly the escape this tier must not have.
     #[tokio::test]
-    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    #[ignore = "requires Docker and a local cognia-cua-lifecycle-test:local Python3 fixture"]
     async fn live_hardened_container_denies_docker_socket_and_rootfs_writes() {
         cleanup_live().await;
         docker_run(&live_spec(ContainerPolicy {
-            // The caddy image needs its config/data dirs writable under a
-            // read-only rootfs, and NET_BIND_SERVICE to listen on :80.
+            // Exercise explicit writable volumes and a minimal capability
+            // grant while keeping the image root filesystem read-only.
             writable_dirs: vec!["/data".into(), "/config".into()],
             cap_add: vec!["NET_BIND_SERVICE".into()],
-            exec_user: None, // the caddy image has no `cua` user
+            exec_user: None, // the small lifecycle fixture has no `cua` user
             ..ContainerPolicy::default()
         }))
         .await
@@ -1328,20 +1926,5 @@ mod tests {
             .any(|opt| opt.starts_with("no-new-privileges")));
 
         cleanup_live().await;
-    }
-
-    #[test]
-    fn cap_stream_reports_truncation_on_a_char_boundary() {
-        let (text, truncated) = cap_stream(b"short");
-        assert_eq!(text, "short");
-        assert!(!truncated);
-
-        // Multi-byte characters straddling the cap must not produce a
-        // replacement character mid-sequence.
-        let oversized: Vec<u8> = "\u{4f60}".repeat(MAX_STREAM_BYTES).into_bytes();
-        let (text, truncated) = cap_stream(&oversized);
-        assert!(truncated);
-        assert!(text.len() <= MAX_STREAM_BYTES);
-        assert!(!text.contains('\u{FFFD}'));
     }
 }

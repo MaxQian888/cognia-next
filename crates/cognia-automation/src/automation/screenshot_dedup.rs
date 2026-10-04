@@ -74,7 +74,7 @@ struct Seen {
 /// Remembers the last frame each app session showed a model.
 #[derive(Debug, Default)]
 pub struct ScreenshotDedup {
-    seen: Mutex<HashMap<String, Seen>>,
+    seen: Mutex<HashMap<(String, String), Seen>>,
     seq: Mutex<u64>,
 }
 
@@ -96,7 +96,8 @@ impl ScreenshotDedup {
         let hash = hash_frame(&shot.bytes);
 
         let mut seen = self.seen.lock();
-        let previous = seen.get(&revision.session_id).copied();
+        let identity = (revision.session_id.clone(), revision.lineage_id.clone());
+        let previous = seen.get(&identity).copied();
         if let Some(previous) = previous {
             if previous.hash == hash {
                 // Keep the entry pointing at the ORIGINAL revision so a long
@@ -114,7 +115,7 @@ impl ScreenshotDedup {
         let stamp = *seq;
         drop(seq);
         seen.insert(
-            revision.session_id.clone(),
+            identity,
             Seen {
                 hash,
                 revision: revision.revision,
@@ -259,6 +260,20 @@ mod tests {
         let mut b = revision("s2", 1, "AAAA");
         assert!(!dedup.apply(&mut b, true, Surface::ComputerUse));
         assert_eq!(b.screenshot.as_ref().unwrap().bytes, "AAAA");
+    }
+
+    #[test]
+    fn a_new_lineage_always_sends_its_first_frame() {
+        let dedup = ScreenshotDedup::default();
+        let mut first = revision("s1", 9, "AAAA");
+        dedup.apply(&mut first, true, Surface::ComputerUse);
+        let mut rebound = revision("s1", 1, "AAAA");
+        rebound.lineage_id = "another-connection-or-post-takeover".into();
+        assert!(!dedup.apply(&mut rebound, true, Surface::ComputerUse));
+        assert_eq!(rebound.screenshot.as_ref().unwrap().bytes, "AAAA");
+        let mut repeat = rebound.clone();
+        repeat.revision = 2;
+        assert!(dedup.apply(&mut repeat, true, Surface::ComputerUse));
     }
 
     #[test]

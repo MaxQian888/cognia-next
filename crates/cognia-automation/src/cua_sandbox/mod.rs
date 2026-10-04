@@ -12,8 +12,17 @@ use std::collections::BTreeMap;
 #[cfg(feature = "tauri-host")]
 use std::time::Duration;
 
+#[cfg(feature = "tauri-host")]
+use crate::automation::{
+    session::UiAction,
+    types::{Point, Screenshot},
+};
+#[cfg(feature = "tauri-host")]
+use desktop_session::ControlLease;
 use serde::{Deserialize, Serialize};
 
+pub mod desktop_session;
+pub mod file_transfer;
 pub mod lifecycle;
 pub mod protocol;
 pub mod registry;
@@ -360,6 +369,100 @@ pub async fn cua_sandbox_read_file(
         .map(|value| value as usize)
         .unwrap_or(DEFAULT_READ_MAX_BYTES);
     reg.read_file(&connection_id, &path, max)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Upload a bounded binary file without replacing an existing guest path.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_upload_file(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    expected_container_id: String,
+    token: String,
+    path: String,
+    data_base64: String,
+) -> std::result::Result<file_transfer::SandboxFileInfo, String> {
+    reg.upload_file(
+        &connection_id,
+        &expected_container_id,
+        &token,
+        &path,
+        &data_base64,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
+/// Download a regular guest file through the bounded, attested exec channel.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_download_file(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    expected_container_id: String,
+    path: String,
+) -> std::result::Result<file_transfer::SandboxFileDownload, String> {
+    reg.download_file(&connection_id, &expected_container_id, &path)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+// Viewer commands stay on the local renderer transport; input requires the
+// exclusive controller lease owned by the same registry as agent actions.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_capture(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+) -> Result<Screenshot, String> {
+    reg.desktop_frame(&connection_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_acquire_control(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+) -> Result<ControlLease, String> {
+    reg.acquire_control(&connection_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_renew_control(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    token: String,
+) -> Result<ControlLease, String> {
+    reg.renew_control(&connection_id, &token)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_release_control(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    token: String,
+) -> Result<(), String> {
+    reg.release_control(&connection_id, &token)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_input(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    token: String,
+    point: Option<Point>,
+    action: UiAction,
+) -> Result<(), String> {
+    reg.control_input(&connection_id, &token, point, action)
         .await
         .map_err(|e| e.to_string())
 }

@@ -1,8 +1,27 @@
 import { transport } from "@/lib/tauri"
+import type { Point, Screenshot, UiAction } from "@/lib/automation/types"
+
+export interface SandboxControlLease {
+  token: string
+  expiresAt: number
+}
+
+/** Dedicated binary transfer budget; ordinary command output keeps its own limit. */
+export const MAX_SANDBOX_TRANSFER_BYTES = 8 * 1024 * 1024
+
+export interface SandboxFileInfo {
+  path: string
+  size: number
+  sha256: string
+}
+
+export interface SandboxFileDownload extends SandboxFileInfo {
+  dataBase64: string
+}
 
 /**
  * Thin wrappers over the `cua_sandbox_*` Tauri commands (ADR-0020
- * remote-target). Lifecycle and workspace execution only. GUI driving actions
+ * remote-target). Lifecycle, workspace execution and local desktop viewing. Agent GUI actions
  * ride the existing `desktop.*` client with a `sandboxConnectionId` in their
  * `CallContext`.
  *
@@ -61,8 +80,8 @@ export interface SandboxExecOutcome {
   stderr: string
   durationMs: number
   /**
-   * The `docker exec` client gave up waiting. The process inside the container
-   * may still be running, so this is not the same as "the work stopped".
+   * The supervisor reached the deadline and confirmed descendant cleanup.
+   * Missing cleanup confirmation rejects the call instead of returning an outcome.
    */
   timedOut: boolean
   stdoutTruncated: boolean
@@ -70,6 +89,59 @@ export interface SandboxExecOutcome {
 }
 
 export const sandboxClient = {
+  /** Publish a new guest file without overwriting an existing destination. */
+  uploadFile(
+    connectionId: string,
+    expectedContainerId: string,
+    token: string,
+    path: string,
+    dataBase64: string
+  ): Promise<SandboxFileInfo> {
+    return transport.call<SandboxFileInfo>("cua_sandbox_upload_file", {
+      connectionId,
+      expectedContainerId,
+      token,
+      path,
+      dataBase64,
+    })
+  },
+  /** Read binary contents only from the specific container selected by the user. */
+  downloadFile(
+    connectionId: string,
+    expectedContainerId: string,
+    path: string
+  ): Promise<SandboxFileDownload> {
+    return transport.call<SandboxFileDownload>("cua_sandbox_download_file", {
+      connectionId,
+      expectedContainerId,
+      path,
+    })
+  },
+  desktopFrame(connectionId: string): Promise<Screenshot> {
+    return transport.call<Screenshot>("cua_sandbox_desktop_capture", { connectionId })
+  },
+  acquireControl(connectionId: string): Promise<SandboxControlLease> {
+    return transport.call<SandboxControlLease>("cua_sandbox_desktop_acquire_control", {
+      connectionId,
+    })
+  },
+  renewControl(connectionId: string, token: string): Promise<SandboxControlLease> {
+    return transport.call<SandboxControlLease>("cua_sandbox_desktop_renew_control", {
+      connectionId,
+      token,
+    })
+  },
+  releaseControl(connectionId: string, token: string): Promise<void> {
+    return transport.call<void>("cua_sandbox_desktop_release_control", { connectionId, token })
+  },
+  controlInput(
+    connectionId: string,
+    token: string,
+    point: Point | null,
+    action: UiAction
+  ): Promise<void> {
+    return transport.call<void>("cua_sandbox_desktop_input", { connectionId, token, point, action })
+  },
   /** Provision the container without starting it. */
   create(
     connectionId: string,
@@ -116,7 +188,7 @@ export const sandboxClient = {
   inspect(connectionId: string): Promise<SandboxContainerState | null> {
     return transport.call<SandboxContainerState | null>("cua_sandbox_inspect", { connectionId })
   },
-  /** Whether the container answers `docker exec`. */
+  /** Whether supervised execution and desktop capture both answer. */
   health(connectionId: string): Promise<boolean> {
     return transport.call<boolean>("cua_sandbox_health", { connectionId })
   },

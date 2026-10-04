@@ -52,6 +52,7 @@ uuid = { workspace = true, features = ["v4", "v7"] }
 regex.workspace = true
 dirs.workspace = true
 hex.workspace = true
+sha2.workspace = true
 url.workspace = true
 bytes.workspace = true
 rand.workspace = true

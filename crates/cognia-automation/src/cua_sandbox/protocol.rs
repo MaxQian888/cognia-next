@@ -59,11 +59,39 @@ pub fn type_text_request(text: &str) -> WsRequest {
 
 /// A `KeyChord` is a `"ctrl+shift+t"`-style string. A single token maps to
 /// `press_key`; a chord maps to `hotkey` with the token list.
+fn native_key_name(key: &str) -> String {
+    let key = key.trim();
+    if key.chars().count() == 1 {
+        return key.to_owned();
+    }
+    match key.to_ascii_lowercase().as_str() {
+        "arrowleft" => "left",
+        "arrowright" => "right",
+        "arrowup" => "up",
+        "arrowdown" => "down",
+        "escape" => "esc",
+        "return" => "enter",
+        "control" => "ctrl",
+        "meta" | "super" | "win" | "os" => "cmd",
+        "option" => "alt",
+        "altgraph" => "alt_gr",
+        "pageup" => "page_up",
+        "pagedown" => "page_down",
+        "capslock" => "caps_lock",
+        "numlock" => "num_lock",
+        "scrolllock" => "scroll_lock",
+        "printscreen" => "print_screen",
+        "plus" => "+",
+        other => other,
+    }
+    .to_owned()
+}
+
 pub fn keys_request(chord: &KeyChord) -> WsRequest {
     let tokens: Vec<String> = chord
         .0
         .split('+')
-        .map(|t| t.trim().to_string())
+        .map(native_key_name)
         .filter(|t| !t.is_empty())
         .collect();
     if tokens.len() == 1 {
@@ -77,7 +105,7 @@ pub fn keys_request(chord: &KeyChord) -> WsRequest {
 pub fn key_transition_request(key: &str, down: bool) -> WsRequest {
     WsRequest::new(
         if down { "key_down" } else { "key_up" },
-        json!({ "key": key }),
+        json!({ "key": native_key_name(key) }),
     )
 }
 
@@ -105,12 +133,22 @@ pub fn drag_request(from: Point, to: Point, button: MouseButton, duration_secs: 
 
 /// Inspect a decoded server response: a truthy `error` field → `Err`.
 pub fn check_response(value: Value) -> Result<Value> {
-    if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
-        if !err.is_empty() {
-            return Err(AutomationError::BackendError {
-                message: err.to_string(),
-            });
-        }
+    if let Some(err) = value.get("error").filter(|err| match err {
+        Value::Null | Value::Bool(false) => false,
+        Value::String(text) => !text.is_empty(),
+        _ => true,
+    }) {
+        return Err(AutomationError::BackendError {
+            message: err
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| err.to_string()),
+        });
+    }
+    if value.get("success").and_then(Value::as_bool) == Some(false) {
+        return Err(AutomationError::BackendError {
+            message: "computer-server reported success=false".into(),
+        });
     }
     Ok(value)
 }
@@ -147,7 +185,7 @@ mod tests {
     fn single_key_is_press_key() {
         let r = keys_request(&KeyChord("Enter".into()));
         assert_eq!(r.command, "press_key");
-        assert_eq!(r.params["key"], "Enter");
+        assert_eq!(r.params["key"], "enter");
     }
 
     #[test]
@@ -177,9 +215,38 @@ mod tests {
     }
 
     #[test]
+    fn browser_special_keys_use_native_server_names() {
+        for (input, expected) in [
+            ("Enter", "enter"),
+            ("Backspace", "backspace"),
+            ("ArrowLeft", "left"),
+            ("Escape", "esc"),
+            ("PageDown", "page_down"),
+            ("Space", "space"),
+        ] {
+            assert_eq!(
+                keys_request(&KeyChord(input.into())).params["key"],
+                expected
+            );
+        }
+        assert_eq!(
+            keys_request(&KeyChord("Meta+ArrowRight".into())).params["keys"],
+            json!(["cmd", "right"])
+        );
+        assert_eq!(
+            keys_request(&KeyChord("ctrl+Plus".into())).params["keys"],
+            json!(["ctrl", "+"])
+        );
+    }
+
+    #[test]
     fn check_response_flags_error() {
         let err = check_response(json!({ "error": "boom" }));
         assert!(err.is_err());
+        assert!(check_response(json!({"error": {"message":"denied"}})).is_err());
+        assert!(check_response(json!({"error": true})).is_err());
+        assert!(check_response(json!({"success": false})).is_err());
+        assert!(check_response(json!({"error": null, "success": true})).is_ok());
         let ok = check_response(json!({ "success": true }));
         assert!(ok.is_ok());
     }

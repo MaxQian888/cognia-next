@@ -5,10 +5,7 @@ description: "为缺失的语言服务器提供 npm 优先的自动安装阶梯�
 
 # ADR-0046 — LSP 成熟度
 
-**状态**：已接受（2026-06-07）
-**作者**：Max Qian + Claude Opus 4.8
-**承接**：ADR-0044（统一 LSP 配置）— 本 ADR 同时找回了 ADR-0044 因并发树覆写而丢失的另一半（迁移接线、`settings.lsp` 读取方、全字段对话框、`buildServers`、`workspace/configuration` 支持，这些只存活在 `qc-stash-backup` 基线中，本次恢复）
-**影响**：`sidecar/vscode-ext-host/src/{lsp-installer,lsp-diagnostics-buffer}.ts`（新增）、`sidecar/vscode-ext-host/src/{lsp-client,lsp-service,host}.ts`、`sidecar/lsp/{servers,resolver,service-loader}.mjs`、`sidecar/dispatch/anthropic.mjs`、`types/lsp/config.ts`、`lib/lsp/{builtin-defaults,lsp-status-store}.ts`、`lib/claude/build-options.ts`、`lib/plugin/lsp/lsp-client-adapter-tauri.ts`、`components/settings/lsp/*`、`components/editor/lsp-server-hint.tsx`、`hooks/use-lsp-status-for-language.ts`
+**状态**：已接受（2026-06-07）**作者**：Max Qian + Claude Opus 4.8 **承接**：ADR-0044（统一 LSP 配置）— 本 ADR 同时找回了 ADR-0044 因并发树覆写而丢失的另一半（迁移接线、`settings.lsp` 读取方、全字段对话框、`buildServers`、`workspace/configuration` 支持，这些只存活在 `qc-stash-backup` 基线中，本次恢复）**影响**：`sidecar/vscode-ext-host/src/{lsp-installer,lsp-diagnostics-buffer}.ts`（新增）、`sidecar/vscode-ext-host/src/{lsp-client,lsp-service,host}.ts`、`sidecar/lsp/{servers,resolver,service-loader}.mjs`、`sidecar/dispatch/anthropic.mjs`、`types/lsp/config.ts`、`lib/lsp/{builtin-defaults,lsp-status-store}.ts`、`lib/claude/build-options.ts`、`lib/plugin/lsp/lsp-client-adapter-tauri.ts`、`components/settings/lsp/*`、`components/editor/lsp-server-hint.tsx`、`hooks/use-lsp-status-for-language.ts`
 
 ## 背景
 
@@ -28,7 +25,7 @@ ADR-0044 统一了**配置**，但运行时仍然脆弱，缺少 OpenCode / Clau
 
 1. 显式路径（绝不覆盖安装）→ 2. 项目 `node_modules/.bin` 逐级上溯 → 3. 托管目录 `<appData>/lsp/node/<npmPackage>/node_modules/.bin` → 4. PATH（支持 PATHEXT）→ 5. `npm install <pkg> --prefix <托管目录>` 后重查第 3 级。
 
-托管目录按**包**而非服务器 id 作键 — `vscode-langservers-extracted` 一个包带四个二进制，只装一次。开关：`COGNIA_DISABLE_LSP_DOWNLOAD` 环境变量（硬开关）与 `AppSettings.lsp.autoInstall`（用户开关）。并发安装通过原子 mkdir 咨询锁串行化。`LspServerConfig` 新增 `install?: { npmPackage, version? }`；内置注册表扩到 **9 个**（新增 json/css/html（`vscode-langservers-extracted`）、yaml、bash；eslint 因需要 ESLint 专属的配置握手而刻意缺席；rust-analyzer/gopls 仅做检测 — 二进制/go-install 阶梯留作后续）。
+托管目录以**包**而非服务器 ID 为键。 `vscode-langservers-extracted` 一个包带四个二进制，只装一次。开关：`COGNIA_DISABLE_LSP_DOWNLOAD` 环境变量（硬开关）与 `AppSettings.lsp.autoInstall`（用户开关）。并发安装通过基于原子 mkdir 的建议锁串行化。`LspServerConfig` 新增 `install?: { npmPackage, version? }`；内置注册表扩到 **9 个**（新增 json/css/html（`vscode-langservers-extracted`）、yaml、bash；eslint 因需要 ESLint 专属的配置握手而刻意缺席；rust-analyzer/gopls 仅做检测 — 二进制/go-install 阶梯留作后续）。
 
 两个消费方共享同一实现：渲染端走 `lsp:detect` / `lsp:install` RPC；agent 走 `resolver.mjs` 的 `ensureCommand` 注入点（动态导入 `dist/lsp-installer.js`），并带 **30 秒回合预算** — npm 安装绝不会扣住一个 agent 回合；安装在后台继续，之后的文件触达会捡起新装好的二进制。resolver 还会按会话缓存失败的服务器，缺一个工具链不会每次编辑都重跑阶梯。
 

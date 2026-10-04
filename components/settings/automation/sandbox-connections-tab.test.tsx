@@ -22,6 +22,7 @@ jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+jest.mock("./sandbox-desktop-viewer", () => ({ SandboxDesktopViewer: () => null }))
 
 import { SandboxConnectionsTab } from "@/components/settings/automation/sandbox-connections-tab"
 
@@ -93,7 +94,9 @@ test("add flow creates a connection with the typed name", async () => {
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "lab" } })
   fireEvent.click(screen.getByText("Save"))
   await waitFor(() =>
-    expect(actions.create).toHaveBeenCalledWith(expect.objectContaining({ name: "lab" }))
+    expect(actions.create).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "lab", image: "cognia-cua-desktop:0.3.46-1" })
+    )
   )
 })
 

@@ -127,7 +127,7 @@ test("create writes a docker row with defaults", async () => {
   expect(lastWrite()).toMatchObject({
     name: "home",
     provider: "docker",
-    image: "ghcr.io/trycua/cua-xfce:latest",
+    image: "cognia-cua-desktop:0.3.46-1",
     host: "127.0.0.1",
     port: 0,
     lastHealthStatus: "unknown",
@@ -269,6 +269,43 @@ test("remove deletes the container, not merely stops it", async () => {
   expect(db.deleteSandboxConnection).toHaveBeenCalledWith("c1")
 })
 
+test("failed deletion retains the machine for a later cleanup retry", async () => {
+  seed(dockerRow({ state: "running" }))
+  client.delete.mockRejectedValueOnce(new Error("Docker daemon unavailable"))
+  const { result } = renderHook(() => useSandboxConnections())
+
+  await act(async () => {
+    await expect(result.current.remove("c1")).rejects.toThrow("Docker daemon unavailable")
+  })
+  expect(db.deleteSandboxConnection).not.toHaveBeenCalled()
+  expect(lastWrite()).toMatchObject({
+    id: "c1",
+    state: "error",
+    lastHealthError: "Docker daemon unavailable",
+  })
+
+  await act(async () => {
+    await result.current.remove("c1")
+  })
+  expect(db.deleteSandboxConnection).toHaveBeenCalledWith("c1")
+})
+
+test("an unsupported imported connection can be forgotten without a host operation", async () => {
+  seed(
+    dockerRow({
+      provider: "lume",
+      config: { provider: "lume", vmName: "imported" },
+      capabilities: defaultSandboxCapabilities("lume", "computer-server"),
+    })
+  )
+  const { result } = renderHook(() => useSandboxConnections())
+  await act(async () => {
+    await result.current.remove("c1")
+  })
+  expect(client.delete).not.toHaveBeenCalled()
+  expect(db.deleteSandboxConnection).toHaveBeenCalledWith("c1")
+})
+
 test("a failed probe keeps the diagnostic the user asked to see", async () => {
   seed(
     dockerRow({
@@ -358,4 +395,40 @@ test("a healthy probe clears the stale diagnostic", async () => {
 
   expect(lastWrite()).toMatchObject({ lastHealthStatus: "ok", state: "running" })
   expect(lastWrite()?.lastHealthError).toBeUndefined()
+})
+
+test("a healthy probe recovers the exact container identity for file transfers", async () => {
+  seed(dockerRow({ state: "running" }))
+  const { result } = renderHook(() => useSandboxConnections())
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+  expect(lastWrite()?.config).toMatchObject({ provider: "docker", containerId: "cid" })
+})
+
+test("a confirmed absent container clears stale placement without losing its configuration", async () => {
+  seed(
+    dockerRow({
+      state: "running",
+      config: {
+        provider: "docker",
+        image: "img",
+        host: "127.0.0.1",
+        port: 49160,
+        containerId: "old",
+      },
+    })
+  )
+  client.inspect.mockResolvedValueOnce(null)
+  const { result } = renderHook(() => useSandboxConnections())
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+  expect(lastWrite()?.config).toEqual({
+    provider: "docker",
+    image: "img",
+    host: "127.0.0.1",
+    port: 0,
+  })
+  expect(lastWrite()?.state).toBe("uninitialized")
 })

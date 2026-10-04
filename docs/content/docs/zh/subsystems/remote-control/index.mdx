@@ -7,21 +7,15 @@ description: 已退役独立 Remote Control 子系统的迁移说明。
 
 <Status variant="deprecated">已退役 · 2026-08-09</Status>
 
-独立的 Remote Control 子系统已不再属于 Cognia。其 axum 监听器、`/api/v1`
-路由、渲染端事件 receiver、Zustand store、审计 UI 与
-`?section=remote-control` 设置入口均已移除，避免形成第二套宿主控制权威。
+独立的 Remote Control 子系统已不再属于 Cognia。其 axum 监听器、`/api/v1` 路由、渲染端事件接收器、Zustand 状态存储、审计 UI 与 `?section=remote-control` 设置入口均已移除，避免形成第二套宿主控制权威。
 
 请使用以下规范替代方案：
 
-- **宿主与设备控制：** [Companion API](../companion-api)，统一使用带鉴权的命令清单、
-  设备授权与 headless dispatch。
-- **MCP 入站与治理：** [External Bridge](../external-bridge) 与
-  [ADR-0110](../../adr/0110-mcp-control-plane-governance)。
-- **出站事件投递：** `lib/webhooks/`、`stores/webhooks/` 与
-  **设置 → Webhooks**（`?section=webhooks`）。
+- **宿主与设备控制：** [Companion API](../companion-api)，统一使用带鉴权的命令清单、设备授权与 headless dispatch。
+- **MCP 入站与治理：** [External Bridge](../external-bridge) 与 [ADR-0110](../../adr/0110-mcp-control-plane-governance)。
+- **出站事件投递：** `lib/webhooks/`、`stores/webhooks/` 与**设置 → Webhooks**（`?section=webhooks`）。
 
-ADR-0005 仅作为已标记的历史记录保留；其中旧文件路径、路由与设置操作均不再是
-当前实现指南。
+ADR-0005 仅作为已标记的历史记录保留；其中旧文件路径、路由与设置操作均不再是当前实现指南。
 
 <Cards>
   <Card title="Companion API" href="../companion-api" description="规范的宿主与设备鉴权控制面。" />

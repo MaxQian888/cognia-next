@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 import zhCN from "@/i18n/messages/zh-CN.json"
@@ -8,6 +8,12 @@ import {
   SandboxConnectionSheet,
   type SandboxConnectionActions,
 } from "@/components/settings/automation/sandbox-connection-sheet"
+
+jest.mock("./sandbox-desktop-viewer", () => ({
+  SandboxDesktopViewer: ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => (
+    <div data-testid="desktop-viewer" data-connection={connectionId} data-enabled={enabled} />
+  ),
+}))
 
 function actions(): jest.Mocked<SandboxConnectionActions> {
   return {
@@ -67,6 +73,17 @@ test("renders nothing without a connection", () => {
   expect(screen.queryByTestId("sandbox-connection-detail")).not.toBeInTheDocument()
 })
 
+test("wires the selected running Docker connection into the desktop viewer", () => {
+  renderSheet(row())
+  expect(screen.getByTestId("desktop-viewer")).toHaveAttribute("data-connection", "c1")
+  expect(screen.getByTestId("desktop-viewer")).toHaveAttribute("data-enabled", "true")
+})
+
+test("disables the desktop viewer when its container is suspended", () => {
+  renderSheet(row({ state: "suspended" }))
+  expect(screen.getByTestId("desktop-viewer")).toHaveAttribute("data-enabled", "false")
+})
+
 test("dispatches each lifecycle action to the matching handler", async () => {
   const { acts } = renderSheet(row())
   for (const [testId, handler] of [
@@ -76,6 +93,8 @@ test("dispatches each lifecycle action to the matching handler", async () => {
     ["sandbox-action-delete", acts.remove],
   ] as const) {
     fireEvent.click(screen.getByTestId(testId))
+    if (testId === "sandbox-action-delete")
+      fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }))
     await waitFor(() => expect(handler).toHaveBeenCalledWith("c1"))
   }
 })
@@ -89,6 +108,7 @@ test("suspend and delete are distinct actions, not aliases of stop", async () =>
   expect(acts.stop).not.toHaveBeenCalled()
 
   fireEvent.click(screen.getByTestId("sandbox-action-delete"))
+  fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }))
   await waitFor(() => expect(acts.remove).toHaveBeenCalled())
   expect(acts.stop).not.toHaveBeenCalled()
 })
@@ -159,6 +179,68 @@ test("keeps the last diagnostic visible", () => {
   renderSheet(row({ lastHealthError: "container exited with code 1" }))
   expect(screen.getByText("container exited with code 1")).toBeInTheDocument()
 })
+
+test("deletion requires confirmation and cancellation does not remove the sandbox", () => {
+  const { acts } = renderSheet(row())
+  fireEvent.click(screen.getByTestId("sandbox-action-delete"))
+  expect(acts.remove).not.toHaveBeenCalled()
+  expect(screen.getByRole("alertdialog")).toHaveTextContent("Files in mounted host folders remain")
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  expect(acts.remove).not.toHaveBeenCalled()
+})
+
+test("failed deletion keeps confirmation available for retry", async () => {
+  const acts = actions()
+  acts.remove.mockRejectedValueOnce(new Error("busy container"))
+  const { onError } = renderSheet(row(), { acts })
+  fireEvent.click(screen.getByTestId("sandbox-action-delete"))
+  fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }))
+  await waitFor(() => expect(onError).toHaveBeenCalledWith("busy container"))
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }))
+  await waitFor(() => expect(acts.remove).toHaveBeenCalledTimes(2))
+})
+
+test.each(["switch", "reopen"])(
+  "late delete completion cannot close a newer sheet after %s",
+  async (mode) => {
+    const acts = actions()
+    let complete!: () => void
+    acts.remove.mockReturnValueOnce(
+      new Promise((resolve) => {
+        complete = resolve
+      })
+    )
+    const onOpenChange = jest.fn()
+    const onDeleted = jest.fn()
+    const element = (id: string, open = true) => (
+      <SandboxConnectionSheet
+        connection={row({ id })}
+        open={open}
+        onOpenChange={onOpenChange}
+        desktop
+        actions={acts}
+        onError={jest.fn()}
+        onDeleted={onDeleted}
+      />
+    )
+    const { rerender } = render(element("a"))
+    fireEvent.click(screen.getByTestId("sandbox-action-delete"))
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }))
+    expect(acts.remove).toHaveBeenCalledWith("a")
+    if (mode === "reopen") {
+      rerender(element("a", false))
+      rerender(element("a"))
+    } else rerender(element("b"))
+    await act(async () => {
+      complete()
+    })
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(onDeleted).not.toHaveBeenCalled()
+    expect(screen.getByTestId("sandbox-action-delete")).toBeEnabled()
+  }
+)
 
 /**
  * `t(`state.${state}`)` is a dynamic key, and `lint:i18n` only checks literal

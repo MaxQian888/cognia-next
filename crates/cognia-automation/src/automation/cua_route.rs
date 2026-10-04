@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
-use super::commands::now_ms;
 use super::types::*;
 use super::worker::AutomationHandle;
 use crate::cua_sandbox::protocol;
@@ -47,36 +46,8 @@ pub async fn screenshot(
     match remote {
         None => handle.screenshot(opts).await,
         Some(id) => {
-            let c = client(cua, id).await?;
-            let resp = c.call_simple(protocol::SCREENSHOT, json!({})).await?;
-            let bytes = resp
-                .get("image_data")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| AutomationError::BackendError {
-                    message: "cua screenshot returned no image_data".into(),
-                })?
-                .to_string();
-            // The container screenshot is full-screen; ask for screen size so
-            // the renderer gets real dimensions.
-            let (width, height) = match c.call_simple(protocol::SCREEN_SIZE, json!({})).await {
-                Ok(s) => {
-                    let size = s.get("size").unwrap_or(&s);
-                    (
-                        size.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                        size.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                    )
-                }
-                Err(_) => (0, 0),
-            };
-            Ok(Screenshot {
-                bytes,
-                width,
-                height,
-                captured_at: now_ms(),
-                format: ImageFormat::Png,
-                source_width: None,
-                source_height: None,
-            })
+            let _desktop = cua.agent_guard(id).await?;
+            crate::cua_sandbox::desktop_session::capture(client(cua, id).await?.as_ref()).await
         }
     }
 }
@@ -91,6 +62,8 @@ pub async fn click(
     match remote {
         None => handle.click(target, opts).await,
         Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
             let point = match target {
                 ClickTarget::Point { x, y } => Point { x, y },
                 // Element-target clicks are UIA-only; the remote backend has no
@@ -101,11 +74,19 @@ pub async fn click(
             let count = opts
                 .count
                 .unwrap_or(if opts.double == Some(true) { 2 } else { 1 });
-            client(cua, id)
-                .await?
-                .call(protocol::click_request(point, button, count))
+            let action = super::session::UiAction::Click {
+                button: Some(button),
+                count: Some(count),
+            };
+            crate::cua_sandbox::desktop_session::validate_action(Some(point), &action)?;
+            let c = client(cua, id).await?;
+            desktop
+                .run_mutation(crate::cua_sandbox::desktop_session::deliver(
+                    &c,
+                    Some(point),
+                    &action,
+                ))
                 .await
-                .map(|_| ())
         }
     }
 }
@@ -119,11 +100,18 @@ pub async fn type_text(
 ) -> Result<()> {
     match remote {
         None => handle.type_text(text, opts).await,
-        Some(id) => client(cua, id)
-            .await?
-            .call(protocol::type_text_request(&text))
-            .await
-            .map(|_| ()),
+        Some(id) => {
+            if opts.target.is_some() || opts.delay_ms.is_some_and(|delay| delay > 0) {
+                return Err(AutomationError::UnsupportedPlatform);
+            }
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
+            let c = client(cua, id).await?;
+            desktop
+                .run_mutation(c.call(protocol::type_text_request(&text)))
+                .await
+                .map(|_| ())
+        }
     }
 }
 
@@ -135,11 +123,21 @@ pub async fn send_keys(
 ) -> Result<()> {
     match remote {
         None => handle.send_keys(chord).await,
-        Some(id) => client(cua, id)
-            .await?
-            .call(protocol::keys_request(&chord))
-            .await
-            .map(|_| ()),
+        Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
+            crate::cua_sandbox::desktop_session::validate_action(
+                None,
+                &super::session::UiAction::PressKey {
+                    chord: chord.clone(),
+                },
+            )?;
+            let c = client(cua, id).await?;
+            desktop
+                .run_mutation(c.call(protocol::keys_request(&chord)))
+                .await
+                .map(|_| ())
+        }
     }
 }
 
@@ -151,11 +149,15 @@ pub async fn mouse_move(
 ) -> Result<()> {
     match remote {
         None => handle.mouse_move(point).await,
-        Some(id) => client(cua, id)
-            .await?
-            .call(protocol::move_request(point))
-            .await
-            .map(|_| ()),
+        Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
+            let c = client(cua, id).await?;
+            desktop
+                .run_mutation(c.call(protocol::move_request(point)))
+                .await
+                .map(|_| ())
+        }
     }
 }
 
@@ -170,11 +172,13 @@ pub async fn drag(
     match remote {
         None => handle.drag(from, to, opts).await,
         Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
             let button = opts.button.unwrap_or(MouseButton::Left);
             let duration_secs = opts.duration_ms.unwrap_or(150) as f64 / 1000.0;
-            client(cua, id)
-                .await?
-                .call(protocol::drag_request(from, to, button, duration_secs))
+            let c = client(cua, id).await?;
+            desktop
+                .run_mutation(c.call(protocol::drag_request(from, to, button, duration_secs)))
                 .await
                 .map(|_| ())
         }
@@ -191,12 +195,19 @@ pub async fn scroll(
     match remote {
         None => handle.scroll(target, opts).await,
         Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
             let c = client(cua, id).await?;
-            // cua scrolls at the current cursor; move there first for fidelity.
-            if let ScrollTarget::Point { x, y } = target {
-                c.call(protocol::move_request(Point { x, y })).await?;
-            }
-            c.call(protocol::scroll_request(&opts)).await.map(|_| ())
+            let point = match target {
+                ScrollTarget::Point { x, y } => Point { x, y },
+                ScrollTarget::Element { .. } => return Err(AutomationError::UnsupportedPlatform),
+            };
+            desktop
+                .run_mutation(async {
+                    c.call(protocol::move_request(point)).await?;
+                    c.call(protocol::scroll_request(&opts)).await.map(|_| ())
+                })
+                .await
         }
     }
 }
@@ -211,6 +222,8 @@ pub async fn hold_key(
     match remote {
         None => handle.hold_key(chord, duration_ms).await,
         Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
             let c = client(cua, id).await?;
             let keys: Vec<String> = chord
                 .0
@@ -218,14 +231,23 @@ pub async fn hold_key(
                 .map(|t| t.trim().to_string())
                 .filter(|t| !t.is_empty())
                 .collect();
-            for k in &keys {
-                c.call(protocol::key_transition_request(k, true)).await?;
+            if keys.is_empty() {
+                return Err(AutomationError::BackendError {
+                    message: "key chord is empty".into(),
+                });
             }
-            tokio::time::sleep(std::time::Duration::from_millis(duration_ms as u64)).await;
-            for k in keys.iter().rev() {
-                c.call(protocol::key_transition_request(k, false)).await?;
-            }
-            Ok(())
+            desktop
+                .run_mutation(async {
+                    for k in &keys {
+                        c.call(protocol::key_transition_request(k, true)).await?;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(duration_ms as u64)).await;
+                    for k in keys.iter().rev() {
+                        c.call(protocol::key_transition_request(k, false)).await?;
+                    }
+                    Ok(())
+                })
+                .await
         }
     }
 }
@@ -240,16 +262,25 @@ pub async fn mouse_button(
     match remote {
         None => handle.mouse_button(button, transition).await,
         Some(id) => {
+            let mut desktop = cua.agent_guard(id).await?;
+            desktop.sessions = super::session::UiSessionManager::default();
             // cua x/y are optional; omitting them acts at the current cursor.
             let command = match transition {
                 ButtonTransition::Down => "mouse_down",
                 ButtonTransition::Up => "mouse_up",
             };
-            client(cua, id)
-                .await?
-                .call_simple(command, json!({ "button": button_name(button) }))
-                .await
-                .map(|_| ())
+            let c = client(cua, id).await?;
+            desktop
+                .run_mutation(c.call_simple(command, json!({ "button": button_name(button) })))
+                .await?;
+            match transition {
+                ButtonTransition::Down if !desktop.held_mouse_buttons.contains(&button) => {
+                    desktop.held_mouse_buttons.push(button)
+                }
+                ButtonTransition::Up => desktop.held_mouse_buttons.retain(|held| *held != button),
+                _ => {}
+            }
+            Ok(())
         }
     }
 }
@@ -262,6 +293,7 @@ pub async fn cursor_position(
     match remote {
         None => handle.cursor_position().await,
         Some(id) => {
+            let _desktop = cua.agent_guard(id).await?;
             let resp = client(cua, id)
                 .await?
                 .call_simple(protocol::CURSOR_POSITION, json!({}))
@@ -284,6 +316,10 @@ pub async fn read_tree(
     match remote {
         None => handle.read_tree(root, opts).await,
         Some(id) => {
+            if root.is_some() {
+                return Err(AutomationError::UnsupportedPlatform);
+            }
+            let _desktop = cua.agent_guard(id).await?;
             let resp = client(cua, id)
                 .await?
                 .call_simple(protocol::ACCESSIBILITY_TREE, json!({}))
@@ -377,8 +413,13 @@ fn json_dimension(value: Option<i64>) -> i32 {
     value.unwrap_or(0).clamp(0, i64::from(i32::MAX)) as i32
 }
 
-fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
-    fn one(node: &Value, depth: usize, index: usize) -> ElementInfo {
+pub(crate) fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
+    fn one(node: &Value, depth: usize, next: &mut usize) -> Option<ElementInfo> {
+        if depth > 64 || *next >= super::session::INSPECTOR_TREE_MAX_NODES || !node.is_object() {
+            return None;
+        }
+        let index = *next;
+        *next += 1;
         let bounds = node.get("bounds");
         let bounding_rect = bounds.map(|b| Rect {
             x: json_coord(b.get("x").and_then(|v| v.as_i64())),
@@ -388,35 +429,38 @@ fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
         });
         let children = node.get("children").and_then(|c| c.as_array()).map(|arr| {
             arr.iter()
-                .enumerate()
-                .map(|(i, child)| one(child, depth + 1, i))
+                .filter_map(|child| one(child, depth + 1, next))
                 .collect::<Vec<_>>()
         });
-        ElementInfo {
-            element_ref: ElementRef(format!("cua:{depth}:{index}")),
-            name: node.get("title").and_then(|v| v.as_str()).map(String::from),
+        Some(ElementInfo {
+            element_ref: ElementRef(format!("cua:{index}")),
+            name: node
+                .get("title")
+                .or_else(|| node.get("name"))
+                .and_then(|v| v.as_str())
+                .map(String::from),
             automation_id: None,
             control_type: node.get("role").and_then(|v| v.as_str()).map(String::from),
             class_name: None,
             bounding_rect,
-            is_enabled: true,
-            is_focused: false,
+            is_enabled: node.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+            is_focused: node
+                .get("focused")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             process_id: None,
             process_name: None,
             window_title: None,
             children,
-        }
+        })
     }
-
-    if node.is_object() {
-        vec![one(node, depth, 0)]
-    } else if let Some(arr) = node.as_array() {
+    let mut next = 0;
+    if let Some(arr) = node.as_array() {
         arr.iter()
-            .enumerate()
-            .map(|(i, n)| one(n, depth, i))
+            .filter_map(|n| one(n, depth, &mut next))
             .collect()
     } else {
-        Vec::new()
+        one(node, depth, &mut next).into_iter().collect()
     }
 }
 
@@ -424,6 +468,19 @@ fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn flatten_a11y_assigns_distinct_refs_across_sibling_subtrees() {
+        let nodes = flatten_a11y(
+            &json!({"children":[{"children":[{"title":"a"}]},{"children":[{"title":"b"}]}]}),
+            0,
+        );
+        let parents = nodes[0].children.as_ref().unwrap();
+        assert_ne!(
+            parents[0].children.as_ref().unwrap()[0].element_ref,
+            parents[1].children.as_ref().unwrap()[0].element_ref
+        );
+    }
 
     #[test]
     fn flatten_a11y_saturates_untrusted_bounds_without_wrapping() {

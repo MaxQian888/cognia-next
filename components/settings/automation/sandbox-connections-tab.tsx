@@ -23,12 +23,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
+import { DEFAULT_DOCKER_SANDBOX_IMAGE } from "@/lib/sandbox/docker-adapter"
 import { hasSandboxAdapter } from "@/lib/sandbox/adapter-registry"
 import type { SandboxHealthStatus } from "@/lib/db/sandbox-connections"
 import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
 import { SandboxConnectionSheet } from "./sandbox-connection-sheet"
-
-const DEFAULT_IMAGE = "ghcr.io/trycua/cua-xfce:latest"
 
 function statusVariant(status: SandboxHealthStatus): "default" | "secondary" | "destructive" {
   if (status === "ok") return "default"
@@ -69,7 +68,7 @@ export function SandboxConnectionsTab() {
     useSandboxConnections()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState("")
-  const [image, setImage] = useState(DEFAULT_IMAGE)
+  const [image, setImage] = useState(DEFAULT_DOCKER_SANDBOX_IMAGE)
   const [host, setHost] = useState("127.0.0.1")
   const [networkMode, setNetworkMode] = useState("")
   const [cpus, setCpus] = useState("")
@@ -94,7 +93,7 @@ export function SandboxConnectionsTab() {
 
   function resetForm() {
     setName("")
-    setImage(DEFAULT_IMAGE)
+    setImage(DEFAULT_DOCKER_SANDBOX_IMAGE)
     setHost("127.0.0.1")
     setNetworkMode("")
     setCpus("")
@@ -199,6 +198,7 @@ export function SandboxConnectionsTab() {
             <div className="space-y-1">
               <Label htmlFor="cua-image">{t("image")}</Label>
               <Input id="cua-image" value={image} onChange={(e) => setImage(e.target.value)} />
+              <p className="text-xs text-muted-foreground">{t("imageHelp")}</p>
             </div>
             <div className="space-y-1">
               <Label htmlFor="cua-host">{t("host")}</Label>
@@ -291,7 +291,7 @@ export function SandboxConnectionsTab() {
         desktop={desktop}
         actions={{ provision, start, suspend, resume, stop, refreshHealth, remove }}
         onError={(message) => toast.error(message)}
-        onDeleted={() => setSelectedId(null)}
+        onDeleted={(id) => setSelectedId((current) => (current === id ? null : current))}
       />
     </Card>
   )

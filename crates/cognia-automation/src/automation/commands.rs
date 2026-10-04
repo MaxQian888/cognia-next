@@ -466,7 +466,10 @@ pub async fn desktop_subscribe_events(
         state,
         ctx,
         "subscribe_events",
-        state.handle.subscribe_events(filter.clone()).await
+        match ctx.remote_connection_id() {
+            Some(_) => Err(AutomationError::UnsupportedPlatform),
+            None => state.handle.subscribe_events(filter.clone()).await,
+        }
     )
 }
 
@@ -485,7 +488,10 @@ pub async fn desktop_unsubscribe(
         state,
         ctx,
         "unsubscribe",
-        state.handle.unsubscribe(sub.clone()).await
+        match ctx.remote_connection_id() {
+            Some(_) => Err(AutomationError::UnsupportedPlatform),
+            None => state.handle.unsubscribe(sub.clone()).await,
+        }
     )
 }
 
@@ -508,7 +514,16 @@ pub async fn desktop_list_apps(
     ctx: Option<CallContext>,
 ) -> std::result::Result<Vec<super::session::ResolvedApplication>, String> {
     let ctx = ctx.unwrap_or_default();
-    command_body!(app, state, ctx, "list_apps", state.handle.list_apps().await)
+    command_body!(
+        app,
+        state,
+        ctx,
+        "list_apps",
+        match ctx.remote_connection_id() {
+            Some(id) => state.cua.remote_list_apps(id).await,
+            None => state.handle.list_apps().await,
+        }
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -558,17 +573,34 @@ pub async fn desktop_get_app_state(
         ctx,
         "get_app_state",
         async {
-            let mut revision = state
-                .handle
-                .get_app_state(
-                    session_id.clone(),
-                    turn_binding.clone(),
-                    locator.clone(),
-                    options.clone(),
-                    redact_enabled,
-                    scaling,
-                )
-                .await?;
+            let mut revision = match ctx.remote_connection_id() {
+                Some(id) => {
+                    state
+                        .cua
+                        .remote_get_app_state(
+                            id,
+                            session_id.clone(),
+                            turn_binding.clone(),
+                            locator.clone(),
+                            options.clone(),
+                            scaling,
+                        )
+                        .await?
+                }
+                None => {
+                    state
+                        .handle
+                        .get_app_state(
+                            session_id.clone(),
+                            turn_binding.clone(),
+                            locator.clone(),
+                            options.clone(),
+                            redact_enabled,
+                            scaling,
+                        )
+                        .await?
+                }
+            };
             // Runs after redaction, so a redacted frame is compared as the
             // model will actually see it: two consecutive redacted captures
             // are one black image and dedupe correctly.
@@ -617,16 +649,24 @@ pub async fn desktop_query_elements(
         state,
         ctx,
         "query_elements",
-        state
-            .handle
-            .query_elements(
-                session_id.clone(),
-                lineage_id.clone(),
-                revision,
-                locator.clone(),
-                limit,
-            )
-            .await
+        match ctx.remote_connection_id() {
+            Some(id) =>
+                state
+                    .cua
+                    .remote_query_elements(id, &session_id, &lineage_id, revision, &locator, limit)
+                    .await,
+            None =>
+                state
+                    .handle
+                    .query_elements(
+                        session_id.clone(),
+                        lineage_id.clone(),
+                        revision,
+                        locator.clone(),
+                        limit
+                    )
+                    .await,
+        }
     )
 }
 
@@ -664,10 +704,18 @@ pub async fn desktop_zoom(
         state,
         ctx,
         "zoom",
-        state
-            .handle
-            .zoom_region(session_id.clone(), lineage_id.clone(), revision, region)
-            .await
+        match ctx.remote_connection_id() {
+            Some(id) =>
+                state
+                    .cua
+                    .remote_zoom(id, &session_id, &lineage_id, revision, region)
+                    .await,
+            None =>
+                state
+                    .handle
+                    .zoom_region(session_id.clone(), lineage_id.clone(), revision, region)
+                    .await,
+        }
     )
 }
 
@@ -703,10 +751,18 @@ pub async fn desktop_expand_element(
         state,
         ctx,
         "expand_element",
-        state
-            .handle
-            .expand_element(handle.clone(), continuation_token.clone(), limit)
-            .await
+        match ctx.remote_connection_id() {
+            Some(id) =>
+                state
+                    .cua
+                    .remote_expand(id, &handle, continuation_token.as_deref(), limit)
+                    .await,
+            None =>
+                state
+                    .handle
+                    .expand_element(handle.clone(), continuation_token.clone(), limit)
+                    .await,
+        }
     )
 }
 
@@ -733,10 +789,18 @@ pub async fn desktop_perform_action(
         state,
         ctx,
         "perform_action",
-        state
-            .handle
-            .perform_action(request.clone(), turn_binding.clone())
-            .await
+        match ctx.remote_connection_id() {
+            Some(id) =>
+                state
+                    .cua
+                    .remote_perform_action(id, request.clone(), &turn_binding)
+                    .await,
+            None =>
+                state
+                    .handle
+                    .perform_action(request.clone(), turn_binding.clone())
+                    .await,
+        }
     )
 }
 

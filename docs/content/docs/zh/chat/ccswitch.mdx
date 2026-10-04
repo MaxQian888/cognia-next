@@ -5,15 +5,12 @@ description: 只读访问 CCSwitch 的 SQLite 数据库，一键切换 50+ 第�
 
 # CCSwitch 互操作
 
-CCSwitch 是社区开源的 Claude 多账号切换器。Cognia 以只读方式打开它的 `~/.cc-switch/cc-switch.db`，把 50+ 服务商、MCP server、prompt、skill 直接呈现在 Settings 里，并能在同一动作内同时切换 cognia-next 自己 + 任意一组外部 agent（目前 v1 只写 `claude-code` 的 `~/.claude/settings.json`）。我们 **从不写** CCSwitch 的数据库。
+CCSwitch 是社区开源的 Claude 多账号切换器。Cognia 以只读方式打开 `~/.cc-switch/cc-switch.db`，在 Settings 中展示其 50+ 服务商、MCP server、prompt 和 skill。用户可通过同一操作切换 cognia-next 的配置和一组外部 agent 的配置；目前 v1 仅写入 `claude-code` 的 `~/.claude/settings.json`。Cognia **从不写入** CCSwitch 数据库。
 
 CCSwitch 互操作有两个独立 capability：
 
-1. **只读浏览** —— 把 CCSwitch 数据库里的 4 张表直接展示在 settings 中，提供一键"导入到
-   cognia-next" 的捷径。
-2. **协同切换** —— 当用户选某个 CCSwitch provider 作为当前 active 时，把它的 API key 和
-   base URL 同时写入 (a) cognia-next 自己的 `AppSettings`，(b) 用户勾选的每个外部 agent
-   的 settings 文件——这样切完一次，cognia-next 和 Claude Code CLI 用同一套凭据。
+1. **只读浏览** —— 把 CCSwitch 数据库里的 4 张表直接展示在 settings 中，提供一键"导入到 cognia-next" 的捷径。
+2. **协同切换** —— 当用户选某个 CCSwitch provider 作为当前 active 时，把它的 API key 和 base URL 同时写入 (a) cognia-next 自己的 `AppSettings`，(b) 用户勾选的每个外部 agent 的 settings 文件——这样切完一次，cognia-next 和 Claude Code CLI 用同一套凭据。
 
 <Callout type="warn">
   CCSwitch 互操作与订阅账号中心有独立的所有权边界。CCSwitch 行是外部只读来源，只有用户明确
@@ -94,9 +91,7 @@ flowchart LR
 
 ## 数据库探活
 
-`src-tauri/src/ccswitch/paths.rs` 把 DB 路径定义为 `~/.cc-switch/cc-switch.db`——跨 OS
-一致。CCSwitch 自身允许通过云同步目录重定向这条路径（Dropbox / iCloud / WebDAV），
-v1 不跟随重定向；用户需要把 CCSwitch 切回默认位置。
+`src-tauri/src/ccswitch/paths.rs` 把 DB 路径定义为 `~/.cc-switch/cc-switch.db`——跨 OS 一致。CCSwitch 自身允许通过云同步目录重定向这条路径（Dropbox / iCloud / WebDAV），v1 不跟随重定向；用户需要把 CCSwitch 切回默认位置。
 
 `ccswitch_status()` 永远成功，返回三态：
 
@@ -123,8 +118,7 @@ let conn = Connection::open_with_flags(
 )?;
 ```
 
-`SQLITE_OPEN_NO_MUTEX` 是因为 CCSwitch 是单线程写入者；只读连接不需要 sqlite 内置的
-连接锁。
+`SQLITE_OPEN_NO_MUTEX` 是因为 CCSwitch 是单线程写入者；只读连接不需要 sqlite 内置的连接锁。
 
 ## 五个 Tauri 命令
 
@@ -139,9 +133,7 @@ ccswitchListSkills() // CcswitchSkill[]
 writeClaudeSettingsEnv(envUpdates)
 ```
 
-`writeClaudeSettingsEnv` 的目标是 `~/.claude/settings.json` 的 `env` 块——也就是
-Claude Code CLI 读环境变量的地方，**不是** `~/.claude.json`（那是 MCP 配置）。Rust 侧
-负责路径解析、原子写入 + 备份。
+`writeClaudeSettingsEnv` 的目标是 `~/.claude/settings.json` 的 `env` 块——也就是 Claude Code CLI 读环境变量的地方，**不是** `~/.claude.json`（那是 MCP 配置）。Rust 侧负责路径解析、原子写入 + 备份。
 
 ## 切换流程
 
@@ -180,8 +172,7 @@ function envUpdatesForProvider(provider: CcswitchProvider) {
 
 ## detectActive —— 漂移检测
 
-settings 重新获焦时 UI 调用 `detectActive()` 找出每个 surface 当前用的 CCSwitch
-provider id：
+settings 重新获焦时 UI 调用 `detectActive()` 找出每个 surface 当前用的 CCSwitch provider id：
 
 ```ts title="lib/ccswitch/types.ts"
 interface ActiveProviderState {
@@ -191,14 +182,11 @@ interface ActiveProviderState {
 }
 ```
 
-当 `drift: true` 时 Overview tab 顶部渲染漂移横幅，让用户重新选 active provider 或忽略。
-"漂移"通常发生在用户用 CCSwitch GUI 直接切了一次而没经过 cognia-next 的 picker。
+当 `drift: true` 时 Overview tab 顶部渲染漂移横幅，让用户重新选 active provider 或忽略。"漂移"通常发生在用户用 CCSwitch GUI 直接切了一次而没经过 cognia-next 的 picker。
 
 ## 与既有导入路径的衔接
 
-我们 **不为 CCSwitch 单独建表**——MCP server、prompt、skill 都映射到 cognia 自己的
-对应 Dexie 表 (`mcpServers` / `promptPresets` / `skills`)。`lib/ccswitch/import.ts`
-是 4 个 adapter：
+我们 **不为 CCSwitch 单独建表**——MCP server、prompt、skill 都映射到 cognia 自己的对应 Dexie 表 (`mcpServers` / `promptPresets` / `skills`)。`lib/ccswitch/import.ts` 是 4 个 adapter：
 
 | 源类型              | 转换成           | 目标导入函数           |
 | ------------------- | ---------------- | ---------------------- |
@@ -207,8 +195,7 @@ interface ActiveProviderState {
 | `CcswitchSkill`     | 直接字段映射     | `createSkill`          |
 | `CcswitchProvider`  | 走 `applySwitch` | （不导入，只 ref）     |
 
-provider 不导入——只是被引用为 active：写到 `AppSettings.activeProviderId = "ccswitch:<id>"`
-后，sidecar 在 spawn 时直接拿当前 env 用，没有 catalog 条目要维护。
+provider 不导入——只是被引用为 active：写到 `AppSettings.activeProviderId = "ccswitch:<id>"` 后，sidecar 在 spawn 时直接拿当前 env 用，没有 catalog 条目要维护。
 
 ## Settings UI 六个 tab
 
@@ -252,15 +239,7 @@ provider 不导入——只是被引用为 active：写到 `AppSettings.activePr
 
 ## 已知限制
 
-- **v1 只写 `claude-code`**——其他 agent（codex / gemini / opencode / openclaw）在切换
-  dialog 中以 `unsupported: true` 灰色展示。增加新 agent 的步骤：在 `SUPPORTED_AGENTS`
-  Set 中加入、在 `targetPathFor` 中给出路径、并扩展 Rust 写命令以支持新文件格式。
-- **两个写入者风险**——CCSwitch 自身也在写 `~/.claude/settings.json`；我们靠 `detectActive`
-  在获焦时检测漂移来收敛，但并发写入仍可能产生 race。`writeClaudeSettingsEnv` 写前会先
-  备份（返回 `backupPath`）以便回滚。
-- **CCSwitch 重定向目录**——用户用 Dropbox / iCloud 把 `.cc-switch` 重定向到其他位置时
-  我们看不到。需要用户把 CCSwitch 切回默认位置，或我们后续支持 CCSwitch 的 marker
-  文件协议。
-- **OAuth 优先级**——已投影的 Claude OAuth bearer 优先于 CCSwitch provider。明确执行
-  CCSwitch 切换前，请先在账号中心使用「停用」。这不会登出 Claude Code 或撤销 OAuth 凭据，
-  只会清除 Cognia 的 active 投影。
+- **v1 只写 `claude-code`**——其他 agent（codex / gemini / opencode / openclaw）在切换 dialog 中以 `unsupported: true` 灰色展示。增加新 agent 的步骤：在 `SUPPORTED_AGENTS` Set 中加入、在 `targetPathFor` 中给出路径、并扩展 Rust 写命令以支持新文件格式。
+- **两个写入者风险**——CCSwitch 自身也在写 `~/.claude/settings.json`；我们靠 `detectActive` 在获焦时检测漂移来收敛，但并发写入仍可能产生 race。`writeClaudeSettingsEnv` 写前会先备份（返回 `backupPath`）以便回滚。
+- **CCSwitch 重定向目录**——用户用 Dropbox / iCloud 把 `.cc-switch` 重定向到其他位置时我们看不到。需要用户把 CCSwitch 切回默认位置，或我们后续支持 CCSwitch 的 marker 文件协议。
+- **OAuth 优先级**——已投影的 Claude OAuth bearer 优先于 CCSwitch provider。明确执行 CCSwitch 切换前，请先在账号中心使用「停用」。这不会登出 Claude Code 或撤销 OAuth 凭据，只会清除 Cognia 的 active 投影。

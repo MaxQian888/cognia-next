@@ -12,7 +12,7 @@
  * rather than offered and then refused.
  */
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ActivityIcon,
@@ -26,7 +26,18 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
+import { SandboxDesktopViewer } from "./sandbox-desktop-viewer"
 import { supportsSandboxOperation } from "@/lib/sandbox/connection-capabilities"
 import { projectSandboxConnectionCapabilities } from "@/lib/sandbox/runtime-availability"
 import type {
@@ -54,7 +65,7 @@ export interface SandboxConnectionSheetProps {
   actions: SandboxConnectionActions
   onError: (message: string) => void
   /** Closed after a successful delete, since the row is gone. */
-  onDeleted?: () => void
+  onDeleted?: (id: string) => void
 }
 
 interface ActionSpec {
@@ -106,7 +117,12 @@ const ACTIONS: ActionSpec[] = [
   },
 ]
 
-export function SandboxConnectionSheet({
+export function SandboxConnectionSheet(props: SandboxConnectionSheetProps) {
+  if (!props.connection) return null
+  return <SandboxConnectionDetail key={`${props.connection.id}:${props.open}`} {...props} />
+}
+
+function SandboxConnectionDetail({
   connection,
   open,
   onOpenChange,
@@ -117,6 +133,15 @@ export function SandboxConnectionSheet({
 }: SandboxConnectionSheetProps) {
   const t = useTranslations("automation.sandboxConnections")
   const [busy, setBusy] = useState<SandboxLifecycleOperation | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const alive = useRef(true)
+  const pending = useRef(false)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
 
   if (!connection) return null
 
@@ -124,18 +149,22 @@ export function SandboxConnectionSheet({
   const docker = connection.config.provider === "docker" ? connection.config : null
 
   async function run(spec: ActionSpec) {
-    if (!connection) return
+    if (!connection || pending.current || !alive.current) return
+    pending.current = true
     setBusy(spec.operation)
     try {
       await spec.run(actions, connection.id)
+      if (!alive.current) return
       if (spec.operation === "delete") {
+        setConfirmDelete(false)
         onOpenChange(false)
-        onDeleted?.()
+        onDeleted?.(connection.id)
       }
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error))
+      if (alive.current) onError(error instanceof Error ? error.message : String(error))
     } finally {
-      setBusy(null)
+      pending.current = false
+      if (alive.current) setBusy(null)
     }
   }
 
@@ -147,6 +176,16 @@ export function SandboxConnectionSheet({
       description={t(`state.${connection.state}`)}
     >
       <div className="space-y-5 overflow-y-auto px-4 pb-6" data-testid="sandbox-connection-detail">
+        {docker && open ? (
+          <SandboxDesktopViewer
+            key={connection.id}
+            connectionId={connection.id}
+            containerId={docker.containerId}
+            enabled={
+              desktop && connection.state === "running" && supportsSandboxOperation(live, "gui")
+            }
+          />
+        ) : null}
         <section className="space-y-2">
           <h3 className="text-sm font-medium">{t("lifecycleTitle")}</h3>
           <p className="text-xs text-muted-foreground">{t("persistsAfterQuit")}</p>
@@ -168,7 +207,9 @@ export function SandboxConnectionSheet({
                           ? t("unsupportedAction")
                           : t("desktopOnly")
                     }
-                    onClick={() => void run(spec)}
+                    onClick={() =>
+                      spec.operation === "delete" ? setConfirmDelete(true) : void run(spec)
+                    }
                   >
                     <spec.icon className="mr-2 size-4" />
                     {t(spec.labelKey)}
@@ -197,6 +238,34 @@ export function SandboxConnectionSheet({
           </section>
         ) : null}
       </div>
+      <AlertDialog
+        open={confirmDelete}
+        onOpenChange={(next) => {
+          if (!pending.current) setConfirmDelete(next)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("deleteConfirmTitle", { name: connection.name })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteConfirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy !== null}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy !== null}
+              onClick={(event) => {
+                event.preventDefault()
+                const spec = ACTIONS.find((action) => action.operation === "delete")!
+                void run(spec)
+              }}
+            >
+              {busy === "delete" ? t("deleting") : t("deleteConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ResponsiveDetailSheet>
   )
 }
