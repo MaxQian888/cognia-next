@@ -166,6 +166,14 @@ export function useBrowserPaneWebview(
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncRef = useRef<() => void>(() => undefined)
   const createdRef = useRef(false)
+  /** The native create in flight, settled either way; null when none is. */
+  const createInFlightRef = useRef<Promise<void> | null>(null)
+  /**
+   * Whether the pane is mounted. A StrictMode remount (development) runs the
+   * unmount cleanup and the mount again in one commit; the teardown waits a
+   * microtask and stands down when the pane came straight back.
+   */
+  const aliveRef = useRef(false)
   const lastUrlRef = useRef<string | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
   const urlRef = useRef(url)
@@ -231,19 +239,25 @@ export function useBrowserPaneWebview(
       // Creating IS the navigation, so the pending request is satisfied here
       // too — otherwise the first render after creation would navigate again.
       appliedNonceRef.current = navigateNonceRef.current
-      void browserClient.embedCreate(target, rect).then(
+      const created = browserClient.embedCreate(target, rect).then(
         () => {
+          // Unmounted or dispossessed while creating: the teardown (or the new
+          // owner) decides what happens to the webview, not this pane.
+          if (!aliveRef.current || activeLease?.token !== leaseToken) return
           retryAttemptRef.current = 0
           onReadyRef.current?.()
           // Created visible at `rect`; if the caller wants it hidden (e.g. the
           // first-load placeholder is showing), park it immediately.
           if (!visibleRef.current) {
-            void browserClient.embedSetVisible(false, rectRef.current ?? rect).catch(() => {})
+            void Promise.resolve()
+              .then(() => browserClient.embedSetVisible(false, rectRef.current ?? rect))
+              .catch(() => {})
           }
         },
         (error: unknown) => {
           createdRef.current = false
           releaseLease(leaseToken, false)
+          if (!aliveRef.current) return
           if (String(error).includes("owned by another Cognia surface")) {
             if (retryTimerRef.current === null) {
               const delay = Math.min(250 * 2 ** retryAttemptRef.current, 4_000)
@@ -258,6 +272,14 @@ export function useBrowserPaneWebview(
           }
         }
       )
+      const settled: Promise<void> = created.then(
+        () => undefined,
+        () => undefined
+      )
+      void settled.finally(() => {
+        if (createInFlightRef.current === settled) createInFlightRef.current = null
+      })
+      createInFlightRef.current = settled
     } else if (
       target !== lastUrlRef.current ||
       navigateNonceRef.current !== appliedNonceRef.current
@@ -335,22 +357,36 @@ export function useBrowserPaneWebview(
       .catch(() => {})
   }, [visible])
 
+  // Unmount: destroy the webview and give the lease back. Never while a create
+  // is still in flight — the native side would run the destroy first, then add
+  // the webview, leaving an ownerless child in the main window that breaks
+  // every later `browser_embed_*` command ("not a WebviewWindow").
   useEffect(() => {
+    aliveRef.current = true
     return () => {
-      if (retryTimerRef.current !== null) {
-        clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = null
-      }
-      if (activeLease?.token === leaseToken) {
-        if (createdRef.current) {
-          void browserClient
-            .embedDestroy()
-            .catch(() => {})
-            .finally(() => releaseLease(leaseToken))
-        } else {
-          releaseLease(leaseToken)
+      aliveRef.current = false
+      queueMicrotask(() => {
+        if (aliveRef.current) return // StrictMode remount: still this pane's webview
+        if (retryTimerRef.current !== null) {
+          clearTimeout(retryTimerRef.current)
+          retryTimerRef.current = null
         }
-      }
+        const finish = () => {
+          if (aliveRef.current || activeLease?.token !== leaseToken) return
+          if (createdRef.current) {
+            createdRef.current = false
+            void browserClient
+              .embedDestroy()
+              .catch(() => {})
+              .finally(() => releaseLease(leaseToken))
+          } else {
+            releaseLease(leaseToken)
+          }
+        }
+        const inFlight = createInFlightRef.current
+        if (inFlight) void inFlight.then(finish, finish)
+        else finish()
+      })
     }
   }, [leaseToken])
 

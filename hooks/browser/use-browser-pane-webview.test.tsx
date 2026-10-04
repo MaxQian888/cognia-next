@@ -289,13 +289,83 @@ it("backs off instead of spinning while another native window owns the lease", a
   }
 })
 
-it("destroys the webview on unmount", () => {
+it("destroys the webview on unmount", async () => {
   const { unmount } = renderHook(() =>
     useBrowserPaneWebview(ref, { url: "http://localhost:3000/" })
   )
   deliverRect()
+  await settle()
   unmount()
+  await settle()
   expect(browserClient.embedDestroy).toHaveBeenCalled()
+})
+
+describe("unmounting while the webview is still being created", () => {
+  const deferCreate = () => {
+    let resolve!: () => void
+    let reject!: (error: Error) => void
+    ;(browserClient.embedCreate as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise<string>((ok, fail) => {
+          resolve = () => ok("browser-embed")
+          reject = fail
+        })
+    )
+    return { resolve: () => resolve(), reject: (error: Error) => reject(error) }
+  }
+
+  // The native side would run the destroy first and then add the webview,
+  // leaving an ownerless child that breaks every later embed command.
+  it("destroys only after the create has finished", async () => {
+    const create = deferCreate()
+    const onReady = jest.fn()
+    const { unmount } = renderHook(() =>
+      useBrowserPaneWebview(ref, { url: "http://localhost:3000/", onReady, visible: false })
+    )
+    deliverRect()
+    unmount()
+    await settle()
+    expect(browserClient.embedDestroy).not.toHaveBeenCalled()
+
+    await act(async () => {
+      create.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(browserClient.embedDestroy).toHaveBeenCalledTimes(1)
+    // The unmounted pane neither reports readiness nor parks the webview.
+    expect(onReady).not.toHaveBeenCalled()
+    expect(browserClient.embedSetVisible).not.toHaveBeenCalled()
+
+    // The lease is free again: the next pane creates its own webview.
+    const next = mountPane("http://localhost:4173/", "next")
+    next.deliverRect()
+    expect(browserClient.embedCreate).toHaveBeenLastCalledWith("http://localhost:4173/", RECT)
+    next.unmount()
+    await settle()
+  })
+
+  it("does not retry a contended create for a pane that is gone", async () => {
+    jest.useFakeTimers()
+    try {
+      const create = deferCreate()
+      const onError = jest.fn()
+      const { unmount } = renderHook(() =>
+        useBrowserPaneWebview(ref, { url: "http://localhost:3000/", onError })
+      )
+      deliverRect()
+      unmount()
+      await act(async () => {
+        create.reject(new Error("embedded browser is owned by another Cognia surface"))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      act(() => jest.advanceTimersByTime(5_000))
+      expect(browserClient.embedCreate).toHaveBeenCalledTimes(1)
+      expect(onError).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 })
 
 it("leases the singleton webview and hands it to the next mounted owner", async () => {
