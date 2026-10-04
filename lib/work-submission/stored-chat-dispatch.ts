@@ -1,6 +1,6 @@
 import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 
-import { sendPrompt } from "@/lib/claude/ipc"
+import { sendPrompt, TranscriptRuntimeRecoveryError } from "@/lib/claude/ipc"
 import { getWorkSubmissionBundle, type WorkSubmissionRow } from "@/lib/db/work-submissions"
 import { abortRouterFusionSend, prepareRouterFusionSend } from "@/lib/router-fusion/gate/chat-send"
 import { enforceCostBudget, isCostBudgetConfigured } from "@/lib/usage/cost-budget-gate"
@@ -126,6 +126,7 @@ export function createStoredChatDispatch(
     try {
       await sendPrompt(row.sessionId, input.content as SendContent, sendOptions, {
         commandId: row.triggerId ?? row.id,
+        transcriptRuntime: "frozen",
       })
     } catch (error) {
       await abortRouterFusionSend(
@@ -133,6 +134,7 @@ export function createStoredChatDispatch(
         sendOptions,
         error instanceof Error ? error.message : String(error)
       )
+      if (error instanceof TranscriptRuntimeRecoveryError) return recoveryRequired(error.code)
       throw error
     }
     return { status: "dispatched" }

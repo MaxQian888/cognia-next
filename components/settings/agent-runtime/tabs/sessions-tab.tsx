@@ -1,25 +1,41 @@
 "use client"
 
 /**
- * Sessions tab — visualisation of `lib/db/sessions` rows enriched with
- * per-session token + USD totals from `lib/db/session-usage`.
+ * Settings → Agent Runtime → Sessions: the RUNTIME view of conversations.
  *
- * Stage 2 of the ClaudeCode 完整化 plan. The slash commands `/sessions`,
- * `/resume`, `/cost` already expose this data inside chat; the tab is the
- * GUI-friendly counterpart so users don't have to type a command to see
- * what's running. Resume / Fork / Rename / Delete map to the existing
- * helpers in `lib/db/sessions.ts` so the tab is purely presentational.
+ * Conversation history is managed on the Conversations page (`/conversations`,
+ * ADR-0213), which is built on the sidebar's list model and its shared row
+ * actions (teardown on delete, `titleAuto: false` on rename, Host routing,
+ * archive with Undo). This tab used to be a second, weaker manager that
+ * bypassed all of that, so it no longer renames, deletes or "resumes". It
+ * answers the runtime questions instead, in three blocks:
+ *
+ * 1. Conversation history — live active/archived counts across every
+ *    workspace and the way into the Conversations page and its archive.
+ * 2. SDK-bound conversations — the exposed conversations that resume a native
+ *    Claude Agent SDK session, with their storage backend, last activity and
+ *    recorded usage (priced through `aggregateBySession`, so unpriced turns
+ *    render as a lower bound rather than a settled figure). Per row: open the
+ *    conversation (through the session link, which switches workspace), fork
+ *    the raw SDK session, or unlink it.
+ * 3. Native SDK sessions — `SdkSessionManager`, the SDK's own session store.
  */
 
-import { useEffect, useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
-import { GitBranchIcon, PencilIcon, PlayIcon, Trash2Icon } from "lucide-react"
+import { useCallback, useId, useMemo, useState, type ReactNode } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { useFormatter, useNow, useTranslations } from "next-intl"
+import { ExternalLinkIcon, GitBranchIcon, MessagesSquareIcon, UnlinkIcon } from "lucide-react"
+import { toast } from "sonner"
+import type { ChatSession } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { LoadingRegion } from "@/components/ui/loading-region"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,14 +47,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
   Table,
   TableBody,
   TableCell,
@@ -46,135 +54,169 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { toast } from "sonner"
-
-import {
-  deleteSession,
-  forkSessionFromParent,
-  listSessions,
-  updateSession,
-} from "@/lib/db/sessions"
-import { getDb } from "@/lib/db/schema"
-import type { SessionUsageRow } from "@/lib/db/session-usage"
-import type { ChatSession } from "@cognia/agent-config-types"
-import { useChatStore } from "@/stores/chat"
-import { loggers } from "@cognia/logging"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { SdkSessionManager } from "@/components/settings/agent-runtime/sdk-session-manager"
+import {
+  countExposedConversations,
+  filterSdkBoundConversations,
+  selectSdkBoundConversations,
+  sessionLastActivity,
+} from "@/components/settings/agent-runtime/sdk-bound-conversations"
+import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
+import { isSessionHandoffLocked } from "@/hooks/chat/use-session-write"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
+import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
+import { clearSessionSdkLink, forkSessionFromParent, listSessions } from "@/lib/db/sessions"
+import { formatTokens } from "@/lib/observability/format-utils"
+import { formatBucketCost, UNKNOWN_COST } from "@/lib/usage/session-analytics"
+import { useSessionUsageSummaries } from "@/hooks/usage/use-session-usage-summaries"
+import { conversationManagerHref } from "@/lib/conversations/conversation-manager"
+import { cn } from "@/lib/utils"
+import { useChatStore } from "@/stores/chat"
 
-interface RowSummary {
-  session: ChatSession
-  turns: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  costUsd: number
+const EMPTY_SESSIONS: ChatSession[] = []
+
+/** Open a conversation the way every other "open this chat" link does. */
+function conversationHref(sessionId: string): string {
+  return `/${buildSessionHref(sessionId)}`
 }
 
 export function SessionsTab() {
-  const t = useTranslations("settings.agentRuntimeSection.sessions")
-  const setActiveSession = useChatStore((s) => s.setActiveSession)
-  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  // One live read of every session row, shared by both blocks. `undefined`
+  // until the first result lands — the blocks render that as loading, never
+  // as an empty table.
+  const sessions = useClientLiveQuery(() => listSessions(), [], EMPTY_SESSIONS)
 
-  // Live read of every session row, sorted newest-first by Dexie's index.
-  const liveSessions = useLiveQuery(() => listSessions(), [])
-  const sessions = useMemo(() => liveSessions ?? [], [liveSessions])
+  return (
+    <div className="min-w-0" data-testid="sessions-tab">
+      <SettingsStack>
+        <ConversationManagerEntry sessions={sessions} />
+        <SdkBoundConversations sessions={sessions} />
+        <SdkSessionManager />
+      </SettingsStack>
+    </div>
+  )
+}
 
-  // Live read of every usage row. Aggregated client-side (typically <10k rows).
-  const liveUsage = useLiveQuery(() => getDb().sessionUsage.toArray(), [])
-  const usageRows = useMemo(() => liveUsage ?? [], [liveUsage])
+/* ── Conversation history entry ─────────────────────────────────────────── */
 
-  // Re-render once a minute so the "Updated x ago" column refreshes without
-  // touching `Date.now()` directly during render (impure).
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(id)
-  }, [])
+function ConversationManagerEntry({ sessions }: { sessions: ChatSession[] | undefined }) {
+  const t = useTranslations("settings.agentRuntimeSection.sessions.manager")
+  const counts = useMemo(() => (sessions ? countExposedConversations(sessions) : null), [sessions])
+
+  return (
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      icon={<MessagesSquareIcon />}
+      testid="sessions-manager-entry"
+      contentClassName="space-y-3"
+    >
+      <LoadingRegion
+        loading={counts === null}
+        label={t("loading")}
+        showDetail={false}
+        fallback={
+          <div className="flex flex-wrap gap-3">
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="h-5 w-32" />
+          </div>
+        }
+      >
+        {counts ? (
+          <ul
+            aria-label={t("countsLabel")}
+            className="flex flex-wrap gap-x-5 gap-y-1 text-sm tabular-nums"
+          >
+            <li data-testid="sessions-manager-active">
+              {t("activeCount", { count: counts.active })}
+            </li>
+            <li className="text-muted-foreground" data-testid="sessions-manager-archived">
+              {t("archivedCount", { count: counts.archived })}
+            </li>
+          </ul>
+        ) : null}
+      </LoadingRegion>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild size="sm">
+          <Link href={conversationManagerHref("active")}>{t("open")}</Link>
+        </Button>
+        <Button asChild size="sm" variant="outline">
+          <Link href={conversationManagerHref("archived")}>{t("openArchive")}</Link>
+        </Button>
+      </div>
+    </SettingsBlock>
+  )
+}
+
+/* ── SDK-bound conversations ────────────────────────────────────────────── */
+
+function SdkBoundConversations({ sessions }: { sessions: ChatSession[] | undefined }) {
+  const t = useTranslations("settings.agentRuntimeSection.sessions.bound")
+  const tRow = useTranslations("desktop.sessionRow")
+  const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
+  const router = useRouter()
 
   const [filter, setFilter] = useState("")
-  const [renameTarget, setRenameTarget] = useState<ChatSession | null>(null)
-  const [renameDraft, setRenameDraft] = useState("")
-  const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [unlinkTarget, setUnlinkTarget] = useState<ChatSession | null>(null)
 
-  // Pre-bucket usage rows by sessionId so the merge loop is O(sessions+usage).
-  const totalsBySession = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        turns: number
-        inputTokens: number
-        outputTokens: number
-        cacheReadTokens: number
-        costUsd: number
-      }
-    >()
-    for (const r of usageRows as SessionUsageRow[]) {
-      const slot = map.get(r.sessionId) ?? {
-        turns: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        costUsd: 0,
-      }
-      slot.turns += 1
-      slot.inputTokens += r.inputTokens
-      slot.outputTokens += r.outputTokens
-      slot.cacheReadTokens += r.cacheReadTokens
-      slot.costUsd += r.costUsd
-      map.set(r.sessionId, slot)
-    }
-    return map
-  }, [usageRows])
+  // Conversations with a turn in flight in this renderer. Unlinking one then
+  // would be undone by the running turn, which stamps the id it resumed back
+  // onto the row. A joined string keeps the selector's result stable.
+  const runningKey = useChatStore((s) =>
+    Object.keys(s.sessions)
+      .filter((id) => {
+        const status = s.sessions[id]?.status
+        return status === "streaming" || status === "awaiting_approval"
+      })
+      .sort()
+      .join("\n")
+  )
+  const running = useMemo(() => new Set(runningKey ? runningKey.split("\n") : []), [runningKey])
 
-  const rows: RowSummary[] = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    const out: RowSummary[] = []
-    for (const session of sessions as ChatSession[]) {
-      if (q) {
-        const haystack = `${session.title} ${session.id}`.toLowerCase()
-        if (!haystack.includes(q)) continue
-      }
-      const totals = totalsBySession.get(session.id) ?? {
-        turns: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        costUsd: 0,
-      }
-      out.push({ session, ...totals })
-    }
-    return out
-  }, [sessions, totalsBySession, filter])
+  const bound = useMemo(
+    () => (sessions ? selectSdkBoundConversations(sessions) : undefined),
+    [sessions]
+  )
+  const boundIds = useMemo(() => (bound ?? []).map((session) => session.id), [bound])
+  const { summaries: usageBySession, loading: usageLoading } = useSessionUsageSummaries(boundIds)
 
-  const onResume = (session: ChatSession) => {
-    setActiveSession(session.id)
-    toast.success(t("resumedToast", { title: session.title || session.id }))
-  }
+  const untitled = tRow("untitled")
+  const placeholder = tRow("placeholderTitle")
+  const titleOf = useCallback(
+    (session: Pick<ChatSession, "title">) =>
+      sessionDisplayTitle(session.title, { untitled, placeholder }),
+    [untitled, placeholder]
+  )
+  const rows = useMemo(
+    () => (bound ? filterSdkBoundConversations(bound, filter, titleOf) : []),
+    [bound, filter, titleOf]
+  )
+
+  const loading = bound === undefined || usageLoading
 
   /**
-   * Low-level SDK-session fork, kept only on this runtime/debug surface.
+   * Low-level SDK-session fork, kept only on this runtime surface.
    *
    * The chat-side entry to this was removed: `branchSessionAtMessage` is a
    * superset for anything a user wants (it reuses the same SDK fork at the tail
    * AND carries the messages, the lineage and every per-session setting). What
-   * survives here is the raw operation — a new session bound to the parent's
-   * SDK conversation with no transcript — which is occasionally what you want
-   * when inspecting the runtime, and nothing else offers it.
+   * survives here is the raw operation — a new conversation bound to the
+   * parent's SDK conversation with no transcript — which is occasionally what
+   * you want when inspecting the runtime, and nothing else offers it.
    */
-  const onForkSdkSession = async (session: ChatSession) => {
+  const onFork = async (session: ChatSession) => {
     setBusyId(session.id)
     try {
       const next = await forkSessionFromParent(session.id)
-      setActiveSession(next.id)
-      toast.success(t("forkedToast", { title: next.title }))
+      toast.success(t("forkedToast", { title: titleOf(next) }))
+      router.push(conversationHref(next.id))
     } catch (err) {
-      // `forkSessionFromParent` throws a bare English Error when the parent has
-      // no `sdkSessionId` yet — which is *always* the case for providers that
-      // never issue one. Surfacing `err.message` put untranslated internals in
-      // front of the user; the reason is already conveyed by the disabled state
-      // and its tooltip, so the toast just names the failure.
-      toast.error(t("forkFailedToast"))
+      // The thrown text is English internals ("Cannot fork: …"); the toast
+      // names the failure and the log keeps the detail.
+      toast.error(isSessionHandoffLocked(err) ? t("lockedReason") : t("forkFailedToast"))
       loggers.chat.warn("sdk-session-fork-failed", {
         sessionId: session.id,
         err: err instanceof Error ? err.message : String(err),
@@ -184,237 +226,298 @@ export function SessionsTab() {
     }
   }
 
-  const openRename = (session: ChatSession) => {
-    setRenameTarget(session)
-    setRenameDraft(session.title ?? "")
-  }
-
-  const commitRename = async () => {
-    if (!renameTarget) return
-    const trimmed = renameDraft.trim()
-    if (!trimmed) {
-      toast.error(t("renameEmpty"))
-      return
-    }
-    setBusyId(renameTarget.id)
+  const commitUnlink = async (session: ChatSession) => {
+    setBusyId(session.id)
     try {
-      await updateSession(renameTarget.id, { title: trimmed })
-      toast.success(t("renamedToast"))
-      setRenameTarget(null)
+      await clearSessionSdkLink(session.id)
+      toast.success(t("unlinkedToast"))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  const commitDelete = async () => {
-    if (!deleteTarget) return
-    setBusyId(deleteTarget.id)
-    try {
-      await deleteSession(deleteTarget.id)
-      toast.success(t("deletedToast"))
-      // If the chat store points at the row we just removed, clear it so the
-      // inactive empty state picks up.
-      if (activeSessionId === deleteTarget.id) setActiveSession(null)
-      setDeleteTarget(null)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(isSessionHandoffLocked(err) ? t("lockedReason") : t("unlinkFailedToast"))
+      loggers.chat.warn("sdk-session-unlink-failed", {
+        sessionId: session.id,
+        err: err instanceof Error ? err.message : String(err),
+      })
     } finally {
       setBusyId(null)
     }
   }
 
   return (
-    <div className="min-w-0" data-testid="sessions-tab">
-      <SettingsStack>
-        <SdkSessionManager />
-        <SettingsBlock
-          title={t("title")}
-          description={t("description")}
-          contentClassName="space-y-3"
-        >
-          <Input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={t("filterPlaceholder")}
-            aria-label={t("filterPlaceholder")}
-            className="text-sm"
-            data-testid="sessions-filter"
-          />
-          {rows.length === 0 ? (
-            <p className="rounded border bg-muted/30 p-4 text-center text-xs italic text-muted-foreground">
-              {sessions.length === 0 ? t("emptyAll") : t("emptyFilter")}
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("colTitle")}</TableHead>
-                    <TableHead className="hidden @xl/settings-stack:table-cell">
-                      {t("colKind")}
-                    </TableHead>
-                    <TableHead className="hidden @xl/settings-stack:table-cell">
-                      {t("colUpdated")}
-                    </TableHead>
-                    <TableHead className="text-right">{t("colTurns")}</TableHead>
-                    <TableHead className="text-right">{t("colTokens")}</TableHead>
-                    <TableHead className="text-right">{t("colCost")}</TableHead>
-                    <TableHead className="text-right">{t("colActions")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => (
-                    <TableRow
-                      key={r.session.id}
-                      data-testid={`session-row-${r.session.id}`}
-                      data-active={r.session.id === activeSessionId ? "true" : undefined}
-                      className={r.session.id === activeSessionId ? "bg-primary/5" : undefined}
-                    >
-                      <TableCell className="max-w-[18rem] truncate font-medium">
-                        {r.session.title || t("untitled")}
-                        <p className="truncate font-mono text-[10px] text-muted-foreground">
-                          {r.session.id}
-                        </p>
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      icon={<GitBranchIcon />}
+      badge={
+        bound ? (
+          <Badge variant="secondary" data-testid="sdk-bound-count">
+            {t("count", { count: bound.length })}
+          </Badge>
+        ) : undefined
+      }
+      testid="sdk-bound-conversations"
+      contentClassName="space-y-3"
+    >
+      <Input
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+        placeholder={t("filterPlaceholder")}
+        aria-label={t("filterLabel")}
+        className="text-sm"
+        disabled={loading || bound.length === 0}
+      />
+      <LoadingRegion
+        loading={loading}
+        label={t("loading")}
+        showDetail={false}
+        fallback={
+          <div className="space-y-2">
+            {[0, 1, 2].map((index) => (
+              <Skeleton key={index} className="h-9 w-full" />
+            ))}
+          </div>
+        }
+      >
+        {loading ? null : bound.length === 0 || rows.length === 0 ? (
+          <p className="rounded border bg-muted/30 p-4 text-center text-xs text-muted-foreground">
+            {bound.length === 0 ? t("empty") : t("emptyFilter")}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("col.conversation")}</TableHead>
+                  <TableHead className="hidden @lg/settings-stack:table-cell">
+                    {t("col.sdkSession")}
+                  </TableHead>
+                  <TableHead className="hidden @xl/settings-stack:table-cell">
+                    {t("col.storage")}
+                  </TableHead>
+                  <TableHead className="hidden @lg/settings-stack:table-cell">
+                    {t("col.lastActivity")}
+                  </TableHead>
+                  <TableHead className="hidden text-right @xl/settings-stack:table-cell">
+                    {t("col.turns")}
+                  </TableHead>
+                  <TableHead className="hidden text-right @xl/settings-stack:table-cell">
+                    {t("col.tokens")}
+                  </TableHead>
+                  <TableHead className="text-right">{t("col.cost")}</TableHead>
+                  <TableHead className="text-right">{t("col.actions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((session) => {
+                  const title = titleOf(session)
+                  const usage = usageBySession.get(session.id)
+                  const turns = usage?.turns ?? 0
+                  const backend = session.sdkSessionStorage?.backend
+                  const busy = busyId === session.id
+                  const lockedReason = session.handoffLock ? t("lockedReason") : null
+                  const unlinkReason =
+                    lockedReason ?? (running.has(session.id) ? t("runningReason") : null)
+                  return (
+                    <TableRow key={session.id} data-testid={`sdk-bound-row-${session.id}`}>
+                      <TableCell className="max-w-[16rem]">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium">{title}</span>
+                          {session.archivedAt != null ? (
+                            <Badge variant="outline" className="shrink-0 text-[10px]">
+                              {t("archived")}
+                            </Badge>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell className="hidden @xl/settings-stack:table-cell">
-                        <Badge variant="outline" className="text-[10px]">
-                          {r.session.kind ?? "direct"}
-                        </Badge>
+                      <TableCell className="hidden max-w-[10rem] @lg/settings-stack:table-cell">
+                        <span
+                          className="block truncate font-mono text-[11px] text-muted-foreground"
+                          title={session.sdkSessionId}
+                        >
+                          {session.sdkSessionId}
+                        </span>
                       </TableCell>
-                      <TableCell className="hidden @xl/settings-stack:table-cell text-xs text-muted-foreground">
-                        {formatRelative(now - r.session.updatedAt, t)}
+                      <TableCell className="hidden text-xs @xl/settings-stack:table-cell">
+                        {backend ? (
+                          <>
+                            <span>
+                              {backend === "host-sqlite"
+                                ? t("storage.hostSqlite")
+                                : t("storage.filesystem")}
+                            </span>
+                            {backend === "host-sqlite" && session.sdkSessionStorage?.workspace ? (
+                              <span className="block max-w-[10rem] truncate font-mono text-[10px] text-muted-foreground">
+                                {session.sdkSessionStorage.workspace}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">{UNKNOWN_COST}</span>
+                        )}
                       </TableCell>
-                      <TableCell className="text-right text-xs">{r.turns}</TableCell>
-                      <TableCell className="text-right text-xs">
-                        {(r.inputTokens + r.outputTokens + r.cacheReadTokens).toLocaleString()}
+                      <TableCell className="hidden text-xs text-muted-foreground @lg/settings-stack:table-cell">
+                        {format.relativeTime(new Date(sessionLastActivity(session)), now)}
                       </TableCell>
-                      <TableCell className="text-right text-xs">
-                        {r.costUsd > 0 ? `$${r.costUsd.toFixed(4)}` : "—"}
+                      <TableCell className="hidden text-right text-xs tabular-nums @xl/settings-stack:table-cell">
+                        {turns}
+                      </TableCell>
+                      <TableCell className="hidden text-right text-xs tabular-nums @xl/settings-stack:table-cell">
+                        {formatTokens(usage?.tokens ?? 0)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {usage && turns > 0
+                          ? formatBucketCost(usage.costUsd, usage.unpricedTurns, turns)
+                          : UNKNOWN_COST}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-7"
-                            onClick={() => onResume(r.session)}
-                            disabled={busyId === r.session.id}
-                            aria-label={t("resume")}
-                            title={t("resume")}
-                            data-testid={`resume-${r.session.id}`}
-                          >
-                            <PlayIcon className="size-3.5" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-7"
-                            onClick={() => void onForkSdkSession(r.session)}
-                            disabled={busyId === r.session.id || !r.session.sdkSessionId}
-                            aria-label={t("fork")}
-                            title={r.session.sdkSessionId ? t("fork") : t("forkDisabledTip")}
-                            data-testid={`fork-${r.session.id}`}
-                          >
-                            <GitBranchIcon className="size-3.5" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-7"
-                            onClick={() => openRename(r.session)}
-                            disabled={busyId === r.session.id}
-                            aria-label={t("rename")}
-                            title={t("rename")}
-                            data-testid={`rename-${r.session.id}`}
-                          >
-                            <PencilIcon className="size-3.5" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-7 text-destructive hover:text-destructive"
-                            onClick={() => setDeleteTarget(r.session)}
-                            disabled={busyId === r.session.id}
-                            aria-label={t("delete")}
-                            title={t("delete")}
-                            data-testid={`delete-${r.session.id}`}
-                          >
-                            <Trash2Icon className="size-3.5" />
-                          </Button>
+                          <RowAction
+                            label={t("openNamed", { title })}
+                            tooltip={t("open")}
+                            icon={<ExternalLinkIcon className="size-3.5" />}
+                            onClick={() => router.push(conversationHref(session.id))}
+                            testId={`sdk-bound-open-${session.id}`}
+                          />
+                          <RowAction
+                            label={t("forkNamed", { title })}
+                            tooltip={t("forkHint")}
+                            reason={lockedReason}
+                            disabled={busy}
+                            icon={<GitBranchIcon className="size-3.5" />}
+                            onClick={() => void onFork(session)}
+                            testId={`sdk-bound-fork-${session.id}`}
+                          />
+                          <RowAction
+                            label={t("unlinkNamed", { title })}
+                            tooltip={t("unlink")}
+                            reason={unlinkReason}
+                            disabled={busy}
+                            destructive
+                            icon={<UnlinkIcon className="size-3.5" />}
+                            onClick={() => setUnlinkTarget(session)}
+                            testId={`sdk-bound-unlink-${session.id}`}
+                          />
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </SettingsBlock>
-      </SettingsStack>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </LoadingRegion>
 
-      {/* Rename dialog */}
-      <Dialog open={renameTarget !== null} onOpenChange={(open) => !open && setRenameTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("renameTitle")}</DialogTitle>
-            <DialogDescription>{t("renameDesc")}</DialogDescription>
-          </DialogHeader>
-          <Input
-            value={renameDraft}
-            onChange={(e) => setRenameDraft(e.target.value)}
-            placeholder={t("renamePlaceholder")}
-            aria-label={t("renameTitle")}
-            data-testid="rename-input"
-          />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenameTarget(null)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={() => void commitRename()} data-testid="rename-confirm">
-              {t("save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete confirmation */}
       <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        open={unlinkTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setUnlinkTarget(null)
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>{t("unlinkTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("deleteDesc", { title: deleteTarget?.title ?? "" })}
+              {unlinkTarget
+                ? t("unlinkDescription", {
+                    title: titleOf(unlinkTarget),
+                    sdkSessionId: unlinkTarget.sdkSessionId ?? "",
+                  })
+                : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void commitDelete()}
+              onClick={() => {
+                if (unlinkTarget) void commitUnlink(unlinkTarget)
+              }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              data-testid="delete-confirm"
             >
-              {t("delete")}
+              {t("unlinkConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SettingsBlock>
   )
 }
 
-function formatRelative(
-  deltaMs: number,
-  t: (k: string, vars?: Record<string, string | number | Date>) => string
-): string {
-  if (deltaMs < 60_000) return t("ago.justNow")
-  if (deltaMs < 3_600_000) return t("ago.minutes", { n: Math.floor(deltaMs / 60_000) })
-  if (deltaMs < 86_400_000) return t("ago.hours", { n: Math.floor(deltaMs / 3_600_000) })
-  return t("ago.days", { n: Math.floor(deltaMs / 86_400_000) })
+interface RowActionProps {
+  /** Accessible name — names the row, since every row repeats the action. */
+  label: string
+  /** Visible hover/focus text. */
+  tooltip: string
+  /**
+   * Why the action is unavailable. Replaces the tooltip and is announced as
+   * the button's description. A disabled button receives no pointer or focus
+   * events, so the tooltip hangs off a focusable wrapper instead.
+   */
+  reason?: string | null
+  /** Unavailable for a transient reason (a write in flight) — no explanation. */
+  disabled?: boolean
+  destructive?: boolean
+  icon: ReactNode
+  onClick: () => void
+  testId: string
+}
+
+function RowAction({
+  label,
+  tooltip,
+  reason,
+  disabled = false,
+  destructive = false,
+  icon,
+  onClick,
+  testId,
+}: RowActionProps) {
+  const reasonId = useId()
+  const blocked = Boolean(reason)
+  const button = (
+    <Button
+      size="icon"
+      variant="ghost"
+      className={cn(
+        "size-7",
+        destructive && "text-destructive hover:text-destructive",
+        blocked && "pointer-events-none"
+      )}
+      disabled={disabled || blocked}
+      aria-label={label}
+      aria-describedby={blocked ? reasonId : undefined}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      {icon}
+    </Button>
+  )
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {blocked ? (
+            <span
+              tabIndex={0}
+              className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid={`${testId}-blocked`}
+            >
+              {button}
+            </span>
+          ) : (
+            button
+          )}
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-64 text-xs">
+          {reason ?? tooltip}
+        </TooltipContent>
+      </Tooltip>
+      {blocked ? (
+        <span id={reasonId} className="sr-only">
+          {reason}
+        </span>
+      ) : null}
+    </>
+  )
 }
 
 export default SessionsTab

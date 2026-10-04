@@ -1,6 +1,7 @@
 import {
   acquireChatLease,
   cancelQueuedChatTurn,
+  hasChatLease,
   isChatTurnQueued,
   isQueuedChatTurnCancellation,
   releaseChatLease,
@@ -31,6 +32,24 @@ beforeEach(() => {
 afterEach(() => {
   __resetChatLeasesForTesting()
   __resetExecutionBrokerForTesting()
+})
+
+describe("chat-lease — hasChatLease", () => {
+  it("is true from admission until the session settles, false otherwise", async () => {
+    expect(hasChatLease("s")).toBe(false)
+    await acquireChatLease({ sessionId: "s", label: "chat" })
+    expect(hasChatLease("s")).toBe(true)
+    setStatus("s", "streaming")
+    expect(hasChatLease("s")).toBe(true)
+    setStatus("s", "idle")
+    expect(hasChatLease("s")).toBe(false)
+  })
+
+  it("is false after an explicit release", async () => {
+    await acquireChatLease({ sessionId: "s", label: "chat" })
+    releaseChatLease("s")
+    expect(hasChatLease("s")).toBe(false)
+  })
 })
 
 describe("chat-lease — a turn that has to wait", () => {

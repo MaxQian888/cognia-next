@@ -1,3 +1,8 @@
+import type { SideEffectClass } from "@cognia/agent"
+import type { ResolvedCaller } from "@/lib/claude/agents/dispatch-run"
+import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { startLeaseHeartbeat } from "@/lib/runtime/lease-heartbeat"
+
 export type BackgroundTaskHost = "renderer" | "cli"
 export type BackgroundTaskKind = "subagent" | "plugin-agent" | "team-delegation"
 export type BackgroundTaskStatus = "running" | "done" | "error" | "interrupted"
@@ -17,7 +22,24 @@ export interface BackgroundTaskUsage {
   totalCostUsd?: number
 }
 
+/** Replay proof owned by the dispatch adapter, not inferred from tool names. */
+export interface BackgroundDispatchRecovery {
+  version: 1
+  phase: "accepted" | "dispatched"
+  namespaceId: string
+  hostId: string
+  contextFingerprint: string
+  executionSessionId: string
+  caller: ResolvedCaller
+  target: PluginSubagentDef
+  sideEffect: SideEffectClass
+}
+
 export interface BackgroundTaskJournalRecord {
+  /** Renderer execution ownership; persisted without another table or index. */
+  ownerLease?: { ownerId: string; epoch: number; expiresAt: number }
+  cancelRequestedAt?: number
+  recovery?: BackgroundDispatchRecovery
   runId: string
   kind: BackgroundTaskKind
   subagentId: string
@@ -35,9 +57,12 @@ export interface BackgroundTaskJournalRecord {
   mode?: "foreground" | "background"
   /** Tool-loop flag of the original dispatch — needed to re-dispatch faithfully. */
   toolsEnabled?: boolean
+  /** Explicit per-dispatch model override, preserved on rerun. */
+  model?: string
   /** Last successful collect (results stay collectable; rows prune by age/cap). */
   collectedAt?: number
   /** Parent re-injection state for settled done|error rows. */
+  deliveryId?: string
   deliveryState?: BackgroundTaskDeliveryState
   deliveredAt?: number
   /** Provenance: this row is a resume/re-run of that run. */
@@ -62,9 +87,11 @@ export type BackgroundTaskJournalPatch = Partial<
     | "error"
     | "usage"
     | "collectedAt"
+    | "deliveryId"
     | "deliveryState"
     | "deliveredAt"
     | "resumedByRunId"
+    | "cancelRequestedAt"
   >
 >
 
@@ -75,6 +102,8 @@ export interface BackgroundTaskJournalProjection {
 }
 
 export interface BackgroundTaskJournalWriter {
+  renewLease?(runId: string): Promise<boolean>
+  leaseIntervalMs?: number
   recordStart(record: BackgroundTaskJournalRecord): void | Promise<void>
   recordSettle(runId: string, patch: BackgroundTaskJournalPatch): void | Promise<void>
 }
@@ -95,6 +124,7 @@ export type BackgroundTaskStartMeta = Omit<
   | "error"
   | "usage"
   | "collectedAt"
+  | "deliveryId"
   | "deliveryState"
   | "deliveredAt"
   | "resumedByRunId"
@@ -117,6 +147,8 @@ export interface BackgroundTaskRegistryOptions<T> {
   journal?: BackgroundTaskJournalWriter
   projectForJournal: (value: T) => BackgroundTaskJournalProjection
   now?: () => number
+  /** Stop local progress observers without publishing an uncommitted result. */
+  onDiscard?: (runId: string) => void
   /**
    * Best-effort terminal hook fired when a tracked run settles (done | error).
    * Receives the settle payload directly — never races the async journal
@@ -130,7 +162,9 @@ export interface BackgroundTaskRegistryOptions<T> {
 }
 
 export interface BackgroundTaskControls {
-  cancel?: () => void
+  cancel?: () => void | Promise<void>
+  /** Ownership loss aborts execution without trying to cancel the new owner. */
+  onLeaseLost?: () => void
 }
 
 interface Entry<T> {
@@ -143,6 +177,7 @@ interface Entry<T> {
   usage?: BackgroundTaskUsage
   controls?: BackgroundTaskControls
   cancelled?: boolean
+  stopLease?: () => void
 }
 
 const INTERRUPTED_ERROR = "Background task interrupted because its host process stopped."
@@ -152,6 +187,7 @@ export class BackgroundTaskRegistry<T> {
   private readonly projectForJournal: (value: T) => BackgroundTaskJournalProjection
   private readonly journal?: BackgroundTaskJournalWriter
   private readonly now: () => number
+  private readonly onDiscard?: (runId: string) => void
   private readonly onSettle?: (
     runId: string,
     meta: BackgroundTaskStartMeta,
@@ -162,6 +198,7 @@ export class BackgroundTaskRegistry<T> {
     this.projectForJournal = options.projectForJournal
     this.journal = options.journal
     this.now = options.now ?? Date.now
+    this.onDiscard = options.onDiscard
     this.onSettle = options.onSettle
   }
 
@@ -171,6 +208,129 @@ export class BackgroundTaskRegistry<T> {
     promise: Promise<T>,
     controls?: BackgroundTaskControls
   ): void {
+    if (this.runs.has(runId)) {
+      void promise.catch(() => undefined)
+      throw new Error("Background run already tracked")
+    }
+    if (this.journal?.renewLease) {
+      const journal = this.journal
+      let admissionCommitted = false
+      // Admission precedes settlement even for an already-resolved producer.
+      // Attach rejection handling immediately while the storage write is pending.
+      const outcome = promise.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error })
+      )
+      let admitted: Promise<void>
+      try {
+        admitted = Promise.resolve(journal.recordStart({ runId, ...meta, status: "running" }))
+      } catch (error) {
+        admitted = Promise.reject(error)
+      }
+      admitted = admitted.catch((error) => {
+        if (controls?.onLeaseLost) controls.onLeaseLost()
+        else
+          void Promise.resolve()
+            .then(() => controls?.cancel?.())
+            .catch(() => undefined)
+        throw error
+      })
+      const execution = admitted.then(async () => {
+        admissionCommitted = true
+        const result = await outcome
+        if ("error" in result) throw result.error
+        return result.value
+      })
+      this.startAccepted(
+        runId,
+        meta,
+        execution,
+        {
+          ...journal,
+          recordSettle: (id, patch) => {
+            if (!admissionCommitted) throw new Error("Background admission did not commit")
+            return journal.recordSettle(id, patch)
+          },
+        },
+        controls
+      )
+      return
+    }
+    this.track(runId, meta, promise, controls, true)
+  }
+
+  /** The caller already committed admission; settlement must precede delivery. */
+  startAccepted(
+    runId: string,
+    meta: BackgroundTaskStartMeta,
+    promise: Promise<T>,
+    journal: BackgroundTaskJournalWriter,
+    controls?: BackgroundTaskControls
+  ): void {
+    if (this.runs.has(runId)) {
+      void promise.catch(() => undefined)
+      throw new Error("Background run already tracked")
+    }
+    let settlementCommitted = false
+    let ownershipLost = false
+    let rejectOwnership!: (error: Error) => void
+    const loss = new Promise<never>((_, reject) => {
+      rejectOwnership = reject
+    })
+    const stopLease = journal.renewLease
+      ? startLeaseHeartbeat({
+          intervalMs: journal.leaseIntervalMs ?? 20_000,
+          renew: async () => ((await journal.renewLease!(runId)) ? "renewed" : "lost"),
+          onLeaseLost: () => {
+            ownershipLost = true
+            rejectOwnership(new Error("Background task ownership lost"))
+            if (controls?.onLeaseLost) controls.onLeaseLost()
+            else
+              void Promise.resolve()
+                .then(() => controls?.cancel?.())
+                .catch(() => undefined)
+          },
+        })
+      : () => {}
+    const committed = Promise.race([promise, loss])
+      .then(
+        async (value) => {
+          if (ownershipLost) throw new Error("Background task ownership lost")
+          const projection = this.projectForJournal(value)
+          await journal.recordSettle(runId, {
+            status: projection.error ? "error" : "done",
+            settledAt: this.now(),
+            resultText: projection.text,
+            ...(projection.error ? { error: projection.error } : {}),
+            ...(projection.usage ? { usage: projection.usage } : {}),
+          })
+          settlementCommitted = true
+          return value
+        },
+        async (error) => {
+          if (ownershipLost) throw error
+          await journal.recordSettle(runId, {
+            status: "error",
+            settledAt: this.now(),
+            error: errorMessage(error),
+          })
+          settlementCommitted = true
+          throw error
+        }
+      )
+      .finally(stopLease)
+    this.track(runId, meta, committed, controls, false, () => settlementCommitted)
+    this.runs.get(runId)!.stopLease = stopLease
+  }
+
+  private track(
+    runId: string,
+    meta: BackgroundTaskStartMeta,
+    promise: Promise<T>,
+    controls: BackgroundTaskControls | undefined,
+    writeJournal: boolean,
+    failureCommitted: () => boolean = () => false
+  ): void {
     const entry: Entry<T> = {
       promise,
       meta,
@@ -178,13 +338,14 @@ export class BackgroundTaskRegistry<T> {
       ...(controls ? { controls } : {}),
     }
     this.runs.set(runId, entry)
-    this.writeJournal(() =>
-      this.journal?.recordStart({
-        runId,
-        ...meta,
-        status: "running",
-      })
-    )
+    if (writeJournal)
+      this.writeJournal(() =>
+        this.journal?.recordStart({
+          runId,
+          ...meta,
+          status: "running",
+        })
+      )
 
     promise.then(
       (value) => {
@@ -206,7 +367,7 @@ export class BackgroundTaskRegistry<T> {
           ...(projection.error ? { error: projection.error } : {}),
           ...(projection.usage ? { usage: projection.usage } : {}),
         }
-        this.writeJournal(() => this.journal?.recordSettle(runId, settle))
+        if (writeJournal) this.writeJournal(() => this.journal?.recordSettle(runId, settle))
         this.fireOnSettle(runId, meta, settle)
       },
       (error) => {
@@ -215,14 +376,23 @@ export class BackgroundTaskRegistry<T> {
         entry.status = "error"
         entry.settledAt = settledAt
         entry.error = message
-        this.writeJournal(() =>
-          this.journal?.recordSettle(runId, {
-            status: "error",
-            settledAt,
-            error: message,
-          })
-        )
-        this.fireOnSettle(runId, meta, { status: "error", settledAt, error: message })
+        if (writeJournal)
+          this.writeJournal(() =>
+            this.journal?.recordSettle(runId, {
+              status: "error",
+              settledAt,
+              error: message,
+            })
+          )
+        if (writeJournal || failureCommitted())
+          this.fireOnSettle(runId, meta, { status: "error", settledAt, error: message })
+        else {
+          try {
+            this.onDiscard?.(runId)
+          } catch {
+            // Local observers cannot turn a rejected result into a delivery.
+          }
+        }
       }
     )
   }
@@ -263,11 +433,38 @@ export class BackgroundTaskRegistry<T> {
   }
 
   cancel(runId: string): boolean {
+    const requested = this.requestCancellation(runId)
+    return typeof requested === "boolean" ? requested : true
+  }
+
+  /** Await the durable cancellation receipt before a caller announces success. */
+  async cancelAndWait(runId: string): Promise<boolean> {
+    return this.requestCancellation(runId)
+  }
+
+  private requestCancellation(runId: string): boolean | Promise<boolean> {
     const entry = this.runs.get(runId)
     if (!entry || entry.status !== "running" || !entry.controls?.cancel) return false
-    entry.cancelled = true
-    entry.controls.cancel()
-    return true
+    try {
+      const requested = entry.controls.cancel()
+      if (requested && typeof requested.then === "function") {
+        return requested.then(
+          () => {
+            entry.cancelled = true
+            return true
+          },
+          (error) => {
+            entry.error = errorMessage(error)
+            return false
+          }
+        )
+      }
+      entry.cancelled = true
+      return true
+    } catch (error) {
+      entry.error = errorMessage(error)
+      return false
+    }
   }
 
   /** Cancel every running entry matching the predicate; returns the count. */
@@ -282,6 +479,7 @@ export class BackgroundTaskRegistry<T> {
   }
 
   __clearForTesting(): void {
+    for (const entry of this.runs.values()) entry.stopLease?.()
     this.runs.clear()
   }
 

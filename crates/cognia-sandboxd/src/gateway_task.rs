@@ -16,8 +16,32 @@ pub struct TaskPayload {
     owner_account_id: Option<String>,
     #[serde(default)]
     origin_device_id: Option<String>,
+    /// Move a retained task to `binding`. Honoured only when the saved owner
+    /// account, origin device and runtime are unchanged (see `prepare_inner`).
+    #[serde(default)]
+    rebind: bool,
     runtime: String,
     files: HashMap<String, String>,
+}
+
+/// Runtimes with a reviewed task-owned launch contract
+/// (`lib/ai/agent/external/config/gateway-task.ts`, `cli/src/runtime/external/gateway-task.ts`).
+pub const RUNTIMES: [&str; 10] = [
+    "codex", "opencode", "pi", "claude", "qwen", "dsh", "kimi", "goose", "copilot", "aider",
+];
+
+/// A retained task may change model only when everything that owns its native
+/// history is unchanged: the account, the paired device and the runtime that
+/// wrote it. Only the model binding itself differs.
+fn rebind_allowed(existing: &serde_json::Value, next: &serde_json::Value) -> bool {
+    ["runtime", "ownerAccountId", "originDeviceId"]
+        .iter()
+        .all(|key| existing.get(key) == next.get(key))
+        && existing.as_object().is_some_and(|fields| {
+            fields.keys().all(|key| {
+                ["binding", "runtime", "ownerAccountId", "originDeviceId"].contains(&key.as_str())
+            })
+        })
 }
 
 fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String> {
@@ -32,7 +56,7 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
             .task_id
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-        || !["codex", "opencode", "pi", "claude", "qwen", "dsh"].contains(&value.runtime.as_str())
+        || !RUNTIMES.contains(&value.runtime.as_str())
         || value.files.iter().any(|(name, contents)| {
             ![
                 "codex/config.toml",
@@ -463,9 +487,15 @@ fn prepare_inner(
         let existing: serde_json::Value = serde_json::from_slice(&read_private(&binding_path)?)
             .map_err(|_| "Invalid saved gateway task binding")?;
         if existing != binding {
-            return Err(
-                "This task is bound to a different model or account; start a new task".into(),
-            );
+            if !(value.rebind && rebind_allowed(&existing, &binding)) {
+                return Err(
+                    "This task is bound to a different model or account; start a new task".into(),
+                );
+            }
+            write_private(
+                &binding_path,
+                &serde_json::to_vec(&binding).map_err(|e| e.to_string())?,
+            )?;
         }
     } else {
         write_private(
@@ -500,6 +530,8 @@ fn prepare_inner(
         ("PI_CODING_AGENT_DIR", "pi"),
         ("CLAUDE_CONFIG_DIR", "claude"),
         ("OPENCODE_CONFIG_DIR", "config/opencode"),
+        ("KIMI_CODE_HOME", "kimi"),
+        ("COPILOT_HOME", "copilot"),
     ] {
         let path = if relative.is_empty() {
             root.clone()
@@ -753,6 +785,83 @@ mod tests {
             .exists());
         drop(sibling_guard);
     }
+    fn payload_env(task: &str, patch: serde_json::Value) -> HashMap<String, String> {
+        let mut payload = serde_json::json!({"taskId":task,"binding":{"providerId":"gateway","modelId":"model"},"ownerAccountId":"owner-a","originDeviceId":"device-a","runtime":"kimi","files":{}});
+        for (key, value) in patch.as_object().unwrap() {
+            payload[key] = value.clone();
+        }
+        HashMap::from([(PAYLOAD_ENV.into(), payload.to_string())])
+    }
+    fn saved_binding(env: &HashMap<String, String>) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(Path::new(&env["HOME"]).join("binding.json")).unwrap())
+            .unwrap()
+    }
+    #[test]
+    fn admits_new_runtimes_with_task_owned_state_homes() {
+        let dir = tempfile::tempdir().unwrap();
+        for runtime in ["kimi", "goose", "copilot", "aider"] {
+            let task = format!("{runtime}-task");
+            let mut input = payload_env(&task, serde_json::json!({ "runtime": runtime }));
+            let root = task_home(&input, dir.path()).unwrap().unwrap();
+            drop(prepare(&mut input, dir.path()).unwrap());
+            assert_eq!(
+                PathBuf::from(&input["KIMI_CODE_HOME"]),
+                root.join("kimi"),
+                "{runtime}"
+            );
+            assert_eq!(PathBuf::from(&input["COPILOT_HOME"]), root.join("copilot"));
+            assert!(root.join("kimi").is_dir() && root.join("copilot").is_dir());
+            assert_eq!(saved_binding(&input)["runtime"], runtime);
+        }
+        let mut unknown = payload_env("gemini-task", serde_json::json!({ "runtime": "gemini" }));
+        assert!(prepare(&mut unknown, dir.path()).is_err());
+    }
+    #[test]
+    fn rebinds_a_retained_task_only_for_the_same_owner_device_and_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let other_model = serde_json::json!({"providerId":"gateway","modelId":"other"});
+        let mut first = payload_env("rebind", serde_json::json!({}));
+        drop(prepare(&mut first, dir.path()).unwrap());
+        let history = Path::new(&first["KIMI_CODE_HOME"]).join("session.jsonl");
+        fs::write(&history, "native history").unwrap();
+        // Without the flag a different model is still a different task.
+        let mut silent = payload_env("rebind", serde_json::json!({ "binding": other_model }));
+        assert!(prepare(&mut silent, dir.path()).is_err());
+        for patch in [
+            serde_json::json!({ "binding": other_model, "rebind": true, "ownerAccountId": "owner-b" }),
+            serde_json::json!({ "binding": other_model, "rebind": true, "originDeviceId": "device-b" }),
+            serde_json::json!({ "binding": other_model, "rebind": true, "originDeviceId": null }),
+            serde_json::json!({ "binding": other_model, "rebind": true, "runtime": "goose" }),
+        ] {
+            assert!(
+                prepare(&mut payload_env("rebind", patch.clone()), dir.path()).is_err(),
+                "{patch}"
+            );
+        }
+        assert_eq!(saved_binding(&first)["binding"]["modelId"], "model");
+        let mut moved = payload_env(
+            "rebind",
+            serde_json::json!({ "binding": other_model, "rebind": true }),
+        );
+        drop(prepare(&mut moved, dir.path()).unwrap());
+        assert_eq!(saved_binding(&moved)["binding"], other_model);
+        assert!(saved_binding(&moved).get("rebind").is_none());
+        assert_eq!(fs::read_to_string(&history).unwrap(), "native history");
+        // The retained binding moved: the old model is now the foreign one,
+        // and the new one resumes without asking again.
+        assert!(prepare(
+            &mut payload_env("rebind", serde_json::json!({})),
+            dir.path()
+        )
+        .is_err());
+        drop(
+            prepare(
+                &mut payload_env("rebind", serde_json::json!({ "binding": other_model })),
+                dir.path(),
+            )
+            .unwrap(),
+        );
+    }
     #[test]
     fn remote_task_history_is_bound_to_device_and_desktop_account() {
         let dir = tempfile::tempdir().unwrap();
@@ -962,6 +1071,29 @@ mod sandbox_tests {
         assert!(prepare_inner(&mut changed, temp.path(), true).is_err());
         fs::remove_file(root.parent().unwrap().join(".bindings/task.json")).unwrap();
         assert!(prepare_inner(&mut original.clone(), temp.path(), true).is_err());
+    }
+    #[test]
+    fn protected_host_binding_follows_an_allowed_rebind() {
+        let temp = tempfile::tempdir().unwrap();
+        let env = |model: &str, rebind: bool, device: &str| {
+            HashMap::from([(PAYLOAD_ENV.into(), serde_json::json!({"taskId":"task","runtime":"copilot","binding":{"modelId":model},"originDeviceId":device,"rebind":rebind,"files":{}}).to_string())])
+        };
+        drop(prepare_inner(&mut env("first", false, "device-a"), temp.path(), true).unwrap());
+        assert!(prepare_inner(&mut env("second", true, "device-b"), temp.path(), true).is_err());
+        let mut moved = env("second", true, "device-a");
+        drop(prepare_inner(&mut moved, temp.path(), true).unwrap());
+        let trusted: serde_json::Value = serde_json::from_slice(
+            &fs::read(
+                Path::new(&moved["HOME"])
+                    .parent()
+                    .unwrap()
+                    .join(".bindings/task.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(trusted["binding"]["modelId"], "second");
+        assert!(prepare_inner(&mut env("first", false, "device-a"), temp.path(), true).is_err());
     }
     #[cfg(unix)]
     #[test]

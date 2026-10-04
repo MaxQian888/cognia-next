@@ -15,6 +15,9 @@ The browser registration flow is available only when `COGNIA_LOGTO_ISSUER`,
 
 ## 1. Start Logto
 
+For an isolated, loopback-only development instance, use section 9. The base
+profile alone publishes on all interfaces unless `COGNIA_BIND_ADDRESS` is set.
+
 ```bash
 cd deploy/compose
 cp .env.example .env         # if you haven't already
@@ -246,11 +249,13 @@ the machine-to-machine application it authenticates with.
    pnpm logto:seed
    ```
 
-   The script reads connector targets from Logto itself (the Feishu connector
-   is `feishu-web`), prints the `COGNIA_LOGTO_*` and `COLLAB_*` lines for
-   `.env`, and prints the callback URL to register at each provider:
-   `${LOGTO_ENDPOINT}/callback/github` on the GitHub OAuth App and
-   `${LOGTO_ENDPOINT}/callback/feishu-web` on the Feishu app's redirect list.
+   The script reads connector targets from Logto itself (in Logto 1.44, the
+   Feishu factory ID is `feishu-web`, but its target is `feishu`), and prints
+   the `COGNIA_LOGTO_*` and `COLLAB_*` lines for `.env`. It prints each provider's
+   callback as `${LOGTO_ENDPOINT}/callback/<connector instance ID>` using the
+   connector returned by Logto. Neither a factory ID nor a target is a callback
+   ID. Adding a provider preserves existing password login, MFA, account-linking
+   settings and other enabled providers.
 
 5. **Finish `.env`:** paste the printed lines, add
    `COGNIA_DEPLOYMENT_MODE=multi-tenant`, `COGNIA_COLLAB_URL=http://collab-server:8080`,
@@ -283,3 +288,210 @@ the machine-to-machine application it authenticates with.
 9. **Phone:** `pnpm build && pnpm mobile:sync`, open the iOS simulator, Me →
    Cloud account, enter the same address. The gate signs in through the
    in-app browser and the same deep link.
+
+## 9. Isolated local development configuration (verified 2026-10-04)
+
+The local overlay extends the existing Logto services; it does not replace the
+main Cognia deployment. Its separate Compose project is `cognia-local-auth`.
+It uses `deploy/compose/.env.logto.local` (ignored, mode 0600) instead of changing
+the existing deployment's `.env`. The private directory
+`~/.config/cognia/logto-local/` is mode 0700 and contains credentials and backups.
+
+From the repository root:
+
+```bash
+rtk docker compose --env-file deploy/compose/.env.logto.local \
+  -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/compose.local.logto.yaml up -d --wait logto
+```
+
+Specify **`logto`** explicitly: starting every profile service also starts
+unrelated Cognia services. Never use `down -v` for this persistent installation.
+
+| Setting                      | Local value                                                                |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| Admin Console                | `http://localhost:3302`                                                    |
+| OIDC issuer                  | `http://logto.localhost:3301/oidc`                                         |
+| Cognia API resource          | `http://localhost:27890/api`                                               |
+| Web callback                 | `http://localhost:3000/logto/callback`                                     |
+| Native callback              | `cognia://logto/callback`                                                  |
+| CLI callback                 | `http://127.0.0.1:9321/callback` (Native loopback port variation verified) |
+| Admin credentials            | `~/.config/cognia/logto-local/admin.json`                                  |
+| Management credentials       | `~/.config/cognia/logto-local/management.json`                             |
+| First-owner claim credential | `~/.config/cognia/logto-local/bootstrap-credential`                        |
+
+`logto.localhost` resolves to loopback on this Mac and is a Docker network alias
+for Logto. The same issuer string was verified from both the host and container.
+Other computers/phones cannot use this loopback-only setup. HTTP here is strictly
+for local development; remote use needs a shared HTTPS domain and new exact
+redirect/origin allowlists.
+
+### Images and container boundaries
+
+The official latest release checked during setup was **Logto 1.44.0**, published
+2026-09-30. The installed image was pulled from `ghcr.io/logto-io/logto` and its
+embedded `@logto/core` version was verified. The env file pins its immutable
+digest `sha256:847cdd2759ad60f61b9733af0ea352183c805681dff5c9f8140a80f52d8e1340`.
+PostgreSQL 17 and Redis 7 use newly pulled patch images, also pinned by digest;
+these retain the base deployment's supported major versions.
+
+Both published ports bind **127.0.0.1**. PostgreSQL and Redis publish no host
+ports and belong to an internal data network. The database password is mounted
+as a secret file. Logto has a read-only root filesystem, dropped capabilities,
+`no-new-privileges`, bounded memory/PIDs and rotated logs. Only `/tmp` and the
+CLI's migration-staging directory are writable tmpfs mounts. The latest image
+has no `curl`, so its health check uses Node's built-in `fetch`.
+
+This is a single-machine development deployment: Compose secrets are local
+files, the database bootstrap user retains administrative privileges, and the
+Logto process runs as the upstream image's root user with all capabilities
+dropped. Do not present it as a production-hardened deployment.
+
+### Provisioned authentication policy
+
+- Separate public **Native** and **SPA** applications; neither needs a client
+  secret in Cognia. Exact callbacks and the SPA's `http://localhost:3000` origin.
+- API scopes: `brain:rpc`, `brain:read`, `brain:admin`, `collab:read`, `collab:write`.
+  Organization `owner` receives all five; `member` receives all except
+  `brain:admin`. New users are not automatically made organization owners.
+- A server-side M2M application has the Logto Management API `all` permission
+  required by Cognia's collaboration adapter. Its secret expires after 90 days;
+  rotate it before expiry and update the private env file. Never expose it to
+  browser code or use it as an ordinary user token.
+- Username/password sign-up and sign-in, minimum password length 14, at least
+  three character types, breached-password/user-info/sequence rejection.
+- Mandatory end-user **TOTP**, with **backup codes** enabled. Each real user
+  enrolls their own authenticator during first sign-in and saves recovery codes.
+  The temporary verification account and its TOTP material were removed.
+- Lockout after five failed attempts, for 15 minutes; trusted-device bypass is
+  disabled. Feishu was subsequently enabled as described in section 10.
+  GitHub, SMTP, SMS and automatic social-account linking remain disabled.
+- Access-token TTL is one hour. Refresh tokens rotate and expire after seven
+  days. Cognia's own device access tokens retain their separate five-minute
+  DPoP lifetime; a Logto token is not a replacement for that device protocol.
+
+The end-user MFA policy is separate from the OSS **Admin Console** account.
+The admin account currently uses the generated strong password on the
+loopback-only console; its personal authenticator has not been enrolled.
+
+### Compatibility fixes verified against the running image
+
+`scripts/smoke/logto-seed.mjs` now binds API scopes to organization roles,
+accepts plain-text `201 Created` responses from relation endpoints, configures
+refresh-token issuance/rotation, and omits secret values from dry-run logs.
+The seeder preserves existing redirect URIs and unrelated client metadata.
+
+`lib/logto/client.ts` now sends **`prompt=consent`** together with
+`offline_access`. Without consent, the live Native flow returned no refresh
+token, preventing Cognia from adopting an organization. The SPA refresh-token
+setting alone does not fix Native clients.
+
+### Acceptance evidence and limits
+
+Verified with the running local service and Cognia's actual `loginToLogto`,
+`refreshLogtoToken`, `revokeLogtoToken`, and CLI callback server:
+
+- Password login → TOTP enrollment → PKCE exchange → organization refresh.
+- Fresh login rejects an invalid TOTP code and accepts a valid code.
+- JWT signature verifies against JWKS (ES384), with matching issuer, audience,
+  organization, expiry, and member permissions; `brain:admin` is absent.
+- Unauthorized organization refresh is denied; revoked refresh tokens return
+  `invalid_grant`; anonymous Management API requests return 401.
+- SPA token POSTs accept the configured web origin and reject an untrusted
+  origin without an allow-origin header. Preflight alone is not sufficient:
+  Logto answers OPTIONS before the client-specific origin check.
+- A PostgreSQL custom-format backup was restored into a separate temporary
+  database and all three Cognia applications were checked before removing it.
+  Backup: `~/.config/cognia/logto-local/logto-2026-10-04.dump` (0600).
+
+Focused checks: 40 Jest tests across the Logto client, discovery and cloud
+sign-in flow; 11 seed-script tests; scoped ESLint, Prettier and Compose validation.
+No coverage run was requested. No whole-repository build/typecheck was run.
+
+The Cognia gateway and collaboration service **were not started**: their
+published images (`cognia-server:latest-full`, `cognia-collab:latest`) returned
+`denied` from GHCR, and disk space was insufficient for a full Rust image build.
+Their issuer/audience/client/M2M/first-owner settings are prepared in the isolated
+env file, but `/api/auth/config`, first-owner claim, invitation acceptance,
+device registration, and full Web/Tauri/mobile flows remain unverified.
+The database restore check validates this backup, not automated backup scheduling.
+
+### Update and recovery
+
+Before changing Logto versions, take a fresh private `pg_dump -Fc`, record the
+currently pinned digest, and test the new image against a restored database.
+Use Logto's documented database alteration procedure for upgrades; startup's
+`db seed -- --swe` initializes an empty database and does not replace migrations.
+Do not blindly follow a moving `latest` tag on every restart.
+
+During this setup, disk exhaustion caused Docker to stop and left an unpacked
+image with empty `package.json` files despite a successful pull result. Only
+the approved npm/pnpm download caches and that newly pulled broken image were
+removed. After downloading it again, the embedded package versions and startup
+were verified. Keep adequate disk headroom before updating images or databases.
+
+Sources:
+
+- [Logto 1.44.0 release](https://github.com/logto-io/logto/releases/tag/v1.44.0)
+- [Official OSS deployment configuration](https://docs.logto.io/logto-oss/deployment-and-configuration)
+- [Organization-level API authorization](https://docs.logto.io/authorization/organization-level-api-resources)
+- [Offline access and consent](https://docs.logto.io/end-user-flows/sign-out)
+- [Password policy](https://docs.logto.io/security/password-policy)
+- [Security advisory fixed in 1.43.0](https://github.com/logto-io/logto/security/advisories/GHSA-crc8-q4hm-4564)
+
+## 10. Local Feishu login (2026-10-04)
+
+The existing Feishu application selected by the operator is **曼波**,
+App ID `cli_a8f5eac646f1d00e`. No new application was created. Its existing
+capabilities and permissions were preserved; only the Logto redirect was added
+to its security settings. This is an internal application in the currently
+selected Feishu enterprise, not a public cross-enterprise login application.
+
+| Setting                    | Value                                                      |
+| -------------------------- | ---------------------------------------------------------- |
+| Feishu developer console   | `https://open.feishu.cn/app/cli_a8f5eac646f1d00e/baseinfo` |
+| Logto connector factory    | `feishu-web`                                               |
+| Logto connector instance   | `x6dxc655l811`                                             |
+| Social provider target     | `feishu`                                                   |
+| Registered Feishu redirect | `http://logto.localhost:3301/callback/x6dxc655l811`        |
+| Cognia configuration       | `COGNIA_LOGTO_SOCIAL_PROVIDERS=feishu`                     |
+
+The credentials are in `~/.config/cognia/logto-local/feishu.json` (0600), outside
+the repository. Connector metadata is in `feishu-connector.json`; the previous
+sign-in experience was saved as `sign-in-exp.before-feishu.json`. Supply the
+credentials as `LOGTO_FEISHU_APP_ID` / `LOGTO_FEISHU_APP_SECRET` when reusing the
+existing seed script; never put the secret in `NEXT_PUBLIC_*`, shell history,
+tracked files, or client code. The instance ID must be read again after creating
+a replacement connector, then the corresponding redirect must be registered.
+
+Password login, username collection, mandatory TOTP/backup codes, password and
+lockout policies, and disabled automatic account linking were read back after
+configuration and matched the previous policy. An existing password account is
+not silently merged with a Feishu identity merely because profile fields match.
+
+Live verification completed Feishu authorization, the registered callback,
+username registration as `cognia_max`, and personal TOTP enrollment. The user
+confirmed saving recovery codes. The Native PKCE callback verified the ID Token's
+ES384 signature, issuer, audience, nonce and expiry, and confirmed refresh-token
+issuance. Test access/refresh tokens were revoked immediately after verification.
+The resulting Logto account has a Feishu identity; no organization membership
+or administrative role was assigned by this setup.
+
+Evidence is in `~/.config/cognia/logto-local/feishu-verification.json`; the updated
+database backup is `logto-feishu-2026-10-04.dump` in the same private directory.
+This backup includes the configured connector and real account and must be
+protected as sensitive data. The earlier backup restore test is separate from
+this newly created backup. The seed script's 13 focused tests, scoped ESLint,
+Prettier, Compose validation and a live seed dry-run passed. This does not claim
+that Gateway/Collab or mobile device access has been verified.
+
+The callback is intentionally loopback-only. Complete the flow in a browser on
+this Mac; opening that callback directly on a phone addresses the phone itself.
+Public or multi-device deployment needs its own HTTPS endpoint and callback
+registration. Feishu login does not require opening the Logto Admin Console to
+the network or adding messaging/contacts permissions to this application.
+
+Sources:
+
+- [Official Logto Feishu connector setup](https://docs.logto.io/integrations/feishu-web)
+- [Feishu application console](https://open.feishu.cn/app)

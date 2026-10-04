@@ -24,6 +24,7 @@
 
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
+import { externalAgentProcessPlane } from "../capability/process-plane"
 import { getRemoteHostConfig } from "../runtimes/remote/remote-host-configs"
 
 /** The slice of `ExternalAgentManager` a mount touches. */
@@ -116,10 +117,12 @@ export async function mountHostConfigAgent(
 export interface HostConfigCatalogDeps {
   readConfig: typeof getRemoteHostConfig
   getManager: () => Promise<HostConfigMountManager>
+  processPlane: typeof externalAgentProcessPlane
 }
 
 const defaultDeps: HostConfigCatalogDeps = {
   readConfig: getRemoteHostConfig,
+  processPlane: externalAgentProcessPlane,
   getManager: async () => {
     const { getExternalAgentManager } = await import("../manager")
     return getExternalAgentManager() as unknown as HostConfigMountManager
@@ -135,6 +138,27 @@ export function __setHostConfigMountDepsForTests(next: Partial<HostConfigCatalog
   return () => {
     deps = previous
   }
+}
+
+/**
+ * Can a catalog read mount this configuration WITHOUT spawning a second agent?
+ *
+ * Only where the agent's process starts locally: a desktop or headless brain
+ * that owns its host-config store runs the turn's agent in this same manager,
+ * so the catalog mount and the run share one process (see the module doc).
+ *
+ * Everywhere else the answer is no. A phone or a browser paired to a Host
+ * reaches the Host's process table through the process plane, and a mount
+ * there spawns a SECOND copy of the agent on the Host under the same process
+ * id as the copy the Host's run service is driving. Observed on a paired
+ * phone: a rival `kimi acp` left running beside the real one, a later spawn
+ * timing out after 30 s, and the picker sitting on "asking the agent" for the
+ * whole wait. Such a client reads what the Host reports in the run stream
+ * instead (`recordReportedAgentModelSurface`).
+ */
+export function hostConfigCatalogMountIsLocal(): boolean {
+  const plane = deps.processPlane()
+  return plane.ok && plane.via === "local"
 }
 
 /**

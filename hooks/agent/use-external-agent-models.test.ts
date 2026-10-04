@@ -14,6 +14,7 @@ const loadAgentModelCatalog = jest.fn().mockResolvedValue({
   status: "unsupported",
   surface: { choices: [], currentModelId: null, write: { kind: "none" } },
 })
+const cachedConversationSurface = jest.fn().mockReturnValue(null)
 const resolveConversationSessionId = jest.fn()
 const selectSessionModel = jest.fn()
 
@@ -28,6 +29,7 @@ const cacheListeners = new Set<() => void>()
 jest.mock("@/lib/ai/agent/external/capability/model-surface-cache", () => ({
   loadAgentModelSurface: (...args: unknown[]) => loadAgentModelSurface(...args),
   cachedAgentModelSurface: (...args: unknown[]) => cachedAgentModelSurface(...args),
+  cachedConversationSurface: (...args: unknown[]) => cachedConversationSurface(...args),
   bindConversationSession: (...args: unknown[]) => bindConversationSession(...args),
   loadAgentModelCatalog: (...args: unknown[]) => loadAgentModelCatalog(...args),
   subscribeAgentModelSurface: (listener: () => void) => {
@@ -43,8 +45,10 @@ jest.mock("@/lib/ai/agent/external/capability/process-plane", () => ({
   subscribeExternalAgentProcessPlane: () => () => {},
 }))
 const mountHostConfigForCatalog = jest.fn()
+let mountIsLocal = true
 jest.mock("@/lib/ai/agent/external/config/host-config-mount", () => ({
   mountHostConfigForCatalog: (...args: unknown[]) => mountHostConfigForCatalog(...args),
+  hostConfigCatalogMountIsLocal: () => mountIsLocal,
 }))
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({
@@ -53,7 +57,8 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
   }),
 }))
 
-import { useExternalAgentModels } from "./use-external-agent-models"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { MODEL_DISCOVERY_DEADLINE_MS, useExternalAgentModels } from "./use-external-agent-models"
 
 const SURFACE: ExternalAgentModelSurface = {
   choices: [
@@ -96,6 +101,8 @@ describe("useExternalAgentModels", () => {
     resolveConversationSessionId.mockReset().mockReturnValue("sess-1")
     selectSessionModel.mockReset().mockResolvedValue(undefined)
     mountHostConfigForCatalog.mockReset().mockResolvedValue("eac_1")
+    cachedConversationSurface.mockReset().mockReturnValue(null)
+    mountIsLocal = true
     cacheRevision = 0
     cacheListeners.clear()
   })
@@ -253,6 +260,8 @@ describe("useExternalAgentModels", () => {
       loadAgentModelCatalog.mockReset().mockResolvedValue({ status: "ready", surface: SURFACE })
     })
 
+    // A desktop or headless brain that owns its host-config store: the mount
+    // shares the run service's agent, so reading the catalog spawns nothing.
     it("mounts the host's configuration and reads its catalog", async () => {
       const { result } = renderHook(() => useExternalAgentModels("chat-1"))
       await waitFor(() => expect(result.current.surface).toEqual(SURFACE))
@@ -282,6 +291,86 @@ describe("useExternalAgentModels", () => {
       expect(result.current.surface).toBeNull()
       expect(loadAgentModelCatalog).not.toHaveBeenCalled()
     })
+  })
+
+  // A phone or browser paired to a Host. Mounting there spawned a SECOND copy
+  // of the agent on the Host under the running copy's process id, and the
+  // picker sat on "asking the agent" until that spawn timed out.
+  describe("a configuration a paired Host runs for this client", () => {
+    beforeEach(() => {
+      runtimeRef = {
+        kind: "host",
+        configId: "eac_1",
+        revision: "eacr_1",
+        lifecycleGeneration: 1,
+        name: "Kimi Code",
+      } as AgentRuntimeRef
+      mountIsLocal = false
+    })
+
+    it("never mounts or asks, and says the models arrive with a turn", async () => {
+      const { result } = renderHook(() => useExternalAgentModels("chat-1"))
+      await waitFor(() => expect(result.current.status).toBe("deferred"))
+      expect(result.current.loading).toBe(false)
+      expect(result.current.canRefresh).toBe(false)
+      expect(result.current.surface).toBeNull()
+      expect(result.current.agentName).toBe("Kimi Code")
+      expect(mountHostConfigForCatalog).not.toHaveBeenCalled()
+      expect(loadAgentModelCatalog).not.toHaveBeenCalled()
+      expect(loadAgentModelSurface).not.toHaveBeenCalled()
+      // Refresh has nobody to ask either.
+      act(() => result.current.refresh())
+      expect(mountHostConfigForCatalog).not.toHaveBeenCalled()
+    })
+
+    it("shows what the Host reported after a turn, and seeds a pick", async () => {
+      const reported: ExternalAgentModelSurface = { ...SURFACE, write: { kind: "session-seed" } }
+      const { result } = renderHook(() => useExternalAgentModels("chat-1"))
+      await waitFor(() => expect(result.current.status).toBe("deferred"))
+
+      cachedConversationSurface.mockReturnValue({ status: "ready", surface: reported })
+      act(() => {
+        cacheRevision += 1
+        for (const listener of [...cacheListeners]) listener()
+      })
+      await waitFor(() => expect(result.current.surface).toEqual(reported))
+      expect(cachedConversationSurface).toHaveBeenLastCalledWith("eac_1", "chat-1")
+      // The Host applies the persisted pick on the next turn: nothing is sent.
+      await expect(result.current.select("openai/gpt-5")).resolves.toBeUndefined()
+      expect(selectSessionModel).not.toHaveBeenCalled()
+    })
+  })
+
+  it("stops claiming to ask once discovery outlives its deadline", async () => {
+    jest.useFakeTimers()
+    try {
+      loadAgentModelSurface.mockReturnValue(new Promise(() => {}))
+      const { result } = renderHook(() => useExternalAgentModels("chat-1"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(result.current.loading).toBe(true)
+      await act(async () => {
+        jest.advanceTimersByTime(MODEL_DISCOVERY_DEADLINE_MS)
+      })
+      expect(result.current.loading).toBe(false)
+      expect(result.current.status).toBe("error")
+      expect(result.current.canRefresh).toBe(true)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("names the agent from the local store", async () => {
+    useExternalAgentStore.setState({
+      agents: { "pi-1": { id: "pi-1", name: "Pi" } } as never,
+    })
+    try {
+      const { result } = renderHook(() => useExternalAgentModels("chat-1"))
+      await waitFor(() => expect(result.current.agentName).toBe("Pi"))
+    } finally {
+      useExternalAgentStore.setState({ agents: {} as never })
+    }
   })
 
   it("re-asks on refresh", async () => {

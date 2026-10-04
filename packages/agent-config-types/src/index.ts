@@ -533,8 +533,12 @@ export type SendOptions = {
    * set, so leave `includePartialMessages` off when budgeting thinking.
    */
   maxThinkingTokens?: number
-  /** Validated provider-neutral history restored by a CLI session restart. */
+  /** Validated provider-neutral history for a new or reconstructed runtime. */
   initialConversation?: Array<{ role: string; content?: unknown; [field: string]: unknown }>
+  /** Transcript generation carried by the runtime and its events, including retained turns. */
+  transcriptInvalidationId?: string
+  /** Require this live AI-SDK context; refuse if it was retired after the status probe. */
+  expectedRuntimeSessionId?: string
   /** Resume an existing SDK session by id. Mutually exclusive with `forkFromSessionId`. */
   resumeSessionId?: string
   /** Fork a new branch from an existing SDK session id. */
@@ -1297,6 +1301,8 @@ export interface SessionEndedEvent {
  */
 export interface SdkSessionIdEvent {
   type: "sdk_session_id"
+  /** AI-SDK emits this only after its initial conversation has been restored. */
+  runtimeAdapter?: "ai-sdk"
   sessionId: string
   sdkSessionId: string
 }
@@ -1474,6 +1480,19 @@ export interface ToolResultReviewEvent {
 // a `control_response` event correlated by `requestId`. Mirrors the
 // `permission_request` / `plugin_tool_exec` round-trips. See `lib/claude/ipc.ts`.
 
+/** Identity of a live AI-SDK loop, read through the existing control channel. */
+export type RuntimeSessionStatus =
+  | { retained: false }
+  | {
+      retained: true
+      runtimeAdapter: "ai-sdk"
+      sdkSessionId: string
+      provider: string
+      cwd?: string
+      transcriptInvalidationId?: string
+      active: boolean
+    }
+
 /**
  * Allowlisted SDK `Query` control methods reachable via `sessionControl`.
  *
@@ -1503,6 +1522,7 @@ export type SessionControlMethod =
   | "reloadPlugins"
   | "reloadSkills"
   | "rewindFiles"
+  | "runtimeStatus"
   | "seedReadState"
   | "setMaxThinkingTokens"
   | "setMcpPermissionModeOverride"
@@ -1531,6 +1551,7 @@ export type SessionControlMethod =
  */
 export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCapabilityId> = {
   accountInfo: "session.manage",
+  runtimeStatus: "session.multi-turn",
   applyFlagSettings: "session.manage",
   backgroundTasks: "tasks.background",
   getContextUsage: "context-management",
@@ -2349,6 +2370,32 @@ export type SessionOrigin =
    */
   | { kind: "scheduled-task"; taskId: string; taskName: string; runId?: string }
 
+/**
+ * A Cognia provider/model an external agent runs on through the local gateway
+ * (ADR-0090, 2026-09-11 amendment). Nonsecret: the upstream credential stays
+ * in Cognia and reaches the task through its gateway lease.
+ *
+ * `accountId` omitted means the provider default at task start; a concrete id
+ * pins the task to that subscription account; `null` selects the manual API
+ * settings.
+ */
+export interface ExternalAgentCogniaModelBinding {
+  providerId: string
+  modelId: string
+  accountId?: string | null
+}
+
+/**
+ * The model one external agent runs on in one conversation.
+ *
+ * - `native`: the agent's own models. `modelId` undefined means the agent's
+ *   own default; otherwise the id the agent itself published.
+ * - `cognia`: a Cognia provider/model reached through the gateway.
+ */
+export type ExternalAgentModelChoice =
+  | { kind: "native"; modelId?: string }
+  | { kind: "cognia"; binding: ExternalAgentCogniaModelBinding }
+
 export interface ChatSession {
   /** Durable source/target link for an explicitly exported Codex snapshot. */
   codexHandoff?: {
@@ -2580,10 +2627,36 @@ export interface ChatSession {
    * conversation survives sidecar restarts and app reloads.
    */
   sdkSessionId?: string
+  /** Destructive transcript mutation awaiting AI-SDK context reconstruction. */
+  runtimeTranscriptInvalidated?: string
+  /** Retained transcript generation used to reject stale runtime events and writes. */
+  runtimeTranscriptGeneration?: string
   /** Original native transcript backend; never contains host credentials or tenant authority. */
   sdkSessionStorage?: { backend: "filesystem" | "host-sqlite"; workspace?: string | null }
   /** Nonsecret, agent-scoped native session link for isolated gateway task resume. */
   externalAgentSession?: { agentId: string; sessionId: string }
+  /**
+   * Which models each external agent runs on in THIS conversation, keyed by
+   * the local agent id or the Host configuration id.
+   *
+   * Separate from `model` / `providerOverride` / `accountId`, which belong to
+   * the built-in lane alone and survive every switch to and from an agent. An
+   * agent absent here runs its configuration's default
+   * (`ExternalAgentConfig.cogniaModel`, else its own model). Resolved by
+   * `resolveExternalAgentModelSelection`
+   * (`lib/ai/agent/external/session/session-models.ts`). Not indexed, so it
+   * needs no Dexie version bump.
+   */
+  externalAgentModels?: Record<string, ExternalAgentModelChoice>
+  /**
+   * Gateway task links retained after the conversation moved off them, so a
+   * switch back to the same Cognia binding resumes the same task instead of
+   * starting another. Bounded to the last
+   * `EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT` per agent; never copied onto a
+   * branch (a task belongs to one conversation). `externalAgentSession` stays
+   * the CURRENT link. Not indexed.
+   */
+  externalAgentGatewaySessions?: Array<{ agentId: string; sessionId: string }>
   /**
    * When forking, the SDK session id this branch was created from. The next
    * send on a session whose `forkedFromSdkSessionId` is set populates
@@ -2876,6 +2949,8 @@ export type MessageSenderKind = "user" | "assistant" | "system"
 export interface StoredMessage {
   id: string
   sessionId: string
+  /** WorkingSet after this persisted message boundary; absent on legacy/imported rows. */
+  workingSetSnapshot?: import("./working-set").SessionWorkingSetV1
   /** Stable provider-agnostic turn identity used by the lazy transcript index. */
   turnKey?: string
   /** Owning workspace id — Workspace isolation column (Dexie v86). Inherits the session's project. */
@@ -3153,6 +3228,28 @@ export interface ConversationView {
   groupBy?: ConversationGroupBy
   /** How far the search field reaches. */
   search?: ConversationSearchOptions
+}
+
+/**
+ * Conversation archive policy.
+ *
+ * `autoArchiveAfterDays` archives a conversation once its last activity (the
+ * last message, else the last update) is older than that many days. `null` or
+ * absent is off, which is the default. The allowed day counts are one list,
+ * `AUTO_ARCHIVE_AFTER_DAYS_OPTIONS` in `lib/chat/auto-archive.ts`, and a stored
+ * value outside it resolves to off rather than to a guess.
+ *
+ * Pinned, running, handed-off (`handoffLock`) and IM-bound (`platformBinding`)
+ * conversations are never auto-archived, nor the one that is open. Archiving
+ * is reversible: an auto-archived conversation is restored like any other.
+ *
+ * A policy, not a preference: the device that OWNS the sessions runs it (the
+ * `conversation-auto-archive` scheduler maintenance task). A paired client
+ * whose Host owns the rows skips the sweep, and its control is shown disabled.
+ */
+export interface ConversationArchiveSettings {
+  /** Days of inactivity before a conversation is archived. `null` / absent = off. */
+  autoArchiveAfterDays?: number | null
 }
 
 export interface ConversationSidebarSettings {
@@ -4365,6 +4462,12 @@ export interface AppSettings {
   conversationTimeline?: ConversationTimelineSettings
   /** Conversation sidebar (ChannelList) behavior preferences. */
   conversationSidebar?: ConversationSidebarSettings
+  /**
+   * Conversation archive policy (auto-archive after inactivity). Absent means
+   * off. Executed by the device that owns the sessions; see
+   * {@link ConversationArchiveSettings}.
+   */
+  conversationArchive?: ConversationArchiveSettings
   /** Which metrics the chat run-status bar surfaces (speed, tokens, cost, …). */
   runStatusBar?: RunStatusBarSettings
   /**
@@ -5453,6 +5556,16 @@ export interface AppSettings {
 
   /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
   defaultProvider?: string
+  /**
+   * Per-agent model choices a NEW conversation starts with, keyed like
+   * `ChatSession.externalAgentModels`.
+   *
+   * Written by the composer's model picker when no conversation exists yet
+   * (the welcome screen), and copied onto the row by `createSession`. Never
+   * read for an existing conversation: there the choice is the
+   * conversation's own.
+   */
+  externalAgentModelDefaults?: Record<string, ExternalAgentModelChoice>
   /**
    * Provider-scoped default subscription accounts. These are lower priority
    * than session and character overrides and higher priority than each

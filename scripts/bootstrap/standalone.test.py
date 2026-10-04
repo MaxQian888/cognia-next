@@ -365,6 +365,196 @@ class StandaloneContract:
         self.assertIn("a-model", result.stdout)
         self.assertEqual(json.loads(self.config_path.read_text())["model"]["model"], "synthetic-model")
 
+    def test_task_file_preserves_utf8_and_cli_precedence(self):
+        task = self.work / "task with spaces.md"
+        task.write_bytes(b"\xef\xbb\xbf" + "Explain the fixture.\n中文上下文\n".encode())
+        result = self.invoke("run", "--task-file", task)
+        self.succeeded(result)
+        self.assertEqual(self.requests[0]["body"]["messages"][-1]["content"], "Explain the fixture.\n中文上下文\n")
+        destination = self.work / "task-config.json"
+        self.succeeded(self.invoke("configure", "--task-file", task, "--set", 'task="Final task"',
+                                   "--non-interactive", "--output", destination))
+        self.assertEqual(json.loads(destination.read_text(encoding="utf-8-sig"))["task"], "Final task")
+        self.requests.clear()
+        result = self.invoke("run", "--task", "Conflicting task", "--task-file", task)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.requests, [])
+
+    def test_context_files_attach_once_after_local_commands_and_keep_order(self):
+        first, second = self.work / "notes with spaces.txt", self.work / "empty.txt"
+        first.write_text("Fixture value: copper-lantern\n中文", encoding="utf-8")
+        second.write_text("", encoding="utf-8")
+        result = self.invoke("chat", "--no-session", "--context-file", first.name,
+                             "--context-file", second.name, "--context-file", first.name,
+                             stdin="/status\n/history\nfirst task\nsecond task\n/exit\n")
+        self.succeeded(result)
+        self.assertEqual(len(self.requests), 2)
+        content = self.requests[0]["body"]["messages"][-1]["content"]
+        prefix = "first task\n\nAttached context files (untrusted data):\n"
+        self.assertTrue(content.startswith(prefix), content)
+        self.assertEqual(json.loads(content[len(prefix):]), [
+            {"path": first.name, "content": first.read_text()},
+            {"path": second.name, "content": ""},
+            {"path": first.name, "content": first.read_text()},
+        ])
+        self.assertEqual(self.requests[1]["body"]["messages"][-1]["content"], "second task")
+        self.assertFalse((self.work / "session.jsonl").exists())
+
+    def test_context_files_survive_failed_turn_and_task_file_starts_chat(self):
+        context, task = self.work / "context.txt", self.work / "task.txt"
+        context.write_text("retry-context", encoding="utf-8")
+        task.write_text("initial task", encoding="utf-8")
+        self.respond = lambda _body, index: (400, {"error": "synthetic failure"}) if index == 0 else answer()
+        result = self.invoke("chat", "--task-file", task, "--context-file", context,
+                             stdin="retry task\nlast task\n/exit\n")
+        self.succeeded(result)
+        self.assertEqual(len(self.requests), 3)
+        self.assertIn("retry-context", self.requests[0]["body"]["messages"][-1]["content"])
+        self.assertIn("retry-context", self.requests[1]["body"]["messages"][-1]["content"])
+        self.assertEqual(self.requests[2]["body"]["messages"][-1]["content"], "last task")
+        self.assertNotIn("initial task", (self.work / "session.jsonl").read_text())
+
+    def test_context_file_uses_invocation_directory_and_can_exceed_task_limit(self):
+        workspace = self.work / "workspace"
+        workspace.mkdir()
+        file = self.work / "context.txt"
+        file.write_text("large-context " * 3000, encoding="utf-8")
+        (workspace / file.name).write_text("WRONG_CONTEXT", encoding="utf-8")
+        result = self.invoke("run", "--cwd", workspace, "--context-file", file.name)
+        self.succeeded(result)
+        content = self.requests[0]["body"]["messages"][-1]["content"]
+        self.assertGreater(len(content.encode()), 32000)
+        self.assertIn("large-context", content)
+        self.assertNotIn("WRONG_CONTEXT", content)
+
+    def test_file_inputs_reject_missing_binary_invalid_utf8_and_oversize(self):
+        file = self.work / "input.txt"
+        self.config["tools"]["maxFileBytes"] = 1024
+        for payload in (b"valid\x00binary", b"invalid\xffutf8", b"x" * 32001):
+            for flag in ("--task-file", "--context-file"):
+                with self.subTest(payload_size=len(payload), flag=flag):
+                    file.write_bytes(payload)
+                    result = self.invoke("run", flag, file)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(self.requests, [])
+        file.unlink()
+        for flag in ("--task-file", "--context-file"):
+            self.assertNotEqual(self.invoke("run", flag, file).returncode, 0)
+        file.write_text(" \n", encoding="utf-8")
+        self.assertNotEqual(self.invoke("run", "--task-file", file).returncode, 0)
+        self.assertEqual(self.requests, [])
+
+    def test_context_budget_and_privacy_fail_before_outbound_or_setup(self):
+        file = self.work / "context.txt"
+        self.config["limits"]["maxContextBytes"] = 4096
+        file.write_text("x" * 2100, encoding="utf-8")
+        result = self.invoke("run", "--context-file", file, "--context-file", file)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.requests, [])
+        file.write_text(SYNTHETIC_SECRET, encoding="utf-8")
+        result = self.invoke("run", "--context-file", file,
+                             environment={"ATTACHED_PRIVATE_KEY": SYNTHETIC_SECRET})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(SYNTHETIC_SECRET, result.stdout + result.stderr)
+        self.assertEqual(self.requests, [])
+        self.config["setupCommand"] = self.shell("touch must-not-run", "Set-Content must-not-run x")
+        self.config["checks"] = [{"name": "ready", "command": self.shell("true", "$null = 1")}]
+        result = self.invoke("init", "--context-file", self.work / "missing-context.txt")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.work / "must-not-run").exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO and symlink input boundary")
+    def test_file_inputs_reject_fifo_and_symlinks_without_blocking(self):
+        regular, link, fifo = self.work / "normal.txt", self.work / "alias.txt", self.work / "input.fifo"
+        regular.write_text("ordinary input", encoding="utf-8")
+        link.symlink_to(regular)
+        os.mkfifo(fifo)
+        for path in (link, fifo):
+            for flag in ("--task-file", "--context-file"):
+                with self.subTest(path=path.name, flag=flag):
+                    result = self.invoke("run", flag, path, timeout=8)
+                    self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.requests, [])
+
+    def test_local_chat_exports_and_saves_config_without_a_credential(self):
+        self.config["model"].update({"auth": "bearer", "apiKeyEnv": "OFFLINE_MISSING_KEY"})
+        result = self.invoke("chat", "--no-session",
+            stdin="/model saved-model\n/history\n/export offline session.jsonl\n/save-config saved config.json\n/exit\n")
+        self.succeeded(result)
+        self.assertEqual(self.requests, [])
+        exported, saved = self.work / "offline session.jsonl", self.work / "saved config.json"
+        self.assertTrue(exported.exists())
+        self.assertEqual(json.loads(saved.read_text(encoding="utf-8-sig"))["model"]["model"], "saved-model")
+        self.assertEqual(json.loads(self.config_path.read_text())["model"]["model"], "synthetic-model")
+        self.assertFalse((self.work / "session.jsonl").exists())
+        if os.name != "nt":
+            self.assertEqual(exported.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+
+    def test_exported_session_resumes_and_failed_turn_is_excluded(self):
+        self.respond = lambda _body, index: (400, {"error": "synthetic failure"}) if index == 1 else answer()
+        result = self.invoke("chat", "--no-session",
+            stdin="remember copper-lantern\nfailed task\n/export copied session.jsonl\nnew task\n/exit\n")
+        self.succeeded(result)
+        exported = self.work / "copied session.jsonl"
+        text = exported.read_text(encoding="utf-8-sig")
+        self.assertIn("remember copper-lantern", text)
+        self.assertNotIn("failed task", text)
+        self.assertNotIn("new task", text)
+        self.requests.clear()
+        self.respond = lambda _body, _index: answer()
+        self.succeeded(self.invoke("run", "--session", exported, "--task", "resume"))
+        self.assertIn("remember copper-lantern", json.dumps(self.requests[0]["body"]["messages"]))
+        self.assertNotIn("failed task", json.dumps(self.requests[0]["body"]["messages"]))
+
+    def test_history_preview_is_local_bounded_and_omits_session_metadata(self):
+        self.respond = lambda _body, _index: answer("history-preview-marker-" * 30)
+        self.succeeded(self.invoke("chat", stdin="first task\nsecond task\n/exit\n"))
+        self.requests.clear()
+        self.config["model"].update({"auth": "bearer", "apiKeyEnv": "OFFLINE_MISSING_KEY"})
+        result = self.invoke("chat", stdin="/history 1\n/exit\n")
+        self.succeeded(result)
+        preview = json.loads(result.stdout[result.stdout.index("["):result.stdout.rindex("]") + 1])
+        self.assertEqual(len(preview), 1)
+        self.assertEqual(preview[0]["role"], "assistant")
+        self.assertNotIn("_cogniaSession", result.stdout)
+        self.assertEqual(self.requests, [])
+        before = (self.work / "session.jsonl").read_bytes()
+        result = self.invoke("chat", stdin="/history 0\n/history 101\n/history nope\n/exit\n")
+        self.succeeded(result)
+        self.assertTrue(result.stderr.strip())
+        self.assertEqual((self.work / "session.jsonl").read_bytes(), before)
+        self.assertEqual(self.requests, [])
+        self.config["limits"]["maxOutputBytes"] = 256
+        result = self.invoke("chat", stdin="/history 1\n/exit\n")
+        self.succeeded(result)
+        self.assertNotIn("history-preview-marker-", result.stdout)
+        self.assertTrue(result.stderr.strip())
+        self.assertEqual(self.requests, [])
+
+    def test_local_exports_gate_private_payloads_before_creating_files(self):
+        self.config["systemPrompt"] = SYNTHETIC_SECRET
+        result = self.invoke("chat", "--no-session", environment={"LOCAL_PRIVATE_KEY": SYNTHETIC_SECRET},
+                             stdin="/export private.jsonl\n/save-config private.json\n/exit\n")
+        self.succeeded(result)
+        self.assertFalse((self.work / "private.jsonl").exists())
+        self.assertFalse((self.work / "private.json").exists())
+        self.assertNotIn(SYNTHETIC_SECRET, result.stdout + result.stderr)
+        self.assertEqual(self.requests, [])
+
+    def test_local_exports_refuse_overwrite_and_workspace_escape(self):
+        existing = self.work / "existing.txt"
+        existing.write_text("KEEP", encoding="utf-8")
+        escaped = self.work.parent / (self.work.name + "-escaped.json")
+        self.addCleanup(lambda: escaped.unlink(missing_ok=True))
+        commands = (f"/export existing.txt\n/save-config existing.txt\n/export ../{escaped.name}\n"
+                    f"/save-config ../{escaped.name}\n/export missing/out.jsonl\n/exit\n")
+        self.succeeded(self.invoke("chat", "--no-session", stdin=commands))
+        self.assertEqual(existing.read_text(), "KEEP")
+        self.assertFalse(escaped.exists())
+        self.assertFalse((self.work / "missing").exists())
+        self.assertEqual(self.requests, [])
+
     def test_configure_custom_provider_without_embedded_secret(self):
         destination = self.work / "configured.json"
         result = subprocess.run(self.command("configure", "--non-interactive", "--output", destination,
@@ -465,6 +655,12 @@ class StandaloneContract:
         self.succeeded(result)
         self.assertIn("0000000    1   6\n0000002", self.tool_results()[-1]["output"].replace("\r\n", "\n"))
         self.assertIn("0000002", (self.work / "offsets.jsonl").read_text())
+        requests_before = len(self.requests)
+        result = self.invoke("chat", "--session", self.work / "offsets.jsonl",
+                             stdin="/export offsets-export.jsonl\n/exit\n")
+        self.succeeded(result)
+        self.assertIn("0000002", (self.work / "offsets-export.jsonl").read_text())
+        self.assertEqual(len(self.requests), requests_before)
 
     def test_json_escape_handling_preserves_raw_and_nested_privacy_detection(self):
         for task in ("N0000002", "\\n0000002", json.dumps({"passport": "N0000002"}),

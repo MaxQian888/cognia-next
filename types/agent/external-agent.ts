@@ -15,6 +15,7 @@ import type {
   ExternalAgentCapabilityLevel,
   ExternalAgentCapabilityProfileV1,
 } from "@cognia/agent-config-types/external-agent-capability"
+import type { ExternalAgentCogniaModelBinding } from "@cognia/agent-config-types"
 import type {
   AgentCapabilities as SdkAcpAgentCapabilities,
   Annotations as SdkAcpAnnotations,
@@ -113,6 +114,10 @@ export type ExternalAgentBranchReasonCode =
   // ready handshake, so the permission interception it owns is not proven
   // live. Fail closed rather than run the agent ungated.
   | "extension_handshake_failed"
+  // A plugin-shipped Pi package the agent opted into cannot be loaded
+  // (ADR-0210): plugin disabled, not prepared, double load, version floor.
+  // The session is refused rather than started without it.
+  | "pi_package_unavailable"
   // A frame on the runtime's stdout violated the wire contract (unparseable,
   // or past the frame/buffer ceiling). The stream cannot be resynchronised.
   | "protocol_frame_invalid"
@@ -1207,7 +1212,15 @@ export interface AcpPermissionRequest {
   kind?: AcpToolCallKind
   toolInfo: AcpToolInfo
   options?: AcpPermissionOption[]
+  /** Arguments exactly as the agent sent them. The only input policy reads. */
   rawInput?: Record<string, unknown>
+  /**
+   * Display-only arguments recovered when the agent omitted `rawInput` (from
+   * JSON text content, diff content or locations — see
+   * `runtimes/acp/acp-permission-input.ts`). Absent when `rawInput` was sent
+   * or nothing could be recovered. Never feeds a permission decision.
+   */
+  inputPreview?: Record<string, unknown>
   locations?: AcpToolCallLocation[]
   reason?: string
   riskLevel?: "low" | "medium" | "high" | "critical"
@@ -1379,13 +1392,14 @@ export interface ExternalAgentRetryConfig {
   retryOnErrors?: string[]
 }
 
-/** A host-resolved model binding. Upstream credentials never enter agent configuration. */
-export interface ExternalAgentCogniaModelBinding {
-  providerId: string
-  modelId: string
-  /** Omit for provider default; a concrete account pins the task; null selects manual API settings. */
-  accountId?: string | null
-}
+/**
+ * A host-resolved model binding. Upstream credentials never enter agent configuration.
+ *
+ * Declared in `@cognia/agent-config-types` beside `ChatSession.externalAgentModels`,
+ * which stores it per conversation; re-exported here for the external-agent code
+ * that has always imported it from this module.
+ */
+export type { ExternalAgentCogniaModelBinding }
 
 export function normalizeCogniaModelBinding(
   value: unknown
@@ -2414,6 +2428,20 @@ export interface ExternalAgentExecutionOptions {
   cogniaModel?: ExternalAgentCogniaModelBinding | null
   /** Reuse an existing external agent session */
   sessionId?: string
+  /**
+   * Start this turn in a new external session, ignoring every session hint
+   * (`sessionId`, `context.custom.sessionId`, the conversation's earlier
+   * session). Used when the turn moves between the native lane and a Cognia
+   * model, or between Cognia models whose task cannot be rebound; the caller
+   * hands the conversation over as `context.custom.conversationHistory`.
+   */
+  resetExternalSession?: boolean
+  /**
+   * Continue the named Cognia gateway task on a different Cognia model,
+   * keeping its native history. Honoured only when the task's owner account,
+   * origin device and runtime are unchanged; refused otherwise.
+   */
+  rebind?: boolean
   /**
    * Model id the external agent should run this execution on.
    *

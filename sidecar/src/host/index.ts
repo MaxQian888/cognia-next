@@ -13,13 +13,14 @@ import {
   routeRestore,
   routeClose,
 } from "./sessions/lifecycle.ts"
-import { providerVisibleSendPayloadIsSafe } from "./commands/send.ts"
+import { providerVisibleSendPayloadIsSafe, retainedRuntimeSendIsSafe } from "./commands/send.ts"
 import {
   routeSetMode,
   runControlWithTimeout,
   routeSteer,
   controlPreflight,
   guardedControlParams,
+  runtimeStatus,
 } from "./control/handle.ts"
 import { buildPermissionResult, routeCallReserveDecision } from "./commands/responses.ts"
 import { dropDuplicateCommand } from "./commands/ledger.ts"
@@ -148,7 +149,10 @@ export function createAgentHost({
       sessions,
       sessionId,
       () => ownerRef.session,
-      turnRef
+      turnRef,
+      typeof sendOptions.transcriptInvalidationId === "string"
+        ? sendOptions.transcriptInvalidationId
+        : undefined
     )
     const dispatchParams = {
       sessionId,
@@ -186,10 +190,28 @@ export function createAgentHost({
         type: "session_ended",
         sessionId,
         error: "provider-visible payload rejected by the PII gate",
+        ...(options?.turnId ? { turnId: options.turnId } : {}),
+        ...(options?.transcriptInvalidationId
+          ? { transcriptInvalidationId: options.transcriptInvalidationId }
+          : {}),
       })
       return
     }
     const existing = sessions.get(sessionId!)
+    if (!retainedRuntimeSendIsSafe(existing, options)) {
+      emit({
+        type: "session_ended",
+        sessionId,
+        errorCode: "RUNTIME_SESSION_NOT_RETAINED",
+        error:
+          "runtime_session_not_retained: retained context is unavailable; retry to restore conversation history.",
+        ...(options?.turnId ? { turnId: options.turnId } : {}),
+        ...(options?.transcriptInvalidationId
+          ? { transcriptInvalidationId: options.transcriptInvalidationId }
+          : {}),
+      })
+      return
+    }
     if (existing) {
       // Defense-in-depth: close-and-restart any session that can't safely take a
       // new prompt in place (changed cwd, or a previous turn that never ended).
@@ -263,6 +285,11 @@ export function createAgentHost({
           ...extra,
         })
       )
+
+    if (method === "runtimeStatus") {
+      respond({ ok: true, result: runtimeStatus(sessions.get(sessionId!)) })
+      return
+    }
 
     const rejection = controlPreflight(sessions.get(sessionId!)?.runtimeAdapterId, method, params)
     if (rejection) {

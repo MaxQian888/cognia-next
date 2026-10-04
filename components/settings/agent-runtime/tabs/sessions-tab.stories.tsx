@@ -2,11 +2,12 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { SessionsTab } from "./sessions-tab"
 
-// `SessionsTab` is a Dexie-backed table of chat sessions enriched with
-// per-session token + cost totals (Resume / Fork / Rename / Delete). On the web
-// preview it opens an empty IndexedDB, so it renders its "no sessions" empty
-// state. (Seeding `ChatSession` + `sessionUsage` rows is possible via
-// `seedDb`, but the empty state is the meaningful default here.)
+// `SessionsTab` is the runtime view of conversations: the entry card into the
+// Conversations page (live active/archived counts), the conversations bound to
+// a native Claude Agent SDK session (open / fork SDK session / unlink), and the
+// native SDK session manager. On the web preview it opens an empty IndexedDB
+// and has no agent host, so it renders zero counts, the "nothing bound yet"
+// empty state, and no native SDK block.
 const meta = {
   title: "Settings/AgentRuntime/Tabs/SessionsTab",
   component: SessionsTab,
@@ -23,5 +24,5 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Empty database — the "no sessions" state with the filter input.
+// Empty database — zero counts and the "nothing bound yet" empty state.
 export const Default: Story = {}

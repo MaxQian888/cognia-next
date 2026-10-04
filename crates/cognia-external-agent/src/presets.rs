@@ -198,6 +198,14 @@ const ENV_PREFIX_ALLOWLIST: &[&str] = &[
     // MCP server spec. The broker's authorize() remains the permission
     // authority; see ADR-0119.
     "COGNIA_TOOLHOST_",
+    // Plugin Pi package values (ADR-0210). Only a cooperating extension that a
+    // plugin ships and the user opted an agent into reads these; no program,
+    // loader or runtime interprets a `COGNIA_PIPKG_*` key. The values come from
+    // the plugin's manifest literals, its own configuration or the session
+    // workspace path — never from the model — and the dedicated prefix is what
+    // keeps a plugin from reaching `NODE_OPTIONS`, `LD_PRELOAD` or a provider
+    // credential through this channel.
+    "COGNIA_PIPKG_",
 ];
 
 /// A policy violation. The message is safe to surface to the caller and to
@@ -335,6 +343,10 @@ impl SpawnPolicy {
         let (env, dropped) =
             filter_env_with_additions(std::mem::take(&mut config.env), &self.operator_env);
         config.env = env;
+        // A remote caller never names sandbox roots: the plugin store whose
+        // packages the key points at lives on the desktop, and the key is a
+        // host-to-wrapper request, not client input.
+        let dropped = scope_pi_package_env(&config.command, &mut config.env, dropped, true);
         Ok(ValidatedSpawn {
             config,
             dropped_env_keys: dropped,
@@ -390,6 +402,7 @@ impl SpawnPolicy {
         let (env, dropped) =
             filter_env_with_additions(std::mem::take(&mut config.env), &self.operator_env);
         config.env = env;
+        let dropped = scope_pi_package_env(&config.command, &mut config.env, dropped, false);
         Ok(ValidatedSpawn {
             config,
             dropped_env_keys: dropped,
@@ -772,6 +785,39 @@ fn valid_operator_env(key: &str) -> bool {
 
 pub(crate) fn kimi_env_key(key: &str) -> bool {
     key.starts_with("KIMI_") && ENV_KEY_ALLOWLIST.contains(&key)
+}
+
+/// Plugin Pi package env (ADR-0210) only belongs to a Pi process: the
+/// `COGNIA_PIPKG_*` values and the package-roots request are dropped from any
+/// other command, and the roots request is dropped from every REMOTE spawn.
+/// Applied after the allowlist so an operator addition cannot re-admit them.
+fn scope_pi_package_env(
+    command: &str,
+    env: &mut HashMap<String, String>,
+    mut dropped: Vec<String>,
+    remote: bool,
+) -> Vec<String> {
+    let lower = command.trim().to_ascii_lowercase();
+    let base = [".exe", ".cmd", ".bat"]
+        .iter()
+        .find_map(|suffix| lower.strip_suffix(suffix))
+        .unwrap_or(&lower);
+    let is_pi = base == "pi";
+    let keys: Vec<String> = env
+        .keys()
+        .filter(|key| {
+            let pipkg = key.starts_with("COGNIA_PIPKG_");
+            let roots = key.as_str() == crate::sandbox::PI_PACKAGE_ROOTS_ENV;
+            ((pipkg || roots) && !is_pi) || (roots && remote)
+        })
+        .cloned()
+        .collect();
+    for key in keys {
+        env.remove(&key);
+        dropped.push(key);
+    }
+    dropped.sort();
+    dropped
 }
 
 #[cfg(test)]
@@ -1599,6 +1645,86 @@ mod tests {
         assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_SERVER"));
         // The prefix must not have widened into a general COGNIA_ passthrough.
         assert_eq!(validated.dropped_env_keys, vec!["COGNIA_UNRELATED"]);
+    }
+
+    /// Plugin Pi package values reach the cooperating extension (ADR-0210),
+    /// while the prefix stays exactly that prefix: a near-miss key, an
+    /// injection vector and an unrelated `COGNIA_` key are all still dropped.
+    #[test]
+    fn plugin_pi_package_env_reaches_the_agent_without_widening_the_policy() {
+        let (_tmp, p) = policy(false);
+        let mut cfg = config("pi", &["--mode", "rpc"]);
+        cfg.env = HashMap::from([
+            (
+                "COGNIA_PIPKG_TEX_ENGINE".to_string(),
+                "lualatex".to_string(),
+            ),
+            ("COGNIA_PIPKG_WORKSPACE".to_string(), "/work".to_string()),
+            ("COGNIA_PIPKGX".to_string(), "near-miss".to_string()),
+            ("COGNIA_PLUGIN_SECRET".to_string(), "nope".to_string()),
+            ("NODE_OPTIONS".to_string(), "--require evil".to_string()),
+        ]);
+        let validated = p.validate(cfg).expect("valid command");
+        assert_eq!(
+            validated
+                .config
+                .env
+                .get("COGNIA_PIPKG_TEX_ENGINE")
+                .map(String::as_str),
+            Some("lualatex")
+        );
+        assert!(validated.config.env.contains_key("COGNIA_PIPKG_WORKSPACE"));
+        assert_eq!(
+            validated.dropped_env_keys,
+            vec!["COGNIA_PIPKGX", "COGNIA_PLUGIN_SECRET", "NODE_OPTIONS"]
+        );
+    }
+
+    /// The package-roots request is host-to-wrapper only: a remote spawn
+    /// never carries it, and no plugin package env reaches a non-Pi agent.
+    #[test]
+    fn plugin_pi_package_env_is_scoped_to_local_pi_spawns() {
+        let (_tmp, p) = policy(false);
+        let env = || {
+            HashMap::from([
+                (
+                    crate::sandbox::PI_PACKAGE_ROOTS_ENV.to_string(),
+                    "[\"/anything\"]".to_string(),
+                ),
+                ("COGNIA_PIPKG_MODE".to_string(), "hosted".to_string()),
+            ])
+        };
+        let mut remote = config("pi", &["--mode", "rpc"]);
+        remote.env = env();
+        let validated = p.validate(remote).expect("valid command");
+        assert!(!validated
+            .config
+            .env
+            .contains_key(crate::sandbox::PI_PACKAGE_ROOTS_ENV));
+        assert!(validated.config.env.contains_key("COGNIA_PIPKG_MODE"));
+        assert!(validated
+            .dropped_env_keys
+            .contains(&crate::sandbox::PI_PACKAGE_ROOTS_ENV.to_string()));
+
+        let mut other = config("claude", &[]);
+        other.env = env();
+        let validated = p.validate(other).expect("valid command");
+        assert!(validated.config.env.is_empty());
+        assert_eq!(
+            validated.dropped_env_keys,
+            vec![
+                "COGNIA_PIPKG_MODE".to_string(),
+                crate::sandbox::PI_PACKAGE_ROOTS_ENV.to_string()
+            ]
+        );
+
+        let (accepted, dropped) = filter_env(env());
+        let mut local = accepted;
+        let dropped = scope_pi_package_env("pi", &mut local, dropped, false);
+        assert!(dropped.is_empty());
+        assert!(local.contains_key(crate::sandbox::PI_PACKAGE_ROOTS_ENV));
+        let mut local_exe = env();
+        assert!(scope_pi_package_env("PI.EXE", &mut local_exe, vec![], false).is_empty());
     }
 
     #[test]

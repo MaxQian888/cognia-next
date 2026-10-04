@@ -19,6 +19,7 @@ import {
   listRendererBackgroundRuns,
   setRendererBackgroundSettleListener,
   startRendererBackgroundRun,
+  startAcceptedRendererBackgroundRun,
   subscribeRendererBackgroundLifecycle,
 } from "./renderer-subagent-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
@@ -247,7 +248,7 @@ describe("renderer subagent background registry", () => {
     const listener = jest.fn()
     setRendererBackgroundSettleListener(listener)
     startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("done")))
-    await new Promise((r) => setTimeout(r, 0))
+    await collectRendererBackgroundResult("r1")
 
     expect(listener).toHaveBeenCalledWith(
       "r1",
@@ -261,7 +262,7 @@ describe("renderer subagent background registry", () => {
     const unsubscribe = subscribeRendererBackgroundLifecycle(listener)
 
     startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("sensitive result")))
-    await new Promise((r) => setTimeout(r, 0))
+    await collectRendererBackgroundResult("r1")
 
     expect(listener.mock.calls).toEqual([
       [{ type: "started", runId: "r1", taskKind: "subagent" }],
@@ -283,7 +284,7 @@ describe("renderer subagent background registry", () => {
     })
 
     startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("done")))
-    await new Promise((r) => setTimeout(r, 0))
+    await collectRendererBackgroundResult("r1")
 
     expect(lifecycle).toHaveBeenLastCalledWith({
       type: "settled",
@@ -307,7 +308,7 @@ describe("renderer subagent background registry", () => {
       },
     }
     startRendererBackgroundRun("r1", meta(), Promise.resolve(failed))
-    await new Promise((r) => setTimeout(r, 0))
+    await collectRendererBackgroundResult("r1")
 
     await expect(getDb().backgroundTasks.get("r1")).resolves.toMatchObject({
       status: "error",
@@ -407,6 +408,7 @@ describe("renderer subagent background registry", () => {
   it("reconciles renderer running rows on boot", async () => {
     await getDb().backgroundTasks.put({
       runId: "stale",
+      ownerLease: { ownerId: "closed-window", epoch: 1, expiresAt: 2000 },
       kind: "subagent",
       subagentId: "reviewer",
       prompt: "check this",
@@ -429,8 +431,28 @@ describe("renderer subagent background registry", () => {
 describe("journalRendererForegroundRun", () => {
   const settle = () => new Promise((r) => setTimeout(r, 0))
 
+  it("returns a fenced error instead of late success after its lease expires", async () => {
+    let resolveLate!: (value: PluginSubagentDispatchResult) => void
+    const producer = new Promise<PluginSubagentDispatchResult>((resolve) => {
+      resolveLate = resolve
+    })
+    const result = journalRendererForegroundRun("fg-expired", meta(), producer)
+    await settle()
+    const row = await getDb().backgroundTasks.get("fg-expired")
+    await getDb().backgroundTasks.update("fg-expired", {
+      ownerLease: { ...row!.ownerLease!, expiresAt: Date.now() },
+    })
+    resolveLate(ok("unowned late success", "fg-expired"))
+    await expect(result).resolves.toMatchObject({
+      runId: "fg-expired",
+      finishReason: "error",
+      errorEnvelope: { retryable: false },
+    })
+    expect((await getDb().backgroundTasks.get("fg-expired"))?.resultText).toBeUndefined()
+  })
+
   it("journals a foreground run as mode foreground and settles done, never collectable", async () => {
-    journalRendererForegroundRun("fg1", meta(), Promise.resolve(ok("fg done", "fg1")))
+    await journalRendererForegroundRun("fg1", meta(), Promise.resolve(ok("fg done", "fg1")))
     await settle()
 
     await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
@@ -455,7 +477,7 @@ describe("journalRendererForegroundRun", () => {
       finishReason: "error",
       errorEnvelope: { code: "network", retryable: true, message: "boom", partialText: "half" },
     }
-    journalRendererForegroundRun("fg1", meta(), Promise.resolve(failed))
+    await journalRendererForegroundRun("fg1", meta(), Promise.resolve(failed))
     await settle()
 
     await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
@@ -474,7 +496,7 @@ describe("journalRendererForegroundRun", () => {
       runId: "fg1",
       finishReason: "cancelled",
     }
-    journalRendererForegroundRun("fg1", meta(), Promise.resolve(cancelled))
+    await journalRendererForegroundRun("fg1", meta(), Promise.resolve(cancelled))
     await settle()
 
     await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
@@ -484,7 +506,7 @@ describe("journalRendererForegroundRun", () => {
   })
 
   it("settles an unexpected rejection as an error row (belt-and-braces)", async () => {
-    journalRendererForegroundRun("fg1", meta(), Promise.reject(new Error("unexpected")))
+    await journalRendererForegroundRun("fg1", meta(), Promise.reject(new Error("unexpected")))
     await settle()
 
     await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
@@ -497,10 +519,58 @@ describe("journalRendererForegroundRun", () => {
     journalRendererForegroundRun("fg1", meta(), new Promise(() => {}))
     await settle()
 
-    const flipped = await interruptRendererBackgroundTasksOnBoot({ now: () => 9000 })
+    const row = await getDb().backgroundTasks.get("fg1")
+    const flipped = await interruptRendererBackgroundTasksOnBoot({
+      now: () => row!.ownerLease!.expiresAt,
+    })
 
     expect(flipped).toEqual([
       expect.objectContaining({ runId: "fg1", status: "interrupted", mode: "foreground" }),
     ])
   })
+})
+
+it("delivers an admitted run only after the result is durable and does not overwrite admission", async () => {
+  const { createDexieBackgroundTaskJournal } = await import("@/lib/db/background-tasks")
+  const journal = createDexieBackgroundTaskJournal()
+  await journal.recordStart({ runId: "accepted", ...meta(), status: "running", mode: "background" })
+  const persistedAtDelivery: unknown[] = []
+  setRendererBackgroundSettleListener(() => {
+    persistedAtDelivery.push(getDb().backgroundTasks.get("accepted"))
+  })
+  startAcceptedRendererBackgroundRun(
+    "accepted",
+    meta(),
+    Promise.resolve(ok("durable result")),
+    journal
+  )
+  await expect(collectRendererBackgroundResult("accepted")).resolves.toMatchObject({
+    text: "durable result",
+  })
+  expect(persistedAtDelivery).toHaveLength(1)
+  await expect(persistedAtDelivery[0]).resolves.toMatchObject({
+    status: "done",
+    resultText: "durable result",
+  })
+})
+
+it("does not interrupt this renderer's live run when boot reconciliation repeats", async () => {
+  startRendererBackgroundRun("live", meta(), new Promise<PluginSubagentDispatchResult>(() => {}))
+  // Let the existing best-effort admission journal commit.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(await getDb().backgroundTasks.get("live")).toMatchObject({ status: "running" })
+  const interrupted = await interruptRendererBackgroundTasksOnBoot()
+  expect(interrupted).toEqual([])
+  expect(await getDb().backgroundTasks.get("live")).toMatchObject({ status: "running" })
+})
+
+it("does not interrupt a CLI host's independent running work", async () => {
+  await getDb().backgroundTasks.put({
+    ...meta(),
+    runId: "cli-live",
+    host: "cli",
+    status: "running",
+  })
+  expect(await interruptRendererBackgroundTasksOnBoot()).toEqual([])
+  expect(await getDb().backgroundTasks.get("cli-live")).toMatchObject({ status: "running" })
 })

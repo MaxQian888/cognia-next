@@ -34,6 +34,8 @@ Copy only `cognia-bootstrap.sh` to use it elsewhere. Bash implements the Agent
 loop, tools, sessions and initialization; curl provides HTTP and jq handles JSON.
 No Python, Node, compiled Cognia binary or sibling runtime file is needed.
 SHA-256 fingerprints use `sha256sum` when available, otherwise `openssl`.
+Non-overwriting exports use the POSIX `link` utility supplied by macOS and GNU
+coreutils on Linux.
 
 ## PowerShell
 
@@ -57,7 +59,8 @@ Windows PowerShell 5.1 (`powershell.exe`) is not supported. Install
 PowerShell using [Microsoft's installation guide](https://learn.microsoft.com/powershell/scripting/install/installing-powershell).
 
 Credentials are environment references in configuration, never literal values.
-Interactive chat can prompt privately for a missing API key. For unattended
+Interactive chat prompts privately for a missing API key only when a model or
+model-discovery request needs it; local chat commands work without a key. For unattended
 initialization, provide the configured key through your environment or Cognia's
 keyring references. No model key is needed when deterministic setup and
 readiness checks succeed.
@@ -217,9 +220,42 @@ Bootstrap readiness checks together. Save the environment to persist the result;
 applying a preset does not execute it. Provider selection clears previous provider
 options, so add custom headers or authentication after selecting the provider.
 
+## Task and context files
+
+Use `--task-file` for a reusable task and repeat `--context-file` to supply
+reference material without enabling workspace tools:
+
+```bash
+bash scripts/bootstrap/cognia-bootstrap.sh chat --config bootstrap.json \
+  --task-file task.txt --context-file requirements.md --context-file "design notes.txt"
+```
+
+```powershell
+pwsh -NoProfile -File ./scripts/bootstrap/cognia-bootstrap.ps1 chat --config bootstrap.json `
+  --task-file task.txt --context-file requirements.md --context-file "design notes.txt"
+```
+
+`--task-file` accepts nonempty UTF-8 text up to 32,000 bytes, supports an optional
+BOM, and conflicts with `--task`. Like other CLI task values, `--set task=...`
+can override it. Relative input paths resolve from the directory where you launch
+the script, even when `--cwd` selects another workspace.
+
+`--context-file` works with `run`, `chat` and `init`. Each UTF-8 file is limited by
+`tools.maxFileBytes`; the serialized attachments and combined task must fit
+`limits.maxContextBytes`. Empty files are allowed. Files retain their supplied
+paths and argument order, including duplicates. Invalid UTF-8, NUL bytes, missing
+files, pipes and leaf symlinks are rejected before setup or HTTP requests.
+
+Attachments are labeled as untrusted data and pass the same privacy gate as
+prompts. In chat they accompany the first successful task: local slash commands
+do not consume them, and failed or cancelled turns retain them for retry. After
+success they remain in conversation history but are not appended again. A
+successful deterministic `init` still needs no model request.
+
 ## Sessions, tools and limits
 
-Chat accepts `/status`, `/model`, `/model ID`, `/models`, `/compact`, `/clear`,
+Chat accepts `/status`, `/model`, `/model ID`, `/models`, `/history [N]`,
+`/export PATH`, `/save-config PATH`, `/compact`, `/clear`,
 `/help`, `/exit` and `/quit`. `/status` displays the active provider, model, tools
 and session state. `/model ID` switches the model for subsequent requests, including
 compaction, without rewriting the configuration file. `--session PATH`
@@ -227,6 +263,25 @@ selects a transcript; `--no-session` disables persistence. Chat's default is
 `session.jsonl` in the workspace. Sessions save complete turns atomically, and
 the shell retains variables, functions and cwd during the current process.
 `/clear` resets both the transcript and shell.
+
+| Local command                    | Behavior                                                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `/history 5`                     | Print the last five non-system messages as JSON, without internal session metadata. Default: 10; range: 1–100. |
+| `/export saved session.jsonl`    | Write the complete current transcript, including the system message, for later `--session` resumption.         |
+| `/save-config saved config.json` | Save the active validated configuration, including changes made with `/model ID`.                              |
+
+Export and configuration destinations must have an existing parent inside the
+workspace. Existing files, symlinks and traversal paths are rejected; files are
+published atomically with private Unix permissions. Enter paths with spaces as
+the remainder of the command, without shell quotes. Privacy checks run before
+output or writes. History previews exceeding `limits.maxOutputBytes` are rejected
+instead of silently truncated. Exports work even with `--no-session` and do not
+change the active session; saving configuration does not include attached files
+or credential environment values.
+
+Resume an exported conversation using either runtime's `chat --config bootstrap.json
+--session "saved session.jsonl"`. Inspecting history, exporting and saving
+configuration never call the provider.
 
 Both implementations bound requests, tool output, command duration and total
 execution. They support automatic/manual compaction, pruning, context-overflow
@@ -269,3 +324,8 @@ shared and 10/10 specific contracts. Seven Cognia integration suites passed
 real editor/shell calls and pnpm initialization/reuse. See the
 [preset validation report](preset-validation-2026-10-01.md) for source hashes,
 measurements, repaired privacy false positives and repository-wide gate limits.
+
+The 2026-10-02 file/session expansion passed 10/10 acceptance checks with copied
+scripts and DeepSeek, including credential-free local commands and cross-runtime
+transcript resumption. See the [file/session validation report](file-session-validation-2026-10-02.md)
+for final source hashes, regression results and evidence boundaries.

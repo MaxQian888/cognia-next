@@ -118,6 +118,25 @@ describe("/pet (desktop shell only, ADR-0058 D9)", () => {
   })
 })
 
+describe("/performance (capability-driven, ADR-0035)", () => {
+  const performance = getSurfaceContract("performance")!
+
+  it("renders on every runtime because this window's Renderer needs no host", () => {
+    expect(performance).toMatchObject({ standalone: "full", companion: "full", offline: "local" })
+    expect(performance.operation).toBeUndefined()
+    expect(resolveSurfaceAvailability(performance, snapshot()).state).toBe("available")
+    const companion = {
+      target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
+    } as Partial<RuntimeSnapshot>
+    expect(
+      resolveSurfaceAvailability(
+        performance,
+        snapshot({ ...companion, connectionState: "offline" })
+      ).state
+    ).toBe("available")
+  })
+})
+
 describe("/files (desktop and web, ADR-0200)", () => {
   const files = getSurfaceContract("files")!
 
@@ -288,5 +307,57 @@ describe("/me/terminal", () => {
   /** It is reached from the `/me` list, not the sidebar, so it claims no nav slot. */
   it("claims no navigation slot of its own", () => {
     expect(getSurfaceContract("me-terminal")).not.toHaveProperty("navigation")
+  })
+})
+
+/**
+ * `offline: "local"` declares a surface that runs in the client. A host that
+ * is reconnecting (or gone) used to fall through to the `blocked` arm, which
+ * put a "Host offline" page over the `/me` hub — the one place the connection
+ * settings live — and over `/discover`.
+ */
+describe("offline: local surfaces on a companion whose host is away", () => {
+  const away = (connectionState: "connecting" | "offline"): RuntimeSnapshot =>
+    snapshot({
+      target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
+      connectionState,
+    })
+
+  it.each(["me", "discover", "creator"])("keeps %s available", (id) => {
+    const contract = getSurfaceContract(id)!
+    expect(contract.companion).toBe("remote")
+    expect(contract.offline).toBe("local")
+    for (const state of ["connecting", "offline"] as const) {
+      expect(resolveSurfaceAvailability(contract, away(state))).toEqual({
+        state: "available",
+        reason: "local-executor",
+      })
+    }
+  })
+
+  it("covers the /me sub-pages that inherit the hub's row", () => {
+    expect(getSurfaceContractForRoute("/me/preferences")?.id).toBe("me")
+    expect(
+      resolveSurfaceAvailability(getSurfaceContractForRoute("/me/preferences")!, away("offline"))
+        .state
+    ).toBe("available")
+  })
+
+  it("still blocks a blocked surface and serves a cached-read one read-only", () => {
+    expect(resolveSurfaceAvailability(getSurfaceContract("me-terminal")!, away("offline"))).toEqual(
+      { state: "offline", reason: "connection-offline" }
+    )
+    expect(
+      resolveSurfaceAvailability(getSurfaceContract("workflows")!, away("connecting"))
+    ).toEqual({ state: "read-only", reason: "offline-cache" })
+  })
+
+  it("still requires pairing first: offline-local only answers the connection question", () => {
+    expect(
+      resolveSurfaceAvailability(getSurfaceContract("me")!, {
+        ...away("offline"),
+        vaultState: "unavailable",
+      }).state
+    ).toBe("requires-pairing")
   })
 })

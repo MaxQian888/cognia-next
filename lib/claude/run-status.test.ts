@@ -4,6 +4,7 @@ import {
   activeElapsedMs,
   formatRunElapsed,
   formatToolLine,
+  lastTurnElapsedMs,
   nextRunTiming,
   selectActiveToolLines,
   selectRunningSubagentChip,
@@ -275,5 +276,78 @@ describe("selectRunningSubagentChip", () => {
         c: { name: "writer", status: "running" },
       })
     ).toEqual({ name: "writer", count: 2 })
+  })
+})
+
+describe("lastTurnElapsedMs", () => {
+  const user = (createdAt?: number) =>
+    ({
+      id: "u",
+      role: "user",
+      parts: [],
+      ...(createdAt != null ? { metadata: { createdAt } } : {}),
+    }) as unknown as UIMessage
+  const assistant = (metadata?: Record<string, unknown>, parts: unknown[] = []) =>
+    ({
+      id: "a",
+      role: "assistant",
+      parts,
+      ...(metadata ? { metadata } : {}),
+    }) as unknown as UIMessage
+
+  it("is null when the transcript does not end in an assistant turn", () => {
+    expect(lastTurnElapsedMs([])).toBeNull()
+    expect(lastTurnElapsedMs([assistant({ usage: { durationMs: 5_000 } }), user(1)])).toBeNull()
+  })
+
+  it("prefers the duration the run was sealed with", () => {
+    const run = { durationMs: 42_000, startedAt: 0, completedAt: 99_000 }
+    expect(lastTurnElapsedMs([user(0), assistant({ run })])).toBe(42_000)
+  })
+
+  it("falls back to the run stamp's completedAt − startedAt", () => {
+    const run = { startedAt: 1_000, completedAt: 181_000 }
+    expect(lastTurnElapsedMs([user(0), assistant({ run })])).toBe(180_000)
+  })
+
+  it("reads the SDK usage duration of a built-in turn", () => {
+    expect(lastTurnElapsedMs([user(0), assistant({ usage: { durationMs: 75_000 } })])).toBe(75_000)
+  })
+
+  it("treats a reported 0 as no duration rather than a real one", () => {
+    expect(
+      lastTurnElapsedMs([user(0), assistant({ usage: { durationMs: 0 }, run: { durationMs: 0 } })])
+    ).toBeNull()
+  })
+
+  it("only reads the newest turn, not an earlier one's stamp", () => {
+    const earlier = assistant({ usage: { durationMs: 9_000 } })
+    expect(lastTurnElapsedMs([user(0), earlier, user(10), assistant()])).toBeNull()
+  })
+
+  it("spans the prompt to the last tool's finish when nothing sealed a duration", () => {
+    const parts = [
+      { type: "tool-Read", toolCallId: "t1", state: "output-available" },
+      { type: "tool-Bash", toolCallId: "t2", state: "output-available" },
+    ]
+    const stamps = {
+      t1: { startedAt: 5_000, endedAt: 8_000 },
+      t2: { startedAt: 9_000, endedAt: 241_000 },
+      // A tool from another turn must not stretch this one.
+      stale: { startedAt: 0, endedAt: 999_000 },
+    }
+    expect(lastTurnElapsedMs([user(1_000), assistant({ createdAt: 2_000 }, parts)], stamps)).toBe(
+      240_000
+    )
+  })
+
+  it("never closes a span on a message's createdAt — that is when it started", () => {
+    // A one-message turn would otherwise read as a second however long it ran.
+    expect(lastTurnElapsedMs([user(1_000), assistant({ createdAt: 2_000 })])).toBeNull()
+  })
+
+  it("is null for a tool that never finished", () => {
+    const parts = [{ type: "tool-Bash", toolCallId: "t1", state: "input-available" }]
+    expect(lastTurnElapsedMs([assistant({}, parts)], { t1: { startedAt: 5_000 } })).toBeNull()
   })
 })

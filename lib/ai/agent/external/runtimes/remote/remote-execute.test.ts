@@ -33,6 +33,26 @@ jest.mock("./remote-run-client", () => ({
   },
 }))
 
+const recordReportedAgentModelSurface = jest.fn()
+jest.mock("../../capability/model-surface-cache", () => ({
+  recordReportedAgentModelSurface: (...args: unknown[]) => recordReportedAgentModelSurface(...args),
+}))
+let mountIsLocal = false
+jest.mock("../../config/host-config-mount", () => ({
+  hostConfigCatalogMountIsLocal: () => mountIsLocal,
+}))
+let hostTakesCogniaModel = true
+jest.mock("./remote-host-configs", () => {
+  class HostCogniaModelUpdateRequiredError extends Error {
+    readonly code = "host-update-required"
+    readonly i18nKey = "externalAgent.cogniaModel.hostUpdateRequired"
+  }
+  return {
+    HostCogniaModelUpdateRequiredError,
+    hostSupportsCogniaModelTurns: () => hostTakesCogniaModel,
+  }
+})
+
 import { executeOnRemoteHostAgent, interruptRemoteHostAgent } from "./remote-execute"
 
 const STAMP = { configId: "eac_1", revision: "eacr_1", lifecycleGeneration: 1 }
@@ -48,6 +68,110 @@ beforeEach(() => {
   subscribedRunId = undefined
   startReply = { started: true, runId: "run-1" }
   stop.mockClear()
+  recordReportedAgentModelSurface.mockClear()
+  mountIsLocal = false
+  hostTakesCogniaModel = true
+})
+
+// The Host reports the session's options at the end of each turn. This client
+// cannot write to that session, so what it keeps is a SEEDED surface: a pick is
+// persisted and the Host applies it at the start of the next turn.
+describe("the Host's report of the session's models", () => {
+  const KIMI_OPTIONS = [
+    {
+      type: "select",
+      id: "model",
+      name: "Model",
+      category: "model",
+      currentValue: "kimi-code/kimi-for-coding",
+      options: [
+        { value: "kimi-code/kimi-for-coding", name: "K2.8 Preview" },
+        { value: "kimi-code/k3", name: "K3" },
+      ],
+    },
+    {
+      type: "select",
+      id: "thinking",
+      name: "Thinking",
+      category: "thought_level",
+      currentValue: "max",
+      options: [
+        { value: "low", name: "Thinking Low" },
+        { value: "max", name: "Thinking Max" },
+      ],
+    },
+  ]
+
+  it("records it for the conversation, seeded, and still forwards the event", async () => {
+    const onEvent = jest.fn()
+    const run = executeOnRemoteHostAgent("hi", {
+      stamp: STAMP,
+      chatSessionId: "chat-1",
+      newRunId: () => "run-1",
+      onEvent,
+    })
+    const report = evt({
+      type: "config_options_update",
+      sessionId: "kimi-session",
+      configOptions: KIMI_OPTIONS,
+    } as never)
+    handlers?.onEvent(report, {})
+    handlers?.onTerminal("completed")
+    await run
+    expect(recordReportedAgentModelSurface).toHaveBeenCalledWith(
+      "eac_1",
+      "chat-1",
+      "kimi-session",
+      {
+        models: {
+          choices: [
+            { modelId: "kimi-code/kimi-for-coding", name: "K2.8 Preview" },
+            { modelId: "kimi-code/k3", name: "K3" },
+          ],
+          currentModelId: "kimi-code/kimi-for-coding",
+          write: { kind: "session-seed" },
+        },
+        thinking: {
+          levels: ["low", "max"],
+          currentLevel: "max",
+          write: { kind: "config-option", optionId: "thinking" },
+        },
+      }
+    )
+    expect(onEvent).toHaveBeenCalledWith(report)
+  })
+
+  it("leaves a configuration mounted in this process to its live surface", async () => {
+    mountIsLocal = true
+    const run = executeOnRemoteHostAgent("hi", {
+      stamp: STAMP,
+      chatSessionId: "chat-1",
+      newRunId: () => "run-1",
+    })
+    handlers?.onEvent(
+      evt({
+        type: "config_options_update",
+        sessionId: "kimi-session",
+        configOptions: KIMI_OPTIONS,
+      } as never),
+      {}
+    )
+    handlers?.onTerminal("completed")
+    await run
+    expect(recordReportedAgentModelSurface).not.toHaveBeenCalled()
+  })
+
+  it("ignores every other event", async () => {
+    const run = executeOnRemoteHostAgent("hi", {
+      stamp: STAMP,
+      chatSessionId: "chat-1",
+      newRunId: () => "run-1",
+    })
+    handlers?.onEvent(evt({ type: "message_delta", sessionId: "s", delta: "x" } as never), {})
+    handlers?.onTerminal("completed")
+    await run
+    expect(recordReportedAgentModelSurface).not.toHaveBeenCalled()
+  })
 })
 
 describe("executeOnRemoteHostAgent", () => {
@@ -243,6 +367,60 @@ describe("executeOnRemoteHostAgent", () => {
     handlers?.onTerminal("completed")
     await run
     expect(gaps).toEqual([[2, 5]])
+  })
+})
+
+// Host-lane Cognia models (ADR-0090, 2026-10-02). The Host runs the gateway
+// with its own credentials; this client only names the binding.
+describe("Cognia model selection on the Host lane", () => {
+  const BINDING = { providerId: "kimi-sub", modelId: "kimi-k2", accountId: "acct-1" }
+
+  async function runWith(options: Record<string, unknown>) {
+    const run = executeOnRemoteHostAgent("hi", {
+      stamp: STAMP,
+      chatSessionId: "chat-1",
+      newRunId: () => "run-1",
+      ...options,
+    })
+    handlers?.onTerminal("completed")
+    return run
+  }
+
+  it("forwards a binding to a Host that accepts it", async () => {
+    await runWith({ cogniaModel: BINDING })
+    expect(started[0]).toMatchObject({ cogniaModel: BINDING })
+  })
+
+  it("sends an explicit null, which is not the same as omitting it", async () => {
+    await runWith({ cogniaModel: null })
+    expect(started[0]).toHaveProperty("cogniaModel", null)
+    started.length = 0
+    await runWith({})
+    expect(started[0]).not.toHaveProperty("cogniaModel")
+  })
+
+  it("resumes a gateway task session on a Host that accepts it", async () => {
+    await runWith({ externalSessionId: "cognia-gateway:task_1:native", cogniaModel: BINDING })
+    expect(started[0]).toMatchObject({ externalSessionId: "cognia-gateway:task_1:native" })
+  })
+
+  it("asks for a Host update instead of sending a binding an older Host would refuse", async () => {
+    hostTakesCogniaModel = false
+    await expect(runWith({ cogniaModel: BINDING })).rejects.toMatchObject({
+      code: "host-update-required",
+      i18nKey: "externalAgent.cogniaModel.hostUpdateRequired",
+    })
+    await expect(
+      runWith({ externalSessionId: "cognia-gateway:task_1:native" })
+    ).rejects.toMatchObject({ code: "host-update-required" })
+    expect(started).toHaveLength(0)
+    expect(subscribedRunId).toBeUndefined()
+  })
+
+  it("lets an older Host's own configuration decide a native turn", async () => {
+    hostTakesCogniaModel = false
+    await runWith({ cogniaModel: null })
+    expect(started[0]).not.toHaveProperty("cogniaModel")
   })
 })
 

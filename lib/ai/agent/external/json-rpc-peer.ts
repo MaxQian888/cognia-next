@@ -57,7 +57,25 @@ export interface JsonRpcPeerOptions {
 interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout>
+  /** Absent while the request's deadline is paused. */
+  timeout: ReturnType<typeof setTimeout> | undefined
+}
+
+/**
+ * Control over one outbound request's deadline, for requests whose timeout is
+ * an INACTIVITY window rather than an absolute budget — an ACP
+ * `session/prompt` turn may legitimately run for an hour while it keeps
+ * streaming, or sit for minutes on a permission the user is reading.
+ *
+ * Every method is a no-op once the request has settled.
+ */
+export interface JsonRpcRequestDeadline {
+  /** Restart the full window from now. Ignored while paused. */
+  touch(): void
+  /** Stop the clock until {@link resume}. Idempotent. */
+  pause(): void
+  /** Restart the full window from now if paused. Idempotent. */
+  resume(): void
 }
 
 interface JsonRpcInbound {
@@ -103,26 +121,66 @@ export class JsonRpcPeer {
     params?: Record<string, unknown>,
     timeout: number = this.defaultTimeout
   ): Promise<T> {
+    return this.sendTrackedRequest<T>(method, params, timeout).promise
+  }
+
+  /**
+   * {@link sendRequest}, plus a handle on the request's deadline so the caller
+   * can treat `timeout` as an inactivity window: `touch()` on progress,
+   * `pause()` while the far side is waiting on us. Expiry behaves exactly like
+   * `sendRequest`'s timeout (cancel notification, `Request timeout: <method>`).
+   */
+  sendTrackedRequest<T>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeout: number = this.defaultTimeout
+  ): { promise: Promise<T>; deadline: JsonRpcRequestDeadline } {
     const id = ++this.messageId
     const message = this.envelope({ id, method, params })
+    let paused = false
 
-    return new Promise<T>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        if (this.opts.cancellationNotifications !== false) {
-          this.sendNotification("$/cancel_request", { requestId: id })
-        }
-        this.pending.delete(id)
-        reject(new Error(`Request timeout: ${method}`))
-      }, timeout)
+    const expire = () => {
+      if (!this.pending.has(id)) return
+      if (this.opts.cancellationNotifications !== false) {
+        this.sendNotification("$/cancel_request", { requestId: id })
+      }
+      const entry = this.pending.get(id)!
+      this.pending.delete(id)
+      entry.reject(new Error(`Request timeout: ${method}`))
+    }
+    // Re-arm from now (or disarm while paused); only while still in flight.
+    const rearm = () => {
+      const entry = this.pending.get(id)
+      if (!entry) return
+      clearTimeout(entry.timeout)
+      entry.timeout = paused ? undefined : setTimeout(expire, timeout)
+    }
+    const deadline: JsonRpcRequestDeadline = {
+      touch: () => {
+        if (!paused) rearm()
+      },
+      pause: () => {
+        if (paused) return
+        paused = true
+        rearm()
+      },
+      resume: () => {
+        if (!paused) return
+        paused = false
+        rearm()
+      },
+    }
 
+    const promise = new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
         resolve: resolve as (value: unknown) => void,
         reject,
-        timeout: timeoutId,
+        timeout: setTimeout(expire, timeout),
       })
 
       const onWriteFailure = (error: unknown) => {
-        clearTimeout(timeoutId)
+        const entry = this.pending.get(id)
+        clearTimeout(entry?.timeout)
         this.pending.delete(id)
         reject(error instanceof Error ? error : new Error(String(error)))
       }
@@ -132,6 +190,7 @@ export class JsonRpcPeer {
         onWriteFailure(error)
       }
     })
+    return { promise, deadline }
   }
 
   /** Send a JSON-RPC notification (no id, no response expected). */

@@ -223,13 +223,25 @@ const PI_BUILTIN_TOOL_NAMES = new Set([...PI_READ_ONLY_FLOOR, "edit", "write", "
 export function processToolFloor(
   permissionMode: string | undefined,
   allowedTools: readonly string[] | undefined,
-  options: { interceptionAvailable?: boolean } = {}
+  options: {
+    interceptionAvailable?: boolean
+    /**
+     * Tools declared by plugin Pi packages loaded into this session
+     * (`hostedSession.tools`, ADR-0210). Under `dontAsk` a pre-approved one is
+     * kept on the floor like a pre-approved built-in; without this, Pi's
+     * `--tools` allowlist would hide the very tool the user pre-approved.
+     */
+    extensionTools?: readonly string[]
+  } = {}
 ): string[] {
   const intercepted = options.interceptionAvailable ?? true
 
   if (permissionMode === "plan") return [...PI_READ_ONLY_FLOOR]
   if (permissionMode === "dontAsk") {
-    return (allowedTools ?? []).filter((tool) => PI_BUILTIN_TOOL_NAMES.has(tool))
+    const declared = new Set(options.extensionTools ?? [])
+    return (allowedTools ?? []).filter(
+      (tool) => PI_BUILTIN_TOOL_NAMES.has(tool) || declared.has(tool)
+    )
   }
   if (permissionMode === "bypassPermissions") return []
   // `default` / `acceptEdits` / anything unrecognised.
@@ -301,6 +313,117 @@ export function piExtensionVerdictReason(verdict: PiExtensionVerdict): string {
 /** Concurrent Pi processes per host before `resource_limit`. */
 export const PI_MAX_CONCURRENT_PROCESSES = 4
 
+// ============================================================================
+// Plugin Pi packages (ADR-0210)
+// ============================================================================
+
+/**
+ * One plugin-contributed Pi package, resolved for a hosted session.
+ *
+ * Produced by the injectable {@link PiPackageResolver}; the adapter never
+ * reads the plugin registry itself, so it stays usable (and testable) on hosts
+ * that have no plugin manager at all.
+ */
+export interface PiHostedPackage {
+  /** `<pluginId>/<packageId>`. */
+  ref: string
+  /** Absolute extension entry files, loaded with `-e` in this order. */
+  extensions: string[]
+  /** Fully-prefixed `COGNIA_PIPKG_<NAME>` values. */
+  env: Record<string, string>
+  /** Tool names the extensions register (`hostedSession.tools`). */
+  tools: string[]
+  /** Directories the sandboxed process must be able to read. */
+  readableRoots: string[]
+  /** The package replaces the session's tool surface. */
+  controlsSession?: boolean
+  /** Lowest Pi version the package supports. */
+  minPiVersion?: string
+}
+
+/** What the resolver knows about the session it resolves packages for. */
+export interface PiPackageResolverContext {
+  /** The session's working directory. */
+  cwd?: string
+  /**
+   * Which settings scopes this session's Pi loads packages from — needed to
+   * detect a package that is also installed in Pi and would load twice.
+   */
+  extensionPolicy: PiExtensionPolicy
+  /** Set when the agent pins its own `PI_CODING_AGENT_DIR`. */
+  piAgentDirOverride?: string
+}
+
+/**
+ * Resolve an agent's `metadata.piPackages` references. MUST reject — never
+ * skip — a reference it cannot satisfy; the adapter turns the rejection into a
+ * {@link PiPackageUnavailableError} and does not start the session.
+ */
+export type PiPackageResolver = (
+  refs: readonly string[],
+  context: PiPackageResolverContext
+) => Promise<PiHostedPackage[]>
+
+/**
+ * Env key carrying the package directories the desktop sandbox wrapper must
+ * mount read-only (JSON array of absolute paths). Under the reviewed
+ * `COGNIA_TOOLHOST_` prefix because the HOST consumes it, not the extension —
+ * see `crates/cognia-external-agent/src/sandbox.rs`.
+ */
+export const PI_PACKAGE_ROOTS_ENV = "COGNIA_TOOLHOST_PI_PACKAGE_ROOTS"
+
+/** Read `metadata.piPackages` defensively: strings only, deduplicated, in order. */
+export function piPackageRefsFromMetadata(metadata: Record<string, unknown> | undefined): string[] {
+  const raw = metadata?.piPackages
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.filter((ref): ref is string => typeof ref === "string" && ref.length > 0))]
+}
+
+/**
+ * The resolver used when none is injected: the plugin registry, via
+ * `lib/plugin/pi-packages/session.ts`.
+ */
+export async function defaultPiPackageResolver(
+  refs: readonly string[],
+  context: PiPackageResolverContext
+): Promise<PiHostedPackage[]> {
+  // Lazy: only a session that opted into a package pays for the plugin
+  // registry, and hosts without a plugin manager (the CLI) never load it.
+  const { resolveHostedPiPackages } = await import("@/lib/plugin/pi-packages/session")
+  return resolveHostedPiPackages(refs, context)
+}
+
+/** Combine resolved packages into what one spawn needs. Throws on an env clash. */
+export function combinePiHostedPackages(packages: readonly PiHostedPackage[]): {
+  extensions: string[]
+  env: Record<string, string>
+  tools: string[]
+  readableRoots: string[]
+} {
+  const env: Record<string, string> = {}
+  const owner: Record<string, string> = {}
+  for (const pkg of packages) {
+    for (const [key, value] of Object.entries(pkg.env)) {
+      if (key in env && env[key] !== value) {
+        throw new PiPackageUnavailableError(
+          pkg.ref,
+          "env-conflict",
+          `Pi packages ${owner[key]} and ${pkg.ref} both set ${key} to different values; ` +
+            `remove one of them from this agent.`
+        )
+      }
+      env[key] = value
+      owner[key] = pkg.ref
+    }
+  }
+  return {
+    extensions: packages.flatMap((pkg) => pkg.extensions),
+    env,
+    tools: [...new Set(packages.flatMap((pkg) => pkg.tools))],
+    readableRoots: [...new Set(packages.flatMap((pkg) => pkg.readableRoots))],
+  }
+}
+
 /**
  * How long a session-less model read may wait for Pi to come up and answer.
  *
@@ -317,6 +440,11 @@ export interface PiRpcAdapterOptions {
   maxProcesses?: number
   /** Overrides the session-id generator so tests get deterministic ids. */
   generateSessionId?: () => string
+  /**
+   * Resolves `metadata.piPackages` references (ADR-0210). Defaults to the
+   * plugin registry; injectable so tests need no plugin manager.
+   */
+  resolvePiPackages?: PiPackageResolver
 }
 
 interface PiProcess {
@@ -418,6 +546,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   private readonly host: PiRpcHost
   private readonly maxProcesses: number
   private readonly newSessionId: () => string
+  private readonly resolvePiPackages: PiPackageResolver
   private readonly processes = new Map<string, PiProcess>()
 
   private versionVerdict?: PiVersionVerdict
@@ -441,6 +570,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     super()
     this.host = options.host ?? defaultHost
     this.maxProcesses = options.maxProcesses ?? PI_MAX_CONCURRENT_PROCESSES
+    this.resolvePiPackages = options.resolvePiPackages ?? defaultPiPackageResolver
     this.newSessionId =
       options.generateSessionId ??
       (() =>
@@ -676,6 +806,16 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // intercept Pi's native tools must not reach the point of having a process.
     const extension = this.assertExtensionReady()
 
+    // Resolve plugin Pi packages BEFORE reclaiming capacity: a package that
+    // cannot load must fail the start without first evicting an idle session.
+    // No references → not even an `await`, so an agent that never opted in
+    // takes exactly the pre-ADR-0210 path.
+    const packageRefs = piPackageRefsFromMetadata(this._config.metadata)
+    const packages =
+      packageRefs.length > 0
+        ? await this.resolveSessionPackages(packageRefs, options.cwd ?? this._config.process?.cwd)
+        : EMPTY_SESSION_PACKAGES
+
     await this.reclaimCapacity()
 
     // Gate BEFORE the value can reach the process env — once it is in the
@@ -691,7 +831,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       throw new Error("Pi cannot mount ACP-channel MCP; use stdio, HTTP, or SSE transport")
 
     const agentId = `${this._config.id}:${piSessionId}`
-    const args = this.buildArgs(piSessionId, options, extra, extension)
+    const args = this.buildArgs(piSessionId, options, extra, extension, packages)
 
     const peer = new PiRpcPeer({
       writeRaw: (frame) =>
@@ -802,13 +942,21 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
           args,
           cwd,
           env: {
-            ...this._config.process?.env,
+            // The package-roots request is set ONLY from resolved packages
+            // below — a value typed into the agent's own env is discarded.
+            ...withoutKey(this._config.process?.env, PI_PACKAGE_ROOTS_ENV),
+            // Plugin package values (`COGNIA_PIPKG_*`) go before every
+            // Cognia-owned key, so nothing a package declares can shadow one.
+            ...packages.env,
             COGNIA_TOOLHOST_PI_MCP_SERVERS: JSON.stringify(mcpServers),
             COGNIA_TOOLHOST_PI_ADDITIONAL_DIRECTORIES: JSON.stringify(additionalDirectories),
+            ...(packages.readableRoots.length > 0
+              ? { [PI_PACKAGE_ROOTS_ENV]: JSON.stringify(packages.readableRoots) }
+              : {}),
             // The extension owns no policy: it applies this table. Computing it
             // here keeps the matrix in tested app code (`pi-permission.ts`).
             [PI_TOOL_POLICY_ENV]: encodePiToolPolicy(
-              resolvePiToolPolicy(options.permissionMode, options.allowedTools)
+              resolvePiToolPolicy(options.permissionMode, options.allowedTools, packages.tools)
             ),
             ...(systemPrompt ? { [PI_SYSTEM_PROMPT_ENV]: systemPrompt } : {}),
           },
@@ -843,14 +991,19 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       // that set.
       const settled = await withTimeout(
         record.handshake.then(() => true),
-        piHandshakeTimeoutMs(this.extensionPolicy(), mcpServers.length),
+        piHandshakeTimeoutMs(this.extensionPolicy(), mcpServers.length, packages.extensions.length),
         false
       )
       if (record.exited) throw new PiProcessExitedError(record.exitCode)
       if (record.cancelling) throw new Error("Pi session closed during startup")
       if (!settled) {
         await this.closeSession(piSessionId)
-        throw new PiExtensionHandshakeError(piSessionId, this.extensionPolicy(), mcpServers.length)
+        throw new PiExtensionHandshakeError(
+          piSessionId,
+          this.extensionPolicy(),
+          mcpServers.length,
+          packages.extensions.length
+        )
       }
 
       const session: ExternalAgentSession = {
@@ -869,6 +1022,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
           cwd,
           additionalDirectories,
           forkedFrom: extra.forkFrom,
+          ...(packages.refs.length > 0 ? { piPackages: packages.refs } : {}),
         },
       }
       this._sessions.set(piSessionId, session)
@@ -887,7 +1041,8 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     piSessionId: string,
     options: SessionCreateOptions,
     extra: { forkFrom?: string },
-    extension: string
+    extension: string,
+    packages: SessionPackages = EMPTY_SESSION_PACKAGES
   ): string[] {
     const configured = this._config?.process?.args ?? ["--mode", "rpc"]
     const args = [...configured]
@@ -912,6 +1067,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // whole restriction if that guarantee were ever weakened.
     const floor = processToolFloor(options.permissionMode, options.allowedTools, {
       interceptionAvailable: true,
+      extensionTools: packages.tools,
     })
     if (options.mcpServers?.length && (floor.length > 0 || options.permissionMode === "dontAsk")) {
       // Latest Pi applies --tools to dynamically registered extension tools
@@ -920,12 +1076,84 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       if (excluded.length) args.push("--exclude-tools", excluded.join(","))
     } else if (floor.length > 0) args.push("--tools", floor.join(","))
 
+    // Plugin Pi packages the agent opted into (ADR-0210), in reference order
+    // and before Cognia's own extension, so Cognia's interception is still the
+    // last `-e` Pi loads.
+    for (const entry of packages.extensions) args.push("-e", entry)
+
     // `-e` still loads under `--no-extensions`, which is exactly what makes
     // isolation workable: the user's stack stays off while Cognia's own
     // interception stays on.
     args.push("-e", extension)
 
     return args
+  }
+
+  /**
+   * Resolve this agent's opted-in plugin Pi packages for one session start.
+   *
+   * Any failure becomes a typed {@link PiPackageUnavailableError} and the
+   * session does not start.
+   */
+  private async resolveSessionPackages(
+    refs: string[],
+    cwd: string | undefined
+  ): Promise<SessionPackages> {
+    // Bot isolation hides the user's home from the sandbox, and the plugin
+    // store lives under it; the desktop wrapper therefore refuses to mount any
+    // package root for such a spawn. Say so here, instead of letting Pi fail
+    // to find the extension file after the process is already up.
+    if (this._config?.process?.env?.COGNIA_BOT_ISOLATION === "1") {
+      throw new PiPackageUnavailableError(
+        refs[0],
+        "bot-isolation",
+        "Bot-isolated agents cannot load plugin Pi packages: the plugin store lives under the hidden home directory."
+      )
+    }
+    let resolved: PiHostedPackage[]
+    try {
+      const agentDir = this._config?.process?.env?.PI_CODING_AGENT_DIR
+      resolved = await this.resolvePiPackages(refs, {
+        cwd,
+        extensionPolicy: this.extensionPolicy(),
+        ...(agentDir ? { piAgentDirOverride: agentDir } : {}),
+      })
+    } catch (error) {
+      if (error instanceof PiPackageUnavailableError) throw error
+      const ref =
+        error && typeof error === "object" && typeof (error as { ref?: unknown }).ref === "string"
+          ? (error as { ref: string }).ref
+          : refs[0]
+      const code =
+        error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "resolution-failed"
+      throw new PiPackageUnavailableError(
+        ref,
+        code,
+        error instanceof Error ? error.message : String(error)
+      )
+    }
+    const missing = refs.filter((ref) => !resolved.some((pkg) => pkg.ref === ref))
+    if (missing.length > 0) {
+      throw new PiPackageUnavailableError(
+        missing[0],
+        "not-found",
+        `Pi package ${missing[0]} could not be resolved for this session.`
+      )
+    }
+    const running = this.versionVerdict?.version
+    for (const pkg of resolved) {
+      if (pkg.minPiVersion && running && compareVersions(running, pkg.minPiVersion) < 0) {
+        throw new PiPackageUnavailableError(
+          pkg.ref,
+          "pi-version",
+          `Pi package ${pkg.ref} requires Pi ${pkg.minPiVersion} or newer; this host runs ${running}.`,
+          { version: pkg.minPiVersion, installed: running }
+        )
+      }
+    }
+    return { refs, ...combinePiHostedPackages(resolved) }
   }
 
   /**
@@ -1945,14 +2173,32 @@ export const PI_EXTENSION_HANDSHAKE_TIMEOUT_MS = 5000
  */
 export const PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS = 30_000
 
+/**
+ * Extra handshake budget per plugin Pi package extension (ADR-0210).
+ *
+ * `session_start` waits for every loaded extension, and a plugin extension is
+ * code Cognia did not write: an async factory may load a toolchain, warm a
+ * cache or dial a local service before it returns. The gate still exists to
+ * catch Cognia's own extension being absent, which no wait fixes, so the
+ * allowance is bounded per extension and capped with everything else.
+ */
+export const PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS = 15_000
+
 /** The budget this policy's startup set deserves. */
-export function piHandshakeTimeoutMs(policy: PiExtensionPolicy, mcpServerCount = 0): number {
+export function piHandshakeTimeoutMs(
+  policy: PiExtensionPolicy,
+  mcpServerCount = 0,
+  pluginExtensionCount = 0
+): number {
   const base =
     policy === "isolated"
       ? PI_EXTENSION_HANDSHAKE_TIMEOUT_MS
       : PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS
   // Each declared MCP server has a bounded connect and tools/list round-trip.
-  return Math.min(120_000, base + mcpServerCount * 30_000)
+  return Math.min(
+    120_000,
+    base + mcpServerCount * 30_000 + pluginExtensionCount * PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS
+  )
 }
 
 /** Marker the bundled extension writes on `session_start`. */
@@ -2002,8 +2248,13 @@ export class PiExtensionUnavailableError extends Error {
  */
 export class PiExtensionHandshakeError extends Error {
   readonly reasonCode = "extension_handshake_failed"
-  constructor(sessionId: string, policy: PiExtensionPolicy = "isolated", mcpServerCount = 0) {
-    const timeout = piHandshakeTimeoutMs(policy, mcpServerCount)
+  constructor(
+    sessionId: string,
+    policy: PiExtensionPolicy = "isolated",
+    mcpServerCount = 0,
+    pluginExtensionCount = 0
+  ) {
+    const timeout = piHandshakeTimeoutMs(policy, mcpServerCount, pluginExtensionCount)
     super(
       `The Cognia Pi extension did not report ready for session ${sessionId} within ` +
         `${timeout}ms` +
@@ -2011,9 +2262,36 @@ export class PiExtensionHandshakeError extends Error {
           ? ""
           : `. This agent runs with extension policy "${policy}", so Pi loads your own ` +
             `extensions before the session starts. Switch it to "isolated" if they are slow ` +
-            `or failing.`)
+            `or failing.`) +
+        (pluginExtensionCount > 0
+          ? ` ${pluginExtensionCount} plugin Pi package extension(s) also load first; ` +
+            `remove a package from this agent if one of them is failing.`
+          : "")
     )
     this.name = "PiExtensionHandshakeError"
+  }
+}
+
+/**
+ * A plugin Pi package this agent opted into cannot be loaded (ADR-0210), so the
+ * session does not start. `code` says why: `not-found` (plugin missing or
+ * disabled), `not-on-disk`, `invalid-path`, `not-hosted`, `not-prepared`,
+ * `workspace-required`, `double-load` (also installed in a Pi scope this
+ * session loads), `env-conflict`, `pi-version`, `bot-isolation` or
+ * `resolution-failed`. The English `message` is diagnostic detail; surfaces
+ * show the localized message for `code` (`lib/plugin/pi-packages/error-keys.ts`).
+ */
+export class PiPackageUnavailableError extends Error {
+  readonly reasonCode = "pi_package_unavailable"
+  constructor(
+    readonly ref: string,
+    readonly code: string,
+    message: string,
+    /** ICU values for the localized message (`plugins.piPackages.errors.*`). */
+    readonly params: Readonly<Record<string, string>> = {}
+  ) {
+    super(message)
+    this.name = "PiPackageUnavailableError"
   }
 }
 
@@ -2090,6 +2368,33 @@ function base64ToBytes(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
+}
+
+/** A copy of `env` without `key` (the agent's configured env is never mutated). */
+function withoutKey(
+  env: Record<string, string> | undefined,
+  key: string
+): Record<string, string> | undefined {
+  if (!env || !(key in env)) return env
+  const { [key]: _dropped, ...rest } = env
+  return rest
+}
+
+/** What one session start loads from plugin Pi packages. */
+interface SessionPackages {
+  refs: string[]
+  extensions: string[]
+  env: Record<string, string>
+  tools: string[]
+  readableRoots: string[]
+}
+
+const EMPTY_SESSION_PACKAGES: SessionPackages = {
+  refs: [],
+  extensions: [],
+  env: {},
+  tools: [],
+  readableRoots: [],
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {

@@ -2,6 +2,12 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { TeammateExecutionBindingField } from "./teammate-execution-binding-field"
+import { resolveAgentExecutionEnvironment } from "@/lib/ai/agent/execution/host-environment"
+
+jest.mock("@/lib/ai/agent/execution/host-environment", () => ({
+  ...jest.requireActual("@/lib/ai/agent/execution/host-environment"),
+  resolveAgentExecutionEnvironment: jest.fn(() => ({ isTauri: false, isHeadlessHost: true })),
+}))
 
 const flags: Record<string, boolean> = {
   agentTeamRemoteDispatch: false,
@@ -76,7 +82,25 @@ describe("TeammateExecutionBindingField remote prerequisites", () => {
 
     expect(screen.getByRole("button", { name: "hostAuto" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "hostPinnedOffline" })).toBeDisabled()
-    expect(screen.getByText("remotePrerequisitesHint")).toBeInTheDocument()
+    expect(screen.getByText("remoteDispatchDisabled")).toBeInTheDocument()
+    expect(screen.queryByText("hostWaitingWarning")).not.toBeInTheDocument()
+    expect(resolveAgentExecutionEnvironment).toHaveBeenCalled()
+    expect(screen.getByText("previewOrchestrated")).toBeInTheDocument()
+  })
+
+  it("shows the effective inherited host and its disabled-dispatch reason", () => {
+    render(
+      <TeammateExecutionBindingField
+        value={{ mode: "inherit" }}
+        teamDefault={{
+          mode: "inherit",
+          executionTarget: { mode: "pinned", hostRef: "device:team" },
+        }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByRole("button", { name: "hostPinnedOffline" })).toBeDisabled()
+    expect(screen.getByText("remoteDispatchDisabled")).toBeInTheDocument()
   })
 
   it("enables only profile-ready remote hosts after all gates are active", () => {

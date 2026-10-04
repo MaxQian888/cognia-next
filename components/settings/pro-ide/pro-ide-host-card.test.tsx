@@ -2,10 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ProIdeHostCard } from "./pro-ide-host-card"
+import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import type { CompanionConfig } from "@/lib/tauri/companion-storage"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -15,19 +18,50 @@ jest.mock("next-intl", () => ({
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn() } }))
 
 let endpointBaseUrl: string | null = "http://127.0.0.1:27891"
+const mockResolveEndpoint = jest.fn(async () =>
+  endpointBaseUrl === null ? null : { baseUrl: endpointBaseUrl }
+)
 jest.mock("@/lib/tauri/companion-endpoint", () => ({
-  defaultCompanionEndpointResolver: async () =>
-    endpointBaseUrl === null ? null : { baseUrl: endpointBaseUrl },
+  defaultCompanionEndpointResolver: () => mockResolveEndpoint(),
 }))
 
-let hostSupports = true
-jest.mock("@/stores/remote-host/remote-host-store", () => ({
-  activeHostSupportsFeature: (...args: unknown[]) => {
-    lastFeatureQuery = args
-    return hostSupports
-  },
+// The frame's own embed-or-explain logic has its own suite; here it only has to
+// show which Host it was handed.
+jest.mock("@/components/editor/project/code-server-web-frame", () => ({
+  CodeServerWebFrame: ({ hostBaseUrl }: { hostBaseUrl: string | null }) => (
+    <div data-testid="frame-host">{hostBaseUrl ?? "self"}</div>
+  ),
 }))
-let lastFeatureQuery: unknown[] = []
+
+/**
+ * The real remote-host store, seeded the way an activation leaves it: the
+ * card subscribes to it, so a test can switch hosts under a mounted card and
+ * watch it follow. `operations` is what the host's build advertises for
+ * `pro-ide`; `null` means the feature is absent altogether.
+ */
+function hostState(id: string, operations: string[] | null = ["codeserver_ensure"]) {
+  return {
+    activeHostId: id,
+    hosts: [
+      {
+        id,
+        label: id,
+        config: { baseUrl: `https://${id}.example`, serverVersion: "1.0.0" } as CompanionConfig,
+        credentialRef: `remote-host:${id}`,
+        addedAt: 1,
+        connectionState: "ready" as const,
+        featureManifest: {
+          schemaVersion: 1,
+          hostBuildId: "1.0.0",
+          platform: "headless",
+          generatedAt: 1,
+          features: operations ? { "pro-ide": { version: 1, operations } } : {},
+          limits: {},
+        } as unknown as HostFeatureManifest,
+      },
+    ],
+  }
+}
 
 let projects: Array<{ id: string; roots: Array<{ path: string; isPrimary?: boolean }> }> = []
 let activeProjectId: string | null = null
@@ -63,7 +97,7 @@ jest.mock("@/components/platform/surface-unavailable-notice", () => ({
 
 beforeEach(() => {
   endpointBaseUrl = "http://127.0.0.1:27891"
-  hostSupports = true
+  useRemoteHostStore.setState(hostState("h1"))
   reach = { available: true }
   projects = [{ id: "p1", roots: [{ path: "/srv/repo", isPrimary: true }] }]
   activeProjectId = "p1"
@@ -72,7 +106,10 @@ beforeEach(() => {
   stop.mockResolvedValue(true)
 })
 
-afterEach(() => jest.clearAllMocks())
+afterEach(() => {
+  jest.clearAllMocks()
+  useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+})
 
 describe("<ProIdeHostCard />", () => {
   it("asks the feature manifest, not the static capability list", async () => {
@@ -81,8 +118,48 @@ describe("<ProIdeHostCard />", () => {
     // the only thing that knows.
     render(<ProIdeHostCard />)
     await waitFor(() => expect(status).toHaveBeenCalled())
-    expect(lastFeatureQuery).toEqual(["pro-ide", "codeserver_ensure"])
     expect(lastReachInput).toMatchObject({ capability: "pro-ide", hostProvides: true })
+  })
+
+  it("needs the host to advertise `codeserver_ensure`, not just the feature", async () => {
+    useRemoteHostStore.setState(hostState("h1", ["codeserver_status"]))
+    render(<ProIdeHostCard />)
+    expect(lastReachInput).toMatchObject({ capability: "pro-ide", hostProvides: false })
+    // Let the endpoint resolution settle inside the test.
+    await act(async () => {})
+  })
+
+  it("follows a desktop's host switch: re-answers, re-resolves and re-probes", async () => {
+    status.mockResolvedValue({ running: true, port: 41234, version: "1.0.0" })
+    endpointBaseUrl = "https://h1.example"
+    const { rerender } = render(<ProIdeHostCard />)
+    await waitFor(() => expect(screen.getByTestId("frame-host")).toHaveTextContent("h1.example"))
+    expect(mockResolveEndpoint).toHaveBeenCalledTimes(1)
+
+    // Ordinary re-renders and unrelated store writes must not re-resolve: the
+    // frame would otherwise risk flipping while the user types in it.
+    rerender(<ProIdeHostCard />)
+    act(() =>
+      useRemoteHostStore.setState((state) => ({
+        hosts: state.hosts.map((host) => ({ ...host, label: "renamed" })),
+      }))
+    )
+    expect(mockResolveEndpoint).toHaveBeenCalledTimes(1)
+
+    // The desktop attaches to another host that also runs a workbench. No prop
+    // changes; only the store moves.
+    status.mockClear()
+    endpointBaseUrl = "https://h2.example"
+    act(() => useRemoteHostStore.setState(hostState("h2")))
+    await waitFor(() => expect(screen.getByTestId("frame-host")).toHaveTextContent("h2.example"))
+    expect(mockResolveEndpoint).toHaveBeenCalledTimes(2)
+    // Same root, same reach: only the host key can have re-run the probe.
+    await waitFor(() => expect(status).toHaveBeenCalledWith("/srv/repo"))
+
+    // A host whose build has no workbench flips the answer without a remount.
+    act(() => useRemoteHostStore.setState(hostState("h3", null)))
+    expect(lastReachInput).toMatchObject({ capability: "pro-ide", hostProvides: false })
+    await act(async () => {})
   })
 
   it("reads the host's status for the active project root", async () => {
@@ -126,7 +203,7 @@ describe("<ProIdeHostCard />", () => {
   })
 
   it("explains rather than disappearing when the host does not run a workbench", async () => {
-    hostSupports = false
+    useRemoteHostStore.setState(hostState("h1", null))
     reach = { available: false, block: "host-lacks-capability" }
     render(<ProIdeHostCard />)
     expect(screen.getByTestId("pro-ide-host-unavailable")).toBeInTheDocument()

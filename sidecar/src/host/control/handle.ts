@@ -9,6 +9,24 @@ import { isControlMethod, controlMethodCapability, controlParamError } from "./c
 import { guardAnthropicRemoteMcpServers } from "../../mcp/relay/sdk-servers.ts"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
+/** A live-loop read, independent of the persisted native session catalog. */
+export function runtimeStatus(session: HostSession | undefined) {
+  if (!session?.sdkSessionId || session.multiTurn !== true || session.q?.closed === true) {
+    return { retained: false as const }
+  }
+  return {
+    retained: true as const,
+    runtimeAdapter: "ai-sdk" as const,
+    sdkSessionId: session.sdkSessionId,
+    provider: session.sendOptions?.provider ?? "anthropic",
+    ...(typeof session.sendOptions?.cwd === "string" ? { cwd: session.sendOptions.cwd } : {}),
+    ...(typeof session.sendOptions?.transcriptInvalidationId === "string"
+      ? { transcriptInvalidationId: session.sendOptions.transcriptInvalidationId }
+      : {}),
+    active: session.q?.active === true,
+  }
+}
+
 // Change a live session's permission mode in place — WITHOUT respawning the
 // session (which would lose the in-process conversation). On the Anthropic path
 // the SDK `Query` exposes `setPermissionMode` (streaming-input only); on both

@@ -206,7 +206,7 @@ var require_section_matter = __commonJS({
         options2 = { parse: options2 };
       }
       var file = toObject(input);
-      var defaults = { section_delimiter: "---", parse: identity };
+      var defaults = { section_delimiter: "---", parse: identity2 };
       var opts = extend({}, defaults, options2);
       var delim = opts.section_delimiter;
       var lines = file.content.split(/\r?\n/);
@@ -290,7 +290,7 @@ var require_section_matter = __commonJS({
     function createSection() {
       return { key: "", data: "", content: "" };
     }
-    function identity(val) {
+    function identity2(val) {
       return val;
     }
     function isBuffer(val) {
@@ -2985,15 +2985,15 @@ var require_dumper = __commonJS({
       }
       return false;
     }
-    function writeNode(state, level, object2, block2, compact, iskey) {
+    function writeNode(state, level, object2, block3, compact, iskey) {
       state.tag = null;
       state.dump = object2;
       if (!detectType(state, object2, false)) {
         detectType(state, object2, true);
       }
       var type = _toString.call(state.dump);
-      if (block2) {
-        block2 = state.flowLevel < 0 || state.flowLevel > level;
+      if (block3) {
+        block3 = state.flowLevel < 0 || state.flowLevel > level;
       }
       var objectOrArray = type === "[object Object]" || type === "[object Array]", duplicateIndex, duplicate;
       if (objectOrArray) {
@@ -3010,7 +3010,7 @@ var require_dumper = __commonJS({
           state.usedDuplicates[duplicateIndex] = true;
         }
         if (type === "[object Object]") {
-          if (block2 && Object.keys(state.dump).length !== 0) {
+          if (block3 && Object.keys(state.dump).length !== 0) {
             writeBlockMapping(state, level, state.dump, compact);
             if (duplicate) {
               state.dump = "&ref_" + duplicateIndex + state.dump;
@@ -3023,7 +3023,7 @@ var require_dumper = __commonJS({
           }
         } else if (type === "[object Array]") {
           var arrayLevel = state.noArrayIndent && level > 0 ? level - 1 : level;
-          if (block2 && state.dump.length !== 0) {
+          if (block3 && state.dump.length !== 0) {
             writeBlockSequence(state, arrayLevel, state.dump, compact);
             if (duplicate) {
               state.dump = "&ref_" + duplicateIndex + state.dump;
@@ -3317,10 +3317,10 @@ var require_stringify = __commonJS({
       data = Object.assign({}, file.data, data);
       const open = opts.delimiters[0];
       const close = opts.delimiters[1];
-      const matter4 = engine.stringify(data, options2).trim();
+      const matter7 = engine.stringify(data, options2).trim();
       let buf = "";
-      if (matter4 !== "{}") {
-        buf = newline(open) + newline(matter4) + newline(close);
+      if (matter7 !== "{}") {
+        buf = newline(open) + newline(matter7) + newline(close);
       }
       if (typeof file.excerpt === "string" && file.excerpt !== "") {
         if (str2.indexOf(file.excerpt.trim()) === -1) {
@@ -3426,19 +3426,19 @@ var require_gray_matter = __commonJS({
     var toFile = require_to_file();
     var parse19 = require_parse();
     var utils = require_utils();
-    function matter4(input, options2) {
+    function matter7(input, options2) {
       if (input === "") {
         return { data: {}, content: input, excerpt: "", orig: input };
       }
       let file = toFile(input);
-      const cached = matter4.cache[file.content];
+      const cached = matter7.cache[file.content];
       if (!options2) {
         if (cached) {
           file = Object.assign({}, cached);
           file.orig = cached.orig;
           return file;
         }
-        matter4.cache[file.content] = file;
+        matter7.cache[file.content] = file;
       }
       return parseMatter(file, options2);
     }
@@ -3460,7 +3460,7 @@ var require_gray_matter = __commonJS({
       }
       str2 = str2.slice(openLen);
       const len = str2.length;
-      const language = matter4.language(str2, opts);
+      const language = matter7.language(str2, opts);
       if (language.name) {
         file.language = language.name;
         str2 = str2.slice(language.raw.length);
@@ -3470,8 +3470,8 @@ var require_gray_matter = __commonJS({
         closeIndex = len;
       }
       file.matter = str2.slice(0, closeIndex);
-      const block2 = file.matter.replace(/^\s*#[^\n]+/gm, "").trim();
-      if (block2 === "") {
+      const block3 = file.matter.replace(/^\s*#[^\n]+/gm, "").trim();
+      if (block3 === "") {
         file.isEmpty = true;
         file.empty = file.content;
         file.data = {};
@@ -3495,24 +3495,24 @@ var require_gray_matter = __commonJS({
       }
       return file;
     }
-    matter4.engines = engines2;
-    matter4.stringify = function(file, data, options2) {
-      if (typeof file === "string") file = matter4(file, options2);
+    matter7.engines = engines2;
+    matter7.stringify = function(file, data, options2) {
+      if (typeof file === "string") file = matter7(file, options2);
       return stringify2(file, data, options2);
     };
-    matter4.read = function(filepath, options2) {
+    matter7.read = function(filepath, options2) {
       const str2 = fs.readFileSync(filepath, "utf8");
-      const file = matter4(str2, options2);
+      const file = matter7(str2, options2);
       file.path = filepath;
       return file;
     };
-    matter4.test = function(str2, options2) {
+    matter7.test = function(str2, options2) {
       return utils.startsWith(str2, defaults(options2).delimiters[0]);
     };
-    matter4.language = function(str2, options2) {
+    matter7.language = function(str2, options2) {
       const opts = defaults(options2);
       const open = opts.delimiters[0];
-      if (matter4.test(str2)) {
+      if (matter7.test(str2)) {
         str2 = str2.slice(open.length);
       }
       const language = str2.slice(0, str2.search(/\r?\n/));
@@ -3521,11 +3521,11 @@ var require_gray_matter = __commonJS({
         name: language ? language.trim() : ""
       };
     };
-    matter4.cache = {};
-    matter4.clearCache = function() {
-      matter4.cache = {};
+    matter7.cache = {};
+    matter7.clearCache = function() {
+      matter7.cache = {};
     };
-    module2.exports = matter4;
+    module2.exports = matter7;
   }
 });
 
@@ -3620,20 +3620,20 @@ function deriveRuntimeCompatibility(need) {
   return { browser: blocked(reason), tauri: SUPPORTED, mobile: blocked(reason) };
 }
 function assembleManifest(assembly) {
-  const { identity, capabilities, permissions, need, contributions } = assembly;
-  const author = identity.authorEmail ? { name: identity.author, email: identity.authorEmail } : { name: identity.author };
+  const { identity: identity2, capabilities, permissions, need, contributions } = assembly;
+  const author = identity2.authorEmail ? { name: identity2.author, email: identity2.authorEmail } : { name: identity2.author };
   const manifest = {
-    id: identity.id,
-    name: identity.name,
-    version: identity.version,
-    description: identity.description,
+    id: identity2.id,
+    name: identity2.name,
+    version: identity2.version,
+    description: identity2.description,
     type: "frontend",
     capabilities,
     main: CONVERTED_MAIN,
     author,
-    license: identity.license,
-    minAppVersion: identity.minAppVersion,
-    engines: { cognia: `>=${identity.minAppVersion}` },
+    license: identity2.license,
+    minAppVersion: identity2.minAppVersion,
+    engines: { cognia: `>=${identity2.minAppVersion}` },
     permissions: permissions ?? [],
     activationEvents: ["startup"],
     runtimeCompatibility: deriveRuntimeCompatibility(need),
@@ -4339,7 +4339,7 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
     _jsonPath.pop();
     return true;
   }
-  function parseObject() {
+  function parseObject2() {
     onObjectBegin();
     scanNext();
     let needsComma = false;
@@ -4428,7 +4428,7 @@ function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
       case 3:
         return parseArray2();
       case 1:
-        return parseObject();
+        return parseObject2();
       case 10:
         return parseString2(true);
       default:
@@ -6878,7 +6878,11 @@ var UNSUPPORTED_SKILL_EXECUTION_FIELDS = [
   "pathPatterns",
   "bashPatterns",
   "importPatterns",
-  "promptSignals"
+  "promptSignals",
+  // OpenHands keyword triggers decide WHEN a skill activates. (Devin's
+  // `triggers` user/model list is mapped by the Devin adapter, and an installed
+  // Devin-origin SKILL.md keeps it as inert frontmatter.)
+  "trigger"
 ];
 function buildSkill(text, resources = [], sourceName) {
   const { draft, warnings } = parseSkillMarkdown(text, { fallbackName: sourceName });
@@ -7085,7 +7089,7 @@ function convert(input, options2 = {}) {
       warnings: [...contribution.warnings, ...warnings]
     };
   }
-  const identity = resolveIdentity(
+  const identity2 = resolveIdentity(
     {
       ...contribution.identityDefaults,
       suffix: ID_SUFFIX[input.kind],
@@ -7099,7 +7103,7 @@ function convert(input, options2 = {}) {
     [contribution.manifestField]: input.kind === "cli" ? [] : [contribution.entry]
   };
   const manifest = assembleManifest({
-    identity,
+    identity: identity2,
     capabilities: [contribution.capability],
     permissions: contribution.permissions,
     need: contribution.need,
@@ -7344,7 +7348,12 @@ var PLUGIN_ECOSYSTEMS = [
   "kimi",
   "devin",
   "opencode",
-  "pi"
+  "pi",
+  "factory-droid",
+  "qoder",
+  "codebuddy",
+  "auggie",
+  "open-plugins"
 ];
 var HOSTED_TOOL_CAPABILITIES = /* @__PURE__ */ new Set(["tools", "cli-tools"]);
 var HOSTED_SESSION_TARGETS = /* @__PURE__ */ new Set([
@@ -7369,27 +7378,30 @@ function assessPluginDelivery({
     hooks: "command-hooks",
     commandHooks: "command-hooks",
     mcpServers: "mcp-server-preset",
-    mcp: "mcp-server-preset"
+    mcp: "mcp-server-preset",
+    // A complete Pi package is one contribution: themes, extensions and the
+    // package manifest are retained by it, never converted on their own.
+    piPackages: "pi-package"
   };
   const canonicalCapability = (value) => value.startsWith("skill-") ? "skills" : aliases[value] ?? value;
   const listed = [
     .../* @__PURE__ */ new Set([
       ...capabilities,
       ...[...report.converted, ...report.warnings, ...report.blocking].map(
-        (issue) => canonicalCapability(issue.capability)
+        (issue2) => canonicalCapability(issue2.capability)
       )
     ])
   ];
   const details = listed.map(
     (capability) => {
       const blocked2 = report.blocking.some(
-        (issue) => canonicalCapability(issue.capability) === capability
+        (issue2) => canonicalCapability(issue2.capability) === capability
       );
       const warning = report.warnings.some(
-        (issue) => canonicalCapability(issue.capability) === capability
+        (issue2) => canonicalCapability(issue2.capability) === capability
       );
       const converted = report.converted.some(
-        (issue) => canonicalCapability(issue.capability) === capability
+        (issue2) => canonicalCapability(issue2.capability) === capability
       );
       const status = blocked2 ? hostedStatus === "requires-cognia" && HOSTED_TOOL_CAPABILITIES.has(capability) ? "hosted" : "unsupported" : capability === "mcp-server-preset" && manifest?.mcpServerPresets?.some((preset) => preset.fields?.length) ? "configuration-required" : warning ? report.fidelity === "contextual" ? "contextual" : "unverified" : report.blocking.length && !converted ? "unverified" : "native";
       return { capability, status };
@@ -7404,7 +7416,11 @@ function assessPluginDelivery({
     hosted: {
       status: hostedStatus,
       capabilities: hostedTools,
-      retained: capabilities.filter((capability) => !HOSTED_TOOL_CAPABILITIES.has(capability))
+      // A Pi package is delivered natively to Pi; everywhere else it stays in
+      // Cognia (installed into Pi or loaded into Cognia-hosted Pi sessions).
+      retained: capabilities.filter(
+        (capability) => !HOSTED_TOOL_CAPABILITIES.has(capability) && !(capability === "pi-package" && target === "pi")
+      )
     }
   };
 }
@@ -7413,12 +7429,439 @@ function assessPluginDelivery({
 function isPluginEnvironmentFile(relativePath) {
   return /(^|\/)\.env(?:\.|$)/.test(relativePath);
 }
+var GENERATED_FILE_PATHS = ["plugin.json", "dist/index.js"];
+var NEUTRALIZED_CONTENTS = ["{}\n", "\n"];
+function isOverlayEntryAllowed(snapshot, path, contents) {
+  return GENERATED_FILE_PATHS.includes(path) || snapshot.has(path) && NEUTRALIZED_CONTENTS.includes(contents);
+}
 
 // lib/plugin/convert/platform-bundles.ts
+var import_gray_matter4 = __toESM(require_gray_matter());
+
+// lib/plugin/convert/hook-dialects.ts
+var CLAUDE_HANDLERS = ["command", "http", "prompt", "agent", "mcp_tool"];
+function identity(events) {
+  return Object.fromEntries(events.map((event) => [event, event]));
+}
+var HOOK_DIALECTS = {
+  "claude-code": {
+    id: "claude-code",
+    label: "Claude Code",
+    events: identity(HOOK_EVENTS),
+    shape: "groups",
+    handlerTypes: CLAUDE_HANDLERS,
+    timeoutUnit: "seconds",
+    claudeToolNames: true,
+    claudeContract: true
+  },
+  codex: {
+    id: "codex",
+    label: "Codex",
+    // `Interrupt` has no Cognia hook event and stays blocking.
+    events: identity([
+      "PreToolUse",
+      "PermissionRequest",
+      "PostToolUse",
+      "PreCompact",
+      "PostCompact",
+      "SessionStart",
+      "SessionEnd",
+      "UserPromptSubmit",
+      "SubagentStart",
+      "SubagentStop",
+      "Stop"
+    ]),
+    shape: "groups",
+    // Codex parses `prompt` / `agent` handlers but skips them: converting one
+    // would activate behavior that never ran in the source host.
+    handlerTypes: ["command", "mcp_tool"],
+    timeoutUnit: "seconds",
+    claudeToolNames: true,
+    claudeContract: true
+  },
+  "gemini-cli": {
+    id: "gemini-cli",
+    label: "Gemini CLI",
+    events: {
+      BeforeTool: "PreToolUse",
+      AfterTool: "PostToolUse",
+      SessionStart: "SessionStart",
+      SessionEnd: "SessionEnd",
+      Notification: "Notification",
+      PreCompress: "PreCompact"
+    },
+    shape: "groups",
+    handlerTypes: ["command"],
+    timeoutUnit: "milliseconds",
+    claudeToolNames: false,
+    claudeContract: false,
+    // `sequential: true` serializes a group; Cognia runs a group's handlers
+    // with Claude semantics, so only the default converts.
+    groupFlags: { sequential: false },
+    presentationFields: ["name", "description"]
+  },
+  cursor: {
+    id: "cursor",
+    label: "Cursor",
+    events: {
+      sessionStart: "SessionStart",
+      sessionEnd: "SessionEnd",
+      preToolUse: "PreToolUse",
+      postToolUse: "PostToolUse",
+      postToolUseFailure: "PostToolUseFailure",
+      subagentStart: "SubagentStart",
+      subagentStop: "SubagentStop",
+      beforeSubmitPrompt: "UserPromptSubmit",
+      preCompact: "PreCompact",
+      stop: "Stop"
+    },
+    shape: "flat",
+    handlerTypes: ["command"],
+    timeoutUnit: "seconds",
+    claudeToolNames: false,
+    claudeContract: false,
+    version: 1
+  },
+  "factory-droid": {
+    id: "factory-droid",
+    label: "Factory Droid",
+    events: identity([
+      "PreToolUse",
+      "PostToolUse",
+      "Notification",
+      "UserPromptSubmit",
+      "Stop",
+      "SubagentStop",
+      "PreCompact",
+      "SessionStart",
+      "SessionEnd"
+    ]),
+    shape: "groups",
+    handlerTypes: ["command"],
+    timeoutUnit: "seconds",
+    claudeToolNames: false,
+    claudeContract: true
+  },
+  qoder: {
+    id: "qoder",
+    label: "Qoder CLI",
+    events: identity([
+      "SessionStart",
+      "SessionEnd",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PermissionRequest",
+      "PermissionDenied",
+      "Stop",
+      "StopFailure",
+      "SubagentStart",
+      "SubagentStop",
+      "PreCompact",
+      "PostCompact",
+      "Notification",
+      "InstructionsLoaded",
+      "ConfigChange",
+      "CwdChanged",
+      "FileChanged",
+      "WorktreeCreate",
+      "WorktreeRemove",
+      "Elicitation",
+      "ElicitationResult"
+    ]),
+    shape: "groups",
+    handlerTypes: ["command", "http", "prompt", "agent"],
+    timeoutUnit: "seconds",
+    claudeToolNames: true,
+    claudeContract: true
+  },
+  codebuddy: {
+    id: "codebuddy",
+    label: "CodeBuddy",
+    events: identity([
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PermissionRequest",
+      "PermissionDenied",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "Notification",
+      "SubagentStart",
+      "SubagentStop",
+      "TaskCreated",
+      "TaskCompleted",
+      "Stop",
+      "StopFailure",
+      "TeammateIdle",
+      "InstructionsLoaded",
+      "ConfigChange",
+      "CwdChanged",
+      "FileChanged",
+      "WorktreeCreate",
+      "WorktreeRemove",
+      "PreCompact",
+      "PostCompact",
+      "Elicitation",
+      "ElicitationResult",
+      "SessionEnd"
+    ]),
+    shape: "groups",
+    handlerTypes: ["command", "prompt"],
+    promptEvents: ["Stop", "UserPromptSubmit", "PreToolUse"],
+    timeoutUnit: "seconds",
+    claudeToolNames: true,
+    claudeContract: true
+  },
+  auggie: {
+    id: "auggie",
+    label: "Auggie",
+    events: identity(["PreToolUse", "PostToolUse", "Stop", "SessionStart", "SessionEnd"]),
+    shape: "groups",
+    handlerTypes: ["command"],
+    timeoutUnit: "milliseconds",
+    claudeToolNames: false,
+    claudeContract: false,
+    commandRule: {
+      pattern: /^\s*"?[^\s"]+\.(?:sh|ps1|cmd|bat)"?(?:\s|$)/i,
+      message: "Auggie runs hook script files only (.sh, .ps1, .cmd, .bat); an inline shell command has no Auggie equivalent"
+    }
+  },
+  openhands: {
+    id: "openhands",
+    label: "OpenHands",
+    events: identity([
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "Stop",
+      "SessionStart",
+      "SessionEnd"
+    ]),
+    shape: "groups",
+    handlerTypes: ["command"],
+    timeoutUnit: "seconds",
+    claudeToolNames: false,
+    claudeContract: false
+  }
+};
+var WILDCARD_MATCHERS = /* @__PURE__ */ new Set(["", "*", ".*", "**"]);
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function block(sink, path, message) {
+  sink.blocking.push({ capability: "commandHooks", path, message, blocking: true });
+}
+function warn(sink, path, message) {
+  if (sink.warnings.some((issue2) => issue2.path === path && issue2.message === message)) return;
+  sink.warnings.push({ capability: "commandHooks", path, message, blocking: false });
+}
+function contractWarning(dialect) {
+  if (dialect.claudeContract && dialect.claudeToolNames) return void 0;
+  return dialect.claudeContract ? `${dialect.label} reports its own tool names in hook payloads; exit-code blocking is shared, but scripts that inspect tool_name/tool_input must be verified` : `${dialect.label} hook payload fields and JSON decision output differ from Claude's contract; exit code 2 blocking is shared, but scripts that parse stdin or print decisions must be verified`;
+}
+function convertTimeout(value, from, to) {
+  if (typeof value !== "number" || from === to) return value;
+  return from === "milliseconds" ? value / 1e3 : Math.round(value * 1e3);
+}
+function hookDocumentToCanonical(args) {
+  const { value, path, dialect, sink } = args;
+  if (dialect.id === "claude-code") return value;
+  const wrapped = isRecord(value.hooks);
+  const eventMap = wrapped ? value.hooks : value;
+  if (wrapped) {
+    for (const key of Object.keys(value)) {
+      if (key === "hooks" || key === "description") continue;
+      if (key === "version" && dialect.version !== void 0 && value.version === dialect.version)
+        continue;
+      block(sink, path, `${dialect.label} hook file field "${key}" has no Cognia equivalent`);
+    }
+  }
+  const canonical = {};
+  let converted = 0;
+  for (const [hostEvent, entries] of Object.entries(eventMap)) {
+    const event = dialect.events[hostEvent];
+    if (!event) {
+      block(
+        sink,
+        path,
+        `${dialect.label} hook event "${hostEvent}" has no exact Cognia hook-runtime equivalent`
+      );
+      continue;
+    }
+    if (!Array.isArray(entries)) {
+      block(sink, path, `hook event "${hostEvent}" must map to an array`);
+      continue;
+    }
+    const groups = [];
+    for (const [index, entry] of entries.entries()) {
+      if (!isRecord(entry)) {
+        block(sink, path, `hook entry "${hostEvent}"[${index}] must be an object`);
+        continue;
+      }
+      const group = dialect.shape === "flat" ? (() => {
+        const { matcher: matcher2, ...handler } = entry;
+        return { ...matcher2 !== void 0 ? { matcher: matcher2 } : {}, hooks: [handler] };
+      })() : { ...entry };
+      for (const [flag, accepted] of Object.entries(dialect.groupFlags ?? {})) {
+        if (!(flag in group)) continue;
+        if (group[flag] !== accepted) {
+          block(
+            sink,
+            path,
+            `${dialect.label} hook group "${hostEvent}"[${index}] sets ${flag}=${JSON.stringify(group[flag])}, which Cognia cannot reproduce`
+          );
+        }
+        delete group[flag];
+      }
+      const matcher = group.matcher;
+      if (matcher !== void 0 && !dialect.claudeToolNames && !(typeof matcher === "string" && WILDCARD_MATCHERS.has(matcher.trim()))) {
+        block(
+          sink,
+          path,
+          `${dialect.label} matcher ${JSON.stringify(matcher)} on "${hostEvent}" selects the host's own tool or event vocabulary; it cannot be mapped to Cognia's`
+        );
+        continue;
+      }
+      if (matcher !== void 0 && !dialect.claudeToolNames) delete group.matcher;
+      const handlers = group.hooks;
+      if (Array.isArray(handlers)) {
+        ;
+        group.hooks = handlers.map((raw, handlerIndex) => {
+          if (!isRecord(raw)) return raw;
+          const handler = { ...raw };
+          if (handler.type === void 0 && dialect.shape === "flat") handler.type = "command";
+          const type = handler.type;
+          if (typeof type === "string" && !dialect.handlerTypes.includes(type)) {
+            block(
+              sink,
+              path,
+              `${dialect.label} hook handler "${hostEvent}"[${index}].hooks[${handlerIndex}] of type "${type}" is not executed by ${dialect.label} or has no exact Cognia equivalent`
+            );
+          }
+          if (type === "prompt" && dialect.promptEvents && !dialect.promptEvents.includes(event)) {
+            block(
+              sink,
+              path,
+              `${dialect.label} only runs prompt hooks on ${dialect.promptEvents.join(", ")}`
+            );
+          }
+          for (const field of dialect.presentationFields ?? []) {
+            if (handler[field] === void 0) continue;
+            warn(
+              sink,
+              path,
+              `${dialect.label} hook ${field} labels the hook in the host UI only and was not projected`
+            );
+            delete handler[field];
+          }
+          if (handler.timeout !== void 0)
+            handler.timeout = convertTimeout(handler.timeout, dialect.timeoutUnit, "seconds");
+          return handler;
+        });
+      }
+      groups.push(group);
+    }
+    if (groups.length) {
+      canonical[event] = [...canonical[event] ?? [], ...groups];
+      converted += groups.length;
+    }
+  }
+  const message = contractWarning(dialect);
+  if (message && converted > 0) warn(sink, path, message);
+  return { hooks: canonical };
+}
+function canonicalHooksToDialect(args) {
+  const { hooks, dialect, sink, path } = args;
+  const reverse = /* @__PURE__ */ new Map();
+  for (const [hostEvent, canonical] of Object.entries(dialect.events)) {
+    if (!reverse.has(canonical)) reverse.set(canonical, hostEvent);
+  }
+  const output2 = {};
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!groups?.length) continue;
+    const hostEvent = reverse.get(event);
+    if (!hostEvent) {
+      block(
+        sink,
+        `commandHooks.${event}`,
+        `${dialect.label} has no hook event equivalent to ${event}`
+      );
+      continue;
+    }
+    const entries = [];
+    for (const [index, group] of groups.entries()) {
+      const location = `commandHooks.${event}[${index}]`;
+      if (group.agents) {
+        block(sink, location, `${dialect.label} cannot enforce Cognia agent selectors`);
+        continue;
+      }
+      const matcher = group.matcher;
+      const wildcard = matcher === void 0 || WILDCARD_MATCHERS.has(matcher.trim());
+      if (!wildcard && !dialect.claudeToolNames) {
+        block(
+          sink,
+          location,
+          `${dialect.label} matches ${JSON.stringify(matcher)} against its own tool vocabulary; the matcher cannot be carried across`
+        );
+        continue;
+      }
+      const handlers = [];
+      for (const handler of group.hooks) {
+        if (!dialect.handlerTypes.includes(handler.type)) {
+          block(sink, location, `${dialect.label} does not execute "${handler.type}" hook handlers`);
+          continue;
+        }
+        if (handler.type === "prompt" && dialect.promptEvents && !dialect.promptEvents.includes(event)) {
+          block(
+            sink,
+            location,
+            `${dialect.label} only runs prompt hooks on ${dialect.promptEvents.join(", ")}`
+          );
+          continue;
+        }
+        if ("policyClass" in handler && handler.policyClass === "managed") {
+          block(sink, location, "Managed fail-closed hook policies require the Cognia host");
+          continue;
+        }
+        if (handler.type === "command" && dialect.commandRule && !dialect.commandRule.pattern.test(handler.command)) {
+          block(sink, location, dialect.commandRule.message);
+          continue;
+        }
+        const projected = { ...handler };
+        delete projected.policyClass;
+        if (projected.timeout !== void 0)
+          projected.timeout = convertTimeout(projected.timeout, "seconds", dialect.timeoutUnit);
+        handlers.push(projected);
+      }
+      if (!handlers.length) continue;
+      if (dialect.shape === "flat") {
+        for (const handler of handlers) {
+          const { type, ...rest } = handler;
+          entries.push({
+            ...type === "command" ? {} : { type },
+            ...rest,
+            ...matcher !== void 0 && !wildcard ? { matcher } : {}
+          });
+        }
+      } else {
+        entries.push({
+          ...matcher !== void 0 && (dialect.claudeToolNames || !wildcard) ? { matcher } : {},
+          hooks: handlers
+        });
+      }
+    }
+    if (entries.length) output2[hostEvent] = entries;
+  }
+  if (!Object.keys(output2).length) return void 0;
+  const message = contractWarning(dialect);
+  if (message) warn(sink, path, message);
+  return dialect.version !== void 0 ? { version: dialect.version, hooks: output2 } : { hooks: output2 };
+}
+
+// lib/plugin/convert/claude-family.ts
 var import_gray_matter3 = __toESM(require_gray_matter());
-var AGENT_PLUGINS_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
-var MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
-var CLAUDE_MANIFEST = ".claude-plugin/plugin.json";
 var METADATA = [
   "name",
   "version",
@@ -7429,38 +7872,602 @@ var METADATA = [
   "license",
   "keywords"
 ];
+var markdownAgentId = (path) => {
+  const match = /^([^/]+)\.md$/i.exec(path);
+  return match ? match[1] : null;
+};
+var CLAUDE_BLOCKED = {
+  lspServers: "LSP servers need a language-server host; Cognia has no plugin LSP contribution",
+  outputStyles: "Output styles replace the host's response style; Cognia has no equivalent",
+  workflows: "Plugin workflows (workflows/*.js) are executable host code",
+  settings: "Plugin settings (agent, subagentStatusLine) change the host session; Cognia has no equivalent",
+  userConfig: "userConfig prompts for values substituted as ${user_config.KEY}; no exact Cognia projection exists yet",
+  channels: "Channels inject messages from external services into the session",
+  dependencies: "Plugin dependencies install other plugins from a marketplace",
+  experimental: "Experimental themes, monitors and evals have no Cognia equivalent",
+  types: "Type declarations configure host-specific component typing"
+};
+var CLAUDE_PATHS = [
+  { path: "monitors/", capability: "monitors", message: "Background monitors run host code" },
+  { path: "themes/", capability: "themes", message: "Themes restyle the host UI" },
+  { path: "workflows/", capability: "workflows", message: "Workflows are executable host code" },
+  {
+    path: "output-styles/",
+    capability: "outputStyles",
+    message: "Output styles replace the host's response style"
+  },
+  {
+    path: "settings.json",
+    capability: "settings",
+    message: "Root settings.json changes host defaults"
+  },
+  {
+    path: ".lsp.json",
+    capability: "lspServers",
+    message: "LSP servers need a language-server host"
+  },
+  {
+    path: "bin/",
+    capability: "bin",
+    message: "Claude Code adds bin/ to the Bash PATH; Cognia does not, so bare-name invocations of these executables fail \u2014 reference them through the plugin root",
+    warn: true
+  }
+];
+var SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+var CLAUDE_FAMILY_PROFILES = {
+  "claude-code": {
+    ecosystem: "claude-code",
+    label: "Claude Code",
+    manifestPaths: [".claude-plugin/plugin.json"],
+    exportManifestPath: ".claude-plugin/plugin.json",
+    metadataFields: [...METADATA, "displayName", "icon"],
+    componentFields: ["skills", "commands", "agents", "hooks", "mcpServers"],
+    ignoredFields: {
+      $schema: "Schema reference only",
+      metadata: "Marketplace metadata is not projected into Cognia",
+      defaultEnabled: "Cognia enables imported plugins through its own install flow; the default is not projected",
+      documentationUrl: "Directory presentation only",
+      supportUrl: "Directory presentation only",
+      privacyPolicyUrl: "Directory presentation only",
+      termsOfServiceUrl: "Directory presentation only"
+    },
+    blockedFields: CLAUDE_BLOCKED,
+    // Claude Code strips unknown top-level keys with a warning, so they carry no behavior.
+    unknownFields: "warn",
+    blockedPaths: CLAUDE_PATHS,
+    agentsDir: "agents",
+    agentId: markdownAgentId,
+    agentFields: null,
+    commandsDir: "commands",
+    mcpFile: ".mcp.json",
+    mcpMode: "merge",
+    skillsMode: "additive",
+    hookFiles: ["hooks/hooks.json", "hooks.json"],
+    hooksMode: "merge",
+    hookDialect: HOOK_DIALECTS["claude-code"],
+    rootTokens: ["${CLAUDE_PLUGIN_ROOT}"],
+    rootEnvVars: ["CLAUDE_PLUGIN_ROOT"],
+    dataTokens: ["${CLAUDE_PLUGIN_DATA}"],
+    claudeRootAlias: true,
+    requireDotSlashPaths: true,
+    nameRule: {
+      pattern: /^[^\s@:/\\\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]+$/u,
+      message: "Claude Code plugin names cannot contain spaces, @, :, path separators, control or bidi characters"
+    },
+    exportComponentPaths: true,
+    reservedNames: {
+      pattern: /^(?:claude-|anthropic-|anthropics-|cc-plugin-)|^claude-code$/,
+      message: "Claude Code reserves the claude-, anthropic-, anthropics- and cc-plugin- name prefixes"
+    }
+  },
+  "factory-droid": {
+    ecosystem: "factory-droid",
+    label: "Factory Droid",
+    manifestPaths: [".factory-plugin/plugin.json"],
+    exportManifestPath: ".factory-plugin/plugin.json",
+    metadataFields: METADATA,
+    componentFields: [],
+    // Droid neither requires nor reads plugin.json; identity comes from the
+    // marketplace entry and components are discovered by convention only.
+    ignoredFields: {
+      skills: "Droid discovers skills/ by convention and does not read manifest paths",
+      commands: "Droid discovers commands/ by convention and does not read manifest paths",
+      agents: "Droid discovers droids/ by convention and does not read manifest paths",
+      hooks: "Droid reads hooks/hooks.json by convention and does not read manifest hooks",
+      mcpServers: "Droid reads mcp.json by convention and does not read manifest MCP",
+      outputStyles: "Droid discovers output-styles/ by convention"
+    },
+    blockedFields: {},
+    unknownFields: "warn",
+    blockedPaths: [
+      {
+        path: "output-styles/",
+        capability: "outputStyles",
+        message: "Droid output styles replace the response style; Cognia has no equivalent"
+      }
+    ],
+    agentsDir: "droids",
+    agentId: markdownAgentId,
+    agentFields: ["name", "description"],
+    agentDefaults: { model: "inherit" },
+    commandsDir: "commands",
+    mcpFile: "mcp.json",
+    mcpMode: "replace",
+    skillsMode: "replace",
+    hookFiles: ["hooks/hooks.json"],
+    hooksMode: "replace",
+    hookDialect: HOOK_DIALECTS["factory-droid"],
+    rootTokens: ["${DROID_PLUGIN_ROOT}", "${CLAUDE_PLUGIN_ROOT}"],
+    rootEnvVars: ["DROID_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"],
+    dataTokens: [],
+    claudeRootAlias: true,
+    requireDotSlashPaths: false,
+    nameRule: { pattern: /^\S+$/, message: "Droid plugin names cannot contain whitespace" },
+    exportComponentPaths: false
+  },
+  qoder: {
+    ecosystem: "qoder",
+    label: "Qoder CLI",
+    manifestPaths: [".qoder-plugin/plugin.json"],
+    exportManifestPath: ".qoder-plugin/plugin.json",
+    metadataFields: METADATA,
+    componentFields: ["skills", "commands", "agents", "hooks"],
+    ignoredFields: {},
+    blockedFields: {
+      outputStyles: "Output styles replace the host's response style; Cognia has no equivalent"
+    },
+    unknownFields: "block",
+    blockedPaths: [
+      {
+        path: "output-styles/",
+        capability: "outputStyles",
+        message: "Output styles replace the host's response style"
+      },
+      {
+        path: "bin/",
+        capability: "bin",
+        message: "Qoder adds bin/ executables to the session; Cognia does not"
+      }
+    ],
+    agentsDir: "agents",
+    agentId: markdownAgentId,
+    agentFields: ["name", "description"],
+    commandsDir: "commands",
+    mcpFile: ".mcp.json",
+    mcpMode: "replace",
+    skillsMode: "replace",
+    hookFiles: ["hooks/hooks.json"],
+    hooksMode: "replace",
+    hookDialect: HOOK_DIALECTS.qoder,
+    rootTokens: ["${QODER_PLUGIN_ROOT}"],
+    rootEnvVars: ["QODER_PLUGIN_ROOT"],
+    dataTokens: ["${QODER_PLUGIN_DATA}"],
+    claudeRootAlias: false,
+    requireDotSlashPaths: false,
+    nameRule: { pattern: /^\S+$/, message: "Qoder plugin names cannot contain spaces" },
+    exportComponentPaths: false
+  },
+  codebuddy: {
+    ecosystem: "codebuddy",
+    label: "CodeBuddy",
+    manifestPaths: [".codebuddy-plugin/plugin.json", ".workbuddy-plugin/plugin.json"],
+    exportManifestPath: ".codebuddy-plugin/plugin.json",
+    metadataFields: METADATA,
+    componentFields: ["skills", "commands", "agents", "hooks", "mcpServers"],
+    ignoredFields: {
+      defaultEnabled: "Cognia enables imported plugins through its own install flow; the default is not projected"
+    },
+    blockedFields: {
+      outputStyles: CLAUDE_BLOCKED.outputStyles,
+      lspServers: CLAUDE_BLOCKED.lspServers,
+      dependencies: CLAUDE_BLOCKED.dependencies,
+      userConfig: CLAUDE_BLOCKED.userConfig,
+      channels: CLAUDE_BLOCKED.channels,
+      experimental: CLAUDE_BLOCKED.experimental
+    },
+    unknownFields: "block",
+    blockedPaths: [
+      CLAUDE_PATHS[3],
+      {
+        path: ".lsp.json",
+        capability: "lspServers",
+        message: "LSP servers need a language-server host"
+      }
+    ],
+    agentsDir: "agents",
+    agentId: markdownAgentId,
+    agentFields: ["name", "description", "effort", "maxTurns"],
+    commandsDir: "commands",
+    mcpFile: ".mcp.json",
+    mcpMode: "merge",
+    skillsMode: "replace",
+    hookFiles: ["hooks/hooks.json"],
+    hooksMode: "merge",
+    hookDialect: HOOK_DIALECTS.codebuddy,
+    rootTokens: ["${CODEBUDDY_PLUGIN_ROOT}", "${CLAUDE_PLUGIN_ROOT}"],
+    rootEnvVars: ["CODEBUDDY_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"],
+    dataTokens: ["${CODEBUDDY_PLUGIN_DATA}", "${CLAUDE_PLUGIN_DATA}"],
+    claudeRootAlias: true,
+    requireDotSlashPaths: false,
+    nameRule: { pattern: SLUG, message: "CodeBuddy plugin names must be kebab-case" },
+    exportComponentPaths: false
+  },
+  auggie: {
+    ecosystem: "auggie",
+    label: "Auggie",
+    manifestPaths: [".augment-plugin/plugin.json"],
+    exportManifestPath: ".augment-plugin/plugin.json",
+    metadataFields: METADATA,
+    componentFields: ["skills", "commands", "agents", "hooks", "mcpServers"],
+    ignoredFields: {},
+    blockedFields: {},
+    unknownFields: "block",
+    blockedPaths: [
+      {
+        path: "rules/",
+        capability: "rules",
+        message: "Auggie rules are always-on instructions; Cognia plugins have no rule contribution"
+      }
+    ],
+    agentsDir: "agents",
+    agentId: markdownAgentId,
+    agentFields: ["name", "description", "color"],
+    commandsDir: "commands",
+    mcpFile: ".mcp.json",
+    mcpMode: "ambiguous",
+    skillsMode: "ambiguous",
+    hookFiles: ["hooks/hooks.json"],
+    hooksMode: "ambiguous",
+    hookDialect: HOOK_DIALECTS.auggie,
+    rootTokens: ["${AUGMENT_PLUGIN_ROOT}", "${AUGGIE_PLUGIN_ROOT}", "${CLAUDE_PLUGIN_ROOT}"],
+    rootEnvVars: ["AUGMENT_PLUGIN_ROOT", "AUGGIE_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"],
+    dataTokens: [],
+    claudeRootAlias: true,
+    requireDotSlashPaths: false,
+    nameRule: { pattern: /^\S+$/, message: "Auggie plugin names cannot contain whitespace" },
+    exportComponentPaths: false
+  },
+  "open-plugins": {
+    ecosystem: "open-plugins",
+    label: "Open Plugins (legacy .plugin)",
+    manifestPaths: [".plugin/plugin.json", ".goose-plugin/plugin.json"],
+    exportManifestPath: ".plugin/plugin.json",
+    metadataFields: METADATA,
+    componentFields: [],
+    ignoredFields: {},
+    blockedFields: {
+      skills: "Legacy OpenPlugin hosts (Copilot, OpenHands, Goose) disagree on manifest path overrides",
+      commands: "Legacy OpenPlugin hosts (Copilot, OpenHands, Goose) disagree on manifest path overrides",
+      agents: "Legacy OpenPlugin hosts (Copilot, OpenHands, Goose) disagree on manifest path overrides",
+      hooks: "Legacy OpenPlugin hosts (Copilot, OpenHands, Goose) disagree on manifest path overrides",
+      mcpServers: "Legacy OpenPlugin hosts (Copilot, OpenHands, Goose) disagree on manifest path overrides"
+    },
+    unknownFields: "block",
+    blockedPaths: [],
+    agentsDir: "agents",
+    agentId: (path) => {
+      const match = /^([^/]+?)(?:\.agent)?\.md$/i.exec(path);
+      return match ? match[1] : null;
+    },
+    agentFields: ["name", "description"],
+    commandsDir: "commands",
+    mcpFile: ".mcp.json",
+    mcpMode: "replace",
+    skillsMode: "replace",
+    hookFiles: ["hooks/hooks.json"],
+    hooksMode: "replace",
+    hookDialect: HOOK_DIALECTS.openhands,
+    rootTokens: ["${PLUGIN_ROOT}"],
+    rootEnvVars: ["PLUGIN_ROOT"],
+    dataTokens: ["${PLUGIN_DATA}"],
+    claudeRootAlias: false,
+    requireDotSlashPaths: false,
+    nameRule: { pattern: /^\S+$/, message: "Plugin names cannot contain whitespace" },
+    exportComponentPaths: false
+  }
+};
+function claudeFamilyManifestPath(files, profile) {
+  return profile.manifestPaths.find((path) => files.has(path));
+}
+function replaceRootTokens(value, tokens, envVars, replacement) {
+  if (typeof value === "string") {
+    let result = value;
+    for (const token of tokens) result = result.replaceAll(token, replacement);
+    for (const name of envVars)
+      result = result.replace(new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"), replacement);
+    return result;
+  }
+  if (Array.isArray(value))
+    return value.map((entry) => replaceRootTokens(entry, tokens, envVars, replacement));
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceRootTokens(entry, tokens, envVars, replacement)
+      ])
+    );
+  return value;
+}
+var CLAUDE_MANIFEST = ".claude-plugin/plugin.json";
+function projectClaudeFamilyBundle(input, profile) {
+  const result = { files: new Map(input), blocking: [], warnings: [] };
+  if (profile.ecosystem === "claude-code") return result;
+  const fail = (capability, path, message) => result.blocking.push({ capability, path, message, blocking: true });
+  const exportToken = profile.rootTokens[0];
+  const swap = (value) => replaceRootTokens(value, ["${CLAUDE_PLUGIN_ROOT}"], ["CLAUDE_PLUGIN_ROOT"], exportToken);
+  const manifestText = input.get(CLAUDE_MANIFEST);
+  if (manifestText === void 0) {
+    fail("format", CLAUDE_MANIFEST, "A validated Claude bundle manifest is required");
+    return result;
+  }
+  const source = JSON.parse(manifestText);
+  result.files.delete(CLAUDE_MANIFEST);
+  const manifest = {};
+  for (const key of METADATA) if (source[key] !== void 0) manifest[key] = source[key];
+  if (typeof manifest.name === "string" && !profile.nameRule.pattern.test(manifest.name))
+    fail("name", `${profile.exportManifestPath}.name`, profile.nameRule.message);
+  for (const [path, text] of Array.from(result.files)) {
+    if (!path.startsWith("agents/") || !path.endsWith(".md")) continue;
+    result.files.delete(path);
+    const id = path.slice("agents/".length, -".md".length);
+    let parsed;
+    try {
+      parsed = (0, import_gray_matter3.default)(text);
+    } catch (error) {
+      fail("subagent", path, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    const allowed = new Set(profile.agentFields ?? []);
+    const unsupported = Object.keys(parsed.data).filter((key) => !allowed.has(key));
+    if (unsupported.length) {
+      fail(
+        "subagent",
+        `subagents.${id}`,
+        `${profile.label} agents have no exact equivalent for: ${unsupported.join(", ")}`
+      );
+      continue;
+    }
+    const target = profile.ecosystem === "open-plugins" ? null : `${profile.agentsDir}/${id}.md`;
+    if (!target) {
+      fail(
+        "subagent",
+        `subagents.${id}`,
+        "Legacy OpenPlugin hosts disagree on agent files (Copilot *.agent.md, OpenHands <name>.md); export to agent-plugins or copilot instead"
+      );
+      continue;
+    }
+    result.files.set(target, text);
+  }
+  const mcpText = result.files.get(".mcp.json");
+  if (mcpText !== void 0) {
+    result.files.delete(".mcp.json");
+    const document = JSON.parse(mcpText);
+    const servers = document.mcpServers ?? {};
+    if (profile.ecosystem === "open-plugins") {
+      for (const [name, server] of Object.entries(servers)) {
+        if (JSON.stringify(server).includes("${CLAUDE_PLUGIN_ROOT}") || server.cwd !== void 0)
+          fail(
+            "mcp",
+            `mcpServers.${name}`,
+            "Legacy OpenPlugin hosts do not document plugin-root expansion or cwd for MCP servers; use a PATH command or a remote server"
+          );
+      }
+    }
+    result.files.set(profile.mcpFile, `${JSON.stringify(swap(document), null, 2)}
+`);
+  }
+  const hooksText = result.files.get("hooks/hooks.json");
+  if (hooksText !== void 0) {
+    result.files.delete("hooks/hooks.json");
+    const document = JSON.parse(hooksText);
+    const projected = canonicalHooksToDialect({
+      hooks: document.hooks ?? {},
+      dialect: profile.hookDialect,
+      sink: result,
+      path: "hooks/hooks.json"
+    });
+    if (projected)
+      result.files.set("hooks/hooks.json", `${JSON.stringify(swap(projected), null, 2)}
+`);
+  }
+  if (!profile.claudeRootAlias) {
+    for (const [path, text] of result.files) {
+      if (path === "hooks/hooks.json" || path === profile.mcpFile) continue;
+      if (text.includes("${CLAUDE_PLUGIN_ROOT}"))
+        fail(
+          "resources",
+          path,
+          `${profile.label} does not expand \${CLAUDE_PLUGIN_ROOT} in bundled resources; update the reference before exporting`
+        );
+    }
+  }
+  if (profile.exportComponentPaths) {
+    for (const key of profile.componentFields)
+      if (source[key] !== void 0) manifest[key] = source[key];
+  }
+  result.files.set(profile.exportManifestPath, `${JSON.stringify(manifest, null, 2)}
+`);
+  result.warnings.push({
+    capability: "compatibility",
+    path: profile.exportManifestPath,
+    message: `Native ${profile.label} installation and execution require separate verification`,
+    blocking: false
+  });
+  return result;
+}
+
+// lib/plugin/convert/bundle-detection.ts
+var VENDOR_MANIFEST_PATHS = [
+  ".claude-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
+  ".cursor-plugin/plugin.json",
+  ".devin-plugin/plugin.json",
+  ".factory-plugin/plugin.json",
+  ".qoder-plugin/plugin.json",
+  ".codebuddy-plugin/plugin.json",
+  ".workbuddy-plugin/plugin.json",
+  ".augment-plugin/plugin.json",
+  ".goose-plugin/plugin.json",
+  ".plugin/plugin.json",
+  ".github/plugin/plugin.json",
+  "gemini-extension.json"
+];
+var VENDOR_DIRECTORY_MARKERS = [
+  [".devin-plugin/plugin.json", "devin"],
+  [".factory-plugin/plugin.json", "factory-droid"],
+  [".qoder-plugin/plugin.json", "qoder"],
+  [".codebuddy-plugin/plugin.json", "codebuddy"],
+  [".workbuddy-plugin/plugin.json", "codebuddy"],
+  [".augment-plugin/plugin.json", "auggie"],
+  [".cursor-plugin/plugin.json", "cursor"],
+  [".codex-plugin/plugin.json", "codex"],
+  [".github/plugin/plugin.json", "copilot"],
+  [".goose-plugin/plugin.json", "open-plugins"],
+  ["gemini-extension.json", "gemini-cli"],
+  ["opencode.json", "opencode"],
+  ["opencode.jsonc", "opencode"]
+];
+var GENERIC_MARKERS = [
+  [".plugin/plugin.json", "open-plugins"],
+  [".claude-plugin/plugin.json", "claude-code"]
+];
+var AGENT_PLUGINS_SCHEMA_PREFIX = "https://agent-plugins.org/schemas/";
+var KIMI_KEYS = ["tools", "inject", "config_file"];
+function parseObject(text) {
+  if (text === void 0) return void 0;
+  try {
+    const value = JSON.parse(text);
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function neutralized(text) {
+  return text !== void 0 && /^\s*\{\s*\}\s*$/.test(text);
+}
+function classifyRootManifest(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(
+      `could not parse plugin.json: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("plugin.json must contain a JSON object");
+  const root = parsed;
+  if (typeof root.id === "string" && typeof root.type === "string")
+    return { ecosystem: "cognia", tier: 0 };
+  if (typeof root.$schema === "string") {
+    if (root.$schema.startsWith(AGENT_PLUGINS_SCHEMA_PREFIX))
+      return { ecosystem: "agent-plugins", tier: 2 };
+    throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format");
+  }
+  if (KIMI_KEYS.some((key) => key in root)) return { ecosystem: "kimi", tier: 1 };
+  if (typeof root.id === "string") return { ecosystem: "cognia", tier: 3 };
+  return { ecosystem: "copilot", tier: 1 };
+}
+function isPiPackage(text) {
+  const pkg = parseObject(text);
+  if (!pkg) return false;
+  return pkg.pi !== null && typeof pkg.pi === "object" && !Array.isArray(pkg.pi) || Array.isArray(pkg.keywords) && pkg.keywords.includes("pi-package");
+}
+function detectPluginBundle(files) {
+  const candidates = [];
+  const rootText = files.get("plugin.json");
+  if (rootText !== void 0 && !neutralized(rootText)) {
+    const root = classifyRootManifest(rootText);
+    if (root.ecosystem === "cognia" && root.tier === 0)
+      return { ecosystem: "cognia", manifestPath: "plugin.json", shadowed: [] };
+    candidates.push({ path: "plugin.json", ...root });
+  }
+  for (const [path, ecosystem] of VENDOR_DIRECTORY_MARKERS)
+    if (files.has(path)) candidates.push({ path, ecosystem, tier: 1 });
+  if (isPiPackage(files.get("package.json")))
+    candidates.push({ path: "package.json", ecosystem: "pi", tier: 1 });
+  for (const [path, ecosystem] of GENERIC_MARKERS)
+    if (files.has(path)) candidates.push({ path, ecosystem, tier: 2 });
+  const active = candidates.filter((candidate) => !neutralized(files.get(candidate.path)));
+  const pool = active.length ? active : candidates;
+  if (pool.length === 0) {
+    if (rootText !== void 0)
+      return { ecosystem: "cognia", manifestPath: "plugin.json", shadowed: [] };
+    throw new Error(
+      "plugin format not recognized \u2014 provide a Cognia, Agent Plugins, Claude Code, Codex, Gemini, Cursor, Copilot, Kimi, Devin, OpenCode, Pi, Factory Droid, Qoder, CodeBuddy, Auggie or Open Plugins bundle"
+    );
+  }
+  const bestTier = Math.min(...pool.map((candidate) => candidate.tier));
+  const winners = pool.filter((candidate) => candidate.tier === bestTier);
+  const ecosystems = [...new Set(winners.map((candidate) => candidate.ecosystem))];
+  if (bestTier < 2 && ecosystems.length > 1)
+    throw new Error(
+      `multiple plugin formats found (${winners.map((candidate) => candidate.path).join(", ")}); provide one unambiguous plugin bundle`
+    );
+  const ordered = bestTier === 2 ? [
+    ...winners.filter((candidate) => candidate.ecosystem === "agent-plugins"),
+    ...winners.filter((candidate) => candidate.path === ".plugin/plugin.json"),
+    ...winners.filter((candidate) => candidate.path === ".claude-plugin/plugin.json")
+  ] : winners;
+  const selected = ordered[0];
+  const resolved = selected.ecosystem;
+  return {
+    ecosystem: resolved,
+    manifestPath: selected.path,
+    shadowed: active.filter((candidate) => candidate.path !== selected.path).map(({ path, ecosystem: shadowedEcosystem }) => ({ path, ecosystem: shadowedEcosystem }))
+  };
+}
+
+// lib/plugin/convert/platform-bundles.ts
+var AGENT_PLUGINS_SCHEMA_VERSIONS = ["1.0.0", "1.1.0"];
+var AP_PLUGIN_SCHEMA = (version) => `https://agent-plugins.org/schemas/${version}/plugin.schema.json`;
+var AP_MCP_SCHEMA = (version) => `https://agent-plugins.org/schemas/${version}/mcp.schema.json`;
+var AGENT_PLUGINS_SCHEMA = AP_PLUGIN_SCHEMA("1.0.0");
+var CLAUDE_MANIFEST2 = ".claude-plugin/plugin.json";
+var NORMALIZED = ".cognia-normalized";
+var METADATA2 = [
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords"
+];
+var AP_NAME = /^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/;
 var PLATFORM_BUNDLE_PROFILES = {
   "agent-plugins": {
     manifest: "plugin.json",
     surfaces: ["cli", "desktop"],
     skills: "native",
     mcp: "native",
-    agents: "vendor-extension",
-    hooks: "vendor-extension"
+    agents: "client-namespace",
+    hooks: "client-namespace"
   },
   cursor: {
     manifest: ".cursor-plugin/plugin.json",
     surfaces: ["desktop"],
     skills: "native",
     mcp: "native",
-    agents: "adapter-required",
-    hooks: "adapter-required"
+    agents: "native",
+    hooks: "event-map"
   },
   copilot: {
-    manifest: ".github/plugin/plugin.json",
+    manifest: "plugin.json",
     surfaces: ["cli", "desktop", "cloud"],
     skills: "native",
     mcp: "native",
-    agents: "adapter-required",
-    hooks: "surface-dependent"
+    agents: "client-namespace",
+    hooks: "host-contract"
   },
   kimi: {
-    manifest: "kimi.plugin.json",
+    manifest: "plugin.json",
     surfaces: ["cli"],
-    skills: "native",
-    mcp: "native",
-    agents: "adapter-required",
-    hooks: "adapter-required"
+    skills: "root-skill-only",
+    mcp: "unsupported",
+    agents: "unsupported",
+    hooks: "unsupported"
   },
   devin: {
     manifest: ".devin-plugin/plugin.json",
@@ -7475,15 +8482,7 @@ var PLATFORM_BUNDLE_PROFILES = {
     surfaces: ["cli"],
     skills: "native",
     mcp: "native",
-    agents: "adapter-required",
-    hooks: "runtime-port-required"
-  },
-  pi: {
-    manifest: "package.json",
-    surfaces: ["cli"],
-    skills: "native",
-    mcp: "extension-required",
-    agents: "extension-required",
+    agents: "subagent-mode-only",
     hooks: "runtime-port-required"
   }
 };
@@ -7491,115 +8490,231 @@ function object(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function read(files, path) {
-  const value = JSON.parse(files.get(path) ?? "{}");
+  const text = files.get(path) ?? "{}";
+  const value = path.endsWith(".jsonc") ? parseJsonc(text) : JSON.parse(text);
   if (!object(value)) throw new Error(`${path} must contain an object`);
   return value;
 }
 function present(value) {
   return value !== void 0 && value !== null && value !== false && value !== "" && (!Array.isArray(value) || value.length > 0) && (!object(value) || Object.keys(value).length > 0);
 }
-function block(result, capability, path, message) {
+function block2(result, capability, path, message) {
   result.blocking.push({ capability, path, message, blocking: true });
+}
+function warn2(result, capability, path, message) {
+  result.warnings.push({ capability, path, message, blocking: false });
 }
 function save(files, path, value) {
   files.set(path, `${JSON.stringify(value, null, 2)}
 `);
 }
-function detectPlatformBundle(files) {
-  const markers = [
-    [".devin-plugin/plugin.json", "devin"],
-    [".cursor-plugin/plugin.json", "cursor"],
-    ["kimi.plugin.json", "kimi"],
-    [".kimi-plugin/plugin.json", "kimi"],
-    [".github/plugin/plugin.json", "copilot"],
-    [".github/plugin.json", "copilot"],
-    ["opencode.json", "opencode"],
-    ["opencode.jsonc", "opencode"]
-  ];
-  for (const [path, target] of markers) if (files.has(path)) return target;
-  try {
-    const root = read(files, "plugin.json");
-    if (typeof root.$schema === "string" && root.$schema.startsWith("https://agent-plugins.org/"))
-      return "agent-plugins";
-    const pkg = read(files, "package.json");
-    if (object(pkg.pi) || Array.isArray(pkg.keywords) && pkg.keywords.includes("pi-package"))
-      return "pi";
-  } catch {
-    return null;
-  }
-  return null;
+function emptyProjection(files) {
+  return { files: new Map(files), blocking: [], warnings: [], transient: /* @__PURE__ */ new Set() };
+}
+function stripDot(path) {
+  return path.replace(/^\.\//, "").replace(/\/+$/, "");
+}
+function pathsOf(value) {
+  return (typeof value === "string" ? [value] : Array.isArray(value) ? value : []).filter((entry) => typeof entry === "string").map(stripDot);
 }
 function manifestPath(files, target) {
-  if (target === "kimi" && !files.has("kimi.plugin.json")) return ".kimi-plugin/plugin.json";
-  if (target === "copilot" && files.has(".github/plugin.json")) return ".github/plugin.json";
-  if (target === "copilot" && !files.has(".github/plugin/plugin.json") && files.has("plugin.json"))
-    return "plugin.json";
+  if (target === "copilot") {
+    if (files.has("plugin.json")) return "plugin.json";
+    return ".github/plugin/plugin.json";
+  }
   if (target === "opencode" && !files.has("opencode.json")) return "opencode.jsonc";
   return PLATFORM_BUNDLE_PROFILES[target].manifest;
 }
-function inventory(files, result) {
-  const unsafe = /^(?:(?:\.opencode\/)?(?:agents?|commands?|hooks|rules|policies|extensions|plugins|prompts|themes|output-styles)\/|com\.[^/]+\/|(?:AGENTS|CLAUDE|GEMINI)\.md$|(?:hooks|lsp|\.lsp|\.app)\.json$)/;
+var UNMAPPED_SURFACES = {
+  "agent-plugins": [
+    [
+      /^(?:agents|commands|hooks|rules|prompts|extensions|themes|output-styles)\//,
+      "platform-control",
+      "Agent Plugins hosts do not load root-level agents, commands, hooks or rules; client-specific components belong in a reverse-domain namespace directory"
+    ],
+    [
+      /^(?:hooks|lsp|\.lsp|\.app)\.json$/,
+      "platform-control",
+      "Agent Plugins defines no portable hooks, LSP or app files"
+    ],
+    [
+      /^(?:AGENTS|CLAUDE|GEMINI)\.md$/,
+      "rules",
+      "Always-on instruction files are not part of an Agent Plugins bundle"
+    ]
+  ],
+  copilot: [
+    [
+      /^(?:hooks\.json|hooks\/hooks\.json)$/,
+      "hooks",
+      "Copilot hook files use Copilot's own contract (version 1, flat bash/powershell entries, preToolUse fail-closed on non-zero exit); no exact Cognia mapping exists"
+    ],
+    [
+      /^(?:lsp|\.lsp)\.json$|^\.github\/lsp\.json$|^lsp-config\//,
+      "lspServers",
+      "LSP servers need a language-server host; Cognia has no plugin LSP contribution"
+    ],
+    [
+      /^(?:rules|extensions|prompts|themes|output-styles)\//,
+      "platform-control",
+      "Copilot rules and extensions have no Cognia equivalent"
+    ],
+    [
+      /^(?:AGENTS|CLAUDE|GEMINI)\.md$/,
+      "rules",
+      "Always-on instruction files have no Cognia plugin equivalent"
+    ]
+  ],
+  cursor: [
+    [
+      /^rules\//,
+      "rules",
+      "Cursor rules apply as persistent context (alwaysApply / globs); a Cognia skill only loads on demand, so the guidance would stop applying automatically"
+    ],
+    [
+      /^(?:policies|extensions|prompts|themes|output-styles)\//,
+      "platform-control",
+      "No Cognia equivalent for this Cursor surface"
+    ],
+    [
+      /^(?:AGENTS|CLAUDE|GEMINI)\.md$/,
+      "rules",
+      "Always-on instruction files have no Cognia plugin equivalent"
+    ]
+  ],
+  // Kimi reads plugin.json and a root SKILL.md only: every other file is an
+  // inert resource of that skill, so nothing else needs a mapping.
+  kimi: [],
+  devin: [
+    [
+      /^AGENTS\.md$/,
+      "rules",
+      "Devin injects AGENTS.md as an always-on rule in every session; Cognia plugins have no always-on rule contribution"
+    ],
+    [
+      /^rules\//,
+      "rules",
+      "Devin rules load by trigger frontmatter; Cognia plugins have no rule contribution"
+    ],
+    [
+      /^agents\//,
+      "agents",
+      "Devin plugin subagents load only in local Devin agents; their routing has no verified Cognia equivalent"
+    ],
+    [
+      /^(?:hooks\.json|hooks\/)/,
+      "hooks",
+      "Devin plugin hooks run best-effort and fail open in local sessions only; Cognia would run them on every surface"
+    ],
+    [
+      /^(?:commands|policies|extensions|prompts|themes|output-styles)\//,
+      "platform-control",
+      "No Cognia equivalent for this Devin surface"
+    ],
+    [
+      /^(?:lsp|\.lsp|\.app)\.json$/,
+      "platform-control",
+      "No Cognia equivalent for this Devin surface"
+    ]
+  ],
+  opencode: [
+    [
+      /^\.opencode\/(?:modes?|plugins?|tools?|themes?)\//,
+      "platform-control",
+      "OpenCode modes, JS/TS plugins, custom tools and themes are executable or host-UI configuration; use Cognia hosting or a manual port"
+    ],
+    [
+      /^(?:agents?|commands?|hooks|rules|policies|extensions|prompts|themes|output-styles|plugins?)\//,
+      "platform-control",
+      "OpenCode reads these directories from .opencode/ only"
+    ],
+    [
+      /^(?:AGENTS|CLAUDE)\.md$/,
+      "rules",
+      "Always-on instruction files have no Cognia plugin equivalent"
+    ]
+  ]
+};
+var FOREIGN_SURFACES = [
+  [
+    /^\.opencode\/(?:agents?|commands?|modes?|plugins?|tools?|themes?)\//,
+    "platform-control",
+    "OpenCode runtime configuration has no meaning for this host"
+  ]
+];
+var allowedNamespaces = {
+  "agent-plugins": ["dev.openhands", "com.github.copilot"],
+  copilot: ["com.github.copilot"]
+};
+function inventory(files, result, target, consumed = /* @__PURE__ */ new Set()) {
   for (const path of files.keys()) {
     if (path.startsWith("/") || path.split(/[\\/]/).includes("..") || path.includes("\\")) {
-      block(result, "path", path, "Bundle paths must be relative canonical paths without traversal");
-    } else if (unsafe.test(path)) {
-      block(
-        result,
-        path.includes("hook") ? "hooks" : "platform-control",
-        path,
-        "Platform-specific runtime, agent, command or policy semantics require an explicit adapter or hosted use"
-      );
+      block2(result, "path", path, "Bundle paths must be relative canonical paths without traversal");
+      continue;
+    }
+    if (consumed.has(path) || path.startsWith(`${NORMALIZED}/`)) continue;
+    const surfaces = [
+      ...UNMAPPED_SURFACES[target],
+      ...target === "opencode" ? [] : FOREIGN_SURFACES
+    ];
+    let reported = false;
+    for (const [pattern, capability, message] of surfaces) {
+      if (pattern.test(path)) {
+        block2(result, capability, path, message);
+        reported = true;
+        break;
+      }
+    }
+    if (!reported && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+\//.test(path)) {
+      const namespace = path.split("/")[0];
+      if (!(allowedNamespaces[target] ?? []).includes(namespace))
+        block2(
+          result,
+          "platform-control",
+          path,
+          `Client namespace ${namespace}/ has no documented Cognia mapping for this host`
+        );
     }
   }
 }
 function checkFields(source, allowed, path, result) {
   for (const field of Object.keys(source)) {
     if (!allowed.includes(field))
-      block(result, field, `${path}.${field}`, "Field has no verified behavioral mapping");
+      block2(result, field, `${path}.${field}`, "Field has no verified behavioral mapping");
   }
 }
-function validateManifestContract(source, target, path, result) {
-  if (target === "kimi" && (typeof source.name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(source.name)))
-    block(result, "name", `${path}.name`, "Kimi plugin ids must match [a-z0-9][a-z0-9_-]{0,63}");
-  if (target !== "agent-plugins" && target !== "copilot") return;
-  if (typeof source.name !== "string" || source.name.length > 64 || !/^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(source.name))
-    block(result, "name", `${path}.name`, "Name is invalid for the Agent Plugins 1.0 manifest");
+function validateApManifest(source, path, result) {
+  if (typeof source.name !== "string" || source.name.length > 64 || !AP_NAME.test(source.name))
+    block2(result, "name", `${path}.name`, "Name is invalid for the Agent Plugins manifest");
   for (const key of ["version", "description", "homepage", "repository", "license"]) {
     if (source[key] !== void 0 && typeof source[key] !== "string")
-      block(result, "metadata", `${path}.${key}`, "Portable manifest metadata must be a string");
+      block2(result, "metadata", `${path}.${key}`, "Portable manifest metadata must be a string");
   }
   if (source.keywords !== void 0 && (!Array.isArray(source.keywords) || source.keywords.some((keyword) => typeof keyword !== "string")))
-    block(result, "metadata", `${path}.keywords`, "Portable keywords must be an array of strings");
+    block2(result, "metadata", `${path}.keywords`, "Portable keywords must be an array of strings");
   if (source.author !== void 0) {
     if (!object(source.author))
-      block(result, "metadata", `${path}.author`, "Portable author must be an object");
+      block2(result, "metadata", `${path}.author`, "Portable author must be an object");
     else {
       checkFields(source.author, ["name", "email", "url"], `${path}.author`, result);
       if (Object.values(source.author).some((value) => typeof value !== "string"))
-        block(result, "metadata", `${path}.author`, "Portable author values must be strings");
+        block2(result, "metadata", `${path}.author`, "Portable author values must be strings");
     }
   }
   if (source.extensions !== void 0 && (!object(source.extensions) || Object.values(source.extensions).some((value) => !object(value))))
-    block(
+    block2(
       result,
       "extensions",
       `${path}.extensions`,
       "Portable extensions must map namespaces to objects"
     );
 }
-function rootTokens(value, from, to) {
-  if (typeof value === "string") return value.replaceAll(from, to);
-  if (Array.isArray(value)) return value.map((entry) => rootTokens(entry, from, to));
-  if (object(value))
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, rootTokens(entry, from, to)])
-    );
-  return value;
-}
-function adaptSkillSemantics(files, result, target, direction) {
-  const skillPaths = [...files.keys()].filter(
-    (path) => path === "SKILL.md" || path.endsWith("/SKILL.md")
+function apVersion(source) {
+  return AGENT_PLUGINS_SCHEMA_VERSIONS.find(
+    (version) => source.$schema === AP_PLUGIN_SCHEMA(version)
   );
+}
+function adaptSkillSemantics(files, result, target, direction, skillPaths = [...files.keys()].filter((path) => path === "SKILL.md" || path.endsWith("/SKILL.md"))) {
   const known = [
     "name",
     "description",
@@ -7612,15 +8727,15 @@ function adaptSkillSemantics(files, result, target, direction) {
   ];
   for (const path of skillPaths) {
     try {
-      const text = files.get(path);
-      const parsed = (0, import_gray_matter3.default)(text);
+      const text = result.files.get(path) ?? files.get(path);
+      const parsed = (0, import_gray_matter4.default)(text);
       const data = { ...parsed.data };
       let changed = false;
       if (direction === "import" && target === "kimi") {
         for (const alias of ["disableModelInvocation", "disable_model_invocation"]) {
           if (data[alias] === void 0) continue;
           if (data["disable-model-invocation"] !== void 0 && data["disable-model-invocation"] !== data[alias]) {
-            block(result, "skill-invocation", path, "Conflicting Kimi invocation policy aliases");
+            block2(result, "skill-invocation", path, "Conflicting Kimi invocation policy aliases");
           }
           data["disable-model-invocation"] = data[alias];
           delete data[alias];
@@ -7631,23 +8746,35 @@ function adaptSkillSemantics(files, result, target, direction) {
           changed = true;
         }
       }
-      if (direction === "import" && target === "devin" && data.triggers !== void 0) {
-        const triggers = data.triggers;
-        if (Array.isArray(triggers) && triggers.includes("user") && triggers.every((entry) => entry === "user" || entry === "model")) {
-          data["disable-model-invocation"] = !triggers.includes("model");
-          delete data.triggers;
-          changed = true;
-        } else
-          block(
+      if (direction === "import" && target === "devin") {
+        if (data.triggers !== void 0) {
+          const triggers = data.triggers;
+          if (Array.isArray(triggers) && triggers.includes("user") && triggers.every((entry) => entry === "user" || entry === "model")) {
+            data["disable-model-invocation"] = !triggers.includes("model");
+            delete data.triggers;
+            changed = true;
+          } else
+            block2(
+              result,
+              "skill-invocation",
+              path,
+              "Devin model-only or custom triggers need an invocation adapter"
+            );
+        }
+        if (data["argument-hint"] !== void 0) {
+          warn2(
             result,
-            "skill-invocation",
-            path,
-            "Devin model-only or custom triggers need an invocation adapter"
+            "skill-frontmatter",
+            `${path}.argument-hint`,
+            "argument-hint only labels the skill in the host UI and was not projected"
           );
+          delete data["argument-hint"];
+          changed = true;
+        }
       }
       for (const key of Object.keys(data)) {
         if (!known.includes(key))
-          block(
+          block2(
             result,
             "skill-frontmatter",
             `${path}.${key}`,
@@ -7655,7 +8782,7 @@ function adaptSkillSemantics(files, result, target, direction) {
           );
       }
       if (present(data["allowed-tools"]) || present(data.allowedTools)) {
-        block(
+        block2(
           result,
           "skill-tools",
           path,
@@ -7664,9 +8791,9 @@ function adaptSkillSemantics(files, result, target, direction) {
       }
       const manual = data["disable-model-invocation"];
       if (manual !== void 0 && typeof manual !== "boolean")
-        block(result, "skill-invocation", path, "disable-model-invocation must be a boolean");
+        block2(result, "skill-invocation", path, "disable-model-invocation must be a boolean");
       if (manual === true && (target === "opencode" || target === "agent-plugins")) {
-        block(
+        block2(
           result,
           "skill-invocation",
           path,
@@ -7678,28 +8805,30 @@ function adaptSkillSemantics(files, result, target, direction) {
         delete data["disable-model-invocation"];
         changed = true;
       }
+      const directoryName = path.split("/").at(-2);
+      if (direction === "import" && target === "opencode" && directoryName && data.name !== directoryName)
+        block2(result, "skill-name", path, "OpenCode skill names must match their directory");
       if (direction === "export") {
         if (typeof data.name !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.name) || data.name.length > 64)
-          block(
+          block2(
             result,
             "skill-name",
             path,
             "Target skills require a lowercase identifier of at most 64 characters"
           );
-        const directoryName = path.split("/").at(-2);
-        if (target !== "pi" && target !== "devin" && directoryName && data.name !== directoryName)
-          block(result, "skill-name", path, "Target skill name must match its parent directory");
+        if (target !== "pi" && target !== "devin" && target !== "kimi" && directoryName && data.name !== directoryName)
+          block2(result, "skill-name", path, "Target skill name must match its parent directory");
         if (typeof data.description !== "string" || !data.description.trim() || data.description.length > 1024)
-          block(
+          block2(
             result,
             "skill-description",
             path,
             "Target skills require a non-empty description of at most 1024 characters"
           );
       }
-      if (changed) result.files.set(path, import_gray_matter3.default.stringify(parsed.content, data));
+      if (changed) result.files.set(path, import_gray_matter4.default.stringify(parsed.content, data));
     } catch (error) {
-      block(
+      block2(
         result,
         "skill-frontmatter",
         path,
@@ -7708,13 +8837,13 @@ function adaptSkillSemantics(files, result, target, direction) {
     }
   }
   const roots = skillPaths.map((path) => path.slice(0, Math.max(0, path.lastIndexOf("/"))));
-  const runtime = /\$(?:\{(?:COGNIA_PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_SKILL_DIR|CODEX_PLUGIN_ROOT|PLUGIN_ROOT|PLUGIN_DATA|CURSOR_PLUGIN_ROOT|KIMI_PLUGIN_ROOT|KIMI_SKILL_DIR|extensionPath|workspacePath)\}|(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|PLUGIN_DATA|KIMI_SKILL_DIR)\b)/;
+  const runtime = /\$(?:\{(?:COGNIA_PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_SKILL_DIR|CODEX_PLUGIN_ROOT|COPILOT_PLUGIN_ROOT|PLUGIN_ROOT|PLUGIN_DATA|CURSOR_PLUGIN_ROOT|KIMI_PLUGIN_ROOT|KIMI_SKILL_DIR|extensionPath|workspacePath)\}|(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|PLUGIN_DATA|KIMI_SKILL_DIR)\b)/;
   for (const [path, text] of files) {
     const resource = roots.some(
       (root) => root ? path.startsWith(`${root}/`) : path === "SKILL.md" || /^(?:scripts|references|assets)\//.test(path)
     );
     if (resource && runtime.test(text))
-      block(
+      block2(
         result,
         "skill-runtime",
         path,
@@ -7725,290 +8854,1014 @@ function adaptSkillSemantics(files, result, target, direction) {
         (match) => match[0].split("../").length - 1 >= path.split("/").length - 1
       );
       if (outsideSkillTree)
-        block(
+        block2(
           result,
           "skill-resources",
           path,
           "Moving skills into .opencode changes relative references outside the skills tree; dependency relocation is required"
         );
     }
-    if (direction === "import" && target === "pi" && /^skills\/[^/]+\.md$/.test(path) && path !== "skills/SKILL.md")
-      block(result, "skills", path, "Pi flat Markdown skills require explicit discovery mapping");
   }
 }
-function mcpServers(files, source, target, result) {
-  let document = {};
-  const declared = source.mcpServers;
-  if (typeof declared === "string") {
-    const path = declared.replace(/^\.\//, "");
-    if (!files.has(path)) throw new Error(`MCP configuration not found: ${path}`);
-    document = read(files, path);
-  } else if (object(declared)) {
-    document = "mcpServers" in declared ? declared : { mcpServers: declared };
-  } else if (declared !== void 0) {
-    block(
-      result,
-      "mcp",
-      "mcpServers",
-      "This MCP declaration shape requires a platform-specific merge adapter"
-    );
-  } else {
-    const path = target === "agent-plugins" || target === "cursor" ? "mcp.json" : ".mcp.json";
-    if (files.has(path)) document = read(files, path);
-  }
-  if (target === "opencode") document = { mcpServers: source.mcp ?? {} };
-  checkFields(document, ["$schema", "mcpServers"], "mcp", result);
-  if (target === "agent-plugins" && Object.keys(document).length) {
-    checkFields(document, ["$schema", "mcpServers"], "mcp.json", result);
-    if (document.$schema !== MCP_SCHEMA)
-      block(
-        result,
-        "schema",
-        "mcp.json.$schema",
-        "Unsupported or missing Agent Plugins MCP schema version"
-      );
-  }
-  const servers = document.mcpServers ?? {};
-  if (!object(servers)) throw new Error("mcpServers must be an object");
+function checkSkillSemantics(files, target, direction, skillPaths) {
+  const result = emptyProjection(files);
+  adaptSkillSemantics(files, result, target, direction, skillPaths);
+  return result;
+}
+function mcpServers(documents, target, result, version) {
   const output2 = {};
-  for (const [name, value] of Object.entries(servers)) {
-    if (!object(value)) throw new Error(`MCP server ${name} must be an object`);
-    let server = { ...value };
-    if (target === "opencode") {
+  for (const document of documents) {
+    if (target === "agent-plugins") {
+      checkFields(document.value, ["$schema", "mcpServers"], document.path, result);
+      if (!version || document.value.$schema !== AP_MCP_SCHEMA(version))
+        block2(
+          result,
+          "schema",
+          `${document.path}.$schema`,
+          "mcp.json must declare the Agent Plugins MCP schema of the same version as plugin.json"
+        );
+    } else if (target !== "opencode")
+      checkFields(document.value, ["$schema", "mcpServers"], document.path, result);
+    const servers = target === "opencode" ? document.value.mcp ?? {} : document.value.mcpServers ?? {};
+    if (!object(servers)) throw new Error(`${document.path} servers must be an object`);
+    for (const [name, value] of Object.entries(servers)) {
+      if (!object(value)) throw new Error(`MCP server ${name} must be an object`);
+      let server = { ...value };
+      const location = `${document.path}.${name}`;
+      if (target === "opencode") {
+        const converted = openCodeServer(name, server, location, result);
+        if (!converted) continue;
+        server = converted;
+      }
+      const type = server.type ?? (server.command ? "stdio" : "http");
+      if (target === "agent-plugins" && !["stdio", "streamable-http", "sse"].includes(String(server.type))) {
+        block2(result, "mcp", `mcpServers.${name}.type`, "Portable MCP transport must be explicit");
+      }
       checkFields(
         server,
-        ["type", "command", "environment", "url", "headers", "enabled"],
-        `mcp.${name}`,
+        type === "stdio" ? ["type", "command", "args", "env", "cwd"] : ["type", "url", "headers"],
+        `mcpServers.${name}`,
         result
       );
-      if (server.enabled === false)
-        block(result, "mcp", `mcp.${name}.enabled`, "Disabled-server state cannot be discarded");
-      if (server.type === "local" && Array.isArray(server.command) && server.command.length > 0) {
-        server = {
-          command: server.command[0],
-          args: server.command.slice(1),
-          ...server.environment ? { env: server.environment } : {}
-        };
-      } else if (server.type === "remote") {
-        block(
+      if (type === "stdio") {
+        if (typeof server.command !== "string" || !server.command.trim())
+          throw new Error(`MCP server ${name} requires a command`);
+        if (server.args !== void 0 && (!Array.isArray(server.args) || server.args.some((arg) => typeof arg !== "string")))
+          throw new Error(`MCP server ${name} args must be strings`);
+      } else if (!["http", "streamable-http", "sse"].includes(String(type)) || typeof server.url !== "string" || !server.url.trim()) {
+        throw new Error(`Unsupported MCP transport or URL: ${name}`);
+      }
+      for (const key of ["env", "headers"]) {
+        const record = server[key];
+        if (record !== void 0 && (!object(record) || Object.values(record).some((item) => typeof item !== "string")))
+          throw new Error(`MCP server ${name} ${key} must contain strings`);
+      }
+      const serialized = JSON.stringify(server);
+      if (/\$\{(?:[A-Z]+_)?PLUGIN_DATA\}/.test(serialized))
+        block2(
+          result,
+          "runtime-data",
+          `mcpServers.${name}`,
+          "Persistent plugin data lifecycle needs a verified binding"
+        );
+      if (target === "agent-plugins" || target === "copilot") {
+        if (typeof server.command === "string" && server.command.includes("${"))
+          block2(
+            result,
+            "mcp",
+            `mcpServers.${name}.command`,
+            "Agent Plugins never expands variables in command; use a bare name or a ./-relative path"
+          );
+        if (type !== "stdio" && serialized.includes("${PLUGIN_ROOT}"))
+          block2(
+            result,
+            "mcp",
+            `mcpServers.${name}`,
+            "Agent Plugins passes remote server values through literally; ${PLUGIN_ROOT} would not expand there"
+          );
+        if (typeof server.command === "string" && server.command.startsWith("./"))
+          server.command = `\${PLUGIN_ROOT}/${server.command.slice(2)}`;
+        if (type === "stdio" && server.cwd === void 0 && target === "agent-plugins")
+          server.cwd = "${PLUGIN_ROOT}";
+        if (server.cwd !== void 0) {
+          if (typeof server.cwd !== "string" || !/^(?:\.\/|\$\{PLUGIN_ROOT\}(?:\/|$)|\$\{PLUGIN_DATA\}(?:\/|$))/.test(server.cwd))
+            block2(
+              result,
+              "mcp",
+              `mcpServers.${name}.cwd`,
+              "Agent Plugins cwd must start with ./, ${PLUGIN_ROOT} or ${PLUGIN_DATA}"
+            );
+          else if (server.cwd.startsWith("./"))
+            server.cwd = `\${PLUGIN_ROOT}/${server.cwd.slice(2)}`;
+        }
+        if (object(server.env) && ["PLUGIN_ROOT", "PLUGIN_DATA"].some((key) => key in server.env))
+          block2(
+            result,
+            "mcp",
+            `mcpServers.${name}.env`,
+            "Portable MCP reserved runtime variables cannot be overridden"
+          );
+      }
+      if (target === "cursor" && /\$\{PLUGIN_(?:ROOT|DATA)\}/.test(serialized))
+        block2(
           result,
           "mcp",
-          `mcp.${name}`,
-          "OpenCode remote transport fallback and OAuth require explicit resolution before conversion"
+          `mcpServers.${name}`,
+          "Cursor does not expand ${PLUGIN_ROOT} or ${PLUGIN_DATA}; the server would receive the literal text"
         );
-        continue;
-      } else throw new Error(`Invalid OpenCode MCP server: ${name}`);
+      const tokens = target === "cursor" ? ["${CURSOR_PLUGIN_ROOT}"] : target === "copilot" ? ["${PLUGIN_ROOT}", "${COPILOT_PLUGIN_ROOT}"] : target === "devin" ? ["${PLUGIN_ROOT}"] : target === "agent-plugins" ? ["${PLUGIN_ROOT}"] : [];
+      server = replaceRootTokens(server, tokens, [], "${CLAUDE_PLUGIN_ROOT}");
+      if (output2[name] !== void 0)
+        block2(result, "mcp", location, "Duplicate MCP server name across declarations");
+      output2[name] = { ...server, type: type === "streamable-http" ? "http" : type };
     }
-    const type = server.type ?? (server.command ? "stdio" : "http");
-    if (target === "agent-plugins" && !["stdio", "streamable-http", "sse"].includes(String(server.type))) {
-      block(result, "mcp", `mcpServers.${name}.type`, "Portable MCP transport must be explicit");
-    }
-    checkFields(
-      server,
-      type === "stdio" ? ["type", "command", "args", "env", "cwd"] : ["type", "url", "headers"],
-      `mcpServers.${name}`,
-      result
-    );
-    if (type === "stdio") {
-      if (typeof server.command !== "string" || !server.command.trim())
-        throw new Error(`MCP server ${name} requires a command`);
-      if (server.args !== void 0 && (!Array.isArray(server.args) || server.args.some((arg) => typeof arg !== "string")))
-        throw new Error(`MCP server ${name} args must be strings`);
-    } else if (!["http", "streamable-http", "sse"].includes(String(type)) || typeof server.url !== "string" || !server.url.trim()) {
-      throw new Error(`Unsupported MCP transport or URL: ${name}`);
-    }
-    for (const key of ["env", "headers"]) {
-      const record = server[key];
-      if (record !== void 0 && (!object(record) || Object.values(record).some((item) => typeof item !== "string")))
-        throw new Error(`MCP server ${name} ${key} must contain strings`);
-    }
-    if (JSON.stringify(server).includes("${PLUGIN_DATA}") || JSON.stringify(server).includes("${CLAUDE_PLUGIN_DATA}")) {
-      block(
-        result,
-        "runtime-data",
-        `mcpServers.${name}`,
-        "Persistent plugin data lifecycle needs a verified binding"
-      );
-    }
-    if (target === "agent-plugins" || target === "kimi") {
-      if (typeof server.command === "string" && server.command.startsWith("./"))
-        server.command = `\${CLAUDE_PLUGIN_ROOT}/${server.command.slice(2)}`;
-      if (type === "stdio" && server.cwd === void 0) server.cwd = "${CLAUDE_PLUGIN_ROOT}";
-      if (typeof server.cwd === "string" && server.cwd.startsWith("./"))
-        server.cwd = `\${CLAUDE_PLUGIN_ROOT}/${server.cwd.slice(2)}`;
-    }
-    const rootToken = target === "agent-plugins" ? "${PLUGIN_ROOT}" : target === "cursor" ? "${CURSOR_PLUGIN_ROOT}" : null;
-    if (rootToken) server = rootTokens(server, rootToken, "${CLAUDE_PLUGIN_ROOT}");
-    if (target === "agent-plugins" && object(server.env) && ["PLUGIN_ROOT", "PLUGIN_DATA"].some((key) => key in server.env)) {
-      block(
-        result,
-        "mcp",
-        `mcpServers.${name}.env`,
-        "Portable MCP reserved runtime variables cannot be overridden"
-      );
-    }
-    output2[name] = { ...server, type: type === "streamable-http" ? "http" : type };
   }
   return output2;
 }
-function normalizePlatformBundle(files, target) {
-  const result = { files: new Map(files), blocking: [], warnings: [] };
-  inventory(files, result);
-  adaptSkillSemantics(files, result, target, "import");
+function openCodeServer(name, server, location, result) {
+  const allowed = server.type === "remote" ? ["type", "url", "enabled", "headers", "oauth", "timeout"] : ["type", "command", "cwd", "environment", "enabled", "timeout"];
+  checkFields(server, allowed, `mcp.${name}`, result);
+  if (server.enabled === false)
+    block2(result, "mcp", `mcp.${name}.enabled`, "Disabled-server state cannot be discarded");
+  if (server.timeout !== void 0 && server.timeout !== 5e3)
+    warn2(
+      result,
+      "mcp",
+      `mcp.${name}.timeout`,
+      "OpenCode's tool-fetch timeout is not projected; Cognia applies its own MCP startup timeout"
+    );
+  const text = JSON.stringify(server);
+  if (/\{file:[^}]+\}/.test(text)) {
+    block2(
+      result,
+      "mcp",
+      location,
+      "OpenCode {file:path} substitution reads files at load time; Cognia has no equivalent"
+    );
+    return null;
+  }
+  const substitute = (value) => typeof value === "string" ? value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, "${$1}") : value;
+  if (server.type === "remote") {
+    block2(
+      result,
+      "mcp",
+      location,
+      "OpenCode remote servers fall back from streamable HTTP to SSE and negotiate OAuth automatically; Cognia cannot reproduce that negotiation"
+    );
+    return null;
+  }
+  if (server.type !== "local" || !Array.isArray(server.command) || server.command.length === 0)
+    throw new Error(`Invalid OpenCode MCP server: ${name}`);
+  if (typeof server.cwd === "string" && !server.cwd.startsWith("/"))
+    warn2(
+      result,
+      "mcp",
+      `mcp.${name}.cwd`,
+      "OpenCode resolves a relative cwd from the project directory; verify the working directory after import"
+    );
+  const environment = object(server.environment) ? Object.fromEntries(
+    Object.entries(server.environment).map(([key, value]) => [key, substitute(value)])
+  ) : void 0;
+  return {
+    command: substitute(server.command[0]),
+    args: server.command.slice(1).map(substitute),
+    ...environment ? { env: environment } : {},
+    ...typeof server.cwd === "string" ? { cwd: server.cwd } : {}
+  };
+}
+function mcpDeclarations(files, declared, conventional, mode, result) {
+  const documents = [];
+  const items = Array.isArray(declared) ? declared : declared === void 0 ? [] : [declared];
+  for (const item of items) {
+    if (typeof item === "string") {
+      const path = stripDot(item);
+      if (!files.has(path)) throw new Error(`MCP configuration not found: ${path}`);
+      documents.push({ path, value: read(files, path) });
+    } else if (object(item)) {
+      documents.push({
+        path: "mcpServers",
+        value: "mcpServers" in item ? item : { mcpServers: item }
+      });
+    } else {
+      block2(
+        result,
+        "mcp",
+        "mcpServers",
+        "This MCP declaration shape is not documented for the host"
+      );
+    }
+  }
+  if (documents.length === 0 || mode === "merge") {
+    for (const path of conventional)
+      if (files.has(path) && !documents.some((document) => document.path === path))
+        documents.push({ path, value: read(files, path) });
+  }
+  return documents;
+}
+function normalizeAgent(args) {
+  const { path, result } = args;
+  let parsed;
   try {
-    const path = manifestPath(files, target);
+    parsed = (0, import_gray_matter4.default)(args.files.get(path) ?? "");
+  } catch (error) {
+    block2(result, "agents", path, error instanceof Error ? error.message : String(error));
+    return;
+  }
+  const data = { ...parsed.data };
+  const veto = args.rewrite?.(data);
+  if (veto) {
+    block2(result, "agents", path, veto);
+    return;
+  }
+  const unsupported = Object.keys(data).filter((key) => !args.allowed.includes(key));
+  if (unsupported.length) {
+    block2(
+      result,
+      "agents",
+      path,
+      `${args.label} agent fields have no exact Cognia equivalent: ${unsupported.join(", ")}`
+    );
+    return;
+  }
+  if (typeof data.name === "string" && data.name !== args.id)
+    warn2(
+      result,
+      "agents",
+      path,
+      `${args.label} display name "${data.name}" is not projected; the agent id is "${args.id}"`
+    );
+  delete data.name;
+  const target = `${NORMALIZED}/agents/${args.id}.md`;
+  if (result.files.has(target)) {
+    block2(result, "agents", path, `Duplicate agent id ${args.id}`);
+    return;
+  }
+  result.files.set(target, import_gray_matter4.default.stringify(parsed.content, data));
+  result.transient.add(target);
+  args.agents.push(`./${target}`);
+}
+function normalizeCommand(args) {
+  const { path, result } = args;
+  const text = args.files.get(path) ?? "";
+  let parsed;
+  try {
+    parsed = path.endsWith(".txt") ? { content: text, data: {} } : (0, import_gray_matter4.default)(text);
+  } catch (error) {
+    block2(result, "commands", path, error instanceof Error ? error.message : String(error));
+    return;
+  }
+  const unsupported = Object.keys(parsed.data).filter((key) => !args.allowed.includes(key));
+  if (unsupported.length) {
+    block2(
+      result,
+      "commands",
+      path,
+      `${args.label} command fields have no exact Cognia equivalent: ${unsupported.join(", ")}`
+    );
+    return;
+  }
+  if (/(^|\s)@[\w./-]*[./][\w./-]+/.test(parsed.content))
+    warn2(
+      result,
+      "commands",
+      path,
+      `${args.label} inlines @file references when the command runs; the converted skill keeps them as literal text`
+    );
+  const target = `${NORMALIZED}/commands/${args.name}.md`;
+  if (result.files.has(target)) {
+    block2(result, "commands", path, `Duplicate command ${args.name}`);
+    return;
+  }
+  result.files.set(target, import_gray_matter4.default.stringify(parsed.content, { ...parsed.data, name: args.name }));
+  result.transient.add(target);
+  args.commands.push(`./${target}`);
+}
+function normalizeHooks(args) {
+  const value = read(args.files, args.path);
+  const canonical = hookDocumentToCanonical({
+    value,
+    path: args.path,
+    dialect: args.dialect,
+    sink: args.result
+  });
+  const target = `${NORMALIZED}/hooks/${args.hooks.length}.json`;
+  save(
+    args.result.files,
+    target,
+    replaceRootTokens(canonical, args.tokens, [], "${CLAUDE_PLUGIN_ROOT}")
+  );
+  args.result.transient.add(target);
+  args.hooks.push(`./${target}`);
+}
+function filesIn(files, dir, pattern, recursive = false) {
+  const prefix = `${dir}/`;
+  return [...files.keys()].filter(
+    (path) => path.startsWith(prefix) && pattern.test(path) && (recursive || !path.slice(prefix.length).includes("/"))
+  ).sort();
+}
+function immediateSkills(files, root) {
+  return [...files.keys()].filter((path) => new RegExp(`^${root.replace(/[.]/g, "\\.")}/[^/]+/SKILL\\.md$`).test(path)).sort();
+}
+function nestedSkills(files, root) {
+  if (files.has(`${root}/SKILL.md`)) return [`${root}/SKILL.md`];
+  return [...files.keys()].filter((path) => path.startsWith(`${root}/`) && path.endsWith("/SKILL.md")).sort();
+}
+function normalizePlatformBundle(files, target) {
+  const result = emptyProjection(files);
+  const path = manifestPath(files, target);
+  const consumed = /* @__PURE__ */ new Set();
+  try {
     if (!files.has(path)) throw new Error(`Manifest not found: ${path}`);
     const source = read(files, path);
-    validateManifestContract(source, target, path, result);
-    if (target === "copilot" && path === "plugin.json" && source.$schema === AGENT_PLUGINS_SCHEMA)
+    if (target === "copilot" && path === "plugin.json" && typeof source.$schema === "string") {
+      if (!apVersion(source)) {
+        block2(
+          result,
+          "schema",
+          `${path}.$schema`,
+          "Copilot CLI rejects plugins that declare an unsupported Agent Plugins version"
+        );
+        return result;
+      }
       return normalizePlatformBundle(files, "agent-plugins");
-    const native = target === "pi" ? object(source.pi) ? source.pi : {} : source;
-    const allowed = target === "agent-plugins" ? [...METADATA, "$schema", "extensions"] : target === "opencode" ? ["$schema", "mcp"] : target === "pi" ? ["skills"] : [...METADATA, "skills", "mcpServers"];
-    checkFields(native, allowed, path, result);
-    if (target === "agent-plugins") {
-      if (source.$schema !== AGENT_PLUGINS_SCHEMA)
-        block(result, "schema", `${path}.$schema`, "Only Agent Plugins 1.0.0 is supported");
-      if (present(source.extensions))
-        block(
-          result,
-          "extensions",
-          `${path}.extensions`,
-          "Vendor extensions require explicit semantic adapters"
-        );
     }
-    if (target === "pi") {
-      checkFields(source, [...METADATA, "pi"], path, result);
-      if (present(source.dependencies) || present(source.scripts))
-        block(
-          result,
-          "runtime",
-          path,
-          "Pi dependency installation and scripts require a runtime port or hosted use"
-        );
-    }
-    const name = target === "opencode" ? "opencode-resource-bundle" : source.name;
-    if (typeof name !== "string" || !name.trim()) throw new Error(`${path}.name is required`);
     const manifest = Object.fromEntries(
-      METADATA.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
+      METADATA2.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
     );
-    manifest.name = name;
-    if (native.skills !== void 0) manifest.skills = native.skills;
-    else if (target === "opencode") manifest.skills = "./.opencode/skills";
-    else if (target === "kimi") {
-      if (files.has("SKILL.md")) manifest.skills = "./SKILL.md";
-      else if ([...files.keys()].some((file) => file.startsWith("skills/") && file.endsWith("/SKILL.md"))) {
-        block(
+    const agents = [];
+    const commands = [];
+    const hooks = [];
+    let skills = [];
+    let documents = [];
+    let version;
+    let name = source.name;
+    if (target === "agent-plugins") {
+      version = apVersion(source);
+      if (!version)
+        block2(
+          result,
+          "schema",
+          `${path}.$schema`,
+          `Unsupported Agent Plugins version; supported: ${AGENT_PLUGINS_SCHEMA_VERSIONS.join(", ")}`
+        );
+      validateApManifest(source, path, result);
+      for (const key of Object.keys(source))
+        if (![...METADATA2, "$schema", "extensions"].includes(key))
+          warn2(
+            result,
+            key,
+            `${path}.${key}`,
+            "Agent Plugins hosts report and ignore unknown top-level fields; it was not projected"
+          );
+      if (object(source.extensions)) {
+        for (const [namespace, value] of Object.entries(source.extensions))
+          if (present(value))
+            block2(
+              result,
+              "extensions",
+              `${path}.extensions.${namespace}`,
+              "Client extension data has client-defined semantics with no Cognia mapping"
+            );
+      }
+      skills = immediateSkills(files, "skills");
+      for (const nested of nestedSkills(files, "skills").filter((entry) => !skills.includes(entry)))
+        warn2(
           result,
           "skills",
+          nested,
+          "Agent Plugins loads only immediate skills/<dir>/SKILL.md children; this skill is not loaded"
+        );
+      if (files.has("SKILL.md"))
+        warn2(
+          result,
           "skills",
-          "Kimi only discovers the root SKILL.md when manifest.skills is omitted; undeclared skills cannot be activated by conversion"
+          "SKILL.md",
+          "Agent Plugins has no root SKILL.md fallback; it is not loaded"
+        );
+      if (files.has("mcp.json")) documents = [{ path: "mcp.json", value: read(files, "mcp.json") }];
+      for (const agentPath of filesIn(files, "dev.openhands/agents", /\.md$/i)) {
+        consumed.add(agentPath);
+        normalizeAgent({
+          files,
+          path: agentPath,
+          id: agentPath.split("/").pop().replace(/\.md$/i, ""),
+          allowed: ["name", "description"],
+          label: "OpenHands",
+          result,
+          agents
+        });
+      }
+      for (const agentPath of filesIn(files, "com.github.copilot/agents", /\.md$/i)) {
+        consumed.add(agentPath);
+        normalizeAgent({
+          files,
+          path: agentPath,
+          id: agentPath.split("/").pop().replace(/(?:\.agent)?\.md$/i, ""),
+          allowed: ["name", "description"],
+          label: "Copilot",
+          result,
+          agents
+        });
+      }
+      for (const namespace of ["dev.openhands", "com.github.copilot"])
+        for (const commandPath of filesIn(files, `${namespace}/commands`, /\.md$/i)) {
+          consumed.add(commandPath);
+          normalizeCommand({
+            files,
+            path: commandPath,
+            name: commandPath.split("/").pop().replace(/\.md$/i, ""),
+            allowed: ["description", "allowed-tools", "disable-model-invocation"],
+            label: namespace,
+            result,
+            commands
+          });
+        }
+      if (files.has("dev.openhands/hooks/hooks.json")) {
+        consumed.add("dev.openhands/hooks/hooks.json");
+        normalizeHooks({
+          files,
+          path: "dev.openhands/hooks/hooks.json",
+          dialect: HOOK_DIALECTS.openhands,
+          tokens: ["${PLUGIN_ROOT}"],
+          result,
+          hooks
+        });
+      }
+      for (const [blocked2, capability, message] of [
+        [
+          "com.github.copilot/hooks/hooks.json",
+          "hooks",
+          "Copilot hook files use Copilot's own contract (version 1, flat bash/powershell entries, preToolUse fail-closed on non-zero exit); no exact Cognia mapping exists"
+        ],
+        [
+          "com.github.copilot/lsp.json",
+          "lspServers",
+          "LSP servers need a language-server host; Cognia has no plugin LSP contribution"
+        ]
+      ])
+        if (files.has(blocked2)) {
+          consumed.add(blocked2);
+          block2(result, capability, blocked2, message);
+        }
+      for (const rule of filesIn(files, "com.github.copilot/rules", /./, true)) {
+        consumed.add(rule);
+        block2(
+          result,
+          "rules",
+          rule,
+          "Copilot rules are always-on or conditional instructions; Cognia plugins have no rule contribution"
         );
       }
-    }
-    if (Array.isArray(native.skills) && native.skills.length === 0)
-      block(
-        result,
-        "skills",
-        `${path}.skills`,
-        "An empty skill selection cannot fall back to automatic discovery"
+      for (const file of files.keys())
+        if (file.startsWith("dev.openhands/") || file.startsWith("com.github.copilot/"))
+          consumed.add(file);
+    } else if (target === "copilot") {
+      if (typeof source.name !== "string" || !/^[A-Za-z0-9-]{1,64}$/.test(source.name))
+        warn2(
+          result,
+          "name",
+          `${path}.name`,
+          "Copilot legacy names allow letters, digits and hyphens (max 64); the host may refuse this plugin"
+        );
+      for (const key of Object.keys(source)) {
+        if ([...METADATA2, "agents", "skills", "commands", "mcpServers"].includes(key)) continue;
+        if (key === "category" || key === "tags")
+          warn2(result, key, `${path}.${key}`, "Marketplace presentation metadata was not projected");
+        else if (key === "hooks")
+          block2(
+            result,
+            "hooks",
+            `${path}.hooks`,
+            "Copilot hook configuration uses Copilot's own contract; no exact Cognia mapping exists"
+          );
+        else if (key === "lspServers")
+          block2(
+            result,
+            "lspServers",
+            `${path}.lspServers`,
+            "LSP servers need a language-server host"
+          );
+        else if (key === "extensions")
+          block2(
+            result,
+            "extensions",
+            `${path}.extensions`,
+            "Copilot extension directories run host code"
+          );
+        else
+          warn2(
+            result,
+            key,
+            `${path}.${key}`,
+            "Copilot reports and ignores unknown manifest fields; it was not projected"
+          );
+      }
+      const skillRoots = source.skills !== void 0 ? pathsOf(source.skills) : ["skills"];
+      skills = skillRoots.flatMap(
+        (root) => root.endsWith(".md") ? [root] : nestedSkills(files, root)
       );
-    const servers = target === "pi" ? {} : mcpServers(files, source, target, result);
+      if (source.skills === void 0 && skills.length === 0 && files.has("SKILL.md"))
+        skills = ["SKILL.md"];
+      for (const root of source.agents !== void 0 ? pathsOf(source.agents) : ["agents"])
+        for (const agentPath of filesIn(files, root, /\.agent\.md$/i, true)) {
+          consumed.add(agentPath);
+          normalizeAgent({
+            files,
+            path: agentPath,
+            id: agentPath.split("/").pop().replace(/\.agent\.md$/i, ""),
+            allowed: ["name", "description"],
+            label: "Copilot",
+            result,
+            agents
+          });
+        }
+      for (const root of pathsOf(source.commands))
+        for (const commandPath of filesIn(files, root, /\.md$/i, true)) {
+          consumed.add(commandPath);
+          normalizeCommand({
+            files,
+            path: commandPath,
+            name: commandPath.split("/").pop().replace(/\.md$/i, ""),
+            allowed: ["description", "allowed-tools", "disable-model-invocation"],
+            label: "Copilot",
+            result,
+            commands
+          });
+        }
+      documents = mcpDeclarations(
+        files,
+        source.mcpServers,
+        [".mcp.json", ".github/mcp.json"],
+        "replace",
+        result
+      );
+    } else if (target === "cursor") {
+      if (typeof source.name !== "string" || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(source.name))
+        warn2(
+          result,
+          "name",
+          `${path}.name`,
+          "Cursor plugin names must be lowercase kebab-case; the host may refuse this plugin"
+        );
+      if (object(source.author))
+        checkFields(source.author, ["name", "email"], `${path}.author`, result);
+      for (const key of Object.keys(source))
+        if (![
+          ...METADATA2,
+          "logo",
+          "rules",
+          "agents",
+          "skills",
+          "commands",
+          "hooks",
+          "mcpServers",
+          "variables"
+        ].includes(key))
+          block2(result, key, `${path}.${key}`, "Field has no verified behavioral mapping");
+      if (typeof source.logo === "string") manifest.icon = source.logo;
+      for (const rule of source.rules !== void 0 ? pathsOf(source.rules) : ["rules"])
+        for (const rulePath of rule.match(/\.(?:md|mdc|markdown)$/) ? [rule].filter((entry) => files.has(entry)) : filesIn(files, rule, /\.(?:md|mdc|markdown)$/i, true)) {
+          consumed.add(rulePath);
+          block2(result, "rules", rulePath, UNMAPPED_SURFACES.cursor[0][2]);
+        }
+      const skillRoots = source.skills !== void 0 ? pathsOf(source.skills) : ["skills"];
+      skills = skillRoots.flatMap(
+        (root) => root.endsWith(".md") ? [root] : source.skills !== void 0 ? nestedSkills(files, root) : immediateSkills(files, root)
+      );
+      if (source.skills === void 0 && skills.length === 0 && files.has("SKILL.md"))
+        skills = ["SKILL.md"];
+      for (const root of source.agents !== void 0 ? pathsOf(source.agents) : ["agents"])
+        for (const agentPath of root.match(/\.(?:md|mdc|markdown)$/) ? [root] : filesIn(files, root, /\.(?:md|mdc|markdown)$/i, true)) {
+          consumed.add(agentPath);
+          normalizeAgent({
+            files,
+            path: agentPath,
+            id: agentPath.split("/").pop().replace(/\.(?:md|mdc|markdown)$/i, ""),
+            allowed: ["name", "description"],
+            label: "Cursor",
+            result,
+            agents
+          });
+        }
+      for (const root of source.commands !== void 0 ? pathsOf(source.commands) : ["commands"])
+        for (const commandPath of root.match(/\.(?:md|mdc|markdown|txt)$/) ? [root] : filesIn(files, root, /\.(?:md|mdc|markdown|txt)$/i, true)) {
+          consumed.add(commandPath);
+          normalizeCommand({
+            files,
+            path: commandPath,
+            name: commandPath.split("/").pop().replace(/\.(?:md|mdc|markdown|txt)$/i, ""),
+            allowed: ["description"],
+            label: "Cursor",
+            result,
+            commands
+          });
+        }
+      if (object(source.hooks)) {
+        const inline = hookDocumentToCanonical({
+          value: source.hooks,
+          path: `${path}.hooks`,
+          dialect: HOOK_DIALECTS.cursor,
+          sink: result
+        });
+        const hookPath = `${NORMALIZED}/hooks/inline.json`;
+        save(
+          result.files,
+          hookPath,
+          replaceRootTokens(inline, ["${CURSOR_PLUGIN_ROOT}"], [], "${CLAUDE_PLUGIN_ROOT}")
+        );
+        result.transient.add(hookPath);
+        hooks.push(`./${hookPath}`);
+      } else {
+        const hookPath = typeof source.hooks === "string" ? stripDot(source.hooks) : "hooks/hooks.json";
+        if (typeof source.hooks === "string" && !files.has(hookPath))
+          throw new Error(`Hooks configuration not found: ${hookPath}`);
+        if (files.has(hookPath)) {
+          consumed.add(hookPath);
+          normalizeHooks({
+            files,
+            path: hookPath,
+            dialect: HOOK_DIALECTS.cursor,
+            tokens: ["${CURSOR_PLUGIN_ROOT}"],
+            result,
+            hooks
+          });
+        }
+      }
+      documents = mcpDeclarations(files, source.mcpServers, ["mcp.json"], "replace", result);
+      if (source.variables !== void 0) {
+        const declarations = cursorVariables(source.variables, `${path}.variables`, result);
+        result.settings = { declarations, servers: {} };
+      }
+    } else if (target === "kimi") {
+      if (typeof source.name !== "string" || !/^[a-z0-9-]+$/.test(source.name))
+        block2(
+          result,
+          "name",
+          `${path}.name`,
+          "Kimi plugin names allow lowercase letters, digits and hyphens only"
+        );
+      if (typeof source.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(source.version))
+        block2(result, "version", `${path}.version`, "Kimi requires a semantic version");
+      for (const key of Object.keys(source)) {
+        if (["name", "version", "description", "config_file"].includes(key)) continue;
+        if (key === "tools") {
+          if (!Array.isArray(source.tools))
+            block2(result, "tools", `${path}.tools`, "Kimi tools must be an array");
+          else if (source.tools.length)
+            block2(
+              result,
+              "tools",
+              `${path}.tools`,
+              "Kimi tools receive their parameters as one JSON object on stdin (cwd = plugin directory, 120 s timeout) and return stdout; Cognia cliTools map arguments to argv flags, so no exact mapping exists"
+            );
+        } else if (key === "inject") {
+          if (present(source.inject))
+            block2(
+              result,
+              "inject",
+              `${path}.inject`,
+              "Kimi injects the host's LLM API key and base URL into the plugin config; Cognia never copies credentials into plugins"
+            );
+        } else
+          warn2(
+            result,
+            key,
+            `${path}.${key}`,
+            "Kimi ignores fields outside its plugin schema; it was not projected"
+          );
+      }
+      if (source.config_file !== void 0 && !present(source.inject))
+        warn2(
+          result,
+          "config_file",
+          `${path}.config_file`,
+          "config_file only receives injected credentials; without inject it has no behavior"
+        );
+      for (const key of ["homepage", "repository", "license", "keywords", "author"])
+        delete manifest[key];
+      if (files.has("SKILL.md")) {
+        skills = ["SKILL.md"];
+        const configFile = typeof source.config_file === "string" ? stripDot(source.config_file) : void 0;
+        result.rootSkillResources = [...files.keys()].filter(
+          (file) => file !== "SKILL.md" && file !== path && file !== configFile && !/(^|\/)\.env(?:\.|$)/.test(file) && !file.startsWith(".claude-plugin/")
+        );
+      }
+      for (const nested of nestedSkills(files, "skills"))
+        block2(
+          result,
+          "skills",
+          nested,
+          "Kimi treats only the plugin directory's root SKILL.md as a skill; this skill would never load"
+        );
+    } else if (target === "devin") {
+      if (typeof source.name !== "string" || !/^[a-z0-9]+(?:[-.][a-z0-9]+)*$/.test(source.name))
+        warn2(
+          result,
+          "name",
+          `${path}.name`,
+          "Devin plugin names are lowercase alphanumerics separated by single - or .; the host may refuse this plugin"
+        );
+      for (const key of Object.keys(source)) {
+        if ([...METADATA2, "skills", "mcpServers"].includes(key)) continue;
+        if (["requiredPlugins", "optionalPlugins", "forbiddenPlugins"].includes(key)) {
+          if (present(source[key]))
+            block2(
+              result,
+              key,
+              `${path}.${key}`,
+              "Plugin dependency and governance lists install or forbid other plugins; Cognia has no equivalent"
+            );
+        } else if (key === "hooks")
+          block2(result, "hooks", `${path}.hooks`, UNMAPPED_SURFACES.devin[3][2]);
+        else block2(result, key, `${path}.${key}`, "Field has no verified behavioral mapping");
+      }
+      if (Array.isArray(source.skills) && source.skills.length === 0) skills = [];
+      else {
+        const roots = source.skills !== void 0 ? pathsOf(source.skills) : ["skills"];
+        for (const root of typeof source.skills === "string" || Array.isArray(source.skills) ? Array.isArray(source.skills) ? source.skills : [source.skills] : [])
+          if (typeof root !== "string" || root.startsWith("/") || root.startsWith("~") || root.split("/").includes(".."))
+            block2(result, "skills", `${path}.skills`, "Devin rejects absolute, ~ or .. skill paths");
+        skills = roots.flatMap(
+          (root) => root.endsWith(".md") ? [root] : nestedSkills(files, root)
+        );
+      }
+      const declared = source.mcpServers;
+      if (object(declared) && Array.isArray(declared.paths)) {
+        for (const key of Object.keys(declared))
+          if (!["paths", "exclusive"].includes(key))
+            block2(
+              result,
+              "mcp",
+              `${path}.mcpServers.${key}`,
+              "Field has no verified behavioral mapping"
+            );
+        documents = mcpDeclarations(
+          files,
+          declared.paths,
+          [".mcp.json"],
+          declared.exclusive === true ? "replace" : "merge",
+          result
+        );
+        if (declared.exclusive === true && files.has(".mcp.json")) {
+          consumed.add(".mcp.json");
+          result.files.set(".mcp.json", "{}\n");
+        }
+      } else if (object(declared)) {
+        if (files.has(".mcp.json"))
+          block2(
+            result,
+            "mcp",
+            `${path}.mcpServers`,
+            "Devin does not document whether inline servers merge with .mcp.json"
+          );
+        documents = mcpDeclarations(files, declared, [], "replace", result);
+      } else documents = mcpDeclarations(files, declared, [".mcp.json"], "merge", result);
+    } else {
+      name = "opencode-resource-bundle";
+      checkFields(source, ["$schema", "mcp"], path, result);
+      documents = [{ path, value: source }];
+      skills = [".opencode/skills", ".opencode/skill"].flatMap(
+        (root) => immediateSkills(files, root)
+      );
+      for (const dir of [".opencode/commands", ".opencode/command"])
+        for (const commandPath of filesIn(files, dir, /\.md$/i, true)) {
+          consumed.add(commandPath);
+          normalizeCommand({
+            files,
+            path: commandPath,
+            name: commandPath.slice(dir.length + 1).replace(/\.md$/i, "").replaceAll("/", "-"),
+            allowed: ["description"],
+            label: "OpenCode",
+            result,
+            commands
+          });
+        }
+      for (const dir of [".opencode/agents", ".opencode/agent"])
+        for (const agentPath of filesIn(files, dir, /\.md$/i, true)) {
+          consumed.add(agentPath);
+          normalizeAgent({
+            files,
+            path: agentPath,
+            id: agentPath.split("/").pop().replace(/\.md$/i, ""),
+            allowed: ["description", "hidden", "color"],
+            label: "OpenCode",
+            result,
+            agents,
+            rewrite: (data) => {
+              if (data.mode !== "subagent")
+                return `OpenCode agent mode ${JSON.stringify(data.mode ?? "all")} also runs as a primary agent; only mode: subagent maps to a Cognia subagent`;
+              delete data.mode;
+              return null;
+            }
+          });
+        }
+    }
+    adaptSkillSemantics(files, result, target, "import", skills);
+    if (typeof name !== "string" || !name.trim()) throw new Error(`${path}.name is required`);
+    manifest.name = name;
+    const servers = target === "kimi" ? {} : mcpServers(documents, target, result, version);
+    if (result.settings) result.settings.servers = servers;
     result.files.set(path, "{}\n");
-    for (const configPath of [
-      "mcp.json",
-      ...typeof source.mcpServers === "string" ? [source.mcpServers.replace(/^\.\//, "")] : []
-    ]) {
-      if (files.has(configPath) && configPath !== CLAUDE_MANIFEST)
-        result.files.set(configPath, "{}\n");
-    }
+    for (const document of documents)
+      if (files.has(document.path) && document.path !== CLAUDE_MANIFEST2) {
+        result.files.set(document.path, "{}\n");
+        consumed.add(document.path);
+      }
     if (Object.keys(servers).length) {
-      save(result.files, ".mcp.json", { mcpServers: servers });
-      manifest.mcpServers = "./.mcp.json";
+      const mcpPath = files.has(".mcp.json") && !documents.some((document) => document.path === ".mcp.json") ? `${NORMALIZED}/mcp.json` : ".mcp.json";
+      save(result.files, mcpPath, { mcpServers: servers });
+      if (!files.has(mcpPath)) result.transient.add(mcpPath);
+      manifest.mcpServers = `./${mcpPath}`;
     }
-    save(result.files, CLAUDE_MANIFEST, manifest);
-    result.warnings.push({
-      capability: "compatibility",
-      path,
-      message: "Declarative normalization only; native host execution has not been verified",
-      blocking: false
-    });
-  } catch (error) {
-    block(
+    manifest.agents = agents;
+    manifest.commands = commands;
+    manifest.hooks = hooks;
+    result.skills = skills;
+    save(result.files, CLAUDE_MANIFEST2, manifest);
+    if (!files.has(CLAUDE_MANIFEST2)) result.transient.add(CLAUDE_MANIFEST2);
+    inventory(files, result, target, consumed);
+    warn2(
       result,
-      "format",
-      manifestPath(files, target),
-      error instanceof Error ? error.message : String(error)
+      "compatibility",
+      path,
+      "Declarative normalization only; native host execution has not been verified"
     );
+  } catch (error) {
+    block2(result, "format", path, error instanceof Error ? error.message : String(error));
   }
   return result;
 }
-function projectPlatformBundle(files, target) {
-  const result = { files: new Map(files), blocking: [], warnings: [] };
-  inventory(files, result);
-  adaptSkillSemantics(files, result, target, "export");
+function cursorVariables(value, path, result) {
+  if (!object(value) || value.type !== "object" || !object(value.properties)) {
+    block2(
+      result,
+      "variables",
+      path,
+      "Cursor variables must be a JSON Schema object with properties"
+    );
+    return [];
+  }
+  for (const key of Object.keys(value))
+    if (!["type", "properties", "required", "$schema", "title", "description"].includes(key))
+      block2(
+        result,
+        "variables",
+        `${path}.${key}`,
+        "Variable schema keyword has no Cognia preset-field equivalent"
+      );
+  const declarations = [];
+  for (const [envVar, raw] of Object.entries(value.properties)) {
+    if (!object(raw) || raw.type !== void 0 && raw.type !== "string") {
+      block2(
+        result,
+        "variables",
+        `${path}.properties.${envVar}`,
+        "Only string variables map to Cognia preset fields"
+      );
+      continue;
+    }
+    for (const key of Object.keys(raw))
+      if (!["type", "title", "description"].includes(key))
+        block2(
+          result,
+          "variables",
+          `${path}.properties.${envVar}.${key}`,
+          "Variable schema keyword has no Cognia preset-field equivalent"
+        );
+    declarations.push({
+      envVar,
+      name: typeof raw.title === "string" && raw.title.trim() ? raw.title : envVar,
+      ...typeof raw.description === "string" ? { description: raw.description } : {},
+      // Cursor stores variable values in its dashboard, never in the plugin.
+      sensitive: true
+    });
+  }
+  return declarations;
+}
+function projectPlatformBundle(files, target, options2 = {}) {
+  const result = emptyProjection(files);
+  const consumed = /* @__PURE__ */ new Set();
   try {
-    if (!files.has(CLAUDE_MANIFEST))
+    if (!files.has(CLAUDE_MANIFEST2))
       throw new Error("A validated Claude bundle manifest is required");
-    const source = read(files, CLAUDE_MANIFEST);
+    const source = read(files, CLAUDE_MANIFEST2);
     checkFields(
       source,
-      [...METADATA, "displayName", "skills", "mcpServers"],
-      CLAUDE_MANIFEST,
+      [...METADATA2, "displayName", "skills", "agents", "mcpServers"],
+      CLAUDE_MANIFEST2,
       result
     );
     const metadata = Object.fromEntries(
-      METADATA.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
+      METADATA2.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
     );
-    validateManifestContract(metadata, target, PLATFORM_BUNDLE_PROFILES[target].manifest, result);
-    if (["agent-plugins", "copilot", "pi", "opencode"].includes(target) && source.skills !== void 0) {
+    if (["agent-plugins", "copilot"].includes(target))
+      validateApManifest(metadata, PLATFORM_BUNDLE_PROFILES[target].manifest, result);
+    if (target === "kimi" && (typeof metadata.name !== "string" || !/^[a-z0-9-]+$/.test(metadata.name)))
+      block2(
+        result,
+        "name",
+        "plugin.json.name",
+        "Kimi plugin names allow lowercase letters, digits and hyphens only"
+      );
+    if (["agent-plugins", "copilot", "opencode", "kimi"].includes(target) && source.skills !== void 0) {
       const roots = Array.isArray(source.skills) ? source.skills : [source.skills];
       if (roots.length !== 1 || !["skills", "./skills", "./skills/"].includes(String(roots[0])))
-        block(
+        block2(
           result,
           "skills",
           "skills",
           "This target uses fixed skill locations; custom skill roots require resource relocation"
         );
     }
-    const servers = mcpServers(files, source, "devin", result);
-    result.files.delete(CLAUDE_MANIFEST);
+    adaptSkillSemantics(files, result, target, "export");
+    const declared = source.mcpServers;
+    let documents = [];
+    if (typeof declared === "string") {
+      const mcpPath = stripDot(declared);
+      if (!files.has(mcpPath)) throw new Error(`MCP configuration not found: ${mcpPath}`);
+      documents = [{ path: mcpPath, value: read(files, mcpPath) }];
+    } else if (object(declared))
+      documents = [
+        {
+          path: "mcpServers",
+          value: "mcpServers" in declared ? declared : { mcpServers: declared }
+        }
+      ];
+    else if (declared !== void 0)
+      block2(
+        result,
+        "mcp",
+        "mcpServers",
+        "This MCP declaration shape requires a platform-specific merge adapter"
+      );
+    else if (files.has(".mcp.json"))
+      documents = [{ path: ".mcp.json", value: read(files, ".mcp.json") }];
+    const servers = mcpServers(documents, "devin", result);
+    result.files.delete(CLAUDE_MANIFEST2);
     result.files.delete(".mcp.json");
-    if (target === "pi") {
-      if (Object.keys(servers).length)
-        block(
-          result,
-          "mcp",
-          "mcpServers",
-          "Pi core requires an MCP extension; select hosted use or a verified runtime adapter"
+    const agentFiles = [...files.keys()].filter((path) => /^agents\/[^/]+\.md$/.test(path));
+    const hooksText = files.get("hooks/hooks.json");
+    const projectAgents = (dir, suffix, allowed, label) => {
+      for (const agentPath of agentFiles) {
+        consumed.add(agentPath);
+        result.files.delete(agentPath);
+        const id = agentPath.slice("agents/".length, -".md".length);
+        const parsed = (0, import_gray_matter4.default)(files.get(agentPath) ?? "");
+        const unsupported = Object.keys(parsed.data).filter((key) => !allowed.includes(key));
+        if (unsupported.length) {
+          block2(
+            result,
+            "subagent",
+            `subagents.${id}`,
+            `${label} agents have no exact equivalent for: ${unsupported.join(", ")}`
+          );
+          continue;
+        }
+        result.files.set(`${dir}/${id}${suffix}`, files.get(agentPath));
+      }
+    };
+    const projectHooks = (path, dialect, token) => {
+      if (hooksText === void 0) return;
+      consumed.add("hooks/hooks.json");
+      result.files.delete("hooks/hooks.json");
+      const document = JSON.parse(hooksText);
+      const projected = canonicalHooksToDialect({
+        hooks: document.hooks ?? {},
+        dialect,
+        sink: result,
+        path
+      });
+      if (projected)
+        save(
+          result.files,
+          path,
+          replaceRootTokens(projected, ["${CLAUDE_PLUGIN_ROOT}"], [], token)
         );
-      save(result.files, "package.json", {
-        ...metadata,
-        keywords: ["pi-package"],
-        pi: { skills: ["./skills"] }
-      });
-    } else if (target === "opencode") {
-      result.warnings.push({
-        capability: "metadata",
-        path: "opencode.json",
-        message: "OpenCode resource configuration has no native plugin identity metadata; imported identity will be generated",
-        blocking: false
-      });
+    };
+    if (target === "opencode") {
+      warn2(
+        result,
+        "metadata",
+        "opencode.json",
+        "OpenCode resource configuration has no native plugin identity metadata; imported identity will be generated"
+      );
       const mcp = {};
       for (const [name, value] of Object.entries(servers)) {
         const server = value;
-        if (server.type !== "stdio" || server.cwd !== void 0 || JSON.stringify(server).includes("${")) {
-          block(
+        if (server.type !== "stdio" || JSON.stringify(server).includes("${")) {
+          block2(
             result,
             "mcp",
             `mcpServers.${name}`,
-            "OpenCode export requires a PATH command without plugin-relative paths, cwd or unresolved variables"
+            "OpenCode export requires a local command without plugin-root paths or unresolved variables (OpenCode has no plugin root)"
           );
           continue;
         }
         mcp[name] = {
           type: "local",
           command: [server.command, ...server.args ?? []],
-          ...server.env ? { environment: server.env } : {}
+          ...server.env ? { environment: server.env } : {},
+          ...typeof server.cwd === "string" ? { cwd: server.cwd } : {}
         };
       }
       for (const [path, text] of Array.from(result.files))
@@ -8016,29 +9869,70 @@ function projectPlatformBundle(files, target) {
           result.files.set(`.opencode/${path}`, text);
           result.files.delete(path);
         }
+      for (const agentPath of agentFiles) {
+        consumed.add(agentPath);
+        result.files.delete(agentPath);
+        const id = agentPath.slice("agents/".length, -".md".length);
+        const parsed = (0, import_gray_matter4.default)(files.get(agentPath) ?? "");
+        const unsupported = Object.keys(parsed.data).filter(
+          (key) => !["name", "description"].includes(key)
+        );
+        if (unsupported.length) {
+          block2(
+            result,
+            "subagent",
+            `subagents.${id}`,
+            `OpenCode agents have no exact equivalent for: ${unsupported.join(", ")}`
+          );
+          continue;
+        }
+        const data = { description: parsed.data.description, mode: "subagent" };
+        result.files.set(`.opencode/agents/${id}.md`, import_gray_matter4.default.stringify(parsed.content, data));
+      }
       save(result.files, "opencode.json", { $schema: "https://opencode.ai/config.json", mcp });
     } else if (target === "agent-plugins" || target === "copilot") {
       save(result.files, "plugin.json", { $schema: AGENT_PLUGINS_SCHEMA, ...metadata });
       if (Object.keys(servers).length) {
         const portable = Object.fromEntries(
           Object.entries(servers).map(([name, value]) => {
-            const server = rootTokens(value, "${CLAUDE_PLUGIN_ROOT}", "${PLUGIN_ROOT}");
+            const server = replaceRootTokens(
+              value,
+              ["${CLAUDE_PLUGIN_ROOT}"],
+              [],
+              "${PLUGIN_ROOT}"
+            );
             if (server.type === "stdio" && server.cwd === void 0)
-              block(
+              block2(
                 result,
                 "mcp",
                 `mcpServers.${name}.cwd`,
                 "Portable MCP defaults cwd to the plugin root; an explicit working directory is required to preserve source behavior"
               );
             if (server.cwd !== void 0 && (typeof server.cwd !== "string" || !/^(?:\.\/|\$\{PLUGIN_ROOT\}(?:\/|$))/.test(server.cwd)))
-              block(
+              block2(
                 result,
                 "mcp",
                 `mcpServers.${name}.cwd`,
                 "Working directory is not representable by the portable plugin-root contract"
               );
+            if (typeof server.command === "string" && server.command.startsWith("${PLUGIN_ROOT}/"))
+              server.command = `./${server.command.slice("${PLUGIN_ROOT}/".length)}`;
+            if (typeof server.command === "string" && server.command.includes("${"))
+              block2(
+                result,
+                "mcp",
+                `mcpServers.${name}.command`,
+                "Agent Plugins never expands variables in command"
+              );
+            if (server.type !== "stdio" && JSON.stringify(server).includes("${PLUGIN_ROOT}"))
+              block2(
+                result,
+                "mcp",
+                `mcpServers.${name}`,
+                "Agent Plugins passes remote server values through literally"
+              );
             if (object(server.env) && ["PLUGIN_ROOT", "PLUGIN_DATA"].some((key) => key in server.env))
-              block(
+              block2(
                 result,
                 "mcp",
                 `mcpServers.${name}.env`,
@@ -8050,45 +9944,858 @@ function projectPlatformBundle(files, target) {
             ];
           })
         );
-        save(result.files, "mcp.json", { $schema: MCP_SCHEMA, mcpServers: portable });
+        save(result.files, "mcp.json", { $schema: AP_MCP_SCHEMA("1.0.0"), mcpServers: portable });
       }
+      if (target === "copilot") {
+        projectAgents("com.github.copilot/agents", ".agent.md", ["name", "description"], "Copilot");
+        if (hooksText !== void 0) {
+          consumed.add("hooks/hooks.json");
+          result.files.delete("hooks/hooks.json");
+          block2(
+            result,
+            "command-hooks",
+            "commandHooks",
+            "Copilot hook files use Copilot's own contract (version 1, flat bash/powershell entries, preToolUse fail-closed on non-zero exit); no exact projection exists"
+          );
+        }
+      } else {
+        projectAgents("dev.openhands/agents", ".md", ["name", "description"], "OpenHands");
+        projectHooks("dev.openhands/hooks/hooks.json", HOOK_DIALECTS.openhands, "${PLUGIN_ROOT}");
+        if (agentFiles.length || hooksText !== void 0)
+          warn2(
+            result,
+            "client-namespace",
+            "dev.openhands/",
+            "Agents and hooks are written to the dev.openhands/ client namespace; other Agent Plugins hosts ignore client namespaces they do not support"
+          );
+      }
+    } else if (target === "kimi") {
+      if (Object.keys(servers).length)
+        block2(result, "mcp", "mcpServers", "Kimi plugins cannot declare MCP servers");
+      for (const agentPath of agentFiles) {
+        consumed.add(agentPath);
+        result.files.delete(agentPath);
+        block2(result, "subagent", agentPath, "Kimi plugins cannot declare subagents");
+      }
+      if (hooksText !== void 0) {
+        consumed.add("hooks/hooks.json");
+        result.files.delete("hooks/hooks.json");
+        block2(result, "command-hooks", "hooks/hooks.json", "Kimi plugins cannot declare hooks");
+      }
+      const skillFiles = [...result.files.keys()].filter(
+        (path) => /^skills\/[^/]+\/SKILL\.md$/.test(path)
+      );
+      if (skillFiles.length > 1)
+        block2(
+          result,
+          "skills",
+          "skills",
+          "A Kimi plugin directory holds exactly one root SKILL.md; split the skills into separate plugins"
+        );
+      else if (skillFiles.length === 1) {
+        const prefix = skillFiles[0].slice(0, -"SKILL.md".length);
+        for (const [path, text] of Array.from(result.files)) {
+          if (!path.startsWith(prefix)) continue;
+          const relative2 = path.slice(prefix.length);
+          if (result.files.has(relative2) && !path.startsWith("skills/"))
+            block2(
+              result,
+              "skills",
+              relative2,
+              "Moving the skill to the plugin root would overwrite another bundled file"
+            );
+          result.files.set(relative2, text);
+          result.files.delete(path);
+        }
+      }
+      save(result.files, "plugin.json", {
+        name: metadata.name,
+        version: typeof metadata.version === "string" ? metadata.version : "0.1.0",
+        ...metadata.description ? { description: metadata.description } : {},
+        tools: []
+      });
     } else {
       const manifest = { ...metadata, ...source.skills ? { skills: source.skills } : {} };
+      if (target === "devin" && typeof metadata.name === "string" && !/^[a-z0-9]+(?:[-.][a-z0-9]+)*$/.test(metadata.name))
+        block2(
+          result,
+          "name",
+          ".devin-plugin/plugin.json.name",
+          "Devin plugin names are lowercase alphanumerics separated by single - or ."
+        );
+      if (target === "cursor") {
+        if (typeof metadata.name !== "string" || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(metadata.name))
+          block2(
+            result,
+            "name",
+            ".cursor-plugin/plugin.json.name",
+            "Cursor plugin names must be lowercase kebab-case"
+          );
+        if (object(metadata.author))
+          manifest.author = Object.fromEntries(
+            Object.entries(metadata.author).filter(([key]) => key !== "url")
+          );
+        projectAgents("agents", ".md", ["name", "description"], "Cursor");
+        projectHooks("hooks/hooks.json", HOOK_DIALECTS.cursor, "${CURSOR_PLUGIN_ROOT}");
+        if (options2.variables?.length)
+          manifest.variables = {
+            type: "object",
+            properties: Object.fromEntries(
+              options2.variables.map((variable) => [
+                variable.envVar,
+                {
+                  type: "string",
+                  title: variable.name,
+                  ...variable.description ? { description: variable.description } : {}
+                }
+              ])
+            ),
+            required: options2.variables.map((variable) => variable.envVar)
+          };
+      }
       const token = target === "cursor" ? "${CURSOR_PLUGIN_ROOT}" : "${CLAUDE_PLUGIN_ROOT}";
       if (Object.keys(servers).length) {
-        if (target === "kimi" && JSON.stringify(servers).includes("${CLAUDE_PLUGIN_ROOT}"))
-          block(
-            result,
-            "mcp",
-            "mcpServers",
-            "Kimi plugin-relative executable and working-directory mappings require a dedicated adapter"
-          );
-        const projected = rootTokens(servers, "${CLAUDE_PLUGIN_ROOT}", token);
-        if (target === "kimi") manifest.mcpServers = projected;
-        else {
-          const path = target === "cursor" ? "mcp.json" : ".mcp.json";
-          save(result.files, path, { mcpServers: projected });
-          manifest.mcpServers = `./${path}`;
-        }
+        const projected = replaceRootTokens(servers, ["${CLAUDE_PLUGIN_ROOT}"], [], token);
+        const path = target === "cursor" ? "mcp.json" : ".mcp.json";
+        save(result.files, path, { mcpServers: projected });
+        manifest.mcpServers = `./${path}`;
       }
       save(result.files, PLATFORM_BUNDLE_PROFILES[target].manifest, manifest);
     }
-    result.warnings.push({
-      capability: "compatibility",
-      path: PLATFORM_BUNDLE_PROFILES[target].manifest,
-      message: "Native host installation and execution require separate verification",
-      blocking: false
-    });
+    inventory(result.files, result, target === "copilot" ? "agent-plugins" : target, consumed);
+    if (target === "copilot") {
+      for (const path of result.files.keys())
+        if (path.startsWith("dev.openhands/"))
+          block2(result, "platform-control", path, "Copilot ignores the OpenHands client namespace");
+    }
+    warn2(
+      result,
+      "compatibility",
+      PLATFORM_BUNDLE_PROFILES[target].manifest,
+      "Native host installation and execution require separate verification"
+    );
   } catch (error) {
-    block(result, "format", CLAUDE_MANIFEST, error instanceof Error ? error.message : String(error));
+    block2(result, "format", CLAUDE_MANIFEST2, error instanceof Error ? error.message : String(error));
   }
   return result;
 }
 
+// lib/plugin/convert/pi-package.ts
+var import_gray_matter5 = __toESM(require_gray_matter());
+var PI_RESOURCE_TYPES = ["extensions", "skills", "prompts", "themes"];
+var PI_HOST_PACKAGES = [
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-tui",
+  "typebox"
+];
+var LIFECYCLE_SCRIPTS = [
+  "preinstall",
+  "install",
+  "postinstall",
+  "prepare",
+  "preprepare",
+  "postprepare",
+  "prepublish",
+  "prepublishOnly",
+  "prepack",
+  "postpack"
+];
+var PI_PREPARE_ARGS = [
+  "install",
+  "--omit=dev",
+  "--omit=peer",
+  "--ignore-scripts",
+  "--no-audit",
+  "--no-fund"
+];
+var PI_PACKAGE_ID_FALLBACK = "pi-package";
+var IGNORE_FILES = /* @__PURE__ */ new Set([".gitignore", ".ignore", ".fdignore"]);
+function isRecord2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function issue(sink, kind, capability, path, message) {
+  sink[kind].push({ capability, path, message, blocking: kind === "blocking" });
+}
+function piGlobToRegExp(pattern) {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "*") {
+      if (pattern[index + 1] === "*") {
+        const slashAfter = pattern[index + 2] === "/";
+        source += slashAfter ? "(?:[^/]*(?:/|$))*" : ".*";
+        index += slashAfter ? 2 : 1;
+      } else source += "[^/]*";
+    } else if (char === "?") source += "[^/]";
+    else if (char === "{") {
+      const end = pattern.indexOf("}", index);
+      if (end < 0) source += "\\{";
+      else {
+        source += `(?:${pattern.slice(index + 1, end).split(",").map((part) => part.replace(/[.+^$()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")).join("|")})`;
+        index = end;
+      }
+    } else if (char === "[") {
+      const end = pattern.indexOf("]", index);
+      if (end < 0) source += "\\[";
+      else {
+        source += `[${pattern.slice(index + 1, end).replace(/^!/, "^")}]`;
+        index = end;
+      }
+    } else source += char.replace(/[.+^$()|\\/]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`);
+}
+function stripDot2(path) {
+  return path.replace(/^\.\//, "").replace(/\/+$/, "");
+}
+function basename(path) {
+  return path.split("/").pop() ?? path;
+}
+function dirname(path) {
+  const index = path.lastIndexOf("/");
+  return index < 0 ? "" : path.slice(0, index);
+}
+function hasDotSegment(path) {
+  return path.split("/").some((segment) => segment.startsWith("."));
+}
+function isDirectory(files, path) {
+  const prefix = path ? `${path}/` : "";
+  for (const file of files.keys()) if (file.startsWith(prefix)) return true;
+  return false;
+}
+function children(files, dir) {
+  const prefix = dir ? `${dir}/` : "";
+  const fileSet = /* @__PURE__ */ new Set();
+  const dirSet = /* @__PURE__ */ new Set();
+  for (const path of files.keys()) {
+    if (!path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length);
+    const [head, ...tail] = rest.split("/");
+    if (!head || head.startsWith(".") || head === "node_modules") continue;
+    if (tail.length) dirSet.add(`${prefix}${head}`);
+    else fileSet.add(`${prefix}${head}`);
+  }
+  return { files: [...fileSet].sort(), dirs: [...dirSet].sort() };
+}
+function readPiManifest(packageJson) {
+  if (!isRecord2(packageJson.pi)) return null;
+  const manifest = {};
+  for (const field of PI_RESOURCE_TYPES) {
+    const entries = packageJson.pi[field];
+    if (Array.isArray(entries) && entries.every((entry) => typeof entry === "string"))
+      manifest[field] = entries;
+  }
+  return manifest;
+}
+function collectRecursive(ctx, dir, pattern) {
+  ctx.walked.add(dir);
+  const { files, dirs } = children(ctx.files, dir);
+  const result = files.filter((path) => pattern.test(basename(path)));
+  for (const child of dirs) result.push(...collectRecursive(ctx, child, pattern));
+  return result;
+}
+function collectSkillEntries(ctx, dir, root) {
+  ctx.walked.add(dir);
+  const skillFile = dir ? `${dir}/SKILL.md` : "SKILL.md";
+  if (ctx.files.has(skillFile)) return [skillFile];
+  const { files, dirs } = children(ctx.files, dir);
+  const result = [];
+  if (dir === root) result.push(...files.filter((path) => path.endsWith(".md")));
+  for (const child of dirs) result.push(...collectSkillEntries(ctx, child, root));
+  return result;
+}
+function resolveExtensionEntries(ctx, dir) {
+  const packageJsonPath = dir ? `${dir}/package.json` : "package.json";
+  const text = ctx.files.get(packageJsonPath);
+  if (text) {
+    try {
+      const nested = JSON.parse(text);
+      const manifest = isRecord2(nested) ? readPiManifest(nested) : null;
+      const entries = (manifest?.extensions ?? []).map((entry) => stripDot2(dir ? `${dir}/${stripDot2(entry)}` : entry)).filter((entry) => ctx.files.has(entry) || isDirectory(ctx.files, entry));
+      if (entries.length) return entries;
+    } catch {
+    }
+  }
+  for (const index of ["index.ts", "index.js"]) {
+    const path = dir ? `${dir}/${index}` : index;
+    if (ctx.files.has(path)) return [path];
+  }
+  return null;
+}
+function collectExtensionEntries(ctx, dir) {
+  ctx.walked.add(dir);
+  const own = resolveExtensionEntries(ctx, dir);
+  if (own) return own;
+  const { files, dirs } = children(ctx.files, dir);
+  const result = files.filter((path) => /\.(?:ts|js)$/.test(path));
+  for (const child of dirs) result.push(...resolveExtensionEntries(ctx, child) ?? []);
+  return result;
+}
+function collectResourceFiles(ctx, dir, type) {
+  if (type === "skills") return collectSkillEntries(ctx, dir, dir);
+  if (type === "extensions") return collectExtensionEntries(ctx, dir);
+  return collectRecursive(ctx, dir, type === "prompts" ? /\.md$/ : /\.json$/);
+}
+function isOverride(entry) {
+  return entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-");
+}
+function matchesPattern(path, pattern) {
+  const regex = piGlobToRegExp(stripDot2(pattern));
+  if (regex.test(path) || regex.test(basename(path))) return true;
+  if (basename(path) !== "SKILL.md") return false;
+  const parent = dirname(path);
+  return regex.test(parent) || regex.test(basename(parent));
+}
+function matchesExact(path, pattern) {
+  const normalized = stripDot2(pattern);
+  return normalized === path || basename(path) === "SKILL.md" && normalized === dirname(path);
+}
+function applyOverrides(all, entries) {
+  let result = [...all];
+  const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
+  const force = entries.filter((entry) => entry.startsWith("+")).map((entry) => entry.slice(1));
+  const remove = entries.filter((entry) => entry.startsWith("-")).map((entry) => entry.slice(1));
+  if (excludes.length)
+    result = result.filter((path) => !excludes.some((pattern) => matchesPattern(path, pattern)));
+  for (const path of all)
+    if (!result.includes(path) && force.some((pattern) => matchesExact(path, pattern)))
+      result.push(path);
+  if (remove.length)
+    result = result.filter((path) => !remove.some((pattern) => matchesExact(path, pattern)));
+  return result;
+}
+function expandGlob(files, pattern) {
+  const regex = piGlobToRegExp(stripDot2(pattern));
+  const candidates = /* @__PURE__ */ new Set();
+  for (const path of files.keys()) {
+    candidates.add(path);
+    let parent = dirname(path);
+    while (parent) {
+      candidates.add(parent);
+      parent = dirname(parent);
+    }
+  }
+  return [...candidates].filter((path) => regex.test(path) && !hasDotSegment(path)).sort();
+}
+function discoverPiResources(files, packageJson) {
+  const ctx = { files, walked: /* @__PURE__ */ new Set() };
+  const manifest = readPiManifest(packageJson);
+  const resources = { extensions: [], skills: [], prompts: [], themes: [] };
+  const missing = [];
+  for (const type of PI_RESOURCE_TYPES) {
+    if (manifest) {
+      const entries = manifest[type];
+      if (!entries) continue;
+      const sources = entries.filter((entry) => !isOverride(entry));
+      const resolved = [];
+      for (const entry of sources) {
+        if (/[*?]/.test(entry)) {
+          resolved.push(...expandGlob(files, entry));
+          continue;
+        }
+        const path = stripDot2(entry);
+        if (files.has(path) || isDirectory(files, path)) resolved.push(path);
+        else missing.push({ type, entry });
+      }
+      const all = [];
+      for (const path of resolved) {
+        if (files.has(path)) all.push(path);
+        else all.push(...collectResourceFiles(ctx, path, type));
+      }
+      resources[type] = [...new Set(applyOverrides([...new Set(all)], entries.filter(isOverride)))];
+    } else if (isDirectory(files, type)) {
+      resources[type] = collectResourceFiles(ctx, type, type);
+    }
+  }
+  const ignoreFiles = [...files.keys()].filter(
+    (path) => IGNORE_FILES.has(basename(path)) && ctx.walked.has(dirname(path))
+  );
+  return { manifest, resources, missing, ignoreFiles };
+}
+function convertPrompt(path, text, issues) {
+  let parsed;
+  try {
+    parsed = (0, import_gray_matter5.default)(text);
+  } catch (error) {
+    issue(
+      issues,
+      "blocking",
+      "prompts",
+      path,
+      error instanceof Error ? error.message : String(error)
+    );
+    return null;
+  }
+  const unknown = Object.keys(parsed.data).filter(
+    (key) => key !== "description" && key !== "argument-hint"
+  );
+  if (unknown.length) {
+    issue(
+      issues,
+      "blocking",
+      "prompts",
+      path,
+      `Pi prompt frontmatter has no exact Cognia equivalent: ${unknown.join(", ")}`
+    );
+    return null;
+  }
+  const name = basename(path).replace(/\.md$/i, "");
+  const id = slugify(name);
+  if (!id) {
+    issue(issues, "blocking", "prompts", path, "Prompt file name cannot produce a skill id");
+    return null;
+  }
+  if (parsed.data["argument-hint"] !== void 0)
+    issue(
+      issues,
+      "warnings",
+      "prompts",
+      path,
+      "argument-hint only labels the Pi prompt in its UI and was not projected"
+    );
+  const contextual = /\$(?:\d+|@|ARGUMENTS)|\$\{(?:\d+|@)(?::[^}]*)?\}/.test(parsed.content);
+  if (contextual)
+    issue(
+      issues,
+      "warnings",
+      "prompts",
+      path,
+      "converted to an explicit skill; Pi argument placeholders ($1, $@, $ARGUMENTS, ${1:-default}, ${@:N}) stay literal"
+    );
+  issue(
+    issues,
+    "converted",
+    "prompts",
+    path,
+    `converted Pi prompt /${name} to explicit skill ${id}`
+  );
+  return {
+    skill: {
+      id,
+      name,
+      description: typeof parsed.data.description === "string" ? parsed.data.description.trim() : "",
+      invocationPolicy: "explicit",
+      source: { kind: "inline", markdown: parsed.content.trim() }
+    },
+    contextual
+  };
+}
+function describeExtension(path, text) {
+  if (!text.trim()) return null;
+  const kinds = /* @__PURE__ */ new Set();
+  for (const match of text.matchAll(/\bregister([A-Z][A-Za-z]*)\s*\(/g)) kinds.add(match[1]);
+  const events = /* @__PURE__ */ new Set();
+  for (const match of text.matchAll(/\.on\(\s*["'`]([A-Za-z_:.-]+)["'`]/g)) events.add(match[1]);
+  const parts = [
+    ...[...kinds].sort().map((kind) => `register${kind}`),
+    ...events.size ? [`events ${[...events].sort().join(", ")}`] : []
+  ];
+  return parts.length ? parts.join("; ") : null;
+}
+function planPiImport(files) {
+  const issues = { converted: [], warnings: [], blocking: [] };
+  const text = files.get("package.json");
+  if (text === void 0) throw new Error("Pi package.json was not found");
+  const parsed = JSON.parse(text);
+  if (!isRecord2(parsed)) throw new Error("package.json must contain a JSON object");
+  const packageJson = parsed;
+  const name = typeof packageJson.name === "string" ? packageJson.name.trim() : "";
+  if (!name) throw new Error("package.json.name is required for a Pi package");
+  if (packageJson.pi !== void 0 && !isRecord2(packageJson.pi))
+    issue(
+      issues,
+      "warnings",
+      "pi-package",
+      "package.json.pi",
+      "Pi ignores a non-object pi manifest"
+    );
+  if (isRecord2(packageJson.pi)) {
+    for (const [key, value] of Object.entries(packageJson.pi)) {
+      if (PI_RESOURCE_TYPES.includes(key)) {
+        if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+          issue(
+            issues,
+            "warnings",
+            "pi-package",
+            `package.json.pi.${key}`,
+            "Pi ignores resource fields that are not arrays of strings"
+          );
+      } else
+        issue(
+          issues,
+          "warnings",
+          "pi-package",
+          `package.json.pi.${key}`,
+          key === "image" || key === "video" ? "Pi gallery media is presentation only and was not projected" : "Pi does not read this manifest key"
+        );
+    }
+  }
+  const discovery = discoverPiResources(files, packageJson);
+  for (const { type, entry } of discovery.missing)
+    issue(
+      issues,
+      "warnings",
+      "pi-package",
+      `package.json.pi.${type}`,
+      `Manifest entry ${JSON.stringify(entry)} resolves to nothing; Pi skips it`
+    );
+  for (const path of discovery.ignoreFiles)
+    issue(
+      issues,
+      "blocking",
+      "pi-package",
+      path,
+      "Pi applies this ignore file during resource discovery; conversion does not evaluate ignore rules and could select resources Pi skips"
+    );
+  const extensionEntries = discovery.resources.extensions;
+  if (files.has("dist/index.js") || extensionEntries.includes("dist/index.js"))
+    issue(
+      issues,
+      "blocking",
+      "pi-package",
+      "dist/index.js",
+      "The package already uses dist/index.js, which the Cognia plugin entry would overwrite; move the extension build output"
+    );
+  const declaredExtensions = discovery.manifest?.extensions ?? [];
+  if (declaredExtensions.some((entry) => /^(?:\.\/)?dist(?:\/|$)/.test(entry)))
+    issue(
+      issues,
+      "blocking",
+      "pi-package",
+      "package.json.pi.extensions",
+      "Extensions load from dist/, which plugin snapshots skip and the Cognia entry overwrites; ship sources or another output directory"
+    );
+  const skillFiles = discovery.resources.skills.filter((path) => path.endsWith(".md"));
+  let contextual = false;
+  const promptSkills = [];
+  for (const path of discovery.resources.prompts) {
+    const prompt = convertPrompt(path, files.get(path) ?? "", issues);
+    if (!prompt) continue;
+    contextual ||= prompt.contextual;
+    promptSkills.push(prompt.skill);
+  }
+  for (const path of extensionEntries) {
+    const description = describeExtension(path, files.get(path) ?? "");
+    issue(
+      issues,
+      "warnings",
+      "pi-package",
+      path,
+      description ? `Pi extension (${description}) is retained for Pi only; its tools, MCP servers and event handlers are not translated into Cognia tools` : "Pi extension is retained for Pi only; extension code is not translated into Cognia tools"
+    );
+  }
+  if (extensionEntries.length)
+    issue(
+      issues,
+      "warnings",
+      "pi-package",
+      "piPackages",
+      "No hostedSession block was generated: loading this package into Cognia-hosted Pi sessions needs reviewed hostedSession.extensions/tools declarations written by the author"
+    );
+  for (const path of discovery.resources.themes)
+    issue(issues, "converted", "pi-package", path, "Pi theme retained for Pi only");
+  const dependencies = isRecord2(packageJson.dependencies) ? packageJson.dependencies : {};
+  for (const host of PI_HOST_PACKAGES)
+    if (host in dependencies)
+      issue(
+        issues,
+        "warnings",
+        "pi-package",
+        `package.json.dependencies.${host}`,
+        `${host} is provided by Pi; list it in peerDependencies with "*" instead of bundling it`
+      );
+  const scripts = isRecord2(packageJson.scripts) ? packageJson.scripts : {};
+  for (const script of LIFECYCLE_SCRIPTS)
+    if (typeof scripts[script] === "string")
+      issue(
+        issues,
+        "warnings",
+        "pi-package",
+        `package.json.scripts.${script}`,
+        "Lifecycle scripts never run: Cognia prepares dependencies with npm --ignore-scripts"
+      );
+  const peer = isRecord2(packageJson.peerDependencies) ? packageJson.peerDependencies["@earendil-works/pi-coding-agent"] : void 0;
+  const minPiVersion = typeof peer === "string" ? /^(?:\^|~|>=)?\s*(\d+\.\d+\.\d+)$/.exec(peer.trim())?.[1] : void 0;
+  const piPackage = {
+    id: slugify(name) || PI_PACKAGE_ID_FALLBACK,
+    name,
+    ...typeof packageJson.description === "string" && packageJson.description.trim() ? { description: packageJson.description.trim() } : {},
+    path: ".",
+    ...minPiVersion ? { minPiVersion } : {},
+    ...Object.keys(dependencies).length ? {
+      prepare: {
+        program: "npm",
+        args: [...PI_PREPARE_ARGS],
+        marker: "node_modules/.package-lock.json"
+      }
+    } : {}
+  };
+  issue(
+    issues,
+    "converted",
+    "pi-package",
+    "package.json",
+    `retained the complete Pi package as piPackages.${piPackage.id}`
+  );
+  return {
+    packageJson,
+    metadata: {
+      name,
+      version: packageJson.version,
+      description: packageJson.description,
+      author: packageJson.author,
+      license: packageJson.license,
+      homepage: packageJson.homepage,
+      repository: isRecord2(packageJson.repository) ? packageJson.repository.url : packageJson.repository,
+      keywords: packageJson.keywords
+    },
+    skillFiles,
+    promptSkills,
+    piPackage,
+    contextual,
+    issues
+  };
+}
+function packageFiles(files, packagePath) {
+  const root = stripDot2(packagePath === "." ? "" : packagePath);
+  const prefix = root ? `${root}/` : "";
+  const result = /* @__PURE__ */ new Map();
+  for (const [path, text] of files)
+    if (path.startsWith(prefix)) result.set(path.slice(prefix.length), text);
+  return result;
+}
+function skillBody(text) {
+  try {
+    return (0, import_gray_matter5.default)(text).content.trim();
+  } catch {
+    return text.trim();
+  }
+}
+function classifySkillsForPiPackage(args) {
+  const root = stripDot2(args.piPackage.path === "." ? "" : args.piPackage.path);
+  const pkgFiles = packageFiles(args.files, args.piPackage.path);
+  const packageJson = (() => {
+    try {
+      const value = JSON.parse(pkgFiles.get("package.json") ?? "{}");
+      return isRecord2(value) ? value : {};
+    } catch {
+      return {};
+    }
+  })();
+  const discovery = discoverPiResources(pkgFiles, packageJson);
+  const byId = /* @__PURE__ */ new Map();
+  for (const path of discovery.resources.skills) {
+    const text = pkgFiles.get(path) ?? "";
+    let name = basename(path) === "SKILL.md" ? basename(dirname(path)) : basename(path).replace(/\.md$/, "");
+    try {
+      const declared = (0, import_gray_matter5.default)(text).data.name;
+      if (typeof declared === "string" && declared.trim()) name = declared;
+    } catch {
+    }
+    byId.set(slugify(name), { path, body: skillBody(text) });
+  }
+  for (const path of discovery.resources.prompts)
+    byId.set(slugify(basename(path).replace(/\.md$/, "")), {
+      path,
+      body: skillBody(pkgFiles.get(path) ?? "")
+    });
+  const remaining = [];
+  const delivered = [];
+  const collisions = [];
+  for (const skill of args.skills) {
+    const source = skill.source;
+    if (source.kind === "local-bundle" || source.kind === "local-folder") {
+      const dir = stripDot2(source.path === "." ? "" : source.path);
+      const relative2 = root ? dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : null : dir;
+      if (relative2 !== null) {
+        const skillFile = relative2 ? `${relative2}/SKILL.md` : "SKILL.md";
+        if (discovery.resources.skills.includes(skillFile)) {
+          delivered.push(skill.id);
+          continue;
+        }
+      }
+    }
+    const match = byId.get(skill.id);
+    if (match && source.kind === "inline") {
+      if (source.markdown.trim() === match.body) {
+        delivered.push(skill.id);
+        continue;
+      }
+      collisions.push({
+        capability: "skills",
+        path: `skills.${skill.id}`,
+        message: `Skill ${skill.id} differs from the package's ${match.path}; exporting both would shadow one in Pi`,
+        blocking: true
+      });
+      continue;
+    }
+    if (match) {
+      collisions.push({
+        capability: "skills",
+        path: `skills.${skill.id}`,
+        message: `Skill ${skill.id} collides with the package's ${match.path}`,
+        blocking: true
+      });
+      continue;
+    }
+    remaining.push(skill);
+  }
+  return { remaining, delivered, collisions };
+}
+function isCogniaGenerated(path, text, generatedEntry) {
+  return path === "plugin.json" || path === "dist/index.js" && text === generatedEntry;
+}
+function planPiExport(args) {
+  const issues = { converted: [], warnings: [], blocking: [] };
+  const { manifest } = args;
+  const packages = manifest.piPackages ?? [];
+  const files = /* @__PURE__ */ new Map();
+  const copies = [];
+  if (packages.length > 1) {
+    issue(
+      issues,
+      "blocking",
+      "pi-package",
+      "piPackages",
+      "A Pi package has exactly one root; split the plugin's Pi packages before exporting"
+    );
+    return { files, copies, issues };
+  }
+  const def = packages[0];
+  let packageJson;
+  if (def) {
+    const root = stripDot2(def.path === "." ? "" : def.path);
+    const prefix = root ? `${root}/` : "";
+    for (const [path, text2] of args.files) {
+      if (!path.startsWith(prefix)) continue;
+      const relative2 = path.slice(prefix.length);
+      if (!root && isCogniaGenerated(relative2, text2, args.generatedEntry)) continue;
+      if (/(^|\/)\.env(?:\.|$)/.test(relative2)) continue;
+      if (args.binaryPaths?.has(path)) copies.push({ from: path, to: relative2 });
+      else files.set(relative2, text2);
+    }
+    const text = files.get("package.json");
+    if (text === void 0) {
+      issue(
+        issues,
+        "blocking",
+        "pi-package",
+        `${def.path}/package.json`,
+        "Pi package.json is missing"
+      );
+      return { files, copies, issues };
+    }
+    const parsed = JSON.parse(text);
+    if (!isRecord2(parsed)) {
+      issue(issues, "blocking", "pi-package", "package.json", "package.json must contain an object");
+      return { files, copies, issues };
+    }
+    packageJson = { ...parsed };
+    if (typeof packageJson.name !== "string" || !packageJson.name.trim())
+      packageJson.name = manifest.id;
+    if (def.prepare)
+      issue(
+        issues,
+        "warnings",
+        "pi-package",
+        `piPackages.${def.id}.prepare`,
+        "Pi installs dependencies for npm and git sources only; a local `pi install` of this directory needs the dependency step run first"
+      );
+    if (def.hostedSession)
+      issue(
+        issues,
+        "warnings",
+        "pi-package",
+        `piPackages.${def.id}.hostedSession`,
+        "hostedSession declarations configure Cognia-hosted Pi sessions and are not part of the Pi package"
+      );
+    issue(
+      issues,
+      "converted",
+      "pi-package",
+      `piPackages.${def.id}`,
+      `exported Pi package ${def.id}`
+    );
+  } else {
+    packageJson = {
+      name: manifest.id,
+      version: manifest.version,
+      ...manifest.description ? { description: manifest.description } : {},
+      ...manifest.author ? { author: { ...manifest.author } } : {},
+      ...manifest.license ? { license: manifest.license } : {},
+      ...manifest.homepage ? { homepage: manifest.homepage } : {},
+      ...manifest.repository ? { repository: manifest.repository } : {},
+      keywords: [...manifest.keywords ?? []],
+      pi: { skills: ["./skills"] }
+    };
+  }
+  const keywords = Array.isArray(packageJson.keywords) ? packageJson.keywords.filter((keyword) => typeof keyword === "string") : [];
+  if (!keywords.includes("pi-package")) keywords.push("pi-package");
+  packageJson.keywords = keywords;
+  const dependencies = isRecord2(packageJson.dependencies) ? packageJson.dependencies : {};
+  for (const host of PI_HOST_PACKAGES)
+    if (host in dependencies)
+      issue(
+        issues,
+        "blocking",
+        "pi-package",
+        `package.json.dependencies.${host}`,
+        `${host} must be a peerDependency ("*"); Pi refuses to load a bundled copy of its own host packages`
+      );
+  for (const [path, text] of args.exported) {
+    if (files.has(path) && files.get(path) !== text) {
+      issue(
+        issues,
+        "blocking",
+        "skills",
+        path,
+        "An exported skill file would overwrite a different file in the Pi package"
+      );
+      continue;
+    }
+    files.set(path, text);
+  }
+  for (const copy of args.exportedCopies) copies.push(copy);
+  const exportedSkillDirs = [
+    ...new Set(
+      [...args.exported.keys(), ...args.exportedCopies.map((copy) => copy.to)].filter((path) => /^skills\/[^/]+\/SKILL\.md$/.test(path)).map((path) => dirname(path))
+    )
+  ];
+  if (exportedSkillDirs.length && isRecord2(packageJson.pi)) {
+    const pi = { ...packageJson.pi };
+    const skills = Array.isArray(pi.skills) ? pi.skills.filter((entry) => typeof entry === "string") : [];
+    const probe2 = new Map(files);
+    for (const copy of copies) probe2.set(copy.to, "");
+    const loaded = discoverPiResources(probe2, { ...packageJson, pi }).resources.skills;
+    for (const dir of exportedSkillDirs)
+      if (!loaded.includes(`${dir}/SKILL.md`)) skills.push(`./${dir}`);
+    pi.skills = skills;
+    packageJson.pi = pi;
+  }
+  files.set("package.json", `${JSON.stringify(packageJson, null, 2)}
+`);
+  const probe = new Map(files);
+  for (const copy of copies) probe.set(copy.to, "");
+  const finalSkills = discoverPiResources(probe, packageJson).resources.skills;
+  for (const dir of exportedSkillDirs)
+    if (!finalSkills.includes(`${dir}/SKILL.md`))
+      issue(
+        issues,
+        "blocking",
+        "skills",
+        `${dir}/SKILL.md`,
+        "Pi would not discover this exported skill with the package's resource rules"
+      );
+  return { files, copies, issues };
+}
+
 // lib/plugin/convert/ecosystem.ts
+var import_gray_matter6 = __toESM(require_gray_matter());
 var UnsupportedPluginConversionError = class extends Error {
   constructor(source, target, report) {
-    const details = report.blocking.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+    const details = report.blocking.map((issue2) => `${issue2.path}: ${issue2.message}`).join("; ");
     super(`cannot convert ${source} plugin to ${target} without losing behavior: ${details}`);
     this.name = "UnsupportedPluginConversionError";
     this.report = report;
@@ -8151,8 +10858,8 @@ function filesBelow(files, directory) {
   return Array.from(files.keys()).map(normalizePath).filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length));
 }
 function displayNameFromPath(path) {
-  const basename2 = normalizePath(path).split("/").pop() ?? path;
-  return basename2.replace(/\.(md|json)$/i, "");
+  const basename3 = normalizePath(path).split("/").pop() ?? path;
+  return basename3.replace(/\.(md|json)$/i, "");
 }
 function authorFields(author, fallbackName = "unknown") {
   if (typeof author === "string" && author.trim()) return { name: author.trim() };
@@ -8169,26 +10876,27 @@ function authorFields(author, fallbackName = "unknown") {
   }
   return { name: fallbackName };
 }
-function replacePluginRootToken(value) {
-  if (typeof value === "string") {
-    return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${CODEX_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${extensionPath}", "${COGNIA_PLUGIN_ROOT}");
-  }
-  if (Array.isArray(value)) return value.map(replacePluginRootToken);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, replacePluginRootToken(item)])
-    );
-  }
-  return value;
+var DEFAULT_ROOT_TOKENS = {
+  tokens: ["${CLAUDE_PLUGIN_ROOT}", "${CODEX_PLUGIN_ROOT}", "${PLUGIN_ROOT}", "${extensionPath}"],
+  envVars: []
+};
+function replacePluginRootToken(value, roots = DEFAULT_ROOT_TOKENS) {
+  return replaceRootTokens(value, roots.tokens, roots.envVars, "${COGNIA_PLUGIN_ROOT}");
 }
 var UNSUPPORTED_RUNTIME_TOKENS = [
   "${PLUGIN_DATA}",
   "${CLAUDE_PLUGIN_DATA}",
+  "${COPILOT_PLUGIN_DATA}",
+  "${QODER_PLUGIN_DATA}",
+  "${CODEBUDDY_PLUGIN_DATA}",
   "${CLAUDE_PROJECT_DIR}",
-  "${workspacePath}"
+  "${workspacePath}",
+  "${user_config."
 ];
 function rejectUnsupportedRuntimeTokens(args) {
-  const found = UNSUPPORTED_RUNTIME_TOKENS.filter((token) => args.text.includes(token));
+  const found = UNSUPPORTED_RUNTIME_TOKENS.filter((token) => args.text.includes(token)).map(
+    (token) => token.endsWith(".") ? `${token}KEY}` : token
+  );
   if (found.length === 0) return false;
   args.report.blocking.push({
     capability: args.capability,
@@ -8243,10 +10951,10 @@ function metadataFromForeignManifest(manifest, sourcePath, interfaceMetadata) {
     description: optionalString(manifest.description) ?? optionalString(interfaceMetadata?.shortDescription) ?? "",
     author: authorFields(manifest.author),
     license: optionalString(manifest.license) ?? "MIT",
-    homepage: optionalString(manifest.homepage) ?? optionalString(interfaceMetadata?.websiteURL),
+    homepage: optionalString(manifest.homepage) ?? optionalString(interfaceMetadata?.websiteUrl) ?? optionalString(interfaceMetadata?.websiteURL),
     repository: optionalString(manifest.repository),
     keywords: stringArray(manifest.keywords),
-    icon: optionalString(interfaceMetadata?.logo) ?? optionalString(interfaceMetadata?.composerIcon),
+    icon: optionalString(interfaceMetadata?.logo) ?? optionalString(interfaceMetadata?.composerIcon) ?? optionalString(manifest.icon) ?? optionalString(manifest.logo),
     screenshots: stringArray(interfaceMetadata?.screenshots)
   };
 }
@@ -8264,7 +10972,9 @@ function finalizeForeignConversion(args) {
     (groups) => Array.isArray(groups) && groups.length > 0
   );
   if (hasCommandHooks) capabilities.push("command-hooks");
-  const need = hasCommandHooks || contributions.presets.some((preset) => preset.transport === "stdio") ? "host-process" : contributions.needsFilesystem ? "host-filesystem" : "portable";
+  const piPackages = contributions.piPackages ?? [];
+  if (piPackages.length > 0) capabilities.push("pi-package");
+  const need = hasCommandHooks || piPackages.length > 0 || contributions.presets.some((preset) => preset.transport === "stdio") ? "host-process" : contributions.needsFilesystem ? "host-filesystem" : "portable";
   const manifest = assembleManifest({
     identity: {
       id: metadata.id,
@@ -8282,7 +10992,8 @@ function finalizeForeignConversion(args) {
       ...contributions.skills.length > 0 ? { skills: contributions.skills } : {},
       ...contributions.subagents.length > 0 ? { subagents: contributions.subagents } : {},
       ...contributions.presets.length > 0 ? { mcpServerPresets: contributions.presets } : {},
-      ...hasCommandHooks ? { commandHooks: contributions.commandHooks } : {}
+      ...hasCommandHooks ? { commandHooks: contributions.commandHooks } : {},
+      ...piPackages.length > 0 ? { piPackages } : {}
     }
   });
   manifest.homepage = metadata.homepage;
@@ -8293,12 +11004,9 @@ function finalizeForeignConversion(args) {
   if (metadata.author.url && manifest.author) {
     manifest.author.url = metadata.author.url;
   }
-  for (const path of [
-    ".claude-plugin/plugin.json",
-    ".codex-plugin/plugin.json",
-    "gemini-extension.json"
-  ])
-    if (output2.has(path)) output2.set(path, "{}\n");
+  if (!args.retainSourceManifests) {
+    for (const path of VENDOR_MANIFEST_PATHS) if (output2.has(path)) output2.set(path, "{}\n");
+  }
   for (const path of output2.keys()) {
     if (isPluginEnvironmentFile(path)) output2.set(path, "\n");
   }
@@ -8313,39 +11021,49 @@ function finalizeForeignConversion(args) {
     report
   };
 }
-function collectSkillMarkdownFiles(files, declared) {
+function skillFilesBelow(files, root) {
+  if (files.has(`${root}/SKILL.md`)) return [`${root}/SKILL.md`];
+  return Array.from(files.keys()).map(normalizePath).filter((path) => path.startsWith(`${root}/`) && path.endsWith("/SKILL.md"));
+}
+function collectSkillMarkdownFiles(files, declared, mode = "replace", report) {
   const declaredPaths = pathList(declared);
-  const roots = declaredPaths.length > 0 ? declaredPaths : ["skills"];
+  const roots = declaredPaths.length === 0 ? ["skills"] : mode === "additive" ? ["skills", ...declaredPaths] : declaredPaths;
   const result = /* @__PURE__ */ new Set();
   for (const root of roots) {
     if (/\.md$/i.test(root)) {
       if (files.has(root)) result.add(root);
       continue;
     }
-    if (files.has(`${root}/SKILL.md`)) {
-      result.add(`${root}/SKILL.md`);
+    if (root === "") {
+      if (files.has("SKILL.md")) result.add("SKILL.md");
       continue;
     }
-    for (const path of files.keys()) {
-      const normalized = normalizePath(path);
-      if (normalized.startsWith(`${root}/`) && normalized.endsWith("/SKILL.md")) {
-        result.add(normalized);
-      }
-    }
+    for (const path of skillFilesBelow(files, root)) result.add(path);
+  }
+  if (mode === "ambiguous" && declaredPaths.length > 0 && report) {
+    const conventional = skillFilesBelow(files, "skills").filter((path) => !result.has(path));
+    if (conventional.length)
+      report.blocking.push({
+        capability: "skills",
+        path: "skills",
+        message: "The manifest declares skill paths while skills/ holds other skills; this host does not document whether declared paths add to or replace skills/",
+        blocking: true
+      });
   }
   return Array.from(result).sort();
 }
 function rootSkillFiles(files, runtimeEntry) {
   return [...files.keys()].filter(
-    (path) => path !== runtimeEntry && !isPluginEnvironmentFile(path) && !/^(?:\.(?:claude|codex|cursor|kimi|devin)-plugin\/|\.github\/|\.opencode\/|(?:skills|agents|commands|hooks|policies|output-styles|workflows)\/|(?:plugin|kimi\.plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(
+    (path) => path !== runtimeEntry && !isPluginEnvironmentFile(path) && !/^(?:\.(?:claude|codex|cursor|devin|factory|qoder|codebuddy|workbuddy|augment|goose)-plugin\/|\.plugin\/|\.cognia-normalized\/|\.github\/|\.opencode\/|(?:skills|agents|droids|commands|hooks|policies|rules|output-styles|workflows)\/|(?:plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(
       path
     )
   );
 }
 function convertSkillFiles(args) {
   const { files, declared, report } = args;
-  const paths = collectSkillMarkdownFiles(files, declared);
-  if (!configured(declared) && files.has("SKILL.md")) paths.unshift("SKILL.md");
+  const paths = args.explicit ? [...args.explicit] : collectSkillMarkdownFiles(files, declared, args.mode, report);
+  if (!args.explicit && args.rootFallback !== false && !configured(declared) && files.has("SKILL.md") && !paths.includes("SKILL.md"))
+    paths.unshift("SKILL.md");
   const skills = [];
   let needsFilesystem = false;
   if (configured(declared) && paths.length === 0) {
@@ -8365,8 +11083,9 @@ function convertSkillFiles(args) {
       path: skillFile,
       report
     });
-    const directory = skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")));
-    const resources = directory ? filesBelow(files, directory) : rootSkillFiles(files);
+    const standalone = !/(^|\/)SKILL\.md$/.test(skillFile);
+    const directory = standalone ? "" : skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")));
+    const resources = standalone ? [] : directory ? filesBelow(files, directory) : args.rootResources ?? rootSkillFiles(files);
     const built = buildSkill(text, resources, displayNameFromPath(directory || skillFile));
     for (const message of built.blockers)
       report.blocking.push({ capability: "skills", path: skillFile, message, blocking: true });
@@ -8392,23 +11111,45 @@ function convertSkillFiles(args) {
   }
   return { skills, needsFilesystem };
 }
-function mcpDocuments(files, declared, defaultPath, rootKey = "mcpServers") {
-  if (declared && typeof declared === "object" && !Array.isArray(declared)) {
-    const record = declared;
-    return [
-      {
-        path: rootKey,
-        value: rootKey in record ? record : { [rootKey]: record }
+function mcpDocuments(files, declared, defaultPath, rootKey = "mcpServers", mode = "replace", report) {
+  const documents = [];
+  const declaredItems = Array.isArray(declared) ? declared : declared === void 0 ? [] : [declared];
+  for (const item of declaredItems) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const record = item;
+      documents.push({ path: rootKey, value: rootKey in record ? record : { [rootKey]: record } });
+    } else if (typeof item === "string" && item.trim()) {
+      if (/^https?:\/\//i.test(item) || /\.(?:mcpb|dxt)$/i.test(item)) {
+        report?.blocking.push({
+          capability: "mcpServers",
+          path: item,
+          message: "Packaged (.mcpb/.dxt) or remote MCP declarations are installed by the host; no Cognia preset can be derived without fetching them",
+          blocking: true
+        });
+        continue;
       }
-    ];
+      const path = normalizePath(item);
+      const text = files.get(path);
+      if (text === void 0) throw new Error(`declared MCP configuration was not found: ${path}`);
+      documents.push({ path, value: parseJsonObject(text, path) });
+    } else if (item !== void 0) {
+      throw new Error("mcpServers must be a path, an inline server map, or an array of these");
+    }
   }
-  const paths = pathList(declared);
-  if (paths.length === 0 && files.has(defaultPath)) paths.push(defaultPath);
-  return paths.map((path) => {
-    const text = files.get(path);
-    if (text === void 0) throw new Error(`declared MCP configuration was not found: ${path}`);
-    return { path, value: parseJsonObject(text, path) };
-  });
+  const conventional = files.has(defaultPath) && !documents.some((doc) => doc.path === defaultPath);
+  if (conventional && (documents.length === 0 || mode === "merge"))
+    documents.push({
+      path: defaultPath,
+      value: parseJsonObject(files.get(defaultPath), defaultPath)
+    });
+  else if (conventional && mode === "ambiguous")
+    report?.blocking.push({
+      capability: "mcpServers",
+      path: defaultPath,
+      message: `The manifest declares MCP servers while ${defaultPath} also exists; this host does not document whether they merge`,
+      blocking: true
+    });
+  return documents;
 }
 function convertMcpDocuments(args) {
   const presets = [];
@@ -8419,7 +11160,7 @@ function convertMcpDocuments(args) {
       path: document.path,
       report: args.report
     });
-    const canonicalText = JSON.stringify(replacePluginRootToken(document.value));
+    const canonicalText = JSON.stringify(replacePluginRootToken(document.value, args.roots));
     const declaredServers = document.value.mcpServers;
     let drafts;
     try {
@@ -8445,11 +11186,7 @@ function convertMcpDocuments(args) {
       }
     }
     if (args.output.has(document.path)) args.output.set(document.path, "{}\n");
-    for (const path of [
-      ".claude-plugin/plugin.json",
-      ".codex-plugin/plugin.json",
-      "gemini-extension.json"
-    ])
+    for (const path of VENDOR_MANIFEST_PATHS)
       if (args.output.has(path)) args.output.set(path, "{}\n");
     for (const path of args.output.keys())
       if (isPluginEnvironmentFile(path)) args.output.set(path, "\n");
@@ -8569,14 +11306,34 @@ function collectHookDocuments(args) {
     }
   };
   addDeclared(declared, `${sourcePath}.hooks`);
+  const declaredCount = documents.length;
+  const defaults = (args.defaultFiles ?? ["hooks/hooks.json", "hooks.json"]).filter(
+    (path) => files.has(path) && !seen.has(path)
+  );
+  const mode = args.mode ?? "merge";
   if (args.defaultDiscovery !== false) {
-    addFile("hooks/hooks.json");
-    addFile("hooks.json");
+    if (declaredCount === 0 || mode === "merge") for (const path of defaults) addFile(path);
+    else if (mode === "ambiguous" && defaults.length)
+      report.blocking.push({
+        capability: "commandHooks",
+        path: defaults[0],
+        message: "The manifest declares hooks while the conventional hook file also exists; this host does not document whether they merge",
+        blocking: true
+      });
   }
   return documents;
 }
 function convertHookDocuments(args) {
-  const { documents, report } = args;
+  const { report } = args;
+  const documents = args.dialect ? args.documents.map((document) => ({
+    path: document.path,
+    value: hookDocumentToCanonical({
+      value: document.value,
+      path: document.path,
+      dialect: args.dialect,
+      sink: report
+    })
+  })) : args.documents;
   const merged = {};
   let convertedGroups = 0;
   for (const document of documents) {
@@ -8587,7 +11344,7 @@ function convertHookDocuments(args) {
       path: document.path,
       report
     });
-    const canonical = replacePluginRootToken(document.value);
+    const canonical = replacePluginRootToken(document.value, args.roots);
     const inner = canonical.hooks;
     const eventMap = inner && typeof inner === "object" && !Array.isArray(inner) ? inner : canonical;
     for (const [event, groups] of Object.entries(eventMap)) {
@@ -8735,240 +11492,361 @@ function convertHookDocuments(args) {
   return merged;
 }
 function detectPluginEcosystem(files) {
-  const rootText = files.get("plugin.json");
-  if (rootText !== void 0) {
-    const root = parseJsonObject(rootText, "plugin.json");
-    if (typeof root.id === "string" && typeof root.type === "string") return "cognia";
-  }
-  const markers = [
-    [".claude-plugin/plugin.json", "claude-code"],
-    [".codex-plugin/plugin.json", "codex"],
-    ["gemini-extension.json", "gemini-cli"],
-    [".cursor-plugin/plugin.json", "cursor"],
-    [".github/plugin/plugin.json", "copilot"],
-    [".github/plugin.json", "copilot"],
-    ["kimi.plugin.json", "kimi"],
-    [".kimi-plugin/plugin.json", "kimi"],
-    [".devin-plugin/plugin.json", "devin"],
-    ["opencode.json", "opencode"],
-    ["opencode.jsonc", "opencode"]
-  ];
-  const candidates = markers.filter(([path]) => files.has(path));
-  const active = candidates.filter(([path]) => !/^\s*\{\s*\}\s*$/.test(files.get(path)));
-  const formats = [...new Set((active.length ? active : candidates).map(([, format2]) => format2))];
-  if (formats.length > 1)
-    throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
-  const platformFiles = new Map(files);
-  for (const [path] of candidates)
-    if (!active.some(([entry]) => entry === path)) platformFiles.delete(path);
-  const platform = detectPlatformBundle(platformFiles);
-  if (platform) {
-    if (formats.length && formats[0] !== platform)
-      throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
-    return platform;
-  }
-  if (formats.length) return formats[0];
-  if (rootText !== void 0) {
-    const root = parseJsonObject(rootText, "plugin.json");
-    if (root.$schema)
-      throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format");
-    return "cognia";
-  }
-  throw new Error(
-    "plugin format not recognized \u2014 provide a Cognia, Agent Plugins, Claude Code, Codex, Gemini, Cursor, Copilot, Kimi, Devin, OpenCode or Pi bundle"
-  );
+  return detectPluginBundle(files).ecosystem;
 }
-function convertClaudePlugin(files, options2) {
-  const sourcePath = ".claude-plugin/plugin.json";
-  const source = parseJsonObject(
-    requiredString(files.get(sourcePath), sourcePath),
-    sourcePath
-  );
-  const sourceRecord = source;
-  const blocking = [
-    ["lspServers", source.lspServers],
-    ["outputStyles", source.outputStyles],
-    ["workflows", source.workflows],
-    ["settings", source.settings],
-    ["userConfig", source.userConfig],
-    ["channels", source.channels],
-    ["dependencies", source.dependencies],
-    ["experimental", source.experimental]
-  ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
-  const discoveredExecutableSurfaces = [
-    ["monitors", ["monitors/"]],
-    ["themes", ["themes/"]],
-    ["workflows", ["workflows/"]],
-    ["outputStyles", ["output-styles/"]],
-    ["settings", ["settings.json"]],
-    ["lspServers", [".lsp.json"]]
-  ];
-  for (const [capability, prefixes] of discoveredExecutableSurfaces) {
-    if (prefixes.some(
-      (prefix) => Array.from(files.keys()).some(
-        (path) => prefix.endsWith("/") ? normalizePath(path).startsWith(prefix) : normalizePath(path) === prefix
-      )
-    ) && !blocking.some((issue) => issue.capability === capability)) {
-      blocking.push(unsupportedIssue(capability));
+function isRecord3(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function convertMarkdownAgent(args) {
+  const { path, report } = args;
+  let text = args.text;
+  if (args.allowedFields) {
+    let parsed2;
+    try {
+      parsed2 = (0, import_gray_matter6.default)(text);
+    } catch (error) {
+      report.blocking.push({
+        capability: "agents",
+        path,
+        message: `frontmatter parse failed: ${error instanceof Error ? error.message : String(error)}`,
+        blocking: true
+      });
+      return null;
     }
+    const data = { ...parsed2.data };
+    for (const [from, to] of Object.entries(args.renames ?? {})) {
+      if (data[from] === void 0) continue;
+      data[to] = data[from];
+      delete data[from];
+    }
+    for (const [key, value] of Object.entries(args.defaults ?? {}))
+      if (data[key] === value) delete data[key];
+    const unsupported = Object.keys(data).filter((key) => !args.allowedFields.includes(key));
+    if (unsupported.length) {
+      report.blocking.push({
+        capability: "agents",
+        path,
+        message: `${args.label} agent fields have no exact Cognia equivalent: ${unsupported.join(", ")}`,
+        blocking: true
+      });
+      return null;
+    }
+    if (typeof data.name === "string" && slugify(data.name) !== slugify(args.id))
+      report.warnings.push({
+        capability: "agents",
+        path,
+        message: `${args.label} display name "${data.name}" is not projected; the agent id is "${slugify(args.id)}"`,
+        blocking: false
+      });
+    delete data.name;
+    text = import_gray_matter6.default.stringify(parsed2.content, data);
   }
+  rejectUnsupportedRuntimeTokens({ text, capability: "agents", path, report });
+  const parsed = parseMarkdownAgent(slugify(args.id), text);
+  if ("error" in parsed) {
+    report.blocking.push({ capability: "agents", path, message: parsed.error, blocking: true });
+    return null;
+  }
+  if (parsed.unsupportedFields.length > 0) {
+    report.blocking.push({
+      capability: "agents",
+      path,
+      message: `unsupported subagent fields: ${parsed.unsupportedFields.join(", ")}`,
+      blocking: true
+    });
+    return null;
+  }
+  report.converted.push({
+    capability: "agents",
+    path,
+    message: `converted subagent ${parsed.id}`,
+    blocking: false
+  });
+  return { id: parsed.id, name: parsed.id, ...parsed.def };
+}
+function convertCommandMap(args) {
+  const skills = [];
+  for (const [name, raw] of Object.entries(args.commands)) {
+    const path = `commands.${name}`;
+    if (!isRecord3(raw)) {
+      args.report.blocking.push({
+        capability: "commands",
+        path,
+        message: "command entries must be objects with source or content",
+        blocking: true
+      });
+      continue;
+    }
+    const unknown = Object.keys(raw).filter(
+      (key) => !["source", "content", "description", "argumentHint", "allowedTools"].includes(key)
+    );
+    if (unknown.length) {
+      args.report.blocking.push({
+        capability: "commands",
+        path,
+        message: `command fields have no exact Cognia equivalent: ${unknown.join(", ")}`,
+        blocking: true
+      });
+      continue;
+    }
+    let body;
+    if (typeof raw.content === "string") body = raw.content;
+    else if (typeof raw.source === "string") {
+      const sourcePath = normalizePath(raw.source);
+      body = args.files.get(sourcePath);
+      if (body === void 0) {
+        args.report.blocking.push({
+          capability: "commands",
+          path,
+          message: `command source was not found: ${sourcePath}`,
+          blocking: true
+        });
+        continue;
+      }
+    } else {
+      args.report.blocking.push({
+        capability: "commands",
+        path,
+        message: "command entries require source or content",
+        blocking: true
+      });
+      continue;
+    }
+    if (raw.argumentHint !== void 0)
+      args.report.warnings.push({
+        capability: "commands",
+        path,
+        message: "argumentHint only labels the command in the host UI and was not projected",
+        blocking: false
+      });
+    const parsed = (0, import_gray_matter6.default)(body);
+    const data = { ...parsed.data, name };
+    if (typeof raw.description === "string") data.description = raw.description;
+    if (Array.isArray(raw.allowedTools)) data["allowed-tools"] = raw.allowedTools;
+    rejectUnsupportedRuntimeTokens({
+      text: body,
+      capability: "commands",
+      path,
+      report: args.report
+    });
+    const built = buildSkill(import_gray_matter6.default.stringify(parsed.content, data), [], name);
+    for (const message of built.blockers)
+      args.report.blocking.push({ capability: "commands", path, message, blocking: true });
+    skills.push(built.skill);
+    args.report.converted.push({
+      capability: "commands",
+      path,
+      message: `converted prompt command to skill ${built.skill.id}`,
+      blocking: false
+    });
+  }
+  return skills;
+}
+function convertClaudePlugin(files, options2, profile = CLAUDE_FAMILY_PROFILES["claude-code"], overrides = {}) {
+  const sourcePath = claudeFamilyManifestPath(files, profile) ?? profile.manifestPaths[0];
+  const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath);
+  const roots = { tokens: profile.rootTokens, envVars: profile.rootEnvVars };
+  const honored = new Set(profile.componentFields);
   const report = {
-    fidelity: blocking.length > 0 ? "unsupported" : "structured",
+    fidelity: "structured",
     converted: [],
     warnings: [],
-    blocking
+    blocking: []
   };
-  reportUnknownManifestFields({
-    manifest: sourceRecord,
-    known: /* @__PURE__ */ new Set([
+  const fail = (capability, path, message) => report.blocking.push({ capability, path, message, blocking: true });
+  const warn3 = (capability, path, message) => report.warnings.push({ capability, path, message, blocking: false });
+  for (const field of Object.keys(source).sort()) {
+    const value = source[field];
+    if (profile.metadataFields.includes(field) || honored.has(field)) continue;
+    if (Object.hasOwn(profile.ignoredFields, field)) {
+      if (configured(value)) warn3(field, `${sourcePath}.${field}`, profile.ignoredFields[field]);
+      continue;
+    }
+    if (Object.hasOwn(profile.blockedFields, field)) {
+      if (configured(value)) fail(field, field, profile.blockedFields[field]);
+      continue;
+    }
+    if (profile.unknownFields === "warn")
+      warn3(
+        field,
+        `${sourcePath}.${field}`,
+        `${profile.label} ignores unknown manifest keys; this field carries no behavior there and was not projected`
+      );
+    else
+      fail(
+        field,
+        `${sourcePath}.${field}`,
+        "unknown manifest field may carry behavior and cannot be converted safely"
+      );
+  }
+  if (typeof source.name === "string" && !profile.nameRule.pattern.test(source.name))
+    warn3(
       "name",
-      "displayName",
-      "version",
-      "description",
-      "author",
-      "homepage",
-      "repository",
-      "license",
-      "keywords",
-      "skills",
-      "commands",
-      "agents",
-      "mcpServers",
-      "hooks",
-      "lspServers",
-      "outputStyles",
-      "workflows",
-      "settings",
-      "userConfig",
-      "channels",
-      "dependencies",
-      "experimental"
-    ]),
-    sourcePath,
-    report
-  });
+      `${sourcePath}.name`,
+      `${profile.nameRule.message}; the host may refuse this plugin`
+    );
+  if (profile.requireDotSlashPaths) {
+    for (const field of honored) {
+      const value = source[field];
+      const paths = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+      for (const path of paths)
+        if (!path.startsWith("./") && !(field === "skills" && path === "."))
+          warn3(
+            field,
+            `${sourcePath}.${field}`,
+            `${profile.label} requires component paths to start with ./ (got ${JSON.stringify(path)}); the host may refuse this manifest`
+          );
+    }
+  }
+  for (const entry of profile.blockedPaths) {
+    const present2 = Array.from(files.keys()).some(
+      (path) => entry.path.endsWith("/") ? normalizePath(path).startsWith(entry.path) : normalizePath(path) === entry.path
+    );
+    if (!present2) continue;
+    if ("warn" in entry && entry.warn) warn3(entry.capability, entry.path, entry.message);
+    else if (!report.blocking.some((issue2) => issue2.capability === entry.capability))
+      fail(entry.capability, entry.path, entry.message);
+  }
   const commandHooks = convertHookDocuments({
     documents: collectHookDocuments({
       files,
-      declared: source.hooks,
+      declared: honored.has("hooks") ? source.hooks : void 0,
       sourcePath,
-      report
+      report,
+      defaultFiles: profile.hookFiles,
+      mode: profile.hooksMode,
+      defaultDiscovery: overrides.hookDefaults !== false
     }),
-    report
+    report,
+    roots,
+    dialect: profile.hookDialect.id === "claude-code" ? void 0 : profile.hookDialect
   });
   if (report.blocking.length > 0) {
-    throw new UnsupportedPluginConversionError("claude-code", "cognia", report);
+    report.fidelity = "unsupported";
+    throw new UnsupportedPluginConversionError(profile.ecosystem, "cognia", report);
   }
   const output2 = cloneFiles(files);
   const convertedSkills = convertSkillFiles({
     files,
-    declared: source.skills,
+    declared: honored.has("skills") ? source.skills : void 0,
     output: output2,
-    report
+    report,
+    mode: overrides.skillsMode ?? profile.skillsMode,
+    explicit: overrides.explicitSkills,
+    rootResources: overrides.rootSkillResources
   });
   const skills = convertedSkills.skills;
-  const commandConversionStart = report.converted.length;
-  const commandPaths = pathList(source.commands, "commands");
-  for (const path of commandPaths) {
-    const candidates = path.toLowerCase().endsWith(".md") ? [path] : Array.from(files.keys()).filter(
-      (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
-    );
-    for (const commandPath of candidates) {
-      const text = files.get(commandPath);
-      if (text === void 0) continue;
-      rejectUnsupportedRuntimeTokens({
-        text,
-        capability: "commands",
-        path: commandPath,
-        report
-      });
-      const built = buildSkill(text, [], displayNameFromPath(commandPath));
-      for (const message of built.blockers)
-        report.blocking.push({ capability: "commands", path: commandPath, message, blocking: true });
-      skills.push(built.skill);
-      report.converted.push({
-        capability: "commands",
-        path: commandPath,
-        message: `converted prompt command to skill ${built.skill.id}`,
-        blocking: false
-      });
+  if (profile.commandsDir) {
+    const declaredCommands = honored.has("commands") ? source.commands : void 0;
+    if (isRecord3(declaredCommands)) {
+      if (profile.ecosystem === "claude-code")
+        skills.push(...convertCommandMap({ commands: declaredCommands, files, report }));
+      else
+        fail(
+          "commands",
+          `${sourcePath}.commands`,
+          `${profile.label} does not document inline command maps`
+        );
+    } else {
+      const commandConversionStart = report.converted.length;
+      for (const path of pathList(declaredCommands, profile.commandsDir)) {
+        const below = path.toLowerCase().endsWith(".md") ? [path] : Array.from(files.keys()).filter((file) => normalizePath(file).startsWith(`${path}/`));
+        for (const commandPath of below) {
+          if (!/\.md$/i.test(commandPath)) {
+            if (profile.ecosystem === "factory-droid")
+              fail(
+                "commands",
+                commandPath,
+                "Droid executable command files run host code; Cognia has no executable slash-command contribution"
+              );
+            continue;
+          }
+          const text = files.get(commandPath);
+          if (text === void 0) continue;
+          rejectUnsupportedRuntimeTokens({
+            text,
+            capability: "commands",
+            path: commandPath,
+            report
+          });
+          const built = buildSkill(text, [], displayNameFromPath(commandPath));
+          for (const message of built.blockers)
+            report.blocking.push({
+              capability: "commands",
+              path: commandPath,
+              message,
+              blocking: true
+            });
+          skills.push(built.skill);
+          report.converted.push({
+            capability: "commands",
+            path: commandPath,
+            message: `converted prompt command to skill ${built.skill.id}`,
+            blocking: false
+          });
+        }
+      }
+      if (configured(declaredCommands) && report.converted.length === commandConversionStart)
+        fail(
+          "commands",
+          "commands",
+          "declared command paths did not contain Markdown command files"
+        );
     }
-  }
-  if (configured(source.commands) && report.converted.length === commandConversionStart) {
-    report.blocking.push({
-      capability: "commands",
-      path: "commands",
-      message: "declared command paths did not contain Markdown command files",
-      blocking: true
-    });
   }
   const subagents = [];
   const agentConversionStart = report.converted.length;
-  const agentPaths = pathList(source.agents, "agents");
-  for (const path of agentPaths) {
+  const declaredAgents = honored.has("agents") ? source.agents : void 0;
+  for (const path of pathList(declaredAgents, profile.agentsDir)) {
     const candidates = path.toLowerCase().endsWith(".md") ? [path] : Array.from(files.keys()).filter(
       (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
     );
     for (const agentPath of candidates) {
       const text = files.get(agentPath);
       if (text === void 0) continue;
-      rejectUnsupportedRuntimeTokens({
-        text,
-        capability: "agents",
+      const id = profile.agentId(normalizePath(agentPath).split("/").pop() ?? agentPath);
+      if (!id) continue;
+      const agent = convertMarkdownAgent({
         path: agentPath,
+        text,
+        id,
+        label: profile.label,
+        allowedFields: profile.agentFields,
+        defaults: profile.agentDefaults,
         report
       });
-      const agentId = slugify(displayNameFromPath(agentPath));
-      const parsed = parseMarkdownAgent(agentId, text);
-      if ("error" in parsed) {
-        report.blocking.push({
-          capability: "agents",
-          path: agentPath,
-          message: parsed.error,
-          blocking: true
-        });
-        continue;
-      }
-      if (parsed.unsupportedFields.length > 0) {
-        report.blocking.push({
-          capability: "agents",
-          path: agentPath,
-          message: `unsupported subagent fields: ${parsed.unsupportedFields.join(", ")}`,
-          blocking: true
-        });
-        continue;
-      }
-      subagents.push({
-        id: parsed.id,
-        name: parsed.id,
-        ...parsed.def
-      });
-      report.converted.push({
-        capability: "agents",
-        path: agentPath,
-        message: `converted subagent ${parsed.id}`,
-        blocking: false
-      });
+      if (agent) subagents.push(agent);
     }
   }
-  if (configured(source.agents) && report.converted.length === agentConversionStart) {
-    report.blocking.push({
-      capability: "agents",
-      path: "agents",
-      message: "declared agent paths did not contain valid Markdown agents",
-      blocking: true
-    });
-  }
+  if (configured(declaredAgents) && report.converted.length === agentConversionStart)
+    fail("agents", "agents", "declared agent paths did not contain valid Markdown agents");
   const presets = convertMcpDocuments({
-    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    documents: mcpDocuments(
+      files,
+      honored.has("mcpServers") ? source.mcpServers : void 0,
+      profile.mcpFile,
+      "mcpServers",
+      overrides.mcpMode ?? profile.mcpMode,
+      report
+    ),
     adapterSourceName: "claude-code.json",
     output: output2,
-    report
+    report,
+    roots
   });
+  if (overrides.settings)
+    importInstallSettings({
+      declarations: overrides.settings.declarations,
+      presets,
+      servers: overrides.settings.servers,
+      report,
+      capability: "variables",
+      exposeToStdio: false
+    });
   return finalizeForeignConversion({
-    source: "claude-code",
+    source: profile.ecosystem,
     output: output2,
-    metadata: metadataFromForeignManifest(sourceRecord, sourcePath),
+    metadata: metadataFromForeignManifest(source, sourcePath),
     contributions: {
       skills,
       subagents,
@@ -8983,7 +11861,11 @@ function convertClaudePlugin(files, options2) {
 function convertCodexPlugin(files, options2) {
   const sourcePath = ".codex-plugin/plugin.json";
   const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath);
-  const blocking = [["apps", source.apps]].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
+  const blocking = [
+    ["apps", source.apps],
+    ["extensions", source.extensions]
+  ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
+  if (files.has(".app.json") && !configured(source.apps)) blocking.push(unsupportedIssue("apps"));
   const report = {
     fidelity: blocking.length > 0 ? "unsupported" : "structured",
     converted: [],
@@ -9005,7 +11887,9 @@ function convertCodexPlugin(files, options2) {
       "hooks",
       "mcpServers",
       "apps",
-      "interface"
+      "interface",
+      "extensions",
+      "commands"
     ]),
     sourcePath,
     report
@@ -9016,9 +11900,15 @@ function convertCodexPlugin(files, options2) {
       declared: source.hooks,
       sourcePath,
       report,
-      defaultDiscovery: source.hooks === void 0
+      defaultDiscovery: source.hooks === void 0,
+      defaultFiles: ["hooks/hooks.json"]
     }),
-    report
+    report,
+    roots: {
+      tokens: ["${PLUGIN_ROOT}", "${CLAUDE_PLUGIN_ROOT}", "${CODEX_PLUGIN_ROOT}"],
+      envVars: ["PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"]
+    },
+    dialect: HOOK_DIALECTS.codex
   });
   const output2 = cloneFiles(files);
   const convertedSkills = convertSkillFiles({
@@ -9027,6 +11917,34 @@ function convertCodexPlugin(files, options2) {
     output: output2,
     report
   });
+  const commandSkills = [];
+  for (const path of pathList(source.commands)) {
+    const candidates = /\.md$/i.test(path) ? [path] : Array.from(files.keys()).filter(
+      (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
+    );
+    if (candidates.length === 0)
+      report.blocking.push({
+        capability: "commands",
+        path,
+        message: "declared command paths did not contain Markdown command files",
+        blocking: true
+      });
+    for (const commandPath of candidates) {
+      const text = files.get(commandPath);
+      if (text === void 0) continue;
+      rejectUnsupportedRuntimeTokens({ text, capability: "commands", path: commandPath, report });
+      const built = buildSkill(text, [], displayNameFromPath(commandPath));
+      for (const message of built.blockers)
+        report.blocking.push({ capability: "commands", path: commandPath, message, blocking: true });
+      commandSkills.push(built.skill);
+      report.converted.push({
+        capability: "commands",
+        path: commandPath,
+        message: `converted command to skill ${built.skill.id} (Codex migrates commands to skills)`,
+        blocking: false
+      });
+    }
+  }
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "claude-code.json",
@@ -9043,9 +11961,9 @@ function convertCodexPlugin(files, options2) {
     source.author = { name: interfaceMetadata.developerName };
     mappedInterfaceFields.add("developerName");
   }
-  if (interfaceMetadata && !optionalString(source.homepage) && optionalString(interfaceMetadata.websiteURL)) {
-    mappedInterfaceFields.add("websiteURL");
-  }
+  for (const key of ["websiteUrl", "websiteURL"])
+    if (interfaceMetadata && !optionalString(source.homepage) && optionalString(interfaceMetadata[key]))
+      mappedInterfaceFields.add(key);
   if (interfaceMetadata) {
     if (optionalString(interfaceMetadata.logo)) {
       mappedInterfaceFields.add("logo");
@@ -9059,7 +11977,7 @@ function convertCodexPlugin(files, options2) {
     output: output2,
     metadata: metadataFromForeignManifest(source, sourcePath, interfaceMetadata),
     contributions: {
-      skills: convertedSkills.skills,
+      skills: [...convertedSkills.skills, ...commandSkills],
       subagents: [],
       presets,
       commandHooks,
@@ -9135,7 +12053,11 @@ function parseGeminiCommand(path, text, report) {
 function convertGeminiPlugin(files, options2) {
   const sourcePath = "gemini-extension.json";
   const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath);
-  const blocking = configured(source.excludeTools) ? [unsupportedIssue("excludeTools")] : [];
+  const blocking = [
+    ["excludeTools", source.excludeTools],
+    ["themes", source.themes],
+    ["plan", source.plan]
+  ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
   const report = {
     fidelity: blocking.length > 0 ? "unsupported" : "structured",
     converted: [],
@@ -9156,75 +12078,142 @@ function convertGeminiPlugin(files, options2) {
       "contextFileName",
       "excludeTools",
       "mcpServers",
-      "settings"
+      "settings",
+      "themes",
+      "plan",
+      "migratedTo"
     ]),
     sourcePath,
     report
   });
+  if (configured(source.migratedTo))
+    report.warnings.push({
+      capability: "migratedTo",
+      path: `${sourcePath}.migratedTo`,
+      message: "Gemini update redirection is an install-time concern and was not projected",
+      blocking: false
+    });
+  if (typeof source.name === "string" && !/^[a-zA-Z0-9-]+$/.test(source.name))
+    report.warnings.push({
+      capability: "name",
+      path: `${sourcePath}.name`,
+      message: "Gemini extension names must match ^[a-zA-Z0-9-]+$; the host may refuse this extension",
+      blocking: false
+    });
+  const separatorFiles = new Map(files);
+  for (const path of [sourcePath, "hooks/hooks.json"]) {
+    const text = files.get(path);
+    if (text === void 0 || !/\$\{(?:\/|pathSeparator)\}/.test(text)) continue;
+    separatorFiles.set(path, text.replaceAll("${/}", "/").replaceAll("${pathSeparator}", "/"));
+    report.warnings.push({
+      capability: "variables",
+      path,
+      message: "Gemini ${/} path separators were normalized to /",
+      blocking: false
+    });
+  }
+  const geminiSource = separatorFiles.get(sourcePath) === files.get(sourcePath) ? source : parseJsonObject(separatorFiles.get(sourcePath), sourcePath);
   const output2 = cloneFiles(files);
   const convertedSkills = convertSkillFiles({ files, declared: void 0, output: output2, report });
   const skills = [...convertedSkills.skills];
-  for (const directory of ["hooks", "agents", "policies"]) {
-    if (filesBelow(files, directory).length)
-      report.blocking.push({
-        capability: directory,
-        path: `${directory}/`,
-        message: `Gemini ${directory} use platform-specific event, execution, or policy semantics; a Cognia adapter is not implemented`,
-        blocking: true
-      });
-  }
-  const contextPath = optionalString(source.contextFileName) ?? "GEMINI.md";
-  const context = files.get(normalizePath(contextPath));
-  if (context !== void 0 && context.trim()) {
-    rejectUnsupportedRuntimeTokens({
-      text: context,
-      capability: "context",
-      path: contextPath,
-      report
-    });
-    skills.push({
-      id: "gemini-context",
-      name: "Gemini Context",
-      description: "Extension context imported from Gemini CLI.",
-      source: { kind: "inline", markdown: context.trim() }
-    });
-    report.converted.push({
-      capability: "context",
-      path: contextPath,
-      message: "converted extension context to a skill",
-      blocking: false
-    });
-  } else if (source.contextFileName !== void 0) {
+  if (filesBelow(files, "policies").length)
     report.blocking.push({
-      capability: "context",
-      path: contextPath,
-      message: "declared context file was not found or was empty",
+      capability: "policies",
+      path: "policies/",
+      message: "Gemini policy engine rules (policies/*.toml) have no Cognia equivalent",
       blocking: true
     });
+  const commandHooks = convertHookDocuments({
+    documents: collectHookDocuments({
+      files: separatorFiles,
+      declared: void 0,
+      sourcePath,
+      report,
+      defaultFiles: ["hooks/hooks.json"]
+    }),
+    report,
+    roots: { tokens: ["${extensionPath}"], envVars: [] },
+    dialect: HOOK_DIALECTS["gemini-cli"]
+  });
+  const subagents = [];
+  for (const agentPath of Array.from(files.keys()).map(normalizePath).sort()) {
+    if (!/^agents\/[^/]+\.md$/i.test(agentPath)) continue;
+    const agent = convertMarkdownAgent({
+      path: agentPath,
+      text: files.get(agentPath),
+      id: displayNameFromPath(agentPath),
+      label: "Gemini CLI",
+      allowedFields: ["name", "description", "maxTurns"],
+      defaults: { kind: "local" },
+      renames: { max_turns: "maxTurns" },
+      report
+    });
+    if (agent) {
+      subagents.push(agent);
+      report.warnings.push({
+        capability: "agents",
+        path: agentPath,
+        message: "Gemini extension agents are a preview feature; routing parity must be verified",
+        blocking: false
+      });
+    }
+  }
+  const contextPaths = typeof source.contextFileName === "string" ? [source.contextFileName] : Array.isArray(source.contextFileName) ? source.contextFileName.filter((entry) => typeof entry === "string") : ["GEMINI.md"];
+  for (const [index, contextPath] of contextPaths.entries()) {
+    const context = files.get(normalizePath(contextPath));
+    if (context !== void 0 && context.trim()) {
+      rejectUnsupportedRuntimeTokens({
+        text: context,
+        capability: "context",
+        path: contextPath,
+        report
+      });
+      skills.push({
+        id: index === 0 ? "gemini-context" : `gemini-context-${index + 1}`,
+        name: index === 0 ? "Gemini Context" : `Gemini Context ${index + 1}`,
+        description: "Extension context imported from Gemini CLI.",
+        source: { kind: "inline", markdown: context.trim() }
+      });
+      report.converted.push({
+        capability: "context",
+        path: contextPath,
+        message: "converted extension context to a skill",
+        blocking: false
+      });
+    } else if (source.contextFileName !== void 0) {
+      report.blocking.push({
+        capability: "context",
+        path: contextPath,
+        message: "declared context file was not found or was empty",
+        blocking: true
+      });
+    }
   }
   for (const path of Array.from(files.keys()).map(normalizePath).sort()) {
     if (!path.startsWith("commands/") || !path.endsWith(".toml")) continue;
     const skill = parseGeminiCommand(path, requiredString(files.get(path), path), report);
     if (skill) skills.push(skill);
   }
-  if (report.warnings.some((issue) => issue.capability === "commands")) {
+  if (report.warnings.some((issue2) => issue2.capability === "commands")) {
     report.fidelity = "contextual";
   }
   const presets = convertMcpDocuments({
-    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    documents: mcpDocuments(files, geminiSource.mcpServers, ""),
     adapterSourceName: "gemini.json",
     output: output2,
-    report
+    report,
+    roots: { tokens: ["${extensionPath}"], envVars: [] }
   });
-  importGeminiSettings({ settings: source.settings, presets, source, report });
+  importGeminiSettings({ settings: source.settings, presets, source: geminiSource, report });
   return finalizeForeignConversion({
     source: "gemini-cli",
     output: output2,
     metadata: metadataFromForeignManifest(source, sourcePath),
     contributions: {
       skills,
-      subagents: [],
+      subagents,
       presets,
+      commandHooks,
       needsFilesystem: convertedSkills.needsFilesystem
     },
     report,
@@ -9238,7 +12227,7 @@ function importGeminiSettings(args) {
     fail("settings", "Gemini settings must be an array");
     return;
   }
-  const servers = args.source.mcpServers;
+  const declarations = [];
   const seen = /* @__PURE__ */ new Set();
   for (const [index, value] of args.settings.entries()) {
     const path = `settings[${index}]`;
@@ -9259,10 +12248,34 @@ function importGeminiSettings(args) {
       continue;
     }
     seen.add(variable);
+    declarations.push({
+      path,
+      envVar: variable,
+      name: label,
+      description: optionalString(setting.description),
+      sensitive: Boolean(setting.sensitive)
+    });
+  }
+  importInstallSettings({
+    declarations,
+    presets: args.presets,
+    servers: args.source.mcpServers ?? {},
+    report: args.report,
+    capability: "settings",
+    // Gemini also exposes declared settings directly to local server processes.
+    exposeToStdio: true
+  });
+}
+function importInstallSettings(args) {
+  const fail = (path, message) => args.report.blocking.push({ capability: args.capability, path, message, blocking: true });
+  for (const setting of args.declarations) {
+    const path = setting.path ?? `${args.capability}.${setting.envVar}`;
+    const variable = setting.envVar;
+    const label = setting.name;
     const reference = "${" + variable + "}";
     let used = false;
     for (const preset of args.presets) {
-      const original = servers?.[preset.id] ?? {};
+      const original = args.servers[preset.id] ?? {};
       const fields = preset.fields ??= [];
       const add = (field) => {
         const existing = fields.findIndex(
@@ -9271,8 +12284,8 @@ function importGeminiSettings(args) {
         const mapped = {
           ...field,
           label,
-          ...optionalString(setting.description) ? { description: optionalString(setting.description) } : {},
-          secret: Boolean(setting.sensitive)
+          ...setting.description ? { description: setting.description } : {},
+          secret: setting.sensitive
         };
         if (existing >= 0) fields[existing] = mapped;
         else fields.push(mapped);
@@ -9305,7 +12318,7 @@ function importGeminiSettings(args) {
         );
       if (Array.isArray(original.args) && original.args.some((arg) => typeof arg === "string" && arg.includes(reference)))
         add({ key: variable, label, placement: "arg-replace", token: reference });
-      if (preset.transport === "stdio" && !(variable in (env ?? {}))) {
+      if (args.exposeToStdio && preset.transport === "stdio" && !(variable in (env ?? {}))) {
         preset.config.env = {
           ...preset.config.env ?? {},
           [variable]: ""
@@ -9315,7 +12328,7 @@ function importGeminiSettings(args) {
     }
     if (!used)
       args.report.warnings.push({
-        capability: "settings",
+        capability: args.capability,
         path,
         message: "Setting is not referenced by a converted MCP contribution; no Cognia field was created",
         blocking: false
@@ -9465,13 +12478,61 @@ function exportCogniaSkills(args) {
 function exportCogniaSubagents(args) {
   const subagents = args.manifest.subagents ?? [];
   if (subagents.length === 0) return;
-  if (args.target !== "claude-code") {
+  if (args.target !== "claude-code" && args.target !== "gemini-cli") {
     args.report.blocking.push({
       capability: "subagent",
       path: "subagents",
-      message: `${args.target} subagent execution and routing require a dedicated adapter; native export is not implemented`,
+      message: `${args.target} plugins have no subagent contribution; native export is not possible`,
       blocking: true
     });
+    return;
+  }
+  if (args.target === "gemini-cli") {
+    for (const agent of subagents) {
+      const unsupported = Object.entries({
+        provider: agent.provider,
+        externalPresetId: agent.externalPresetId,
+        mcpServerIds: agent.mcpServerIds?.length,
+        allowNesting: agent.allowNesting,
+        maxDepth: agent.maxDepth,
+        hidden: agent.hidden,
+        disabled: agent.disabled,
+        tools: agent.tools?.length,
+        disallowedTools: agent.disallowedTools?.length,
+        model: agent.model,
+        effort: agent.effort
+      }).filter(([, value]) => configured(value)).map(([key]) => key);
+      if (unsupported.length) {
+        args.report.blocking.push({
+          capability: "subagent",
+          path: `subagents.${agent.id}`,
+          message: `Gemini extension agents have no exact equivalent for: ${unsupported.join(", ")}`,
+          blocking: true
+        });
+        continue;
+      }
+      args.output.set(
+        `agents/${agent.id}.md`,
+        import_gray_matter6.default.stringify(agent.prompt.endsWith("\n") ? agent.prompt : `${agent.prompt}
+`, {
+          name: agent.id,
+          description: agent.description,
+          ...agent.maxTurns ? { max_turns: agent.maxTurns } : {}
+        })
+      );
+      args.report.converted.push({
+        capability: "subagent",
+        path: `subagents.${agent.id}`,
+        message: `exported subagent ${agent.id}`,
+        blocking: false
+      });
+      args.report.warnings.push({
+        capability: "subagent",
+        path: `subagents.${agent.id}`,
+        message: "Gemini extension agents are a preview feature; routing parity must be verified",
+        blocking: false
+      });
+    }
     return;
   }
   for (const agent of subagents) {
@@ -9514,6 +12575,7 @@ function exportCogniaSubagents(args) {
   }
 }
 function exportMcpServers(args) {
+  const fieldProjection = args.fieldProjection ?? (args.target === "gemini-cli" ? "gemini-settings" : void 0);
   const presets = args.manifest.mcpServerPresets ?? [];
   if (presets.length === 0) return void 0;
   const servers = [];
@@ -9568,7 +12630,7 @@ function exportMcpServers(args) {
       });
       continue;
     }
-    if (fields.length && args.target !== "gemini-cli") {
+    if (fields.length && !fieldProjection) {
       args.report.blocking.push({
         capability: "mcp-server-preset",
         path: `mcpServerPresets.${preset.id}.fields`,
@@ -9621,7 +12683,7 @@ function exportMcpServers(args) {
       args.report.warnings.push({
         capability: "mcp-server-preset",
         path: `mcpServerPresets.${preset.id}.fields`,
-        message: "Gemini requests these settings during installation; values must be supplied before use",
+        message: fieldProjection === "cursor-variables" ? "Cursor declares these as plugin variables; an administrator sets the values in the Cursor dashboard before use" : "Gemini requests these settings during installation; values must be supplied before use",
         blocking: false
       });
     if (args.target === "codex" && preset.transport === "sse") {
@@ -9664,11 +12726,12 @@ function exportMcpServers(args) {
 function exportCommandHooks(args) {
   const hooks = args.manifest.commandHooks;
   if (!hooks || !Object.keys(hooks).length) return;
-  if (args.target !== "claude-code") {
+  const dialect = args.target === "claude-code" ? void 0 : args.target === "codex" ? HOOK_DIALECTS.codex : args.target === "gemini-cli" ? HOOK_DIALECTS["gemini-cli"] : null;
+  if (dialect === null) {
     args.report.blocking.push({
       capability: "command-hooks",
       path: "commandHooks",
-      message: `${args.target} hooks require an event/payload/decision adapter; native export is not implemented`,
+      message: `${args.target} hooks are not declarative; native export is not possible`,
       blocking: true
     });
     return;
@@ -9677,6 +12740,20 @@ function exportCommandHooks(args) {
     documents: [{ path: "commandHooks", value: { hooks } }],
     report: args.report
   });
+  if (dialect) {
+    const projected = canonicalHooksToDialect({
+      hooks: validated,
+      dialect,
+      sink: args.report,
+      path: "hooks/hooks.json"
+    });
+    if (projected)
+      args.output.set(
+        "hooks/hooks.json",
+        JSON.stringify(replaceCanonicalRootToken(projected, args.target), null, 2) + "\n"
+      );
+    return;
+  }
   for (const [event, groups] of Object.entries(hooks)) {
     for (const group of groups ?? []) {
       if (group.agents)
@@ -9687,7 +12764,7 @@ function exportCommandHooks(args) {
           blocking: true
         });
       for (const handler of group.hooks) {
-        if (!["command", "http", "prompt", "agent"].includes(handler.type) || handler.policyClass === "managed") {
+        if (!["command", "http", "prompt", "agent", "mcp_tool"].includes(handler.type) || handler.policyClass === "managed") {
           args.report.blocking.push({
             capability: "command-hooks",
             path: `commandHooks.${event}`,
@@ -9740,9 +12817,9 @@ function exportRuntimeResources(args) {
       });
   }
   for (const [path, text] of args.files) {
-    if (path === "plugin.json" || path === args.manifest.main || path === "gemini-extension.json" || /^\.(?:claude|codex)-plugin\//.test(path) || /(^|\/)\.env(?:\.|$)/.test(path) || path === ".mcp.json" || path === "hooks/hooks.json" || path === "hooks.json")
+    if (path === "plugin.json" || path === args.manifest.main || VENDOR_MANIFEST_PATHS.includes(path) || path === "mcp.json" || /^\.cognia-normalized\//.test(path) || /^\.(?:claude|codex)-plugin\//.test(path) || /(^|\/)\.env(?:\.|$)/.test(path) || path === ".mcp.json" || path === "hooks/hooks.json" || path === "hooks.json")
       continue;
-    if (path.startsWith("skills/") && path.endsWith("/SKILL.md") || path.startsWith("agents/") && path.endsWith(".md") || path.startsWith("commands/") && /\.(?:toml|md)$/.test(path) || path.startsWith("policies/") || path.startsWith("output-styles/") || path.startsWith("workflows/") || path === ".lsp.json" || path === "settings.json")
+    if (path.startsWith("skills/") && path.endsWith("/SKILL.md") || /^(?:agents|droids)\//.test(path) && path.endsWith(".md") || path.startsWith("commands/") && /\.(?:toml|md)$/.test(path) || path.startsWith("policies/") || path.startsWith("output-styles/") || path.startsWith("workflows/") || path === ".lsp.json" || path === "settings.json")
       continue;
     if (args.output.has(path)) continue;
     if (args.binaryPaths?.has(path)) args.copies.push({ from: path, to: path });
@@ -9773,9 +12850,11 @@ function authorForForeign(manifest) {
     ...manifest.author.url ? { url: manifest.author.url } : {}
   };
 }
-function convertCogniaPlugin(files, target, options2) {
+var PROJECTED_SETTINGS = /* @__PURE__ */ new WeakMap();
+function convertCogniaPlugin(files, target, options2, context = {}) {
   const loaded = loadCogniaPlugin(files);
-  const { manifest } = loaded;
+  const manifest = loaded.manifest;
+  const finalTarget = context.finalTarget ?? target;
   const report = {
     fidelity: "structured",
     converted: [],
@@ -9786,21 +12865,28 @@ function convertCogniaPlugin(files, target, options2) {
     "skills",
     "mcp-server-preset",
     "command-hooks",
-    ...target === "claude-code" ? ["subagent"] : []
+    ...target === "claude-code" || target === "gemini-cli" ? ["subagent"] : [],
+    ...target === "pi" ? ["pi-package"] : []
   ]);
   for (const capability of manifest.capabilities ?? []) {
-    if (!allowedCapabilities.has(capability)) {
-      report.blocking.push(unsupportedIssue(capability, target));
-    }
+    if (allowedCapabilities.has(capability)) continue;
+    if (capability === "pi-package")
+      report.blocking.push({
+        capability,
+        path: "piPackages",
+        message: `Pi packages install only into Pi (pi install) or load into Cognia-hosted Pi sessions; they stay in Cognia and have no ${finalTarget} equivalent`,
+        blocking: true
+      });
+    else report.blocking.push(unsupportedIssue(capability, finalTarget));
   }
   if (manifest.permissions?.length) {
-    report.blocking.push(unsupportedIssue("permissions", target));
+    report.blocking.push(unsupportedIssue("permissions", finalTarget));
   }
   const executableEntries = [manifest.pythonMain, manifest.wasmMain, manifest.vscodeMain].filter(
     configured
   );
   if (executableEntries.length > 0) {
-    report.blocking.push(unsupportedIssue("runtime", target));
+    report.blocking.push(unsupportedIssue("runtime", finalTarget));
   }
   if (manifest.main) {
     const entry = files.get(normalizePath(manifest.main));
@@ -9813,6 +12899,25 @@ function convertCogniaPlugin(files, target, options2) {
       });
     }
   }
+  if (target === "pi") return exportPiPackage({ manifest, files, report, options: options2 });
+  if (target === "claude-code" && finalTarget === "claude-code") {
+    const { nameRule, reservedNames } = CLAUDE_FAMILY_PROFILES["claude-code"];
+    for (const rule of [nameRule, reservedNames])
+      if (rule && rule.pattern.test(manifest.id) !== (rule === nameRule))
+        report.blocking.push({
+          capability: "name",
+          path: "id",
+          message: rule.message,
+          blocking: true
+        });
+  }
+  if (target === "gemini-cli" && !/^[a-zA-Z0-9-]+$/.test(manifest.id))
+    report.blocking.push({
+      capability: "name",
+      path: "id",
+      message: "Gemini extension names must match ^[a-zA-Z0-9-]+$",
+      blocking: true
+    });
   const output2 = /* @__PURE__ */ new Map();
   const copies = [];
   exportCogniaSkills({
@@ -9827,7 +12932,15 @@ function convertCogniaPlugin(files, target, options2) {
   exportCogniaSubagents({ manifest, output: output2, target, report });
   const settings = [];
   const removedValues = /* @__PURE__ */ new Set();
-  const mcp = exportMcpServers({ manifest, output: output2, target, report, settings, removedValues });
+  const mcp = exportMcpServers({
+    manifest,
+    output: output2,
+    target,
+    report,
+    settings,
+    removedValues,
+    fieldProjection: context.fieldProjection
+  });
   exportCommandHooks({ manifest, output: output2, target, report });
   exportRuntimeResources({
     manifest,
@@ -9849,7 +12962,7 @@ function convertCogniaPlugin(files, target, options2) {
   }
   if (report.blocking.length > 0) {
     report.fidelity = "unsupported";
-    throw new UnsupportedPluginConversionError("cognia", target, report);
+    throw new UnsupportedPluginConversionError("cognia", finalTarget, report);
   }
   const baseManifest = {
     name: manifest.id,
@@ -9887,6 +13000,7 @@ function convertCogniaPlugin(files, target, options2) {
           ...baseManifest,
           ...manifest.skills?.length ? { skills: "./skills" } : {},
           ...mcp ? { mcpServers: "./.mcp.json" } : {},
+          ...output2.has("hooks/hooks.json") ? { hooks: "./hooks/hooks.json" } : {},
           interface: {
             displayName: manifest.name,
             shortDescription: manifest.description
@@ -9917,7 +13031,7 @@ function convertCogniaPlugin(files, target, options2) {
 `
     );
   }
-  return {
+  const result = {
     source: "cognia",
     target,
     manifest,
@@ -9925,6 +13039,183 @@ function convertCogniaPlugin(files, target, options2) {
     copies,
     report
   };
+  if (context.fieldProjection && settings.length) PROJECTED_SETTINGS.set(result, settings);
+  return result;
+}
+function exportPiPackage(args) {
+  const { manifest, files, report, options: options2 } = args;
+  if (manifest.mcpServerPresets?.length)
+    report.blocking.push({
+      capability: "mcp-server-preset",
+      path: "mcpServerPresets",
+      message: "Pi core has no declarative MCP servers; an extension must call pi.registerMcpServer. Select hosted use or ship a Pi extension",
+      blocking: true
+    });
+  if (manifest.commandHooks && Object.keys(manifest.commandHooks).length)
+    report.blocking.push({
+      capability: "command-hooks",
+      path: "commandHooks",
+      message: "Pi hooks are extension event handlers (pi.on); a declarative command hook cannot become one",
+      blocking: true
+    });
+  let skills = manifest.skills ?? [];
+  const packages = manifest.piPackages ?? [];
+  if (packages.length === 1) {
+    const classified = classifySkillsForPiPackage({
+      skills,
+      files,
+      piPackage: packages[0]
+    });
+    report.blocking.push(...classified.collisions);
+    for (const id of classified.delivered)
+      report.converted.push({
+        capability: "skills",
+        path: `skills.${id}`,
+        message: `skill ${id} is delivered by the retained Pi package`,
+        blocking: false
+      });
+    skills = classified.remaining;
+  }
+  const exported = /* @__PURE__ */ new Map();
+  const exportedCopies = [];
+  exportCogniaSkills({
+    manifest: { ...manifest, skills },
+    files,
+    output: exported,
+    target: "pi",
+    report,
+    copies: exportedCopies,
+    binaryPaths: options2.binaryPaths
+  });
+  const probe = new Map(exported);
+  for (const copy of exportedCopies) if (!probe.has(copy.to)) probe.set(copy.to, "");
+  const semantics = checkSkillSemantics(probe, "pi", "export");
+  report.blocking.push(...semantics.blocking);
+  report.warnings.push(...semantics.warnings);
+  const plan = planPiExport({
+    manifest,
+    files,
+    exported,
+    exportedCopies,
+    binaryPaths: options2.binaryPaths,
+    generatedEntry: renderDist(manifest)
+  });
+  report.converted.push(...plan.issues.converted);
+  report.warnings.push(...plan.issues.warnings);
+  report.blocking.push(...plan.issues.blocking);
+  if (report.blocking.length > 0) {
+    report.fidelity = "unsupported";
+    throw new UnsupportedPluginConversionError("cognia", "pi", report);
+  }
+  report.warnings.push({
+    capability: "compatibility",
+    path: "package.json",
+    message: "Native Pi installation and execution require separate verification",
+    blocking: false
+  });
+  return {
+    source: "cognia",
+    target: "pi",
+    manifest,
+    files: plan.files,
+    copies: plan.copies,
+    report
+  };
+}
+function convertPiPlugin(files, options2) {
+  const plan = planPiImport(files);
+  const report = {
+    fidelity: plan.contextual ? "contextual" : "structured",
+    converted: [...plan.issues.converted],
+    warnings: [...plan.issues.warnings],
+    blocking: [...plan.issues.blocking]
+  };
+  const semantics = checkSkillSemantics(
+    files,
+    "pi",
+    "import",
+    plan.skillFiles.filter((path) => /(^|\/)SKILL\.md$/.test(path))
+  );
+  report.blocking.push(...semantics.blocking);
+  report.warnings.push(...semantics.warnings);
+  if (report.blocking.length > 0) {
+    report.fidelity = "unsupported";
+    throw new UnsupportedPluginConversionError("pi", "cognia", report);
+  }
+  const output2 = cloneFiles(files);
+  const converted = convertSkillFiles({
+    files,
+    declared: void 0,
+    output: output2,
+    report,
+    explicit: plan.skillFiles
+  });
+  const skills = [...converted.skills];
+  for (const prompt of plan.promptSkills) {
+    if (skills.some((skill) => skill.id === prompt.id)) {
+      report.blocking.push({
+        capability: "prompts",
+        path: `prompts.${prompt.id}`,
+        message: `Pi prompt /${prompt.name} and a Pi skill both become Cognia skill ${prompt.id}`,
+        blocking: true
+      });
+      continue;
+    }
+    skills.push(prompt);
+  }
+  for (const path of files.keys())
+    if (isPluginEnvironmentFile(path))
+      report.warnings.push({
+        capability: "secrets",
+        path,
+        message: "Environment files inside the Pi package are blanked; credentials are never copied",
+        blocking: false
+      });
+  return finalizeForeignConversion({
+    source: "pi",
+    output: output2,
+    metadata: metadataFromForeignManifest(plan.metadata, "package.json"),
+    contributions: {
+      skills,
+      subagents: [],
+      presets: [],
+      piPackages: [plan.piPackage],
+      needsFilesystem: true
+    },
+    report,
+    options: options2,
+    retainSourceManifests: true
+  });
+}
+var NORMALIZED_PROFILE = {
+  ...CLAUDE_FAMILY_PROFILES["claude-code"],
+  ignoredFields: {},
+  blockedFields: {},
+  unknownFields: "block",
+  blockedPaths: [],
+  requireDotSlashPaths: false,
+  nameRule: { pattern: /[\s\S]*/, message: "" }
+};
+var ECOSYSTEM_LABELS = {
+  cognia: "Cognia",
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  "gemini-cli": "Gemini CLI",
+  "agent-plugins": "Agent Plugins",
+  cursor: "Cursor",
+  copilot: "GitHub Copilot",
+  kimi: "Kimi CLI",
+  devin: "Devin",
+  opencode: "OpenCode",
+  pi: "Pi",
+  "factory-droid": "Factory Droid",
+  qoder: "Qoder CLI",
+  codebuddy: "CodeBuddy",
+  auggie: "Auggie",
+  "open-plugins": "Open Plugins"
+};
+function isClaudeFamily(value) {
+  return value in CLAUDE_FAMILY_PROFILES;
 }
 function convertPluginBundle(files, target, options2 = {}) {
   for (const path of files.keys()) {
@@ -9932,7 +13223,14 @@ function convertPluginBundle(files, target, options2 = {}) {
       throw new Error(`plugin source path must stay relative to the bundle: ${path}`);
     }
   }
-  const source = detectPluginEcosystem(files);
+  const detected = detectPluginBundle(files);
+  const source = detected.ecosystem;
+  const shadowWarnings = detected.shadowed.map((entry) => ({
+    capability: "format",
+    path: entry.path,
+    message: `${ECOSYSTEM_LABELS[entry.ecosystem]} manifest is also present; this conversion reads ${detected.manifestPath} (${ECOSYSTEM_LABELS[source]}) and does not convert it`,
+    blocking: false
+  }));
   let canonical;
   const platformTarget = (value) => value in PLATFORM_BUNDLE_PROFILES;
   const finish = (result) => {
@@ -9947,39 +13245,76 @@ function convertPluginBundle(files, target, options2 = {}) {
   };
   try {
     if (source === "cognia") canonical = loadCogniaPlugin(files);
-    else if (source === "claude-code") canonical = convertClaudePlugin(files, options2);
+    else if (isClaudeFamily(source))
+      canonical = convertClaudePlugin(files, options2, CLAUDE_FAMILY_PROFILES[source]);
     else if (source === "codex") canonical = convertCodexPlugin(files, options2);
     else if (source === "gemini-cli") canonical = convertGeminiPlugin(files, options2);
+    else if (source === "pi") canonical = convertPiPlugin(files, options2);
     else {
       const normalized = normalizePlatformBundle(files, source);
       if (normalized.blocking.length)
         throw new UnsupportedPluginConversionError(source, target, {
           fidelity: "unsupported",
           converted: [],
-          warnings: normalized.warnings,
+          warnings: [...shadowWarnings, ...normalized.warnings],
           blocking: normalized.blocking
         });
-      canonical = convertClaudePlugin(normalized.files, options2);
+      canonical = convertClaudePlugin(normalized.files, options2, NORMALIZED_PROFILE, {
+        explicitSkills: normalized.skills ?? [],
+        hookDefaults: false,
+        mcpMode: "replace",
+        settings: normalized.settings,
+        rootSkillResources: normalized.rootSkillResources
+      });
+      for (const path of normalized.transient) canonical.files.delete(path);
+      canonical.copies = canonical.copies.filter((copy) => !normalized.transient.has(copy.to));
       canonical.report.warnings.unshift(...normalized.warnings);
     }
-    if (target === "cognia") return finish(canonical);
-    const exportTarget = platformTarget(target) ? "claude-code" : target;
-    const result = convertCogniaPlugin(canonical.files, exportTarget, options2);
+    canonical.report.warnings.unshift(...shadowWarnings);
+    if (target === "cognia") {
+      if (source !== "cognia")
+        for (const [path, text] of canonical.files) {
+          const original = files.get(path);
+          if (original === void 0 || original === text) continue;
+          if (!isOverlayEntryAllowed(files, path, text)) canonical.files.set(path, original);
+        }
+      return finish(canonical);
+    }
+    const exportTarget = platformTarget(target) || isClaudeFamily(target) && target !== "claude-code" ? "claude-code" : target;
+    const result = convertCogniaPlugin(canonical.files, exportTarget, options2, {
+      finalTarget: target,
+      fieldProjection: target === "cursor" ? "cursor-variables" : void 0
+    });
     result.report.warnings.unshift(...canonical.report.warnings);
-    if (platformTarget(target)) {
+    if (exportTarget === "claude-code" && target !== "claude-code") {
       const nativeFiles = new Map(result.files);
       for (const copy of result.copies) if (!nativeFiles.has(copy.to)) nativeFiles.set(copy.to, "");
-      const projected = projectPlatformBundle(nativeFiles, target);
+      const projected = platformTarget(target) ? projectPlatformBundle(nativeFiles, target, {
+        variables: (PROJECTED_SETTINGS.get(result) ?? []).map((setting) => ({
+          envVar: String(setting.envVar),
+          name: String(setting.name),
+          description: typeof setting.description === "string" ? setting.description : void 0,
+          sensitive: Boolean(setting.sensitive)
+        }))
+      }) : projectClaudeFamilyBundle(
+        nativeFiles,
+        CLAUDE_FAMILY_PROFILES[target]
+      );
       result.report.warnings.push(...projected.warnings);
       result.report.blocking.push(...projected.blocking);
       if (projected.blocking.length) {
         result.report.fidelity = "unsupported";
         throw new UnsupportedPluginConversionError(source, target, result.report);
       }
+      const relocated = /* @__PURE__ */ new Map();
+      for (const copy of result.copies) {
+        const to = target === "opencode" && copy.to.startsWith("skills/") ? `.opencode/${copy.to}` : target === "kimi" && /^skills\/[^/]+\//.test(copy.to) ? copy.to.replace(/^skills\/[^/]+\//, "") : copy.to;
+        relocated.set(copy.to, to);
+      }
       result.files = projected.files;
       result.copies = result.copies.map((copy) => ({
         ...copy,
-        to: target === "opencode" && copy.to.startsWith("skills/") ? `.opencode/${copy.to}` : copy.to
+        to: relocated.get(copy.to) ?? copy.to
       }));
       for (const copy of result.copies) result.files.delete(copy.to);
     }
@@ -9987,6 +13322,8 @@ function convertPluginBundle(files, target, options2 = {}) {
   } catch (error) {
     if (!(error instanceof UnsupportedPluginConversionError)) throw error;
     const report = { ...error.report, fidelity: "unsupported" };
+    if (!report.warnings.some((issue2) => shadowWarnings.includes(issue2)))
+      report.warnings = [...shadowWarnings, ...report.warnings];
     report.delivery = assessPluginDelivery({ manifest: canonical?.manifest, report, target });
     throw new UnsupportedPluginConversionError(source, target, report);
   }
@@ -10265,7 +13602,7 @@ function runEcosystemConvertCli(argv, io) {
     pluginId: result.manifest.id,
     dir: outputDir,
     files: written.sort(),
-    warnings: result.report.warnings.map((issue) => `${issue.path}: ${issue.message}`),
+    warnings: result.report.warnings.map((issue2) => `${issue2.path}: ${issue2.message}`),
     report: result.report
   };
 }

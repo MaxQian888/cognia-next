@@ -1,6 +1,10 @@
 import {
+  HOST_CONFIG_CAPABILITIES,
   HOST_CONFIG_COMMANDS,
+  HostCogniaModelUpdateRequiredError,
   HostConfigsUnsupportedError,
+  fetchHostCogniaModels,
+  hostSupportsCogniaModelTurns,
   admitRemoteExternalRun,
   createRemoteHostConfig,
   deleteRemoteHostConfig,
@@ -309,5 +313,83 @@ describe("run admission", () => {
   it("swallows a release refused by the handshake", async () => {
     setup({ getRuntimeSnapshot: snapshot(undefined) })
     await expect(releaseRemoteExternalRun("run-1")).resolves.toBeUndefined()
+  })
+})
+
+// Host-lane Cognia models (ADR-0090, 2026-10-02).
+describe("fetchHostCogniaModels", () => {
+  const catalog = {
+    supported: true,
+    providers: [{ providerId: "p", providerName: "P", models: [{ id: "m", name: "M" }] }],
+  }
+
+  it("asks the Host for the catalog of one configuration, without a lease", async () => {
+    setup({}, catalog)
+    await expect(fetchHostCogniaModels("eac_1")).resolves.toEqual(catalog)
+    expect(calls).toEqual([
+      { command: HOST_CONFIG_COMMANDS.cogniaModels, payload: { configId: "eac_1" } },
+    ])
+    expect(leaseOperations).toEqual([])
+  })
+
+  it("answers host-update-required as data for a Host that does not advertise it", async () => {
+    setup({
+      getRuntimeSnapshot: snapshot({
+        compatible: true,
+        operations: ALL_OPS.filter((op) => op !== HOST_CONFIG_COMMANDS.cogniaModels),
+      }),
+    })
+    await expect(fetchHostCogniaModels("eac_1")).resolves.toEqual({
+      supported: false,
+      reason: "host-update-required",
+    })
+    expect(calls).toEqual([])
+  })
+
+  it("still refuses loudly when no Host is paired", async () => {
+    setup({ getRuntimeSnapshot: snapshot(null) })
+    await expect(fetchHostCogniaModels("eac_1")).rejects.toBeInstanceOf(HostConfigsUnsupportedError)
+  })
+
+  it("passes a Host's own refusal reason through", async () => {
+    setup({}, { supported: false, reason: "account-locked" })
+    await expect(fetchHostCogniaModels("eac_1")).resolves.toEqual({
+      supported: false,
+      reason: "account-locked",
+    })
+  })
+
+  it("rejects a malformed answer rather than rendering it", async () => {
+    setup({}, { supported: true, providers: [{ providerId: "p" }] })
+    await expect(fetchHostCogniaModels("eac_1")).rejects.toThrow("malformed Cognia model catalog")
+  })
+})
+
+describe("Cognia model turns", () => {
+  it("are supported by local authority", () => {
+    setup({ hasLocalAuthority: () => true })
+    expect(hostSupportsCogniaModelTurns()).toBe(true)
+  })
+
+  it("follow the capability marker on a paired Host", () => {
+    setup({
+      isRemoteHostActive: () => true,
+      activeHostFeatureManifest: () =>
+        manifest([...ALL_OPS, HOST_CONFIG_CAPABILITIES.runTurnCogniaModel]),
+    })
+    expect(hostSupportsCogniaModelTurns()).toBe(true)
+    setup({ isRemoteHostActive: () => true, activeHostFeatureManifest: () => manifest() })
+    expect(hostSupportsCogniaModelTurns()).toBe(false)
+  })
+
+  it("names the update as a structured, translatable refusal", () => {
+    const error = new HostCogniaModelUpdateRequiredError()
+    expect(error).toBeInstanceOf(HostConfigsUnsupportedError)
+    expect(error).toMatchObject({
+      code: "host-update-required",
+      i18nKey: "externalAgent.cogniaModel.hostUpdateRequired",
+      reason: "unsupported",
+      operation: HOST_CONFIG_CAPABILITIES.runTurnCogniaModel,
+    })
   })
 })

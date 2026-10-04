@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const listSdkSessions = jest.fn()
@@ -18,6 +18,8 @@ const replaceSessionMessages = jest.fn()
 const setActiveSession = jest.fn()
 const routerPush = jest.fn()
 const toastError = jest.fn()
+const toastSuccess = jest.fn()
+const clearSessionSdkLink = jest.fn()
 let mockSessionStoreEnabled = true
 
 jest.mock("@/lib/claude/ipc", () => ({
@@ -36,7 +38,30 @@ jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) })
 jest.mock("@/lib/db/sessions", () => ({
   listSessions: (...args: unknown[]) => listChatSessions(...args),
   updateSession: jest.fn(async () => undefined),
+  clearSessionSdkLink: (...args: unknown[]) => clearSessionSdkLink(...args),
 }))
+// The linked-chat read is a Dexie live query in the app; here it resolves the
+// mocked `listSessions` once per mount, which is all the badge needs.
+jest.mock("@/hooks/data/use-client-live-query", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react") as typeof import("react")
+  return {
+    useClientLiveQuery: <T,>(query: () => Promise<T> | T) => {
+      const [value, setValue] = React.useState<T | undefined>(undefined)
+      React.useEffect(() => {
+        let live = true
+        void Promise.resolve(query()).then((next) => {
+          if (live) setValue(next)
+        })
+        return () => {
+          live = false
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [])
+      return value
+    },
+  }
+})
 jest.mock("@/lib/db/messages", () => ({
   persistMessages: (...args: unknown[]) => persistMessages(...args),
 }))
@@ -78,7 +103,10 @@ jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
   subscribeToAgentExecutionFlags: () => () => {},
 }))
 jest.mock("sonner", () => ({
-  toast: { error: (...args: unknown[]) => toastError(...args), success: jest.fn() },
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    success: (...args: unknown[]) => toastSuccess(...args),
+  },
 }))
 
 import { SdkSessionManager } from "./sdk-session-manager"
@@ -112,6 +140,7 @@ beforeEach(() => {
   listChatSessions.mockResolvedValue([])
   persistMessages.mockResolvedValue(undefined)
   startNewSession.mockResolvedValue({ id: "chat-new" })
+  clearSessionSdkLink.mockResolvedValue(undefined)
 })
 
 describe("SdkSessionManager", () => {
@@ -325,7 +354,7 @@ describe("SdkSessionManager", () => {
       screen.getByText("The SDK returned a partial page of this transcript.")
     ).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "agent-1" }))
+    await user.click(screen.getByRole("button", { name: "Subagent agent-1" }))
     await waitFor(() =>
       expect(getSdkSubagentMessages).toHaveBeenCalledWith(
         "sdk-1",
@@ -345,11 +374,13 @@ describe("SdkSessionManager", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue in Chat" }))
 
-    await waitFor(() => expect(setActiveSession).toHaveBeenCalledWith("chat-existing"))
+    // Navigates through the session link, which switches to the chat's
+    // workspace before focusing it; a store-only switch left Settings on screen.
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/?session=chat-existing"))
+    expect(setActiveSession).not.toHaveBeenCalled()
     expect(getSdkSessionMessages).not.toHaveBeenCalled()
     expect(startNewSession).not.toHaveBeenCalled()
     expect(persistMessages).not.toHaveBeenCalled()
-    expect(routerPush).toHaveBeenCalledWith("/")
   })
 
   it("creates and seeds a Chat binding from the native transcript", async () => {
@@ -395,8 +426,8 @@ describe("SdkSessionManager", () => {
       ])
     )
     expect(replaceSessionMessages).toHaveBeenCalledWith("chat-new", expect.any(Array))
-    expect(setActiveSession).toHaveBeenCalledWith("chat-new")
-    expect(routerPush).toHaveBeenCalledWith("/")
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/?session=chat-new"))
+    expect(setActiveSession).not.toHaveBeenCalled()
   })
 
   it("keeps available details visible when one SDK details request fails", async () => {
@@ -461,7 +492,6 @@ describe("SdkSessionManager", () => {
     render(<SdkSessionManager />)
     expect(await screen.findByText("Stored")).toBeInTheDocument()
     const row = screen.getByText("Stored").closest("li")!
-    const { within } = await import("@testing-library/react")
     await user.click(within(row).getByRole("button", { name: "Fork SDK session" }))
     await waitFor(() =>
       expect(forkSdkSession).toHaveBeenCalledWith(
@@ -478,5 +508,185 @@ describe("SdkSessionManager", () => {
       )
     )
     expect(screen.getByText("Disk")).toBeInTheDocument()
+  })
+  it("renders a busy skeleton instead of an empty list while the first load is in flight", async () => {
+    let resolve: (rows: unknown[]) => void = () => {}
+    listSdkSessions.mockImplementation(
+      (_params, options) =>
+        new Promise((done) => {
+          if (options?.claudeAgentSdk?.sessionStore) done([])
+          else resolve = done
+        })
+    )
+    render(<SdkSessionManager />)
+    const block = screen.getByTestId("sdk-session-manager")
+    expect(block.querySelector('[aria-busy="true"]')).not.toBeNull()
+    expect(within(block).queryByRole("list")).not.toBeInTheDocument()
+    expect(screen.queryByText("No native SDK sessions were found.")).not.toBeInTheDocument()
+
+    await waitFor(() => expect(listSdkSessions).toHaveBeenCalled())
+    resolve([{ sessionId: "sdk-1", summary: "Fix auth", lastModified: 10, cwd: "/repo" }])
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    expect(block.querySelector('[aria-busy="true"]')).toBeNull()
+  })
+
+  it("puts the count in the header badge and the refresh in the header action", async () => {
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    const block = screen.getByTestId("sdk-session-manager")
+    expect(within(block).getByText(/^1 native session/)).toBeInTheDocument()
+    expect(within(block).getByRole("button", { name: "Refresh SDK sessions" })).toBeEnabled()
+  })
+
+  it("sorts rows newest first and shows when each was last modified", async () => {
+    listSdkSessions.mockImplementation(async (_params, options) =>
+      options?.claudeAgentSdk?.sessionStore
+        ? []
+        : [
+            { sessionId: "old", summary: "Older work", lastModified: 1_000, cwd: "/a" },
+            { sessionId: "new", summary: "Newer work", lastModified: 5_000, cwd: "/b" },
+          ]
+    )
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Newer work")).toBeInTheDocument()
+    const items = within(screen.getByRole("list")).getAllByRole("listitem")
+    expect(items.map((item) => within(item).getByText(/work$/).textContent)).toEqual([
+      "Newer work",
+      "Older work",
+    ])
+    // The global next-intl mock renders relativeTime as the ISO instant.
+    expect(
+      within(items[0]!).getByText(`Updated ${new Date(5_000).toISOString()}`)
+    ).toBeInTheDocument()
+  })
+
+  it("marks a native session a Cognia chat resumes and opens that chat from the badge", async () => {
+    const user = userEvent.setup()
+    listChatSessions.mockResolvedValue([
+      { id: "chat-1", title: "Auth chat", sdkSessionId: "sdk-1", updatedAt: 2 },
+      // Embedded rows resume SDK sessions too, but are not openable chats.
+      { id: "wf", kind: "workflow-editor", sdkSessionId: "sdk-1", updatedAt: 9 },
+    ])
+    render(<SdkSessionManager />)
+    const badge = await screen.findByRole("button", { name: "Open the linked chat “Auth chat”" })
+    expect(badge).toHaveTextContent(/Linked to/)
+    await user.click(badge)
+    expect(routerPush).toHaveBeenCalledWith("/?session=chat-1")
+  })
+
+  it("shows no linked badge for a chat bound to another storage copy", async () => {
+    listChatSessions.mockResolvedValue([
+      {
+        id: "chat-store",
+        title: "Stored",
+        sdkSessionId: "sdk-1",
+        sdkSessionStorage: { backend: "host-sqlite", workspace: "/repo" },
+      },
+    ])
+    mockSessionStoreEnabled = false
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    await waitFor(() => expect(listChatSessions).toHaveBeenCalled())
+    expect(screen.queryByText(/Linked to/)).not.toBeInTheDocument()
+  })
+
+  it("clears the link of every chat bound to a deleted native session", async () => {
+    const user = userEvent.setup()
+    listChatSessions.mockResolvedValue([
+      { id: "chat-1", title: "Auth chat", sdkSessionId: "sdk-1", updatedAt: 2 },
+      { id: "wf", kind: "workflow-editor", sdkSessionId: "sdk-1", updatedAt: 1 },
+      { id: "other", sdkSessionId: "sdk-9", updatedAt: 3 },
+    ])
+    render(<SdkSessionManager />)
+    expect(
+      await screen.findByRole("button", { name: "Open the linked chat “Auth chat”" })
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Delete SDK session" }))
+    expect(
+      screen.getByText(/2 linked Cognia chats keep their messages/, { exact: false })
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }))
+
+    await waitFor(() => expect(clearSessionSdkLink).toHaveBeenCalledTimes(2))
+    expect(clearSessionSdkLink).toHaveBeenCalledWith("chat-1")
+    expect(clearSessionSdkLink).toHaveBeenCalledWith("wf")
+    expect(clearSessionSdkLink).not.toHaveBeenCalledWith("other")
+    expect(toastSuccess).toHaveBeenCalledWith("SDK session deleted.")
+  })
+
+  it("does not touch chat links when the native delete fails", async () => {
+    const user = userEvent.setup()
+    deleteSdkSession.mockRejectedValueOnce(new Error("raw"))
+    listChatSessions.mockResolvedValue([{ id: "chat-1", sdkSessionId: "sdk-1" }])
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Delete SDK session" }))
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("The SDK session could not be deleted.")
+    )
+    expect(clearSessionSdkLink).not.toHaveBeenCalled()
+  })
+
+  it("says so when a linked chat could not be unlinked after the delete", async () => {
+    const user = userEvent.setup()
+    listChatSessions.mockResolvedValue([{ id: "chat-1", sdkSessionId: "sdk-1" }])
+    clearSessionSdkLink.mockRejectedValueOnce(new Error("handoff lock"))
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Delete SDK session" }))
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "The SDK session was deleted, but a linked chat could not be unlinked. Unlink it from the SDK-bound conversations list."
+      )
+    )
+    expect(toastSuccess).not.toHaveBeenCalledWith("SDK session deleted.")
+  })
+
+  it("submits the rename dialog on Enter and disables Save while the rename runs", async () => {
+    const user = userEvent.setup()
+    let finish: () => void = () => {}
+    renameSdkSession.mockImplementationOnce(
+      () =>
+        new Promise<void>((done) => {
+          finish = done
+        })
+    )
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Rename SDK session" }))
+    const input = screen.getByRole("textbox", { name: "Session title" })
+    await user.clear(input)
+    await user.type(input, "Via enter{Enter}")
+    await waitFor(() =>
+      expect(renameSdkSession).toHaveBeenCalledWith("sdk-1", "Via enter", expect.anything())
+    )
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    finish()
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("submits the tag dialog on Enter", async () => {
+    const user = userEvent.setup()
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Edit SDK session tag" }))
+    const input = screen.getByRole("textbox", { name: "Session tag" })
+    await user.clear(input)
+    await user.type(input, "review{Enter}")
+    await waitFor(() =>
+      expect(tagSdkSession).toHaveBeenCalledWith("sdk-1", "review", expect.anything())
+    )
+  })
+
+  it("widens the details dialog past the base sm:max-w-lg cap", async () => {
+    const user = userEvent.setup()
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Inspect SDK session" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog.className).toContain("sm:max-w-4xl")
   })
 })

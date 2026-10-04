@@ -1,5 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
+import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import type { CompanionConfig } from "@/lib/tauri/companion-storage"
+import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import { BridgeWorkspacePanel, toggleWorkspaceGrant } from "./workspace-panel"
 
@@ -24,13 +27,56 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (select: (state: typeof projectsState) => unknown) => select(projectsState),
 }))
 
-jest.mock("@/lib/external-bridge/tauri-control", () => ({
-  isHostManagedBridgeAvailable: jest.fn(() => true),
-  listExternalBridgeClients: jest.fn(async () => [
+/** Each host keeps its own credential store; the mock answers for the active one. */
+const clientsByHost: Record<string, unknown[]> = {
+  h1: [
     { id: "cli-1", name: "Cursor", scopes: [], createdAt: 0 },
     { id: "old", name: "Revoked", scopes: [], createdAt: 0, revokedAt: 1 },
-  ]),
+  ],
+  h2: [{ id: "cli-2", name: "Zed", scopes: [], createdAt: 0 }],
+}
+const mockListClients = jest.fn(async () => {
+  const { useRemoteHostStore: store } = jest.requireActual("@/stores/remote-host/remote-host-store")
+  return clientsByHost[store.getState().activeHostId ?? ""] ?? []
+})
+jest.mock("@/lib/external-bridge/tauri-control", () => ({
+  listExternalBridgeClients: () => mockListClients(),
 }))
+
+/** A ready host whose manifest advertises the host-managed bridge (or not). */
+function remoteHost(id: string, managed: boolean): RemoteHost {
+  return {
+    id,
+    label: id,
+    config: { baseUrl: `https://${id}.example`, serverVersion: "1.0.0" } as CompanionConfig,
+    credentialRef: `remote-host:${id}`,
+    addedAt: 1,
+    connectionState: "ready",
+    ...(managed
+      ? {
+          featureManifest: {
+            schemaVersion: 1,
+            hostBuildId: "1.0.0",
+            platform: "headless",
+            generatedAt: 1,
+            features: {
+              "external-bridge.lifecycle": { version: 1, operations: ["external_bridge_status"] },
+            },
+            limits: {},
+          } as unknown as HostFeatureManifest,
+        }
+      : {}),
+  }
+}
+
+const initialHostStore = useRemoteHostStore.getState()
+function driveHost(activeHostId: string | null) {
+  useRemoteHostStore.setState({
+    hosts: [remoteHost("h1", true), remoteHost("h2", true), remoteHost("h3", false)],
+    activeHostId,
+  })
+}
+afterAll(() => useRemoteHostStore.setState(initialHostStore, true))
 jest.mock("@/lib/db/projects", () => ({ getAllProjects: jest.fn() }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn() }))
 
@@ -55,6 +101,8 @@ describe("toggleWorkspaceGrant", () => {
 
 describe("BridgeWorkspacePanel", () => {
   beforeEach(() => {
+    mockListClients.mockClear()
+    driveHost("h1")
     projectsState.projects = [
       {
         id: "p1",
@@ -99,5 +147,44 @@ describe("BridgeWorkspacePanel", () => {
     projectsState.projects = []
     await renderPanel(base())
     expect(screen.getByTestId("bridge-workspace-no-roots")).toBeInTheDocument()
+  })
+
+  /**
+   * The list belongs to the host being driven. It used to be fetched once on
+   * mount, so after a switch the panel kept offering grants for credentials
+   * the new host has never issued.
+   */
+  it("refetches the client list when the active host changes, with no prop change", async () => {
+    await renderPanel(base())
+    expect(screen.getByTestId("bridge-workspace-caller-mcp:cli-1")).toBeInTheDocument()
+
+    await act(async () => driveHost("h2"))
+    expect(screen.queryByTestId("bridge-workspace-caller-mcp:cli-1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("bridge-workspace-caller-mcp:cli-2")).toBeInTheDocument()
+    expect(mockListClients).toHaveBeenCalledTimes(2)
+  })
+
+  it("drops host-managed clients on a host without the managed bridge, and on local", async () => {
+    await renderPanel(base())
+    expect(screen.getByTestId("bridge-workspace-caller-mcp:cli-1")).toBeInTheDocument()
+
+    await act(async () => driveHost("h3"))
+    expect(screen.queryByTestId("bridge-workspace-caller-mcp:cli-1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("bridge-workspace-caller-mcp:stdio")).toBeInTheDocument()
+
+    await act(async () => driveHost(null))
+    expect(screen.queryByTestId("bridge-workspace-caller-mcp:cli-1")).not.toBeInTheDocument()
+    // Neither of those has a client store to ask.
+    expect(mockListClients).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not refetch on an unrelated store write", async () => {
+    await renderPanel(base())
+    await act(async () =>
+      useRemoteHostStore.setState((state) => ({
+        hosts: state.hosts.map((host) => (host.id === "h2" ? { ...host, label: "renamed" } : host)),
+      }))
+    )
+    expect(mockListClients).toHaveBeenCalledTimes(1)
   })
 })

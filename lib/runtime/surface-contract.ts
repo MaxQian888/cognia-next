@@ -106,6 +106,18 @@ export const SURFACE_CONTRACTS = [
     companion: "hidden",
     offline: "local",
   },
+  {
+    // The conversation manager (ADR-0213) is the chat's own data seen as a
+    // table, so it runs wherever the chat does: a paired client reads the
+    // Host's mirrored sessions and every write is a Host intent
+    // (`lib/chat/session-archive-writes.ts`).
+    id: "conversations",
+    route: "/conversations",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
   { id: "fleet", route: "/fleet", standalone: "hidden", companion: "remote", offline: "blocked" },
   {
     id: "workflows",
@@ -322,13 +334,18 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    // Capability-driven since ADR-0035's 2026-08-13 update: this window's
+    // Renderer metrics and encrypted captures need no host at all, and the
+    // host sections appear only when the selected host's lease is live (each
+    // one explains its own absence). It used to be `standalone: "hidden"`
+    // and gated on the sidecar, so web and a phone with its host offline got
+    // "needs a paired desktop" instead of the metrics they can measure.
     id: "performance",
     route: "/performance",
     navigation: true,
-    operation: "claude_sidecar_status",
-    standalone: "hidden",
-    companion: "remote",
-    offline: "cached-read",
+    standalone: "full",
+    companion: "full",
+    offline: "local",
   },
   {
     id: "logs",
@@ -648,6 +665,13 @@ export function resolveSurfaceAvailability(
     return { state: "incompatible", reason: "host-protocol" }
   }
   if (snapshot.connectionState !== "online") {
+    // `offline: "local"` is the contract saying this surface runs in the
+    // client and needs no live host: the `/me` hub (which is also the way to
+    // the connection settings), `/discover`, `/creator`. It used to fall into
+    // the `blocked` arm, so a host that was merely reconnecting walled the
+    // phone out of its own settings, and the remedy for being offline sat
+    // behind the offline page.
+    if (contract.offline === "local") return { state: "available", reason: "local-executor" }
     return contract.offline === "cached-read"
       ? { state: "read-only", reason: "offline-cache" }
       : { state: "offline", reason: "connection-offline" }

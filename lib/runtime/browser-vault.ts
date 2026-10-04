@@ -118,6 +118,37 @@ export class BrowserVaultRepository {
     await this.db.vaults.put(record)
   }
 
+  /** Keep the old wrap until the enrollment metadata has durably accepted its replacement. */
+  async commitQuickUnlockWrap(
+    expected: BrowserVaultRecord,
+    method: QuickUnlockMethod,
+    entry: QuickUnlockWrap,
+    now: number,
+    persist?: (wrap: QuickUnlockWrap) => Promise<void>
+  ): Promise<void> {
+    await this.db.transaction("rw", this.db.vaults, async () => {
+      const current = await this.db.vaults.get(expected.accountId)
+      if (
+        !current ||
+        current.passwordWrap.ciphertext !== expected.passwordWrap.ciphertext ||
+        current.passwordWrap.iv !== expected.passwordWrap.iv
+      ) {
+        throw new Error("Browser Vault changed during quick-unlock enrollment")
+      }
+      await this.db.vaults.put({
+        ...current,
+        quickWraps: { ...current.quickWraps, [method]: entry },
+        updatedAt: now,
+      })
+      if (persist) {
+        // The registry owns a different IndexedDB database. Keep this
+        // transaction alive while its independent write completes; rejection
+        // aborts this tentative wrap without an unreliable compensating put.
+        await Dexie.waitFor(Dexie.ignoreTransaction(() => persist(entry)))
+      }
+    })
+  }
+
   async delete(localAccountId: string): Promise<void> {
     const normalized = assertAccountId(localAccountId)
     await this.db.transaction("rw", this.db.vaults, this.db.secrets, async () => {
@@ -411,6 +442,7 @@ export async function enrollBrowserVaultQuickUnlock(args: {
   canonicalSecret: string
   pepper: Uint8Array
   now?: number
+  persist?: (wrap: QuickUnlockWrap) => Promise<void>
 }): Promise<QuickUnlockWrap> {
   const { accountId: localAccountId, method, password, canonicalSecret, pepper } = args
   const now = args.now ?? Date.now()
@@ -436,11 +468,7 @@ export async function enrollBrowserVaultQuickUnlock(args: {
       wrap,
       createdAt: now,
     }
-    await repository().put({
-      ...record,
-      quickWraps: { ...(record.quickWraps ?? {}), [method]: entry },
-      updatedAt: now,
-    })
+    await repository().commitQuickUnlockWrap(record, method, entry, now, args.persist)
     return entry
   } finally {
     zeroBytes(masterBytes)
@@ -459,6 +487,10 @@ export async function unlockBrowserVaultWithQuickSecret(args: {
   method: QuickUnlockMethod
   canonicalSecret: string
   pepper: Uint8Array
+  /** Prevent a late derivation from replacing a newer account's active session. */
+  isCurrent?: () => boolean
+  /** Revoke only this session if its caller is cancelled before activation. */
+  onSessionOpened?: (revoke: () => void) => void
 }): Promise<void> {
   const { accountId: localAccountId, method, canonicalSecret, pepper } = args
   const record = await repository().get(localAccountId)
@@ -484,8 +516,16 @@ export async function unlockBrowserVaultWithQuickSecret(args: {
         localAccountId,
         await importAesKey(masterBytes, ["encrypt", "decrypt"])
       )
+      if (args.isCurrent && !args.isCurrent()) {
+        session.lock()
+        throw new Error("Account changed during quick unlock")
+      }
       activeBrowserVaultSession?.lock()
       activeBrowserVaultSession = session
+      args.onSessionOpened?.(() => {
+        session.lock()
+        if (activeBrowserVaultSession === session) activeBrowserVaultSession = null
+      })
     } finally {
       zeroBytes(masterBytes)
     }

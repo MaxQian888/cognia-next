@@ -8,6 +8,7 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   getLatestUsage,
   getModelContextWindow,
+  resolveContextWindowUsage,
   sumSessionUsage,
   tokensInWindow,
 } from "./usage"
@@ -366,5 +367,34 @@ describe("getLatestRunProviderId", () => {
   // "Compact now" on the sidecar turn that followed it.
   it("does not let an older turn answer for an unstamped newest one", () => {
     expect(getLatestRunProviderId([assistant({ providerId: "external" }), assistant()])).toBeNull()
+  })
+})
+
+describe("resolveContextWindowUsage", () => {
+  it("prefers the SDK's live window and occupancy", () => {
+    const win = resolveContextWindowUsage(
+      { totalTokens: 50_000, maxTokens: 200_000, percentage: 25 },
+      { inputTokens: 1 },
+      "claude-sonnet-4-6"
+    )
+    expect(win).toMatchObject({
+      used: 50_000,
+      max: 200_000,
+      fraction: 0.25,
+      reported: true,
+      windowSource: "agent",
+      compactThresholdTokens: Math.round(200_000 * AUTO_COMPACT_FRACTION),
+    })
+  })
+
+  it("falls back to the message-derived estimate without a usable snapshot", () => {
+    const usage: UsageInfo = { inputTokens: 1000, outputTokens: 10 }
+    expect(resolveContextWindowUsage(null, usage, "x", 10_000)).toEqual(
+      computeContextWindowUsage(usage, "x", 10_000)
+    )
+    expect(
+      resolveContextWindowUsage({ totalTokens: 1, maxTokens: 0, percentage: 0 }, usage, "x", 10_000)
+        .windowSource
+    ).toBe("override")
   })
 })

@@ -1,0 +1,74 @@
+# Local-only overlay for docker-compose.yml. Use a separate Compose project
+# and an ignored .env.logto.local; see LOGTO.md. Pin freshly pulled digests.
+services:
+  logto-postgres:
+    image: ${POSTGRES_IMAGE:?set the pulled PostgreSQL image digest}
+    environment:
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/logto_db_password
+    secrets: [logto_db_password]
+    networks: [logto-data]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    logging: &local-logging
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+  logto-redis:
+    image: ${REDIS_IMAGE:?set the pulled Redis image digest}
+    command: [redis-server, --appendonly, "yes", --save, "60", "1"]
+    networks: [logto-data]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    logging: *local-logging
+
+  logto:
+    image: ${LOGTO_IMAGE:?set the pulled Logto image digest}
+    entrypoint:
+      - sh
+      - -ec
+      - export DB_URL="postgres://postgres:$$(cat /run/secrets/logto_db_password)@logto-postgres:5432/logto"; npm run cli db seed -- --swe; exec npm start
+    environment:
+      DB_URL: ""
+      PORT: "3301"
+      ADMIN_PORT: "3302"
+      ENDPOINT: http://logto.localhost:3301
+      ADMIN_ENDPOINT: http://localhost:3302
+      TRUST_PROXY_HEADER: "0"
+      NODE_ENV: production
+      NPM_CONFIG_CACHE: /tmp/npm-cache
+    # Replace the base ports instead of merging and accidentally exposing both.
+    ports: !override
+      - "127.0.0.1:3301:3301"
+      - "127.0.0.1:3302:3302"
+    secrets: [logto_db_password]
+    networks:
+      logto-data: {}
+      default:
+        aliases: [logto.localhost]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3301/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,nosuid,nodev
+      # The CLI stages bundled migration scripts here even for first-time seed.
+      - /etc/logto/packages/cli/alteration-scripts:size=32m,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 256
+    mem_limit: 1536m
+    logging: *local-logging
+
+networks:
+  logto-data:
+    internal: true
+
+secrets:
+  logto_db_password:
+    file: ${LOGTO_DB_PASSWORD_FILE:?set the private database password file}

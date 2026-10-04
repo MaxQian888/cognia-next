@@ -23,8 +23,17 @@ jest.mock("@/lib/logging", () => ({
 }))
 
 jest.mock("@/components/logging", () => ({
-  LogPanel: (props: { sources?: string[] }) => (
-    <div data-testid="log-panel" data-sources={JSON.stringify(props.sources)} />
+  LogPanel: (props: {
+    sources?: string[]
+    storageScope?: string
+    hideToolbarPresets?: boolean
+  }) => (
+    <div
+      data-testid="log-panel"
+      data-sources={JSON.stringify(props.sources)}
+      data-storage-scope={props.storageScope}
+      data-hide-presets={String(Boolean(props.hideToolbarPresets))}
+    />
   ),
 }))
 
@@ -205,6 +214,13 @@ describe("McpHealthTab", () => {
     render(<McpHealthTab />)
     const panel = await screen.findByTestId("log-panel")
     expect(panel).toHaveAttribute("data-sources", JSON.stringify(["mcp"]))
+  })
+
+  it("gives the embed its own live-follow preference and keeps presets reachable", async () => {
+    render(<McpHealthTab />)
+    const panel = await screen.findByTestId("log-panel")
+    expect(panel).toHaveAttribute("data-storage-scope", "settings-mcp")
+    expect(panel).toHaveAttribute("data-hide-presets", "false")
   })
 
   it("wraps the audit table in a horizontal-scroll container for narrow screens", async () => {

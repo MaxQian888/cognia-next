@@ -82,6 +82,103 @@ export function formatRunElapsed(ms: number): string {
   return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`
 }
 
+// ── Finished-turn duration ──────────────────────────────────────────────────
+
+/** Per-tool timing keyed by `toolCallId`, as the chat-store slice keeps it. */
+type ToolTimestampLookup = Readonly<Record<string, { startedAt: number; endedAt?: number }>>
+
+function finiteMs(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function positiveMs(value: unknown): number | null {
+  const ms = finiteMs(value)
+  return ms != null && ms > 0 ? ms : null
+}
+
+function metadataOf(message: UIMessage): Record<string, unknown> {
+  const meta = (message as { metadata?: unknown }).metadata
+  return meta && typeof meta === "object" ? (meta as Record<string, unknown>) : {}
+}
+
+/**
+ * How long the most recent *finished* turn took, from what the transcript
+ * itself recorded — or `null` when nothing recorded can say.
+ *
+ * The live `RunTiming` cannot answer this: `nextRunTiming` clears it to
+ * {@link IDLE_TIMING} the moment a turn settles, and it is never persisted, so
+ * a "last run" summary that read it always rendered `0s` — for a turn that ran
+ * for minutes. A turn is the trailing assistant messages after the last
+ * non-assistant one (the same boundary `deriveRunRecord` uses). In order:
+ *
+ * 1. A duration the turn was sealed with, newest message first: the run stamp's
+ *    `durationMs` (the runtime's own report), its `completedAt − startedAt`,
+ *    or the SDK usage's `durationMs`. A reported `0` is not a duration — a
+ *    non-SDK turn reports exactly that — so it falls through.
+ * 2. A span over the turn's own timestamps: from the earliest start signal
+ *    (the prompt's and the turn messages' `createdAt`, the run stamp's
+ *    `startedAt`, a tool's `startedAt`) to the latest *finish* signal (the
+ *    run stamp's `completedAt`, a tool's `endedAt`). A message's `createdAt`
+ *    is when its row was first written — the start of that message, not its
+ *    end — so it never closes a span: a one-message turn would otherwise read
+ *    as a second or two however long it ran, the same lie as `0s`.
+ *
+ * Unknown stays unknown: callers omit the duration rather than invent one.
+ */
+export function lastTurnElapsedMs(
+  messages: readonly UIMessage[],
+  toolTimestamps?: ToolTimestampLookup
+): number | null {
+  let firstTurnIndex = messages.length
+  while (firstTurnIndex > 0 && messages[firstTurnIndex - 1]!.role === "assistant") {
+    firstTurnIndex -= 1
+  }
+  if (firstTurnIndex === messages.length) return null
+  const turn = messages.slice(firstTurnIndex)
+  const prompt = firstTurnIndex > 0 ? messages[firstTurnIndex - 1] : undefined
+
+  for (let i = turn.length - 1; i >= 0; i -= 1) {
+    const meta = metadataOf(turn[i]!)
+    const run = asRecord(meta.run)
+    const reported = positiveMs(run.durationMs)
+    if (reported != null) return reported
+    const runStarted = finiteMs(run.startedAt)
+    const runCompleted = finiteMs(run.completedAt)
+    if (runStarted != null && runCompleted != null && runCompleted > runStarted) {
+      return runCompleted - runStarted
+    }
+    const usage = positiveMs(asRecord(meta.usage).durationMs)
+    if (usage != null) return usage
+  }
+
+  const starts: number[] = []
+  const ends: number[] = []
+  const pushFinite = (into: number[], value: unknown) => {
+    const ms = finiteMs(value)
+    if (ms != null) into.push(ms)
+  }
+  if (prompt) pushFinite(starts, metadataOf(prompt).createdAt)
+  for (const message of turn) {
+    const meta = metadataOf(message)
+    pushFinite(starts, meta.createdAt)
+    const run = asRecord(meta.run)
+    pushFinite(starts, run.startedAt)
+    pushFinite(ends, run.completedAt)
+    if (!toolTimestamps) continue
+    for (const part of (message.parts ?? []) as unknown[]) {
+      const id = (part as { toolCallId?: unknown }).toolCallId
+      if (typeof id !== "string" || id.length === 0) continue
+      const stamp = toolTimestamps[id]
+      if (!stamp) continue
+      pushFinite(starts, stamp.startedAt)
+      pushFinite(ends, stamp.endedAt)
+    }
+  }
+  if (starts.length === 0 || ends.length === 0) return null
+  const span = Math.max(...ends) - Math.min(...starts)
+  return span > 0 ? span : null
+}
+
 // ── Running-tool detail lines ───────────────────────────────────────────────
 
 /** A readable label for a tool, collapsing `mcp__server__tool` → `server:tool`. */

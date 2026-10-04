@@ -30,6 +30,7 @@
     "@aws-sdk/client-bedrock": "^3.1141.0",
     "@aws-sdk/credential-providers": "^3.1141.0",
     "@cognia/agent-config-types": "link:../packages/agent-config-types",
+    "@cognia/provider-routing": "link:../packages/provider-routing",
     "@cognia/redact": "link:../packages/redact",
     "@langfuse/otel": "5.11.1",
     "@langfuse/vercel-ai-sdk": "5.11.1",

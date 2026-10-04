@@ -493,6 +493,31 @@ describe("external-agent sandbox launcher", () => {
     )
   })
 
+  it("denies every supported runtime's ambient login state to a gateway task", () => {
+    const taskHome = "/home/user/.local/share/cognia-agent-tasks/kimi-task"
+    const args = buildSandboxLauncherArgs(
+      {
+        id: "task",
+        command: "kimi",
+        args: ["acp"],
+        cwd: "/work",
+        env: { COGNIA_GATEWAY_TASK_HOME: taskHome },
+      },
+      "/home/user"
+    )
+    for (const relative of [
+      ".kimi-code",
+      ".kimi",
+      ".copilot",
+      ".config/goose",
+      ".local/share/goose",
+      ".local/state/goose",
+      ".aider",
+    ])
+      expect(args).toEqual(expect.arrayContaining(["--deny-readable", `/home/user/${relative}`]))
+    expect(args).toEqual(expect.arrayContaining(["--writable", taskHome]))
+  })
+
   it("binds the dedicated tool-host runtime directory instead of the whole temp root", () => {
     const args = buildSandboxLauncherArgs(
       { id: "a", command: "codex", cwd: "/work/repo" },

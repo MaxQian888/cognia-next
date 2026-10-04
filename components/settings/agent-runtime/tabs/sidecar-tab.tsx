@@ -6,7 +6,8 @@
 // Restart button is desktop-only.
 //
 // Stage 5 enrichments: SDK + sidecar version (from the sidecar's `ready`
-// event), live counts of slash commands / hooks / MCP servers / sessions,
+// event), live counts of slash commands / hooks / MCP servers / active
+// conversations,
 // and a deep-link strip to related Settings sections.
 
 import { useEffect, useState } from "react"
@@ -24,6 +25,7 @@ import { isTauri } from "@/lib/tauri"
 import { getSidecarStatus, restartSidecar } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
 import { getSession, listSessions } from "@/lib/db/sessions"
+import { countExposedConversations } from "@/components/settings/agent-runtime/sdk-bound-conversations"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { useSidecarInfo } from "@/lib/claude/sidecar-info"
 import { BUILTIN_SLASH_COMMANDS } from "@/lib/slash-commands/builtin"
@@ -48,7 +50,10 @@ export function SidecarTab() {
 
   const slashCommandCount =
     BUILTIN_SLASH_COMMANDS.length + listSlashCommands().filter((c) => c.source !== "builtin").length
-  const sessionCount = sessions?.length ?? 0
+  // Conversations the user can open from the list — not every row in the
+  // table, which also holds embedded subagent / workflow-editor sessions and
+  // the archive. Matches the "active" figure on the Sessions tab it links to.
+  const sessionCount = sessions ? countExposedConversations(sessions).active : 0
   const mcpEnabledCount = mcpServers?.filter((s) => s.enabled).length ?? 0
   const mcpTotalCount = mcpServers?.length ?? 0
 

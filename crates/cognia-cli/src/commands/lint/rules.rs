@@ -450,6 +450,10 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
     //    in lib/plugin/core/validation.ts — keep rule-for-rule in lockstep) ─
     lint_cli_tools(obj, &mut out);
 
+    // ── piPackages[].prepare: the spawned package manager (parity with
+    //    validatePiPackagePrepare in lib/plugin/core/validation.ts) ──────
+    lint_pi_package_prepare(obj, &mut out);
+
     // ── lazy-factory contribution fields: `entry` path safety ────────────
     lint_manifest_paths(obj, &mut out);
 
@@ -1091,6 +1095,56 @@ fn validate_dexie_block(block: &Value, out: &mut Vec<Diagnostic>) {
 /// Parity arm for `validateCliTools` in `lib/plugin/core/validation.ts` —
 /// the structural rules the executor's safety model relies on. Keep
 /// rule-for-rule in lockstep with the TS validator.
+/// `prepare.program` may only name a package manager Cognia allowlists, and
+/// `prepare.args` must be static strings — the host spawns exactly these
+/// (ADR-0210), so a manifest naming `sh` must fail lint as it fails in the app.
+const PI_PACKAGE_PREPARE_PROGRAMS: &[&str] = &["npm", "pnpm"];
+
+fn lint_pi_package_prepare(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
+    let Some(packages) = obj.get("piPackages").and_then(Value::as_array) else {
+        return;
+    };
+    for (index, package) in packages.iter().enumerate() {
+        let Some(prepare) = package.get("prepare") else {
+            continue;
+        };
+        let field = format!("piPackages[{index}].prepare");
+        let program = prepare.get("program").and_then(Value::as_str);
+        if !program.is_some_and(|program| PI_PACKAGE_PREPARE_PROGRAMS.contains(&program)) {
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.program"),
+                code: "manifest.piPackages.prepare.program.invalid".into(),
+                message: format!(
+                    "{field}.program must be one of: {}",
+                    PI_PACKAGE_PREPARE_PROGRAMS.join(", ")
+                ),
+                hint: None,
+            });
+        }
+        let args_ok = prepare
+            .get("args")
+            .and_then(Value::as_array)
+            .is_some_and(|args| {
+                args.iter().all(|arg| {
+                    arg.as_str()
+                        .is_some_and(|arg| !arg.chars().any(char::is_control))
+                })
+            });
+        if !args_ok {
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.args"),
+                code: "manifest.piPackages.prepare.args.invalid".into(),
+                message: format!(
+                    "{field}.args must be an array of static strings (no control characters)"
+                ),
+                hint: None,
+            });
+        }
+    }
+}
+
 fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
     let Some(cli_tools) = obj.get("cliTools") else {
         return;
@@ -1572,55 +1626,63 @@ fn cli_has_path_traversal(rel_path: &str) -> bool {
 /// Reject every plugin-controlled path described by the generated catalog.
 fn lint_manifest_paths(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
     for descriptor in PLUGIN_PATH_FIELDS {
-        if let Some((array_field, nested_path)) = descriptor.split_once("[].") {
-            let Some(items) = obj.get(array_field).and_then(Value::as_array) else {
-                continue;
-            };
-            for (index, item) in items.iter().enumerate() {
-                let Some(entry) = value_at_path(item, nested_path).and_then(Value::as_str) else {
-                    continue;
-                };
-                push_path_diagnostics(
-                    entry,
-                    format!("{array_field}[{index}].{nested_path}"),
-                    format!("{array_field}.{nested_path}"),
-                    out,
-                );
-            }
-            continue;
-        }
-
-        let Some(entry) = value_at_path_from_object(obj, descriptor).and_then(Value::as_str) else {
-            continue;
-        };
-        let code_path = if descriptor.contains('.') {
-            (*descriptor).to_string()
+        let segments = descriptor.split('.').collect::<Vec<_>>();
+        let mut values = Vec::new();
+        collect_path_values(obj, &segments, "", &mut values);
+        let code_path = if descriptor.contains('.') || descriptor.contains("[]") {
+            descriptor.replace("[]", "")
         } else {
             format!("{descriptor}.entry")
         };
-        push_path_diagnostics(entry, (*descriptor).to_string(), code_path, out);
+        for (value, field) in values {
+            if let Some(entry) = value.as_str() {
+                push_path_diagnostics(entry, field, code_path.clone(), out);
+            }
+        }
     }
 }
 
-fn value_at_path_from_object<'a>(
+fn collect_path_values<'a>(
     obj: &'a serde_json::Map<String, Value>,
-    path: &str,
-) -> Option<&'a Value> {
-    let (first, rest) = path.split_once('.').unwrap_or((path, ""));
-    let value = obj.get(first)?;
-    if rest.is_empty() {
-        Some(value)
+    segments: &[&str],
+    prefix: &str,
+    output: &mut Vec<(&'a Value, String)>,
+) {
+    let Some((segment, rest)) = segments.split_first() else {
+        return;
+    };
+    let (key, is_array) = match segment.strip_suffix("[]") {
+        Some(key) => (key, true),
+        None => (*segment, false),
+    };
+    let Some(value) = obj.get(key) else {
+        return;
+    };
+    let values = if is_array {
+        let Some(values) = value.as_array() else {
+            return;
+        };
+        values.as_slice()
     } else {
-        value_at_path(value, rest)
+        std::slice::from_ref(value)
+    };
+    let field = if prefix.is_empty() {
+        key.to_string()
+    } else {
+        format!("{prefix}.{key}")
+    };
+    for (index, value) in values.iter().enumerate() {
+        let field = if is_array {
+            format!("{field}[{index}]")
+        } else {
+            field.clone()
+        };
+        if rest.is_empty() {
+            output.push((value, field));
+        } else if let Some(obj) = value.as_object() {
+            collect_path_values(obj, rest, &field, output);
+        }
     }
-}
-
-fn value_at_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut current = value;
-    for segment in path.split('.') {
-        current = current.as_object()?.get(segment)?;
-    }
-    Some(current)
 }
 
 fn push_path_diagnostics(entry: &str, field: String, code_path: String, out: &mut Vec<Diagnostic>) {
@@ -1790,6 +1852,95 @@ fn is_valid_dexie_table_name(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_paths_lint_every_nested_array_element() {
+        let manifest = serde_json::json!({
+            "fonts": [
+                { "files": [{ "src": "fonts/regular.woff2" }, { "src": "../secret" }] },
+                { "files": [{ "src": "/outside.woff2" }] }
+            ]
+        });
+        let mut diagnostics = Vec::new();
+        lint_manifest_paths(manifest.as_object().unwrap(), &mut diagnostics);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].field, "fonts[0].files[1].src");
+        assert_eq!(diagnostics[0].code, "manifest.fonts.files.src.traversal");
+        assert_eq!(diagnostics[1].field, "fonts[1].files[0].src");
+        assert_eq!(diagnostics[1].code, "manifest.fonts.files.src.absolute");
+    }
+
+    #[test]
+    fn manifest_paths_preserve_flat_and_trailing_array_diagnostics() {
+        let manifest = serde_json::json!({
+            "main": "../main.js",
+            "piPackages": [{ "hostedSession": {
+                "extensions": ["dist/safe.js", "../outside.js", "/absolute.js"]
+            } }]
+        });
+        let mut diagnostics = Vec::new();
+        lint_manifest_paths(manifest.as_object().unwrap(), &mut diagnostics);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.field == "main" && diagnostic.code == "manifest.main.entry.traversal"
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.field == "piPackages[0].hostedSession.extensions[1]"
+                && diagnostic.code == "manifest.piPackages.hostedSession.extensions.traversal"
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.field == "piPackages[0].hostedSession.extensions[2]"
+                && diagnostic.code == "manifest.piPackages.hostedSession.extensions.absolute"
+        }));
+        assert_eq!(diagnostics.len(), 3);
+    }
+
+    #[test]
+    fn path_values_collect_a_trailing_array_at_the_root() {
+        let manifest = serde_json::json!({ "extensions": ["safe.js", "../outside.js"] });
+        let mut values = Vec::new();
+        collect_path_values(
+            manifest.as_object().unwrap(),
+            &["extensions[]"],
+            "",
+            &mut values,
+        );
+        assert_eq!(values.len(), 2);
+        assert_eq!(
+            values[0],
+            (&serde_json::json!("safe.js"), "extensions[0]".into())
+        );
+        assert_eq!(
+            values[1],
+            (&serde_json::json!("../outside.js"), "extensions[1]".into())
+        );
+    }
+
+    #[test]
+    fn manifest_paths_skip_missing_intermediate_keys_without_skipping_siblings() {
+        let manifest = serde_json::json!({
+            "fonts": [{}, { "files": [{}] }, { "files": [{ "src": "../secret" }] }]
+        });
+        let mut diagnostics = Vec::new();
+        lint_manifest_paths(manifest.as_object().unwrap(), &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].field, "fonts[2].files[0].src");
+    }
+
+    #[test]
+    fn manifest_paths_skip_non_array_values_at_array_segments() {
+        for manifest in [
+            serde_json::json!({ "fonts": { "files": [{ "src": "../secret" }] } }),
+            serde_json::json!({ "fonts": [{ "files": { "src": "../secret" } }] }),
+            serde_json::json!({ "piPackages": [{ "hostedSession": { "extensions": "../secret" } }] }),
+        ] {
+            let mut diagnostics = Vec::new();
+            lint_manifest_paths(manifest.as_object().unwrap(), &mut diagnostics);
+            assert!(
+                diagnostics.is_empty(),
+                "unexpected diagnostics: {diagnostics:?}"
+            );
+        }
+    }
 
     #[test]
     fn lazy_factory_entry_violations_match_ts_regexes() {

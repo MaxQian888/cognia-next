@@ -47,8 +47,10 @@ function setState(over: Partial<HostExternalAgentConfigsState> = {}) {
     refresh: jest.fn(async () => {}),
     reconcile: jest.fn(async () => {}),
     setEnabled: jest.fn(async () => {}),
-    remove: jest.fn(async () => {}),
+    update: jest.fn(async () => true),
+    remove: jest.fn(async () => true),
     copyLocal: jest.fn(async () => {}),
+    create: jest.fn(async () => ({ ok: false as const, error: "not used" })),
     ...over,
   }
 }
@@ -140,7 +142,7 @@ describe("HostExternalAgentConfigs", () => {
   })
 
   it("deletes through the host", async () => {
-    const remove = jest.fn(async () => {})
+    const remove = jest.fn(async () => true)
     setState({ configs: [record()], remove })
     render(<HostExternalAgentConfigs />)
     await userEvent.click(screen.getByRole("button", { name: /Delete Pi/i }))

@@ -31,7 +31,10 @@ import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { codeServerClient, type CodeServerStatus } from "@/lib/codeserver/client"
 import { defaultCompanionEndpointResolver } from "@/lib/tauri/companion-endpoint"
 import { primaryRootOf } from "@/lib/workspace/roots"
-import { activeHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
+import {
+  useActiveHostSupportsFeature,
+  useRemoteHostStore,
+} from "@/stores/remote-host/remote-host-store"
 import { useProjectStore } from "@/stores/project/project-store"
 
 type Busy = "start" | "stop" | null
@@ -44,8 +47,19 @@ export function ProIdeHostCard() {
    * of that host's build rather than of the companion profile. The feature
    * manifest is the only thing that knows, which is why ADR-0088's five
    * lifecycle commands were undiscoverable until `pro-ide` was declared.
+   *
+   * Subscribed, not read once: a desktop can switch its active remote host
+   * (ADR-0082) while this card is open, and the manifest only lands once the
+   * new host's probe settles. A one-shot read kept the previous host's answer.
    */
-  const hostProvides = activeHostSupportsFeature("pro-ide", "codeserver_ensure")
+  const hostProvides = useActiveHostSupportsFeature("pro-ide", "codeserver_ensure")
+  /**
+   * Which remote host a desktop is driving, or `null` when it drives itself (and
+   * always `null` on a phone or a browser, whose host lives in the companion
+   * target book instead). Only used as a key: it changes exactly when the
+   * machine behind every call below changes, and on nothing else.
+   */
+  const activeHostId = useRemoteHostStore((state) => state.activeHostId)
   const reach = useSurfaceReach({ capability: "pro-ide", hostProvides })
 
   const project = useProjectStore((state) =>
@@ -60,9 +74,16 @@ export function ProIdeHostCard() {
   /**
    * The Host's base URL, or `null` when this shell is the host.
    *
-   * Read once and held, because "which machine is the Host" does not change
-   * without a re-pair, and the frame below must not flip between embedding and
-   * refusing while the user is typing in it.
+   * Resolved once per active host and held between switches. On a phone or a
+   * browser the host is fixed by the pairing, so this resolves once. On a
+   * desktop it is not: the user can attach to a remote host, switch to another
+   * one or detach while this card is open, and a value read once at mount kept
+   * pointing the frame at whichever machine was active then. So the effect is
+   * keyed on `activeHostId` and nothing else: it re-resolves when the Host
+   * actually changes, and the frame below still never flips between embedding
+   * and refusing while the user is typing in it, because no ordinary re-render
+   * re-runs it. The store installs the new endpoint on the routing plane before
+   * it publishes the new id, so the resolver already sees the new host here.
    */
   const [hostBaseUrl, setHostBaseUrl] = useState<string | null>(null)
 
@@ -75,7 +96,7 @@ export function ProIdeHostCard() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [activeHostId])
 
   const probe = useCallback(async () => {
     if (!root || !reach.available) return null
@@ -85,6 +106,10 @@ export function ProIdeHostCard() {
     return codeServerClient.status(root).catch(() => null)
   }, [reach.available, root])
 
+  // `activeHostId` is a dependency even though the body does not read it: a
+  // switch between two hosts that both run a workbench leaves `probe` itself
+  // unchanged, and without the key the card would keep showing the previous
+  // host's running state against the new one.
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -94,7 +119,7 @@ export function ProIdeHostCard() {
     return () => {
       cancelled = true
     }
-  }, [probe])
+  }, [probe, activeHostId])
 
   const start = useCallback(async () => {
     if (!root) return

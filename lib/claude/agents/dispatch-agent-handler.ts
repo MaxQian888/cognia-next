@@ -72,18 +72,19 @@ async function collectDispatchRuns(runIds: string[], timeoutMs: number | undefin
 }
 
 /** Stop running background runs. A run that is not live reads as such. */
-function cancelDispatchRuns(runIds: string[]): string {
-  return runIds
-    .map((runId) => {
-      const cancelled = cancelSubagentRun(runId, {
+async function cancelDispatchRuns(runIds: string[]): Promise<string> {
+  const results = await Promise.all(
+    runIds.map(async (runId) => {
+      const cancelled = await cancelSubagentRun(runId, {
         backgrounded: true,
         reason: "Cancelled by the dispatching agent.",
       })
       return cancelled
         ? `Cancelled run "${runId}". Any partial output it produced can still be collected.`
-        : `No running background run "${runId}" (already finished, or unknown).`
+        : `Could not cancel background run "${runId}" (not running, or cancellation could not be persisted).`
     })
-    .join("\n")
+  )
+  return results.join("\n")
 }
 
 export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promise<string> {

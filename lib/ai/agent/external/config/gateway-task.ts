@@ -13,6 +13,8 @@ import type { GatewayModelMetadata } from "@/types/gateway"
 import { findRuntimeForConfig } from "./install-catalog"
 
 export const GATEWAY_TASK_ENV = "COGNIA_GATEWAY_TASK_CONFIG"
+/** Placeholder GitHub token for Copilot BYOK tasks; never a credential. */
+export const COPILOT_NO_GITHUB_AUTH = "cognia-gateway-task-no-github-auth"
 export const GATEWAY_TOKEN_ENV = "COGNIA_GATEWAY_TOKEN"
 const SESSION_PREFIX = "cognia-gateway:"
 
@@ -21,9 +23,48 @@ type GatewayRuntimeConfig = Pick<
   "protocol" | "transport" | "process" | "metadata" | "network"
 >
 
+/** Runtime names the native task hosts accept (sandboxd and the CLI twin). */
+export type CogniaGatewayRuntime =
+  "codex" | "opencode" | "pi" | "claude" | "qwen" | "dsh" | "kimi" | "goose" | "copilot" | "aider"
+
+export type CogniaGatewayUnsupportedReason =
+  "unsupported-runtime" | "remote-server" | "no-process" | "network-endpoint"
+
+/**
+ * How a runtime reaches the gateway and how a resumed task continues.
+ *
+ * `native-resume` reopens the agent's own session inside the retained task
+ * home, so the agent keeps its native history across leases and model rebinds.
+ * `transcript` starts a fresh native turn and replays Cognia's conversation
+ * transcript instead. Keys are the runtime names {@link cogniaGatewaySupport}
+ * reports; DeepSeek Harness's SDK profile is distinguished as `dsh-sdk`
+ * because, unlike its ACP profile, it has no resumable native session.
+ */
+export const GATEWAY_RUNTIME_TRAITS: Record<
+  string,
+  {
+    ingress: "openai-responses" | "openai-chat" | "anthropic"
+    continuity: "native-resume" | "transcript"
+  }
+> = {
+  codex: { ingress: "openai-responses", continuity: "native-resume" },
+  opencode: { ingress: "openai-chat", continuity: "native-resume" },
+  pi: { ingress: "openai-chat", continuity: "native-resume" },
+  claude: { ingress: "anthropic", continuity: "native-resume" },
+  qwen: { ingress: "openai-chat", continuity: "native-resume" },
+  dsh: { ingress: "openai-chat", continuity: "native-resume" },
+  "dsh-sdk": { ingress: "openai-chat", continuity: "transcript" },
+  kimi: { ingress: "openai-chat", continuity: "native-resume" },
+  goose: { ingress: "openai-chat", continuity: "native-resume" },
+  copilot: { ingress: "openai-chat", continuity: "native-resume" },
+  // Aider is a one-shot CLI whose Cognia-owned history lives beside the
+  // workspace, not in the task home, so a task continues from the transcript.
+  aider: { ingress: "openai-chat", continuity: "transcript" },
+}
+
 export function cogniaGatewayRuntime(
   config: GatewayRuntimeConfig
-): "codex" | "opencode" | "pi" | "claude" | "qwen" | "dsh" | undefined {
+): CogniaGatewayRuntime | undefined {
   if (config.protocol === "opencode-v2") {
     return !config.network?.endpoint || config.process?.command ? "opencode" : undefined
   }
@@ -41,13 +82,63 @@ export function cogniaGatewayRuntime(
   if (!config.process.command) return undefined
   if (entry.protocol !== config.protocol) return undefined
   const runtime = entry.runtimeId
+  // OpenCode's V1 server preset (`metadata.autoSpawnServer`) launches
+  // `opencode serve` itself whenever a command is configured and talks to it
+  // over HTTP + SSE; it is still a task-owned local process. An attached
+  // server (an endpoint) was refused above.
+  if (runtime === "opencode") return config.transport === "sse" ? "opencode" : undefined
   if (config.transport !== "stdio") return undefined
   if (runtime === "codex-app-server" || runtime === "codex-acp") return "codex"
   if (runtime === "qwen-code") return "qwen"
   if (runtime === "opencode-acp") return "opencode"
   if (runtime === "pi") return "pi"
   if (runtime === "claude-agent-acp") return "claude"
+  if (runtime === "kimi") return "kimi"
+  if (runtime === "goose") return "goose"
+  if (runtime === "copilot-cli") return "copilot"
+  if (runtime === "aider") return "aider"
   return undefined
+}
+
+/**
+ * Whether this configuration can run a task on a Cognia model, and why not.
+ *
+ * `runtime` is the {@link GATEWAY_RUNTIME_TRAITS} key for the configuration.
+ * The refusal reasons are ordered by what the user would have to change: an
+ * attached server or network endpoint cannot be given a task-owned config
+ * home at all; a configuration without a process has nothing to launch; any
+ * other refusal is a runtime without a verified isolated launch contract.
+ */
+export function cogniaGatewaySupport(
+  config: GatewayRuntimeConfig
+):
+  | { supported: true; runtime: string }
+  | { supported: false; reason: CogniaGatewayUnsupportedReason } {
+  const runtime = cogniaGatewayRuntime(config)
+  if (runtime)
+    return {
+      supported: true,
+      runtime: runtime === "dsh" && config.protocol === "dsh-sdk" ? "dsh-sdk" : runtime,
+    }
+  if (config.network?.endpoint)
+    return {
+      supported: false,
+      reason:
+        config.protocol === "opencode" || config.protocol === "opencode-v2"
+          ? "remote-server"
+          : "network-endpoint",
+    }
+  if (!config.process?.command && findRuntimeForConfig(config)?.runtimeId !== "deepseek-harness")
+    return { supported: false, reason: "no-process" }
+  return { supported: false, reason: "unsupported-runtime" }
+}
+
+/** Ingress and continuity for a supported configuration. */
+export function gatewayRuntimeTraits(
+  config: GatewayRuntimeConfig
+): (typeof GATEWAY_RUNTIME_TRAITS)[string] | undefined {
+  const support = cogniaGatewaySupport(config)
+  return support.supported ? GATEWAY_RUNTIME_TRAITS[support.runtime] : undefined
 }
 
 export function canUseCogniaModels(config: GatewayRuntimeConfig): boolean {
@@ -86,7 +177,18 @@ export interface GatewayTaskPayload {
   taskId: string
   ownerAccountId: string | null
   binding: ExternalAgentCogniaModelBinding
-  runtime: "codex" | "opencode" | "pi" | "claude" | "qwen" | "dsh"
+  runtime: CogniaGatewayRuntime
+  /**
+   * The paired device a Host-run task belongs to. The native host refuses to
+   * resume (or rebind) a retained task for another device.
+   */
+  originDeviceId?: string
+  /**
+   * Replace the retained model binding of an existing task. Hosts accept this
+   * only when the owner account, origin device and runtime are unchanged, so
+   * the native history keeps one owner while it moves to another Cognia model.
+   */
+  rebind?: true
   /** Fixed relative file names only; native hosts derive the state root. No secrets. */
   files: Record<string, string>
 }
@@ -142,6 +244,23 @@ const CUSTOM_ARGUMENTS: Record<string, { values: readonly string[]; switches: re
       switches: [],
     },
     claude: { values: [], switches: [] },
+    // `kimi acp` takes no options of its own; everything else is a TUI flag.
+    kimi: { values: [], switches: [] },
+    goose: { values: ["--with-builtin"], switches: [] },
+    // `--model` is the task's route; the remaining flags are TUI or auth options.
+    copilot: { values: [], switches: [] },
+    // Model, weak/editor model, endpoint and model settings files are the route.
+    aider: {
+      values: [
+        "--edit-format",
+        "--editor-edit-format",
+        "--reasoning-effort",
+        "--thinking-tokens",
+        "--max-chat-history-tokens",
+        "--timeout",
+      ],
+      switches: [],
+    },
   }
 const CODEX_CUSTOM_CONFIG_KEYS = new Set([
   "developer_instructions",
@@ -273,17 +392,122 @@ function codexCustomization(config: ExternalAgentConfig): Record<string, string>
   return result
 }
 
+// Per-runtime environment outside the shared route-owned list. `preserved`
+// keys and prefixes are user customization that cannot select a provider,
+// model, credential or endpoint; `routeOwned` ones are replaced by the task's
+// route (or its task-owned home), so dropping them is deliberate. Anything
+// else is refused rather than guessed at.
+const RUNTIME_ENVIRONMENT: Record<
+  string,
+  {
+    preserved?: readonly string[]
+    preservedPrefixes?: readonly string[]
+    routeOwned?: readonly string[]
+    routeOwnedPrefixes?: readonly string[]
+  }
+> = {
+  codex: { preserved: ["CODEX_PATH", "NO_BROWSER", "INITIAL_AGENT_MODE", "APP_SERVER_LOGS"] },
+  dsh: { routeOwned: ["DSH_HOME"], routeOwnedPrefixes: ["COGNIA_DSH_"] },
+  // Kimi Code 2.1: KIMI_MODEL_* is the env-model provider, KIMI_API_KEY /
+  // KIMI_BASE_URL / KIMI_CODE_BASE_URL its managed platform route, the OAuth
+  // hosts its login, and KIMI_SECONDARY_* a second model for side work.
+  kimi: {
+    preserved: ["KIMI_CODE_NO_AUTO_UPDATE", "KIMI_CLI_NO_AUTO_UPDATE", "KIMI_DISABLE_TELEMETRY"],
+    preservedPrefixes: ["KIMI_MCP_", "KIMI_LOOP_"],
+    routeOwned: [
+      "KIMI_API_KEY",
+      "KIMI_BASE_URL",
+      "KIMI_CODE_BASE_URL",
+      "KIMI_CODE_CUSTOM_HEADERS",
+      "KIMI_CODE_HOME",
+      "KIMI_SHARE_DIR",
+      "KIMI_OAUTH_HOST",
+      "KIMI_CODE_OAUTH_HOST",
+    ],
+    routeOwnedPrefixes: ["KIMI_MODEL_", "KIMI_SECONDARY_"],
+  },
+  // Goose reads every config key from its upper-cased environment name, so a
+  // lead/planner/subagent provider or another OpenAI host would be a second
+  // route; keyring and telemetry switches are pinned by the task.
+  goose: {
+    preserved: [
+      "GOOSE_MODE",
+      "GOOSE_TEMPERATURE",
+      "GOOSE_SHELL",
+      "GOOSE_STREAM_TIMEOUT",
+      "GOOSE_SUBAGENT_MAX_TURNS",
+      "GOOSE_CLI_MIN_PRIORITY",
+    ],
+    routeOwned: [
+      "GOOSE_PROVIDER",
+      "GOOSE_MODEL",
+      "GOOSE_CONTEXT_LIMIT",
+      "GOOSE_INPUT_LIMIT",
+      "GOOSE_DISABLE_KEYRING",
+      "GOOSE_TELEMETRY_OFF",
+      "GOOSE_TELEMETRY_ENABLED",
+      "GOOSE_TOOLSHIM",
+      "GOOSE_TOOLSHIM_OLLAMA_MODEL",
+      "GOOSE_CLIENT_CERT_PATH",
+      "GOOSE_CLIENT_KEY_PATH",
+    ],
+    routeOwnedPrefixes: [
+      "GOOSE_LEAD_",
+      "GOOSE_PLANNER_",
+      "GOOSE_SUBAGENT_PROVIDER",
+      "GOOSE_SUBAGENT_MODEL",
+      "OPENAI_",
+    ],
+  },
+  // Copilot CLI 1.0: COPILOT_PROVIDER_* is BYOK, the GitHub tokens and hosts
+  // are its native account route.
+  copilot: {
+    preserved: [
+      "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
+      "PLAIN_DIFF",
+      "USE_BUILTIN_RIPGREP",
+      "USE_TGREP",
+    ],
+    routeOwned: [
+      "COPILOT_MODEL",
+      "COPILOT_OFFLINE",
+      "COPILOT_AUTO_UPDATE",
+      "COPILOT_AUTO_TIER",
+      "COPILOT_HOME",
+      "COPILOT_CACHE_HOME",
+      "COPILOT_PKG_CACHE_HOME",
+      "COPILOT_CLI_VERSION",
+      "COPILOT_CLI_DIST_DIR",
+      "COPILOT_GITHUB_TOKEN",
+      "COPILOT_GH_HOST",
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "GH_HOST",
+    ],
+    routeOwnedPrefixes: ["COPILOT_PROVIDER_"],
+  },
+  aider: {
+    preserved: [
+      "AIDER_EDIT_FORMAT",
+      "AIDER_EDITOR_EDIT_FORMAT",
+      "AIDER_REASONING_EFFORT",
+      "AIDER_THINKING_TOKENS",
+    ],
+    routeOwned: ["AIDER_MODEL", "AIDER_WEAK_MODEL", "AIDER_EDITOR_MODEL", "OPENAI_API_BASE"],
+  },
+}
+
 function customizationEnvironment(
   config: ExternalAgentConfig,
   runtime: string
 ): Record<string, string> {
   const preserved = new Set(["LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "NO_COLOR", "FORCE_COLOR"])
-  if (runtime === "codex")
-    for (const key of ["CODEX_PATH", "NO_BROWSER", "INITIAL_AGENT_MODE", "APP_SERVER_LOGS"])
-      preserved.add(key)
+  const rules = RUNTIME_ENVIRONMENT[runtime] ?? {}
+  for (const key of rules.preserved ?? []) preserved.add(key)
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(config.process?.env ?? {})) {
-    if (preserved.has(key)) env[key] = value
+    if (preserved.has(key) || rules.preservedPrefixes?.some((prefix) => key.startsWith(prefix)))
+      env[key] = value
     // These values belong to the selected route or the task-owned home. Their
     // replacement is deliberate, unlike silently throwing away custom flags.
     else if (
@@ -323,8 +547,9 @@ function customizationEnvironment(
         "COGNIA_TOOLHOST_SOCKET",
         "COGNIA_TOOLHOST_TOKEN",
         "COGNIA_TOOLHOST_SERVER",
+        ...(rules.routeOwned ?? []),
       ].includes(key) ||
-      (runtime === "dsh" && (key === "DSH_HOME" || key.startsWith("COGNIA_DSH_")))
+      rules.routeOwnedPrefixes?.some((prefix) => key.startsWith(prefix))
     )
       continue
     else throw new Error(`Unsupported Cognia model environment customization: ${key}`)
@@ -481,7 +706,19 @@ export function buildGatewayTaskConfig(input: {
   settings: Pick<AppSettings, "providerSettings" | "customProviders">
   ownerAccountId: string | null
   modelMetadata?: GatewayModelMetadata
-}): { config: ExternalAgentConfig; model: string } {
+  /** The paired device that owns a Host-run task (see {@link GatewayTaskPayload}). */
+  originDeviceId?: string | null
+  /** Move an existing task to this binding (see {@link GatewayTaskPayload}). */
+  rebind?: boolean
+}): {
+  config: ExternalAgentConfig
+  /**
+   * The value the child session must report as its selected model, or
+   * `undefined` when the runtime has no session model surface on this route
+   * and the launch alone selects the model (Copilot BYOK).
+   */
+  model: string | undefined
+} {
   const { config, binding, taskId, endpoint, secret, model, settings } = input
   const runtime = cogniaGatewayRuntime(config)
   if (!runtime)
@@ -511,7 +748,8 @@ export function buildGatewayTaskConfig(input: {
     const value = config.process?.env?.[key]
     if (value) env[key] = value
   }
-  let selectedModel = model
+  let selectedModel: string | undefined = model
+  const launchArgs: string[] = []
   if (runtime === "dsh") {
     // Current DSH ACP config_options encodes the complete provider/model pair.
     selectedModel = config.protocol === "acp" ? JSON.stringify(["cognia", model]) : model
@@ -775,6 +1013,87 @@ export function buildGatewayTaskConfig(input: {
       defaultModel: model,
       enabledModels: [`cognia/${model}`],
     })
+  } else if (runtime === "kimi") {
+    // Kimi Code's env-model provider (2.1.1 `applyEnvModelConfig`): an
+    // OpenAI-compatible provider type speaks Chat Completions, the alias it
+    // registers is the fixed `__kimi_env_model__`, and the key stays in this
+    // process environment (stripped again before any config write).
+    selectedModel = "__kimi_env_model__"
+    env.KIMI_MODEL_PROVIDER_TYPE = "openai"
+    env.KIMI_MODEL_BASE_URL = endpoint
+    env.KIMI_MODEL_API_KEY = secret
+    env.KIMI_MODEL_NAME = model
+    env.KIMI_MODEL_DISPLAY_NAME = model
+    const context = meta.contextLength
+      ? Math.min(meta.contextLength, meta.maxInputTokens ?? meta.contextLength)
+      : undefined
+    if (context) env.KIMI_MODEL_MAX_CONTEXT_SIZE = String(context)
+    if (meta.maxOutputTokens) env.KIMI_MODEL_MAX_OUTPUT_SIZE = String(meta.maxOutputTokens)
+    // Without an explicit list Kimi assumes image input and thinking.
+    env.KIMI_MODEL_CAPABILITIES = [
+      "tool_use",
+      ...(meta.supportsReasoning === true ? ["thinking"] : []),
+      ...(meta.supportsVision === true ? ["image_in"] : []),
+      ...(meta.supportsVideo === true ? ["video_in"] : []),
+      ...(meta.supportsAudio === true ? ["audio_in"] : []),
+    ].join(",")
+    env.KIMI_CODE_NO_AUTO_UPDATE = "1"
+    env.KIMI_DISABLE_TELEMETRY = "1"
+  } else if (runtime === "goose") {
+    // Goose reads provider settings from the environment before its config
+    // file. The keyring stays closed so another provider's stored secret is
+    // never reachable from the task; the session model option reports the
+    // plain model id.
+    const url = new URL(endpoint)
+    env.GOOSE_PROVIDER = "openai"
+    env.GOOSE_MODEL = model
+    env.OPENAI_HOST = url.origin
+    env.OPENAI_BASE_PATH = [url.pathname.replace(/^\/+|\/+$/g, ""), "chat/completions"]
+      .filter(Boolean)
+      .join("/")
+    env.OPENAI_API_KEY = secret
+    env.GOOSE_DISABLE_KEYRING = "1"
+    env.GOOSE_TELEMETRY_OFF = "1"
+    if (meta.contextLength)
+      env.GOOSE_CONTEXT_LIMIT = String(
+        Math.min(meta.contextLength, meta.maxInputTokens ?? meta.contextLength)
+      )
+  } else if (runtime === "copilot") {
+    // Copilot CLI BYOK. It exposes no session model option on this route and a
+    // resumed session keeps its recorded model unless `--model` is passed, so
+    // the launch carries the model. The GitHub tokens are deliberate
+    // placeholders: they outrank any stored Copilot login, so a build without
+    // BYOK fails authentication instead of silently using GitHub's route.
+    selectedModel = undefined
+    env.COPILOT_PROVIDER_BASE_URL = endpoint
+    env.COPILOT_PROVIDER_TYPE = "openai"
+    env.COPILOT_PROVIDER_WIRE_API = "completions"
+    env.COPILOT_PROVIDER_API_KEY = secret
+    env.COPILOT_MODEL = model
+    if (meta.maxInputTokens || meta.contextLength)
+      env.COPILOT_PROVIDER_MAX_PROMPT_TOKENS = String(meta.maxInputTokens ?? meta.contextLength)
+    if (meta.maxOutputTokens) env.COPILOT_PROVIDER_MAX_OUTPUT_TOKENS = String(meta.maxOutputTokens)
+    env.COPILOT_OFFLINE = "true"
+    env.COPILOT_AUTO_UPDATE = "false"
+    for (const key of ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"])
+      env[key] = COPILOT_NO_GITHUB_AUTH
+    launchArgs.push("--model", model)
+  } else if (runtime === "aider") {
+    // LiteLLM's OpenAI-compatible route: `openai/<model>` against the given
+    // API base, key from OPENAI_API_KEY. Weak and editor models default to
+    // provider-specific models, so they are pinned to the task model too.
+    selectedModel = `openai/${model}`
+    env.OPENAI_API_KEY = secret
+    launchArgs.push(
+      "--model",
+      selectedModel,
+      "--weak-model",
+      selectedModel,
+      "--editor-model",
+      selectedModel,
+      "--openai-api-base",
+      endpoint
+    )
   } else {
     env.ANTHROPIC_BASE_URL = endpoint.replace(/\/v1\/?$/, "")
     env.ANTHROPIC_AUTH_TOKEN = secret
@@ -790,9 +1109,11 @@ export function buildGatewayTaskConfig(input: {
     ownerAccountId: input.ownerAccountId,
     binding,
     runtime,
+    ...(input.originDeviceId ? { originDeviceId: input.originDeviceId } : {}),
+    ...(input.rebind ? { rebind: true as const } : {}),
     files,
   } satisfies GatewayTaskPayload)
-  const args = [...launch.args]
+  const args = [...launch.args, ...launchArgs]
   if (runtime === "qwen")
     args.push("--auth-type", "openai", "--model", model, "--openai-base-url", endpoint)
   if (runtime === "codex" && findRuntimeForConfig(config)?.runtimeId === "codex-app-server") {

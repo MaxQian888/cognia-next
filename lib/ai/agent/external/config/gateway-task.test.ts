@@ -1,6 +1,10 @@
 import {
   buildGatewayTaskConfig,
   canUseCogniaModels,
+  cogniaGatewaySupport,
+  COPILOT_NO_GITHUB_AUTH,
+  GATEWAY_RUNTIME_TRAITS,
+  gatewayRuntimeTraits,
   gatewaySessionId,
   normalizeCogniaModelBinding,
   parseGatewaySessionId,
@@ -633,7 +637,7 @@ describe("isolated gateway task configuration", () => {
   it("prepares current OpenCode V2 local discovery without a preconfigured process", () => {
     const source = { ...config("opencode-v2-service", "opencode-v2", "sse"), process: undefined }
     expect(canUseCogniaModels(source)).toBe(true)
-    expect(canUseCogniaModels(config("opencode-server", "opencode", "sse"))).toBe(false)
+    expect(canUseCogniaModels(config("opencode-server", "opencode", "sse"))).toBe(true)
     expect(canUseCogniaModels({ ...source, network: { endpoint: "https://remote.example" } })).toBe(
       false
     )
@@ -698,6 +702,11 @@ describe("isolated gateway task configuration", () => {
     ["pi-rpc", "pi-rpc", "stdio"],
     ["claude-code", "acp", "stdio"],
     ["deepseek-harness-readonly", "dsh-sdk", "stdio"],
+    ["kimi", "acp", "stdio"],
+    ["goose", "acp", "stdio"],
+    ["copilot-cli", "acp", "stdio"],
+    ["aider", "aider-cli", "stdio"],
+    ["opencode-server", "opencode", "sse"],
   ])(
     "keeps %s route valid with sparse and inferred model metadata",
     (preset, protocol, transport) => {
@@ -798,5 +807,362 @@ describe("isolated gateway task configuration", () => {
     expect(parseGatewaySessionId("ordinary")).toBeUndefined()
     expect(() => parseGatewaySessionId("cognia-gateway:../escape:session")).toThrow()
     expect(() => normalizeCogniaModelBinding({ ...binding, apiKey: "secret" })).toThrow()
+  })
+
+  const meta = {
+    id: "model",
+    contextLength: 200000,
+    maxInputTokens: 180000,
+    maxOutputTokens: 16000,
+    supportsTools: true,
+  }
+  const build = (source: ExternalAgentConfig, extra: Record<string, unknown> = {}) =>
+    buildGatewayTaskConfig({
+      config: source,
+      binding,
+      taskId: "runtime-task",
+      endpoint: "http://127.0.0.1:9000/v1",
+      secret: "lease-only",
+      model: "model",
+      settings,
+      ownerAccountId: "owner",
+      modelMetadata: meta,
+      ...extra,
+    })
+  const payloadOf = (prepared: ReturnType<typeof build>) =>
+    JSON.parse(prepared.config.process!.env!.COGNIA_GATEWAY_TASK_CONFIG)
+
+  describe("Kimi Code (kimi acp)", () => {
+    it("routes the env-model provider through Chat Completions with the lease as its key", () => {
+      const prepared = build(config("kimi"))
+      const env = prepared.config.process!.env!
+      expect(prepared.model).toBe("__kimi_env_model__")
+      expect(prepared.config.process).toMatchObject({ command: "kimi", args: ["acp"] })
+      expect(env).toMatchObject({
+        KIMI_MODEL_PROVIDER_TYPE: "openai",
+        KIMI_MODEL_BASE_URL: "http://127.0.0.1:9000/v1",
+        KIMI_MODEL_API_KEY: "lease-only",
+        KIMI_MODEL_NAME: "model",
+        KIMI_MODEL_DISPLAY_NAME: "model",
+        KIMI_MODEL_MAX_CONTEXT_SIZE: "180000",
+        KIMI_MODEL_MAX_OUTPUT_SIZE: "16000",
+        KIMI_MODEL_CAPABILITIES: "tool_use",
+        KIMI_CODE_NO_AUTO_UPDATE: "1",
+        KIMI_DISABLE_TELEMETRY: "1",
+      })
+      expect(env).not.toHaveProperty("OPENAI_API_KEY")
+      expect(payloadOf(prepared)).toMatchObject({ runtime: "kimi", files: {} })
+      expect(JSON.stringify(payloadOf(prepared))).not.toContain("lease-only")
+    })
+
+    it("declares only the capabilities the model has, instead of Kimi's image/thinking default", () => {
+      const env = build(config("kimi"), {
+        modelMetadata: {
+          id: "model",
+          supportsReasoning: true,
+          supportsVision: true,
+          supportsVideo: true,
+          supportsAudio: true,
+        },
+      }).config.process!.env!
+      expect(env.KIMI_MODEL_CAPABILITIES).toBe("tool_use,thinking,image_in,video_in,audio_in")
+      expect(env).not.toHaveProperty("KIMI_MODEL_MAX_CONTEXT_SIZE")
+      expect(env).not.toHaveProperty("KIMI_MODEL_MAX_OUTPUT_SIZE")
+    })
+
+    it("replaces a configured provider route and keeps non-routing Kimi settings", () => {
+      const source = config("kimi")
+      source.process!.env = {
+        KIMI_MODEL_NAME: "kimi-k2",
+        KIMI_MODEL_BASE_URL: "https://elsewhere.example/v1",
+        KIMI_MODEL_API_KEY: "upstream",
+        KIMI_MODEL_PROVIDER_TYPE: "anthropic",
+        KIMI_API_KEY: "platform",
+        KIMI_BASE_URL: "https://platform.example",
+        KIMI_CODE_BASE_URL: "https://code.example",
+        KIMI_CODE_CUSTOM_HEADERS: "X-Route: other",
+        KIMI_SECONDARY_MODEL: "kimi-other",
+        KIMI_CODE_HOME: "/user/.kimi-code",
+        KIMI_MCP_TIMEOUT: "30",
+        KIMI_LOOP_MAX_STEPS: "40",
+        KIMI_DISABLE_TELEMETRY: "0",
+      }
+      const env = build(source).config.process!.env!
+      expect(env).toMatchObject({
+        KIMI_MODEL_NAME: "model",
+        KIMI_MODEL_BASE_URL: "http://127.0.0.1:9000/v1",
+        KIMI_MODEL_API_KEY: "lease-only",
+        KIMI_MODEL_PROVIDER_TYPE: "openai",
+        KIMI_MCP_TIMEOUT: "30",
+        KIMI_LOOP_MAX_STEPS: "40",
+        KIMI_DISABLE_TELEMETRY: "1",
+      })
+      for (const key of [
+        "KIMI_API_KEY",
+        "KIMI_BASE_URL",
+        "KIMI_CODE_BASE_URL",
+        "KIMI_CODE_CUSTOM_HEADERS",
+        "KIMI_SECONDARY_MODEL",
+        "KIMI_CODE_HOME",
+      ])
+        expect(env).not.toHaveProperty(key)
+      expect(JSON.stringify(env)).not.toContain("upstream")
+    })
+
+    it("refuses unknown Kimi environment and launch options", () => {
+      const env = config("kimi")
+      env.process!.env = { KIMI_EXPERIMENTAL_PROVIDER: "x" }
+      expect(() => build(env)).toThrow(/environment customization.*KIMI_EXPERIMENTAL_PROVIDER/)
+      const args = config("kimi")
+      args.process!.args = ["acp", "--model", "other"]
+      expect(() => build(args)).toThrow(/customization argument/)
+    })
+  })
+
+  describe("Goose (goose acp)", () => {
+    it("selects the OpenAI-compatible provider from the environment with the keyring closed", () => {
+      const source = config("goose")
+      source.process!.env = { ...source.process!.env, GOOSE_MODE: "approve" }
+      const prepared = build(source)
+      const env = prepared.config.process!.env!
+      expect(prepared.model).toBe("model")
+      expect(prepared.config.process!.args).toEqual(["acp", "--with-builtin", "developer"])
+      expect(env).toMatchObject({
+        GOOSE_PROVIDER: "openai",
+        GOOSE_MODEL: "model",
+        OPENAI_HOST: "http://127.0.0.1:9000",
+        OPENAI_BASE_PATH: "v1/chat/completions",
+        OPENAI_API_KEY: "lease-only",
+        GOOSE_DISABLE_KEYRING: "1",
+        GOOSE_TELEMETRY_OFF: "1",
+        GOOSE_CONTEXT_LIMIT: "180000",
+        // The preset's permission default is customization, not a route.
+        GOOSE_MODE: "approve",
+      })
+      expect(payloadOf(prepared).runtime).toBe("goose")
+    })
+
+    it("drops second provider routes and refuses unknown Goose settings", () => {
+      const source = config("goose")
+      source.process!.env = {
+        GOOSE_LEAD_PROVIDER: "anthropic",
+        GOOSE_LEAD_MODEL: "claude",
+        GOOSE_PLANNER_PROVIDER: "openai",
+        GOOSE_SUBAGENT_PROVIDER: "openai",
+        OPENAI_HOST: "https://api.openai.com",
+        OPENAI_CUSTOM_HEADERS: "X-Org: other",
+        GOOSE_TEMPERATURE: "0.2",
+      }
+      const env = build(source).config.process!.env!
+      expect(env.OPENAI_HOST).toBe("http://127.0.0.1:9000")
+      expect(env.GOOSE_TEMPERATURE).toBe("0.2")
+      for (const key of [
+        "GOOSE_LEAD_PROVIDER",
+        "GOOSE_LEAD_MODEL",
+        "GOOSE_PLANNER_PROVIDER",
+        "GOOSE_SUBAGENT_PROVIDER",
+        "OPENAI_CUSTOM_HEADERS",
+      ])
+        expect(env).not.toHaveProperty(key)
+      source.process!.env = { GOOSE_RECIPE_PATH: "/recipes" }
+      expect(() => build(source)).toThrow(/GOOSE_RECIPE_PATH/)
+    })
+  })
+
+  describe("GitHub Copilot CLI (copilot --acp)", () => {
+    it("uses BYOK with the model on the launch and placeholder GitHub credentials", () => {
+      const prepared = build(config("copilot-cli"))
+      const env = prepared.config.process!.env!
+      // No session model option exists on this route; the launch selects it.
+      expect(prepared.model).toBeUndefined()
+      expect(prepared.config.process!.args).toEqual(["--acp", "--model", "model"])
+      expect(env).toMatchObject({
+        COPILOT_PROVIDER_BASE_URL: "http://127.0.0.1:9000/v1",
+        COPILOT_PROVIDER_TYPE: "openai",
+        COPILOT_PROVIDER_WIRE_API: "completions",
+        COPILOT_PROVIDER_API_KEY: "lease-only",
+        COPILOT_MODEL: "model",
+        COPILOT_PROVIDER_MAX_PROMPT_TOKENS: "180000",
+        COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "16000",
+        COPILOT_OFFLINE: "true",
+        COPILOT_AUTO_UPDATE: "false",
+        COPILOT_GITHUB_TOKEN: COPILOT_NO_GITHUB_AUTH,
+        GH_TOKEN: COPILOT_NO_GITHUB_AUTH,
+        GITHUB_TOKEN: COPILOT_NO_GITHUB_AUTH,
+      })
+      expect(payloadOf(prepared).runtime).toBe("copilot")
+    })
+
+    it("replaces BYOK and account settings and refuses a launch-time model", () => {
+      const source = config("copilot-cli")
+      source.process!.env = {
+        COPILOT_PROVIDER_BASE_URL: "https://elsewhere.example/v1",
+        COPILOT_PROVIDER_HEADERS: "X-Key: upstream",
+        COPILOT_GITHUB_TOKEN: "github-secret",
+        COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/docs",
+      }
+      const env = build(source).config.process!.env!
+      expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://127.0.0.1:9000/v1")
+      expect(env.COPILOT_CUSTOM_INSTRUCTIONS_DIRS).toBe("/docs")
+      expect(env).not.toHaveProperty("COPILOT_PROVIDER_HEADERS")
+      expect(JSON.stringify(env)).not.toContain("github-secret")
+      source.process!.env = {}
+      source.process!.args = ["--acp", "--model", "gpt-5"]
+      expect(() => build(source)).toThrow(/customization argument/)
+      source.process!.args = ["--acp"]
+      source.process!.env = { COPILOT_ALLOW_ALL: "true" }
+      expect(() => build(source)).toThrow(/COPILOT_ALLOW_ALL/)
+    })
+  })
+
+  describe("Aider (one-shot CLI)", () => {
+    it("pins the main, weak and editor models to the gateway's LiteLLM route", () => {
+      const prepared = build(config("aider", "aider-cli"))
+      expect(prepared.model).toBe("openai/model")
+      expect(prepared.config.process!.args).toEqual([
+        "--model",
+        "openai/model",
+        "--weak-model",
+        "openai/model",
+        "--editor-model",
+        "openai/model",
+        "--openai-api-base",
+        "http://127.0.0.1:9000/v1",
+      ])
+      expect(prepared.config.process!.env).toMatchObject({ OPENAI_API_KEY: "lease-only" })
+      expect(payloadOf(prepared).runtime).toBe("aider")
+    })
+
+    it("keeps edit-format options, drops model environment and refuses model arguments", () => {
+      const source = config("aider", "aider-cli")
+      source.process!.args = ["--edit-format", "diff"]
+      source.process!.env = { AIDER_MODEL: "gpt-4o", AIDER_REASONING_EFFORT: "high" }
+      const prepared = build(source).config.process!
+      expect(prepared.args!.slice(0, 2)).toEqual(["--edit-format", "diff"])
+      expect(prepared.env).toMatchObject({ AIDER_REASONING_EFFORT: "high" })
+      expect(prepared.env).not.toHaveProperty("AIDER_MODEL")
+      for (const args of [
+        ["--model", "gpt-4o"],
+        ["--openai-api-base", "https://elsewhere.example/v1"],
+        ["--model-settings-file", ".aider.model.settings.yml"],
+      ]) {
+        source.process!.args = args
+        expect(() => build(source)).toThrow(/customization argument/)
+      }
+    })
+  })
+
+  it("auto-spawns the OpenCode V1 server preset with the task-owned inline provider", () => {
+    const source = config("opencode-server", "opencode", "sse")
+    source.metadata = { ...source.metadata, autoSpawnServer: true }
+    const prepared = build(source)
+    expect(prepared.model).toBe("cognia/model")
+    expect(prepared.config.process).toMatchObject({ command: "opencode", args: [] })
+    expect(prepared.config.metadata).toMatchObject({ autoSpawnServer: true, port: 0 })
+    expect(prepared.config.network).toBeUndefined()
+    const inline = JSON.parse(prepared.config.process!.env!.OPENCODE_CONFIG_CONTENT)
+    expect(inline).toMatchObject({
+      model: "cognia/model",
+      enabled_providers: ["cognia"],
+      provider: { cognia: { options: { baseURL: "http://127.0.0.1:9000/v1" } } },
+    })
+    expect(JSON.stringify(inline)).not.toContain("lease-only")
+  })
+
+  it("records the origin device and an explicit rebind in the nonsecret task payload", () => {
+    expect(payloadOf(build(config("kimi")))).not.toHaveProperty("originDeviceId")
+    expect(payloadOf(build(config("kimi")))).not.toHaveProperty("rebind")
+    expect(
+      payloadOf(build(config("kimi"), { originDeviceId: "phone-1", rebind: true }))
+    ).toMatchObject({
+      originDeviceId: "phone-1",
+      rebind: true,
+      ownerAccountId: "owner",
+      runtime: "kimi",
+    })
+  })
+
+  describe("cogniaGatewaySupport", () => {
+    it.each([
+      ["kimi", "acp", "stdio", "kimi"],
+      ["goose", "acp", "stdio", "goose"],
+      ["copilot-cli", "acp", "stdio", "copilot"],
+      ["aider", "aider-cli", "stdio", "aider"],
+      ["opencode-server", "opencode", "sse", "opencode"],
+      ["opencode-acp", "acp", "stdio", "opencode"],
+      ["codex-app-server", "codex-app-server", "stdio", "codex"],
+      ["claude-code", "acp", "stdio", "claude"],
+      ["deepseek-harness-readonly", "dsh-sdk", "stdio", "dsh-sdk"],
+      ["deepseek-harness-acp", "acp", "stdio", "dsh"],
+    ])("supports %s as %s/%s with traits for %s", (preset, protocol, transport, runtime) => {
+      const source = config(preset, protocol, transport)
+      expect(cogniaGatewaySupport(source)).toEqual({ supported: true, runtime })
+      expect(gatewayRuntimeTraits(source)).toBe(GATEWAY_RUNTIME_TRAITS[runtime])
+    })
+
+    it("names each runtime's ingress and continuity", () => {
+      expect(GATEWAY_RUNTIME_TRAITS.codex).toEqual({
+        ingress: "openai-responses",
+        continuity: "native-resume",
+      })
+      expect(GATEWAY_RUNTIME_TRAITS.claude.ingress).toBe("anthropic")
+      for (const runtime of ["kimi", "goose", "copilot", "opencode", "pi", "qwen", "dsh"])
+        expect(GATEWAY_RUNTIME_TRAITS[runtime]).toEqual({
+          ingress: "openai-chat",
+          continuity: "native-resume",
+        })
+      for (const runtime of ["dsh-sdk", "aider"])
+        expect(GATEWAY_RUNTIME_TRAITS[runtime]).toEqual({
+          ingress: "openai-chat",
+          continuity: "transcript",
+        })
+    })
+
+    it.each([
+      ["gemini-cli", "acp"],
+      ["cline", "acp"],
+      ["cursor-cli", "acp"],
+      ["kiro", "acp"],
+      ["devin", "acp"],
+      ["qoder", "acp"],
+      ["droid", "acp"],
+      ["unknown", "acp"],
+    ])("refuses %s as an unsupported runtime", (preset, protocol) => {
+      expect(cogniaGatewaySupport(config(preset, protocol))).toEqual({
+        supported: false,
+        reason: "unsupported-runtime",
+      })
+    })
+
+    it("distinguishes attached servers, network endpoints and missing processes", () => {
+      expect(
+        cogniaGatewaySupport({
+          ...config("opencode-remote", "opencode", "sse"),
+          process: undefined,
+          network: { endpoint: "http://127.0.0.1:4096" },
+        })
+      ).toEqual({ supported: false, reason: "remote-server" })
+      expect(
+        cogniaGatewaySupport({
+          ...config("opencode-v2-service", "opencode-v2", "sse"),
+          process: undefined,
+          network: { endpoint: "https://remote.example" },
+        })
+      ).toEqual({ supported: false, reason: "remote-server" })
+      expect(
+        cogniaGatewaySupport({
+          ...config("kimi", "acp", "websocket"),
+          process: undefined,
+          network: { endpoint: "wss://agent.example" },
+        })
+      ).toEqual({ supported: false, reason: "network-endpoint" })
+      expect(cogniaGatewaySupport({ ...config("kimi"), process: undefined })).toEqual({
+        supported: false,
+        reason: "no-process",
+      })
+      expect(
+        cogniaGatewaySupport({ ...config("pi-rpc", "pi-rpc"), process: { command: "" } })
+      ).toEqual({ supported: false, reason: "no-process" })
+    })
   })
 })

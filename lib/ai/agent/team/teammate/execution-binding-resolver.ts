@@ -81,15 +81,19 @@ export function resolveTeammateExecutionBinding(
   ]
 
   const consulted: ExecutionBindingSource[] = []
+  // Host selection is independent of deployment inheritance. Inherit-mode
+  // rows are how the UI stores a host-only pin.
+  let executionTarget: TeammateExecutionBinding["executionTarget"]
   for (const [source, binding] of chain) {
     consulted.push(source)
+    executionTarget ??= binding?.executionTarget
     if (!binding || binding.mode === "inherit") continue
     const { policy, candidateIds } = policyFromBinding(binding)
     return {
-      policy,
+      policy: { ...policy, ...(executionTarget ? { executionTarget } : {}) },
       source,
       ...(candidateIds ? { candidateIds } : {}),
-      executionTarget: binding.executionTarget ?? LOCAL_TARGET,
+      executionTarget: executionTarget ?? LOCAL_TARGET,
       trace: { consulted, managedForced: source === "managed" },
     }
   }
@@ -97,9 +101,9 @@ export function resolveTeammateExecutionBinding(
   // Whole chain inherited: the app default execution applies (empty policy —
   // the unified resolver's own legacy/default mapping decides).
   return {
-    policy: {},
+    policy: executionTarget ? { executionTarget } : {},
     source: "app-default",
-    executionTarget: LOCAL_TARGET,
+    executionTarget: executionTarget ?? LOCAL_TARGET,
     trace: { consulted, managedForced: false },
   }
 }

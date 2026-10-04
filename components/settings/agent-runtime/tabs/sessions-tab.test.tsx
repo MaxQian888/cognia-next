@@ -1,66 +1,64 @@
-// Coverage for the agent-runtime Sessions tab.
+// Coverage for Settings → Agent Runtime → Sessions: the runtime view of
+// conversations (manager entry, SDK-bound conversations, native SDK sessions).
+// next-intl is globally mocked against en.json in jest.setup.ts, so the
+// assertions read the shipped English strings.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { SessionsTab } from "./sessions-tab"
 import type { ChatSession } from "@cognia/agent-config-types"
 
-const setActiveSession = jest.fn()
-const liveSessions: ChatSession[] = []
-const liveUsage: Array<{
-  sessionId: string
-  messageId: string
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  costUsd: number
-}> = []
-let activeSessionId: string | null = null
+import { TooltipProvider } from "@/components/ui/tooltip"
+import type { SessionUsageRow } from "@/lib/db/session-usage"
+import { aggregateBySession, formatBucketCost } from "@/lib/usage/session-analytics"
 
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: (factory: () => unknown) => {
-    const out = factory()
-    if (out instanceof Promise) return undefined
-    return out
+const liveSessions: ChatSession[] = []
+const liveUsage: SessionUsageRow[] = []
+let chatSlices: Record<string, { status: string }> = {}
+// When true, every live query hands back a pending promise — the pre-hydration
+// state the tab has to render as loading, never as an empty table.
+let liveQueriesPending = false
+
+jest.mock("@/hooks/data/use-client-live-query", () => ({
+  useClientLiveQuery: (query: () => unknown) => {
+    const out = query()
+    return out instanceof Promise ? undefined : out
   },
 }))
 
-// When true, both live queries hand back a pending promise — the pre-hydration
-// state the component has to survive without rows.
-let liveQueriesPending = false
 jest.mock("@/lib/db/sessions", () => ({
   listSessions: () => (liveQueriesPending ? Promise.resolve([]) : liveSessions),
   forkSessionFromParent: jest.fn(),
-  deleteSession: jest.fn(),
-  updateSession: jest.fn(),
+  clearSessionSdkLink: jest.fn(),
 }))
 
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     sessionUsage: {
-      toArray: () => (liveQueriesPending ? Promise.resolve([]) : liveUsage),
+      where: (index: string) => ({
+        anyOf: (ids: string[]) => ({
+          toArray: () =>
+            liveQueriesPending
+              ? Promise.resolve([])
+              : liveUsage.filter((row) => index === "sessionId" && ids.includes(row.sessionId)),
+        }),
+      }),
     },
   }),
 }))
 
 jest.mock("@/stores/chat", () => ({
-  useChatStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      activeSessionId,
-      setActiveSession,
-    }),
+  useChatStore: (selector: (s: unknown) => unknown) => selector({ sessions: chatSlices }),
 }))
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (k: string, vars?: Record<string, unknown>) =>
-    vars ? `${k} ${JSON.stringify(vars)}` : k,
+const routerPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush, replace: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/settings",
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 jest.mock("sonner", () => ({
-  toast: {
-    success: jest.fn(),
-    error: jest.fn(),
-  },
+  toast: { success: jest.fn(), error: jest.fn() },
 }))
 
 jest.mock("@/components/settings/agent-runtime/sdk-session-manager", () => ({
@@ -69,280 +67,386 @@ jest.mock("@/components/settings/agent-runtime/sdk-session-manager", () => ({
 
 const warnMock = jest.fn()
 jest.mock("@cognia/logging", () => ({
-  loggers: { chat: { warn: (...args: unknown[]) => warnMock(...args) } },
+  loggers: {
+    chat: { warn: (...args: unknown[]) => warnMock(...args) },
+    ui: { warn: jest.fn(), info: jest.fn() },
+  },
 }))
 
 import { toast } from "sonner"
-import { forkSessionFromParent, deleteSession, updateSession } from "@/lib/db/sessions"
+import { clearSessionSdkLink, forkSessionFromParent } from "@/lib/db/sessions"
+import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
+import { SessionsTab } from "./sessions-tab"
+
 const mockedFork = forkSessionFromParent as unknown as jest.Mock
-const mockedDelete = deleteSession as unknown as jest.Mock
-const mockedUpdate = updateSession as unknown as jest.Mock
+const mockedUnlink = clearSessionSdkLink as unknown as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
   liveQueriesPending = false
   liveSessions.length = 0
   liveUsage.length = 0
-  activeSessionId = null
-  setActiveSession.mockClear()
+  chatSlices = {}
 })
 
-function pushSession(s: Partial<ChatSession> & { id: string; title: string }) {
+function pushSession(s: Partial<ChatSession> & { id: string }) {
   liveSessions.push({
-    kind: s.kind ?? "direct",
-    createdAt: s.createdAt ?? 0,
-    updatedAt: s.updatedAt ?? Date.now(),
+    title: s.id,
+    createdAt: 0,
+    updatedAt: 1_000,
     ...s,
   } as ChatSession)
 }
 
-describe("SessionsTab — rendering", () => {
-  it("shows the empty-all message when there are no sessions", () => {
-    render(<SessionsTab />)
-    expect(screen.getByText(/emptyAll/)).toBeInTheDocument()
+function usageRow(overrides: Partial<SessionUsageRow> & { sessionId: string }): SessionUsageRow {
+  return {
+    messageId: `m-${Math.random().toString(36).slice(2)}`,
+    at: 1,
+    model: "claude-sonnet-4-6",
+    inputTokens: 1_000,
+    outputTokens: 500,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    costUsd: 0.25,
+    durationMs: 100,
+    ...overrides,
+  }
+}
+
+function renderTab() {
+  return render(
+    <TooltipProvider>
+      <SessionsTab />
+    </TooltipProvider>
+  )
+}
+
+const boundBlock = () => screen.getByTestId("sdk-bound-conversations")
+const managerBlock = () => screen.getByTestId("sessions-manager-entry")
+
+describe("SessionsTab — layout", () => {
+  it("stacks the manager entry, the SDK-bound list and the native SDK manager in that order", () => {
+    renderTab()
+    const tab = screen.getByTestId("sessions-tab")
+    const order = Array.from(tab.querySelectorAll("[data-testid]"))
+      .map((node) => node.getAttribute("data-testid"))
+      .filter((id) =>
+        ["sessions-manager-entry", "sdk-bound-conversations", "sdk-session-manager"].includes(
+          id ?? ""
+        )
+      )
+    expect(order).toEqual([
+      "sessions-manager-entry",
+      "sdk-bound-conversations",
+      "sdk-session-manager",
+    ])
   })
 
-  it("renders one row per session with token + cost totals", () => {
-    pushSession({ id: "s1", title: "Demo" })
-    liveUsage.push({
-      sessionId: "s1",
-      messageId: "m1",
-      inputTokens: 100,
-      outputTokens: 50,
-      cacheReadTokens: 0,
-      costUsd: 0.0123,
-    })
-    render(<SessionsTab />)
-    expect(screen.getByTestId("session-row-s1")).toBeInTheDocument()
-    expect(screen.getByText(/Demo/)).toBeInTheDocument()
-    expect(screen.getByText("$0.0123")).toBeInTheDocument()
-  })
-
-  it("shows '—' when a session has zero cost", () => {
-    pushSession({ id: "s1", title: "Free" })
-    render(<SessionsTab />)
-    expect(screen.getByTestId("session-row-s1")).toHaveTextContent("—")
-  })
-
-  it("highlights the active session", () => {
-    pushSession({ id: "s1", title: "Active" })
-    activeSessionId = "s1"
-    render(<SessionsTab />)
-    expect(screen.getByTestId("session-row-s1")).toHaveAttribute("data-active", "true")
-  })
-
-  it("filter input narrows the visible rows", async () => {
-    pushSession({ id: "s1", title: "Cookie research" })
-    pushSession({ id: "s2", title: "Vacation plan" })
-    const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.type(screen.getByTestId("sessions-filter"), "cookie")
-    expect(screen.getByTestId("session-row-s1")).toBeInTheDocument()
-    expect(screen.queryByTestId("session-row-s2")).toBeNull()
-  })
-
-  it("filter with no matches shows the empty-filter message", async () => {
-    pushSession({ id: "s1", title: "Demo" })
-    const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.type(screen.getByTestId("sessions-filter"), "zzz")
-    expect(screen.getByText(/emptyFilter/)).toBeInTheDocument()
+  it("offers no rename, delete or resume — those live in the conversation manager", () => {
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    renderTab()
+    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument()
   })
 })
 
-describe("SessionsTab — row actions", () => {
-  beforeEach(() => {
+describe("SessionsTab — conversation manager entry", () => {
+  it("renders a busy region instead of counts while the session table loads", () => {
+    liveQueriesPending = true
+    renderTab()
+    expect(managerBlock().querySelector('[aria-busy="true"]')).not.toBeNull()
+    expect(screen.queryByTestId("sessions-manager-active")).not.toBeInTheDocument()
+  })
+
+  it("counts exposed active and archived conversations across workspaces", () => {
+    pushSession({ id: "a", projectId: "p1" })
+    pushSession({ id: "b", projectId: "p2" })
+    pushSession({ id: "c", archivedAt: 9 })
+    pushSession({ id: "sub", kind: "subagent" })
+    pushSession({ id: "wf", kind: "workflow-editor", archivedAt: 3 })
+    renderTab()
+    expect(screen.getByTestId("sessions-manager-active")).toHaveTextContent(
+      "2 active conversations"
+    )
+    expect(screen.getByTestId("sessions-manager-archived")).toHaveTextContent(
+      /^1 archived conversation/
+    )
+    expect(managerBlock().querySelector('[aria-busy="true"]')).toBeNull()
+  })
+
+  it("links to the conversation manager and its archive tab", () => {
+    renderTab()
+    expect(screen.getByRole("link", { name: "Open conversations" })).toHaveAttribute(
+      "href",
+      "/conversations"
+    )
+    expect(screen.getByRole("link", { name: "Open archive" })).toHaveAttribute(
+      "href",
+      "/conversations?tab=archived"
+    )
+  })
+})
+
+describe("SessionsTab — SDK-bound conversations", () => {
+  it("renders a busy region, not the empty state, while loading", () => {
+    liveQueriesPending = true
+    renderTab()
+    expect(boundBlock().querySelector('[aria-busy="true"]')).not.toBeNull()
+    expect(
+      within(boundBlock()).queryByText(/No conversation is bound to an SDK session yet/)
+    ).not.toBeInTheDocument()
+  })
+
+  it("explains the empty state when nothing is bound", () => {
+    pushSession({ id: "plain", title: "No SDK" })
+    renderTab()
+    expect(
+      within(boundBlock()).getByText(/No conversation is bound to an SDK session yet/)
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("sdk-bound-row-plain")).not.toBeInTheDocument()
+  })
+
+  it("lists only exposed SDK-bound conversations, newest activity first, archived marked", () => {
+    pushSession({ id: "old", title: "Old work", sdkSessionId: "sdk-old", updatedAt: 1 })
+    pushSession({
+      id: "new",
+      title: "New work",
+      sdkSessionId: "sdk-new",
+      updatedAt: 2,
+      lastMessageAt: 50,
+    })
+    pushSession({
+      id: "arch",
+      title: "Shelved",
+      sdkSessionId: "sdk-arch",
+      updatedAt: 3,
+      archivedAt: 3,
+    })
+    pushSession({ id: "sub", kind: "subagent", sdkSessionId: "sdk-sub", updatedAt: 99 })
+    pushSession({ id: "none", title: "Unbound", updatedAt: 98 })
+    renderTab()
+
+    const rows = within(boundBlock())
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => row.getAttribute("data-testid"))
+    expect(rows).toEqual(["sdk-bound-row-new", "sdk-bound-row-arch", "sdk-bound-row-old"])
+    expect(within(screen.getByTestId("sdk-bound-row-arch")).getByText("Archived")).toBeTruthy()
+    expect(within(screen.getByTestId("sdk-bound-row-new")).queryByText("Archived")).toBeNull()
+    expect(within(boundBlock()).getByText(/^3 conversations/)).toBeInTheDocument()
+  })
+
+  it("shows the display title, the SDK id, the storage backend and the last activity", () => {
+    pushSession({
+      id: "placeholder",
+      title: "New chat",
+      sdkSessionId: "sdk-placeholder",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/repo" },
+      updatedAt: 7_000,
+    })
+    pushSession({
+      id: "untitled",
+      title: "",
+      sdkSessionId: "sdk-untitled",
+      sdkSessionStorage: { backend: "filesystem" },
+      updatedAt: 6_000,
+    })
+    pushSession({ id: "legacy", title: "Legacy", sdkSessionId: "sdk-legacy", updatedAt: 5_000 })
+    renderTab()
+
+    const placeholder = screen.getByTestId("sdk-bound-row-placeholder")
+    expect(within(placeholder).getByText("New chat")).toBeInTheDocument()
+    expect(within(placeholder).getByText("sdk-placeholder")).toBeInTheDocument()
+    expect(within(placeholder).getByText("Host store")).toBeInTheDocument()
+    expect(within(placeholder).getByText("/repo")).toBeInTheDocument()
+    // The global next-intl mock renders relativeTime as the ISO instant.
+    expect(within(placeholder).getByText(new Date(7_000).toISOString())).toBeInTheDocument()
+
+    const untitled = screen.getByTestId("sdk-bound-row-untitled")
+    expect(within(untitled).getByText("(untitled)")).toBeInTheDocument()
+    expect(within(untitled).getByText("Local files")).toBeInTheDocument()
+
+    // No recorded backend: say nothing rather than guess one.
+    const legacy = screen.getByTestId("sdk-bound-row-legacy")
+    expect(within(legacy).queryByText("Local files")).toBeNull()
+    expect(within(legacy).queryByText("Host store")).toBeNull()
+  })
+
+  it("prices usage through aggregateBySession and marks a partly unpriced total", () => {
     pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    pushSession({ id: "s2", title: "Quiet", sdkSessionId: "sdk-2" })
+    liveUsage.push(
+      usageRow({ sessionId: "s1", costUsd: 0.5 }),
+      usageRow({
+        sessionId: "s1",
+        costUsd: 0,
+        model: "no-such-model-anywhere",
+        providerId: "no-such-provider",
+      })
+    )
+    renderTab()
+
+    const [summary] = aggregateBySession(liveUsage)
+    const expectedCost = formatBucketCost(summary!.costUsd, summary!.unpricedTurns, summary!.turns)
+    expect(expectedCost.startsWith("≥")).toBe(true)
+    const row = screen.getByTestId("sdk-bound-row-s1")
+    expect(within(row).getByText(expectedCost)).toBeInTheDocument()
+    expect(within(row).getByText("2")).toBeInTheDocument()
+    expect(within(row).getByText("3.0K")).toBeInTheDocument()
+
+    // No recorded turn is not "$0.00". The cost cell is the one before actions.
+    const quiet = screen.getByTestId("sdk-bound-row-s2")
+    const cells = within(quiet).getAllByRole("cell")
+    expect(cells[cells.length - 2]).toHaveTextContent(/^—$/)
+    expect(within(quiet).queryByText("$0.00")).toBeNull()
   })
 
-  it("Resume sets the active session", async () => {
+  it("filters by title, chat id or SDK id and says when nothing matches", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("resume-s1"))
-    expect(setActiveSession).toHaveBeenCalledWith("s1")
+    pushSession({ id: "s1", title: "Fix auth", sdkSessionId: "sdk-aaa" })
+    pushSession({ id: "s2", title: "Write docs", sdkSessionId: "sdk-bbb" })
+    renderTab()
+
+    const input = screen.getByRole("textbox", { name: "Filter SDK-bound conversations" })
+    await user.type(input, "sdk-bbb")
+    expect(screen.queryByTestId("sdk-bound-row-s1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("sdk-bound-row-s2")).toBeInTheDocument()
+
+    await user.clear(input)
+    await user.type(input, "nothing-like-this")
+    expect(screen.getByText("No SDK-bound conversation matches this filter.")).toBeInTheDocument()
   })
 
-  it("Fork is disabled when sdkSessionId is missing", () => {
-    liveSessions[0] = { ...liveSessions[0], sdkSessionId: undefined }
-    render(<SessionsTab />)
-    expect(screen.getByTestId("fork-s1")).toBeDisabled()
-  })
-
-  it("Fork calls forkSessionFromParent + sets the new active session", async () => {
-    mockedFork.mockResolvedValue({ id: "s2", title: "Demo (fork)" })
+  it("opens a conversation through the session link", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("fork-s1"))
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    renderTab()
+    await user.click(screen.getByRole("button", { name: "Open “Demo”" }))
+    expect(routerPush).toHaveBeenCalledWith("/?session=s1")
+  })
+})
+
+describe("SessionsTab — fork SDK session", () => {
+  it("forks the raw SDK session and opens the new conversation", async () => {
+    const user = userEvent.setup()
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    mockedFork.mockResolvedValueOnce({ id: "s2", title: "Demo (fork)" })
+    renderTab()
+
+    await user.click(screen.getByRole("button", { name: "Fork the SDK session of “Demo”" }))
     await waitFor(() => expect(mockedFork).toHaveBeenCalledWith("s1"))
-    expect(setActiveSession).toHaveBeenCalledWith("s2")
+    expect(toast.success).toHaveBeenCalledWith("Forked into “Demo (fork)”.")
+    expect(routerPush).toHaveBeenCalledWith("/?session=s2")
   })
 
-  it("Fork failure shows a translated toast, not the raw Error text", async () => {
-    // `forkSessionFromParent` throws a bare English Error when the parent has
-    // no `sdkSessionId` — always the case for providers that never issue one.
-    // Surfacing `err.message` put untranslated internals in front of the user.
-    mockedFork.mockRejectedValue(new Error("session s1 has no sdkSessionId"))
+  it("names the failure without leaking the thrown text", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("fork-s1"))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("forkFailedToast"))
-    expect(toast.error).not.toHaveBeenCalledWith(expect.stringContaining("sdkSessionId"))
-    expect(setActiveSession).not.toHaveBeenCalled()
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    mockedFork.mockRejectedValueOnce(new Error("Cannot fork: internal detail"))
+    renderTab()
+
+    await user.click(screen.getByRole("button", { name: "Fork the SDK session of “Demo”" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn't fork the SDK session."))
+    expect(toast.error).not.toHaveBeenCalledWith(expect.stringContaining("internal detail"))
+    expect(warnMock).toHaveBeenCalledWith(
+      "sdk-session-fork-failed",
+      expect.objectContaining({ sessionId: "s1", err: "Cannot fork: internal detail" })
+    )
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
-  it("Fork failure still records the real reason for diagnosis", async () => {
-    mockedFork.mockRejectedValue(new Error("session s1 has no sdkSessionId"))
+  it("explains a lock that landed after render", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("fork-s1"))
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    mockedFork.mockRejectedValueOnce(new SessionHandoffLockedError("s1", "ticket", "branch"))
+    renderTab()
+
+    await user.click(screen.getByRole("button", { name: "Fork the SDK session of “Demo”" }))
     await waitFor(() =>
-      expect(warnMock).toHaveBeenCalledWith(
-        "sdk-session-fork-failed",
-        expect.objectContaining({ sessionId: "s1" })
+      expect(toast.error).toHaveBeenCalledWith(
+        "This conversation is read-only while it is handed off to another device."
       )
     )
   })
 
-  it("Rename opens dialog, saves on confirm", async () => {
-    mockedUpdate.mockResolvedValue(undefined)
+  it("disables fork and unlink on a handed-off conversation with a reachable reason", () => {
+    pushSession({
+      id: "s1",
+      title: "Demo",
+      sdkSessionId: "sdk-1",
+      handoffLock: { ticketId: "t1" } as ChatSession["handoffLock"],
+    })
+    renderTab()
+    const fork = screen.getByRole("button", { name: "Fork the SDK session of “Demo”" })
+    expect(fork).toBeDisabled()
+    expect(fork).toHaveAccessibleDescription(
+      "This conversation is read-only while it is handed off to another device."
+    )
+    // The tooltip hangs off a focusable wrapper, since a disabled button
+    // receives neither focus nor pointer events.
+    expect(screen.getByTestId("sdk-bound-fork-s1-blocked")).toHaveAttribute("tabindex", "0")
+    expect(fork).not.toHaveAttribute("title")
+
+    const unlink = screen.getByRole("button", { name: "Unlink the SDK session from “Demo”" })
+    expect(unlink).toBeDisabled()
+    // Opening stays available: a locked conversation can still be read.
+    expect(screen.getByRole("button", { name: "Open “Demo”" })).toBeEnabled()
+  })
+})
+
+describe("SessionsTab — unlink SDK session", () => {
+  it("confirms, then clears the link while the conversation keeps its messages", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("rename-s1"))
-    const input = await screen.findByTestId("rename-input")
-    fireEvent.change(input, { target: { value: "  Renamed  " } })
-    await user.click(screen.getByTestId("rename-confirm"))
-    await waitFor(() => expect(mockedUpdate).toHaveBeenCalledWith("s1", { title: "Renamed" }))
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    mockedUnlink.mockResolvedValueOnce(undefined)
+    renderTab()
+
+    await user.click(screen.getByRole("button", { name: "Unlink the SDK session from “Demo”" }))
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Unlink the SDK session?")
+    expect(dialog).toHaveTextContent(
+      "“Demo” keeps all of its messages, but its next turn starts a fresh SDK conversation instead of resuming sdk-1."
+    )
+    expect(mockedUnlink).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole("button", { name: "Unlink" }))
+    await waitFor(() => expect(mockedUnlink).toHaveBeenCalledWith("s1"))
+    expect(toast.success).toHaveBeenCalledWith("SDK session unlinked.")
   })
 
-  it("Rename refuses an empty title", async () => {
+  it("cancelling leaves the link alone", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("rename-s1"))
-    const input = await screen.findByTestId("rename-input")
-    fireEvent.change(input, { target: { value: "   " } })
-    await user.click(screen.getByTestId("rename-confirm"))
-    expect(mockedUpdate).not.toHaveBeenCalled()
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    renderTab()
+    await user.click(screen.getByRole("button", { name: "Unlink the SDK session from “Demo”" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(mockedUnlink).not.toHaveBeenCalled()
   })
 
-  it("Delete confirms then calls deleteSession", async () => {
-    mockedDelete.mockResolvedValue(undefined)
+  it("names an unlink failure without the thrown text", async () => {
     const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("delete-s1"))
-    await user.click(await screen.findByTestId("delete-confirm"))
-    await waitFor(() => expect(mockedDelete).toHaveBeenCalledWith("s1"))
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    mockedUnlink.mockRejectedValueOnce(new Error("dexie exploded"))
+    renderTab()
+    await user.click(screen.getByRole("button", { name: "Unlink the SDK session from “Demo”" }))
+    await user.click(screen.getByRole("button", { name: "Unlink" }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Couldn't unlink the SDK session.")
+    )
+    expect(toast.error).not.toHaveBeenCalledWith(expect.stringContaining("dexie"))
   })
 
-  it("Delete clears active session when removing the active row", async () => {
-    activeSessionId = "s1"
-    mockedDelete.mockResolvedValue(undefined)
-    const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("delete-s1"))
-    await user.click(await screen.findByTestId("delete-confirm"))
-    await waitFor(() => expect(setActiveSession).toHaveBeenCalledWith(null))
-  })
-
-  it("Fork surfaces errors via toast and unblocks the row", async () => {
-    mockedFork.mockRejectedValue(new Error("nope"))
-    const user = userEvent.setup()
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("fork-s1"))
-    await waitFor(() => expect(mockedFork).toHaveBeenCalled())
-  })
-
-  it("Rename can be dismissed with Cancel and with Escape", async () => {
-    const user = userEvent.setup()
-    render(<SessionsTab />)
-
-    await user.click(screen.getByTestId("rename-s1"))
-    await user.click(await screen.findByRole("button", { name: "cancel" }))
-    await waitFor(() => expect(screen.queryByTestId("rename-input")).not.toBeInTheDocument())
-
-    await user.click(screen.getByTestId("rename-s1"))
-    await screen.findByTestId("rename-input")
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(screen.queryByTestId("rename-input")).not.toBeInTheDocument())
-  })
-
-  it("falls back to placeholders for an untitled, kindless row", () => {
-    liveSessions.push({ id: "bare", title: "", updatedAt: Date.now(), createdAt: 0 } as never)
-    render(<SessionsTab />)
-    const row = screen.getByTestId("session-row-bare")
-    expect(row).toHaveTextContent("untitled")
-    expect(row).toHaveTextContent("direct")
-  })
-
-  it("labels each age band of the Updated column", () => {
-    const now = Date.now()
-    pushSession({ id: "now", title: "Now", updatedAt: now })
-    pushSession({ id: "mins", title: "Mins", updatedAt: now - 5 * 60_000 })
-    pushSession({ id: "hours", title: "Hours", updatedAt: now - 5 * 3_600_000 })
-    pushSession({ id: "days", title: "Days", updatedAt: now - 5 * 86_400_000 })
-    render(<SessionsTab />)
-
-    expect(screen.getByTestId("session-row-now")).toHaveTextContent("ago.justNow")
-    expect(screen.getByTestId("session-row-mins")).toHaveTextContent("ago.minutes")
-    expect(screen.getByTestId("session-row-hours")).toHaveTextContent("ago.hours")
-    expect(screen.getByTestId("session-row-days")).toHaveTextContent("ago.days")
-  })
-
-  it("names an untitled session by its id in the resume toast", async () => {
-    const user = userEvent.setup()
-    liveSessions.push({ id: "bare", title: "", updatedAt: Date.now(), createdAt: 0 } as never)
-    render(<SessionsTab />)
-    await user.click(screen.getByTestId("resume-bare"))
-    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("bare"))
-  })
-
-  it("surfaces a rename failure and unblocks the row", async () => {
-    const user = userEvent.setup()
-    mockedUpdate.mockRejectedValueOnce(new Error("write refused"))
-    render(<SessionsTab />)
-
-    await user.click(screen.getByTestId("rename-s1"))
-    fireEvent.change(screen.getByTestId("rename-input"), { target: { value: "New" } })
-    await user.click(screen.getByTestId("rename-confirm"))
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("write refused"))
-  })
-
-  it("surfaces a delete failure and keeps the row", async () => {
-    const user = userEvent.setup()
-    mockedDelete.mockRejectedValueOnce("boom")
-    render(<SessionsTab />)
-
-    await user.click(screen.getByTestId("delete-s1"))
-    await user.click(await screen.findByTestId("delete-confirm"))
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"))
-    expect(screen.getByTestId("session-row-s1")).toBeInTheDocument()
-  })
-
-  it("renders the empty state while both live queries are still pending", () => {
-    liveQueriesPending = true
-    render(<SessionsTab />)
-    expect(screen.getByText(/emptyAll/)).toBeInTheDocument()
-  })
-
-  it("stringifies a non-Error rename failure", async () => {
-    const user = userEvent.setup()
-    mockedUpdate.mockRejectedValueOnce("rename blew up")
-    render(<SessionsTab />)
-
-    await user.click(screen.getByTestId("rename-s1"))
-    fireEvent.change(screen.getByTestId("rename-input"), { target: { value: "New" } })
-    await user.click(screen.getByTestId("rename-confirm"))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("rename blew up"))
-  })
-
-  it("reads the message off an Error delete failure", async () => {
-    const user = userEvent.setup()
-    mockedDelete.mockRejectedValueOnce(new Error("delete refused"))
-    render(<SessionsTab />)
-
-    await user.click(screen.getByTestId("delete-s1"))
-    await user.click(await screen.findByTestId("delete-confirm"))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("delete refused"))
+  it("waits for a running turn before it can unlink", () => {
+    pushSession({ id: "s1", title: "Demo", sdkSessionId: "sdk-1" })
+    chatSlices = { s1: { status: "streaming" } }
+    renderTab()
+    const unlink = screen.getByRole("button", { name: "Unlink the SDK session from “Demo”" })
+    expect(unlink).toBeDisabled()
+    expect(unlink).toHaveAccessibleDescription(
+      "Wait for the current turn to finish before unlinking the SDK session."
+    )
+    // Fork does not race the running turn's link, so it stays available.
+    expect(screen.getByRole("button", { name: "Fork the SDK session of “Demo”" })).toBeEnabled()
   })
 })

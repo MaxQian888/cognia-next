@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { isDeepStrictEqual } from "node:util"
 import type { SendOptions } from "../../shared/wire/inbound.ts"
 import type { HostRpcCaller } from "../../tools/state/host-background-shells.ts"
 import type {
@@ -14,6 +15,7 @@ import {
   estimateTokens,
   makeSummaryMessage,
   summaryVersion,
+  AUTO_COMPACT_FRACTION,
 } from "../../context/compaction.ts"
 import { planStrategy } from "../../context/strategies.ts"
 import { queryPreCompactDecision } from "../../hooks/pre-compact.ts"
@@ -87,41 +89,91 @@ export function createCompactor({
       .join("\n\n")
   }
 
-  // Before a turn, if the previous turn's prompt crossed the auto-compact
-  // threshold, summarize the older messages and splice the summary in. The
-  // summary is produced by the same state.model (no tools); on any failure we skip
-  // compaction rather than break the turn. Emits a `compact_boundary` system
-  // event so the renderer marks it exactly like the Anthropic path.
-  async function maybeCompact(
+  // A preparation owns an immutable prefix, cancellation, and the turn's
+  // billing gate. Only a model-loop boundary may publish its result.
+  const runtimeState = state
+  let generation = 0
+  type Prepared = Awaited<ReturnType<typeof prepare>>
+  type Job = {
+    generation: number
+    snapshot: ConversationMessage[]
+    controller: AbortController
+    model: string
+    gate: CallLedgerGate | null
+    result?: Prepared
+    settled: boolean
+    promise: Promise<void>
+  }
+  let pending: Job | undefined
+  const running = new Set<Job>()
+
+  function invalidate() {
+    generation++
+    pending?.controller.abort()
+    for (const job of running) job.controller.abort()
+    pending = undefined
+  }
+
+  function matches(job: Job) {
+    return (
+      job.generation === generation &&
+      !job.controller.signal.aborted &&
+      job.model === state.model &&
+      conversation.length >= job.snapshot.length &&
+      job.snapshot.every((message, i) => isDeepStrictEqual(message, conversation[i]))
+    )
+  }
+
+  // Abort also settles a non-cooperative adapter's local waiter. The provider
+  // receives the same signal; late responses cannot reach publication or billing.
+  function abortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    if (signal.aborted) return Promise.reject(signal.reason)
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        reject(signal.reason)
+        cleanup()
+      }
+      const cleanup = () => signal.removeEventListener("abort", abort)
+      signal.addEventListener("abort", abort, { once: true })
+      Promise.resolve()
+        .then(() => {
+          signal.throwIfAborted()
+          return operation()
+        })
+        .then(
+          (value) => {
+            cleanup()
+            resolve(value)
+          },
+          (error) => {
+            cleanup()
+            reject(error)
+          }
+        )
+    })
+  }
+
+  async function prepare(
     creds: AdapterCredentials,
     modelParams: Record<string, unknown>,
-    { force = false, focus }: { force?: boolean; focus?: string } = {}
+    job: Job,
+    { force = false, focus, trigger }: { force?: boolean; focus?: string; trigger?: "auto" }
   ) {
-    const comp = sendOptions.compaction ?? {}
-    // Auto path: honour the enable toggle + the configured trigger. Manual
-    // (`force`) bypasses both — the user asked for it explicitly.
-    if (!force) {
-      if (comp.enabled === false) return
-      const args =
-        comp.trigger === "message-count"
-          ? {
-              trigger: "message-count",
-              messageCount: conversation.length,
-              messageCountThreshold: comp.messageCountThreshold,
-            }
-          : {
-              lastInputTokens: state.lastInputTokens,
-              modelId: state.model,
-              // Authoritative window resolved by the renderer (catalog-backed);
-              // falls back to the regex table inside `shouldCompact` when absent.
-              ...(typeof comp.contextWindow === "number"
-                ? { contextWindow: comp.contextWindow }
-                : {}),
-              ...(typeof comp.fraction === "number" ? { fraction: comp.fraction } : {}),
-            }
-      if (!shouldCompact(args)) return
+    const conversation = job.snapshot
+    const state: CompactionState = {
+      ...runtimeState,
+      model: job.model,
+      turnLedgerGate: job.gate,
+      activeAbortController: job.controller,
+      get ledgerSideCalls() {
+        return runtimeState.ledgerSideCalls
+      },
+      set ledgerSideCalls(value) {
+        runtimeState.ledgerSideCalls = value
+      },
     }
-
+    const comp = sendOptions.compaction ?? {}
+    const signal = job.controller.signal
     // ── PreCompact plugin hook (ADR-0090 Phase 9) ──────────────────────────
     // Gives plugins a chance to skip compaction, inject context, or override
     // the strategy. This used to route through `host_rpc`, which is answered in
@@ -139,25 +191,35 @@ export function createCompactor({
       {
         log,
         pluginHookBridge: async ({ hookId, payload, timeoutMs }) => {
-          const outcome = await runPluginHookHandler(
-            {
-              type: "plugin",
-              pluginId: PLUGIN_HOOK_BROADCAST,
-              hookId,
-              timeout: (timeoutMs ?? 30000) / 1000,
-            },
-            JSON.stringify(payload),
-            {
-              emit: (frame) => emit({ ...frame }),
-              sessionId,
-              pendingPluginHookCalls,
-              newId: () => randomUUID(),
-            }
-          )
-          return outcome?.pluginResult
+          signal.throwIfAborted()
+          const execId = randomUUID()
+          const abortHook = () =>
+            pendingPluginHookCalls.get(execId)?.resolve({ error: "compaction cancelled" })
+          signal.addEventListener("abort", abortHook, { once: true })
+          try {
+            const outcome = await runPluginHookHandler(
+              {
+                type: "plugin",
+                pluginId: PLUGIN_HOOK_BROADCAST,
+                hookId,
+                timeout: (timeoutMs ?? 30000) / 1000,
+              },
+              JSON.stringify(payload),
+              {
+                emit: (frame) => emit({ ...frame }),
+                sessionId,
+                pendingPluginHookCalls,
+                newId: () => execId,
+              }
+            )
+            return outcome?.pluginResult
+          } finally {
+            signal.removeEventListener("abort", abortHook)
+          }
         },
       }
     )
+    signal.throwIfAborted()
     if (preCompactDecision.skip) {
       log("info", "compaction skipped by plugin preCompact decision")
       return
@@ -206,6 +268,7 @@ export function createCompactor({
         ? comp.maxSummaryTokens
         : 500
     const summarize = async (messages: ConversationMessage[]) => {
+      signal.throwIfAborted()
       const transcript = renderForSummary(messages)
       if (!useAI) {
         const cap = summaryCap * 4
@@ -238,34 +301,37 @@ export function createCompactor({
             estimatedInputTokens: estimatePromptTokens([systemPrompt, transcript]),
             maxOutputTokens: summaryCap,
           },
-          async () => {
-            const run = await summaryAdapter.start({
-              sessionId,
-              model: summaryModel,
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: transcript },
-              ],
-              modelParams: summaryParams,
-              tools: undefined,
-              maxSteps: 1,
-              credentials: summaryCreds,
-              // Must track whichever credentials won above: a distinct summary
-              // provider carries its own id, otherwise these ARE the turn's creds
-              // and so is its provider. Omitting it dropped codex-on-a-relay back
-              // to `.chat()` for compaction only — the turn itself still worked.
-              providerId: summaryProviderId,
-              // Interruptible: a hung summary provider must not stall the turn
-              // head forever. Absent for a between-turns manual compaction (no
-              // active controller) — that call has no turn to stall.
-              ...(state.activeAbortController
-                ? { abortSignal: state.activeAbortController.signal }
-                : {}),
-              streamTextFn: streamTextOverride,
-            })
-            return drainSideCallStream(run, { withBilling: state.turnLedgerGate?.active === true })
-          },
-          { isCancelled }
+          () =>
+            abortable(signal, async () => {
+              const run = await summaryAdapter.start({
+                sessionId,
+                model: summaryModel,
+                messages: [
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: transcript },
+                ],
+                modelParams: summaryParams,
+                tools: undefined,
+                maxSteps: 1,
+                credentials: summaryCreds,
+                // Must track whichever credentials won above: a distinct summary
+                // provider carries its own id, otherwise these ARE the turn's creds
+                // and so is its provider. Omitting it dropped codex-on-a-relay back
+                // to `.chat()` for compaction only — the turn itself still worked.
+                providerId: summaryProviderId,
+                // Interruptible: a hung summary provider must not stall the turn
+                // head forever. Absent for a between-turns manual compaction (no
+                // active controller) — that call has no turn to stall.
+                ...(state.activeAbortController
+                  ? { abortSignal: state.activeAbortController.signal }
+                  : {}),
+                streamTextFn: streamTextOverride,
+              })
+              return drainSideCallStream(run, {
+                withBilling: state.turnLedgerGate?.active === true,
+              })
+            }),
+          { isCancelled: () => signal.aborted || isCancelled() }
         )
         if (!outcome.sent) {
           log("warn", `compaction summary refused by Router + Fusion: ${outcome.refusal.code}`)
@@ -299,6 +365,7 @@ export function createCompactor({
     if (plan.kind === "optical") {
       const { buildOpticalCompaction } = await import("../../context/optical/compact.ts")
       const opticalTranscribe = async (dataUrl: string) => {
+        signal.throwIfAborted()
         const sum = comp.summary ?? {}
         let visionAdapter = protocolAdapter
         if (sum.protocol) {
@@ -320,35 +387,38 @@ export function createCompactor({
             estimatedInputTokens: estimatePromptTokens([dataUrl]),
             maxOutputTokens: 1024,
           },
-          async () => {
-            const run = await visionAdapter.start({
-              model: visionModel,
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    { type: "image", image: dataUrl, mediaType: "image/png" },
-                    {
-                      type: "text",
-                      text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
-                    },
-                  ],
-                },
-              ],
-              modelParams: { ...modelParams, maxOutputTokens: 1024 },
-              tools: undefined,
-              maxSteps: 1,
-              credentials: sum.credentials || creds,
-              // Same pairing as the summary call above.
-              providerId: visionProviderId,
-              ...(state.activeAbortController
-                ? { abortSignal: state.activeAbortController.signal }
-                : {}),
-              streamTextFn: streamTextOverride,
-            })
-            return drainSideCallStream(run, { withBilling: state.turnLedgerGate?.active === true })
-          },
-          { isCancelled }
+          () =>
+            abortable(signal, async () => {
+              const run = await visionAdapter.start({
+                model: visionModel,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      { type: "image", image: dataUrl, mediaType: "image/png" },
+                      {
+                        type: "text",
+                        text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
+                      },
+                    ],
+                  },
+                ],
+                modelParams: { ...modelParams, maxOutputTokens: 1024 },
+                tools: undefined,
+                maxSteps: 1,
+                credentials: sum.credentials || creds,
+                // Same pairing as the summary call above.
+                providerId: visionProviderId,
+                ...(state.activeAbortController
+                  ? { abortSignal: state.activeAbortController.signal }
+                  : {}),
+                streamTextFn: streamTextOverride,
+              })
+              return drainSideCallStream(run, {
+                withBilling: state.turnLedgerGate?.active === true,
+              })
+            }),
+          { isCancelled: () => signal.aborted || isCancelled() }
         )
         if (!outcome.sent) {
           throw new Error(
@@ -357,6 +427,7 @@ export function createCompactor({
         }
         return outcome.value.trim()
       }
+      signal.throwIfAborted()
       const optical = await buildOpticalCompaction({
         middle: plan.middle,
         modelId: state.model,
@@ -405,21 +476,36 @@ export function createCompactor({
         : [...plan.systemHead, ...frozen, ...keep, summaryMsg, ...plan.tail]
     }
 
-    if (summaryProduced) state.frozenSummaryVersion = nextVersion
-
     // Per-tool-result cap (independent of the summary strategy).
     next = capToolResults(next!, {
       maxToolResultTokens: comp.maxToolResultTokens,
       preserveToolCallMetadata: comp.preserveToolCallMetadata,
     })
 
-    // Undo snapshot — copied BEFORE the splice when enabled.
-    const preMessages = comp.captureUndoSnapshot ? conversation.map((m) => ({ ...m })) : undefined
+    return {
+      next,
+      version: summaryProduced ? nextVersion : undefined,
+      captureUndo: comp.captureUndoSnapshot,
+      metadata: {
+        trigger: trigger ?? (force ? "manual" : "auto"),
+        strategy: comp.strategy ?? "summary",
+        ...(summaryProduced ? { frozenSummaryDecision: decision } : {}),
+        ...(opticalMeta ? { optical: { ...opticalMeta, sessionId } } : {}),
+        ...(plan.kind === "optical" && !opticalMeta ? { opticalFallback: true } : {}),
+      },
+    }
+  }
 
+  function publish(job: Job) {
+    if (!job.result || !matches(job)) return
+    const { next, version, captureUndo, metadata } = job.result
+    // Newly appended messages were never included in the preparation and must
+    // survive verbatim. Undo captures the complete history at publication.
+    const preMessages = captureUndo ? structuredClone(conversation) : undefined
     const preTokens = state.lastInputTokens || estimateTokens(conversation)
-    // Replace the conversation contents in place (it is a const binding).
-    conversation.splice(0, conversation.length, ...next)
-    // Reset the trigger so we don't compact again until the window refills.
+    const combined = [...next, ...conversation.slice(job.snapshot.length)]
+    conversation.splice(0, conversation.length, ...combined)
+    if (version !== undefined) state.frozenSummaryVersion = version
     state.lastInputTokens = 0
     emit({
       type: "event",
@@ -430,17 +516,98 @@ export function createCompactor({
         uuid: randomUUID(),
         session_id: sdkSessionId,
         compact_metadata: {
-          trigger: force ? "manual" : "auto",
+          ...metadata,
           pre_tokens: preTokens,
-          post_tokens: estimateTokens(next),
-          strategy: comp.strategy ?? "summary",
-          ...(summaryProduced ? { frozenSummaryDecision: decision } : {}),
-          ...(opticalMeta ? { optical: { ...opticalMeta, sessionId } } : {}),
-          ...(plan.kind === "optical" && !opticalMeta ? { opticalFallback: true } : {}),
+          post_tokens: estimateTokens(combined),
           ...(preMessages ? { pre_messages: preMessages } : {}),
         },
       },
     })
   }
-  return maybeCompact
+  function triggered(factor: number) {
+    const comp = sendOptions.compaction ?? {}
+    if (comp.enabled === false || comp.trigger === "manual") return false
+    return shouldCompact(
+      comp.trigger === "message-count"
+        ? {
+            trigger: "message-count",
+            messageCount: conversation.length,
+            messageCountThreshold:
+              typeof comp.messageCountThreshold === "number"
+                ? Math.ceil(comp.messageCountThreshold * factor)
+                : undefined,
+          }
+        : {
+            lastInputTokens: state.lastInputTokens,
+            modelId: state.model,
+            contextWindow: comp.contextWindow,
+            fraction: (comp.fraction ?? AUTO_COMPACT_FRACTION) * factor,
+          }
+    )
+  }
+
+  async function maybeCompact(
+    creds: AdapterCredentials,
+    modelParams: Record<string, unknown>,
+    options: { force?: boolean; focus?: string; trigger?: "auto" } = {}
+  ) {
+    if (pending && (!matches(pending) || options.force)) invalidate()
+    if (pending?.settled) {
+      const completed = pending
+      pending = undefined
+      publish(completed)
+      // A failed preparation is retried only at a later safe boundary.
+      return
+    }
+    const hard = options.force || triggered(1)
+    if (!pending && (hard || triggered(0.8))) {
+      const controller = new AbortController()
+      const parentSignal = state.activeAbortController?.signal
+      const abort = () => controller.abort(parentSignal?.reason)
+      if (parentSignal?.aborted) abort()
+      else parentSignal?.addEventListener("abort", abort, { once: true })
+      const job: Job = {
+        generation,
+        snapshot: structuredClone(conversation),
+        controller,
+        model: state.model,
+        gate: state.turnLedgerGate,
+        settled: false,
+        promise: Promise.resolve(),
+      }
+      pending = job
+      running.add(job)
+      job.promise = prepare(creds, modelParams, job, options)
+        .then((result) => {
+          job.result = result
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted)
+            log("warn", `compaction preparation failed: ${errorToMessage(error)}`)
+        })
+        .finally(() => {
+          job.settled = true
+          running.delete(job)
+          parentSignal?.removeEventListener("abort", abort)
+        })
+    }
+    if (hard && pending) {
+      const job = pending
+      await job.promise
+      if (pending === job) {
+        pending = undefined
+        publish(job)
+      }
+    }
+  }
+
+  // Do not let a side call outlive the turn that owns its ledger reservation.
+  // Completed candidates can safely wait for the next model-loop boundary.
+  async function settle() {
+    const jobs = [...running]
+    if (pending && !pending.settled) invalidate()
+    for (const job of jobs) job.controller.abort()
+    await Promise.all(jobs.map((job) => job.promise))
+  }
+  return Object.assign(maybeCompact, { invalidate, settle })
 }

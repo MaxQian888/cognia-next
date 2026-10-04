@@ -26,3 +26,8 @@ in-chat model switching in both scripts. Apply editable presets in Cognia's
 environment settings, clearing old provider authentication and saving recipe
 setup/readiness settings together. Preserve privacy checks while avoiding false
 passport matches caused by JSON newline escapes before file offsets.
+
+Add bounded UTF-8 task and context file inputs, local history inspection,
+resumable transcript export and active configuration saving to both native
+scripts. Preserve attachments across failed turns and defer credential prompts
+until a provider request. Export privately without overwriting existing files.

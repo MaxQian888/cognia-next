@@ -362,7 +362,10 @@ export function McpHealthTab() {
               showTimeline={false}
               includeAgentTrace={false}
               defaultAutoRefresh
-              hideToolbarPresets
+              // Its own live-follow preference: this embed defaults to live,
+              // and sharing `/logs`'s key turned Live off in one when it was
+              // turned off in the other.
+              storageScope="settings-mcp"
               maxHeight="22rem"
             />
           )}

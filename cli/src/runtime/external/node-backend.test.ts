@@ -884,6 +884,56 @@ it("keeps the DSH environment isolated from ambient and configured unrelated sec
   })
 })
 
+it("admits plugin Pi package values under exactly the COGNIA_PIPKG_ prefix (ADR-0210)", () => {
+  const env = buildExternalAgentChildEnv(
+    { NODE_ENV: "test" },
+    {
+      COGNIA_PIPKG_TEX_ENGINE: "lualatex",
+      COGNIA_PIPKGX: "near-miss",
+      COGNIA_PLUGIN_SECRET: "nope",
+      NODE_OPTIONS: "--require evil",
+    },
+    false,
+    false,
+    false,
+    true
+  )
+  expect(env.COGNIA_PIPKG_TEX_ENGINE).toBe("lualatex")
+  expect(env).not.toHaveProperty("COGNIA_PIPKGX")
+  expect(env).not.toHaveProperty("COGNIA_PLUGIN_SECRET")
+  expect(env).not.toHaveProperty("NODE_OPTIONS")
+})
+
+it("keeps plugin Pi package env away from every non-Pi agent, from both sources", () => {
+  const ambient = { NODE_ENV: "test", COGNIA_PIPKG_AMBIENT: "a" } as NodeJS.ProcessEnv
+  const overrides = {
+    COGNIA_PIPKG_MODE: "hosted",
+    COGNIA_TOOLHOST_PI_PACKAGE_ROOTS: '["/x"]',
+    COGNIA_TOOLHOST_TOKEN: "tok",
+  }
+  const other = buildExternalAgentChildEnv(ambient, overrides)
+  expect(other).not.toHaveProperty("COGNIA_PIPKG_MODE")
+  expect(other).not.toHaveProperty("COGNIA_PIPKG_AMBIENT")
+  expect(other).not.toHaveProperty("COGNIA_TOOLHOST_PI_PACKAGE_ROOTS")
+  // The rest of the reviewed prefix family is untouched.
+  expect(other.COGNIA_TOOLHOST_TOKEN).toBe("tok")
+
+  // A gateway task merges its overrides wholesale; the Pi scoping still holds.
+  const gatewayOther = buildExternalAgentChildEnv(ambient, {
+    ...overrides,
+    COGNIA_GATEWAY_TASK_HOME: "/task",
+  })
+  expect(gatewayOther).not.toHaveProperty("COGNIA_PIPKG_MODE")
+  expect(gatewayOther).not.toHaveProperty("COGNIA_TOOLHOST_PI_PACKAGE_ROOTS")
+
+  const pi = buildExternalAgentChildEnv(ambient, overrides, false, false, false, true)
+  expect(pi).toMatchObject({
+    COGNIA_PIPKG_MODE: "hosted",
+    COGNIA_PIPKG_AMBIENT: "a",
+    COGNIA_TOOLHOST_PI_PACKAGE_ROOTS: '["/x"]',
+  })
+})
+
 it("passes only an explicit managed DeepSeek endpoint", () => {
   expect(
     buildExternalAgentChildEnv(

@@ -7,12 +7,17 @@
 import { render, screen, act, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AgentEditorDialog } from "./agent-editor-dialog"
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
-const mockRemoteHostActive = jest.fn(() => false)
-jest.mock("@/lib/tauri/transport-routing", () => ({
-  isRemoteHostActive: () => mockRemoteHostActive(),
-}))
+// The routing plane is real: the dialog subscribes to it, so a test can attach
+// a remote Host under an open dialog and watch the picker follow.
+const remoteTransport: Transport = {
+  call: jest.fn(async () => undefined) as Transport["call"],
+  subscribe: jest.fn(() => () => undefined) as unknown as Transport["subscribe"],
+}
+afterEach(() => __resetRoutingForTests())
 jest.mock("@/hooks/files/use-directory-picker", () => ({
   useDirectoryPicker: () => ({ available: true, busy: false, browse: jest.fn() }),
 }))
@@ -140,21 +145,36 @@ describe("AgentEditorDialog", () => {
   })
 
   it("does not browse this computer for paths belonging to a remote execution Host", () => {
-    mockRemoteHostActive.mockReturnValue(true)
-    try {
-      render(
-        <AgentEditorDialog
-          open
-          editingAgentId="agent-1"
-          onOpenChange={jest.fn()}
-          onSave={jest.fn()}
-        />
-      )
-      expect(screen.queryByTestId("cwd-browse")).not.toBeInTheDocument()
-      expect(screen.getByLabelText(/working directory/i)).toBeInTheDocument()
-    } finally {
-      mockRemoteHostActive.mockReturnValue(false)
-    }
+    setActiveRemoteTransport(remoteTransport)
+    render(
+      <AgentEditorDialog
+        open
+        editingAgentId="agent-1"
+        onOpenChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("cwd-browse")).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/working directory/i)).toBeInTheDocument()
+  })
+
+  it("follows a Host switch while the dialog stays open", () => {
+    render(
+      <AgentEditorDialog
+        open
+        editingAgentId="agent-1"
+        onOpenChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("cwd-browse")).toBeInTheDocument()
+
+    // No prop changes: only the desktop attaching to a remote Host.
+    act(() => setActiveRemoteTransport(remoteTransport))
+    expect(screen.queryByTestId("cwd-browse")).not.toBeInTheDocument()
+
+    act(() => setActiveRemoteTransport(null))
+    expect(screen.getByTestId("cwd-browse")).toBeInTheDocument()
   })
 
   it("seeds Cline's documented ACP launch and saves a masked API key and custom config root", async () => {
@@ -292,6 +312,48 @@ describe("AgentEditorDialog", () => {
         metadata: expect.objectContaining({ preset: "goose" }),
       })
     )
+  })
+
+  it("opts a pi-rpc agent into plugin Pi packages and keeps an unavailable saved reference", async () => {
+    const { registerContributedPiPackage, __resetContributedPiPackagesForTesting } =
+      jest.requireActual<typeof import("@/lib/plugin/pi-packages/registry")>(
+        "@/lib/plugin/pi-packages/registry"
+      )
+    registerContributedPiPackage(
+      {
+        id: "latex",
+        name: "LaTeX workbench",
+        path: "pi",
+        hostedSession: { extensions: ["pi/latex.ts"], tools: ["latex_compile"] },
+      },
+      { pluginId: "latex-workbench", installRoot: "/p/latex-workbench" }
+    )
+    const original = { ...existingAgent }
+    existingAgent.protocol = "pi-rpc"
+    existingAgent.process = { command: "pi", args: ["--mode", "rpc"] }
+    existingAgent.metadata = { piExtensionPolicy: "isolated", piPackages: ["gone/pkg"] }
+    try {
+      const onSave = jest.fn()
+      render(
+        <AgentEditorDialog open editingAgentId="agent-1" onOpenChange={jest.fn()} onSave={onSave} />
+      )
+      expect(screen.getByTestId("pi-plugin-packages-unavailable")).toHaveTextContent("gone/pkg")
+      await userEvent.click(
+        within(screen.getByTestId("pi-plugin-package-latex-workbench-latex")).getByRole("checkbox")
+      )
+      await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            piExtensionPolicy: "isolated",
+            piPackages: ["gone/pkg", "latex-workbench/latex"],
+          }),
+        })
+      )
+    } finally {
+      Object.assign(existingAgent, original)
+      __resetContributedPiPackagesForTesting()
+    }
   })
 
   it("opens in create mode with the preset picker and blank name", () => {

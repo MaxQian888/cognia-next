@@ -1,6 +1,10 @@
 import { dispatchTeammate, ExternalRuntimeUnavailableError } from "./dispatch-teammate"
+import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
 import { negotiateCapabilityProfile } from "@/lib/ai/agent/external/capability/capability-profile"
 import type { TeamRunContext } from "../team-run-context"
+jest.mock("@/lib/i18n/runtime-translator", () => ({
+  getRuntimeTranslator: jest.fn(async () => (key: string) => `translated:${key}`),
+}))
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { RoutingPlan } from "@cognia/provider-types/auto-router"
@@ -763,6 +767,124 @@ describe("dispatchTeammate — durable execution environment", () => {
 })
 
 describe("dispatchTeammate — remote durable worker", () => {
+  beforeEach(() => {
+    delete process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH
+  })
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH
+  })
+
+  it.each(["inherit", "pinned", "pool"] as const)(
+    "refuses disabled remote targets even with %s deployment selection",
+    async (mode) => {
+      for (const targetMode of ["pinned", "auto"] as const) {
+        const executionTarget =
+          targetMode === "pinned"
+            ? { mode: targetMode, hostRef: "device:saved" }
+            : { mode: targetMode }
+        const execution =
+          mode === "pool"
+            ? { mode, candidateIds: ["anthropic"], executionTarget }
+            : { mode, executionTarget }
+        const { ctx, pool } = makeCtx(makeTeammate({ config: { execution } }))
+        await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toThrow(
+          "translated:remoteDispatchDisabled"
+        )
+        expect(pool.recordSuccess).not.toHaveBeenCalled()
+      }
+      expect(getRuntimeTranslator).toHaveBeenCalledWith(
+        "agentTeamsWorkspace.teammateConfig.executionBinding"
+      )
+      expect(executeAgentMock).not.toHaveBeenCalled()
+      expect(runAndCaptureMock).not.toHaveBeenCalled()
+      expect(resolveExternalMock).not.toHaveBeenCalled()
+      expect(remoteRunMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("refuses a disabled remote target inherited from the team default", async () => {
+    const { ctx } = makeCtx(makeTeammate(), {
+      defaultExecution: { mode: "inherit", executionTarget: { mode: "auto" } },
+    })
+    await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toThrow(
+      "translated:remoteDispatchDisabled"
+    )
+    expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("does not run locally if durable remote admission is unavailable", async () => {
+    process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
+    const { ctx } = makeCtx(
+      makeTeammate({
+        config: { execution: { mode: "inherit", executionTarget: { mode: "auto" } } },
+      })
+    )
+    await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toThrow(
+      "translated:remoteDispatchUnavailable"
+    )
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(remoteRunMock).not.toHaveBeenCalled()
+  })
+
+  it("rechecks the flag after admission instead of falling back locally", async () => {
+    process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
+    const fail = jest.fn()
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-remote",
+      prepareTurnContext: async () => {
+        process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "false"
+      },
+      run: (operation: () => Promise<unknown>) => operation(),
+      fail,
+    })
+    const { ctx } = makeCtx(
+      makeTeammate({
+        config: { execution: { mode: "inherit", executionTarget: { mode: "auto" } } },
+      })
+    )
+    await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toThrow(
+      "translated:remoteDispatchDisabled"
+    )
+    expect(fail).toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(remoteRunMock).not.toHaveBeenCalled()
+  })
+
+  it("parks an enabled offline pin in the durable queue without migrating", async () => {
+    process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
+    const wait = jest.fn()
+    const fail = jest.fn()
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-remote",
+      prepareTurnContext: async () => "",
+      run: (operation: () => Promise<unknown>) => operation(),
+      wait,
+      fail,
+    })
+    const { ctx, pool } = makeCtx(
+      makeTeammate({
+        config: {
+          execution: {
+            mode: "inherit",
+            executionTarget: { mode: "pinned", hostRef: "device:offline" },
+          },
+        },
+      })
+    )
+    ;(ctx.team as AgentTeam).projectId = "project1"
+    await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toMatchObject({
+      name: "RemoteWorkerWaitingError",
+    })
+    expect(wait).toHaveBeenCalledWith("pinned_host_offline", "device:offline")
+    expect(fail).not.toHaveBeenCalled()
+    expect(pool.recordFailure).not.toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(remoteRunMock).not.toHaveBeenCalled()
+  })
+
   it("refuses remote dispatch when the handoff cannot enforce inherited permissions", async () => {
     process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
     beginDurableDispatchMock.mockResolvedValue({
@@ -897,11 +1019,22 @@ describe("dispatchTeammate — remote durable worker", () => {
           commandId: "dispatch:existing",
           prompt: expect.not.stringContaining("alice@example.com"),
           handoff: expect.objectContaining({
+            execution: expect.objectContaining({
+              hostRef: "device:worker-a",
+              executionFingerprint: expect.any(String),
+            }),
             task: expect.objectContaining({
               prompt: expect.not.stringContaining("alice@example.com"),
             }),
             resources: [{ kind: "repository", ref: "repository:project1:primary" }],
           }),
+        })
+      )
+      expect(claimDispatchLeaseMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hostRef: "device:worker-a",
+          executionFingerprint:
+            remoteRunMock.mock.calls[0]![0].handoff.execution.executionFingerprint,
         })
       )
       expect(updateChildRunMock).toHaveBeenCalledWith(

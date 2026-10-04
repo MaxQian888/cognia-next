@@ -14,6 +14,7 @@
 import type { DiagnosticCode } from "@cognia/diagnostics"
 import { diagnosticCodeForReason } from "@/lib/diagnostics/external-agent-reason"
 import { isLeaseConflictError, type LeaseConflictResource } from "@/lib/execution/lease-conflict"
+import { piPackageErrorKey } from "@/lib/plugin/pi-packages/error-keys"
 
 const LEASE_CONFLICT_CODE: Readonly<Record<LeaseConflictResource, DiagnosticCode>> = {
   "working-copy": "workspaceBusy",
@@ -57,6 +58,41 @@ export function classifyExternalTurnFailure(error: unknown): DiagnosticCode | nu
   return null
 }
 
+/** What a refused plugin Pi package start needs to be explained in the user's language. */
+export interface PiPackageTurnFailure {
+  /** `plugins.piPackages.errors.*` key. */
+  messageKey: string
+  /** ICU values for that message. */
+  params: Record<string, string>
+}
+
+/**
+ * The localized-message inputs for a `pi_package_unavailable` failure, read
+ * from the typed `PiPackageUnavailableError` (`code`, `params`) wherever it
+ * sits in the cause chain; `null` when the failure is not one.
+ */
+export function piPackageTurnFailure(error: unknown): PiPackageTurnFailure | null {
+  for (const candidate of candidates(error)) {
+    if (!candidate || typeof candidate !== "object") continue
+    const typed = candidate as { reasonCode?: unknown; code?: unknown; params?: unknown }
+    if (typed.reasonCode !== "pi_package_unavailable") continue
+    const params: Record<string, string> = {}
+    if (typed.params && typeof typed.params === "object") {
+      for (const [key, value] of Object.entries(typed.params as Record<string, unknown>)) {
+        if (typeof value === "string") params[key] = value
+      }
+    }
+    return {
+      messageKey: piPackageErrorKey(
+        typeof typed.code === "string" ? typed.code : undefined,
+        "resolutionFailed"
+      ),
+      params,
+    }
+  }
+  return null
+}
+
 /**
  * Codes that mean the agent never ran the turn at all — refused at start-up or
  * blocked by a holder — as opposed to a turn that started and then failed.
@@ -64,6 +100,7 @@ export function classifyExternalTurnFailure(error: unknown): DiagnosticCode | nu
 const NOT_STARTED_CODES: ReadonlySet<DiagnosticCode> = new Set<DiagnosticCode>([
   "initializationFailed",
   "extensionHandshakeFailed",
+  "piPackageUnavailable",
   "resourceLimit",
   "agentProcessBusy",
   "workspaceBusy",

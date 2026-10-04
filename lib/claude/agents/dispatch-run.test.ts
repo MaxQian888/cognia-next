@@ -6,7 +6,7 @@ import { getSession } from "@/lib/db/sessions"
 import { resolveSessionCwd } from "@/lib/workspace/session-cwd"
 import {
   journalRendererForegroundRun,
-  startRendererBackgroundRun,
+  startAcceptedRendererBackgroundRun,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import {
   registerDispatchContext,
@@ -40,7 +40,27 @@ jest.mock("@/lib/workspace/session-cwd", () => ({
 jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
   __esModule: true,
   journalRendererForegroundRun: jest.fn(),
-  startRendererBackgroundRun: jest.fn(),
+  startAcceptedRendererBackgroundRun: jest.fn(),
+}))
+
+const mockAdmission = jest.fn(async () => ({
+  journal: { recordStart: jest.fn(), recordSettle: jest.fn() },
+  markDispatched: jest.fn(async (): Promise<void> => undefined),
+  requestCancel: jest.fn(async (): Promise<void> => undefined),
+}))
+jest.mock("@/lib/db/background-tasks", () => ({
+  admitBackgroundDispatch: (...args: unknown[]) => mockAdmission(...(args as [])),
+}))
+jest.mock("@/lib/background-tasks/redispatch", () => ({
+  captureBackgroundDispatchRecovery: jest.fn(async (input) => ({
+    version: 1,
+    phase: "accepted",
+    namespaceId: "test",
+    hostId: "host",
+    contextFingerprint: "fingerprint",
+    ...input,
+    sideEffect: input.toolsEnabled ? "non-idempotent" : "none",
+  })),
 }))
 
 const mockDispatch = dispatchSubagent as jest.MockedFunction<typeof dispatchSubagent>
@@ -53,8 +73,8 @@ const mockSessionCwd = resolveSessionCwd as jest.MockedFunction<typeof resolveSe
 const mockForegroundJournal = journalRendererForegroundRun as jest.MockedFunction<
   typeof journalRendererForegroundRun
 >
-const mockStartBackground = startRendererBackgroundRun as jest.MockedFunction<
-  typeof startRendererBackgroundRun
+const mockStartBackground = startAcceptedRendererBackgroundRun as jest.MockedFunction<
+  typeof startAcceptedRendererBackgroundRun
 >
 
 const ok = (text: string): PluginSubagentDispatchResult => ({
@@ -82,18 +102,92 @@ function caller(over: Partial<ResolvedCaller> = {}): ResolvedCaller {
 
 const runs = () => Object.values(useSubagentRuntimeStore.getState().subAgents)
 
+it("aborts an admitted background execution on ownership loss without cancelling the new owner", async () => {
+  let dispatchedSignal: AbortSignal | undefined
+  mockDispatch.mockImplementation(async (_target, _prompt, options) => {
+    dispatchedSignal = options?.abortSignal
+    return new Promise((resolve) =>
+      options?.abortSignal?.addEventListener(
+        "abort",
+        () => resolve({ ...ok("cancelled"), finishReason: "cancelled" }),
+        { once: true }
+      )
+    )
+  })
+  await startDispatchRun({
+    subagentId: "coder",
+    prompt: "work",
+    parentSessionId: "chat-1",
+    toolsEnabled: false,
+    background: true,
+    caller: caller(),
+  })
+  await Promise.resolve()
+  const controls = mockStartBackground.mock.calls[0]?.[4]
+  expect(dispatchedSignal?.aborted).toBe(false)
+  controls?.onLeaseLost?.()
+  expect(dispatchedSignal?.aborted).toBe(true)
+  const admission = await mockAdmission.mock.results[0].value
+  expect(admission.requestCancel).not.toHaveBeenCalled()
+  await mockStartBackground.mock.calls[0]?.[2]
+})
+
 beforeEach(() => {
   jest.clearAllMocks()
   __clearAllDispatchContextsForTesting()
   __clearAllDispatchBudgetsForTesting()
   useSubagentRuntimeStore.getState().clearRuntime()
-  mockGetDef.mockReturnValue(undefined)
+  mockGetDef.mockReturnValue({ id: "coder", prompt: "task" } as never)
   mockGetSession.mockResolvedValue(undefined)
   nesting()
   mockDispatch.mockResolvedValue(ok("done"))
+  mockForegroundJournal.mockImplementation(async (_runId, _meta, producer) => producer)
 })
 
 describe("startDispatchRun — success + terminal records", () => {
+  it("rejects late foreground success after ownership loss and keeps the terminal UI fenced", async () => {
+    let resolveLate!: (value: PluginSubagentDispatchResult) => void
+    let signal: AbortSignal | undefined
+    mockDispatch.mockImplementation((_target, _prompt, options) => {
+      signal = options?.abortSignal
+      return new Promise((resolve) => {
+        resolveLate = resolve
+      })
+    })
+    mockForegroundJournal.mockImplementation(async (runId, _meta, _producer, controls) => {
+      controls?.onLeaseLost?.()
+      return {
+        text: "Background task ownership lost",
+        channel: "text",
+        toolsAvailable: false,
+        runId,
+        finishReason: "error",
+        errorEnvelope: {
+          code: "interrupted",
+          retryable: false,
+          message: "Background task ownership lost",
+        },
+      }
+    })
+    const pending = startDispatchRun({
+      subagentId: "coder",
+      prompt: "work",
+      toolsEnabled: false,
+      background: false,
+      parentSessionId: "chat-1",
+      caller: caller(),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(signal?.aborted).toBe(true)
+    resolveLate(ok("late success"))
+    const handle = await pending
+    await Promise.resolve()
+    expect(handle.text).toContain("ownership lost")
+    expect(handle.text).not.toContain("late success")
+    expect(runs()).toEqual([expect.objectContaining({ status: "failed" })])
+    expect(liveSubagentRunCount()).toBe(0)
+  })
+
   it("runs a foreground dispatch, records completed, journals the run, and renders the outcome", async () => {
     const handle = await startDispatchRun({
       subagentId: "coder",
@@ -116,7 +210,8 @@ describe("startDispatchRun — success + terminal records", () => {
         host: "renderer",
         toolsEnabled: true,
       }),
-      expect.any(Promise)
+      expect.any(Promise),
+      expect.objectContaining({ onLeaseLost: expect.any(Function) })
     )
     expect(mockStartBackground).not.toHaveBeenCalled()
     expect(liveSubagentRunCount()).toBe(0)
@@ -136,7 +231,8 @@ describe("startDispatchRun — success + terminal records", () => {
     expect(mockForegroundJournal).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ resumeOfRunId: "orig-1", resumeAttempt: 2, toolsEnabled: false }),
-      expect.any(Promise)
+      expect.any(Promise),
+      expect.objectContaining({ onLeaseLost: expect.any(Function) })
     )
   })
 
@@ -155,6 +251,7 @@ describe("startDispatchRun — success + terminal records", () => {
       handle.runId,
       expect.objectContaining({ subagentId: "coder", sessionId: "chat-1" }),
       expect.any(Promise),
+      expect.objectContaining({ recordSettle: expect.any(Function) }),
       expect.objectContaining({ cancel: expect.any(Function) })
     )
     expect(mockForegroundJournal).not.toHaveBeenCalled()
@@ -369,7 +466,7 @@ describe("startDispatchRun — retry loop", () => {
     expect(runs()[0].status).toBe("rejected")
   })
 
-  it("background runs retry inside the parked promise", async () => {
+  it("tool-free background runs retry inside the parked promise", async () => {
     nesting({ dispatchMaxRetries: 1 })
     mockDispatch
       .mockRejectedValueOnce(new Error("429 rate limit exceeded"))
@@ -378,7 +475,7 @@ describe("startDispatchRun — retry loop", () => {
     await startDispatchRun({
       subagentId: "coder",
       prompt: "p",
-      toolsEnabled: true,
+      toolsEnabled: false,
       background: true,
       parentSessionId: "chat-1",
       caller: caller(),
@@ -560,7 +657,7 @@ describe("resolveCaller / cwd inheritance", () => {
       caller: caller({ cwd: "/repo/parent" }),
     })
     expect(mockDispatch).toHaveBeenCalledWith(
-      "coder",
+      expect.objectContaining({ id: "coder" }),
       "build",
       expect.objectContaining({ cwd: "/repo/parent" })
     )
@@ -575,4 +672,67 @@ describe("resolveCaller / cwd inheritance", () => {
     })
     expect(mockDispatch.mock.calls[0][2]).not.toHaveProperty("cwd")
   })
+})
+
+describe("durable background admission", () => {
+  it("never dispatches or reports started if admission persistence fails", async () => {
+    mockAdmission.mockRejectedValueOnce(new Error("journal unavailable"))
+    const result = await startDispatchRun({
+      subagentId: "coder",
+      prompt: "p",
+      toolsEnabled: true,
+      background: true,
+      parentSessionId: "chat-1",
+      caller: caller(),
+    })
+    expect(result.error).toBe("journal unavailable")
+    expect(mockDispatch).not.toHaveBeenCalled()
+    expect(mockStartBackground).not.toHaveBeenCalled()
+    expect(liveSubagentRunCount()).toBe(0)
+  })
+
+  it("waits for the durable dispatch marker before starting the runtime", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockAdmission.mockResolvedValueOnce({
+      journal: { recordStart: jest.fn(), recordSettle: jest.fn() },
+      markDispatched: jest.fn(() => gate),
+      requestCancel: jest.fn(async (): Promise<void> => undefined),
+    })
+    const result = await startDispatchRun({
+      subagentId: "coder",
+      prompt: "p",
+      toolsEnabled: false,
+      background: true,
+      parentSessionId: "chat-1",
+      caller: caller(),
+    })
+    expect(result.error).toBeUndefined()
+    expect(mockDispatch).not.toHaveBeenCalled()
+    release()
+    await mockStartBackground.mock.calls[0][2]
+    expect(mockDispatch).toHaveBeenCalledWith(
+      expect.any(Object),
+      "p",
+      expect.objectContaining({ _sessionId: `background:${result.runId}` })
+    )
+  })
+})
+
+it("does not retry a background tool-capable attempt after an ambiguous transport failure", async () => {
+  nesting({ dispatchMaxRetries: 2 })
+  mockDispatch.mockRejectedValueOnce(new Error("429 rate limit exceeded"))
+  await startDispatchRun({
+    subagentId: "coder",
+    prompt: "mutate",
+    toolsEnabled: true,
+    background: true,
+    parentSessionId: "chat-1",
+    caller: caller(),
+  })
+  await mockStartBackground.mock.calls[0][2]
+  expect(mockDispatch).toHaveBeenCalledTimes(1)
+  expect(runs()[0].status).toBe("failed")
 })

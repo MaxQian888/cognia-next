@@ -39,6 +39,9 @@ import {
   type SandboxProviderAdapter,
 } from "./lifecycle-contract"
 
+/** Built from the desktop recipe embedded in the native lifecycle module. */
+export const DEFAULT_DOCKER_SANDBOX_IMAGE = "cognia-cua-desktop:0.3.46-1"
+
 /** Side channel for values a lifecycle call discovers, e.g. the mapped port. */
 export interface DockerAdapterOutcome {
   containerId?: string
@@ -153,10 +156,8 @@ export function buildDockerSandboxAdapter(
     delete: async (ctx) => client.delete(ctx.connectionId),
 
     health: async (ctx): Promise<SandboxHealthReport> => {
-      // Two questions with different answers. `inspect` says what Docker
-      // believes. `health` proves the exec channel every workspace operation
-      // rides is actually usable. A container Docker calls running whose exec
-      // channel is dead is not a healthy machine.
+      // Inspect reports lifecycle state; health additionally verifies the
+      // supervised execution channel and a decoded desktop screenshot.
       const state = await client.inspect(ctx.connectionId)
       outcome.containerState = state
       if (!state) {
@@ -175,7 +176,10 @@ export function buildDockerSandboxAdapter(
         state: mapped,
         ...(reachable
           ? {}
-          : { error: "The container is running but does not answer `docker exec`." }),
+          : {
+              error:
+                "The container is running but its execution supervisor or desktop capture is unavailable.",
+            }),
       }
     },
 

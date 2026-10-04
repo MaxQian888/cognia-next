@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import MobileAgentPage from "./page"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
@@ -14,6 +14,11 @@ jest.mock("@/hooks/companion/use-companion-config")
 jest.mock("@/hooks/use-settings-patch")
 jest.mock("@/hooks/use-biometric-guard")
 jest.mock("@/stores/settings", () => ({ useSettingsStore: jest.fn() }))
+const mockIsMobile = jest.fn(() => false)
+jest.mock("@/lib/capacitor/_shared", () => ({
+  ...jest.requireActual("@/lib/capacitor/_shared"),
+  isMobile: () => mockIsMobile(),
+}))
 
 const updateMock = jest.fn(async () => undefined)
 const guardMock = jest.fn(async (_gate: unknown, action: () => Promise<unknown>) => {
@@ -30,13 +35,18 @@ const mockPaired = (paired: boolean) =>
     reload: jest.fn(),
   })
 
-const mockSettings = (settings: Record<string, unknown>) =>
-  (useSettingsStore as unknown as jest.Mock).mockImplementation(
+const mockSettings = (settings: Record<string, unknown>) => {
+  ;(useSettingsStore as unknown as jest.Mock).mockImplementation(
     (selector: (s: { settings: unknown }) => unknown) => selector({ settings })
   )
+  useSettingsStore.getState = jest.fn(() => ({
+    settings,
+  })) as unknown as typeof useSettingsStore.getState
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockIsMobile.mockReturnValue(false)
   ;(useSettingsPatch as jest.Mock).mockReturnValue(updateMock)
   ;(useBiometricGuard as jest.Mock).mockReturnValue(guardMock)
   mockPaired(true)
@@ -63,6 +73,29 @@ describe("MobileAgentPage", () => {
     render(<MobileAgentPage />)
     fireEvent.click(screen.getByTestId("agent-brief-mode"))
     expect(updateMock).toHaveBeenCalledWith({ briefMode: true })
+  })
+
+  it("does not disable the permission escalation guard when verification is cancelled", async () => {
+    mockIsMobile.mockReturnValue(true)
+    guardMock.mockResolvedValueOnce({ kind: "blocked", reason: "cancelled" } as never)
+    render(<MobileAgentPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-escalate-gate"))
+    })
+    expect(guardMock.mock.calls[0][0]).toMatchObject({ fallthroughWhenUnavailable: false })
+    expect(updateMock).not.toHaveBeenCalled()
+  })
+
+  it("disables the escalation guard after native verification", async () => {
+    mockIsMobile.mockReturnValue(true)
+    render(<MobileAgentPage />)
+    fireEvent.click(screen.getByTestId("agent-escalate-gate"))
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({
+        biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD, escalatePermissionMode: false },
+      })
+    )
+    expect(guardMock).toHaveBeenCalledTimes(1)
   })
 
   it("persists the system prompt once, on blur, trimmed", async () => {

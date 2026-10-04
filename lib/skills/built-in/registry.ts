@@ -38,10 +38,42 @@ export function createBuiltInSkillRegistry(): BuiltInSkillRegistry {
   const familyOrder: string[] = []
   const familySet = new Set<string>()
 
+  // Load passes. Skill modules register as an import side effect, and a dev
+  // server's hot reload re-evaluates a skill module (it is a parent of
+  // whatever file changed) without re-evaluating this registry — so the same
+  // `registerBuiltInSkill` calls arrive a second time, in a later task. A
+  // duplicate id therefore means two different things:
+  //   - within ONE pass (one synchronous run of module bodies): two
+  //     definitions collide — a copy-paste or two files claiming one id.
+  //     Always an authoring bug; always thrown.
+  //   - in a LATER pass, for the same skill (same family and MCP tool name):
+  //     the module that owns it was evaluated again. Replaced, not thrown —
+  //     throwing there left the module half-evaluated, so every following
+  //     SSR request re-ran it and failed the same way until a restart.
+  // A later pass that brings a DIFFERENT skill under an existing id is still
+  // a collision and still throws.
+  let pass = 0
+  let passOpen = false
+  const passById = new Map<string, number>()
+  const notePass = () => {
+    if (passOpen) return
+    passOpen = true
+    queueMicrotask(() => {
+      pass += 1
+      passOpen = false
+    })
+  }
+
   const registry: BuiltInSkillRegistry = {
     register(skill) {
-      if (byId.has(skill.id)) {
-        throw new Error(`BuiltInSkillRegistry: duplicate skill id "${skill.id}"`)
+      notePass()
+      const existing = byId.get(skill.id)
+      if (existing) {
+        const sameSkill =
+          existing.family === skill.family && existing.mcpToolName === skill.mcpToolName
+        if (passById.get(skill.id) === pass || !sameSkill) {
+          throw new Error(`BuiltInSkillRegistry: duplicate skill id "${skill.id}"`)
+        }
       }
       // Defensive: write/destructive skills MUST ship a hitlSurface so the
       // dispatcher has a confirm card to send. Failing fast at registration
@@ -53,6 +85,7 @@ export function createBuiltInSkillRegistry(): BuiltInSkillRegistry {
         )
       }
       byId.set(skill.id, skill)
+      passById.set(skill.id, pass)
       if (!familySet.has(skill.family)) {
         familySet.add(skill.family)
         familyOrder.push(skill.family)
@@ -61,6 +94,7 @@ export function createBuiltInSkillRegistry(): BuiltInSkillRegistry {
     unregister(id) {
       const skill = byId.get(id)
       const ok = byId.delete(id)
+      passById.delete(id)
       if (ok && skill) {
         // Recompute family list lazily — only drop families with zero remaining skills.
         const stillUsed = Array.from(byId.values()).some((s) => s.family === skill.family)
@@ -95,6 +129,7 @@ export function createBuiltInSkillRegistry(): BuiltInSkillRegistry {
     },
     clear() {
       byId.clear()
+      passById.clear()
       familyOrder.length = 0
       familySet.clear()
     },
@@ -111,7 +146,11 @@ export function platformAllows(skill: BuiltInSkill, platform: PlatformKind): boo
 
 const sharedRegistry = createBuiltInSkillRegistry()
 
-/** Module-load registration entry point. Idempotent per-id (throws on duplicate). */
+/**
+ * Module-load registration entry point. Throws on a duplicate id within one
+ * load pass or from a different skill; a later re-evaluation of the same
+ * skill's module (dev hot reload) replaces it — see the registry's pass notes.
+ */
 export function registerBuiltInSkill(skill: BuiltInSkill): void {
   sharedRegistry.register(skill)
 }

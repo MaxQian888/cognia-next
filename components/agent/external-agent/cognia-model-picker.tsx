@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { getAllProviders } from "@cognia/provider-types/provider"
 import { groupByProvider } from "@cognia/provider-routing/model-option-source"
 import { useSettingsStore } from "@/stores/settings"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -11,10 +10,11 @@ import {
   getSubscriptionModel,
 } from "@/lib/subscription/core/model-discovery"
 import type { ProviderModelDiscoveryEntry } from "@cognia/provider-types"
-import { collectModelOptions, resolveModelMeta } from "@/lib/ai/model-options"
+import { resolveModelMeta } from "@/lib/ai/model-options"
 import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 import { useAccounts, useSubscriptionProviders } from "@/lib/subscription/core/hooks"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { filterCogniaGatewayModels } from "@/lib/ai/agent/external/config/cognia-model-options"
 import { ProviderModelList } from "@/components/settings/provider/provider-model-list"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { Button } from "@/components/ui/button"
@@ -137,33 +137,12 @@ export function CogniaModelPicker({
   const supported = canUseCogniaModels(config)
   const options = useMemo(
     () =>
-      collectModelOptions(scopedSettings, scopedCustomProviders).filter((model) => {
-        const custom = customProviders?.find((provider) => provider.id === model.providerId)
-        const provider = getAllProviders()[model.providerId]
-        const subscription =
-          subscriptions.find((entry) => entry.id === model.providerId) ??
-          getSubscriptionProvider(model.providerId, customProviders)
-        const protocol =
-          custom?.apiProtocol ??
-          providerSettings?.[model.providerId]?.apiProtocol ??
-          provider?.protocol ??
-          subscription?.protocol
-        const metadata = resolveModelMeta(
-          model.providerId,
-          model.modelId,
-          scopedSettings,
-          scopedCustomProviders
-        )
-        const settings = custom ?? providerSettings?.[model.providerId]
-        const hasManualKey = !!(settings?.apiKey || settings?.apiKeys?.some((key) => key.trim()))
-        return (
-          (protocol === "openai" || protocol === "anthropic") &&
-          metadata.supportsTools !== false &&
-          metadata.supportsStreaming !== false &&
-          (subscription?.authMode === "api-key" ||
-            hasManualKey ||
-            provider?.apiKeyRequired === false)
-        )
+      filterCogniaGatewayModels({
+        providerSettings,
+        customProviders,
+        subscriptions,
+        scopedProviderSettings: scopedSettings,
+        scopedCustomProviders,
       }),
     [providerSettings, customProviders, subscriptions, scopedSettings, scopedCustomProviders]
   )

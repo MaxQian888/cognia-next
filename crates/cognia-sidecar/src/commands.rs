@@ -582,6 +582,7 @@ pub fn is_allowed_control_method(method: &str) -> bool {
             | "readFile"
             | "reconnectMcpServer"
             | "reinitialize"
+            | "runtimeStatus"
             | "reloadOutputStyles"
             | "reloadPlugins"
             | "reloadSkills"
@@ -1250,6 +1251,7 @@ mod tests {
             "readFile",
             "reconnectMcpServer",
             "reinitialize",
+            "runtimeStatus",
             "reloadOutputStyles",
             "reloadPlugins",
             "reloadSkills",

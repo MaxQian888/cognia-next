@@ -53,6 +53,9 @@ importers:
       '@cognia/agent-config-types':
         specifier: link:../packages/agent-config-types
         version: link:../packages/agent-config-types
+      '@cognia/provider-routing':
+        specifier: link:../packages/provider-routing
+        version: link:../packages/provider-routing
       '@cognia/redact':
         specifier: link:../packages/redact
         version: link:../packages/redact

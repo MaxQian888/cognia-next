@@ -9,6 +9,10 @@ interface FixtureFrame {
   name?: string
   toolUseId?: string
   ok?: boolean
+  result?: { retained?: boolean; sdkSessionId?: string; active?: boolean }
+  errorCode?: string
+  turnId?: string
+  transcriptInvalidationId?: string
 }
 import test from "node:test"
 import assert from "node:assert/strict"
@@ -149,8 +153,60 @@ test(
       send({ type: "control", requestId, method: "setPermissionMode", params: { mode: value } })
       return wait((frame) => frame.type === "control_response" && frame.requestId === requestId)
     }
+    const status = async () => {
+      const requestId = "status-" + ++controlId
+      send({ type: "control", requestId, method: "runtimeStatus" })
+      return wait((frame) => frame.type === "control_response" && frame.requestId === requestId)
+    }
+    const refusedSend = async (overrides: Record<string, unknown>) => {
+      const start = frames.length
+      const requestCount = requests.length
+      send({
+        type: "send",
+        prompt: "must-not-run",
+        options: {
+          ...options,
+          turnId: "refused-turn",
+          transcriptInvalidationId: "replacement-generation",
+          ...overrides,
+        },
+      })
+      const ended = await wait((frame) => frame.type === "session_ended", start)
+      assert.equal(ended.turnId, "refused-turn")
+      assert.equal(ended.transcriptInvalidationId, "replacement-generation")
+      assert.equal(requests.length, requestCount, "refusal occurs before provider or tool effects")
+      return ended
+    }
     try {
+      assert.deepEqual((await status()).result, { retained: false })
+      assert.equal(
+        (await refusedSend({ expectedRuntimeSessionId: "missing" })).errorCode,
+        "RUNTIME_SESSION_NOT_RETAINED"
+      )
+      assert.match(
+        String(
+          (
+            await refusedSend({
+              initialConversation: [{ role: "user", content: "private@example.com" }],
+            })
+          ).error
+        ),
+        /PII gate/
+      )
       await turn("allowed")
+      const retained = (await status()).result
+      assert.equal(retained?.retained, true)
+      assert.equal(retained?.active, false)
+      assert.equal(typeof retained?.sdkSessionId, "string")
+      assert.equal(
+        (await refusedSend({ expectedRuntimeSessionId: "obsolete" })).errorCode,
+        "RUNTIME_SESSION_NOT_RETAINED"
+      )
+      assert.equal(
+        (await status()).result?.sdkSessionId,
+        retained?.sdkSessionId,
+        "a refused send leaves the retained loop intact"
+      )
       assert.equal(await fs.readFile(path.join(workspace, "allowed.txt"), "utf8"), "allowed")
       assert.equal((await mode("plan")).ok, true)
       await turn("blocked")

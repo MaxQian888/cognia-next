@@ -38,6 +38,17 @@ import type {
   ExternalAgentLifecycleStatus,
 } from "@/types/agent/external-agent-lifecycle"
 
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { AppSettings } from "@cognia/agent-config-types"
+import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
+
+import type {
+  CogniaGatewayModelCatalog,
+  CogniaGatewayModelCatalogUnsupportedReason,
+  CogniaGatewayProviderOption,
+  HostGatewayCapabilities,
+  HostProfileStoreDocs,
+} from "./cognia-model-options"
 import { credentialsRequiredByImport, scrubInlineCredentials } from "../lifecycle/credentials"
 import type { LifecycleAgentConfig } from "../lifecycle/credentials"
 import type { ReadinessVerdict } from "../lifecycle/service"
@@ -122,6 +133,167 @@ export async function getHostExternalAgentConfig(
   configId: string
 ): Promise<ExternalAgentConfigRecord | null> {
   return getExternalAgentConfig(configId)
+}
+
+/**
+ * `cogniaGatewaySupport(config)`'s verdict (`./gateway-task`): whether this
+ * configuration's runtime has a gateway launch contract on this Host.
+ */
+export type CogniaGatewaySupportVerdict =
+  { supported: true; runtime: string } | { supported: false; reason: string }
+
+/** The Host facts the Cognia model catalog is computed from. Injected for tests. */
+export interface HostCogniaModelCatalogDeps {
+  getConfig: (configId: string) => Promise<ExternalAgentConfigRecord | null>
+  support: (config: ExternalAgentConfig) => CogniaGatewaySupportVerdict
+  /** The Host's live provider settings, as the gateway route will read them. */
+  readSettings: () => Pick<AppSettings, "providerSettings" | "customProviders"> | null | undefined
+  /** True while the Host's Cognia account is locked (settings and vault unreadable). */
+  accountLocked: () => boolean
+  subscriptions?: (
+    customProviders: AppSettings["customProviders"] | undefined
+  ) => readonly SubscriptionProviderDefinition[]
+  /**
+   * Vault account ids for one API-key subscription provider. Best-effort: a
+   * Host whose vault cannot be listed offers the provider default only.
+   */
+  listAccountIds?: (subscriptionProviderId: string) => Promise<string[]>
+  /**
+   * The Host's provider catalog when it does not come from renderer settings.
+   * The headless brain has none: its providers live in `cognia-server`'s
+   * Provider Profile Store and gateway snapshot, which is what its task route
+   * (`agent_gateway_host_task_prepare`) mints against, so the catalog is read
+   * from there instead.
+   */
+  hostProviders?: () => Promise<CogniaGatewayProviderOption[]>
+}
+
+/**
+ * The headless Host's provider catalog: the redacted profile export for names,
+ * the gateway snapshot for what is actually servable. Both are service-scope
+ * reads of `cognia-server`; neither carries a credential.
+ */
+async function readHeadlessHostProviders(): Promise<CogniaGatewayProviderOption[]> {
+  const [{ transport }, { listHostProfileGatewayModelOptions }] = await Promise.all([
+    import("@/lib/tauri"),
+    import("./cognia-model-options"),
+  ])
+  const [docs, capabilities] = await Promise.all([
+    transport.call<HostProfileStoreDocs>("provider_profiles_list"),
+    transport.call<HostGatewayCapabilities>("gateway_provider_capabilities"),
+  ])
+  return listHostProfileGatewayModelOptions(docs, capabilities)
+}
+
+export async function defaultHostCogniaModelCatalogDeps(): Promise<HostCogniaModelCatalogDeps> {
+  const [
+    { cogniaGatewaySupport },
+    { useSettingsStore },
+    { useAccountStore },
+    { listSubscriptionProviders },
+    { isHeadlessHost },
+  ] = await Promise.all([
+    import("./gateway-task"),
+    import("@/stores/settings"),
+    import("@/stores/account/account-store"),
+    import("@/lib/subscription/core/provider-registry"),
+    import("@/lib/platform/detect"),
+  ])
+  if (isHeadlessHost()) {
+    return {
+      getConfig: getExternalAgentConfig,
+      support: (config) => cogniaGatewaySupport(config) as CogniaGatewaySupportVerdict,
+      readSettings: () => null,
+      accountLocked: () => useAccountStore.getState().locked === true,
+      hostProviders: readHeadlessHostProviders,
+    }
+  }
+  return {
+    getConfig: getExternalAgentConfig,
+    support: (config) => cogniaGatewaySupport(config) as CogniaGatewaySupportVerdict,
+    readSettings: () => useSettingsStore.getState().settings,
+    accountLocked: () => useAccountStore.getState().locked === true,
+    subscriptions: (customProviders) => listSubscriptionProviders(customProviders ?? []),
+    listAccountIds: async (subscriptionProviderId) => {
+      const { listAccounts } = await import("@/lib/subscription/core/transport")
+      return (await listAccounts(subscriptionProviderId)).map((account) => account.id)
+    },
+  }
+}
+
+function catalogReason(
+  reason: string,
+  known: readonly CogniaGatewayModelCatalogUnsupportedReason[]
+): CogniaGatewayModelCatalogUnsupportedReason {
+  return known.includes(reason as CogniaGatewayModelCatalogUnsupportedReason)
+    ? (reason as CogniaGatewayModelCatalogUnsupportedReason)
+    : "unsupported-runtime"
+}
+
+/**
+ * Which Cognia models this Host can run `configId` on through its own gateway.
+ *
+ * Answered from the Host's settings and vault — the same ones
+ * `prepareExternalAgentGatewayRoute` resolves a task against — so a paired
+ * device is offered exactly what a turn here could launch. The catalog carries
+ * identifiers and capability facts only (`listCogniaGatewayModelOptions`).
+ *
+ * The order of the refusals is the order a user can act on them: a runtime
+ * that cannot use the gateway at all is not fixed by unlocking the account, and
+ * an empty provider list means nothing until the account is readable.
+ */
+export async function getHostCogniaModelCatalog(
+  configId: string,
+  deps: HostCogniaModelCatalogDeps
+): Promise<CogniaGatewayModelCatalog> {
+  const record = await deps.getConfig(configId)
+  if (!record || record.tombstonedAt !== undefined) {
+    throw new Error(`external_agent_cognia_models: unknown configuration ${configId}`)
+  }
+  // Loaded on demand: the model catalog pulls in the provider registry, which
+  // no other operation of this service needs.
+  const { COGNIA_GATEWAY_MODEL_CATALOG_REASONS, listCogniaGatewayModelOptions } =
+    await import("./cognia-model-options")
+  const support = deps.support(record.config as unknown as ExternalAgentConfig)
+  if (!support.supported) {
+    return {
+      supported: false,
+      reason: catalogReason(support.reason, COGNIA_GATEWAY_MODEL_CATALOG_REASONS),
+    }
+  }
+  if (deps.accountLocked()) return { supported: false, reason: "account-locked" }
+  if (deps.hostProviders) {
+    const hosted = await deps.hostProviders()
+    return hosted.length > 0
+      ? { supported: true, providers: hosted }
+      : { supported: false, reason: "no-eligible-models" }
+  }
+  const settings = deps.readSettings()
+  if (!settings) throw new Error("Cognia provider settings are unavailable on this host")
+  const subscriptions = deps.subscriptions?.(settings.customProviders)
+  const providers = listCogniaGatewayModelOptions({ settings, subscriptions })
+  if (providers.length === 0) return { supported: false, reason: "no-eligible-models" }
+  if (deps.listAccountIds && subscriptions) {
+    await Promise.all(
+      providers.map(async (provider) => {
+        const definition =
+          subscriptions.find((entry) => entry.id === provider.providerId) ??
+          subscriptions.find((entry) =>
+            entry.plans?.some((plan) => plan.chatProviderId === provider.providerId)
+          )
+        if (definition?.authMode !== "api-key") return
+        try {
+          const ids = (await deps.listAccountIds!(definition.id)).filter(
+            (id) => typeof id === "string" && id.length > 0
+          )
+          if (ids.length > 0) provider.accountIds = [...new Set(ids)]
+        } catch {
+          // See `listAccountIds`: the provider default still resolves at task start.
+        }
+      })
+    )
+  }
+  return { supported: true, providers }
 }
 
 export interface CreateHostConfigInput {

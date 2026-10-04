@@ -25,7 +25,15 @@ import {
   parsePiModel,
   processToolFloor,
   type PiRpcHost,
+  PiPackageUnavailableError,
+  PI_PACKAGE_ROOTS_ENV,
+  PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS,
+  combinePiHostedPackages,
+  piPackageRefsFromMetadata,
+  type PiHostedPackage,
+  type PiPackageResolver,
 } from "./pi-rpc-client"
+import { decodePiToolPolicy, PI_TOOL_POLICY_ENV } from "./pi-permission"
 import { PI_AUTH_FORBIDDEN_FLAGS, PI_AUTH_FORBIDDEN_SUBCOMMANDS } from "./pi-auth"
 import { LeaseConflictError } from "@/lib/execution/lease-conflict"
 import { encodePiPermissionTitle } from "./pi-permission"
@@ -2785,5 +2793,262 @@ describe("resolvePiExtensionPolicy", () => {
     expect(resolvePiExtensionPolicy("isolated")).toBe("isolated")
     expect(resolvePiExtensionPolicy("trusted-project")).toBe("trusted-project")
     expect(resolvePiExtensionPolicy("invalid")).toBe("isolated")
+  })
+})
+
+// ============================================================================
+// Plugin Pi packages (ADR-0210)
+// ============================================================================
+
+describe("plugin Pi package helpers", () => {
+  it("reads metadata.piPackages defensively", () => {
+    expect(piPackageRefsFromMetadata(undefined)).toEqual([])
+    expect(piPackageRefsFromMetadata({ piPackages: "a/b" })).toEqual([])
+    expect(piPackageRefsFromMetadata({ piPackages: ["a/b", 3, "", "a/b", "c/d"] })).toEqual([
+      "a/b",
+      "c/d",
+    ])
+  })
+
+  it("extends the handshake budget per plugin extension, within the cap", () => {
+    expect(piHandshakeTimeoutMs("isolated", 0, 2)).toBe(
+      PI_EXTENSION_HANDSHAKE_TIMEOUT_MS + 2 * PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS
+    )
+    expect(piHandshakeTimeoutMs("global", 3, 5)).toBe(120_000)
+    expect(piHandshakeTimeoutMs("isolated", 0, 0)).toBe(PI_EXTENSION_HANDSHAKE_TIMEOUT_MS)
+  })
+
+  it("admits pre-approved package tools onto the dontAsk floor only when declared", () => {
+    expect(
+      processToolFloor("dontAsk", ["read", "latex_compile", "rogue"], {
+        extensionTools: ["latex_compile"],
+      })
+    ).toEqual(["read", "latex_compile"])
+    expect(
+      processToolFloor("plan", ["latex_compile"], { extensionTools: ["latex_compile"] })
+    ).toEqual(["read", "grep", "find", "ls"])
+  })
+
+  it("combines packages and refuses two different values for one env key", () => {
+    const a: PiHostedPackage = {
+      ref: "a/x",
+      extensions: ["/p/a/x.ts"],
+      env: { COGNIA_PIPKG_MODE: "one" },
+      tools: ["t1"],
+      readableRoots: ["/p/a"],
+    }
+    const b: PiHostedPackage = {
+      ref: "a/y",
+      extensions: ["/p/a/y.ts"],
+      env: { COGNIA_PIPKG_MODE: "one" },
+      tools: ["t1", "t2"],
+      readableRoots: ["/p/a"],
+    }
+    expect(combinePiHostedPackages([a, b])).toEqual({
+      extensions: ["/p/a/x.ts", "/p/a/y.ts"],
+      env: { COGNIA_PIPKG_MODE: "one" },
+      tools: ["t1", "t2"],
+      readableRoots: ["/p/a"],
+    })
+    expect(() => combinePiHostedPackages([a, { ...b, env: { COGNIA_PIPKG_MODE: "two" } }])).toThrow(
+      PiPackageUnavailableError
+    )
+  })
+})
+
+describe("PiRpcClientAdapter — plugin Pi packages", () => {
+  const LATEX: PiHostedPackage = {
+    ref: "latex-workbench/latex",
+    extensions: ["/data/plugins/latex-workbench/pi/latex.ts"],
+    env: { COGNIA_PIPKG_WORKSPACE: "/w", COGNIA_PIPKG_ENGINE: "lualatex" },
+    tools: ["latex_compile"],
+    readableRoots: ["/data/plugins/latex-workbench"],
+    controlsSession: true,
+    minPiVersion: "0.85.0",
+  }
+
+  async function connectWithPackages(
+    host: FakeHost,
+    resolvePiPackages: PiPackageResolver,
+    refs: string[] = [LATEX.ref],
+    version = PI_CERTIFIED_VERSION
+  ) {
+    const adapter = new PiRpcClientAdapter({
+      host,
+      resolvePiPackages,
+      generateSessionId: (() => {
+        let n = 0
+        return () => `pk-${++n}`
+      })(),
+    })
+    const connecting = adapter.connect({
+      ...config,
+      metadata: { piExtensionPolicy: "isolated", piPackages: refs },
+    })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, version)
+    await connecting
+    return adapter
+  }
+
+  const sessionSpawn = (host: FakeHost) => host.spawns.find((s) => s.args.includes("--session-id"))
+
+  it("loads each package extension before Cognia's own, with env, roots and tools", async () => {
+    const host = createFakeHost()
+    const resolver = jest.fn<ReturnType<PiPackageResolver>, Parameters<PiPackageResolver>>(
+      async () => [LATEX]
+    )
+    const adapter = await connectWithPackages(host, resolver)
+    const session = await adapter.createSession({
+      cwd: "/w",
+      permissionMode: "dontAsk",
+      allowedTools: ["read", "latex_compile"],
+    })
+    expect(resolver).toHaveBeenCalledWith([LATEX.ref], {
+      cwd: "/w",
+      extensionPolicy: "isolated",
+    })
+
+    const spawn = sessionSpawn(host)!
+    const pkgIndex = spawn.args.indexOf("/data/plugins/latex-workbench/pi/latex.ts")
+    const cogniaIndex = spawn.args.indexOf(VERIFIED_EXTENSION.path)
+    expect(spawn.args[pkgIndex - 1]).toBe("-e")
+    expect(pkgIndex).toBeGreaterThan(-1)
+    expect(pkgIndex).toBeLessThan(cogniaIndex)
+    // Cognia's interception stays the LAST `-e`.
+    expect(spawn.args.lastIndexOf("-e")).toBe(cogniaIndex - 1)
+    // The dontAsk floor keeps the pre-approved package tool visible to Pi.
+    expect(spawn.args[spawn.args.indexOf("--tools") + 1]).toBe("read,latex_compile")
+
+    expect(spawn.env).toMatchObject({
+      COGNIA_PIPKG_WORKSPACE: "/w",
+      COGNIA_PIPKG_ENGINE: "lualatex",
+      [PI_PACKAGE_ROOTS_ENV]: JSON.stringify(["/data/plugins/latex-workbench"]),
+    })
+    const policy = decodePiToolPolicy(spawn.env![PI_TOOL_POLICY_ENV])
+    expect(policy.decisions.latex_compile).toBe("allow")
+    expect(session.metadata).toMatchObject({ piPackages: [LATEX.ref] })
+  })
+
+  it("tells the resolver the policy and a pinned PI_CODING_AGENT_DIR", async () => {
+    const host = createFakeHost()
+    const resolver = jest.fn<ReturnType<PiPackageResolver>, Parameters<PiPackageResolver>>(
+      async () => [LATEX]
+    )
+    const adapter = new PiRpcClientAdapter({ host, resolvePiPackages: resolver })
+    const connecting = adapter.connect({
+      ...config,
+      process: { ...config.process!, env: { PI_CODING_AGENT_DIR: "/task/pi" } },
+      metadata: { piExtensionPolicy: "global", piPackages: [LATEX.ref] },
+    })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    await adapter.createSession({ cwd: "/w" })
+    expect(resolver).toHaveBeenCalledWith([LATEX.ref], {
+      cwd: "/w",
+      extensionPolicy: "global",
+      piAgentDirOverride: "/task/pi",
+    })
+  })
+
+  it("refuses packages for a Bot-isolated agent before resolving anything", async () => {
+    const host = createFakeHost()
+    const resolver = jest.fn(async () => [LATEX])
+    const adapter = new PiRpcClientAdapter({ host, resolvePiPackages: resolver })
+    const connecting = adapter.connect({
+      ...config,
+      process: { ...config.process!, env: { COGNIA_BOT_ISOLATION: "1" } },
+      metadata: { piExtensionPolicy: "isolated", piPackages: [LATEX.ref] },
+    })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    await expect(adapter.createSession({ cwd: "/w" })).rejects.toMatchObject({
+      code: "bot-isolation",
+    })
+    expect(resolver).not.toHaveBeenCalled()
+  })
+
+  it("never forwards a package-roots value typed into the agent's own env", async () => {
+    const host = createFakeHost()
+    const adapter = new PiRpcClientAdapter({ host, resolvePiPackages: async () => [] })
+    const connecting = adapter.connect({
+      ...config,
+      process: { ...config.process!, env: { [PI_PACKAGE_ROOTS_ENV]: '["/"]', KEEP: "1" } },
+      metadata: { piExtensionPolicy: "isolated" },
+    })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    await adapter.createSession({ cwd: "/w" })
+    const spawn = sessionSpawn(host)!
+    expect(spawn.env).not.toHaveProperty(PI_PACKAGE_ROOTS_ENV)
+    expect(spawn.env).toMatchObject({ KEEP: "1" })
+  })
+
+  it("does not call the resolver at all for an agent that opted into nothing", async () => {
+    const host = createFakeHost()
+    const resolver = jest.fn(async () => [LATEX])
+    const adapter = await connectWithPackages(host, resolver, [])
+    await adapter.createSession({ cwd: "/w" })
+    expect(resolver).not.toHaveBeenCalled()
+    expect(sessionSpawn(host)!.env).not.toHaveProperty(PI_PACKAGE_ROOTS_ENV)
+  })
+
+  it("fails the start with a typed error, spawning nothing, when a package cannot load", async () => {
+    const host = createFakeHost()
+    const failure = Object.assign(new Error("Pi package latex-workbench/latex is not prepared"), {
+      code: "not-prepared",
+      ref: LATEX.ref,
+    })
+    const adapter = await connectWithPackages(host, async () => {
+      throw failure
+    })
+    const error = await adapter.createSession({ cwd: "/w" }).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(PiPackageUnavailableError)
+    expect(error).toMatchObject({
+      reasonCode: "pi_package_unavailable",
+      code: "not-prepared",
+      ref: LATEX.ref,
+    })
+    expect(sessionSpawn(host)).toBeUndefined()
+  })
+
+  it("refuses a resolver that silently drops a reference", async () => {
+    const host = createFakeHost()
+    const adapter = await connectWithPackages(host, async () => [LATEX], [LATEX.ref, "other/pkg"])
+    await expect(adapter.createSession({ cwd: "/w" })).rejects.toMatchObject({
+      code: "not-found",
+      ref: "other/pkg",
+    })
+    expect(sessionSpawn(host)).toBeUndefined()
+  })
+
+  it("refuses a package whose minPiVersion is above the running Pi", async () => {
+    const host = createFakeHost()
+    const adapter = await connectWithPackages(host, async () => [
+      { ...LATEX, minPiVersion: "9.0.0" },
+    ])
+    await expect(adapter.createSession({ cwd: "/w" })).rejects.toMatchObject({
+      code: "pi-version",
+      params: { version: "9.0.0", installed: PI_CERTIFIED_VERSION },
+    })
+    expect(sessionSpawn(host)).toBeUndefined()
+  })
+
+  it("names plugin extensions in the handshake failure", async () => {
+    jest.useFakeTimers()
+    try {
+      const host = createFakeHost({ autoHandshake: false })
+      const adapter = await connectWithPackages(host, async () => [LATEX])
+      const creating = adapter.createSession({ cwd: "/w" }).catch((e: unknown) => e)
+      await jest.advanceTimersByTimeAsync(piHandshakeTimeoutMs("isolated", 0, 1) + 10)
+      const error = await creating
+      expect(error).toBeInstanceOf(PiExtensionHandshakeError)
+      expect(String((error as Error).message)).toContain("plugin Pi package extension")
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

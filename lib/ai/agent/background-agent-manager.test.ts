@@ -5,6 +5,8 @@ jest.mock("@/lib/db/seed", () => ({
   seedBuiltIns: jest.fn().mockResolvedValue(undefined),
 }))
 
+import { waitFor } from "@testing-library/react"
+
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
@@ -23,9 +25,18 @@ beforeEach(async () => {
   __resetBackgroundAgentManagerForTesting()
 })
 
+afterEach(__resetBackgroundAgentManagerForTesting)
 afterAll(dbFixture.dispose)
 
 describe("BackgroundAgentManager facade", () => {
+  it("preserves the first execution when a duplicate live agent ID is registered", () => {
+    const manager = getBackgroundAgentManager()
+    const signal = manager.registerAgent("same")
+    expect(() => manager.registerAgent("same")).toThrow("already registered")
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.cancelAgent("same")).toBe(true)
+    expect(signal.aborted).toBe(true)
+  })
   it("registerAgent returns a live AbortSignal synchronously (legacy contract)", () => {
     const manager = getBackgroundAgentManager()
     const signal = manager.registerAgent("a1", { pluginId: "p1", label: "sweeper" })
@@ -41,15 +52,17 @@ describe("BackgroundAgentManager facade", () => {
     manager.registerAgent("a1", { pluginId: "p1", label: "sweeper", prompt: "sweep the logs" })
     await flush()
 
-    await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
-      kind: "plugin-agent",
-      status: "running",
-      pluginId: "p1",
-      label: "sweeper",
-      subagentId: "sweeper",
-      prompt: "sweep the logs",
-      host: "renderer",
-      mode: "background",
+    await waitFor(async () => {
+      await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
+        kind: "plugin-agent",
+        status: "running",
+        pluginId: "p1",
+        label: "sweeper",
+        subagentId: "sweeper",
+        prompt: "sweep the logs",
+        host: "renderer",
+        mode: "background",
+      })
     })
   })
 
@@ -62,10 +75,12 @@ describe("BackgroundAgentManager facade", () => {
     ).toBe(true)
     await flush()
 
-    await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
-      status: "done",
-      resultText: "swept",
-      usage: { inputTokens: 5, outputTokens: 2 },
+    await waitFor(async () => {
+      await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
+        status: "done",
+        resultText: "swept",
+        usage: { inputTokens: 5, outputTokens: 2 },
+      })
     })
     expect(manager.list()).toEqual([])
   })
@@ -77,9 +92,11 @@ describe("BackgroundAgentManager facade", () => {
     manager.finishAgent("a1", { error: "exploded" })
     await flush()
 
-    await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
-      status: "error",
-      error: "exploded",
+    await waitFor(async () => {
+      await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
+        status: "error",
+        error: "exploded",
+      })
     })
   })
 
@@ -91,9 +108,11 @@ describe("BackgroundAgentManager facade", () => {
     expect(manager.finishAgent("a1")).toBe(false)
     await flush()
 
-    await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
-      status: "done",
-      resultText: "real outcome",
+    await waitFor(async () => {
+      await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
+        status: "done",
+        resultText: "real outcome",
+      })
     })
   })
 
@@ -110,9 +129,11 @@ describe("BackgroundAgentManager facade", () => {
     expect(manager.cancelAgent("a1")).toBe(false)
     await flush()
 
-    await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
-      status: "error",
-      error: "Cancelled.",
+    await waitFor(async () => {
+      await expect(getDb().backgroundTasks.get("a1")).resolves.toMatchObject({
+        status: "error",
+        error: "Cancelled.",
+      })
     })
   })
 
@@ -138,9 +159,11 @@ describe("BackgroundAgentManager facade", () => {
     })
     await flush()
 
-    await expect(getDb().backgroundTasks.get("d1")).resolves.toMatchObject({
-      kind: "team-delegation",
-      label: "team-delegation:del-1",
+    await waitFor(async () => {
+      await expect(getDb().backgroundTasks.get("d1")).resolves.toMatchObject({
+        kind: "team-delegation",
+        label: "team-delegation:del-1",
+      })
     })
   })
 
@@ -150,10 +173,24 @@ describe("BackgroundAgentManager facade", () => {
     await flush()
 
     const { interruptBackgroundTasksOnBoot } = await import("@/lib/db/background-tasks")
-    const flipped = await interruptBackgroundTasksOnBoot({ now: () => 9000 })
+    const row = await getDb().backgroundTasks.get("a1")
+    const flipped = await interruptBackgroundTasksOnBoot({ now: () => row!.ownerLease!.expiresAt })
 
     expect(flipped).toEqual([
       expect.objectContaining({ runId: "a1", status: "interrupted", kind: "plugin-agent" }),
     ])
+  })
+
+  it("keeps another window's recovery from interrupting a live plugin lease", async () => {
+    const manager = getBackgroundAgentManager()
+    manager.registerAgent("plugin-live", { pluginId: "p1" })
+    await flush()
+    const { interruptBackgroundTasksOnBoot } = await import("@/lib/db/background-tasks")
+    const row = await getDb().backgroundTasks.get("plugin-live")
+    expect(row?.ownerLease?.ownerId).toEqual(expect.any(String))
+    expect(
+      await interruptBackgroundTasksOnBoot({ now: () => row!.ownerLease!.expiresAt - 1 })
+    ).toEqual([])
+    expect((await getDb().backgroundTasks.get("plugin-live"))?.status).toBe("running")
   })
 })

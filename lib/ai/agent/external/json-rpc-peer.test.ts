@@ -120,6 +120,84 @@ describe("JsonRpcPeer", () => {
       }
     })
 
+    describe("tracked deadlines (inactivity windows)", () => {
+      beforeEach(() => jest.useFakeTimers())
+      afterEach(() => jest.useRealTimers())
+
+      it("touch() restarts the full window, so steady progress never expires", async () => {
+        const { peer } = makePeer()
+        const { promise, deadline } = peer.sendTrackedRequest("session/prompt", undefined, 1000)
+        let settled = false
+        void promise.then(
+          () => (settled = true),
+          () => (settled = true)
+        )
+        for (let i = 0; i < 5; i++) {
+          jest.advanceTimersByTime(800)
+          deadline.touch()
+        }
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        const assertion = expect(promise).rejects.toThrow("Request timeout: session/prompt")
+        jest.advanceTimersByTime(1000)
+        await assertion
+      })
+
+      it("pause() stops the clock and resume() restarts the full window", async () => {
+        const { peer, writes } = makePeer()
+        const { promise, deadline } = peer.sendTrackedRequest("session/prompt", undefined, 1000)
+        let settled = false
+        void promise.catch(() => (settled = true))
+        jest.advanceTimersByTime(900)
+        deadline.pause()
+        deadline.pause() // idempotent
+        deadline.touch() // ignored while paused
+        jest.advanceTimersByTime(60_000)
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        deadline.resume()
+        jest.advanceTimersByTime(999)
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        const assertion = expect(promise).rejects.toThrow("Request timeout: session/prompt")
+        jest.advanceTimersByTime(1)
+        await assertion
+        expect(JSON.parse(writes.at(-1)!)).toMatchObject({
+          method: "$/cancel_request",
+          params: { requestId: 1 },
+        })
+      })
+
+      it("resume() without a pause does not extend the deadline", async () => {
+        const { peer } = makePeer()
+        const { promise, deadline } = peer.sendTrackedRequest("slow", undefined, 1000)
+        const assertion = expect(promise).rejects.toThrow("Request timeout: slow")
+        jest.advanceTimersByTime(900)
+        deadline.resume()
+        jest.advanceTimersByTime(100)
+        await assertion
+      })
+
+      it("is inert once the request has settled", async () => {
+        const { peer } = makePeer()
+        const { promise, deadline } = peer.sendTrackedRequest("fast", undefined, 1000)
+        peer.ingest(JSON.stringify({ id: 1, result: { ok: true } }))
+        await expect(promise).resolves.toEqual({ ok: true })
+        deadline.pause()
+        deadline.resume()
+        deadline.touch()
+        expect(jest.getTimerCount()).toBe(0)
+      })
+
+      it("a paused request still settles on its response", async () => {
+        const { peer } = makePeer()
+        const { promise, deadline } = peer.sendTrackedRequest("slow", undefined, 1000)
+        deadline.pause()
+        peer.ingest(JSON.stringify({ id: 1, result: "done" }))
+        await expect(promise).resolves.toBe("done")
+      })
+    })
+
     it("notifies the peer before rejecting a timed-out request", async () => {
       jest.useFakeTimers()
       try {

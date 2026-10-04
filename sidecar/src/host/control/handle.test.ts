@@ -7,7 +7,34 @@ import {
   routeSteer,
   controlPreflight,
   guardedControlParams,
+  runtimeStatus,
 } from "./handle.ts"
+
+test("runtimeStatus reports only the owning live AI runtime's nonsecret identity", () => {
+  assert.deepEqual(runtimeStatus(undefined), { retained: false })
+  const session: HostSession = {
+    sdkSessionId: "runtime-1",
+    multiTurn: true,
+    q: { active: false, closed: false },
+    sendOptions: {
+      provider: "openai",
+      cwd: "/workspace",
+      transcriptInvalidationId: "g1",
+      providerCredentials: { apiKey: "private" },
+    },
+  }
+  assert.deepEqual(runtimeStatus(session), {
+    retained: true,
+    runtimeAdapter: "ai-sdk",
+    sdkSessionId: "runtime-1",
+    provider: "openai",
+    cwd: "/workspace",
+    transcriptInvalidationId: "g1",
+    active: false,
+  })
+  assert.deepEqual(runtimeStatus({ ...session, q: { closed: true } }), { retained: false })
+  assert.deepEqual(runtimeStatus({ ...session, multiTurn: false }), { retained: false })
+})
 
 // ---- control frame preflight -------------------------------------------------
 

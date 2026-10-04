@@ -170,7 +170,12 @@ const RUNTIME_AFFECTING_KEYS = [
 export function isRuntimeAffectingUpdate(updates: UpdateExternalAgentInput): boolean {
   return (
     RUNTIME_AFFECTING_KEYS.some((key) => Object.prototype.hasOwnProperty.call(updates, key)) ||
-    Boolean(updates.metadata && Object.hasOwn(updates.metadata, "piExtensionPolicy"))
+    Boolean(
+      updates.metadata &&
+      (Object.hasOwn(updates.metadata, "piExtensionPolicy") ||
+        // Plugin Pi packages change the spawn argv (`-e`) and env (ADR-0210).
+        Object.hasOwn(updates.metadata, "piPackages"))
+    )
   )
 }
 

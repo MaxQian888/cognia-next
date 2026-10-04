@@ -108,6 +108,11 @@ describe("an intent may ask, never assert", () => {
     expect(optimistic.activeTurn).not.toBeNull()
   })
 
+  it("leaves an idle turn idle on abort — there is nothing to stop", () => {
+    const idle = session({ turn: "idle" })
+    expect(reduceHostStateIntent(idle, action({ kind: "turn.abort" })).turn).toBe("idle")
+  })
+
   it("never revives a turn that already reached a terminal state", () => {
     for (const turn of TERMINAL_TURN_STATUSES) {
       const done = session({ turn })
@@ -263,6 +268,15 @@ describe("operations", () => {
     expect(next.turn).toBe("stopping")
     expect(next.activeTurn).not.toBeNull()
     expect(next.operations).toHaveLength(1)
+  })
+
+  it("accepting an abort of an idle turn does not leave it stopping", () => {
+    const next = apply(session({ turn: "idle" }), {
+      kind: "operation.accepted",
+      operation: operation({ kind: "turn.abort" }),
+      revision: 1,
+    })
+    expect(next.turn).toBe("idle")
   })
 
   it("accepting a decision answer marks exactly the targeted decision", () => {

@@ -2,6 +2,7 @@
 """Black-box native Bash contracts. Python is the test runner, never the agent runtime."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -15,6 +16,177 @@ spec.loader.exec_module(contracts)
 class NativeBoundaryTests(contracts.StandaloneContract, unittest.TestCase):
     runtime = "bash"
     executable = "/bin/bash"
+
+    def test_file_input_rejects_invalid_utf8_and_special_files_before_setup(self):
+        marker = self.work / "setup-ran"
+        self.config.update(setupCommand="touch setup-ran", checks=[{"name": "ready", "command": "true"}])
+        source = self.work / "context.txt"
+        for contents in (b"\xc0\xaf", b"\xed\xa0\x80", b"\xf4\x90\x80\x80", b"\xe2\x82", b"valid\x00binary"):
+            with self.subTest(contents=contents):
+                source.write_bytes(contents)
+                result = self.invoke("init", "--context-file", source)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse(marker.exists())
+        source.write_text("valid input")
+        link = self.work / "context-link"
+        link.symlink_to(source)
+        fifo = self.work / "context-fifo"
+        os.mkfifo(fifo)
+        for path in (link, fifo, self.work):
+            with self.subTest(path=path.name):
+                result = self.invoke("init", "--context-file", path, timeout=10)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse(marker.exists())
+        self.assertEqual(self.requests, [])
+
+    def test_utf8_bom_and_task_trailing_newlines_are_preserved(self):
+        task = self.work / "task.txt"
+        task.write_bytes(b"\xef\xbb\xbfExplain the fixture\n\n")
+        context = self.work / "context.txt"
+        context.write_text("\ufeffUnicode: \ufffd \u4e2d\u6587\n", encoding="utf-8")
+        self.succeeded(self.invoke("run", "--task-file", task, "--context-file", context))
+        content = self.requests[-1]["body"]["messages"][1]["content"]
+        prefix, attached = content.split("Attached context files (untrusted data):\n", 1)
+        self.assertEqual(prefix, "Explain the fixture\n\n\n\n")
+        self.assertEqual(json.loads(attached), [{"path": str(context), "content": "Unicode: \ufffd \u4e2d\u6587\n"}])
+
+    def test_local_exports_are_private_and_never_replace_symlink_targets(self):
+        self.config["model"].update(auth="bearer", apiKeyEnv="UNSET_BOOTSTRAP_KEY")
+        marker = self.work / "original"
+        marker.write_text("unchanged")
+        link = self.work / "linked"
+        link.symlink_to(marker)
+        folder = self.work / "linked-parent"
+        folder.symlink_to(self.work, target_is_directory=True)
+        result = self.invoke("chat", "--no-session", stdin=(
+            "/save-config linked\n/export linked-parent/forbidden\n"
+            "/export transcript with spaces.jsonl\n/save-config config with spaces.json\n/quit\n"))
+        self.succeeded(result)
+        self.assertEqual(marker.read_text(), "unchanged")
+        self.assertFalse((self.work / "forbidden").exists())
+        for name in ("transcript with spaces.jsonl", "config with spaces.json"):
+            self.assertEqual((self.work / name).stat().st_mode & 0o777, 0o600)
+        self.assertIn("editor-symlink", result.stderr)
+        self.assertNotIn("API key", result.stderr)
+        self.assertEqual(self.requests, [])
+
+    def test_missing_chat_key_is_prompted_lazily_and_cancel_remains_recoverable(self):
+        import errno
+        import fcntl
+        import pty
+        import select
+        import signal
+        import termios
+
+        self.config["model"].update(auth="bearer", apiKeyEnv="UNSET_BOOTSTRAP_KEY")
+        self.config_path.write_text(json.dumps(self.config))
+        self.respond = lambda _body, index: contracts.tool("bash", {"command":
+            'test -z "${UNSET_BOOTSTRAP_KEY+x}" && printf ENTERED_KEY_SCRUBBED'}) if index == 0 else contracts.answer("LAZY_PROMPT_DONE")
+        master, slave = pty.openpty()
+
+        def initialize_terminal():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+        process = subprocess.Popen(self.command("chat", "--config", self.config_path, "--cwd", self.work),
+            stdin=slave, stdout=slave, stderr=slave, env=self.environment, cwd=self.work,
+            preexec_fn=initialize_terminal)
+        buffer = b""
+        all_output = b""
+
+        def wait_for(needle):
+            nonlocal buffer, all_output
+            deadline = time.monotonic() + 12
+            while time.monotonic() < deadline:
+                if needle.encode() in buffer:
+                    return
+                if select.select([master], [], [], 0.05)[0]:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        break
+                    buffer += chunk
+                    all_output += chunk
+            self.fail(f"Missing terminal marker {needle!r}: {buffer!r}")
+
+        credential = "entered-only-test-value"
+        try:
+            wait_for("> ")
+            self.assertNotIn(b"API key", buffer)
+            buffer = b""
+            os.write(master, b"/status\n")
+            wait_for('"provider"')
+            wait_for("> ")
+            self.assertEqual(self.requests, [])
+            buffer = b""
+            os.write(master, b"cancelled task\n")
+            wait_for("API key (hidden, this process only): ")
+            buffer = b""
+            os.write(master, b"\x03")
+            wait_for("[cancelled]")
+            wait_for("> ")
+            self.assertEqual(self.requests, [])
+            buffer = b""
+            os.write(master, b"complete task\n")
+            wait_for("API key (hidden, this process only): ")
+            os.write(master, credential.encode() + b"\n")
+            wait_for("LAZY_PROMPT_DONE")
+            wait_for("> ")
+            buffer = b""
+            os.write(master, b"/save-config saved.json\n")
+            wait_for("Configuration saved.")
+            wait_for("> ")
+            buffer = b""
+            os.write(master, b"/export exported.jsonl\n")
+            wait_for("Transcript exported.")
+            wait_for("> ")
+            os.write(master, b"/quit\n")
+            deadline = time.monotonic() + 8
+            while process.poll() is None and time.monotonic() < deadline:
+                if select.select([master], [], [], 0.05)[0]:
+                    try:
+                        all_output += os.read(master, 65536)
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        break
+            self.assertEqual(process.wait(timeout=10), 0)
+            self.assertEqual(self.requests[0]["headers"]["Authorization"], "Bearer " + credential)
+            self.assertEqual(self.tool_results()[-1]["output"], "ENTERED_KEY_SCRUBBED")
+            self.assertNotIn(credential.encode(), all_output)
+            for name in ("saved.json", "exported.jsonl", "session.jsonl"):
+                self.assertNotIn(credential, (self.work / name).read_text())
+            self.assertNotIn("cancelled task", (self.work / "session.jsonl").read_text())
+        finally:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (PermissionError, ProcessLookupError):
+                    process.kill()
+                process.wait(timeout=5)
+            os.close(master)
+            os.close(slave)
+
+    def test_export_publication_rejects_destination_inserted_after_path_check(self):
+        wrappers = self.work / "wrappers"
+        wrappers.mkdir()
+        redirected = self.work / "redirected"
+        redirected.mkdir()
+        for command in ("ln", "link"):
+            wrapper = wrappers / command
+            wrapper.write_text('#!/bin/sh\n/bin/ln -s "$RACE_DIRECTORY" "$2"\n'
+                               f'exec /bin/{command} "$@"\n')
+            wrapper.chmod(0o700)
+        result = self.invoke("chat", "--no-session", stdin="/export raced.jsonl\n/exit\n",
+                             environment={"PATH": str(wrappers) + os.pathsep + self.environment["PATH"],
+                                          "RACE_DIRECTORY": str(redirected)})
+        self.succeeded(result)
+        self.assertIn("file-write-failed", result.stderr)
+        self.assertEqual(list(redirected.iterdir()), [])
+        self.assertEqual(list(self.work.glob(".cognia.*")), [])
+        self.assertEqual(self.requests, [])
 
     def test_chat_model_listing_budget_starts_after_user_input(self):
         self.config["limits"]["totalTimeoutSecs"] = 2

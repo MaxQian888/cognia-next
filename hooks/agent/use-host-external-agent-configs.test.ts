@@ -178,3 +178,103 @@ describe("copyLocal", () => {
     expect(result.current.error).toBe("host refused the import")
   })
 })
+
+describe("create / update / remove outcomes", () => {
+  // The phone's add flow navigates away on success and has to show the Host's
+  // reason on failure in the same tick; `error` would only arrive a render
+  // later, so the outcome is the return value.
+  it("create resolves the Host's new row, without the import flag, and re-reads the list", async () => {
+    const created = record({ configId: "eac_new", config: { name: "Claude" } as never })
+    setup({}, (command) =>
+      command === HOST_CONFIG_COMMANDS.list ? { configs: [created] } : { config: created }
+    )
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let outcome: Awaited<ReturnType<typeof result.current.create>> | undefined
+    await act(async () => {
+      outcome = await result.current.create({ name: "Claude", enabled: true })
+    })
+
+    expect(outcome).toEqual({ ok: true, record: created })
+    const create = calls.find((entry) => entry.command === HOST_CONFIG_COMMANDS.create)
+    // Configuring the Host directly is not an import: nothing is stripped.
+    expect(create?.payload).toEqual({ config: { name: "Claude", enabled: true } })
+    expect(calls.filter((entry) => entry.command === HOST_CONFIG_COMMANDS.list)).toHaveLength(2)
+  })
+
+  it("create resolves the Host's refusal and keeps it in error", async () => {
+    setup({}, (command) => {
+      if (command === HOST_CONFIG_COMMANDS.list) return { configs: [] }
+      throw new Error("name already taken")
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let outcome: Awaited<ReturnType<typeof result.current.create>> | undefined
+    await act(async () => {
+      outcome = await result.current.create({ name: "Claude" })
+    })
+    expect(outcome).toEqual({ ok: false, error: "name already taken" })
+    expect(result.current.error).toBe("name already taken")
+    expect(result.current.busy).toBe(false)
+  })
+
+  it("update sends the shallow patch at the read revision and reports whether it landed", async () => {
+    let refuse = false
+    setup({}, (command) => {
+      if (command === HOST_CONFIG_COMMANDS.list) return { configs: [record()] }
+      if (refuse) throw new Error("revision conflict")
+      return { config: record() }
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let landed: boolean | undefined
+    await act(async () => {
+      landed = await result.current.update(record({ revision: "eacr_3" }), {
+        defaultPermissionMode: "plan",
+      })
+    })
+    expect(landed).toBe(true)
+    expect(calls.find((c) => c.command === HOST_CONFIG_COMMANDS.update)?.payload).toEqual({
+      configId: "eac_1",
+      expectedRevision: "eacr_3",
+      patch: { defaultPermissionMode: "plan" },
+    })
+
+    refuse = true
+    await act(async () => {
+      landed = await result.current.update(record(), { enabled: false })
+    })
+    expect(landed).toBe(false)
+    expect(result.current.error).toBe("revision conflict")
+  })
+
+  it("remove reports whether the Host removed the row", async () => {
+    let refuse = false
+    setup({}, (command) => {
+      if (command === HOST_CONFIG_COMMANDS.list) return { configs: [record()] }
+      if (refuse) throw new Error("in use")
+      return { config: record() }
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let removed: boolean | undefined
+    await act(async () => {
+      removed = await result.current.remove(record())
+    })
+    expect(removed).toBe(true)
+    expect(calls.find((c) => c.command === HOST_CONFIG_COMMANDS.delete)?.payload).toEqual({
+      configId: "eac_1",
+    })
+
+    refuse = true
+    await act(async () => {
+      removed = await result.current.remove(record())
+    })
+    expect(removed).toBe(false)
+    expect(result.current.error).toBe("in use")
+  })
+})

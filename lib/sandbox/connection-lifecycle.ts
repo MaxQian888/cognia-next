@@ -1,4 +1,8 @@
-import { sandboxClient, type SandboxClient } from "@/lib/automation/sandbox-client"
+import {
+  sandboxClient,
+  type SandboxClient,
+  type SandboxContainerState,
+} from "@/lib/automation/sandbox-client"
 import type { SandboxConnectionRow, SandboxLifecycleOperation } from "@/types/sandbox"
 import { sandboxAdapterFactoryFor } from "./adapter-registry"
 import type { DockerAdapterOutcome } from "./docker-adapter"
@@ -23,6 +27,8 @@ export interface SandboxConnectionOperationResult {
   health?: boolean
   /** Present when the operation resolved the machine's real state. */
   healthReport?: SandboxHealthReport
+  /** undefined means no inspection evidence; null confirms the container is absent. */
+  containerState?: SandboxContainerState | null
   /** Present for `workspaceExec`. */
   exec?: SandboxExecResult
   /** Present for `workspaceRead`. */
@@ -155,5 +161,6 @@ export async function runSandboxConnectionOperation(
   if (outcome.containerId !== undefined) result.containerId = outcome.containerId
   if (outcome.port !== undefined) result.port = outcome.port
   if (outcome.health !== undefined) result.health = outcome.health
+  if (outcome.containerState !== undefined) result.containerState = outcome.containerState
   return result
 }

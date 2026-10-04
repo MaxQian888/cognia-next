@@ -59,7 +59,15 @@ export interface PiToolPolicy {
  */
 export function resolvePiToolPolicy(
   mode: string | undefined,
-  allowedTools: readonly string[] = []
+  allowedTools: readonly string[] = [],
+  /**
+   * Tool names declared by plugin Pi packages loaded into this session
+   * (`hostedSession.tools`, ADR-0210). Consulted only under `dontAsk`, where a
+   * declared tool the session pre-approved by name is allowed like a
+   * pre-approved built-in; an undeclared extension tool still takes the
+   * `deny` fallback. Every other mode leaves them on the mode's fallback.
+   */
+  extensionTools: readonly string[] = []
 ): PiToolPolicy {
   const decisions: Record<string, PiToolDecision> = {}
   const set = (tools: readonly string[], decision: PiToolDecision) => {
@@ -92,6 +100,12 @@ export function resolvePiToolPolicy(
     case "dontAsk": {
       const preapproved = new Set(allowedTools)
       for (const tool of PI_BUILTIN_TOOLS) {
+        decisions[tool] = preapproved.has(tool) ? "allow" : "deny"
+      }
+      for (const tool of extensionTools) {
+        // A package can never re-declare a built-in into "allow": built-ins
+        // were decided above from the pre-approval list alone.
+        if ((PI_BUILTIN_TOOLS as readonly string[]).includes(tool)) continue
         decisions[tool] = preapproved.has(tool) ? "allow" : "deny"
       }
       return { mode: "dontAsk", decisions, fallback: "deny" }

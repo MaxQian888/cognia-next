@@ -7,6 +7,7 @@ import type {
 } from "@/types/agent/external-agent"
 
 import {
+  approvalInput,
   deliverExternalElicitation,
   EXTERNAL_AGENT_APPROVAL_PREFIX,
   __resetExternalApprovalsForTests,
@@ -89,6 +90,39 @@ describe("registerExternalApproval", () => {
     // the user — a mid-turn pane switch must not misroute it.
     expect(target?.externalSessionId).toBe("ext-session")
     expect(target?.responseRequestId).toBe("req-1")
+  })
+
+  /**
+   * Kimi Code CLI sends no `rawInput` on `session/request_permission`; the
+   * adapter recovers its streamed arguments as `inputPreview`. Before this the
+   * card read `{}` for a Bash call.
+   */
+  it("shows the adapter's recovered preview when rawInput is absent or empty", () => {
+    for (const rawInput of [undefined, {}]) {
+      const approval = registerExternalApproval({
+        agentId: "kimi",
+        chatSessionId: "chat-1",
+        event: event({
+          rawInput,
+          inputPreview: { command: "echo hi" },
+          title: "Bash",
+          toolInfo: { id: "0:tool_R29u", name: "Bash" },
+          reason: "Requesting approval to Running: echo hi",
+        }),
+      })
+      expect(approval?.input).toEqual({ command: "echo hi" })
+      expect(approval?.toolName).toBe("Bash")
+      expect(approval?.description).toBe("Requesting approval to Running: echo hi")
+    }
+  })
+
+  it("keeps a non-empty rawInput over any preview", () => {
+    const approval = registerExternalApproval({
+      agentId: "a",
+      chatSessionId: "chat-1",
+      event: event({ rawInput: { command: "git status" }, inputPreview: { command: "x" } }),
+    })
+    expect(approval?.input).toEqual({ command: "git status" })
   })
 
   it("prefers request.requestId over request.id as the answer target", () => {
@@ -556,3 +590,31 @@ it.each(["wrong-device", "unknown"])(
     ).resolves.toBeUndefined()
   }
 )
+
+describe("approvalInput", () => {
+  type Request = Parameters<typeof approvalInput>[0]
+  const base = { toolInfo: { name: "Bash", parameters: undefined } } as unknown as Request
+
+  it("prefers a non-empty wire rawInput", () => {
+    expect(
+      approvalInput({
+        ...base,
+        rawInput: { command: "ls" },
+        inputPreview: { command: "echo hi" },
+      } as Request)
+    ).toEqual({ command: "ls" })
+  })
+
+  it("falls back to the recovered preview when rawInput is missing or empty (Kimi Code)", () => {
+    expect(approvalInput({ ...base, inputPreview: { command: "echo hi" } } as Request)).toEqual({
+      command: "echo hi",
+    })
+    expect(
+      approvalInput({ ...base, rawInput: {}, inputPreview: { command: "echo hi" } } as Request)
+    ).toEqual({ command: "echo hi" })
+  })
+
+  it("never returns undefined", () => {
+    expect(approvalInput(base)).toEqual({})
+  })
+})

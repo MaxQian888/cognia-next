@@ -7,15 +7,24 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { ExternalAgentConfigNotFoundError } from "@/lib/db/external-agent-configs"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 
+const mockTransportCall = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
+}))
+
 import {
   applyVerdict,
   createHostExternalAgentConfig,
+  defaultHostCogniaModelCatalogDeps,
   deleteHostExternalAgentConfig,
+  getHostCogniaModelCatalog,
   getHostExternalAgentConfig,
   importedConfigCredentialGaps,
   listHostExternalAgentConfigs,
   reconcileHostExternalAgentConfigs,
   updateHostExternalAgentConfig,
+  type HostCogniaModelCatalogDeps,
   type HostConfigServiceDeps,
 } from "./host-config-service"
 
@@ -303,5 +312,219 @@ describe("importedConfigCredentialGaps", () => {
 
   it("is empty for a config that was never exported", () => {
     expect(importedConfigCredentialGaps(config())).toEqual([])
+  })
+})
+
+// Host-lane Cognia models (ADR-0090, 2026-10-02): the catalog a paired device
+// is offered is computed from THIS Host's settings and vault.
+describe("getHostCogniaModelCatalog", () => {
+  const SECRET = "sk-host-only"
+  const hostRecord = {
+    configId: "eac_1",
+    revision: "eacr_1",
+    lifecycleGeneration: 1,
+    seq: 1,
+    enabled: true,
+    lifecycleStatus: "ready",
+    createdAt: 1,
+    updatedAt: 1,
+    config: config({ protocol: "acp", process: { command: "codex-acp" } } as never),
+  } as never
+  const hostSettings = {
+    providerSettings: {
+      openai: { providerId: "openai", enabled: true, apiKey: SECRET, enabledModels: ["gpt-5.6"] },
+      "kimi-sub": { providerId: "kimi-sub", enabled: true, enabledModels: ["kimi-k2"] },
+    },
+    customProviders: [],
+  } as never
+  const kimi = {
+    id: "kimi-sub",
+    name: "Kimi",
+    authMode: "api-key",
+    protocol: "anthropic",
+    source: "builtin",
+  } as never
+
+  function deps(over: Partial<HostCogniaModelCatalogDeps> = {}): HostCogniaModelCatalogDeps {
+    return {
+      getConfig: async () => hostRecord,
+      support: () => ({ supported: true, runtime: "codex" }),
+      readSettings: () => hostSettings,
+      accountLocked: () => false,
+      subscriptions: () => [kimi],
+      listAccountIds: async () => ["acct-1", "acct-1", ""],
+      ...over,
+    }
+  }
+
+  it("lists the Host's eligible models, with vault account ids and no secret", async () => {
+    const catalog = await getHostCogniaModelCatalog("eac_1", deps())
+    expect(catalog.supported).toBe(true)
+    if (!catalog.supported) return
+    expect(catalog.providers.map((provider) => provider.providerId).sort()).toEqual([
+      "kimi-sub",
+      "openai",
+    ])
+    expect(catalog.providers.find((p) => p.providerId === "kimi-sub")?.accountIds).toEqual([
+      "acct-1",
+    ])
+    // Accounts are listed only for API-key subscriptions.
+    expect(catalog.providers.find((p) => p.providerId === "openai")).not.toHaveProperty(
+      "accountIds"
+    )
+    expect(JSON.stringify(catalog)).not.toContain(SECRET)
+  })
+
+  it("keeps the provider when its vault cannot be listed", async () => {
+    const catalog = await getHostCogniaModelCatalog(
+      "eac_1",
+      deps({
+        listAccountIds: async () => {
+          throw new Error("vault unavailable")
+        },
+      })
+    )
+    expect(catalog.supported && catalog.providers.some((p) => p.providerId === "kimi-sub")).toBe(
+      true
+    )
+  })
+
+  it("maps a runtime refusal onto the catalog's reasons", async () => {
+    await expect(
+      getHostCogniaModelCatalog(
+        "eac_1",
+        deps({ support: () => ({ supported: false, reason: "network-endpoint" }) })
+      )
+    ).resolves.toEqual({ supported: false, reason: "unsupported-runtime" })
+    await expect(
+      getHostCogniaModelCatalog(
+        "eac_1",
+        deps({ support: () => ({ supported: false, reason: "public-https-required" }) })
+      )
+    ).resolves.toEqual({ supported: false, reason: "public-https-required" })
+  })
+
+  it("says the account is locked before reading settings", async () => {
+    const readSettings = jest.fn(() => hostSettings)
+    await expect(
+      getHostCogniaModelCatalog("eac_1", deps({ accountLocked: () => true, readSettings }))
+    ).resolves.toEqual({ supported: false, reason: "account-locked" })
+    expect(readSettings).not.toHaveBeenCalled()
+  })
+
+  it("answers no-eligible-models when nothing passes the gateway rule", async () => {
+    await expect(
+      getHostCogniaModelCatalog(
+        "eac_1",
+        deps({
+          readSettings: () => ({ providerSettings: {}, customProviders: [] }) as never,
+          subscriptions: () => [],
+        })
+      )
+    ).resolves.toEqual({ supported: false, reason: "no-eligible-models" })
+  })
+
+  it("refuses an unknown or deleted configuration and missing settings", async () => {
+    await expect(
+      getHostCogniaModelCatalog("eac_x", deps({ getConfig: async () => null }))
+    ).rejects.toThrow("unknown configuration eac_x")
+    await expect(
+      getHostCogniaModelCatalog(
+        "eac_1",
+        deps({ getConfig: async () => ({ ...(hostRecord as object), tombstonedAt: 5 }) as never })
+      )
+    ).rejects.toThrow("unknown configuration")
+    await expect(
+      getHostCogniaModelCatalog("eac_1", deps({ readSettings: () => null }))
+    ).rejects.toThrow("provider settings are unavailable")
+  })
+
+  // The headless brain has no renderer settings: its catalog is the server's
+  // gateway snapshot, the one `agent_gateway_host_task_prepare` mints against.
+  it("answers from the Host's own provider catalog when one is supplied", async () => {
+    const readSettings = jest.fn(() => null)
+    const providers = [
+      { providerId: "stub-openai", providerName: "Stub", models: [{ id: "m", name: "M" }] },
+    ]
+    await expect(
+      getHostCogniaModelCatalog(
+        "eac_1",
+        deps({ readSettings, hostProviders: async () => providers })
+      )
+    ).resolves.toEqual({ supported: true, providers })
+    expect(readSettings).not.toHaveBeenCalled()
+    await expect(
+      getHostCogniaModelCatalog("eac_1", deps({ hostProviders: async () => [] }))
+    ).resolves.toEqual({ supported: false, reason: "no-eligible-models" })
+    const hostProviders = jest.fn(async () => providers)
+    await expect(
+      getHostCogniaModelCatalog(
+        "eac_1",
+        deps({ hostProviders, support: () => ({ supported: false, reason: "network-endpoint" }) })
+      )
+    ).resolves.toEqual({ supported: false, reason: "unsupported-runtime" })
+    expect(hostProviders).not.toHaveBeenCalled()
+  })
+
+  it("reads the headless catalog from cognia-server's profile store and gateway snapshot", async () => {
+    const marker = globalThis as Record<string, unknown>
+    marker.__COGNIA_HEADLESS__ = true
+    mockTransportCall.mockImplementation(async (name: string) =>
+      name === "provider_profiles_list"
+        ? {
+            providerProfiles: [
+              { id: "stub", displayName: "Stub AI", deploymentRefs: ["stub-openai"] },
+            ],
+            deploymentProfiles: [
+              {
+                id: "stub-openai",
+                providerRef: "stub",
+                credentialProfileRef: { kind: "secret-store", secretId: "stub-key" },
+                models: [{ id: "stub-model", displayName: "Stub Model" }],
+              },
+            ],
+          }
+        : {
+            snapshot: true,
+            providers: [
+              {
+                id: "stub-openai",
+                protocol: "openai",
+                baseUrl: "http://127.0.0.1:9/v1",
+                enabled: true,
+                credentialPool: 1,
+                models: [{ id: "stub-model", exposed: false }],
+              },
+            ],
+          }
+    )
+    try {
+      const hostDeps = await defaultHostCogniaModelCatalogDeps()
+      expect(hostDeps.readSettings()).toBeNull()
+      const catalog = await getHostCogniaModelCatalog("eac_1", {
+        ...hostDeps,
+        getConfig: async () => hostRecord,
+        support: () => ({ supported: true, runtime: "codex" }),
+        accountLocked: () => false,
+      })
+      expect(catalog).toEqual({
+        supported: true,
+        providers: [
+          {
+            providerId: "stub-openai",
+            providerName: "Stub AI",
+            models: [{ id: "stub-model", name: "Stub Model" }],
+          },
+        ],
+      })
+      expect(JSON.stringify(catalog)).not.toMatch(/secret|baseUrl|127\.0\.0\.1/)
+      expect(mockTransportCall.mock.calls.map(([name]) => name).sort()).toEqual([
+        "gateway_provider_capabilities",
+        "provider_profiles_list",
+      ])
+    } finally {
+      delete marker.__COGNIA_HEADLESS__
+      mockTransportCall.mockReset()
+    }
   })
 })

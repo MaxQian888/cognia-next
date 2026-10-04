@@ -106,6 +106,7 @@ describe("runSandboxConnectionOperation", () => {
     })
     expect(result.health).toBe(true)
     expect(result.healthReport).toMatchObject({ reachable: true, state: "running" })
+    expect(result.containerState).toMatchObject({ containerId: "c1", running: true })
     expect(client.inspect).toHaveBeenCalledWith("conn-1")
     expect(client.health).toHaveBeenCalledWith("conn-1")
   })
@@ -144,6 +145,7 @@ describe("runSandboxConnectionOperation", () => {
       client,
     })
     expect(result.healthReport).toMatchObject({ reachable: false, state: "uninitialized" })
+    expect(result.containerState).toBeNull()
   })
 
   it("carries the frozen container policy into create and start", async () => {

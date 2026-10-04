@@ -286,6 +286,54 @@ describe("starting a turn", () => {
     expect(calls[0].payload).toMatchObject({ externalSessionId: "agent-9" })
   })
 
+  // Host-lane Cognia models. Unlike the model axes above, `null` IS sent: it is
+  // the explicit "native models" instruction and the Host must not read it as
+  // "inherit the configuration's binding".
+  describe("the Cognia model binding", () => {
+    const binding = { providerId: "kimi-sub", modelId: "kimi-k2", accountId: null }
+
+    it("sends a binding by its three fields only", async () => {
+      reply = { started: true, runId: "run-1" }
+      await startRemoteExternalTurn({
+        runId: "run-1",
+        chatSessionId: "c",
+        stamp,
+        prompt: "hi",
+        cogniaModel: { ...binding, apiKey: "sk-should-not-travel" } as never,
+      })
+      expect((calls[0].payload as Record<string, unknown>).cogniaModel).toEqual(binding)
+    })
+
+    it("keeps an omitted account omitted", async () => {
+      reply = { started: true, runId: "run-1" }
+      await startRemoteExternalTurn({
+        runId: "run-1",
+        chatSessionId: "c",
+        stamp,
+        prompt: "hi",
+        cogniaModel: { providerId: "p", modelId: "m" },
+      })
+      expect((calls[0].payload as Record<string, unknown>).cogniaModel).toEqual({
+        providerId: "p",
+        modelId: "m",
+      })
+    })
+
+    it("sends an explicit null and omits an absent binding", async () => {
+      reply = { started: true, runId: "run-1" }
+      await startRemoteExternalTurn({
+        runId: "run-1",
+        chatSessionId: "c",
+        stamp,
+        prompt: "hi",
+        cogniaModel: null,
+      })
+      expect(calls[0].payload).toHaveProperty("cogniaModel", null)
+      await startRemoteExternalTurn({ runId: "run-2", chatSessionId: "c", stamp, prompt: "hi" })
+      expect(calls[1].payload).not.toHaveProperty("cogniaModel")
+    })
+  })
+
   it("surfaces the host's refusal", async () => {
     reply = { started: false, refusal: { kind: "readiness", status: "needs-credentials" } }
     await expect(

@@ -230,6 +230,11 @@ const CONFIG_ENV_PREFIXES = [
   // broker's authorize() is the permission authority, not possession of the
   // token — see ADR-0119.
   "COGNIA_TOOLHOST_",
+  // Plugin Pi package values (ADR-0210), mirroring ENV_PREFIX_ALLOWLIST in
+  // crates/cognia-external-agent/src/presets.rs. Read only by a cooperating
+  // extension the user opted an agent into; values come from the plugin's
+  // manifest, its own configuration or the workspace path, never the model.
+  "COGNIA_PIPKG_",
 ]
 const DANGEROUS_ENV =
   /^(?:LD_|DYLD_|NODE_OPTIONS$|GCONV_PATH$|GIT_CONFIG_|HOSTALIASES$|NLSPATH$|RESOLV_HOST_CONF$|PSMODULEPATH$|PSEXECUTIONPOLICYPREFERENCE$)/i
@@ -358,12 +363,23 @@ export function botRuntimeEnvironment(
   )
 }
 
+/**
+ * Plugin Pi package env (ADR-0210) belongs to a Pi process only: the
+ * `COGNIA_PIPKG_*` values and the package-roots request never reach another
+ * agent. Mirrors `scope_pi_package_env` in
+ * crates/cognia-external-agent/src/presets.rs.
+ */
+function isPiPackageOnlyKey(key: string): boolean {
+  return key.startsWith("COGNIA_PIPKG_") || key === "COGNIA_TOOLHOST_PI_PACKAGE_ROOTS"
+}
+
 export function buildExternalAgentChildEnv(
   ambient: NodeJS.ProcessEnv,
   overrides: Record<string, string> | undefined,
   managedDsh = false,
   aider = false,
-  kimi = false
+  kimi = false,
+  pi = false
 ): NodeJS.ProcessEnv {
   if (managedDsh) {
     const inherited = new Set([
@@ -396,10 +412,12 @@ export function buildExternalAgentChildEnv(
     const env = { ...gatewayRuntimeEnvironment(ambient), ...overrides }
     delete env.COGNIA_GATEWAY_TASK_HOME
     delete env.COGNIA_GATEWAY_TASK_CONFIG
+    if (!pi) for (const key of Object.keys(env)) if (isPiPackageOnlyKey(key)) delete env[key]
     return env
   }
   const env: NodeJS.ProcessEnv = { NODE_ENV: ambient.NODE_ENV ?? "production" }
   for (const [key, value] of Object.entries(ambient)) {
+    if (!pi && isPiPackageOnlyKey(key)) continue
     if (aider && key.startsWith("AIDER_")) continue
     if (kimi && overrides?.COGNIA_BOT_ISOLATION === "1" && key.startsWith("KIMI_")) continue
     if (
@@ -412,6 +430,7 @@ export function buildExternalAgentChildEnv(
     }
   }
   for (const [key, value] of Object.entries(overrides ?? {})) {
+    if (!pi && isPiPackageOnlyKey(key)) continue
     if (
       !DANGEROUS_ENV.test(key) &&
       (CONFIG_ENV_KEYS.has(key) || CONFIG_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)))
@@ -587,7 +606,8 @@ export class NodeExternalAgentBackend {
       config.env,
       isDshLauncherInvocation(config.args ?? [], this.workspacesRoot),
       config.command === "aider",
-      config.command === "kimi"
+      config.command === "kimi",
+      baseCommand(config.command) === "pi"
     )
     Object.assign(env, launch.env)
     const devinConfigRoot = devinOwnedConfigRoot(config)

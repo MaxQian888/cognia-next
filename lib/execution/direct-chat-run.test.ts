@@ -6,6 +6,7 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createExecutionRun, listExecutionRunEvents } from "@/lib/db/execution-runs"
 import {
   finishDirectChatExecutionRun,
+  hasActiveDirectChatExecutionRun,
   projectDirectChatCaptureEvent,
   projectDirectChatSdkMessage,
   recoverStaleDirectChatExecutionRuns,
@@ -16,6 +17,18 @@ describe("direct chat execution run", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("reports a turn as active only between start and finish", async () => {
+    expect(hasActiveDirectChatExecutionRun("session-live")).toBe(false)
+    await startDirectChatExecutionRun({
+      sessionId: "session-live",
+      runId: "run:session-live:1",
+      startedAt: 1_000,
+    })
+    expect(hasActiveDirectChatExecutionRun("session-live")).toBe(true)
+    await finishDirectChatExecutionRun("session-live", "failed", 2_000, "boom")
+    expect(hasActiveDirectChatExecutionRun("session-live")).toBe(false)
   })
 
   it("creates one canonical run and journals tool lifecycle through the existing producer", async () => {

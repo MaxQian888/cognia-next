@@ -70,6 +70,7 @@ class BackgroundAgentManager {
    * thread into their `executeAgent` call.
    */
   registerAgent(id: string, options: RegisterAgentOptions = {}): AbortSignal {
+    if (this.live.has(id)) throw new Error("Background agent already registered")
     const controller = new AbortController()
     let resolve!: (outcome: BackgroundAgentOutcome) => void
     const parked = new Promise<BackgroundAgentOutcome>((res) => {
@@ -99,7 +100,13 @@ class BackgroundAgentManager {
         ...(options.label ? { label: options.label } : {}),
       },
       parked,
-      { cancel: () => controller.abort() }
+      {
+        cancel: () => controller.abort(),
+        onLeaseLost: () => {
+          controller.abort()
+          this.settle(id, { text: "", error: "Background task ownership lost" })
+        },
+      }
     )
     return controller.signal
   }
@@ -145,6 +152,13 @@ class BackgroundAgentManager {
     }))
   }
 
+  /** Drop process-local tracking on test teardown without releasing another owner. */
+  clearForTesting(): void {
+    this.registry.__clearForTesting()
+    for (const entry of this.live.values()) entry.controller.abort()
+    this.live.clear()
+  }
+
   private settle(id: string, outcome: BackgroundAgentOutcome): boolean {
     const entry = this.live.get(id)
     if (!entry || entry.settled) return false
@@ -167,5 +181,6 @@ export function getBackgroundAgentManager(): BackgroundAgentManager {
 
 /** Test-only escape hatch. */
 export function __resetBackgroundAgentManagerForTesting(): void {
+  singleton?.clearForTesting()
   singleton = null
 }

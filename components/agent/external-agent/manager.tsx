@@ -23,22 +23,10 @@ import { ExternalAgentAuthentication } from "./authentication"
  * the analytics hook + health badge are local stubs that no-op gracefully.
  */
 
-import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import { Spinner } from "@/components/ui/spinner"
-import { KvEditor } from "@/components/settings/mcp/kv-editor"
-import { kvRowsToObject, objectToKvRows } from "@/components/settings/mcp/mcp-server-utils"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  ChevronDown,
-  ExternalLink,
-  Plus,
-  Power,
-  PowerOff,
-  RefreshCw,
-  Settings,
-  Trash2,
-} from "lucide-react"
+import { ChevronDown, Plus, Power, PowerOff, RefreshCw, Settings, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -65,7 +53,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -74,7 +61,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/sonner"
 import { cn } from "@/lib/utils"
@@ -95,7 +81,6 @@ import { AgentCredentialBadge } from "./credential-status-badge"
 
 import type {
   AcpPermissionOption,
-  CreateExternalAgentInput,
   ExternalAgentConfig,
   ExternalAgentConnectionStatus,
   ExternalAgentValiditySnapshot,
@@ -103,29 +88,30 @@ import type {
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
-  isSupportedExternalAgentProtocol,
 } from "@/lib/ai/agent/external/config/config-normalizer"
 import type { ExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import { isEnvironmentScopedVerdict } from "@/lib/ai/agent/external/canonical-contract"
-import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session/session-extension-errors"
-import {
-  getPresetConfig,
-  getRunnablePresets,
-  type ExternalAgentPresetId,
-} from "@/lib/ai/agent/external/config/presets"
-import {
-  PROCESS_PLANE_COMMANDS,
-  type ProcessPlaneUnavailableReason,
-} from "@/lib/ai/agent/external/capability/process-plane"
+import { approvalInput } from "@/lib/ai/agent/external/session/chat-decision-bridge"
+import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
+import { PROCESS_PLANE_COMMANDS } from "@/lib/ai/agent/external/capability/process-plane"
 import { useExternalAgentProcessPlane } from "@/hooks/agent/use-external-agent-process-plane"
 import { useInstalledAgentRuntimes } from "@/hooks/agent/use-installed-agent-runtimes"
 import { RuntimeDetectionBadge } from "./runtime-detection-badge"
-import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
-import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { ExternalAgentCapabilityMatrix } from "./capability-matrix"
-import { CogniaModelPicker } from "./cognia-model-picker"
-import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { useAddAgentForm } from "@/hooks/agent/use-add-agent-form"
+import { useAddAgentProblemMessage } from "@/hooks/agent/use-add-agent-problem-message"
+import { buildCreateExternalAgentInput } from "@/lib/ai/agent/external/config/add-agent-form"
+import { ConnectionFields } from "./add-agent/connection-fields"
+import {
+  AddAgentCogniaModelField,
+  ExecutionTuningFields,
+} from "./add-agent/execution-tuning-fields"
+import {
+  DETECTION_UNAVAILABLE_KEYS,
+  PLANE_WARNING_KEYS,
+  PresetGuidance,
+} from "./add-agent/preset-guidance"
 
 import type { AddAgentFormData } from "@/types/agent/component-types"
 import type { SessionObservationSummary } from "@/types/agent/agent-trace"
@@ -136,34 +122,6 @@ import type { SessionObservationSummary } from "@/types/agent/agent-trace"
  * turned a connected agent into a wall of rows the moment it was selected.
  */
 const SESSION_LIST_PREVIEW_COUNT = 20
-
-const DEFAULT_TIMEOUT_MS = "300000"
-const DEFAULT_RETRY_MAX_RETRIES = "3"
-const DEFAULT_RETRY_DELAY_MS = "1000"
-const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
-
-const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
-  name: "",
-  protocol: "acp",
-  transport: "stdio",
-  command: "",
-  args: "",
-  bare: false,
-  debug: false,
-  endpoint: "",
-  autoSpawnServer: false,
-  port: "",
-  hostname: "",
-  serverPassword: "",
-  serverUsername: "",
-  model: "",
-  timeoutMs: DEFAULT_TIMEOUT_MS,
-  retryMaxRetries: DEFAULT_RETRY_MAX_RETRIES,
-  retryDelayMs: DEFAULT_RETRY_DELAY_MS,
-  retryExponentialBackoff: true,
-  retryMaxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
-  retryOnErrors: "",
-}
 
 // ============================================================================
 // Agent Card
@@ -413,29 +371,9 @@ function CollapsibleSection({
 // Add Agent Dialog
 // ============================================================================
 
-/**
- * Reason code to message key. The codes are the plane's vocabulary (kebab, and
- * wire-shaped); the keys are the catalogue's. Kept as a table so
- * `manager.detection.test.tsx` can assert every code has a translation:
- * `lint:i18n` cannot see through the template literal that resolves them.
- */
-export const PLANE_WARNING_KEYS: Record<ProcessPlaneUnavailableReason, string> = {
-  "no-host": "noHost",
-  "manifest-missing": "manifestMissing",
-  unsupported: "unsupported",
-  "not-granted": "notGranted",
-}
-
-/**
- * The same mapping for the detection line, plus the one state the plane cannot
- * describe: it was reachable, it was asked, and it did not answer. Blaming that
- * on the plane's `unsupported` accused a Host that had declared the operation.
- */
-export const DETECTION_UNAVAILABLE_KEYS: Record<ProcessPlaneUnavailableReason | "failed", string> =
-  {
-    ...PLANE_WARNING_KEYS,
-    failed: "failed",
-  }
+// The reason-code tables moved with the preset guidance they label. Re-exported
+// so existing importers (and the parity test) keep their path.
+export { DETECTION_UNAVAILABLE_KEYS, PLANE_WARNING_KEYS }
 
 interface AddAgentDialogProps {
   open: boolean
@@ -444,7 +382,6 @@ interface AddAgentDialogProps {
 }
 
 function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
-  const tGateway = useTranslations("externalAgent.cogniaModel")
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
@@ -460,139 +397,22 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
   // Only while the dialog is open: detection spawns `--version` reads on the
   // host, and a closed dialog has nothing to render them into.
   const detection = useInstalledAgentRuntimes(open)
-  const [selectedPreset, setSelectedPreset] = useState<ExternalAgentPresetId | "">("")
-  const [formData, setFormData] = useState<AddAgentFormData>(DEFAULT_ADD_AGENT_FORM_DATA)
-  const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows({}))
+  const form = useAddAgentForm()
+  const problemMessage = useAddAgentProblemMessage()
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  const isOpenCode = formData.protocol === "opencode"
-  const isOpenCodeV2 = formData.protocol === "opencode-v2"
-  const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
-  const isStdio = !isOpenCode && !isOpenCodeV2 && formData.transport === "stdio"
-
-  const handlePresetChange = (presetId: string) => {
-    setSelectedPreset(presetId as ExternalAgentPresetId | "")
-    if (presetId && presetId !== "custom") {
-      // getPresetConfig is dynamic-aware (plugin-contributed presets too),
-      // matching how the dropdown is built from getRunnablePresets().
-      const preset = getPresetConfig(presetId)
-      if (preset) {
-        setProcessEnvRows(objectToKvRows(preset.process?.env))
-        const presetPort = preset.metadata?.port
-        setFormData((current) => ({
-          ...current,
-          name: preset.name,
-          protocol: preset.protocol,
-          transport: preset.transport,
-          command: preset.process?.command || "",
-          args: preset.process?.args.map(shellQuote).join(" ") || "",
-          processEnv: preset.process?.env,
-          endpoint: preset.network?.endpoint || "",
-          autoSpawnServer: preset.metadata?.autoSpawnServer === true,
-          port: typeof presetPort === "number" ? String(presetPort) : "",
-          hostname: typeof preset.metadata?.hostname === "string" ? preset.metadata.hostname : "",
-          model: typeof preset.metadata?.model === "string" ? preset.metadata.model : "",
-        }))
-      }
-    }
-  }
+  const { presetId, data, setField, applyPreset, shape } = form
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Accept any built-in protocol (acp / codex-app-server / opencode / a2a) OR
-    // any plugin-contributed adapter currently registered in the runtime registry
-    // (mirrors the registry-aware gate in getExternalAgentExecutionBlock). Using
-    // the canonical built-in list keeps every shipping protocol — including A2A —
-    // selectable without depending on registry bootstrap order. A disabled-plugin
-    // protocol is no longer in the registry, so it stays correctly blocked.
-    if (
-      !isSupportedExternalAgentProtocol(formData.protocol) &&
-      !protocolAdapterRegistry.has(formData.protocol)
-    ) {
-      toast.error(tManager("unsupportedProtocol"))
-      return
-    }
-    if (!formData.name.trim()) {
-      toast.error(tSettings("nameRequired"))
-      return
-    }
-    if (isOpenCodeV2) {
-      // V2 preview discovers an already-running local service through the
-      // sidecar. It intentionally has no process or endpoint fields.
-    } else if (isOpenCode) {
-      // Remote mode (no auto-spawn) needs an endpoint; auto-spawn defaults the
-      // command to `opencode`, so nothing else is strictly required.
-      if (!formData.autoSpawnServer && !formData.endpoint.trim()) {
-        toast.error(tSettings("endpointRequired"))
-        return
-      }
-    } else if (
-      isStdio &&
-      !getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime &&
-      !formData.command.trim()
-    ) {
-      toast.error(tSettings("commandRequired"))
-      return
-    } else if (!isStdio && !formData.endpoint.trim()) {
-      toast.error(tSettings("endpointRequired"))
-      return
-    }
-
-    if (
-      formData.cogniaModel &&
-      (!formData.cogniaModel.providerId ||
-        !formData.cogniaModel.modelId ||
-        !canUseCogniaModels({
-          protocol: formData.protocol,
-          transport: formData.transport,
-          process: {
-            command: formData.command || (formData.autoSpawnServer ? "opencode" : ""),
-            args: tokenizeShellCommand(formData.args) ?? [],
-          },
-          network:
-            formData.transport !== "stdio" && !formData.autoSpawnServer
-              ? { endpoint: formData.endpoint }
-              : undefined,
-          metadata: {
-            ...getPresetConfig(selectedPreset)?.metadata,
-            autoSpawnServer: formData.autoSpawnServer,
-          },
-        }))
-    ) {
-      toast.error(tGateway("invalid"))
-      return
-    }
-    if (
-      (isStdio || (isOpenCode && formData.autoSpawnServer)) &&
-      !managedDsh &&
-      tokenizeShellCommand(formData.args) === null
-    ) {
-      toast.error(tSettings("argumentsInvalid"))
-      return
-    }
-    const processEnv = kvRowsToObject(processEnvRows)
-    const names = processEnvRows.map((row) => row.key.trim()).filter(Boolean)
-    if (
-      names.some((key) => key.includes("=") || key.includes("\0")) ||
-      new Set(names).size !== names.length ||
-      Object.values(processEnv).some((value) => value.includes("\0"))
-    ) {
-      toast.error(tSettings("environmentInvalid"))
+    const prepared = form.prepare()
+    if (!prepared.ok) {
+      toast.error(problemMessage(prepared.problem))
       return
     }
     setIsSubmitting(true)
     try {
-      await onAdd({
-        ...formData,
-        processEnv,
-        preset: selectedPreset || undefined,
-        name: formData.name.trim(),
-        command: formData.command.trim(),
-        endpoint: formData.endpoint.trim(),
-      })
-      setFormData(DEFAULT_ADD_AGENT_FORM_DATA)
-      setProcessEnvRows([])
-      setSelectedPreset("")
+      await onAdd(prepared.data)
+      form.reset()
       onOpenChange(false)
     } catch (error) {
       const message =
@@ -602,13 +422,6 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
       setIsSubmitting(false)
     }
   }
-
-  const currentPreset = selectedPreset ? getPresetConfig(selectedPreset) : null
-  const currentAdapter = currentPreset?.adapterId
-    ? getExternalAgentEcosystemAdapter(currentPreset.adapterId)
-    : null
-  const relatedOfficialSurfaces =
-    currentAdapter?.surfaces.filter((surface) => surface.id !== currentPreset?.surfaceId) ?? []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -622,25 +435,25 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
             {/* Preset Selector */}
             <div className="grid gap-2">
               <Label>{tManager("quickStartPreset")}</Label>
-              <Select value={selectedPreset} onValueChange={handlePresetChange}>
+              <Select value={presetId} onValueChange={applyPreset}>
                 <SelectTrigger>
                   <SelectValue placeholder={tManager("selectPresetOrConfigureManually")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {getRunnablePresets().map((presetId) => {
+                  {getRunnablePresets().map((runnableId) => {
                     // Route through `getPresetConfig` so plugin-contributed
                     // presets (registered via the §A-3 dynamic overlay)
                     // resolve identically to the four builtin entries.
-                    const preset = getPresetConfig(presetId)
+                    const preset = getPresetConfig(runnableId)
                     if (!preset) return null
                     return (
-                      <SelectItem key={presetId} value={presetId}>
+                      <SelectItem key={runnableId} value={runnableId}>
                         <div className="flex items-center gap-2">
                           <span>{preset.name}</span>
                           <span className="text-xs text-muted-foreground">
                             ({preset.tags.join(", ")})
                           </span>
-                          <RuntimeDetectionBadge detection={detection.forPreset(presetId)} />
+                          <RuntimeDetectionBadge detection={detection.forPreset(runnableId)} />
                         </div>
                       </SelectItem>
                     )
@@ -650,107 +463,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
               </Select>
             </div>
 
-            {currentPreset && (
-              <div className="rounded-md border p-3 text-xs space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  {currentPreset.supportTier && (
-                    <Badge variant="outline" className="text-[10px]">
-                      {currentPreset.supportTier}
-                    </Badge>
-                  )}
-                  {selectedPreset && (
-                    <RuntimeDetectionBadge
-                      detection={detection.forPreset(selectedPreset)}
-                      showVersion
-                    />
-                  )}
-                  {detection.loading && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {tManager("detectionRunning")}
-                    </span>
-                  )}
-                  {/* An absent badge means "not asked", which reads as silence.
-                      Saying why, and offering the re-ask, is the difference
-                      between a missing answer and an unexplained blank. */}
-                  {!detection.loading && detection.unavailable && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                      {tManager(
-                        `detectionUnavailable.${DETECTION_UNAVAILABLE_KEYS[detection.unavailable]}`
-                      )}
-                      <button
-                        type="button"
-                        className="underline underline-offset-2 hover:text-foreground"
-                        onClick={detection.refresh}
-                      >
-                        {tManager("detectionRetry")}
-                      </button>
-                    </span>
-                  )}
-                  {currentPreset.docsUrl && (
-                    <a
-                      href={currentPreset.docsUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      {tManager("officialDocs")}
-                    </a>
-                  )}
-                </div>
-                {currentPreset.setupHint && (
-                  <p>
-                    {selectedPreset === "devin"
-                      ? tManager("devinSetupHint")
-                      : selectedPreset === "aider"
-                        ? tManager("aiderSetupHint")
-                        : selectedPreset === "qoder"
-                          ? tManager("qoderSetupHint")
-                          : selectedPreset === "kimi"
-                            ? tManager("kimiSetupHint")
-                            : selectedPreset === "cline"
-                              ? tManager("clineSetupHint")
-                              : selectedPreset === "goose"
-                                ? tManager("gooseSetupHint")
-                                : currentPreset.setupHint}
-                  </p>
-                )}
-                {relatedOfficialSurfaces.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="font-medium">{tManager("otherOfficialSurfaces")}</p>
-                    {relatedOfficialSurfaces.map((surface) => (
-                      <div key={surface.id} className="rounded-sm border bg-muted/40 px-2 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <span>{surface.name}</span>
-                          <Badge variant="secondary" className="text-[10px]">
-                            {surface.supportTier}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-muted-foreground">
-                          {surface.limitationNote ?? surface.setupHint ?? surface.description}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {currentPreset?.envVarHint && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                <span className="font-medium">{tManager("noteLabel")}:</span>{" "}
-                {selectedPreset === "aider"
-                  ? tManager("aiderEnvVarHint")
-                  : selectedPreset === "qoder"
-                    ? tManager("qoderEnvVarHint")
-                    : selectedPreset === "kimi"
-                      ? tManager("kimiEnvVarHint")
-                      : selectedPreset === "cline"
-                        ? tManager("clineEnvVarHint")
-                        : selectedPreset === "goose"
-                          ? tManager("gooseEnvVarHint")
-                          : currentPreset.envVarHint}
-              </div>
+            {shape.preset && (
+              <PresetGuidance presetId={presetId} preset={shape.preset} detection={detection} />
             )}
 
             <Separator />
@@ -759,476 +473,16 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
               <Label htmlFor="name">{tManager("name")}</Label>
               <Input
                 id="name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                value={data.name}
+                onChange={(e) => setField("name", e.target.value)}
                 // i18n-exempt: example agent name (brand), not UI prose
                 placeholder="Claude Code"
                 required
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="protocol">{tSettings("protocol")}</Label>
-                <Select
-                  value={formData.protocol}
-                  onValueChange={(value: AddAgentFormData["protocol"]) => {
-                    // Radix can emit "" when the controlled value matches no
-                    // built-in item (e.g. a plugin-contributed protocol like
-                    // `${pluginId}:${id}`); ignore it so the preset's protocol
-                    // isn't silently wiped.
-                    if (!value) return
-                    setFormData({
-                      ...formData,
-                      protocol: value,
-                      // OpenCode runs over HTTP + SSE; A2A is a remote HTTP
-                      // (JSON-RPC + optional SSE) protocol — both need a network
-                      // endpoint rather than a stdio command.
-                      transport:
-                        value === "opencode" || value === "opencode-v2"
-                          ? "sse"
-                          : value === "a2a"
-                            ? "http"
-                            : formData.transport,
-                    })
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Derived from the REGISTERED protocols, plus whatever the
-                        form already holds. The hand-written list this replaced
-                        offered http/websocket/custom as "coming soon" — none of
-                        them has ever had an adapter — while omitting the three
-                        protocols that do. */}
-                    {externalProtocolOptions(formData.protocol).map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value}
-                        disabled={!option.selectable}
-                      >
-                        {option.value === "opencode-v2"
-                          ? tSettings("opencodeV2Protocol")
-                          : option.label}
-                        {option.reasonKey ? ` — ${tManager(option.reasonKey)}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="transport">{tSettings("transport")}</Label>
-                <Select
-                  value={formData.transport}
-                  onValueChange={(value: AddAgentFormData["transport"]) =>
-                    setFormData({ ...formData, transport: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stdio">{tManager("transportStdioLocal")}</SelectItem>
-                    <SelectItem value="http">{tManager("transportHttp")}</SelectItem>
-                    <SelectItem value="websocket">{tManager("transportWebsocket")}</SelectItem>
-                    <SelectItem value="sse">{tManager("transportSse")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            {isOpenCode ? (
-              <>
-                <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="auto-spawn" className="cursor-pointer text-sm">
-                      {tManager("autoSpawnServer")}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      {tManager("autoSpawnServerHint")}
-                    </p>
-                  </div>
-                  <Switch
-                    id="auto-spawn"
-                    checked={formData.autoSpawnServer}
-                    onCheckedChange={(v) => setFormData({ ...formData, autoSpawnServer: v })}
-                    aria-label={tManager("autoSpawnServer")}
-                  />
-                </div>
-                {formData.autoSpawnServer ? (
-                  <>
-                    {planeWarning && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                        {tManager("opencodeAutoSpawnNeedsAProcess")} {planeWarning}
-                      </div>
-                    )}
-                    <div className="grid gap-2">
-                      <Label htmlFor="command">{tSettings("command")}</Label>
-                      <Input
-                        id="command"
-                        value={formData.command}
-                        onChange={(e) => setFormData({ ...formData, command: e.target.value })}
-                        // i18n-exempt: example CLI command, not UI prose
-                        placeholder="opencode"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="grid gap-2">
-                        <Label htmlFor="port">{tManager("serverPort")}</Label>
-                        <Input
-                          id="port"
-                          type="number"
-                          min={0}
-                          value={formData.port}
-                          onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                          placeholder="0"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="hostname">{tManager("serverHostname")}</Label>
-                        <Input
-                          id="hostname"
-                          value={formData.hostname}
-                          onChange={(e) => setFormData({ ...formData, hostname: e.target.value })}
-                          // i18n-exempt: example hostname, not UI prose
-                          placeholder="127.0.0.1"
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="grid gap-2">
-                    <Label htmlFor="endpoint">{tSettings("endpoint")}</Label>
-                    <Input
-                      id="endpoint"
-                      value={formData.endpoint}
-                      onChange={(e) => setFormData({ ...formData, endpoint: e.target.value })}
-                      placeholder="http://127.0.0.1:4096"
-                      required={!formData.autoSpawnServer}
-                    />
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="server-password">{tManager("serverPassword")}</Label>
-                    <Input
-                      id="server-password"
-                      type="password"
-                      value={formData.serverPassword}
-                      onChange={(e) => setFormData({ ...formData, serverPassword: e.target.value })}
-                      placeholder="••••••••"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="server-username">{tManager("serverUsername")}</Label>
-                    <Input
-                      id="server-username"
-                      value={formData.serverUsername}
-                      onChange={(e) => setFormData({ ...formData, serverUsername: e.target.value })}
-                      // i18n-exempt: the server's documented default Basic-Auth user
-                      placeholder="opencode"
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
-                <div className="grid gap-2">
-                  <Label htmlFor="opencode-model">{tManager("defaultModel")}</Label>
-                  <Input
-                    id="opencode-model"
-                    value={formData.model}
-                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                    // i18n-exempt: example provider/model id, not UI prose
-                    placeholder="anthropic/claude-sonnet-4-5"
-                  />
-                  <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
-                </div>
-              </>
-            ) : isStdio ? (
-              <>
-                {managedDsh && (
-                  <div className="grid gap-2">
-                    <p className="text-xs text-muted-foreground">
-                      {tSettings("deepseekHarness.managedLaunchNotice")}
-                    </p>
-                    <Label htmlFor="dsh-api-key">{tSettings("apiKey")}</Label>
-                    <Input
-                      id="dsh-api-key"
-                      type="password"
-                      autoComplete="new-password"
-                      value={formData.dshApiKey ?? ""}
-                      onChange={(event) =>
-                        setFormData({ ...formData, dshApiKey: event.target.value })
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {tSettings("deepseekHarness.credentialNotice")}
-                    </p>
-                    <Label htmlFor="dsh-workspace">{tSettings("workingDirectory")}</Label>
-                    <Input
-                      id="dsh-workspace"
-                      value={formData.dshWorkspace ?? ""}
-                      onChange={(event) =>
-                        setFormData({ ...formData, dshWorkspace: event.target.value })
-                      }
-                    />
-                  </div>
-                )}
-                {planeWarning && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                    {tManager("stdioNeedsAProcess")} {planeWarning}
-                  </div>
-                )}
-                <div className="grid gap-2">
-                  <Label htmlFor="command">{tSettings("command")}</Label>
-                  <Input
-                    id="command"
-                    value={formData.command}
-                    onChange={(e) => setFormData({ ...formData, command: e.target.value })}
-                    // i18n-exempt: example CLI command, not UI prose
-                    placeholder="npx"
-                    required={isStdio && !managedDsh}
-                    disabled={managedDsh}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="args">{tSettings("arguments")}</Label>
-                  <Input
-                    id="args"
-                    value={formData.args}
-                    onChange={(e) => setFormData({ ...formData, args: e.target.value })}
-                    // i18n-exempt: example CLI arguments, not UI prose
-                    placeholder="@anthropics/claude-code --stdio"
-                  />
-                </div>
-                {(formData.protocol === "aider-cli" ||
-                  selectedPreset === "qoder" ||
-                  selectedPreset === "cline" ||
-                  selectedPreset === "kimi") && (
-                  <>
-                    <div className="grid gap-2">
-                      <Label htmlFor="aider-cwd">{tSettings("workingDirectory")}</Label>
-                      <Input
-                        id="aider-cwd"
-                        value={formData.processCwd ?? ""}
-                        onChange={(event) =>
-                          setFormData({ ...formData, processCwd: event.target.value })
-                        }
-                      />
-                    </div>
-                    <KvEditor
-                      label={tSettings(
-                        selectedPreset === "qoder"
-                          ? "qoderEnvironment"
-                          : selectedPreset === "kimi"
-                            ? "kimiEnvironment"
-                            : selectedPreset === "cline"
-                              ? "clineEnvironment"
-                              : "aiderEnvironment"
-                      )}
-                      maskValues
-                      rows={processEnvRows}
-                      onChange={setProcessEnvRows}
-                      keyPlaceholder={tSettings("aiderEnvironmentKey")}
-                      valuePlaceholder={tSettings("aiderEnvironmentValue")}
-                    />
-                  </>
-                )}
-                {formData.protocol !== "aider-cli" &&
-                  selectedPreset !== "qoder" &&
-                  selectedPreset !== "cline" &&
-                  selectedPreset !== "kimi" && (
-                    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="bare-flag" className="cursor-pointer text-sm">
-                            {tSettings("passBareFlag")}
-                          </Label>
-                          <p className="text-xs text-muted-foreground">
-                            {tSettings("passBareFlagHint")}
-                          </p>
-                        </div>
-                        <Switch
-                          id="bare-flag"
-                          checked={formData.bare}
-                          onCheckedChange={(v) => setFormData({ ...formData, bare: v })}
-                          aria-label={tSettings("passBareFlag")}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="debug-flag" className="cursor-pointer text-sm">
-                            {tSettings("passDebugFlag")}
-                          </Label>
-                          <p className="text-xs text-muted-foreground">
-                            {tSettings("passDebugFlagHint")}
-                          </p>
-                        </div>
-                        <Switch
-                          id="debug-flag"
-                          checked={formData.debug}
-                          onCheckedChange={(v) => setFormData({ ...formData, debug: v })}
-                          aria-label={tSettings("passDebugFlag")}
-                        />
-                      </div>
-                    </div>
-                  )}
-              </>
-            ) : (
-              <div className="grid gap-2">
-                <Label htmlFor="endpoint">{tSettings("endpoint")}</Label>
-                <Input
-                  id="endpoint"
-                  value={formData.endpoint}
-                  onChange={(e) => setFormData({ ...formData, endpoint: e.target.value })}
-                  placeholder="http://localhost:8080"
-                  required={!isStdio}
-                />
-              </div>
-            )}
-            {(isStdio || (isOpenCode && formData.autoSpawnServer)) &&
-              formData.protocol !== "aider-cli" &&
-              selectedPreset !== "qoder" &&
-              selectedPreset !== "cline" &&
-              selectedPreset !== "kimi" && (
-                <Collapsible className="rounded-md border">
-                  <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium">
-                    {tSettings("processEnvironment")}
-                    <ChevronDown className="h-4 w-4" />
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="grid gap-3 px-3 pb-3">
-                    <p className="text-xs text-muted-foreground">
-                      {tSettings("processEnvironmentHint")}
-                    </p>
-                    {!managedDsh && (
-                      <div className="grid gap-2">
-                        <Label htmlFor="process-cwd">{tSettings("workingDirectory")}</Label>
-                        <Input
-                          id="process-cwd"
-                          value={formData.processCwd ?? ""}
-                          onChange={(event) =>
-                            setFormData({ ...formData, processCwd: event.target.value })
-                          }
-                        />
-                      </div>
-                    )}
-                    <KvEditor
-                      label={tSettings("processEnvironment")}
-                      maskValues
-                      rows={processEnvRows}
-                      onChange={setProcessEnvRows}
-                      keyPlaceholder={tSettings("aiderEnvironmentKey")}
-                      valuePlaceholder={tSettings("aiderEnvironmentValue")}
-                    />
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
-            <Collapsible className="rounded-md border">
-              <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium">
-                <span>{tManager("advancedOptions")}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="grid gap-4 px-3 pb-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="timeoutMs">{tSettings("executionTimeoutMs")}</Label>
-                  <Input
-                    id="timeoutMs"
-                    type="number"
-                    min={1000}
-                    step={1000}
-                    value={formData.timeoutMs}
-                    onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
-                    placeholder={DEFAULT_TIMEOUT_MS}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="retryMaxRetries">{tSettings("maxRetries")}</Label>
-                    <Input
-                      id="retryMaxRetries"
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={formData.retryMaxRetries}
-                      onChange={(e) =>
-                        setFormData({ ...formData, retryMaxRetries: e.target.value })
-                      }
-                      placeholder={DEFAULT_RETRY_MAX_RETRIES}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="retryDelayMs">{tSettings("retryDelayMs")}</Label>
-                    <Input
-                      id="retryDelayMs"
-                      type="number"
-                      min={0}
-                      step={100}
-                      value={formData.retryDelayMs}
-                      onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
-                      placeholder={DEFAULT_RETRY_DELAY_MS}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="retryMaxDelayMs">{tSettings("maxRetryDelayMs")}</Label>
-                    <Input
-                      id="retryMaxDelayMs"
-                      type="number"
-                      min={0}
-                      step={100}
-                      value={formData.retryMaxDelayMs}
-                      onChange={(e) =>
-                        setFormData({ ...formData, retryMaxDelayMs: e.target.value })
-                      }
-                      placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="retryExponentialBackoff">{tSettings("backoffStrategy")}</Label>
-                    <Select
-                      value={formData.retryExponentialBackoff ? "true" : "false"}
-                      onValueChange={(value) =>
-                        setFormData({ ...formData, retryExponentialBackoff: value === "true" })
-                      }
-                    >
-                      <SelectTrigger id="retryExponentialBackoff">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="true">{tSettings("backoffExponential")}</SelectItem>
-                        <SelectItem value="false">{tSettings("backoffFixedDelay")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="retryOnErrors">{tSettings("retryErrorPatterns")}</Label>
-                  <Textarea
-                    id="retryOnErrors"
-                    className="min-h-20 text-sm"
-                    value={formData.retryOnErrors}
-                    onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
-                    placeholder={tSettings("retryErrorPatternsPlaceholder")}
-                  />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-            <CogniaModelPicker
-              config={{
-                protocol: formData.protocol,
-                transport: formData.transport,
-                process: {
-                  command: formData.command || (formData.autoSpawnServer ? "opencode" : ""),
-                  args: tokenizeShellCommand(formData.args) ?? [],
-                },
-                network:
-                  formData.transport !== "stdio" && !formData.autoSpawnServer
-                    ? { endpoint: formData.endpoint }
-                    : undefined,
-                metadata: { ...currentPreset?.metadata, autoSpawnServer: formData.autoSpawnServer },
-              }}
-              value={formData.cogniaModel}
-              onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
-            />
+            <ConnectionFields form={form} planeWarning={planeWarning} />
+            <ExecutionTuningFields form={form} />
+            <AddAgentCogniaModelField form={form} />
           </div>
           <DialogFooter>
             <Button
@@ -1376,110 +630,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
 
   const handleAddAgent = useCallback(
     async (data: AddAgentFormData) => {
-      const toNonNegativeInteger = (value: string, fallback: number): number => {
-        const parsed = Number.parseInt(value, 10)
-        if (Number.isNaN(parsed) || parsed < 0) return fallback
-        return parsed
-      }
-
-      const retryOnErrors = data.retryOnErrors
-        .split(/\r?\n|,/)
-        .map((pattern) => pattern.trim())
-        .filter(Boolean)
-
-      const config: CreateExternalAgentInput = {
-        ...(data.preset
-          ? { metadata: { ...getPresetConfig(data.preset)?.metadata, preset: data.preset } }
-          : {}),
-        name: data.name,
-        cogniaModel: data.cogniaModel ?? null,
-        protocol: data.protocol,
-        ...(data.protocol === "aider-cli"
-          ? {
-              defaultPermissionMode: data.preset
-                ? (getPresetConfig(data.preset)?.defaultPermissionMode ?? "plan")
-                : "plan",
-            }
-          : {}),
-        transport: data.transport,
-        timeout: toNonNegativeInteger(data.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
-        retryConfig: {
-          maxRetries: toNonNegativeInteger(
-            data.retryMaxRetries,
-            Number.parseInt(DEFAULT_RETRY_MAX_RETRIES, 10)
-          ),
-          retryDelay: toNonNegativeInteger(
-            data.retryDelayMs,
-            Number.parseInt(DEFAULT_RETRY_DELAY_MS, 10)
-          ),
-          exponentialBackoff: data.retryExponentialBackoff,
-          maxRetryDelay: toNonNegativeInteger(
-            data.retryMaxDelayMs,
-            Number.parseInt(DEFAULT_RETRY_MAX_DELAY_MS, 10)
-          ),
-          retryOnErrors,
-        },
-      }
-
-      if (data.protocol === "opencode") {
-        const metadata: Record<string, unknown> = { ...config.metadata }
-        if (data.autoSpawnServer) {
-          metadata.autoSpawnServer = true
-          config.process = {
-            command: data.command.trim() || "opencode",
-            args: tokenizeShellCommand(data.args) ?? [],
-            cwd: data.processCwd?.trim() || undefined,
-            env: data.processEnv ?? {},
-          }
-          const port = Number.parseInt(data.port, 10)
-          if (!Number.isNaN(port) && port > 0) {
-            metadata.port = port
-          }
-        } else if (data.endpoint.trim()) {
-          config.network = { endpoint: data.endpoint.trim() }
-        }
-        if (data.hostname.trim()) {
-          metadata.hostname = data.hostname.trim()
-        }
-        if (data.serverPassword) {
-          metadata.serverPassword = data.serverPassword
-        }
-        if (data.serverUsername.trim()) {
-          metadata.serverUsername = data.serverUsername.trim()
-        }
-        if (data.model.trim()) {
-          metadata.model = data.model.trim()
-        }
-        if (Object.keys(metadata).length > 0) {
-          config.metadata = metadata
-        }
-      } else if (data.protocol === "opencode-v2") {
-        config.metadata = { preview: true, localServiceDiscovery: true }
-      } else if (data.transport === "stdio") {
-        config.process = {
-          command: config.metadata?.requiresManagedRuntime ? "" : data.command,
-          args: config.metadata?.requiresManagedRuntime
-            ? []
-            : (tokenizeShellCommand(data.args) ?? []),
-          cwd: data.processCwd?.trim() || undefined,
-          env: data.processEnv ?? {},
-          ...(config.metadata?.requiresManagedRuntime
-            ? {
-                cwd: data.dshWorkspace?.trim() || undefined,
-                ...(data.dshApiKey
-                  ? { env: { ...data.processEnv, DEEPSEEK_API_KEY: data.dshApiKey } }
-                  : {}),
-              }
-            : {}),
-          bare: data.bare || undefined,
-          debug: data.debug || undefined,
-        }
-      } else {
-        config.network = {
-          endpoint: data.endpoint,
-        }
-      }
-
+      const config = buildCreateExternalAgentInput(data)
       await addAgent(config)
     },
     [addAgent]
@@ -2412,7 +1563,9 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
                 toolName: pendingPermission.title || pendingPermission.toolInfo.name,
                 toolDescription:
                   pendingPermission.reason || pendingPermission.toolInfo.description || "",
-                args: pendingPermission.rawInput || {},
+                // Kimi Code sends no `rawInput` until after the answer; show the
+                // arguments recovered from its stream, as the chat surface does.
+                args: approvalInput(pendingPermission),
                 riskLevel:
                   pendingPermission.riskLevel === "critical"
                     ? "high"

@@ -3,6 +3,7 @@ import {
   registerSubagentRun,
   unregisterSubagentRun,
   requestCancelSubagentRun,
+  requestCancelSubagentRunAndWait,
   liveSubagentRunCount,
 } from "./subagent-cancel-registry"
 
@@ -38,4 +39,13 @@ describe("subagent-cancel-registry", () => {
     expect(cancel).toHaveBeenCalledWith("stop native task")
     expect(liveSubagentRunCount()).toBe(0)
   })
+})
+
+it("awaits async cancellation and reports a rejected receipt as failure", async () => {
+  registerSubagentCancellation("failed-cancel", async () => {
+    throw new Error("journal unavailable")
+  })
+  await expect(requestCancelSubagentRunAndWait("failed-cancel")).resolves.toBe(false)
+  registerSubagentCancellation("saved-cancel", async () => undefined)
+  await expect(requestCancelSubagentRunAndWait("saved-cancel")).resolves.toBe(true)
 })

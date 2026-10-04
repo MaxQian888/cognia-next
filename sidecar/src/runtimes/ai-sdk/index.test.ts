@@ -1429,6 +1429,7 @@ test("dispatchAiSdk emits sdk_session_id and proxies fake stream events", async 
   const sidEvent = events.find((e) => e.type === "sdk_session_id")
   assert.ok(sidEvent)
   assert.equal(sidEvent.sessionId, "s1")
+  assert.equal(sidEvent.runtimeAdapter, "ai-sdk")
 
   const assistantSnapshots = events.filter(
     (e) => e.type === "event" && e.event.type === "assistant"
@@ -1448,6 +1449,38 @@ test("dispatchAiSdk emits sdk_session_id and proxies fake stream events", async 
   const ended = events.find((e) => e.type === "session_ended")
   assert.ok(ended)
   assert.equal(ended.error, undefined)
+})
+
+test("failed conversation hydration does not acknowledge runtime initialization", () => {
+  const { events, emit } = captureEmit()
+  assert.throws(
+    () =>
+      dispatchAiSdk({
+        provider: "openai",
+        sessionId: "invalid-history",
+        firstPrompt: "continue",
+        sendOptions: {
+          model: "gpt-test",
+          providerCredentials: { apiKey: "test-only", protocol: "openai" },
+          initialConversation: [
+            {
+              get role(): never {
+                throw new Error("history could not be restored")
+              },
+              content: "unreadable",
+            },
+          ],
+        },
+        emit,
+        log: () => {},
+        streamText: makeFakeStream([{ type: "finish", finishReason: "stop" }]),
+      }),
+    /history could not be restored/
+  )
+  assert.equal(
+    events.some((event) => event.type === "sdk_session_id"),
+    false
+  )
 })
 
 test("dispatchAiSdk surfaces stream errors as session_ended.error", async () => {
@@ -2119,6 +2152,327 @@ test("requestCompact() forces a manual boundary between turns", async () => {
   assert.ok(boundary, "a manual compact boundary is emitted")
   assert.equal(boundary.event.compact_metadata.trigger, "manual")
 })
+
+test("background compaction leaves the active model leg unchanged and publishes on the next turn", async () => {
+  const { events, emit: capture } = captureEmit()
+  let releaseSummary!: () => void
+  let releaseMain!: () => void
+  const summaryGate = new Promise<void>((resolve) => {
+    releaseSummary = resolve
+  })
+  const mainGate = new Promise<void>((resolve) => {
+    releaseMain = resolve
+  })
+  const mainCalls: TestStreamArgs[] = []
+  let summaryCalls = 0
+  const session = startSession({
+    provider: "openai",
+    sessionId: "background-compact",
+    firstPrompt: "first",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "synthetic" },
+      initialConversation: Array.from({ length: 8 }, (_, i) => ({
+        role: i % 2 ? "assistant" : "user",
+        content: `history-${i}`,
+      })),
+      compaction: { contextWindow: 1000, fraction: 0.8, keepRecent: 2, maxSummaryTokens: 64 },
+    },
+    emit(event) {
+      capture(event)
+      if (event.type === "plugin_hook_exec")
+        setImmediate(() =>
+          session.pendingPluginHookCalls.get(String(event.execId))?.resolve({ result: {} })
+        )
+    },
+    log() {},
+    streamText(args) {
+      const summary = args.maxOutputTokens === 64
+      if (summary) summaryCalls++
+      else mainCalls.push(streamArgs(args))
+      const number = mainCalls.length
+      return {
+        fullStream: (async function* () {
+          if (summary) await summaryGate
+          else if (number === 2) await mainGate
+          yield { type: "text-delta", id: "1", text: summary ? "BACKGROUND SUMMARY" : "reply" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({ inputTokens: 700, outputTokens: 3 }),
+      }
+    },
+  })
+  try {
+    await waitForTurnsFactory(events)(1)
+    session.pushUserMessage("second")
+    await waitForEvent(events, () => mainCalls.length === 2 && summaryCalls === 1)
+    assert.ok(JSON.stringify(mainCalls[1]).includes("history-0"))
+    releaseSummary()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(
+      events.some((e) => e.event?.subtype === "compact_boundary"),
+      false
+    )
+    releaseMain()
+    await waitForTurnsFactory(events)(2)
+    session.pushUserMessage("third")
+    await waitForTurnsFactory(events)(3)
+    assert.ok(JSON.stringify(mainCalls[2]).includes("BACKGROUND SUMMARY"))
+    assert.ok(JSON.stringify(mainCalls[2]).includes("third"))
+    assert.equal(events.filter((e) => e.event?.subtype === "compact_boundary").length, 1)
+    assert.equal(summaryCalls, 1)
+  } finally {
+    releaseSummary()
+    releaseMain()
+    session.closeInput()
+  }
+})
+
+test("a user send waits for idle manual compaction before starting its model leg", async () => {
+  const { events, emit: capture } = captureEmit()
+  let releaseSummary!: () => void
+  const gate = new Promise<void>((resolve) => {
+    releaseSummary = resolve
+  })
+  let mainCalls = 0
+  let summaryCalls = 0
+  const session = startSession({
+    provider: "openai",
+    sessionId: "manual-race",
+    firstPrompt: "first",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "synthetic" },
+      compaction: { trigger: "manual", keepRecent: 1, maxSummaryTokens: 64 },
+    },
+    emit(event) {
+      capture(event)
+      if (event.type === "plugin_hook_exec")
+        setImmediate(() =>
+          session.pendingPluginHookCalls.get(String(event.execId))?.resolve({ result: {} })
+        )
+    },
+    log() {},
+    streamText(args) {
+      const summary = args.maxOutputTokens === 64
+      if (summary) summaryCalls++
+      else mainCalls++
+      return {
+        fullStream: (async function* () {
+          if (summary) await gate
+          yield { type: "text-delta", id: "1", text: summary ? "summary" : "reply" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({ inputTokens: 10, outputTokens: 3 }),
+      }
+    },
+  })
+  try {
+    await waitForTurnsFactory(events)(1)
+    const compact = session.requestCompact()
+    await waitForEvent(events, () => summaryCalls === 1)
+    session.pushUserMessage("second")
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(mainCalls, 1)
+    releaseSummary()
+    await compact
+    await waitForTurnsFactory(events)(2)
+    assert.equal(mainCalls, 2)
+    assert.equal(events.filter((e) => e.event?.subtype === "compact_boundary").length, 1)
+  } finally {
+    releaseSummary()
+    session.closeInput()
+  }
+})
+
+test("undo cancels queued manual compactions as well as the active preparation", async () => {
+  const { events, emit: capture } = captureEmit()
+  let releaseSummary!: () => void
+  const summaryGate = new Promise<void>((resolve) => {
+    releaseSummary = resolve
+  })
+  let summaryCalls = 0
+  const session = startSession({
+    provider: "openai",
+    sessionId: "undo-manual-queue",
+    firstPrompt: "first",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "synthetic" },
+      compaction: { trigger: "manual", keepRecent: 1, maxSummaryTokens: 64 },
+    },
+    emit(event) {
+      capture(event)
+      if (event.type === "plugin_hook_exec")
+        setImmediate(() =>
+          session.pendingPluginHookCalls.get(String(event.execId))?.resolve({ result: {} })
+        )
+    },
+    log() {},
+    streamText(args) {
+      const summary = args.maxOutputTokens === 64
+      if (summary) summaryCalls++
+      return {
+        fullStream: (async function* () {
+          if (summary) await summaryGate
+          yield { type: "text-delta", id: "1", text: summary ? "old queued summary" : "reply" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({ inputTokens: 10, outputTokens: 3 }),
+      }
+    },
+  })
+  try {
+    await waitForTurnsFactory(events)(1)
+    const first = session.requestCompact()
+    await waitForEvent(events, () => summaryCalls === 1)
+    const queued = session.requestCompact()
+    assert.equal(
+      session.restoreConversation(
+        Array.from({ length: 6 }, (_, i) => ({
+          role: i % 2 ? "assistant" : "user",
+          content: `restored-${i}`,
+        }))
+      ),
+      true
+    )
+    releaseSummary()
+    await Promise.all([first, queued])
+    assert.equal(summaryCalls, 1, "undo must not admit a queued replacement summary")
+    assert.equal(
+      events.some((event) => event.event?.subtype === "compact_boundary"),
+      false
+    )
+  } finally {
+    releaseSummary()
+    session.closeInput()
+  }
+})
+
+for (const scenario of [
+  "recover",
+  "persistent",
+  "disabled",
+  "manual",
+  "unreduced",
+  "tool-effect",
+  "text-output",
+] as const) {
+  test(`context overflow recovery: ${scenario}`, async () => {
+    const { events, emit: capture } = captureEmit()
+    const calls: string[] = []
+    const overflow = Object.assign(new Error("maximum context length exceeded"), {
+      statusCode: 400,
+    })
+    const session = startSession({
+      provider: "openai",
+      sessionId: `overflow-${scenario}`,
+      firstPrompt: "continue",
+      sendOptions: {
+        model: "gpt-x",
+        providerCredentials: { apiKey: "synthetic" },
+        initialConversation: Array.from({ length: 8 }, (_, i) => ({
+          role: i % 2 ? "assistant" : "user",
+          content: `history-${i}: ${"old context ".repeat(100)}`,
+        })),
+        ledger: { runId: "overflow-run", mode: "per_call" },
+        compaction: {
+          enabled: scenario !== "disabled",
+          trigger: scenario === "manual" ? "manual" : "token-based",
+          keepRecent: 2,
+          maxSummaryTokens: 64,
+        },
+      },
+      emit(event) {
+        capture(event)
+        if (event.type === "plugin_hook_exec")
+          setImmediate(() =>
+            session.pendingPluginHookCalls.get(String(event.execId))?.resolve({ result: {} })
+          )
+        if (event.type === "call_reserve_request")
+          setImmediate(() =>
+            session.resolveCallReserve({
+              requestId: event.requestId,
+              decision: "granted",
+              attemptId: event.requestId,
+              attemptNo: 1,
+            })
+          )
+      },
+      log() {},
+      streamText(args) {
+        const summary = args.maxOutputTokens === 64
+        const mainNumber = calls.filter((call) => call === "main").length
+        calls.push(summary ? "summary" : "main")
+        if (summary)
+          return makeFakeStream([
+            {
+              type: "text-delta",
+              id: "summary",
+              text: scenario === "unreduced" ? "huge summary ".repeat(2000) : "short summary",
+            },
+            { type: "finish", finishReason: "stop" },
+          ])()
+        if (mainNumber === 0 || scenario === "persistent")
+          return makeFakeStream([
+            ...(scenario === "tool-effect"
+              ? [
+                  {
+                    type: "tool-call",
+                    toolCallId: "effect",
+                    toolName: "read_file",
+                    input: { path: "test" },
+                  },
+                ]
+              : []),
+            ...(scenario === "text-output"
+              ? [{ type: "text-delta", id: "partial", text: "partial" }]
+              : []),
+            { type: "error", error: overflow },
+          ])()
+        assert.ok(JSON.stringify(args.messages).includes("short summary"))
+        return makeFakeStream([
+          { type: "text-delta", id: "reply", text: "recovered" },
+          { type: "finish", finishReason: "stop" },
+        ])()
+      },
+    })
+    try {
+      await waitForEvent(events, (event) => event.type === "session_ended")
+      assert.deepEqual(
+        calls,
+        ["recover", "persistent"].includes(scenario)
+          ? ["main", "summary", "main"]
+          : scenario === "unreduced"
+            ? ["main", "summary"]
+            : ["main"]
+      )
+      const reports = events.filter((event) => event.type === "call_attempt_result")
+      assert.equal(
+        reports.length,
+        calls.length,
+        "every refused, summary and retried provider call settles"
+      )
+      assert.equal(reports[0]?.status, scenario === "tool-effect" ? "unknown" : "failed")
+      const endedIndex = events.findIndex((event) => event.type === "session_ended")
+      assert.ok(
+        events.every((event, index) => event.type !== "call_attempt_result" || index < endedIndex)
+      )
+      if (scenario === "recover") {
+        assert.equal(events[endedIndex]?.error, undefined)
+        assert.equal(
+          events.find((event) => event.event?.subtype === "compact_boundary")?.event
+            .compact_metadata.trigger,
+          "auto"
+        )
+      }
+      if (scenario === "persistent")
+        assert.match(String(events[endedIndex]?.error), /maximum context/)
+    } finally {
+      session.closeInput()
+    }
+  })
+}
 
 test("reasoning effort is forwarded to a genuine OpenAI provider as reasoningEffort", async () => {
   const { events, emit } = captureEmit()

@@ -116,6 +116,68 @@ describe("gateway task host state", () => {
     expect(fs.existsSync(env.HOME)).toBe(false)
   })
 
+  it("admits the Kimi, Goose, Copilot and Aider runtimes with task-owned homes", () => {
+    for (const runtime of ["kimi", "goose", "copilot", "aider"]) {
+      const input = config(`${runtime}-task`)
+      const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)
+      payload.runtime = runtime
+      payload.files = {}
+      input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify(payload)
+      const prepared = prepareGatewayTask(input, home)
+      const env = prepared.config.env!
+      expect(env.KIMI_CODE_HOME).toBe(path.join(env.HOME, "kimi"))
+      expect(env.COPILOT_HOME).toBe(path.join(env.HOME, "copilot"))
+      expect(fs.statSync(env.KIMI_CODE_HOME).isDirectory()).toBe(true)
+      expect(JSON.parse(fs.readFileSync(path.join(env.HOME, "binding.json"), "utf8")).runtime).toBe(
+        runtime
+      )
+      prepared.cleanup()
+    }
+  })
+
+  it("rebinds a retained task only for the same owner, device and runtime", () => {
+    const withPayload = (patch: Record<string, unknown>) => {
+      const input = config()
+      input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify({
+        ...JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG),
+        originDeviceId: "device-a",
+        ...patch,
+      })
+      return input
+    }
+    const first = prepareGatewayTask(withPayload({}), home)
+    const history = path.join(first.config.env!.HOME, "pi", "session.jsonl")
+    fs.writeFileSync(history, "native history")
+    first.cleanup()
+    const other = { providerId: "provider", modelId: "other" }
+    expect(() => prepareGatewayTask(withPayload({ binding: other }), home)).toThrow(
+      "different model"
+    )
+    for (const patch of [
+      { ownerAccountId: "other-owner" },
+      { originDeviceId: "device-b" },
+      { originDeviceId: undefined },
+      { runtime: "qwen" },
+    ])
+      expect(() =>
+        prepareGatewayTask(withPayload({ binding: other, rebind: true, ...patch }), home)
+      ).toThrow("different model")
+    const moved = prepareGatewayTask(withPayload({ binding: other, rebind: true }), home)
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(moved.config.env!.HOME, "binding.json"), "utf8")
+    )
+    expect(saved).toEqual({
+      binding: other,
+      runtime: "pi",
+      ownerAccountId: "local-owner",
+      originDeviceId: "device-a",
+    })
+    expect(fs.readFileSync(history, "utf8")).toBe("native history")
+    moved.cleanup()
+    expect(() => prepareGatewayTask(withPayload({}), home)).toThrow("different model")
+    prepareGatewayTask(withPayload({ binding: other }), home).cleanup()
+  })
+
   it("leaves ordinary launches untouched and validates every gateway payload boundary", () => {
     const ordinary = { id: "ordinary", command: "node" }
     const prepared = prepareGatewayTask(ordinary, home)

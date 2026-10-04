@@ -24,6 +24,8 @@
     // Only `link:` dependencies of sidecar/package.json belong here; the
     // linked-packages test keeps the two lists equal.
     "paths": {
+      "@cognia/provider-routing": ["../packages/provider-routing/src/index.ts"],
+      "@cognia/provider-routing/*": ["../packages/provider-routing/src/*"],
       "@cognia/redact": ["../packages/redact/src/index.ts"],
       "@cognia/redact/*": ["../packages/redact/src/*"],
       "@cognia/agent-config-types": ["../packages/agent-config-types/src/index.ts"],

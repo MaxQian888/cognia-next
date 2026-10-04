@@ -12,9 +12,10 @@ jest.mock("@/lib/gateway/mint-session-ticket", () => ({
 jest.mock("@/lib/tauri/gateway", () => ({
   gatewayRevokeRouteTicket: (...args: unknown[]) => mockGatewayRevoke(...args),
 }))
+let mockSettings: unknown = { providerSettings: {}, customProviders: [] }
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: {
-    getState: () => ({ settings: { providerSettings: {}, customProviders: [] } }),
+    getState: () => ({ settings: mockSettings }),
   },
 }))
 const appendCanonicalEnvelopesMock = jest.fn(
@@ -3381,7 +3382,11 @@ describe("Cognia gateway task lifecycle", () => {
       expect(parsed.binding).toEqual(binding)
       expect(mockGatewayRevoke).toHaveBeenCalledWith("ticket-1")
       expect(children[1].isConnected()).toBe(false)
-      expect(manager.resolveConversationSessionId("managed", "chat-one")).toBe(first.sessionId)
+      expect(manager.resolveConversationSessionId("managed", "chat-one", { kind: "gateway" })).toBe(
+        first.sessionId
+      )
+      // The native lane (the agent's own model picker) never sees a task id.
+      expect(manager.resolveConversationSessionId("managed", "chat-one")).toBeNull()
       const resume = new MockAdapter()
       resume.resumeSessionImpl = jest.fn(async (id) => {
         const session = await resume.createSession()
@@ -3552,6 +3557,418 @@ describe("Cognia gateway task lifecycle", () => {
         manager.execute("managed", "resume", { sessionId: first.sessionId })
       ).rejects.toThrow("could not resume")
       expect(mockGatewayRevoke).toHaveBeenCalledTimes(2)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  /** Register `acp` children that record the launch configuration they connect with. */
+  function captureChildren(resumable = true) {
+    const launched: { adapter: MockAdapter; config: ExternalAgentConfig }[] = []
+    protocolAdapterRegistry.register("acp", () => {
+      const adapter = new MockAdapter()
+      const connect = adapter.connect.bind(adapter)
+      adapter.connect = async (config) => {
+        launched.push({ adapter, config })
+        await connect(config)
+      }
+      if (resumable)
+        adapter.resumeSessionImpl = jest.fn(async (id) => {
+          const session = await adapter.createSession()
+          adapter.sessions.delete(session.id)
+          session.id = id
+          adapter.sessions.set(id, session)
+          return session
+        })
+      return adapter as never
+    })
+    const payload = (index: number) =>
+      JSON.parse(launched[index].config.process!.env!.COGNIA_GATEWAY_TASK_CONFIG)
+    return { launched, payload }
+  }
+  const bindingB = { providerId: "provider", modelId: "model-b", accountId: "account-one" }
+  const leaseFor = (leaseBinding: typeof binding, extra: Record<string, unknown> = {}) => ({
+    endpoint: "http://127.0.0.1:9900/v1",
+    secret: "lease-secret",
+    ticketId: `ticket-${mockGatewayMint.mock.calls.length}`,
+    model: leaseBinding.modelId,
+    binding: leaseBinding,
+    modelMetadata: { id: leaseBinding.modelId },
+    ...extra,
+  })
+
+  it("starts a fresh task when the conversation's earlier session is native", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      children[0].sessions.set("native-1", {
+        id: "native-1",
+        status: "idle",
+        metadata: { cogniaSessionId: "chat-native" },
+      } as never)
+      const result = await manager.execute("managed", "switch to Cognia", {
+        context: { custom: { chatSessionId: "chat-native" } },
+      })
+      expect(result.success).toBe(true)
+      expect(parseGatewaySessionId(result.sessionId)?.binding).toEqual(binding)
+      expect(mockGatewayMint).toHaveBeenCalledTimes(1)
+      // Naming the native session explicitly is still a request to continue it.
+      await expect(
+        manager.execute("managed", "continue native", { sessionId: "native-1" })
+      ).rejects.toThrow("Start a new task")
+      await expect(
+        manager.execute("managed", "continue native", {
+          context: { custom: { sessionId: "native-1" } },
+        })
+      ).rejects.toThrow("Start a new task")
+      expect(mockGatewayMint).toHaveBeenCalledTimes(1)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("discards every session hint on resetExternalSession", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const first = await manager.execute("managed", "first", {
+        context: { custom: { chatSessionId: "chat-reset" } },
+      })
+      const reset = await manager.execute("managed", "handoff", {
+        sessionId: first.sessionId,
+        resetExternalSession: true,
+        context: { custom: { chatSessionId: "chat-reset", sessionId: "native-hint" } },
+      })
+      expect(reset.success).toBe(true)
+      expect(parseGatewaySessionId(reset.sessionId)?.taskId).not.toBe(
+        parseGatewaySessionId(first.sessionId)?.taskId
+      )
+      // The conversation now resolves to its newest task.
+      expect(
+        manager.resolveConversationSessionId("managed", "chat-reset", { kind: "gateway" })
+      ).toBe(reset.sessionId)
+      // A native turn after a reset neither resumes a task id nor the old session.
+      await manager.execute("managed", "native again", {
+        cogniaModel: null,
+        sessionId: reset.sessionId,
+        resetExternalSession: true,
+      })
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("starts the native lane in a new session on reset instead of reusing the conversation's", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const first = await manager.execute("managed", "native", {
+        cogniaModel: null,
+        context: { custom: { chatSessionId: "chat-lane" } },
+      })
+      const reused = await manager.execute("managed", "native", {
+        cogniaModel: null,
+        context: { custom: { chatSessionId: "chat-lane" } },
+      })
+      expect(reused.sessionId).toBe(first.sessionId)
+      const fresh = await manager.execute("managed", "after Cognia", {
+        cogniaModel: null,
+        resetExternalSession: true,
+        context: { custom: { chatSessionId: "chat-lane", sessionId: first.sessionId } },
+      })
+      expect(fresh.sessionId).not.toBe(first.sessionId)
+      expect(children[0].sessions.size).toBe(2)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("asks the gateway for each runtime's ingress protocol", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      captureChildren()
+      for (const [id, metadata, process, ingress] of [
+        ["kimi", { preset: "kimi" }, { command: "kimi", args: ["acp"] }, "openai-chat"],
+        [
+          "goose",
+          { preset: "goose" },
+          { command: "goose", args: ["acp", "--with-builtin", "developer"] },
+          "openai-chat",
+        ],
+        [
+          "copilot",
+          { preset: "copilot-cli" },
+          { command: "copilot", args: ["--acp"] },
+          "openai-chat",
+        ],
+        [
+          "claude",
+          { preset: "claude-code" },
+          { command: "claude-agent-acp", args: [] },
+          "anthropic",
+        ],
+      ] as const) {
+        await manager.addAgent(
+          buildBaseConfig({
+            id,
+            transport: "stdio",
+            protocol: "acp",
+            process: { ...process, args: [...process.args], cwd: "/workspace" },
+            metadata,
+            cogniaModel: binding,
+          })
+        )
+        mockGatewayMint.mockClear()
+        await expect(manager.execute(id, "hello")).resolves.toMatchObject({ success: true })
+        expect(mockGatewayMint.mock.calls[0][0]).toMatchObject({ ingressProtocol: ingress })
+      }
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("selects Kimi's env-model alias and never writes a model onto a Copilot BYOK session", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const { launched } = captureChildren()
+      await manager.addAgent(
+        buildBaseConfig({
+          id: "kimi",
+          transport: "stdio",
+          protocol: "acp",
+          process: { command: "kimi", args: ["acp"], cwd: "/workspace" },
+          metadata: { preset: "kimi" },
+          cogniaModel: binding,
+        })
+      )
+      await manager.execute("kimi", "hello")
+      expect(launched[0].config.process!.env).toMatchObject({
+        KIMI_MODEL_NAME: "model",
+        KIMI_MODEL_API_KEY: "lease-secret",
+      })
+      expect(launched[0].adapter.lastSessionOptions?.metadata).toMatchObject({
+        selectedModel: "__kimi_env_model__",
+      })
+      await manager.addAgent(
+        buildBaseConfig({
+          id: "copilot",
+          transport: "stdio",
+          protocol: "acp",
+          process: { command: "copilot", args: ["--acp"], cwd: "/workspace" },
+          metadata: { preset: "copilot-cli" },
+          cogniaModel: binding,
+        })
+      )
+      await manager.execute("copilot", "hello", { model: "native-model" })
+      const copilot = launched.at(-1)!
+      expect(copilot.config.process!.args).toEqual(["--acp", "--model", "model"])
+      expect(
+        (copilot.adapter.lastSessionOptions?.metadata as Record<string, unknown> | undefined)
+          ?.selectedModel
+      ).toBeUndefined()
+      expect(copilot.adapter.setSessionModelImpl).not.toHaveBeenCalled()
+      expect(copilot.adapter.setConfigOptionImpl).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("rebinds a task to another Cognia model only on request, keeping its native session", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const { launched, payload } = captureChildren()
+      await manager.addAgent(managedConfig())
+      const first = await manager.execute("managed", "first", {
+        context: { custom: { chatSessionId: "chat-rebind" } },
+      })
+      const parsed = parseGatewaySessionId(first.sessionId)!
+      await expect(
+        manager.execute("managed", "other model", {
+          sessionId: first.sessionId,
+          cogniaModel: bindingB,
+        })
+      ).rejects.toThrow("different model or account")
+      expect(mockGatewayMint).toHaveBeenCalledTimes(1)
+      mockGatewayMint.mockImplementationOnce(async () => leaseFor(bindingB))
+      const rebound = await manager.execute("managed", "other model", {
+        sessionId: first.sessionId,
+        cogniaModel: bindingB,
+        rebind: true,
+      })
+      const next = parseGatewaySessionId(rebound.sessionId)!
+      expect(next).toEqual({
+        taskId: parsed.taskId,
+        nativeSessionId: parsed.nativeSessionId,
+        binding: bindingB,
+      })
+      expect(launched[1].adapter.resumeSessionImpl).toHaveBeenCalledWith(parsed.nativeSessionId)
+      expect(payload(1)).toMatchObject({ taskId: parsed.taskId, binding: bindingB, rebind: true })
+      expect(payload(0)).not.toHaveProperty("rebind")
+      expect(mockGatewayMint.mock.calls[1][0]).toMatchObject({
+        sessionId: parsed.taskId,
+        ...bindingB,
+      })
+      // The id naming the old binding no longer resolves beside the new one.
+      expect(manager.getAgent("managed")!.sessions.has(first.sessionId)).toBe(false)
+      expect(
+        manager.resolveConversationSessionId("managed", "chat-rebind", { kind: "gateway" })
+      ).toBe(rebound.sessionId)
+      // An unchanged binding continues without a rebind flag.
+      mockGatewayMint.mockImplementationOnce(async () => leaseFor(bindingB))
+      await expect(
+        manager.execute("managed", "again", { sessionId: rebound.sessionId, cogniaModel: bindingB })
+      ).resolves.toMatchObject({ sessionId: rebound.sessionId })
+      expect(payload(2)).not.toHaveProperty("rebind")
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("refuses a rebind across owner accounts and revokes the lease it minted", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      captureChildren()
+      await manager.addAgent(managedConfig())
+      mockGatewayMint.mockImplementationOnce(async () =>
+        leaseFor(binding, { ownerAccountId: "owner-a" })
+      )
+      const first = await manager.execute("managed", "first")
+      mockGatewayMint.mockImplementationOnce(async () =>
+        leaseFor(bindingB, { ownerAccountId: "owner-b", ticketId: "foreign" })
+      )
+      await expect(
+        manager.execute("managed", "other account", {
+          sessionId: first.sessionId,
+          cogniaModel: bindingB,
+          rebind: true,
+        })
+      ).rejects.toThrow("different model or account")
+      expect(mockGatewayRevoke).toHaveBeenCalledWith("foreign")
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("binds a Host-run task to the paired device that started it", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const { payload } = captureChildren()
+      await manager.addAgent(managedConfig())
+      const phone = { chatSessionId: "chat-device", callerDeviceId: "phone-a" }
+      const first = await manager.execute("managed", "first", { context: { custom: phone } })
+      expect(payload(0)).toMatchObject({ originDeviceId: "phone-a" })
+      // The route is leased for that device too (the headless lease scope).
+      expect(mockGatewayMint.mock.calls[0][0]).toMatchObject({ originDeviceId: "phone-a" })
+      await expect(
+        manager.execute("managed", "steal", {
+          sessionId: first.sessionId,
+          context: { custom: { callerDeviceId: "phone-b" } },
+        })
+      ).rejects.toThrow("another device")
+      // The Host's own turns are a different owner too.
+      await expect(
+        manager.execute("managed", "steal", { sessionId: first.sessionId })
+      ).rejects.toThrow("another device")
+      expect(mockGatewayMint).toHaveBeenCalledTimes(1)
+      // Another device in the same conversation starts its own task.
+      const other = await manager.execute("managed", "mine", {
+        context: { custom: { chatSessionId: "chat-device", callerDeviceId: "phone-b" } },
+      })
+      expect(parseGatewaySessionId(other.sessionId)?.taskId).not.toBe(
+        parseGatewaySessionId(first.sessionId)?.taskId
+      )
+      expect(payload(1)).toMatchObject({ originDeviceId: "phone-b" })
+      // The owning device continues its own task from the conversation.
+      const again = await manager.execute("managed", "continue", { context: { custom: phone } })
+      expect(parseGatewaySessionId(again.sessionId)?.taskId).toBe(
+        parseGatewaySessionId(first.sessionId)?.taskId
+      )
+      expect(
+        manager.resolveConversationSessionId("managed", "chat-device", {
+          kind: "gateway",
+          originDeviceId: "phone-b",
+        })
+      ).toBe(other.sessionId)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  // The headless brain never loads renderer settings; its lease carries the
+  // model facts the launch needs, so a Host-run task must not require them.
+  it("launches a headless Host task without renderer settings", async () => {
+    const { manager, restorePlane } = prepare()
+    const marker = globalThis as Record<string, unknown>
+    marker.__COGNIA_HEADLESS__ = true
+    mockSettings = null
+    try {
+      const { payload } = captureChildren()
+      await manager.addAgent(managedConfig())
+      const result = await manager.execute("managed", "task", {
+        context: { custom: { chatSessionId: "chat-headless", callerDeviceId: "phone-a" } },
+      })
+      expect(result.success).toBe(true)
+      expect(payload(0)).toMatchObject({ originDeviceId: "phone-a" })
+    } finally {
+      delete marker.__COGNIA_HEADLESS__
+      mockSettings = { providerSettings: {}, customProviders: [] }
+      restorePlane()
+    }
+  })
+
+  it("still requires settings outside the headless Host", async () => {
+    const { manager, restorePlane } = prepare()
+    mockSettings = null
+    try {
+      captureChildren()
+      await manager.addAgent(managedConfig())
+      await expect(manager.execute("managed", "task")).rejects.toThrow("Settings are not loaded")
+    } finally {
+      mockSettings = { providerSettings: {}, customProviders: [] }
+      restorePlane()
+    }
+  })
+
+  it("continues a transcript runtime (Aider) from Cognia's history instead of a native session", async () => {
+    const { manager, restorePlane } = prepare()
+    const children: MockAdapter[] = []
+    protocolAdapterRegistry.register("aider-cli", () => {
+      const adapter = new MockAdapter()
+      adapter.events = [
+        {
+          type: "message_delta",
+          sessionId: "s_1",
+          timestamp: new Date(),
+          delta: { type: "text", text: "done" },
+        },
+      ]
+      children.push(adapter)
+      return adapter as never
+    })
+    try {
+      await manager.addAgent(
+        buildBaseConfig({
+          id: "aider",
+          transport: "stdio",
+          protocol: "aider-cli",
+          process: { command: "aider", args: [], cwd: "/workspace" },
+          metadata: { preset: "aider" },
+          cogniaModel: binding,
+        })
+      )
+      const first = await manager.execute("aider", "Write the plan")
+      const second = await manager.execute("aider", "Refine it", { sessionId: first.sessionId })
+      expect(second.success).toBe(true)
+      const last = children.at(-1)!
+      expect(last.lastSessionOptions?.context).toMatchObject({
+        custom: {
+          conversationHistory: "User: Write the plan\n\nAssistant: ok",
+          sessionId: undefined,
+        },
+      })
+      expect(parseGatewaySessionId(second.sessionId)?.taskId).toBe(
+        parseGatewaySessionId(first.sessionId)?.taskId
+      )
     } finally {
       restorePlane()
     }

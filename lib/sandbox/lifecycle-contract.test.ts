@@ -109,6 +109,30 @@ describe("assertSandboxOperationAllowed", () => {
     )
   })
 
+  it.each(["gui", "workspaceRead", "workspaceExec"] as const)(
+    "refuses %s until the connection is running",
+    (operation) => {
+      const states: SandboxLifecycleState[] = [
+        "uninitialized",
+        "creating",
+        "stopped",
+        "starting",
+        "suspending",
+        "suspended",
+        "resuming",
+        "stopping",
+        "deleting",
+        "error",
+      ]
+      for (const state of states) {
+        expect(() => assertSandboxOperationAllowed(ctx({ state }), operation)).toThrow(
+          SandboxCapabilityError
+        )
+      }
+      expect(() => assertSandboxOperationAllowed(ctx(), operation)).not.toThrow()
+    }
+  )
+
   it("refuses suspend/resume on a cloud connection in the wrong state", () => {
     const cloud = ctx({
       provider: "cua-cloud",

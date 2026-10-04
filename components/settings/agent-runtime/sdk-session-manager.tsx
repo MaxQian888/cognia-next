@@ -1,24 +1,28 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import {
   DatabaseIcon,
   EyeIcon,
   GitBranchIcon,
+  LinkIcon,
   MessageSquareIcon,
   PencilIcon,
   RefreshCwIcon,
   TagsIcon,
   Trash2Icon,
 } from "lucide-react"
-import type { SDKMessage } from "@cognia/agent-config-types"
+import type { ChatSession, SDKMessage } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 import type { UIMessage } from "ai"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { LoadingRegion } from "@/components/ui/loading-region"
+import { Skeleton } from "@/components/ui/skeleton"
 import { TranscriptMessageList } from "@/components/chat/transcript-message-list"
 import {
   AlertDialog,
@@ -41,6 +45,11 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import {
+  linkedChatsFor,
+  type SdkSessionLocator,
+} from "@/components/settings/agent-runtime/sdk-bound-conversations"
+import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
+import {
   deleteSdkSession,
   forkSdkSession,
   getSdkSessionInfo,
@@ -53,9 +62,16 @@ import {
   tagSdkSession,
 } from "@/lib/claude/ipc"
 import { applySdkEvent } from "@/lib/claude/adapter"
-import { listSessions as listChatSessions, updateSession } from "@/lib/db/sessions"
+import {
+  clearSessionSdkLink,
+  listSessions as listChatSessions,
+  updateSession,
+} from "@/lib/db/sessions"
 import { persistMessages } from "@/lib/db/messages"
 import { startNewSession } from "@/lib/chat/start-session"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
+import { isSessionExposed } from "@/lib/chat/session-exposure"
+import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { useChatStore } from "@/stores/chat"
 import { sdkSessionApiOptions, type SdkSessionStorage } from "@/lib/claude/claude-sdk-rollout"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -164,8 +180,47 @@ function readSdkSubagents(value: unknown): { agentIds: string[]; partial: boolea
 
 type SdkSessionErrorKey = "errors.loadFailed"
 
+/** Stable identity of a listed row: the same id can live in several stores. */
+function sdkRowKey(session: SdkSessionInfo): string {
+  return JSON.stringify([
+    session.storage,
+    session.storageWorkspace ?? session.cwd,
+    session.sessionId,
+  ])
+}
+
+/** Newest first; the SDK's `lastModified` is epoch milliseconds. */
+export function sortSdkSessions<T extends Pick<SdkSessionInfo, "lastModified" | "sessionId">>(
+  sessions: readonly T[]
+): T[] {
+  return [...sessions].sort(
+    (a, b) =>
+      (Number.isFinite(b.lastModified) ? b.lastModified : 0) -
+        (Number.isFinite(a.lastModified) ? a.lastModified : 0) ||
+      a.sessionId.localeCompare(b.sessionId)
+  )
+}
+
+function locatorOf(session: SdkSessionInfo): SdkSessionLocator {
+  return {
+    sessionId: session.sessionId,
+    storage: session.storage,
+    storageWorkspace: session.storageWorkspace,
+  }
+}
+
+/** Open a Cognia chat through the session link (switches workspace, then focuses). */
+function conversationHref(sessionId: string): string {
+  return `/${buildSessionHref(sessionId)}`
+}
+
+const EMPTY_CHATS: ChatSession[] = []
+
 export function SdkSessionManager() {
   const t = useTranslations("settings.agentRuntimeSection.sessions.sdk")
+  const tRow = useTranslations("desktop.sessionRow")
+  const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const router = useRouter()
   const enabled = useAgentExecutionFlag("claudeSdkParityV1")
   const sessionStoreEnabled = useAgentExecutionFlag("claudeSdkSessionStore")
@@ -174,7 +229,9 @@ export function SdkSessionManager() {
   // companion transport and the headless brain owns outright.
   const environment = resolveAgentExecutionEnvironment()
   const hostReachable = agentHostAvailable(environment)
-  const [sessions, setSessions] = useState<SdkSessionInfo[]>([])
+  // `null` until the first list lands, so the first paint is a loading state
+  // rather than an empty list.
+  const [sessions, setSessions] = useState<SdkSessionInfo[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<SdkSessionErrorKey | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -192,6 +249,27 @@ export function SdkSessionManager() {
   const [detailsPartial, setDetailsPartial] = useState(false)
   const [detailsError, setDetailsError] = useState(false)
   const detailsRequestRef = useRef(0)
+
+  // Cognia chats, live, to mark the native sessions a chat resumes.
+  // Skipped where the block renders nothing (no host, or parity off).
+  const chats = useClientLiveQuery(
+    () => (hostReachable && enabled ? listChatSessions() : EMPTY_CHATS),
+    [hostReachable, enabled],
+    EMPTY_CHATS
+  )
+  const sortedSessions = useMemo(() => (sessions ? sortSdkSessions(sessions) : null), [sessions])
+  const untitled = tRow("untitled")
+  const placeholder = tRow("placeholderTitle")
+  const chatTitle = (chat: Pick<ChatSession, "title">) =>
+    sessionDisplayTitle(chat.title, { untitled, placeholder })
+  /** Chats bound to `session` that a conversation list shows — the ones to open. */
+  const openableLinks = (session: SdkSessionInfo): ChatSession[] =>
+    linkedChatsFor(chats ?? EMPTY_CHATS, locatorOf(session)).filter((chat) =>
+      isSessionExposed(chat, "main-list")
+    )
+  const deleteLinkCount = deleteTarget
+    ? linkedChatsFor(chats ?? EMPTY_CHATS, locatorOf(deleteTarget)).length
+    : 0
 
   const load = useCallback(async () => {
     if (!hostReachable || !enabled) return
@@ -276,8 +354,9 @@ export function SdkSessionManager() {
       storage: session.storage ?? "filesystem",
     })
 
-  const onRename = async () => {
-    if (!renameTarget || !renameDraft.trim()) return
+  const onRename = async (event?: FormEvent) => {
+    event?.preventDefault()
+    if (!renameTarget || !renameDraft.trim() || busyId === renameTarget.sessionId) return
     setBusyId(renameTarget.sessionId)
     try {
       await renameSdkSession(
@@ -310,21 +389,52 @@ export function SdkSessionManager() {
 
   const onDelete = async () => {
     if (!deleteTarget) return
-    setBusyId(deleteTarget.sessionId)
+    const target = deleteTarget
+    setBusyId(target.sessionId)
     try {
-      await deleteSdkSession(deleteTarget.sessionId, await optionsFor(deleteTarget))
-      toast.success(t("deleted"))
-      setDeleteTarget(null)
-      await load()
+      await deleteSdkSession(target.sessionId, await optionsFor(target))
     } catch {
       toast.error(t("errors.deleteFailed"))
+      setBusyId(null)
+      return
+    }
+    // A chat still pointing at the deleted transcript would try to resume it
+    // on its next turn. Clearing the link keeps the chat's messages and lets
+    // that turn start a fresh SDK conversation. Read fresh rows, not the live
+    // snapshot, so a chat bound since the last render is not missed.
+    let unlinkFailed = false
+    try {
+      const linked = linkedChatsFor(await listChatSessions(), locatorOf(target))
+      const results = await Promise.allSettled(linked.map((chat) => clearSessionSdkLink(chat.id)))
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") return
+        unlinkFailed = true
+        loggers.chat.warn("sdk-session-delete-unlink-failed", {
+          sdkSessionId: target.sessionId,
+          sessionId: linked[index]?.id,
+          err: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        })
+      })
+    } catch (err) {
+      unlinkFailed = true
+      loggers.chat.warn("sdk-session-delete-unlink-failed", {
+        sdkSessionId: target.sessionId,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    }
+    if (unlinkFailed) toast.error(t("errors.unlinkAfterDeleteFailed"))
+    else toast.success(t("deleted"))
+    setDeleteTarget(null)
+    try {
+      await load()
     } finally {
       setBusyId(null)
     }
   }
 
-  const onTag = async () => {
-    if (!tagTarget) return
+  const onTag = async (event?: FormEvent) => {
+    event?.preventDefault()
+    if (!tagTarget || busyId === tagTarget.sessionId) return
     setBusyId(tagTarget.sessionId)
     try {
       await tagSdkSession(tagTarget.sessionId, tagDraft.trim() || null, await optionsFor(tagTarget))
@@ -448,8 +558,10 @@ export function SdkSessionManager() {
       }
 
       await updateSession(chatSessionId, { sdkSessionStorage: storage })
-      useChatStore.getState().setActiveSession(chatSessionId)
-      router.push("/")
+      // Through the session link, not the store: the link consumer on `/`
+      // switches to the chat's workspace before focusing it, and a store-only
+      // switch left the user on Settings with the chat never shown.
+      router.push(conversationHref(chatSessionId))
       toast.success(t("continued"))
     } catch {
       toast.error(t("errors.continueFailed"))
@@ -479,6 +591,8 @@ export function SdkSessionManager() {
     }
   }
 
+  const showLoading = enabled && sessions === null && error === null
+
   return (
     <>
       <SettingsBlock
@@ -486,166 +600,223 @@ export function SdkSessionManager() {
         description={t("description")}
         testid="sdk-session-manager"
         contentClassName="space-y-3"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <Badge variant="secondary">{t("count", { count: sessions.length })}</Badge>
+        badge={
+          enabled && sortedSessions ? (
+            <Badge variant="secondary">{t("count", { count: sortedSessions.length })}</Badge>
+          ) : undefined
+        }
+        action={
           <Button
             variant="outline"
-            size="sm"
+            size="icon"
+            className="size-8"
             onClick={() => void load()}
             disabled={!enabled || loading}
             aria-label={t("refresh")}
           >
             {loading ? <Spinner className="size-3.5" /> : <RefreshCwIcon className="size-3.5" />}
           </Button>
-        </div>
+        }
+      >
         {!enabled ? (
           <p className="text-xs text-muted-foreground">{t("disabled")}</p>
         ) : error ? (
           <p className="text-sm text-destructive">{t(error)}</p>
-        ) : sessions.length === 0 && !loading ? (
-          <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <ul className="divide-y rounded-md border">
-            {sessions.map((session) => (
-              <li
-                key={JSON.stringify([
-                  session.storage,
-                  session.storageWorkspace ?? session.cwd,
-                  session.sessionId,
-                ])}
-                className="flex items-center justify-between gap-3 p-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="truncate text-sm font-medium">
-                      {session.customTitle || session.summary}
-                    </p>
-                    {session.tag && <Badge variant="outline">{session.tag}</Badge>}
+          <LoadingRegion
+            loading={showLoading}
+            label={t("loading")}
+            showDetail={false}
+            fallback={
+              <div className="divide-y rounded-md border">
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="flex items-center gap-3 p-3">
+                    <div className="flex-1 space-y-1.5">
+                      <Skeleton className="h-4 w-2/5" />
+                      <Skeleton className="h-3 w-3/5" />
+                    </div>
+                    <Skeleton className="h-7 w-40" />
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {session.cwd || session.sessionId}
-                  </p>
-                </div>
-                <div className="flex gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === session.sessionId}
-                    aria-label={t("details")}
-                    onClick={() => void onOpenDetails(session)}
-                  >
-                    <EyeIcon className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === session.sessionId}
-                    aria-label={t("continueInChat")}
-                    onClick={() => void onContinueInChat(session)}
-                  >
-                    <MessageSquareIcon className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === session.sessionId}
-                    aria-label={t("rename")}
-                    onClick={() => {
-                      setRenameTarget(session)
-                      setRenameDraft(session.customTitle || session.summary)
-                    }}
-                  >
-                    <PencilIcon className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === session.sessionId}
-                    aria-label={t("editTag")}
-                    onClick={() => {
-                      setTagTarget(session)
-                      setTagDraft(session.tag ?? "")
-                    }}
-                  >
-                    <TagsIcon className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === session.sessionId}
-                    aria-label={t("fork")}
-                    onClick={() => void onFork(session)}
-                  >
-                    <GitBranchIcon className="size-3.5" />
-                  </Button>
-                  {sessionStoreEnabled && session.storage !== "host-sqlite" && session.cwd && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      disabled={busyId === session.sessionId}
-                      aria-label={t("importStore")}
-                      onClick={() => void onImportStore(session)}
+                ))}
+              </div>
+            }
+          >
+            {sortedSessions === null ? null : sortedSessions.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("empty")}</p>
+            ) : (
+              <ul className="divide-y rounded-md border">
+                {sortedSessions.map((session) => {
+                  const links = openableLinks(session)
+                  const firstLink = links[0]
+                  return (
+                    <li
+                      key={sdkRowKey(session)}
+                      className="flex flex-wrap items-center justify-between gap-3 p-3"
                     >
-                      <DatabaseIcon className="size-3.5" />
-                    </Button>
-                  )}
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="text-destructive"
-                    disabled={busyId === session.sessionId}
-                    aria-label={t("delete")}
-                    onClick={() => setDeleteTarget(session)}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-medium">
+                            {session.customTitle || session.summary}
+                          </p>
+                          {session.tag && <Badge variant="outline">{session.tag}</Badge>}
+                          {firstLink ? (
+                            <Badge asChild variant="secondary" className="gap-1">
+                              <button
+                                type="button"
+                                aria-label={t("linkedOpen", { title: chatTitle(firstLink) })}
+                                onClick={() => router.push(conversationHref(firstLink.id))}
+                                className="cursor-pointer hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <LinkIcon className="size-3" aria-hidden />
+                                {t("linked", { count: links.length })}
+                              </button>
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {session.cwd || session.sessionId}
+                        </p>
+                        {Number.isFinite(session.lastModified) && session.lastModified > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            {t("lastModified", {
+                              time: format.relativeTime(new Date(session.lastModified), now),
+                            })}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={busyId === session.sessionId}
+                          aria-label={t("details")}
+                          onClick={() => void onOpenDetails(session)}
+                        >
+                          <EyeIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={busyId === session.sessionId}
+                          aria-label={t("continueInChat")}
+                          onClick={() => void onContinueInChat(session)}
+                        >
+                          <MessageSquareIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={busyId === session.sessionId}
+                          aria-label={t("rename")}
+                          onClick={() => {
+                            setRenameTarget(session)
+                            setRenameDraft(session.customTitle || session.summary)
+                          }}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={busyId === session.sessionId}
+                          aria-label={t("editTag")}
+                          onClick={() => {
+                            setTagTarget(session)
+                            setTagDraft(session.tag ?? "")
+                          }}
+                        >
+                          <TagsIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={busyId === session.sessionId}
+                          aria-label={t("fork")}
+                          onClick={() => void onFork(session)}
+                        >
+                          <GitBranchIcon className="size-3.5" />
+                        </Button>
+                        {sessionStoreEnabled &&
+                          session.storage !== "host-sqlite" &&
+                          session.cwd && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={busyId === session.sessionId}
+                              aria-label={t("importStore")}
+                              onClick={() => void onImportStore(session)}
+                            >
+                              <DatabaseIcon className="size-3.5" />
+                            </Button>
+                          )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive"
+                          disabled={busyId === session.sessionId}
+                          aria-label={t("delete")}
+                          onClick={() => setDeleteTarget(session)}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </LoadingRegion>
         )}
       </SettingsBlock>
 
       <Dialog open={renameTarget !== null} onOpenChange={(open) => !open && setRenameTarget(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("renameTitle")}</DialogTitle>
-            <DialogDescription>{t("renameDescription")}</DialogDescription>
-          </DialogHeader>
-          <Input
-            value={renameDraft}
-            onChange={(event) => setRenameDraft(event.target.value)}
-            aria-label={t("titleLabel")}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameTarget(null)}>
-              {t("cancel")}
-            </Button>
-            <Button disabled={!renameDraft.trim()} onClick={() => void onRename()}>
-              {t("save")}
-            </Button>
-          </DialogFooter>
+          <form className="contents" onSubmit={(event) => void onRename(event)}>
+            <DialogHeader>
+              <DialogTitle>{t("renameTitle")}</DialogTitle>
+              <DialogDescription>{t("renameDescription")}</DialogDescription>
+            </DialogHeader>
+            <Input
+              value={renameDraft}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              aria-label={t("titleLabel")}
+            />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRenameTarget(null)}>
+                {t("cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={!renameDraft.trim() || busyId === renameTarget?.sessionId}
+              >
+                {t("save")}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
       <Dialog open={tagTarget !== null} onOpenChange={(open) => !open && setTagTarget(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("tagTitle")}</DialogTitle>
-            <DialogDescription>{t("tagDescription")}</DialogDescription>
-          </DialogHeader>
-          <Input
-            value={tagDraft}
-            onChange={(event) => setTagDraft(event.target.value)}
-            aria-label={t("tagLabel")}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTagTarget(null)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={() => void onTag()}>{t("save")}</Button>
-          </DialogFooter>
+          <form className="contents" onSubmit={(event) => void onTag(event)}>
+            <DialogHeader>
+              <DialogTitle>{t("tagTitle")}</DialogTitle>
+              <DialogDescription>{t("tagDescription")}</DialogDescription>
+            </DialogHeader>
+            <Input
+              value={tagDraft}
+              onChange={(event) => setTagDraft(event.target.value)}
+              aria-label={t("tagLabel")}
+            />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setTagTarget(null)}>
+                {t("cancel")}
+              </Button>
+              <Button type="submit" disabled={busyId === tagTarget?.sessionId}>
+                {t("save")}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -658,7 +829,9 @@ export function SdkSessionManager() {
           }
         }}
       >
-        <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col">
+        {/* `sm:` — the base DialogContent caps width at `sm:max-w-lg`, which
+            outranks an unprefixed `max-w-4xl` from 640px up. */}
+        <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{detailsInfo?.customTitle || detailsInfo?.summary}</DialogTitle>
             <DialogDescription>{t("detailsDescription")}</DialogDescription>
@@ -694,7 +867,7 @@ export function SdkSessionManager() {
                   variant={detailTranscriptId === agentId ? "secondary" : "ghost"}
                   onClick={() => void onOpenSubagent(agentId)}
                 >
-                  {agentId}
+                  {t("subagentTranscript", { agentId })}
                 </Button>
               ))}
             </div>
@@ -740,7 +913,10 @@ export function SdkSessionManager() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("deleteDescription")}</AlertDialogDescription>
+            <AlertDialogDescription>
+              {t("deleteDescription")}
+              {deleteLinkCount > 0 ? ` ${t("deleteLinkedNote", { count: deleteLinkCount })}` : null}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>

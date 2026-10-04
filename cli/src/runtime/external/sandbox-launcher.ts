@@ -194,6 +194,15 @@ export function buildSandboxLauncherArgs(
             ".config/opencode",
             ".local/share/opencode",
             ".local/share/cognia-agent-tasks",
+            // Kimi Code (and its archived Python CLI), Copilot CLI, Goose and
+            // Aider keep logins and provider settings here; a task uses its own.
+            ".kimi-code",
+            ".kimi",
+            ".copilot",
+            ".config/goose",
+            ".local/share/goose",
+            ".local/state/goose",
+            ".aider",
           ].flatMap((relative) => ["--deny-readable", path.join(homedir, relative)]),
         ]
       : []),

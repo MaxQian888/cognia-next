@@ -16,7 +16,11 @@
  */
 
 import { transport } from "@/lib/tauri"
-import type { AcpElicitationResponse, ExternalAgentEvent } from "@/types/agent/external-agent"
+import type {
+  AcpElicitationResponse,
+  ExternalAgentCogniaModelBinding,
+  ExternalAgentEvent,
+} from "@/types/agent/external-agent"
 import type { ApprovalDecision } from "@cognia/agent-config-types"
 import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-config-store"
 
@@ -113,6 +117,18 @@ export async function whenRemoteRunChannelSubscribed(): Promise<void> {
   if (typeof ready === "function") await ready.call(transport, [EXTERNAL_RUN_EVENT_TOPIC])
 }
 
+/** The three binding fields by name, so nothing else on the object rides along. */
+function copyBinding(
+  binding: ExternalAgentCogniaModelBinding | null
+): ExternalAgentCogniaModelBinding | null {
+  if (binding === null) return null
+  return {
+    providerId: binding.providerId,
+    modelId: binding.modelId,
+    ...(binding.accountId !== undefined ? { accountId: binding.accountId } : {}),
+  }
+}
+
 export async function startRemoteExternalTurn(input: {
   runId: string
   chatSessionId: string
@@ -133,6 +149,13 @@ export async function startRemoteExternalTurn(input: {
   systemPrompt?: string
   allowedTools?: string[]
   externalSessionId?: string
+  /**
+   * Run this turn on a Cognia provider/model through the Host's gateway, with
+   * the Host's credentials (ADR-0090, 2026-10-02). Omitted inherits the Host
+   * configuration's own setting; `null` explicitly selects the agent's native
+   * models. Identifiers only — the Host resolves the credential.
+   */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
 }): Promise<RemoteTurnStart> {
   // Starting a turn is an interactive approval, like the configuration writes
   // beside it. `callHostConfigCommand` checks the handshake but attaches no
@@ -156,6 +179,9 @@ export async function startRemoteExternalTurn(input: {
     ...(input.systemPrompt !== undefined ? { systemPrompt: input.systemPrompt } : {}),
     ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
     ...(input.externalSessionId ? { externalSessionId: input.externalSessionId } : {}),
+    // The one axis where `null` is sent: it is the explicit "native models"
+    // instruction, which the Host must not confuse with "inherit".
+    ...(input.cogniaModel !== undefined ? { cogniaModel: copyBinding(input.cogniaModel) } : {}),
   })
 
   if (result.started && result.runId) {

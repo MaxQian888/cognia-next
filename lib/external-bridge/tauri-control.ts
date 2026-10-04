@@ -68,6 +68,12 @@ export interface ExternalBridgeHostStatus {
   error?: string | null
 }
 
+/**
+ * Imperative read, for non-React callers. A component must subscribe instead
+ * (`useActiveHostSupportsFeature("external-bridge.lifecycle",
+ * "external_bridge_status")`): this reads the remote-host store once, so a
+ * render that calls it goes stale after a host switch.
+ */
 export function isHostManagedBridgeAvailable(): boolean {
   return activeHostSupportsFeature("external-bridge.lifecycle", "external_bridge_status")
 }

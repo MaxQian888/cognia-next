@@ -7490,3 +7490,11 @@ describe("resolveSendOptions — capability grants", () => {
     expect(opts.permissionMode).toBe("plan")
   })
 })
+
+it("keeps the automatic delivery key renderer-only on ordinary sends", async () => {
+  const opts = await resolveSendOptions({
+    character: makeChar({ id: "delivery-char" }),
+    backgroundDeliveryId: "delivery-1",
+  })
+  expect(opts).not.toHaveProperty("backgroundDeliveryId")
+})

@@ -75,8 +75,8 @@ export function RuntimePanel() {
   }, [anyRunning])
 
   const cancel = useCallback(
-    (run: SubAgent) => {
-      const signalled = cancelSubagentRun(run.id, { reason: "Cancelled from settings" })
+    async (run: SubAgent) => {
+      const signalled = await cancelSubagentRun(run.id, { reason: "Cancelled from settings" })
       if (signalled) toast.success(t("cancelRequested", { name: run.name }))
       else toast.info(t("cancelUnreachable"))
     },

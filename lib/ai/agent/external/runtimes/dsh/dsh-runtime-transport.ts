@@ -1,6 +1,5 @@
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import { nanoid } from "nanoid"
 import { agentInvoke, agentListen } from "../../agent-transport"
 import { JsonRpcPeer } from "../../json-rpc-peer"
 import { PiFrameDecoder } from "../pi/pi-rpc-peer"
@@ -153,7 +152,10 @@ class HarnessSubprocessTransport implements DshRuntimeTransport {
     } catch {
       /* The managed launcher reports invalid configuration. */
     }
-    const processId = `dsh-${nanoid()}`
+    // The adapter owns process ids: the agent id for discovery and unique
+    // <agentId>:dsh:<uuid> ids for sessions. Preserve that ownership so the
+    // process plane can attach the run's placement and track its digest.
+    const processId = this.config.id
     this.processId = processId
     const peer = new JsonRpcPeer({
       defaultTimeout: this.config.timeout ?? 30000,

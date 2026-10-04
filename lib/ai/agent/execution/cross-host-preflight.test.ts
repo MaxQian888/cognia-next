@@ -47,10 +47,10 @@ function run(input: Partial<Parameters<typeof preflightCrossHostDispatch>[0]> = 
 }
 
 describe("preflightCrossHostDispatch", () => {
-  it("passes all gates and pins the target host into envelope + child policy", () => {
+  it("pins the envelope without returning an unused second resolver policy", () => {
     const result = run()
     expect(result.envelope.execution.hostRef).toBe("remote-host-1")
-    expect(result.hostPin).toEqual({ mode: "pinned", hostRef: "remote-host-1" })
+    expect(Object.keys(result)).toEqual(["envelope"])
   })
 
   it("rejects an invalid envelope (local absolute path resource) before anything else", () => {

@@ -40,7 +40,16 @@ export interface HostExternalAgentConfigsState {
   refresh: () => Promise<void>
   reconcile: () => Promise<void>
   setEnabled: (record: ExternalAgentConfigRecord, enabled: boolean) => Promise<void>
-  remove: (record: ExternalAgentConfigRecord) => Promise<void>
+  /**
+   * A shallow edit, compare-and-swapped on the revision the row was read at.
+   * Resolves `false` when the host refused it; the reason is in `error`.
+   */
+  update: (
+    record: ExternalAgentConfigRecord,
+    patch: Partial<StoredExternalAgentConfig>
+  ) => Promise<boolean>
+  /** Resolves `false` when the host refused; the reason is in `error`. */
+  remove: (record: ExternalAgentConfigRecord) => Promise<boolean>
   /**
    * Copy a locally-configured agent onto the host.
    *
@@ -52,6 +61,17 @@ export interface HostExternalAgentConfigsState {
    * references and consents that only mean something on the sending machine.
    */
   copyLocal: (config: StoredExternalAgentConfig) => Promise<void>
+  /**
+   * Create a new configuration on the host — the phone's "add agent", which
+   * has no local store to copy from. Unlike `copyLocal` this is not an import:
+   * the caller is configuring the host directly, so nothing is stripped.
+   * Resolves the created row, or the host's reason for refusing it (also kept
+   * in `error`, which a caller reading it right after the await would see one
+   * render late).
+   */
+  create: (
+    config: Partial<StoredExternalAgentConfig>
+  ) => Promise<{ ok: true; record: ExternalAgentConfigRecord } | { ok: false; error: string }>
   /** True while any write is in flight; the panel disables its controls. */
   busy: boolean
 }
@@ -106,13 +126,17 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
    * rather than the state the host is in.
    */
   const mutate = useCallback(
-    async (run: () => Promise<unknown>) => {
+    async <T>(
+      run: () => Promise<T>
+    ): Promise<{ ok: true; value: T } | { ok: false; error: string }> => {
       setBusy(true)
       let failure: string | null = null
+      let outcome: { ok: true; value: T } | { ok: false; error: string }
       try {
-        await run()
+        outcome = { ok: true, value: await run() }
       } catch (cause) {
         failure = cause instanceof Error ? cause.message : String(cause)
+        outcome = { ok: false, error: failure }
       }
       // The refresh runs BEFORE the failure is recorded, not after. A refresh
       // that succeeds clears `error` — so setting the write's failure first
@@ -121,32 +145,56 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       await refresh()
       setError(failure)
       setBusy(false)
+      return outcome
     },
     [refresh]
   )
 
-  const setEnabled = useCallback(
-    (record: ExternalAgentConfigRecord, enabled: boolean) =>
-      mutate(() =>
-        updateRemoteHostConfig({
-          configId: record.configId,
-          expectedRevision: record.revision,
-          patch: { enabled },
-        })
-      ),
+  const update = useCallback(
+    async (record: ExternalAgentConfigRecord, patch: Partial<StoredExternalAgentConfig>) =>
+      (
+        await mutate(() =>
+          updateRemoteHostConfig({
+            configId: record.configId,
+            expectedRevision: record.revision,
+            patch,
+          })
+        )
+      ).ok,
     [mutate]
+  )
+
+  const setEnabled = useCallback(
+    async (record: ExternalAgentConfigRecord, enabled: boolean) => {
+      await update(record, { enabled })
+    },
+    [update]
   )
 
   const remove = useCallback(
-    (record: ExternalAgentConfigRecord) => mutate(() => deleteRemoteHostConfig(record.configId)),
+    async (record: ExternalAgentConfigRecord) =>
+      (await mutate(() => deleteRemoteHostConfig(record.configId))).ok,
     [mutate]
   )
 
-  const reconcile = useCallback(() => mutate(() => reconcileRemoteHostConfigs()), [mutate])
+  const reconcile = useCallback(async () => {
+    await mutate(() => reconcileRemoteHostConfigs())
+  }, [mutate])
 
   const copyLocal = useCallback(
-    (config: StoredExternalAgentConfig) =>
-      mutate(() => createRemoteHostConfig(config, { fromImport: true })),
+    async (config: StoredExternalAgentConfig) => {
+      await mutate(() => createRemoteHostConfig(config, { fromImport: true }))
+    },
+    [mutate]
+  )
+
+  const create = useCallback(
+    async (config: Partial<StoredExternalAgentConfig>) => {
+      const outcome = await mutate(() => createRemoteHostConfig(config))
+      return outcome.ok
+        ? { ok: true as const, record: outcome.value }
+        : { ok: false as const, error: outcome.error }
+    },
     [mutate]
   )
 
@@ -159,10 +207,25 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       refresh,
       reconcile,
       setEnabled,
+      update,
       remove,
       copyLocal,
+      create,
       busy,
     }),
-    [configs, loading, unavailable, error, refresh, reconcile, setEnabled, remove, copyLocal, busy]
+    [
+      configs,
+      loading,
+      unavailable,
+      error,
+      refresh,
+      reconcile,
+      setEnabled,
+      update,
+      remove,
+      copyLocal,
+      create,
+      busy,
+    ]
   )
 }

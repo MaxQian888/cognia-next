@@ -27,9 +27,11 @@
 
 import { publishHostEvent } from "@/lib/companion/host-event-publisher"
 import type {
+  AcpConfigOption,
   AcpElicitationResponse,
   AcpPermissionOption,
   AcpPermissionResponse,
+  ExternalAgentCogniaModelBinding,
   ExternalAgentConfig,
   ExternalAgentEvent,
 } from "@/types/agent/external-agent"
@@ -40,6 +42,11 @@ import { mountHostConfigAgent, resetHostConfigMountsForTests } from "../../confi
 import { admitExternalAgentRun, releaseExternalAgentRun } from "../../policy/run-admission"
 import type { RunAdmissionRefusal } from "../../policy/run-admission"
 import { pickPermissionOptionId } from "../../session/chat-decision-bridge"
+import {
+  reportableConfigOptions,
+  type ExternalAgentModelSurface,
+  type ExternalAgentThinkingSurface,
+} from "../../session/session-models"
 
 /** The channel every frame of a remote external run is published on. */
 export const EXTERNAL_RUN_EVENT_TOPIC = "external-agent://session-event"
@@ -76,6 +83,14 @@ export interface RemoteRunRequest {
   allowedTools?: string[]
   /** Resume an agent session this run already created. */
   externalSessionId?: string
+  /**
+   * The Cognia provider/model this turn runs on through the Host's gateway,
+   * resolved against the Host's own settings and vault (ADR-0090,
+   * 2026-10-02). Three states, kept distinct all the way to the manager:
+   * absent inherits the Host configuration's own setting, `null` selects the
+   * agent's native model configuration, and a binding selects Cognia.
+   */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
   /**
    * The authenticated caller, injected host-side by the RPC layer. Recorded so
    * a decision can only be answered by the device that was shown the question.
@@ -133,6 +148,8 @@ interface ActiveRun {
   /** Set by whichever path ends the run first; the fence for the rest. */
   settled: boolean
   externalSessionId?: string
+  /** The turn was asked to run on a Cognia model (a gateway task). */
+  cogniaBound: boolean
   cancel?: () => void
   /**
    * The tail of this run's publish chain. Frames are appended to it rather
@@ -168,7 +185,8 @@ export interface ExternalRunManager {
       reasoningEffort?: string
       systemPrompt?: string
       allowedTools?: string[]
-      context?: { custom: { chatSessionId: string } }
+      cogniaModel?: ExternalAgentCogniaModelBinding | null
+      context?: { custom: { chatSessionId: string; callerDeviceId?: string } }
       onEvent?: (event: ExternalAgentEvent) => void
       signal?: AbortSignal
     }
@@ -179,6 +197,30 @@ export interface ExternalRunManager {
     response: AcpPermissionResponse
   ): Promise<void>
   respondToElicitation(agentId: string, response: AcpElicitationResponse): Promise<void>
+  /**
+   * What the session's agent offers on its model and thinking axes. Optional
+   * so a manager without it simply reports nothing, which the client renders
+   * as "the models arrive with a turn" rather than as a failure.
+   */
+  fetchSessionModelSurface?(
+    agentId: string,
+    sessionId: string
+  ): Promise<
+    | {
+        status: "ok"
+        data: { models: ExternalAgentModelSurface; thinking: ExternalAgentThinkingSurface }
+      }
+    | { status: "unsupported" }
+    | { status: "error"; error: Error }
+  >
+  /** The session's raw config options, when the adapter keeps them synchronously. */
+  getConfigOptions?(
+    agentId: string,
+    sessionId: string
+  ):
+    | { status: "ok"; data: AcpConfigOption[] }
+    | { status: "unsupported" }
+    | { status: "error"; error: Error }
 }
 
 const defaultDeps: RemoteRunDeps = {
@@ -247,6 +289,70 @@ function emit(
   const published = run.publishing.then(() => deps.publish(EXTERNAL_RUN_EVENT_TOPIC, frame))
   run.publishing = published.catch(() => undefined)
   return published
+}
+
+/**
+ * How long the end of a turn waits for the session's model report. ACP answers
+ * from the session it already holds; Pi asks its process, which is the one
+ * that can be slow. The terminal frame must not wait on it for longer.
+ */
+export const MODEL_REPORT_TIMEOUT_MS = 5_000
+
+/**
+ * Tell the client which models the session it just ran on offers.
+ *
+ * A paired client has no handle on the Host's agent session, so without this
+ * its model picker had two options: spawn a second copy of the agent on the
+ * Host to ask (which it did, under the same process id as the running copy),
+ * or show nothing. The run stream is already the one channel between the two,
+ * so the session's options ride it as the `config_options_update` an ACP
+ * agent would have pushed itself. Sent after the turn, because that is when the
+ * model this conversation asked for (`applyModelToSession`) has been applied.
+ *
+ * Best-effort by construction: a failure to read costs the client its list
+ * until the next turn, never the turn's terminal frame.
+ */
+async function reportSessionModels(run: ActiveRun, manager: ExternalRunManager): Promise<void> {
+  const sessionId = run.externalSessionId
+  if (!sessionId || run.settled || !manager.fetchSessionModelSurface) return
+  // A gateway task's child is released when the turn ends, and what it would
+  // report is the task's own `cognia/<model>` route — not the agent's native
+  // models. Sending that would teach the client's picker a list the agent does
+  // not have, so a Cognia-bound turn reports nothing.
+  if (run.cogniaBound || isGatewayTaskSessionId(sessionId)) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const surface = await Promise.race([
+      manager.fetchSessionModelSurface(run.agentId, sessionId),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), MODEL_REPORT_TIMEOUT_MS)
+      }),
+    ])
+    if (!surface || surface.status !== "ok" || run.settled) return
+    const raw = manager.getConfigOptions?.(run.agentId, sessionId)
+    const configOptions = reportableConfigOptions(
+      raw?.status === "ok" ? raw.data : undefined,
+      surface.data
+    )
+    if (configOptions.length === 0) return
+    await emit(run, {
+      type: "config_options_update",
+      sessionId,
+      timestamp: new Date(deps.now()),
+      configOptions,
+    } as ExternalAgentEvent)
+  } catch {
+    // See the docstring: the report is never worth a turn.
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** Gateway task sessions (`gatewaySessionId` in `config/gateway-task`). */
+const GATEWAY_SESSION_PREFIX = "cognia-gateway:"
+
+function isGatewayTaskSessionId(sessionId: string | undefined): boolean {
+  return !!sessionId && sessionId.startsWith(GATEWAY_SESSION_PREFIX)
 }
 
 const TERMINAL_REASON = {
@@ -485,6 +591,7 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
     seq: 0,
     settled: false,
     externalSessionId: request.externalSessionId,
+    cogniaBound: !!request.cogniaModel,
     cancel: () => controller.abort(),
     publishing: Promise.resolve(),
   }
@@ -508,7 +615,18 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
         ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
         ...(request.systemPrompt !== undefined ? { systemPrompt: request.systemPrompt } : {}),
         ...(request.allowedTools !== undefined ? { allowedTools: request.allowedTools } : {}),
-        context: { custom: { chatSessionId: request.chatSessionId } },
+        // `!== undefined`, not truthiness: `null` is the explicit "native"
+        // instruction and must reach the manager, while an absent key leaves
+        // the Host configuration's own binding in force.
+        ...(request.cogniaModel !== undefined ? { cogniaModel: request.cogniaModel } : {}),
+        // The device that asked. A gateway task started for it is bound to it,
+        // so a different device cannot resume or rebind the same task.
+        context: {
+          custom: {
+            chatSessionId: request.chatSessionId,
+            ...(request.callerDeviceId ? { callerDeviceId: request.callerDeviceId } : {}),
+          },
+        },
         signal: controller.signal,
         onEvent: (event) => {
           if (run.settled) return
@@ -523,9 +641,13 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
           void emit(run, event).catch(() => undefined)
         },
       })
+      await reportSessionModels(run, manager)
       await settle(run, "completed")
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
+      // A refused model fails the turn after the session opened, and is the
+      // moment the client most needs the list the agent actually has.
+      if (!controller.signal.aborted) await reportSessionModels(run, manager)
       await settle(run, controller.signal.aborted ? "cancelled" : "failed", message)
     }
   })().catch(() => {

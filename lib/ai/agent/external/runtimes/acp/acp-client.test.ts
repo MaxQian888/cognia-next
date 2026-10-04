@@ -354,6 +354,141 @@ describe("AcpClientAdapter — prompt deadlines and host response envelopes", ()
       jest.useRealTimers()
     }
   })
+
+  describe("turn timeout is an inactivity window", () => {
+    const FIVE_MIN = 300_000
+    const message = {
+      id: "m",
+      role: "user" as const,
+      content: [{ type: "text" as const, text: "hello" }],
+      timestamp: new Date(),
+    }
+
+    function startTurn(adapter: AcpClientAdapter) {
+      const events: ExternalAgentEvent[] = []
+      const consume = (async () => {
+        for await (const event of adapter.prompt("s", message)) events.push(event)
+      })()
+      const outcome = consume.then(
+        () => undefined,
+        (error: Error) => error
+      )
+      return { events, outcome }
+    }
+
+    function agentUpdate(peer: JsonRpcPeer, text: string) {
+      peer.ingest(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "s",
+            update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+          },
+        })
+      )
+    }
+
+    const cancels = (frames: () => Array<{ method?: string }>) =>
+      frames().filter((frame) => frame.method === "session/cancel")
+
+    it("keeps a streaming turn alive past twice the window", async () => {
+      jest.useFakeTimers()
+      const { adapter, peer, frames } = await connectedAdapter(FIVE_MIN)
+      try {
+        const { events, outcome } = startTurn(adapter)
+        // An update every 4 minutes for 12 minutes, then 4 more quiet minutes:
+        // 16 minutes of wall time, never 5 minutes of silence.
+        for (let i = 0; i < 3; i++) {
+          await jest.advanceTimersByTimeAsync(240_000)
+          agentUpdate(peer, `step ${i}`)
+        }
+        await jest.advanceTimersByTimeAsync(240_000)
+        expect(events.filter((event) => event.type === "error")).toEqual([])
+        expect(cancels(frames)).toEqual([])
+        const prompt = frames().find((frame) => frame.method === "session/prompt")
+        peer.ingest(
+          JSON.stringify({ jsonrpc: "2.0", id: prompt.id, result: { stopReason: "end_turn" } })
+        )
+        expect(await outcome).toBeUndefined()
+        expect(events.at(-1)).toEqual(expect.objectContaining({ type: "done", success: true }))
+      } finally {
+        await adapter.disconnect()
+        jest.useRealTimers()
+      }
+    })
+
+    it("pauses while a permission is pending and restarts the full window once it resolves", async () => {
+      jest.useFakeTimers()
+      const { adapter, peer, frames } = await connectedAdapter(FIVE_MIN)
+      try {
+        const { events, outcome } = startTurn(adapter)
+        await jest.advanceTimersByTimeAsync(100_000)
+        // The real wire path: the agent asks, and a person takes 8 minutes.
+        peer.ingest(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 77,
+            method: "session/request_permission",
+            params: {
+              sessionId: "s",
+              options: [ALLOW, REJECT],
+              toolCall: { toolCallId: "t1", title: "Bash" },
+            },
+          })
+        )
+        await jest.advanceTimersByTimeAsync(480_000)
+        expect(events.filter((event) => event.type === "error")).toEqual([])
+        expect(cancels(frames)).toEqual([])
+        expect(events).toContainEqual(expect.objectContaining({ type: "permission_request" }))
+
+        await adapter.respondToPermission("s", {
+          requestId: "77",
+          granted: false,
+          optionId: REJECT.optionId,
+        })
+        await jest.advanceTimersByTimeAsync(0)
+        expect(frames()).toContainEqual({
+          jsonrpc: "2.0",
+          id: 77,
+          result: { outcome: { outcome: "selected", optionId: REJECT.optionId } },
+        })
+
+        // A FULL window from the answer — not the 200 s left before the pause.
+        await jest.advanceTimersByTimeAsync(FIVE_MIN - 1_000)
+        expect(cancels(frames)).toEqual([])
+        await jest.advanceTimersByTimeAsync(2_000)
+        expect(cancels(frames)).toHaveLength(1)
+        expect(await outcome).toEqual(new Error("Request timeout: session/prompt"))
+      } finally {
+        await adapter.disconnect()
+        jest.useRealTimers()
+      }
+    })
+
+    it("still times out and cancels a turn that goes truly silent", async () => {
+      jest.useFakeTimers()
+      const { adapter, peer, frames } = await connectedAdapter(FIVE_MIN)
+      try {
+        const { outcome } = startTurn(adapter)
+        await jest.advanceTimersByTimeAsync(60_000)
+        agentUpdate(peer, "thinking")
+        await jest.advanceTimersByTimeAsync(FIVE_MIN - 1)
+        expect(cancels(frames)).toEqual([])
+        await jest.advanceTimersByTimeAsync(2)
+        expect(frames()).toContainEqual({
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: { sessionId: "s" },
+        })
+        expect(await outcome).toEqual(new Error("Request timeout: session/prompt"))
+        expect(adapter.getSession("s")?.status).toBe("idle")
+      } finally {
+        await adapter.disconnect()
+        jest.useRealTimers()
+      }
+    })
+  })
 })
 
 describe("AcpClientAdapter — Devin permission identity", () => {
@@ -510,6 +645,82 @@ describe("AcpClientAdapter — Devin permission identity", () => {
       status: "completed",
     })
     expect((await permissionEvent(adapter, emit)).toolInfo.name).toBe("Tool request")
+  })
+
+  /**
+   * Real Kimi Code CLI 2.1.1 frames (ids trimmed): arguments stream as JSON
+   * text in `tool_call_update`s, and the permission carries only the id, the
+   * title and a prose line. `rawInput` arrives after the answer.
+   */
+  function streamKimiBash(adapter: AcpClientAdapter) {
+    handleUpdate(adapter, "s", {
+      sessionUpdate: "tool_call",
+      toolCallId: "0:tool_R29u",
+      title: "Bash",
+      kind: "execute",
+      status: "pending",
+      content: [{ type: "content", content: { type: "text", text: "" } }],
+    })
+    for (const partial of ['{"command":"echo', '{"command":"echo hi"}']) {
+      handleUpdate(adapter, "s", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "0:tool_R29u",
+        status: "in_progress",
+        content: [{ type: "content", content: { type: "text", text: partial } }],
+      })
+    }
+  }
+  const KIMI_PERMISSION_TOOL_CALL = {
+    toolCallId: "0:tool_R29u",
+    title: "Bash",
+    content: [
+      {
+        type: "content",
+        content: { type: "text", text: "Requesting approval to Running: echo hi" },
+      },
+    ],
+  }
+
+  it("recovers Kimi Code's streamed arguments as a display-only preview", async () => {
+    const { adapter, emit } = adapterWithEvents("kimi")
+    streamKimiBash(adapter)
+    const request = await permissionEvent(
+      adapter,
+      emit,
+      "s",
+      KIMI_PERMISSION_TOOL_CALL as unknown as PermissionParams["toolCall"]
+    )
+    expect(request).toMatchObject({
+      title: "Bash",
+      kind: "execute",
+      toolInfo: { name: "Bash" },
+      inputPreview: { command: "echo hi" },
+      reason: "Requesting approval to Running: echo hi",
+    })
+    // The wire field stays what the agent actually sent: nothing.
+    expect(request.rawInput).toBeUndefined()
+  })
+
+  it("never lets a recovered preview satisfy a dontAsk allow-list", async () => {
+    const { adapter } = adapterWithEvents("kimi")
+    seedSession(adapter, "s", "dontAsk", ["Bash(echo*)"])
+    streamKimiBash(adapter)
+    await expect(
+      callPermission(adapter, {
+        sessionId: "s",
+        toolCall: KIMI_PERMISSION_TOOL_CALL as unknown as PermissionParams["toolCall"],
+        options: [ALLOW, REJECT],
+      })
+    ).resolves.toEqual({ outcome: { outcome: "selected", optionId: REJECT.optionId } })
+  })
+
+  it("sends no preview when the agent supplied rawInput", async () => {
+    const { adapter, emit } = adapterWithEvents()
+    startTool(adapter)
+    const request = await permissionEvent(adapter, emit)
+    expect(request.rawInput).toEqual({ file_path: "/work/README.md" })
+    expect(request).not.toHaveProperty("inputPreview")
+    expect(request.reason).toBe('Tool "Calling read from cognia-tools" requires permission')
   })
 
   it("uses current permission details ahead of cached fields", async () => {
@@ -4728,7 +4939,8 @@ describe("DeepSeek Harness ACP capability boundaries", () => {
           { type: "text", text: "Do the task" },
         ],
       }),
-      expect.any(Number)
+      expect.any(Number),
+      expect.any(Function)
     )
     for await (const _event of adapter.prompt("context-session", message)) {
       /* Same context is already in the conversation. */

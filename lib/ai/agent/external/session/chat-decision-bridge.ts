@@ -146,6 +146,19 @@ export function toPermissionResponse(
 }
 
 /**
+ * The arguments the approval shows. The wire `rawInput` wins when it says
+ * anything; an empty or missing one falls back to the adapter's recovered
+ * `inputPreview` (Kimi Code streams its arguments as text and sends `rawInput`
+ * only after the answer), so the dialog shows the command instead of `{}`.
+ * Display only: permission rules read the real `rawInput`, never this.
+ */
+export function approvalInput(request: ExternalAgentPermissionRequestEvent["request"]) {
+  const raw = request.rawInput
+  if (raw && Object.keys(raw).length > 0) return raw
+  return request.inputPreview ?? request.toolInfo?.parameters ?? raw ?? {}
+}
+
+/**
  * Build the chat-store entry for an incoming request, and remember where the
  * answer must go. Returns `null` when the event carries no usable id — an
  * approval with no id could never be answered, so surfacing a dialog for it
@@ -182,7 +195,7 @@ export function registerExternalApproval(params: {
     requestId,
     toolUseID: request.toolCallId ?? responseRequestId,
     toolName: request.toolInfo?.name ?? "unknown",
-    input: request.rawInput ?? request.toolInfo?.parameters ?? {},
+    input: approvalInput(request),
     title: request.title,
     displayName: request.toolInfo?.name,
     description: request.toolInfo?.description ?? request.reason,

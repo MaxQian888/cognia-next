@@ -16,6 +16,11 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import {
+  presetDescription,
+  presetName,
+  supportTierLabel,
+} from "@/components/agent/external-agent/add-agent/preset-copy"
+import {
   getAvailablePresets,
   getPresetConfig,
   resolvePreferredCodexExecutablePresetId,
@@ -34,6 +39,7 @@ const CODEX_EXECUTABLE_PRESET_IDS = ["codex", "codex-app-server"] as const
 
 export function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
   const t = useTranslations("externalAgent.settings")
+  const tTier = useTranslations("externalAgent.supportTier")
   const [showExperimental, setShowExperimental] = useState(false)
   // Auto-prefer the native app-server Codex preset when the `codex` CLI is on
   // PATH; otherwise the ACP shim. Surfaced as a "Recommended" hint — both stay
@@ -88,9 +94,7 @@ export function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) 
                 <div className="flex flex-wrap items-start justify-between gap-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <BrandIcon id={id} size={24} />
-                    <p className="truncate text-sm font-medium">
-                      {id === "opencode-v2-service" ? t("opencodeV2PresetName") : config.name}
-                    </p>
+                    <p className="truncate text-sm font-medium">{presetName(t, id, config)}</p>
                   </div>
                   {(CODEX_EXECUTABLE_PRESET_IDS as readonly string[]).includes(id) &&
                     id === preferredCodexPreset && (
@@ -113,26 +117,12 @@ export function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) 
                       }
                       className="text-[10px]"
                     >
-                      {config.supportTier}
+                      {supportTierLabel(tTier, config.supportTier)}
                     </Badge>
                   )}
                 </div>
                 <p className="line-clamp-3 text-xs text-muted-foreground">
-                  {id === "opencode-v2-service"
-                    ? t("opencodeV2PresetDescription")
-                    : id === "devin"
-                      ? t("devinPresetDescription")
-                      : id === "aider"
-                        ? t("aiderPresetDescription")
-                        : id === "qoder"
-                          ? t("qoderPresetDescription")
-                          : id === "kimi"
-                            ? t("kimiPresetDescription")
-                            : id === "cline"
-                              ? t("clinePresetDescription")
-                              : id === "goose"
-                                ? t("goosePresetDescription")
-                                : config.description}
+                  {presetDescription(t, id, config)}
                 </p>
                 {/* `tags` is optional on the preset type and a plugin can register
                     a preset at runtime, so the gallery must not assume the array

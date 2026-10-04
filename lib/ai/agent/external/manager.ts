@@ -58,7 +58,8 @@ import type {
 import type { AgentTool } from "@/lib/ai/agent"
 import {
   buildGatewayTaskConfig,
-  cogniaGatewayRuntime,
+  cogniaGatewaySupport,
+  GATEWAY_RUNTIME_TRAITS,
   gatewaySessionId,
   normalizeCogniaModelBinding,
   parseGatewaySessionId,
@@ -77,6 +78,7 @@ import { CodexAppServerAdapter } from "./runtimes/codex/codex-app-server-client"
 import { OpenCodeClientAdapter } from "./runtimes/opencode/opencode-client"
 import { OpenCodeV2ClientAdapter } from "./runtimes/opencode/opencode-v2-client"
 import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import { DshSdkClientAdapter } from "./runtimes/dsh/dsh-sdk-client"
 import { prepareDshManagedLaunch } from "./runtimes/dsh/dsh-managed-launch"
 import { clampThinkingLevel, PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
@@ -394,6 +396,23 @@ function placementWithToolHostLeases(
   return { ...placement, hostedToolHostLeaseIds: [...leaseIds] as string[] }
 }
 
+/** The most recently active session; later entries win a tie. */
+function latestSession<T extends Pick<ExternalAgentSession, "lastActivityAt">>(
+  sessions: readonly T[]
+): T | undefined {
+  let latest: T | undefined
+  let latestTime = -Infinity
+  for (const session of sessions) {
+    const time = session.lastActivityAt ? new Date(session.lastActivityAt).getTime() : NaN
+    const value = Number.isFinite(time) ? time : -Infinity
+    if (!latest || value >= latestTime) {
+      latest = session
+      latestTime = value
+    }
+  }
+  return latest
+}
+
 export class ExternalAgentManager {
   private static _instance: ExternalAgentManager | null = null
 
@@ -453,13 +472,14 @@ export class ExternalAgentManager {
         : options.cogniaModel
     )
     if (!binding) {
-      if (parseGatewaySessionId(options?.sessionId))
+      if (options?.resetExternalSession !== true && parseGatewaySessionId(options?.sessionId))
         throw new Error("A gateway task must resume with its Cognia model binding")
       return undefined
     }
-    const runtime = cogniaGatewayRuntime(source.config)
-    if (!runtime)
+    const support = cogniaGatewaySupport(source.config)
+    if (!support.supported)
       throw new Error("This external agent does not support isolated Cognia gateway tasks")
+    const traits = GATEWAY_RUNTIME_TRAITS[support.runtime]
     const plane = externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
     if (!plane.ok) throw new Error("Cognia gateway tasks require an available process host")
     const { spawnPlacementFor, registerSpawnPlacement, clearSpawnPlacement } =
@@ -468,41 +488,67 @@ export class ExternalAgentManager {
     if (options?.signal?.aborted) throw new Error("External agent execution was aborted")
     const custom = options?.context?.custom
     const childPlacement = placementWithToolHostLeases(placement, custom?.sandboxToolHostLeaseIds)
-    const previousId =
-      options?.sessionId ??
-      (typeof custom?.sessionId === "string" ? custom.sessionId : undefined) ??
-      (typeof custom?.chatSessionId === "string"
-        ? (this.resolveConversationSessionId(agentId, custom.chatSessionId) ?? undefined)
-        : undefined)
-    const previous = parseGatewaySessionId(previousId)
-    if (previous?.binding) {
-      if (
-        binding.providerId !== previous.binding.providerId ||
-        binding.modelId !== previous.binding.modelId ||
-        (binding.accountId !== undefined && binding.accountId !== previous.binding.accountId)
-      ) {
-        throw new Error("This task is bound to a different model or account; start a new task")
-      }
-      binding = previous.binding
-    }
-    if (previousId && !previous)
+    // A Host-run turn names the paired device it runs for; the task's native
+    // history belongs to that device alone.
+    const originDeviceId =
+      typeof custom?.callerDeviceId === "string" && custom.callerDeviceId
+        ? custom.callerDeviceId
+        : null
+    const reset = options?.resetExternalSession === true
+    // Only an id the caller names is a demand to continue that session. A
+    // reset discards every hint, including one the caller also supplied.
+    const explicitId = reset
+      ? undefined
+      : (options?.sessionId ??
+        (typeof custom?.sessionId === "string" ? custom.sessionId : undefined))
+    if (explicitId && !parseGatewaySessionId(explicitId))
       throw new Error(
         "Start a new task to switch an existing external session to the Cognia gateway"
       )
-    const freshSdkTurn = source.config.protocol === "dsh-sdk"
+    // The conversation's own earlier task is a hint, never a native session:
+    // a native id cannot continue on a Cognia model, so it starts a new task.
+    const previousId =
+      explicitId ??
+      (!reset && typeof custom?.chatSessionId === "string"
+        ? (this.resolveConversationSessionId(agentId, custom.chatSessionId, {
+            kind: "gateway",
+            originDeviceId,
+          }) ?? undefined)
+        : undefined)
+    let previous = parseGatewaySessionId(previousId)
+    const previousMetadata = previousId ? source.sessions.get(previousId)?.metadata : undefined
+    const recordedDevice = previousMetadata?.cogniaGatewayOriginDeviceId
+    if (previous && recordedDevice !== undefined && recordedDevice !== originDeviceId)
+      throw new Error("This task belongs to another device; start a new task")
+    let rebind = false
+    if (previous?.binding) {
+      const unchanged =
+        binding.providerId === previous.binding.providerId &&
+        binding.modelId === previous.binding.modelId &&
+        (binding.accountId === undefined || binding.accountId === previous.binding.accountId)
+      if (unchanged) binding = previous.binding
+      else if (options?.rebind === true) {
+        // In-task rebind: same owner, device and runtime, new Cognia model.
+        // The native host enforces the same rule on the retained binding.
+        const recordedRuntime = previousMetadata?.cogniaGatewayRuntime
+        if (recordedRuntime !== undefined && recordedRuntime !== support.runtime)
+          throw new Error("This task belongs to another agent runtime; start a new task")
+        rebind = true
+      } else if (!explicitId) previous = undefined
+      else throw new Error("This task is bound to a different model or account; start a new task")
+    }
+    const transcript = traits.continuity === "transcript"
     const suppliedHistory = custom?.conversationHistory
-    const storedHistory = previousId
-      ? source.sessions.get(previousId)?.metadata?.cogniaGatewayHistory
-      : undefined
+    const storedHistory = previous ? previousMetadata?.cogniaGatewayHistory : undefined
     const continuationHistory =
       typeof suppliedHistory === "string" && suppliedHistory.trim()
         ? suppliedHistory
         : typeof storedHistory === "string"
           ? storedHistory
           : ""
-    if (freshSdkTurn && previous && !continuationHistory.trim()) {
+    if (transcript && previous && !continuationHistory.trim()) {
       throw new Error(
-        "DeepSeek Harness SDK continuation requires the preserved Cognia conversation transcript"
+        "Continuing this Cognia task requires the preserved Cognia conversation transcript"
       )
     }
     let turnResponse = ""
@@ -528,12 +574,8 @@ export class ExternalAgentManager {
       lease = await prepareExternalAgentGatewayRoute({
         ...binding,
         sessionId: taskId,
-        ingressProtocol:
-          runtime === "codex"
-            ? "openai-responses"
-            : runtime === "claude"
-              ? "anthropic"
-              : "openai-chat",
+        ingressProtocol: traits.ingress,
+        originDeviceId,
         signal: options?.signal,
       })
     } catch (error) {
@@ -541,6 +583,47 @@ export class ExternalAgentManager {
       throw error
     }
     binding = lease.binding
+    const ownerAccountId = lease.ownerAccountId ?? null
+    // Recorded on every public session so a later resume or rebind can be
+    // checked against the task's owner, device and runtime before any spend.
+    const publishSession = (
+      session: ExternalAgentSession,
+      extra?: Record<string, unknown>
+    ): string => {
+      const publicId = gatewaySessionId(taskId, session.id, binding ?? undefined)
+      // The conversation that owns the task survives a resume whose native
+      // session came back without Cognia's metadata.
+      let conversation = source.sessions.get(publicId)?.metadata?.cogniaSessionId
+      // A rebind re-encodes the same native session under its new binding;
+      // the id naming the old binding must not stay resolvable beside it.
+      for (const [id, existing] of source.sessions) {
+        if (id === publicId || !id.startsWith("cognia-gateway:")) continue
+        let parsed: ReturnType<typeof parseGatewaySessionId>
+        try {
+          parsed = parseGatewaySessionId(id)
+        } catch {
+          continue
+        }
+        if (parsed?.taskId !== taskId || parsed.nativeSessionId !== session.id) continue
+        conversation ??= existing.metadata?.cogniaSessionId
+        source.sessions.delete(id)
+      }
+      source.sessions.set(publicId, {
+        ...session,
+        id: publicId,
+        metadata: {
+          ...(conversation !== undefined ? { cogniaSessionId: conversation } : {}),
+          ...session.metadata,
+          cogniaModel: binding,
+          cogniaGatewayTask: taskId,
+          cogniaGatewayRuntime: support.runtime,
+          cogniaGatewayOwnerAccountId: ownerAccountId,
+          cogniaGatewayOriginDeviceId: originDeviceId,
+          ...extra,
+        },
+      })
+      return publicId
+    }
     let releasePromise: Promise<void> | undefined
     let childAdapter: ProtocolAdapter | undefined
     const release = (): Promise<void> =>
@@ -555,26 +638,19 @@ export class ExternalAgentManager {
         )
         const child = this.instances.get(childId)
         for (const session of child?.sessions.values() ?? []) {
-          const publicId = gatewaySessionId(taskId, session.id, binding ?? undefined)
-          source.sessions.set(publicId, {
-            ...session,
-            id: publicId,
-            metadata: {
-              ...session.metadata,
-              cogniaModel: binding,
-              cogniaGatewayTask: taskId,
-              ...(freshSdkTurn
-                ? {
-                    cogniaGatewayHistory:
-                      hasTurnResponse && prompt !== undefined
-                        ? [continuationHistory, `User: ${prompt}`, `Assistant: ${turnResponse}`]
-                            .filter(Boolean)
-                            .join("\n\n")
-                        : continuationHistory,
-                  }
-                : {}),
-            },
-          })
+          publishSession(
+            session,
+            transcript
+              ? {
+                  cogniaGatewayHistory:
+                    hasTurnResponse && prompt !== undefined
+                      ? [continuationHistory, `User: ${prompt}`, `Assistant: ${turnResponse}`]
+                          .filter(Boolean)
+                          .join("\n\n")
+                      : continuationHistory,
+                }
+              : undefined
+          )
         }
         await this.removeAgent(childId)
         if (childPlacement && spawnPlacementFor(childId) === childPlacement)
@@ -591,10 +667,27 @@ export class ExternalAgentManager {
       if (this.instances.get(agentId) !== source)
         throw new Error("External agent was removed during task preparation")
       const { useSettingsStore } = await import("@/stores/settings")
-      const settings = useSettingsStore.getState().settings
+      // The headless brain has no renderer settings; its lease carries the
+      // model facts the launch needs, so the settings are only a fallback for
+      // metadata the lease does not have.
+      const settings =
+        useSettingsStore.getState().settings ??
+        (isHeadlessHost() ? { providerSettings: {}, customProviders: [] } : null)
       if (!settings) throw new Error("Settings are not loaded")
       lease.assertCurrent?.()
-      const prepared = buildGatewayTaskConfig({ config: source.config, taskId, ...lease, settings })
+      if (rebind) {
+        const recordedOwner = previousMetadata?.cogniaGatewayOwnerAccountId
+        if (recordedOwner !== undefined && recordedOwner !== ownerAccountId)
+          throw new Error("This task is bound to a different model or account; start a new task")
+      }
+      const prepared = buildGatewayTaskConfig({
+        config: source.config,
+        taskId,
+        ...lease,
+        settings,
+        originDeviceId,
+        rebind,
+      })
       const cwd = this.buildSessionOptions(source, options).cwd
       if (cwd) prepared.config.process!.cwd = cwd
       if (spawnPlacementFor(agentId) !== placement)
@@ -603,7 +696,7 @@ export class ExternalAgentManager {
       await this.addAgent(prepared.config, { connect: false })
       childAdapter = this.adapters.get(childId)
       const mapEvent = (event: ExternalAgentEvent): ExternalAgentEvent => {
-        if (freshSdkTurn && event.type === "message_delta" && event.delta.type === "text") {
+        if (transcript && event.type === "message_delta" && event.delta.type === "text") {
           turnResponse += event.delta.text
           hasTurnResponse = true
         }
@@ -638,12 +731,7 @@ export class ExternalAgentManager {
         }
         if (event.sessionId) {
           const session = childAdapter?.getSession?.(event.sessionId)
-          if (session)
-            source.sessions.set(mapped.sessionId!, {
-              ...session,
-              id: mapped.sessionId!,
-              metadata: { ...session.metadata, cogniaModel: binding },
-            })
+          if (session) publishSession(session)
         }
         this.emitEvent(agentId, mapped)
         return mapped
@@ -678,14 +766,18 @@ export class ExternalAgentManager {
               : lease.signal
             : options?.signal,
           cogniaModel: null,
-          sessionId: freshSdkTurn ? undefined : previous?.nativeSessionId,
+          resetExternalSession: undefined,
+          rebind: undefined,
+          sessionId: transcript ? undefined : previous?.nativeSessionId,
+          // `undefined` also drops a native model the caller named: the task
+          // route alone selects the model.
           model: prepared.model,
           context: {
             ...options?.context,
             custom: {
               ...custom,
-              sessionId: freshSdkTurn ? undefined : previous?.nativeSessionId,
-              ...(freshSdkTurn && continuationHistory
+              sessionId: transcript ? undefined : previous?.nativeSessionId,
+              ...(transcript && continuationHistory
                 ? { conversationHistory: continuationHistory }
                 : {}),
             },
@@ -2824,11 +2916,17 @@ export class ExternalAgentManager {
     instance: ExternalAgentInstance,
     options?: ExternalAgentExecutionOptions
   ): Promise<ExternalAgentSession> {
-    const preferredSessionId =
+    // A reset starts the conversation's next external session from scratch
+    // (the caller hands the history over instead). A Cognia gateway task id is
+    // never a native session to resume on this lane.
+    const reset = options?.resetExternalSession === true
+    const requestedSessionId =
       options?.sessionId ??
       (typeof options?.context?.custom?.sessionId === "string"
         ? options.context.custom.sessionId
         : undefined)
+    const preferredSessionId =
+      reset || requestedSessionId?.startsWith("cognia-gateway:") ? undefined : requestedSessionId
     const chatSessionId =
       typeof options?.context?.custom?.chatSessionId === "string"
         ? options.context.custom.chatSessionId
@@ -2839,10 +2937,12 @@ export class ExternalAgentManager {
       ? adapter instanceof DevinAcpAdapter
         ? adapter.getSession(preferredSessionId)
         : (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
-      : chatSessionId
-        ? adapter
-            .getSessions()
-            .find((candidate) => candidate.metadata?.cogniaSessionId === chatSessionId)
+      : chatSessionId && !reset
+        ? latestSession(
+            adapter
+              .getSessions()
+              .filter((candidate) => candidate.metadata?.cogniaSessionId === chatSessionId)
+          )
         : undefined
     if (session && adapter instanceof AcpClientAdapter) {
       try {
@@ -3319,11 +3419,31 @@ export class ExternalAgentManager {
    * `instance.sessions` here disagreed with the reuse lookup in `execute`,
    * which already read the adapter, so one of them could find the session
    * while the other reported the agent had nothing open.
+   *
+   * `kind` separates the two lanes a conversation can use: a native caller
+   * (the agent's own model picker, a native resume) must never be handed a
+   * Cognia gateway task id, and the gateway lane must never continue a native
+   * session. A gateway lookup with `originDeviceId` only answers with tasks
+   * that device owns (`null` is the Host's own, unpaired turns). Several
+   * sessions can share one conversation after a reset; the most recently
+   * active one is the conversation's current session.
    */
-  resolveConversationSessionId(agentId: string, chatSessionId: string): string | null {
+  resolveConversationSessionId(
+    agentId: string,
+    chatSessionId: string,
+    filter: { kind: "native" | "gateway"; originDeviceId?: string | null } = { kind: "native" }
+  ): string | null {
+    const gateway = filter.kind === "gateway"
     return (
-      this.liveSessions(agentId).find(
-        (session) => session.metadata?.cogniaSessionId === chatSessionId
+      latestSession(
+        this.liveSessions(agentId).filter(
+          (session) =>
+            session.metadata?.cogniaSessionId === chatSessionId &&
+            session.id.startsWith("cognia-gateway:") === gateway &&
+            (!gateway ||
+              filter.originDeviceId === undefined ||
+              (session.metadata?.cogniaGatewayOriginDeviceId ?? null) === filter.originDeviceId)
+        )
       )?.id ?? null
     )
   }

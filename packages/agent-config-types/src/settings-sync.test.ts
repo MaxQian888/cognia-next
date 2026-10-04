@@ -162,6 +162,15 @@ describe("derived key lists", () => {
     expect(mirrored.has("background")).toBe(false)
   })
 
+  it("keeps the auto-archive policy on the device that owns the sessions", () => {
+    // The sweep runs where the session rows live. A paired client shows the
+    // control disabled ("the Host decides") and never writes it, so the value
+    // has no business on the wire in either direction.
+    expect(SETTINGS_SYNC.conversationArchive.category).toBe("desktop-only")
+    expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain("conversationArchive")
+    expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain("conversationArchive")
+  })
+
   it("lets the fields a /me page edits travel in both directions", () => {
     // A field a mobile page writes is part of the mobile contract by
     // definition, which is exactly what `desktop-only` denies. `evalSettings`

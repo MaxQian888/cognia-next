@@ -1,4 +1,14 @@
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
+import type { Transport } from "@/lib/tauri/transport-types"
+import { setActiveRemoteTransport, __resetRoutingForTests } from "@/lib/tauri/transport-routing"
+import {
+  __resetSpawnPlacementsForTests,
+  clearSpawnPlacement,
+  registerSpawnPlacement,
+  spawnedPlacementDigest,
+} from "@/lib/sandbox/spawn-placement-registry"
+import { agentInvoke, __resetAgentProcessHostsForTests } from "../../agent-transport"
 import {
   createDshRuntimeTransport,
   resolveDshLaunchFromConfig,
@@ -93,7 +103,11 @@ describe("resolveDshLaunchFromConfig", () => {
   })
 })
 
-function fixture(envOverrides: Record<string, string> = {}) {
+function fixture(
+  envOverrides: Record<string, string> = {},
+  agentId = "agent-1",
+  useProcessPlane = false
+) {
   const listeners = new Map<string, (payload: never) => void>()
   const frames: Array<Record<string, unknown>> = []
   let processId = ""
@@ -124,7 +138,7 @@ function fixture(envOverrides: Record<string, string> = {}) {
     }
   })
   const host = {
-    invoke,
+    invoke: useProcessPlane ? agentInvoke : invoke,
     listen: jest.fn(async (channel: string, callback: (payload: never) => void) => {
       listeners.set(channel, callback)
       return () => {
@@ -133,7 +147,7 @@ function fixture(envOverrides: Record<string, string> = {}) {
     }),
   } as unknown as DshProcessHost
   const transport = createDshRuntimeTransport(
-    config({ ...INSTALLED, env: { ...INSTALLED.env, ...envOverrides } }),
+    { ...config({ ...INSTALLED, env: { ...INSTALLED.env, ...envOverrides } }), id: agentId },
     resolveDshLaunchFromConfig,
     true,
     host
@@ -156,6 +170,99 @@ function fixture(envOverrides: Record<string, string> = {}) {
     },
   }
 }
+
+describe("DSH runtime-environment placement through the process plane", () => {
+  let processHost: Transport
+  beforeEach(() => {
+    processHost = {} as Transport
+  })
+  const placement: SandboxPlacement = {
+    kind: "container",
+    isolationMandatory: true,
+    spec: {
+      version: 1,
+      specDigest: "a".repeat(64),
+      projectId: "project-dsh",
+      source: { kind: "deployment-default", catalogEntryId: "default" },
+      image: {
+        registry: "ghcr.io",
+        repository: "cognia/runner",
+        digest: `sha256:${"b".repeat(64)}`,
+      },
+      bundle: { digest: `sha256:${"c".repeat(64)}`, releaseTag: "v1", pinned: false },
+      isolation: { minimum: "container" },
+      sizeClassId: "small",
+      lifecycle: "persistent",
+      user: {},
+      containerEnv: {},
+      lifecycleCommands: {},
+      forwardPorts: [],
+      egress: { tier: "off", presetIds: [], approvedDomains: [] },
+      browserSidecar: false,
+    },
+  }
+
+  afterEach(() => {
+    __resetSpawnPlacementsForTests()
+    __resetAgentProcessHostsForTests()
+    __resetRoutingForTests()
+  })
+
+  function processFixture(agentId = "agent-1") {
+    const f = fixture({}, agentId, true)
+    Object.assign(processHost, { call: f.invoke })
+    setActiveRemoteTransport(processHost)
+    return f
+  }
+
+  it.each(["agent-1", "agent-1:dsh:session-1"])(
+    "carries the project's placement to the host for %s",
+    async (processId) => {
+      registerSpawnPlacement("agent-1", placement)
+      const f = processFixture(processId)
+      await f.transport.start(f.handlers)
+      try {
+        expect(f.invoke).toHaveBeenCalledWith("spawn_external_agent", {
+          config: expect.objectContaining({ id: processId, sandbox: placement }),
+        })
+        expect(spawnedPlacementDigest(processId)).toBe(placement.spec.specDigest)
+      } finally {
+        await f.transport.close()
+      }
+    }
+  )
+
+  it("uses the current placement on reconnect and clears it when the project opts out", async () => {
+    for (const current of [
+      placement,
+      { ...placement, spec: { ...placement.spec, specDigest: "d".repeat(64) } },
+      undefined,
+    ]) {
+      if (current) registerSpawnPlacement("agent-1", current)
+      else clearSpawnPlacement("agent-1")
+      const f = processFixture()
+      await f.transport.start(f.handlers)
+      try {
+        const spawn = f.invoke.mock.calls.find(([name]) => name === "spawn_external_agent")![1]
+        expect((spawn.config as { sandbox?: SandboxPlacement }).sandbox).toEqual(current)
+        expect(spawnedPlacementDigest("agent-1")).toBe(current?.spec.specDigest ?? null)
+      } finally {
+        await f.transport.close()
+      }
+    }
+  })
+
+  it("keeps unselected DSH runs on the existing process path", async () => {
+    const f = processFixture()
+    await f.transport.start(f.handlers)
+    try {
+      const spawn = f.invoke.mock.calls.find(([name]) => name === "spawn_external_agent")![1]
+      expect(spawn.config).not.toHaveProperty("sandbox")
+    } finally {
+      await f.transport.close()
+    }
+  })
+})
 
 describe("DSH host process transport", () => {
   it("sends supported initialization tuning and ignores unrelated host exits", async () => {

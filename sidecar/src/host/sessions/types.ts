@@ -5,6 +5,7 @@ export type Emit = (frame: Frame) => void
 export type Outcome = { ok: true; result: unknown } | { ok: false; error: string }
 /** The host consumes capabilities, while each rail owns its complete session. */
 export interface HostSession {
+  sdkSessionId?: string
   multiTurn?: boolean
   runtimeAdapterId?: string
   turnRef?: { id?: string }
@@ -12,6 +13,7 @@ export interface HostSession {
   modeTransition?: Promise<Outcome>
   q?: {
     active?: unknown
+    closed?: boolean
     interrupt?(): unknown
     close?(): void
     setPermissionMode?(mode: string): unknown

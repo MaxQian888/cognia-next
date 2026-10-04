@@ -127,6 +127,14 @@ export const SETTINGS_SYNC = {
   agentPermissions: { category: "desktop-only" },
   conversationTimeline: { category: "shared" },
   conversationSidebar: { category: "shared" },
+  // A policy the device that OWNS the sessions executes (the
+  // `conversation-auto-archive` scheduler sweep), not a per-device display
+  // preference. A paired client never runs it: its Host owns the rows, so the
+  // client's control is disabled with "the Host decides". Writing it up from a
+  // phone would let a client change a policy that mutates the Host's data, and
+  // mirroring the value down buys nothing the disabled control needs, so it
+  // stays off the wire.
+  conversationArchive: { category: "desktop-only" },
   runStatusBar: { category: "desktop-only" },
   steerInterruptConfirmed: { category: "desktop-only" },
   alwaysAllowTools: { category: "desktop-only" },
@@ -316,6 +324,11 @@ export const SETTINGS_SYNC = {
   activePluginThemeId: { category: "shared" },
   accentColor: { category: "shared" },
   defaultProvider: { category: "desktop-only" },
+  externalAgentModelDefaults: {
+    category: "device-local",
+    rationale:
+      "A welcome-screen pick seeds the next conversation created on the SAME device (`createSession`); the conversation row then carries the choice and syncs with it. The keys are agent ids, and a phone's local agents are not the desktop's, so a default mirrored across devices would name agents the other side does not have.",
+  },
   defaultAccountIds: { category: "desktop-only" },
   defaultAccountId: { category: "desktop-only" },
   petSettings: { category: "desktop-only" },

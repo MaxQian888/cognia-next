@@ -1,9 +1,12 @@
 import type { DockerSandboxConfig, SandboxConnectionRow } from "@/types/sandbox"
+import { sandboxClient } from "@/lib/automation/sandbox-client"
 import { defaultSandboxCapabilities } from "./connection-capabilities"
 import {
+  buildDockerSandboxAdapter,
   lifecycleStateFromDocker,
   policyInputFromConfig,
   requireDockerConfig,
+  type DockerAdapterOutcome,
 } from "./docker-adapter"
 import { SandboxCapabilityError } from "./lifecycle-contract"
 
@@ -99,4 +102,35 @@ describe("requireDockerConfig", () => {
     expect(() => requireDockerConfig(mismatched, "start")).toThrow(SandboxCapabilityError)
     expect(() => requireDockerConfig(mismatched, "start")).toThrow(/describes lume/)
   })
+})
+
+test("a running container does not imply a usable desktop or execution channel", async () => {
+  const connection = row({ state: "running" })
+  const health = jest.fn().mockResolvedValue(false)
+  const client = {
+    ...sandboxClient,
+    inspect: jest.fn().mockResolvedValue({
+      containerId: "container-1",
+      status: "running",
+      running: true,
+      paused: false,
+      networkMode: "bridge",
+      nanoCpus: 0,
+      memoryBytes: 0,
+    }),
+    health,
+  }
+  const outcome: DockerAdapterOutcome = {}
+  const adapter = buildDockerSandboxAdapter(connection, client, outcome, "health")
+  const report = await adapter.health!({
+    connectionId: connection.id,
+    provider: connection.provider,
+    driver: connection.driver,
+    capabilities: connection.capabilities,
+    state: connection.state,
+  })
+  expect(health).toHaveBeenCalledWith(connection.id)
+  expect(report).toMatchObject({ reachable: false, state: "running" })
+  expect(report.error).toContain("desktop capture")
+  expect(outcome.health).toBe(false)
 })

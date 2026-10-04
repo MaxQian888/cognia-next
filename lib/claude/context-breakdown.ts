@@ -350,6 +350,23 @@ export function buildEstimateContextBreakdown(
 }
 
 /**
+ * The breakdown for whichever reading is available: the SDK's live snapshot
+ * when it reports a window, else the transcript estimate sized to the resolved
+ * window. Shared by the composer's context card and the conversation's Usage &
+ * context panel.
+ */
+export function resolveContextBreakdown(
+  sdkUsage: SdkContextUsage | null | undefined,
+  messages: UIMessage[],
+  usedTokens: number,
+  maxTokens: number
+): ContextBreakdown {
+  return sdkUsage && sdkUsage.maxTokens > 0
+    ? buildSdkContextBreakdown(sdkUsage)
+    : buildEstimateContextBreakdown(messages, usedTokens, maxTokens)
+}
+
+/**
  * Where the auto-compaction threshold shown next to the window bar comes from.
  *
  * The renderer used to draw "Auto-compact at 83.5%" unconditionally. That is a

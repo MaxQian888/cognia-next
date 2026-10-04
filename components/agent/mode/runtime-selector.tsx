@@ -31,6 +31,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   BotIcon,
@@ -67,6 +68,11 @@ import { useAgentConnectionStatus } from "@/hooks/agent/use-agent-connection-sta
 import { AgentCredentialBadge } from "@/components/agent/external-agent/credential-status-badge"
 import { ExternalAgentManager } from "@/components/agent/external-agent/manager"
 import { cn } from "@/lib/utils"
+import { isMobile } from "@/lib/capacitor/_shared"
+import {
+  ADD_EXTERNAL_AGENT_ROUTE,
+  EXTERNAL_AGENTS_ROUTE,
+} from "@/components/mobile/external-agents/routes"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
@@ -143,6 +149,14 @@ export function AgentRuntimeSelector({
 
   const externalRows = runtimes.filter((row) => row.group === "external")
   const hostRows = runtimes.filter((row) => row.group === "host")
+  // Nothing to manage yet, on either side: the entry reads as "add" and, on a
+  // phone, goes straight to choosing an agent.
+  const nothingConfigured = configuredExternalCount === 0 && hostRows.length === 0
+  const router = useRouter()
+  // A phone manages agents on the Host, full screen, under /me. The desktop
+  // manager dialog configures this device's own store, which a phone cannot
+  // run from, and was a desktop layout squeezed into a phone-width modal.
+  const [phone] = useState(() => isMobile())
 
   // A persisted selection outlives the agent that justified it: the agent gets
   // deleted, disabled, or its plugin adapter unregisters, and the composer is
@@ -386,7 +400,13 @@ export function AgentRuntimeSelector({
                   // Drawer unmounts its children, so a dialog opened before the
                   // close would be torn down by it.
                   setOpen(false)
-                  setManageOpen(true)
+                  if (phone) {
+                    router.push(
+                      nothingConfigured ? ADD_EXTERNAL_AGENT_ROUTE : EXTERNAL_AGENTS_ROUTE
+                    )
+                  } else {
+                    setManageOpen(true)
+                  }
                 }}
                 className="gap-2"
                 data-testid="runtime-manage-agents"
@@ -394,7 +414,7 @@ export function AgentRuntimeSelector({
                 <SlidersHorizontalIcon className="size-4" />
                 {/* Same dialog either way, but "Manage" reads as housekeeping
                     to someone who has nothing to manage yet. */}
-                {configuredExternalCount === 0 ? t("addExternalAgent") : tExternal("manageAgents")}
+                {nothingConfigured ? t("addExternalAgent") : tExternal("manageAgents")}
               </CommandItem>
             </CommandGroup>
           </CommandList>

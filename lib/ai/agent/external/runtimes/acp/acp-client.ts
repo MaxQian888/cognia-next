@@ -36,7 +36,7 @@ import {
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
 import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
-import { JsonRpcPeer, JsonRpcMethodError } from "../../json-rpc-peer"
+import { JsonRpcPeer, JsonRpcMethodError, type JsonRpcRequestDeadline } from "../../json-rpc-peer"
 import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./acp-wire-codec"
 import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
 import { spawnReclaimingOrphan } from "../../policy/spawn-reclaim"
@@ -52,6 +52,7 @@ import {
   isExternalAgentSessionExtensionUnsupportedForMethod,
 } from "../../session/session-extension-errors"
 import { isToolPreApproved } from "../../policy/tool-preapproval"
+import { deriveAcpPermissionInput } from "./acp-permission-input"
 import type { ExternalAgentCompactionOptions } from "../../capability/session-capabilities"
 import type {
   InitializeRequest as SdkInitializeRequest,
@@ -113,6 +114,15 @@ const GOOSE_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
   plan: "chat",
   dontAsk: "approve",
 }
+
+/**
+ * How long a permission or elicitation waits for a person before it resolves
+ * as cancelled. The turn clock is paused for the whole wait (see
+ * `promptDeadlines`), so this — not the turn timeout — bounds a decision; it
+ * was 5 minutes, which cancelled an approval a phone user was still reading.
+ * The wait also ends on an answer, a turn cancel, an abort, or a disconnect.
+ */
+const USER_DECISION_TIMEOUT_MS = 30 * 60_000
 
 type CachedAcpToolCall = Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }> & {
   _meta?: Record<string, unknown> | null
@@ -198,6 +208,7 @@ import type {
   AcpElicitationResponse,
   AcpToolCallKind,
   AcpToolCallStatus,
+  AcpToolCallContent,
   AcpToolCallLocation,
   AcpPlanEntry,
   ExternalAgentBranchReasonCode,
@@ -810,6 +821,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
   >()
   private knownUrlElicitations = new Map<string, string | undefined>()
+  /**
+   * Live `session/prompt` deadlines by session. The configured turn timeout is
+   * an INACTIVITY window, not a budget: every inbound notification for the
+   * session restarts it, and it is paused while the agent is waiting on us.
+   */
+  private promptDeadlines = new Map<string, JsonRpcRequestDeadline>()
+  /**
+   * Agent→client requests in flight per session (permission, elicitation,
+   * terminal wait, …). While any is open the agent is waiting on the client —
+   * often on a person reading an approval — which is not agent inactivity.
+   */
+  private awaitingClient = new Map<string, number>()
 
   // Extension method handlers for custom "_" methods
   private extensionHandlers: Map<
@@ -2441,13 +2464,22 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const priorUsage = this.cumulativeUsage.get(sessionId)
     if (priorUsage) this.turnStartUsage.set(sessionId, priorUsage)
     else this.turnStartUsage.delete(sessionId)
-    // Send as request but handle response asynchronously
+    // Send as request but handle response asynchronously. The timeout is an
+    // inactivity window (see `promptDeadlines`): a turn that keeps streaming,
+    // or waits on a permission the user is still reading, is not stalled.
+    let deadline: JsonRpcRequestDeadline | undefined
     this.sendRequest<AcpPromptResult>(
       "session/prompt",
       params as unknown as Record<string, unknown>,
-      executionTimeout ?? this._config?.timeout ?? 300000
+      executionTimeout ?? this._config?.timeout ?? 300000,
+      (handle) => {
+        deadline = handle
+        this.promptDeadlines.set(sessionId, handle)
+        this.syncPromptDeadline(sessionId)
+      }
     )
       .then((result) => {
+        this.retirePromptDeadline(sessionId, deadline)
         // Turn over — retire the per-turn message id.
         this.toolCallStates.delete(sessionId)
         this.turnMessageId.delete(sessionId)
@@ -2491,6 +2523,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         })
       })
       .catch(async (error) => {
+        this.retirePromptDeadline(sessionId, deadline)
         if (error instanceof Error && error.message === "Request timeout: session/prompt") {
           // Generic request cancellation does not end an ACP prompt turn.
           // Stop agent work and resolve pending approvals before reporting the deadline.
@@ -3509,10 +3542,30 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async sendRequest<T>(
     method: string,
     params?: Record<string, unknown>,
-    timeout = 30000
+    timeout = 30000,
+    /** Receives the request's deadline handle (inactivity-window callers). */
+    onDeadline?: (deadline: JsonRpcRequestDeadline) => void
   ): Promise<T> {
     if (!this.peer) throw new Error("Not connected to agent")
-    return this.peer.sendRequest<T>(method, params, timeout)
+    if (!onDeadline) return this.peer.sendRequest<T>(method, params, timeout)
+    const { promise, deadline } = this.peer.sendTrackedRequest<T>(method, params, timeout)
+    onDeadline(deadline)
+    return promise
+  }
+
+  /** Pause the session's turn clock while the agent waits on us; resume otherwise. */
+  private syncPromptDeadline(sessionId: string): void {
+    const deadline = this.promptDeadlines.get(sessionId)
+    if (!deadline) return
+    if ((this.awaitingClient.get(sessionId) ?? 0) > 0) deadline.pause()
+    else deadline.resume()
+  }
+
+  /** Retire a turn's deadline, unless a newer turn already replaced it. */
+  private retirePromptDeadline(sessionId: string, deadline: JsonRpcRequestDeadline | undefined) {
+    if (deadline && this.promptDeadlines.get(sessionId) === deadline) {
+      this.promptDeadlines.delete(sessionId)
+    }
   }
 
   /**
@@ -3605,6 +3658,27 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/terminals
    */
   private async dispatchAgentRequest(
+    method: string,
+    params: Record<string, unknown> | undefined,
+    requestId: number | string,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    const sessionId = typeof params?.sessionId === "string" ? params.sessionId : ""
+    if (!sessionId) return this.routeAgentRequest(method, params, requestId, signal)
+    // The agent is waiting on us until this settles: stop its turn clock.
+    this.awaitingClient.set(sessionId, (this.awaitingClient.get(sessionId) ?? 0) + 1)
+    this.syncPromptDeadline(sessionId)
+    try {
+      return await this.routeAgentRequest(method, params, requestId, signal)
+    } finally {
+      const remaining = (this.awaitingClient.get(sessionId) ?? 1) - 1
+      if (remaining > 0) this.awaitingClient.set(sessionId, remaining)
+      else this.awaitingClient.delete(sessionId)
+      this.syncPromptDeadline(sessionId)
+    }
+  }
+
+  private async routeAgentRequest(
     method: string,
     params: Record<string, unknown> | undefined,
     requestId: number | string,
@@ -3776,7 +3850,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       const timeout = setTimeout(() => {
         cleanup()
         resolve({ action: "cancel" })
-      }, 300000)
+      }, USER_DECISION_TIMEOUT_MS)
       this.pendingElicitations.set(id, { request: normalized.request, resolve, reject, timeout })
       signal.addEventListener(
         "abort",
@@ -3845,6 +3919,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         title?: string
         kind?: string
         rawInput?: Record<string, unknown>
+        content?: AcpToolCallContent[]
         locations?: AcpToolCallLocation[]
         _meta?: Record<string, unknown> | null
       }
@@ -3854,6 +3929,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       requestId?: string
       options?: AcpPermissionOption[]
       rawInput?: Record<string, unknown>
+      content?: AcpToolCallContent[]
       locations?: AcpToolCallLocation[]
       _meta?: Record<string, unknown>
       toolInfo?: AcpToolInfo
@@ -3887,6 +3963,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const tcKind = tc.kind ?? params.kind ?? cached?.kind
     const tcRawInput = tc.rawInput ?? params.rawInput ?? cached?.rawInput
     const tcLocations = tc.locations ?? params.locations ?? cached?.locations
+    // `rawInput` is optional and some agents omit it exactly here — Kimi Code
+    // streams the arguments as JSON text in earlier `tool_call_update`s and
+    // sends `rawInput` only after the answer. Recover a display-only preview so
+    // the user never approves a bare `{}`; policy below still reads `rawInput`.
+    const inputView = deriveAcpPermissionInput(
+      {
+        rawInput: tc.rawInput ?? params.rawInput,
+        content: tc.content ?? params.content,
+        locations: tc.locations ?? params.locations,
+      },
+      cached
+    )
     const toolMeta =
       cached?._meta || params._meta || tc._meta
         ? { ...cached?._meta, ...params._meta, ...tc._meta }
@@ -3943,9 +4031,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       toolInfo,
       options: params.options,
       rawInput: tcRawInput,
+      ...(inputView.source && inputView.source !== "rawInput"
+        ? { inputPreview: inputView.input }
+        : {}),
       locations: tcLocations,
       _meta: toolMeta,
-      reason: params.reason || `Tool "${tcTitle || toolInfo.name}" requires permission`,
+      // The agent's own words about the call ("Requesting approval to Running:
+      // echo hi") say more than a synthesized sentence naming the tool.
+      reason:
+        params.reason ||
+        inputView.summary ||
+        `Tool "${tcTitle || toolInfo.name}" requires permission`,
       riskLevel: params.riskLevel,
       autoApproveTimeout: params.autoApproveTimeout,
       metadata: params.metadata,
@@ -4018,14 +4114,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         this.pendingPermissions.delete(requestId)
         reject(new JsonRpcMethodError(-32800, "Request cancelled"))
       }
-      // Set timeout for permission request (5 minutes)
+      // Bound the wait for a person (see USER_DECISION_TIMEOUT_MS).
       const timeoutId = setTimeout(() => {
         if (this.pendingPermissions.has(requestId)) {
           this.pendingPermissions.delete(requestId)
           removeAbortListener()
           resolve({ outcome: { outcome: "cancelled" } })
         }
-      }, 300000)
+      }, USER_DECISION_TIMEOUT_MS)
 
       // Store pending permission
       this.pendingPermissions.set(requestId, {
@@ -4184,6 +4280,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Handle a JSON-RPC notification
    */
   private handleNotification(notification: JsonRpcNotification): void {
+    // Any notification scoped to a session is the agent making progress on
+    // it — restart that turn's inactivity window.
+    const notifiedSessionId = notification.params?.sessionId
+    if (typeof notifiedSessionId === "string") {
+      this.promptDeadlines.get(notifiedSessionId)?.touch()
+    }
     if (notification.method === "mcp/message") {
       void this.handleDynamicMcpMessage(
         notification.params as unknown as AcpMessageMcpNotification,

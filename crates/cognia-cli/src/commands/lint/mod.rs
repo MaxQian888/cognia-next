@@ -193,6 +193,74 @@ mod tests {
         })
     }
 
+    fn pi_package_manifest() -> Value {
+        json!({
+            "id": "pi-demo",
+            "name": "Pi Demo",
+            "version": "0.1.0",
+            "description": "demo",
+            "type": "frontend",
+            "capabilities": ["pi-package"],
+            "main": "dist/index.js",
+            "piPackages": [{
+                "id": "latex",
+                "name": "LaTeX",
+                "path": "pi",
+                "prepare": { "program": "npm", "args": ["ci"], "marker": "pi/node_modules/.package-lock.json" },
+                "hostedSession": { "extensions": ["pi/extensions/latex.ts"] }
+            }]
+        })
+    }
+
+    #[test]
+    fn pi_package_paths_are_confined_including_extension_arrays() {
+        assert_clean(pi_package_manifest());
+
+        let mut m = pi_package_manifest();
+        m["piPackages"][0]["path"] = json!("../outside");
+        assert_has_error_code(m, "manifest.piPackages.path.traversal");
+
+        let mut m = pi_package_manifest();
+        m["piPackages"][0]["prepare"]["marker"] = json!("/etc/passwd");
+        assert_has_error_code(m, "manifest.piPackages.prepare.marker.absolute");
+
+        // The trailing `[]` path field walks every element of the array.
+        let mut m = pi_package_manifest();
+        m["piPackages"][0]["hostedSession"]["extensions"] =
+            json!(["pi/extensions/ok.ts", "../../escape.ts"]);
+        let diags = validate_manifest(&m);
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error
+                && d.code == "manifest.piPackages.hostedSession.extensions.traversal"
+                && d.field == "piPackages[0].hostedSession.extensions[1]"),
+            "expected traversal on extensions[1], got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn pi_package_prepare_program_is_allowlisted() {
+        for program in ["npm", "pnpm"] {
+            let mut m = pi_package_manifest();
+            m["piPackages"][0]["prepare"]["program"] = json!(program);
+            assert_clean(m);
+        }
+        for program in [json!("sh"), json!("yarn"), json!(null)] {
+            let mut m = pi_package_manifest();
+            m["piPackages"][0]["prepare"]["program"] = program;
+            assert_has_error_code(m, "manifest.piPackages.prepare.program.invalid");
+        }
+        let mut m = pi_package_manifest();
+        m["piPackages"][0]["prepare"]["args"] = json!(["ci", 1]);
+        assert_has_error_code(m, "manifest.piPackages.prepare.args.invalid");
+        // A package without a prepare step is not linted for one.
+        let mut m = pi_package_manifest();
+        m["piPackages"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("prepare");
+        assert_clean(m);
+    }
+
     #[test]
     fn runtime_combinations_enforce_javascript_entry_ownership() {
         // A JS-only (React) contribution — `views` (tree-view) has no Python

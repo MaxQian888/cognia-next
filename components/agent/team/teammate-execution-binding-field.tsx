@@ -32,6 +32,7 @@ import { resolveTeammateExecutionBinding } from "@/lib/ai/agent/team/teammate/ex
 import { resolveAgentExecutionSpec } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { TeammateExecutionBinding } from "@/types/agent/agent-team"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
+import { resolveAgentExecutionEnvironment } from "@/lib/ai/agent/execution/host-environment"
 
 export interface TeammateExecutionBindingFieldProps {
   value: TeammateExecutionBinding | undefined
@@ -47,7 +48,7 @@ function previewDecision(
   value: TeammateExecutionBinding | undefined,
   teamDefault: TeammateExecutionBinding | undefined
 ) {
-  const environment = { isTauri: true, isHeadlessHost: false }
+  const environment = resolveAgentExecutionEnvironment()
   const flags = getAgentExecutionFlags()
   const base = {
     surface: "team" as const,
@@ -73,7 +74,10 @@ export function TeammateExecutionBindingField({
   const mode = value?.mode ?? "inherit"
   const pinned = value?.mode === "pinned" ? value : undefined
   const pool = value?.mode === "pool" ? value : undefined
-  const executionTarget = value?.executionTarget ?? { mode: "colocate" as const }
+  const executionTarget = resolveTeammateExecutionBinding({
+    member: value,
+    teamDefault,
+  }).executionTarget
   const executionTargetPatch = value?.executionTarget ? { executionTarget } : {}
   const pinnedHostRef = executionTarget.mode === "pinned" ? executionTarget.hostRef : undefined
   const hosts = snapshot.hosts ?? []
@@ -98,7 +102,7 @@ export function TeammateExecutionBindingField({
       <p className="text-[10px] text-muted-foreground">{t("description")}</p>
       {!remoteReady && executionTarget.mode !== "colocate" ? (
         <p className="text-[10px] text-amber-600 dark:text-amber-500">
-          {t("remotePrerequisitesHint")}
+          {t(remoteDispatchEnabled ? "remotePrerequisitesHint" : "remoteDispatchDisabled")}
         </p>
       ) : null}
       <Select
@@ -170,7 +174,8 @@ export function TeammateExecutionBindingField({
             ))}
           </SelectContent>
         </Select>
-        {executionTarget.mode === "pinned" &&
+        {remoteDispatchEnabled &&
+        executionTarget.mode === "pinned" &&
         !hosts.some((host) => host.hostRef === executionTarget.hostRef && host.online) ? (
           <p className="text-[10px] text-amber-600 dark:text-amber-500">
             {t("hostWaitingWarning")}

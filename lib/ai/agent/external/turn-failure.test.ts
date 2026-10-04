@@ -1,9 +1,14 @@
-import { classifyExternalTurnFailure, planHaltCauseForCode } from "./turn-failure"
+import {
+  classifyExternalTurnFailure,
+  piPackageTurnFailure,
+  planHaltCauseForCode,
+} from "./turn-failure"
 import { LeaseConflictError } from "@/lib/execution/lease-conflict"
 import {
   PiExtensionHandshakeError,
   PiProcessExitedError,
   PiResourceLimitError,
+  PiPackageUnavailableError,
 } from "./runtimes/pi/pi-rpc-client"
 
 describe("classifyExternalTurnFailure", () => {
@@ -55,5 +60,29 @@ describe("planHaltCauseForCode", () => {
     expect(planHaltCauseForCode("workspaceBusy")).toBe("not_started")
     expect(planHaltCauseForCode("executionFailed")).toBe("turn_failed")
     expect(planHaltCauseForCode("unknown")).toBe("turn_failed")
+  })
+})
+
+describe("plugin Pi package refusals (ADR-0210)", () => {
+  it("classify as a session that never started", () => {
+    const error = new PiPackageUnavailableError("a/b", "not-prepared", "english detail")
+    expect(classifyExternalTurnFailure(error)).toBe("piPackageUnavailable")
+    expect(planHaltCauseForCode("piPackageUnavailable")).toBe("not_started")
+  })
+
+  it("carry the localized message key and its ICU values, even when wrapped", () => {
+    const error = new PiPackageUnavailableError("a/b", "pi-version", "english", {
+      version: "1.0.0",
+      installed: "0.85.1",
+    })
+    expect(piPackageTurnFailure(new Error("outer", { cause: error }))).toEqual({
+      messageKey: "piVersion",
+      params: { version: "1.0.0", installed: "0.85.1" },
+    })
+    expect(piPackageTurnFailure(new PiPackageUnavailableError("a/b", "weird", "x"))).toEqual({
+      messageKey: "resolutionFailed",
+      params: {},
+    })
+    expect(piPackageTurnFailure(new PiResourceLimitError(4))).toBeNull()
   })
 })

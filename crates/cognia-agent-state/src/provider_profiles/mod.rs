@@ -861,12 +861,10 @@ pub fn resolve_credential_ref(reference: &Value) -> Option<String> {
     match reference.get("kind").and_then(Value::as_str)? {
         "secret-store" => {
             let id = reference.get("secretId").and_then(Value::as_str)?;
-            SecretStoreResolver {
-                service: "com.cognia.provider-credentials".into(),
-            }
-            .resolve(&CredentialSource::SecretStore { id })
-            .ok()
-            .map(|r| r.secret)
+            SecretStoreResolver::provider_credentials()
+                .resolve(&CredentialSource::SecretStore { id })
+                .ok()
+                .map(|r| r.secret)
         }
         "env" => {
             let var = reference.get("var").and_then(Value::as_str)?;

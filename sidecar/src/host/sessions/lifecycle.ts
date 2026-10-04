@@ -28,7 +28,8 @@ export function makeWrappedEmit(
   sessionsMap: Map<string, HostSession>,
   sessionId: string,
   getOwner?: () => HostSession | null | undefined,
-  turnRef?: { id?: string }
+  turnRef?: { id?: string },
+  transcriptInvalidationId?: string
 ) {
   // Retire the map entry only when it still points at THIS session. After a
   // close-and-restart (see `handleSend` / `restartReason`) the OLD loop can emit
@@ -55,7 +56,11 @@ export function makeWrappedEmit(
     // this wrapper. A turn-less send (older parent) leaves the field absent, and
     // the renderer treats absence as "can't tell" and keeps the event.
     const turnId = turnRef?.id
-    emitFn(turnId && msg && typeof msg === "object" ? { ...msg, turnId } : msg)
+    emitFn({
+      ...msg,
+      ...(turnId ? { turnId } : {}),
+      ...(transcriptInvalidationId ? { transcriptInvalidationId } : {}),
+    })
     if (msg && msg.type === "session_ended" && msg.sessionId === sessionId) {
       // A multi-turn dispatcher (ai-sdk) keeps ONE live loop across turns and
       // accumulates conversation context in-process. A per-turn `session_ended`
@@ -133,6 +138,13 @@ export function envelopeEmitterParams({
  * @returns {string | null}
  */
 export function restartReason(existing: HostSession, options?: SendOptions) {
+  if (Array.isArray(options?.initialConversation)) return "transcript restored"
+  if (
+    typeof options?.transcriptInvalidationId === "string" &&
+    options.transcriptInvalidationId !== existing.sendOptions?.transcriptInvalidationId
+  ) {
+    return "transcript changed"
+  }
   // Working directory changed — the SDK must respawn to pick up the new cwd.
   if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
     return "cwd changed"

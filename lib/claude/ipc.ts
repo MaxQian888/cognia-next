@@ -100,11 +100,71 @@ function isPermissionRequestEvent(event: unknown): event is PermissionRequestEve
   )
 }
 
+/** Frozen replay must keep the transcript generation it was accepted against. */
+export class TranscriptRuntimeRecoveryError extends Error {
+  constructor(readonly code: string) {
+    super(code)
+    this.name = "TranscriptRuntimeRecoveryError"
+  }
+}
+
+type PromptDelivery = {
+  commandId?: string
+  /** `prepared` requires the caller to hold the transcript lock through this receipt. */
+  transcriptRuntime?: "prepared" | "frozen"
+}
+
 export async function sendPrompt(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions,
-  delivery?: { commandId?: string }
+  delivery?: PromptDelivery
+): Promise<void> {
+  // A mirrored row is not the execution host's transcript authority. Preserve
+  // host-issued options on remote sends; frozen local replay needs a local row.
+  if (turnsRunOnPairedHost()) {
+    if (delivery?.transcriptRuntime === "frozen") {
+      throw new TranscriptRuntimeRecoveryError("frozen_transcript_host_unverified")
+    }
+    const { getSession } = await import("@/lib/db/sessions")
+    const mirror = await getSession(sessionId)
+    if (mirror?.runtimeTranscriptGeneration || mirror?.runtimeTranscriptInvalidated) {
+      throw new TranscriptRuntimeRecoveryError("transcript_authoritative_host_required")
+    }
+    return sendPromptToTransport(sessionId, prompt, options, delivery)
+  }
+  if (delivery?.transcriptRuntime === "prepared") {
+    return sendPromptToTransport(sessionId, prompt, options, delivery)
+  }
+  const { withTranscriptRuntimeLock } = await import("@/lib/chat/transcript/revision-events")
+  await withTranscriptRuntimeLock(sessionId, async () => {
+    if (delivery?.transcriptRuntime === "frozen") {
+      const { getSession } = await import("@/lib/db/sessions")
+      const session = await getSession(sessionId)
+      if (!session) throw new TranscriptRuntimeRecoveryError("frozen_transcript_session_missing")
+      if (options?.transcriptInvalidationId !== session.runtimeTranscriptGeneration) {
+        throw new TranscriptRuntimeRecoveryError("frozen_transcript_generation_mismatch")
+      }
+      return sendPromptToTransport(sessionId, prompt, options, delivery)
+    }
+    const { prepareTranscriptRuntimeSend } = await import("@/hooks/chat/claude-chat-send-options")
+    const prepared = await prepareTranscriptRuntimeSend(sessionId, options ?? {})
+    return sendPromptToTransport(
+      sessionId,
+      prompt,
+      options || Object.values(prepared).some((value) => value !== undefined)
+        ? prepared
+        : undefined,
+      delivery
+    )
+  })
+}
+
+async function sendPromptToTransport(
+  sessionId: string,
+  prompt: SendContent,
+  options?: SendOptions,
+  delivery?: PromptDelivery
 ): Promise<void> {
   const sdk = options?.claudeAgentSdk
   if (

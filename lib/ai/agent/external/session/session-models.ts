@@ -25,11 +25,17 @@
  */
 
 import type {
+  AppSettings,
+  ChatSession,
+  ExternalAgentModelChoice as ConversationModelChoice,
+} from "@cognia/agent-config-types"
+import type {
   AcpConfigOption,
   AcpConfigOptionValue,
   AcpSessionModelState,
   ExternalAgentCogniaModelBinding,
 } from "@/types/agent/external-agent"
+import { parseGatewaySessionId } from "@/lib/ai/agent/external/config/gateway-task"
 
 /**
  * The provider id an external agent's own models are grouped under.
@@ -45,6 +51,28 @@ import type {
  * been persisted.
  */
 export const EXTERNAL_AGENT_PROVIDER_ID = "cognia:external-agent"
+
+/**
+ * The group-id prefix the composer's picker gives a Cognia provider offered to
+ * an external agent (`cognia:gateway:<providerId>`), so a selection from that
+ * section is told apart from both an agent's own model and a built-in-lane
+ * provider pick. A picker id only: never persisted, never a provider.
+ */
+export const COGNIA_GATEWAY_GROUP_PREFIX = "cognia:gateway:"
+
+export function cogniaGatewayGroupId(providerId: string): string {
+  return `${COGNIA_GATEWAY_GROUP_PREFIX}${encodeURIComponent(providerId)}`
+}
+
+/** The Cognia provider id a gateway group names, or `null` for any other group. */
+export function cogniaProviderIdFromGroupId(groupId: string | undefined): string | null {
+  if (!groupId?.startsWith(COGNIA_GATEWAY_GROUP_PREFIX)) return null
+  try {
+    return decodeURIComponent(groupId.slice(COGNIA_GATEWAY_GROUP_PREFIX.length)) || null
+  } catch {
+    return null
+  }
+}
 
 /** Persisted marker for a model chosen from one specific external agent. */
 export function externalAgentProviderId(agentId: string): string {
@@ -69,58 +97,306 @@ export function externalAgentIdFromProviderId(providerId: string | undefined): s
   }
 }
 
-/** Where a turn's model choice can have been recorded, in precedence order. */
-export interface ExternalAgentModelAxisInput {
-  /** The agent this turn actually runs on. */
-  agentId: string
-  /** `ChatSession.model` and its provider stamp. */
-  sessionModel?: string
-  sessionProviderOverride?: string
-  /** `AppSettings.defaultModel` and its provider stamp. */
-  defaultModel?: string
-  defaultProvider?: string
+/** How many retained gateway links a conversation keeps per agent. */
+export const EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT = 4
+
+const GATEWAY_SESSION_PREFIX = "cognia-gateway:"
+
+/** Whether a session id is a Cognia gateway task link (`gatewaySessionId`). */
+export function isGatewaySessionLink(sessionId: string | undefined): sessionId is string {
+  return sessionId?.startsWith(GATEWAY_SESSION_PREFIX) === true
+}
+
+/** A gateway link's parts, or `undefined` for a native id or a malformed link. */
+function gatewayLinkParts(sessionId: string | undefined) {
+  if (!isGatewaySessionLink(sessionId)) return undefined
+  try {
+    return parseGatewaySessionId(sessionId)
+  } catch {
+    // A link this build cannot read is evidence of nothing: it is neither
+    // resumed nor allowed to decide the route.
+    return undefined
+  }
 }
 
 /**
- * The model a turn on THIS agent should replay, or `undefined` for "the agent
- * keeps whatever it is on".
+ * Whether two bindings name the same gateway task route.
  *
- * Two places can hold the choice, and reading only the first is what made a
- * picked model vanish. The conversation row is the normal home, written by the
- * picker whenever a conversation exists. But the composer offers an agent's
- * models on a brand-new chat too, and there is no row yet to write to, so the
- * picker records it as the app-wide default instead. A send path that read
- * only the row therefore dropped the very first turn's model and let the agent
- * boot onto its own, with nothing anywhere saying so.
- *
- * Both sources are guarded on the marker naming this agent, never merely on
- * being non-empty. The same two columns hold an ordinary provider's model for
- * the built-in lane, and replaying one of those at an agent would ask for an
- * id it has never heard of. The legacy unscoped marker resolves to `null` and
- * is skipped for the same reason: it cannot be attributed to any agent.
+ * Mirrors the manager's own resume check (`prepareGatewayExecution`): an
+ * omitted account on the SELECTION accepts whatever account the task froze,
+ * because "the provider default" was resolved once, at task start, and that
+ * resolution is what the task is bound to. A concrete or `null` account must
+ * match exactly.
  */
-export function resolveExternalAgentModelAxis(
-  input: ExternalAgentModelAxisInput
-): string | undefined {
-  const owns = (model: string | undefined, providerId: string | undefined) =>
-    model && externalAgentIdFromProviderId(providerId) === input.agentId ? model : undefined
+export function sameCogniaModelBinding(
+  selection: ExternalAgentCogniaModelBinding,
+  bound: ExternalAgentCogniaModelBinding
+): boolean {
   return (
-    owns(input.sessionModel, input.sessionProviderOverride) ??
-    owns(input.defaultModel, input.defaultProvider)
+    selection.providerId === bound.providerId &&
+    selection.modelId === bound.modelId &&
+    (selection.accountId === undefined || selection.accountId === bound.accountId)
   )
 }
 
-/** Only an explicit conversation choice opts an external task into Cognia routing. */
-export function resolveExternalAgentCogniaModelAxis(
-  input: ExternalAgentModelAxisInput & { accountId?: string | null }
-): ExternalAgentCogniaModelBinding | null | undefined {
-  if (isExternalAgentProviderId(input.sessionProviderOverride)) return null
-  if (!input.sessionProviderOverride || !input.sessionModel || input.sessionModel === "auto")
-    return undefined
-  return {
-    providerId: input.sessionProviderOverride,
-    modelId: input.sessionModel,
-    ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
+/**
+ * A stable key for a binding, for a run's route stamp when no task id is known.
+ * The account is part of it: two accounts are two separate memories.
+ */
+export function cogniaModelBindingKey(binding: ExternalAgentCogniaModelBinding): string {
+  // `null` (manual API settings) and omitted (provider default) are two routes.
+  const account =
+    binding.accountId === undefined
+      ? ""
+      : binding.accountId === null
+        ? "~manual"
+        : binding.accountId
+  return [binding.providerId, binding.modelId, account].map(encodeURIComponent).join("/")
+}
+
+/**
+ * The route a turn on an external agent ran (or will run) on, as transcript
+ * memory: `native`, or `cognia:<taskId>` for a gateway task (falling back to
+ * the binding's key when no task id is known yet).
+ *
+ * Finer than the lane: an agent's own native session and a gateway task on the
+ * same agent keep two separate memories of the conversation, so a native
+ * session resumed after Cognia turns must be told about those turns
+ * (`lib/chat/turn-route/history.ts`).
+ */
+export function externalAgentRouteKey(input: {
+  sessionId?: string
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
+}): string {
+  const link = gatewayLinkParts(input.sessionId)
+  if (link) return `cognia:${link.taskId}`
+  if (input.cogniaModel) return `cognia:${cogniaModelBindingKey(input.cogniaModel)}`
+  return "native"
+}
+
+type GatewaySessionLink = { agentId: string; sessionId: string }
+
+type SessionModelColumns = Pick<
+  ChatSession,
+  | "externalAgentModels"
+  | "externalAgentSession"
+  | "externalAgentGatewaySessions"
+  | "model"
+  | "providerOverride"
+>
+
+/**
+ * Every gateway task link a conversation row still holds: the current slot and
+ * the retained list, de-duplicated. What deleting the row must clean up.
+ */
+export function managedGatewayLinksOf(
+  row: Pick<ChatSession, "externalAgentSession" | "externalAgentGatewaySessions"> | undefined
+): GatewaySessionLink[] {
+  const links = new Map<string, GatewaySessionLink>()
+  for (const link of [row?.externalAgentSession, ...(row?.externalAgentGatewaySessions ?? [])]) {
+    if (link && isGatewaySessionLink(link.sessionId))
+      links.set(`${link.agentId}\u0000${link.sessionId}`, link)
+  }
+  return [...links.values()]
+}
+
+/**
+ * The retained link list after `link` became the conversation's current one.
+ *
+ * The slot it replaces is kept too (a row written before the list existed has
+ * its only link there), the newest goes last, and each agent keeps its last
+ * {@link EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT}. `evicted` is what fell off
+ * the end, whose retained task state the caller should delete: nothing on the
+ * row names it any more, so nothing else ever would.
+ */
+export function rememberGatewaySession(
+  row: Pick<ChatSession, "externalAgentSession" | "externalAgentGatewaySessions"> | undefined,
+  link: GatewaySessionLink
+): { sessions: GatewaySessionLink[]; evicted: GatewaySessionLink[] } {
+  const same = (a: GatewaySessionLink, b: GatewaySessionLink) =>
+    a.agentId === b.agentId && a.sessionId === b.sessionId
+  const ordered: GatewaySessionLink[] = []
+  for (const candidate of [
+    ...(row?.externalAgentGatewaySessions ?? []),
+    row?.externalAgentSession,
+    link,
+  ]) {
+    if (!candidate || !isGatewaySessionLink(candidate.sessionId)) continue
+    const at = ordered.findIndex((entry) => same(entry, candidate))
+    if (at >= 0) ordered.splice(at, 1)
+    ordered.push({ agentId: candidate.agentId, sessionId: candidate.sessionId })
+  }
+  const kept: GatewaySessionLink[] = []
+  const evicted: GatewaySessionLink[] = []
+  const perAgent = new Map<string, number>()
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const entry = ordered[index]
+    const count = perAgent.get(entry.agentId) ?? 0
+    if (count < EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT) kept.unshift(entry)
+    else evicted.push(entry)
+    perAgent.set(entry.agentId, count + 1)
+  }
+  return { sessions: kept, evicted }
+}
+
+/** Where a turn's model selection came from, in precedence order. */
+export type ExternalAgentModelSelectionSource =
+  "conversation" | "gateway-link" | "legacy-marker" | "app-default" | "agent-default" | "none"
+
+export interface ExternalAgentModelSelectionInput {
+  /** The agent this turn runs on: a local agent id or a Host configuration id. */
+  agentId: string
+  /** The conversation row. `null`/`undefined` before one exists (the welcome screen). */
+  session?: Partial<SessionModelColumns> | null
+  /**
+   * The agent configuration's own Cognia binding (`ExternalAgentConfig.cogniaModel`):
+   * a binding, `null` for "explicitly native", `undefined` when this client
+   * does not know it (a configuration the paired Host owns, whose default is
+   * the Host's to apply).
+   */
+  agentDefault?: ExternalAgentCogniaModelBinding | null
+  /**
+   * App-wide fallbacks. `externalAgentModelDefaults` is read only when there
+   * is no conversation row: `createSession` copies it onto the row, after
+   * which the choice is the conversation's own. The legacy app-default marker
+   * (`defaultProvider` naming this agent) is still honoured as a native pick.
+   */
+  appDefaults?: Partial<
+    Pick<AppSettings, "externalAgentModelDefaults" | "defaultModel" | "defaultProvider">
+  > | null
+}
+
+export interface ExternalAgentModelSelection {
+  /**
+   * A binding runs the turn through the Cognia gateway; `null` runs the
+   * agent's own models; `undefined` leaves it to the agent configuration's
+   * default (on a Host lane, the Host's).
+   */
+  cogniaModel: ExternalAgentCogniaModelBinding | null | undefined
+  /** The agent's own model id to replay. Only ever set on the native route. */
+  model?: string
+  /**
+   * The gateway task link to resume: set only when a link's binding EQUALS
+   * the selection (or, with no explicit choice, the conversation's current
+   * link, which is its own evidence of the route).
+   */
+  gatewayLink?: string
+  /**
+   * The selection is a Cognia binding that no retained task serves, so the
+   * turn starts a new task and must not resume whatever the conversation last
+   * had open on this agent. The caller hands the transcript over.
+   */
+  resetExternalSession?: boolean
+  /**
+   * Switching between Cognia models: `gatewayLink` is this agent's most recent
+   * task, bound to ANOTHER Cognia model, and the manager may
+   * rebind it to the selection so the agent keeps its own history instead of
+   * getting a summary. Only a local lane can rebind; a Host lane treats this
+   * as a reset.
+   */
+  rebind?: boolean
+  /** The choice the picker should show as active, or `null` for the agent's own default. */
+  choice: ConversationModelChoice | null
+  source: ExternalAgentModelSelectionSource
+}
+
+/**
+ * Which models a turn on THIS agent runs, read from the places the choice can
+ * have been recorded, in precedence order:
+ *
+ * 1. the conversation's explicit choice, `session.externalAgentModels[agentId]`;
+ * 2. for rows written before that existed, the conversation's current
+ *    `cognia-gateway:` link for this agent (its encoded binding, if any);
+ * 3. the legacy `cognia:external-agent:<id>` marker, on the row or the app
+ *    default, as a native pick of that model;
+ * 4. with no row yet, `AppSettings.externalAgentModelDefaults[agentId]`;
+ * 5. the agent configuration's default binding;
+ * 6. native, on the agent's own default model.
+ *
+ * It never reads `session.model` / `providerOverride` / `accountId` as a
+ * binding. Those are the built-in lane's pick, and treating them as a Cognia
+ * selection is what routed a Kimi turn through a Claude model left over from
+ * a built-in turn.
+ */
+export function resolveExternalAgentModelSelection(
+  input: ExternalAgentModelSelectionInput
+): ExternalAgentModelSelection {
+  const { agentId, session } = input
+  const currentLink =
+    session?.externalAgentSession?.agentId === agentId &&
+    isGatewaySessionLink(session.externalAgentSession.sessionId)
+      ? session.externalAgentSession.sessionId
+      : undefined
+
+  const explicit = session?.externalAgentModels?.[agentId]
+  if (explicit) return fromChoice(explicit, "conversation")
+
+  if (currentLink) {
+    const parts = gatewayLinkParts(currentLink)
+    if (parts) {
+      return {
+        cogniaModel: parts.binding,
+        gatewayLink: currentLink,
+        choice: parts.binding ? { kind: "cognia", binding: parts.binding } : null,
+        source: "gateway-link",
+      }
+    }
+  }
+
+  const marked = (model: string | undefined, providerId: string | undefined) =>
+    model?.trim() && externalAgentIdFromProviderId(providerId) === agentId
+      ? model.trim()
+      : undefined
+  const legacy =
+    marked(session?.model, session?.providerOverride) ??
+    marked(input.appDefaults?.defaultModel, input.appDefaults?.defaultProvider)
+  if (legacy) return fromChoice({ kind: "native", modelId: legacy }, "legacy-marker")
+
+  if (!session) {
+    const appDefault = input.appDefaults?.externalAgentModelDefaults?.[agentId]
+    if (appDefault) return fromChoice(appDefault, "app-default")
+  }
+
+  if (input.agentDefault) {
+    return fromChoice({ kind: "cognia", binding: input.agentDefault }, "agent-default")
+  }
+  if (input.agentDefault === null) return fromChoice({ kind: "native" }, "agent-default")
+  return { cogniaModel: undefined, choice: null, source: "none" }
+
+  function fromChoice(
+    choice: ConversationModelChoice,
+    source: ExternalAgentModelSelectionSource
+  ): ExternalAgentModelSelection {
+    if (choice.kind === "native") {
+      return {
+        cogniaModel: null,
+        ...(choice.modelId ? { model: choice.modelId } : {}),
+        choice,
+        source,
+      }
+    }
+    const binding = choice.binding
+    const candidates = [
+      ...(currentLink ? [currentLink] : []),
+      ...[...(session?.externalAgentGatewaySessions ?? [])]
+        .reverse()
+        .filter((link) => link.agentId === agentId)
+        .map((link) => link.sessionId),
+    ]
+    const gatewayLink = candidates.find((sessionId) => {
+      const bound = gatewayLinkParts(sessionId)?.binding
+      return bound !== undefined && sameCogniaModelBinding(binding, bound)
+    })
+    if (gatewayLink) return { cogniaModel: binding, gatewayLink, choice, source }
+    // No task runs this model yet. The agent's latest task can be rebound to
+    // it, provider, model and subscription account included: the links are
+    // this conversation's, for this agent, on this client, and the manager
+    // enforces the rest (same Cognia owner, device and runtime).
+    const latest = candidates[0]
+    if (latest && gatewayLinkParts(latest)?.binding) {
+      return { cogniaModel: binding, gatewayLink: latest, rebind: true, choice, source }
+    }
+    return { cogniaModel: binding, resetExternalSession: true, choice, source }
   }
 }
 
@@ -286,6 +562,65 @@ export function resolveExternalAgentModels(input: {
   if (current) return { choices: [], currentModelId: current, write: { kind: "none" } }
 
   return EMPTY
+}
+
+/**
+ * A surface whose writes cannot reach the agent's session directly, so a pick
+ * is recorded on the conversation and replayed by `applyModelToSession` on the
+ * next turn.
+ *
+ * Used for what a paired Host REPORTED about the session it runs: this client
+ * holds no handle on that session, but the Host applies the persisted model at
+ * the start of the next turn (`startRemoteExternalTurn({ model })`).
+ */
+export function seededModelSurface(surface: ExternalAgentModelSurface): ExternalAgentModelSurface {
+  return {
+    ...surface,
+    write: surface.choices.length > 0 ? { kind: "session-seed" } : { kind: "none" },
+  }
+}
+
+/**
+ * The model and thinking options a session should report, as config options.
+ *
+ * The agent's own option list is reported verbatim when it has one, because
+ * that is the shape ACP clients already understand. An agent that keeps its
+ * models elsewhere (ACP `session/new` → `models`, or an adapter that answers
+ * asynchronously) has its resolved surfaces folded back into the matching
+ * `select` options, so the receiving side re-derives the same surfaces with
+ * {@link resolveExternalAgentModels} and {@link resolveExternalAgentThinking}.
+ */
+export function reportableConfigOptions(
+  configOptions: readonly AcpConfigOption[] | undefined,
+  surfaces: { models: ExternalAgentModelSurface; thinking: ExternalAgentThinkingSurface }
+): AcpConfigOption[] {
+  const options = [...(configOptions ?? [])]
+  const { models, thinking } = surfaces
+  if (!findModelConfigOption(options) && models.choices.length > 0) {
+    options.push({
+      id: models.write.kind === "config-option" ? models.write.optionId : "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: models.currentModelId ?? "",
+      options: models.choices.map((choice) => ({
+        value: choice.modelId,
+        name: choice.name,
+        ...(choice.description ? { description: choice.description } : {}),
+      })),
+    })
+  }
+  if (!findThinkingConfigOption(options) && thinking.levels.length > 0) {
+    options.push({
+      id: thinking.write.kind === "config-option" ? thinking.write.optionId : "thought_level",
+      name: "Thinking",
+      category: "thought_level",
+      type: "select",
+      currentValue: thinking.currentLevel ?? "",
+      options: thinking.levels.map((level) => ({ value: level, name: level })),
+    })
+  }
+  return options
 }
 
 /**

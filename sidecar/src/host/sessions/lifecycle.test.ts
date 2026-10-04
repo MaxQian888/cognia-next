@@ -258,6 +258,21 @@ test("routeClose calls q.close when the dispatch path provides it", () => {
 })
 
 // ── Identity guard: a superseded old loop must not evict its replacement ──────
+test("raw events preserve runtime generation across repeated turn ids", () => {
+  const frames: Array<Record<string, unknown>> = []
+  const emit = makeWrappedEmit(
+    (frame) => frames.push(frame),
+    new Map(),
+    "s1",
+    undefined,
+    { id: "same-turn" },
+    "replacement-generation"
+  )
+  emit({ type: "event", sessionId: "s1", event: { type: "system", subtype: "compact_boundary" } })
+  assert.equal(frames[0]?.turnId, "same-turn")
+  assert.equal(frames[0]?.transcriptInvalidationId, "replacement-generation")
+})
+
 // After a close-and-restart the OLD session's loop can emit a late
 // `session_ended` / `session_closed` for the same id. With `getOwner` wired,
 // the wrapped emitter retires the entry only when the map still points at the
@@ -328,6 +343,30 @@ test("restartReason: an in-flight ai-sdk (multiTurn) turn forces a restart", () 
 test("restartReason: an idle ai-sdk (multiTurn) session is kept (pushUserMessage)", () => {
   const idle = { multiTurn: true, q: { active: false }, sendOptions: { cwd: "/x" } }
   assert.equal(restartReason(idle, { cwd: "/x" }), null)
+})
+
+test("restartReason: a newer transcript generation cannot reuse stale live context", () => {
+  const existing = {
+    multiTurn: true,
+    q: { active: false },
+    sendOptions: { provider: "openai", transcriptInvalidationId: "before" },
+  }
+  assert.equal(
+    restartReason(existing, { provider: "openai", transcriptInvalidationId: "after" }),
+    "transcript changed"
+  )
+  assert.equal(
+    restartReason(existing, { provider: "openai", transcriptInvalidationId: "before" }),
+    null
+  )
+})
+
+test("restartReason: an explicit restored transcript replaces even an otherwise reusable loop", () => {
+  const existing = { multiTurn: true, q: { active: false }, sendOptions: { provider: "openai" } }
+  assert.equal(
+    restartReason(existing, { provider: "openai", initialConversation: [] }),
+    "transcript restored"
+  )
 })
 
 test("restartReason: a lingering single-turn (Anthropic) session is always restarted", () => {

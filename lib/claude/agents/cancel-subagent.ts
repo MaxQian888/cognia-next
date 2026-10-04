@@ -2,25 +2,28 @@
  * Single reuse point for cancelling a running subagent from the UI.
  *
  * Aborts the run's controller (registered by `dispatch-agent-handler`), also
- * cancels the background-run promise when the run was detached, and optimistically
+ * cancels the background-run promise when the run was detached, and
  * marks the runtime-store node `cancelled` so the chat card reflects the action
- * immediately (the handler's abort `.catch` also records it — idempotent).
+ * after its durable receipt (the terminal handler is idempotent).
  */
 
-import { requestCancelSubagentRun } from "./subagent-cancel-registry"
-import { cancelRendererBackgroundRun } from "@/lib/background-tasks/renderer-subagent-registry"
+import { requestCancelSubagentRunAndWait } from "./subagent-cancel-registry"
+import {
+  cancelRendererBackgroundRunAndWait,
+  hasRendererBackgroundRun,
+} from "@/lib/background-tasks/renderer-subagent-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 
-export function cancelSubagentRun(
+export async function cancelSubagentRun(
   id: string,
   opts?: { backgrounded?: boolean; reason?: string }
-): boolean {
-  const requested = opts?.reason
-    ? requestCancelSubagentRun(id, opts.reason)
-    : requestCancelSubagentRun(id)
-  const backgroundCancelled = opts?.backgrounded ? cancelRendererBackgroundRun(id) : false
-  if (requested || backgroundCancelled) {
-    useSubagentRuntimeStore.getState().setStatus(id, "cancelled")
-  }
-  return requested || backgroundCancelled
+): Promise<boolean> {
+  // Both registries point at one adapter. Invoke it once, and await the
+  // persisted cancellation intent before projecting a terminal UI state.
+  const cancelled =
+    opts?.backgrounded || hasRendererBackgroundRun(id)
+      ? await cancelRendererBackgroundRunAndWait(id)
+      : await requestCancelSubagentRunAndWait(id, opts?.reason)
+  if (cancelled) useSubagentRuntimeStore.getState().setStatus(id, "cancelled")
+  return cancelled
 }

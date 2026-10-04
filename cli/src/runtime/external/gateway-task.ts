@@ -4,6 +4,19 @@ import path from "node:path"
 import type { NodeExternalAgentSpawnConfig } from "./node-backend"
 
 const PAYLOAD_ENV = "COGNIA_GATEWAY_TASK_CONFIG"
+/** Mirrors `RUNTIMES` in `crates/cognia-sandboxd/src/gateway_task.rs`. */
+const RUNTIMES = new Set([
+  "codex",
+  "opencode",
+  "pi",
+  "claude",
+  "qwen",
+  "dsh",
+  "kimi",
+  "goose",
+  "copilot",
+  "aider",
+])
 const ALLOWED_FILES = new Set([
   "codex/config.toml",
   "pi/models.json",
@@ -76,11 +89,13 @@ export function prepareGatewayTask(
     binding: unknown
     runtime: string
     ownerAccountId: string | null
+    originDeviceId?: string
+    rebind?: boolean
     files: Record<string, string>
   }
   if (
     !/^[a-zA-Z0-9_-]{1,128}$/.test(payload.taskId) ||
-    !["codex", "opencode", "pi", "claude", "qwen", "dsh"].includes(payload.runtime) ||
+    !RUNTIMES.has(payload.runtime) ||
     !payload.files ||
     Object.entries(payload.files).some(
       ([name, value]) =>
@@ -93,14 +108,36 @@ export function prepareGatewayTask(
   privateDirectory(root)
   root = fs.realpathSync(root)
   const bindingPath = path.join(root, "binding.json")
-  const binding = JSON.stringify({
+  const record: Record<string, unknown> = {
     binding: payload.binding,
     runtime: payload.runtime,
     ownerAccountId: payload.ownerAccountId ?? null,
-  })
+    ...(payload.originDeviceId ? { originDeviceId: payload.originDeviceId } : {}),
+  }
+  const binding = JSON.stringify(record)
   if (fs.existsSync(bindingPath)) {
-    if (fs.readFileSync(bindingPath, "utf8") !== binding)
-      throw new Error("This task is bound to a different model or account; start a new task")
+    const saved = fs.readFileSync(bindingPath, "utf8")
+    if (saved !== binding) {
+      // A rebind moves the task to another model; the account, device and
+      // runtime that own its native history must all be unchanged.
+      let existing: Record<string, unknown> | undefined
+      try {
+        existing = JSON.parse(saved) as Record<string, unknown>
+      } catch {
+        existing = undefined
+      }
+      const sameOwner =
+        existing !== undefined &&
+        Object.keys(existing).every((key) =>
+          ["binding", "runtime", "ownerAccountId", "originDeviceId"].includes(key)
+        ) &&
+        ["runtime", "ownerAccountId", "originDeviceId"].every(
+          (key) => JSON.stringify(existing![key]) === JSON.stringify(record[key])
+        )
+      if (payload.rebind !== true || !sameOwner)
+        throw new Error("This task is bound to a different model or account; start a new task")
+      privateWrite(bindingPath, binding)
+    }
   } else privateWrite(bindingPath, binding)
   const files: string[] = []
   const cleanup = () => {
@@ -126,6 +163,8 @@ export function prepareGatewayTask(
       PI_CODING_AGENT_DIR: "pi",
       CLAUDE_CONFIG_DIR: "claude",
       OPENCODE_CONFIG_DIR: "config/opencode",
+      KIMI_CODE_HOME: "kimi",
+      COPILOT_HOME: "copilot",
     })) {
       const directory = path.join(root, relative)
       privateDirectory(directory)

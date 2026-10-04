@@ -53,4 +53,26 @@ describe("work submission lease heartbeat", () => {
     expect(onError).toHaveBeenCalledWith(expect.any(Error))
     expect(onLeaseLost).toHaveBeenCalledTimes(2)
   })
+
+  it("does not abort a completed handoff when its pending renewal resolves late", async () => {
+    let finish!: (status: "lost") => void
+    const renew = jest.fn(
+      () =>
+        new Promise<"lost">((resolve) => {
+          finish = resolve
+        })
+    )
+    const onLeaseLost = jest.fn()
+    const stop = startWorkSubmissionLeaseHeartbeat("submission-1", "live-chat", {
+      renew,
+      intervalMs: 10,
+      onLeaseLost,
+    })
+    await jest.advanceTimersByTimeAsync(10)
+    stop()
+    finish("lost")
+    await jest.advanceTimersByTimeAsync(100)
+    expect(onLeaseLost).not.toHaveBeenCalled()
+    expect(renew).toHaveBeenCalledTimes(1)
+  })
 })

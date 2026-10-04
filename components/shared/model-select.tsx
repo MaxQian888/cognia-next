@@ -71,6 +71,30 @@ export interface GroupedModel {
   supportsTools?: boolean
   supportsVision?: boolean
   supportsReasoning?: boolean
+  /**
+   * Listed but not selectable, with `disabledReason` saying why on the row.
+   * For a model a caller knows cannot serve the surface (an external agent's
+   * Cognia model without tool calling), which hiding would leave unexplained.
+   */
+  disabled?: boolean
+  disabledReason?: string
+  /**
+   * The id is a placeholder, not a model name worth printing: the row for an
+   * external agent's own default model, offered before it has listed any.
+   */
+  hideId?: boolean
+}
+
+/**
+ * A run of groups introduced once, under one label: "Cognia models" over the
+ * providers an external agent can reach through the gateway. `notice` is one
+ * line under the label, for why the section is disabled or what a pick does.
+ */
+export interface ModelGroupSection {
+  id: string
+  label: string
+  icon?: React.ReactNode
+  notice?: React.ReactNode
 }
 
 export interface ModelProviderGroup {
@@ -78,6 +102,12 @@ export interface ModelProviderGroup {
   providerName: string
   models: GroupedModel[]
   headingAction?: React.ReactNode
+  /**
+   * The section this group belongs to. Consecutive groups sharing a section id
+   * are introduced by one header. A group with no models still draws its
+   * section header, so a section can be shown disabled with its reason.
+   */
+  section?: ModelGroupSection
 }
 
 export interface ModelSelectChoice {
@@ -101,13 +131,32 @@ export interface ModelSelectProps {
    * Groups rendered ABOVE the configured providers, in the order given.
    *
    * The one caller today is an external agent: when a conversation runs on
-   * Codex, Pi or Claude Code, that agent's own models are the ones the turn
-   * will actually use, so they lead. The provider groups stay underneath
-   * because a model configured in Cognia is still a legitimate choice for an
-   * agent that accepts one. Selection reports the group's own `providerId`,
-   * which is how the caller tells the two apart.
+   * Codex, Pi or Kimi Code, that agent's own models are the ones the turn will
+   * actually use, so they lead. Selection reports the group's own
+   * `providerId`, which is how the caller tells them apart from a provider's.
    */
   leadingGroups?: ModelProviderGroup[]
+  /**
+   * Render ONLY the leading groups: no configured providers, and no "no
+   * providers configured" empty state when the leading groups are empty.
+   *
+   * For a surface whose turn is not run by a Cognia provider at all. An
+   * external agent runs its own models, and listing Claude under Kimi Code
+   * offered a choice the agent cannot take, with the provider default ticked
+   * as if it were the one running. `leadingNotice` explains an empty list.
+   */
+  hideProviderGroups?: boolean
+  /**
+   * Trigger text that replaces the resolved model name, for a caller that
+   * knows better than the provider catalog what is running (an external
+   * agent's own display name, or "Kimi Code · default" before it has said).
+   * `model` still drives the active row and the trigger's title.
+   */
+  triggerLabel?: string
+  /** Replaces the trigger's chip icon, for a choice that is not a provider model. */
+  triggerIcon?: React.ReactNode
+  /** Replaces the trigger label's hover title (by default the raw model id). */
+  triggerTitle?: string
   /**
    * One line above the groups, for a caller that has something to explain
    * about why its leading group is missing or empty.
@@ -246,6 +295,10 @@ export function ModelSelect({
   onSelect,
   onSelectAuto,
   leadingGroups,
+  hideProviderGroups = false,
+  triggerLabel,
+  triggerIcon,
+  triggerTitle,
   leadingNotice,
   onOpen,
   autoEnabled = false,
@@ -258,10 +311,10 @@ export function ModelSelect({
 }: ModelSelectProps) {
   const t = useTranslations("chat.composer.modelPicker")
   const { options, groups: providerGroups } = useModelOptions()
-  const groups = useMemo(
-    () => (leadingGroups?.length ? [...leadingGroups, ...providerGroups] : providerGroups),
-    [leadingGroups, providerGroups]
-  )
+  const groups = useMemo(() => {
+    if (hideProviderGroups) return leadingGroups ?? []
+    return leadingGroups?.length ? [...leadingGroups, ...providerGroups] : providerGroups
+  }, [hideProviderGroups, leadingGroups, providerGroups])
   const [open, setOpen] = useState(false)
   const positionedActiveModelRef = useRef(false)
 
@@ -289,13 +342,14 @@ export function ModelSelect({
   }
 
   const activeModelName = useMemo(() => {
+    if (triggerLabel) return triggerLabel
     if (autoActive) return t("autoModel")
     const leading = leadingGroups
       ?.find((group) => group.providerId === provider)
       ?.models.find((candidate) => candidate.id === model)
     if (leading) return leading.name
     return resolveOptionModelName(options, model, provider)
-  }, [options, leadingGroups, model, provider, autoActive, t])
+  }, [options, leadingGroups, model, provider, autoActive, triggerLabel, t])
 
   return (
     // `TooltipTrigger` sits INSIDE the picker's trigger slot, so the picker's
@@ -324,8 +378,8 @@ export function ModelSelect({
               )}
               aria-label={t("switchModelAria")}
             >
-              <CpuIcon className="size-3.5 shrink-0" />
-              {autoActive ? (
+              {triggerIcon ?? <CpuIcon className="size-3.5 shrink-0" />}
+              {autoActive && !triggerLabel ? (
                 <span
                   className="shrink-0 rounded-sm bg-primary/10 px-1 text-[10px] font-medium text-primary"
                   title={t("autoBadgeHint")}
@@ -335,7 +389,7 @@ export function ModelSelect({
               ) : null}
               <span
                 className={cn("min-w-0 truncate", !model && placeholder && "text-muted-foreground")}
-                title={model || placeholder}
+                title={triggerTitle || model || triggerLabel || placeholder}
               >
                 {activeModelName
                   ? compactLabel
@@ -388,89 +442,113 @@ export function ModelSelect({
             </p>
           ) : null}
           {groups.length === 0 ? (
-            <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
+            hideProviderGroups ? null : (
+              <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
+            )
           ) : (
             groups.map((group, idx) => (
               <div key={group.providerId}>
                 {idx > 0 ? <ModelSelectorSeparator /> : null}
-                {group.headingAction ? (
+                {group.section && group.section.id !== groups[idx - 1]?.section?.id ? (
+                  <div className="flex flex-col gap-0.5 px-3 pt-2 pb-1">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      {group.section.icon}
+                      {group.section.label}
+                    </span>
+                    {group.section.notice ? (
+                      <span className="text-[11px] leading-snug text-muted-foreground">
+                        {group.section.notice}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                {group.models.length > 0 && group.headingAction ? (
                   <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
                     <span>{group.providerName}</span>
                     {group.headingAction}
                   </div>
                 ) : null}
-                <ModelSelectorGroup
-                  heading={group.headingAction ? undefined : group.providerName}
-                  aria-label={group.headingAction ? group.providerName : undefined}
-                >
-                  {group.models.map((gm) => {
-                    const { id: modelId, name: modelName } = gm
-                    const isActive = modelId === model && group.providerId === provider
-                    const hasMeta =
-                      gm.contextLength !== undefined ||
-                      gm.supportsTools ||
-                      gm.supportsVision ||
-                      gm.supportsReasoning
-                    return (
-                      <ModelSelectorItem
-                        key={`${group.providerId}:${modelId}`}
-                        ref={isActive ? positionActiveModelItem : undefined}
-                        // Include both name and id so the command filter matches
-                        // either the friendly name or the raw id the user types.
-                        value={`${group.providerId} ${modelName} ${modelId}`}
-                        onSelect={() => {
-                          setOpen(false)
-                          onSelect({ providerId: group.providerId, modelId })
-                        }}
-                        className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
-                      >
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span
-                            className={cn(
-                              "truncate text-xs leading-none",
-                              isActive && "font-medium text-foreground"
-                            )}
-                          >
-                            {modelName}
-                          </span>
-                          {modelName !== modelId ? (
-                            <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
-                              {modelId}
+                {group.models.length === 0 ? null : (
+                  <ModelSelectorGroup
+                    heading={group.headingAction ? undefined : group.providerName}
+                    aria-label={group.headingAction ? group.providerName : undefined}
+                  >
+                    {group.models.map((gm) => {
+                      const { id: modelId, name: modelName } = gm
+                      const isActive = modelId === model && group.providerId === provider
+                      const hasMeta =
+                        gm.contextLength !== undefined ||
+                        gm.supportsTools ||
+                        gm.supportsVision ||
+                        gm.supportsReasoning
+                      return (
+                        <ModelSelectorItem
+                          key={`${group.providerId}:${modelId}`}
+                          ref={isActive ? positionActiveModelItem : undefined}
+                          // Include both name and id so the command filter matches
+                          // either the friendly name or the raw id the user types.
+                          value={`${group.providerId} ${modelName} ${modelId}`}
+                          disabled={gm.disabled}
+                          onSelect={() => {
+                            if (gm.disabled) return
+                            setOpen(false)
+                            onSelect({ providerId: group.providerId, modelId })
+                          }}
+                          className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
+                        >
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span
+                              className={cn(
+                                "truncate text-xs leading-none",
+                                isActive && "font-medium text-foreground"
+                              )}
+                            >
+                              {modelName}
                             </span>
-                          ) : null}
-                        </span>
-                        {/* Metadata reads as one right-aligned cluster: the
-                              context window, then the capability glyphs in a
-                              fixed order so the same capability sits in the
-                              same place on every row. */}
-                        {hasMeta ? (
-                          <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-                            {gm.contextLength !== undefined ? (
-                              <span title={t("contextWindowLabel")}>
-                                {formatContextWindow(gm.contextLength)}
+                            {modelName !== modelId && !gm.hideId ? (
+                              <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
+                                {modelId}
                               </span>
                             ) : null}
-                            {gm.supportsTools ? (
-                              <WrenchIcon className="size-3" aria-label={t("capTools")} />
-                            ) : null}
-                            {gm.supportsVision ? (
-                              <EyeIcon className="size-3" aria-label={t("capVision")} />
-                            ) : null}
-                            {gm.supportsReasoning ? (
-                              <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                            {gm.disabled && gm.disabledReason ? (
+                              <span className="truncate text-[10px] leading-tight text-muted-foreground">
+                                {gm.disabledReason}
+                              </span>
                             ) : null}
                           </span>
-                        ) : null}
-                        <CheckIcon
-                          className={cn(
-                            "size-3.5 shrink-0 text-primary",
-                            isActive ? "opacity-100" : "opacity-0"
-                          )}
-                        />
-                      </ModelSelectorItem>
-                    )
-                  })}
-                </ModelSelectorGroup>
+                          {/* Metadata reads as one right-aligned cluster: the
+                                context window, then the capability glyphs in a
+                                fixed order so the same capability sits in the
+                                same place on every row. */}
+                          {hasMeta ? (
+                            <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                              {gm.contextLength !== undefined ? (
+                                <span title={t("contextWindowLabel")}>
+                                  {formatContextWindow(gm.contextLength)}
+                                </span>
+                              ) : null}
+                              {gm.supportsTools ? (
+                                <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                              ) : null}
+                              {gm.supportsVision ? (
+                                <EyeIcon className="size-3" aria-label={t("capVision")} />
+                              ) : null}
+                              {gm.supportsReasoning ? (
+                                <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                              ) : null}
+                            </span>
+                          ) : null}
+                          <CheckIcon
+                            className={cn(
+                              "size-3.5 shrink-0 text-primary",
+                              isActive ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                        </ModelSelectorItem>
+                      )
+                    })}
+                  </ModelSelectorGroup>
+                )}
               </div>
             ))
           )}

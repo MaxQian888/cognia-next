@@ -441,6 +441,8 @@ function buildWorkflowSnapshotBlock(
 }
 
 export interface BuildOptionsContext {
+  /** Reuse the accepted background-result batch identity for a fusion run. */
+  backgroundDeliveryId?: string
   /**
    * The turn is a person chatting in the app's own chat pane, the one surface
    * where a built-in skill's desktop approval dialog can be answered. Set only
@@ -1616,6 +1618,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             fusion.chatAutoConsidersFusion(routeHost.settings, needsTools))
         ) {
           const run = await fusion.selectChatFusionRun(routeHost, {
+            ...(ctx.backgroundDeliveryId ? { runId: ctx.backgroundDeliveryId } : {}),
             requested: explicitRunMode ? (requestedRunMode as "cascade" | "panel") : "auto",
             sessionId: session!.id,
             promptText: promptText ?? "",

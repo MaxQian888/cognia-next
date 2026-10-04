@@ -205,6 +205,15 @@ export async function projectDirectChatCaptureEvent(
   await active.producer.onCaptureEvent(event, ts)
 }
 
+/**
+ * Whether a direct-chat turn for `sessionId` is open in this renderer — opened
+ * by {@link startDirectChatExecutionRun} and not yet sealed. In-memory only, so
+ * it is always false for a turn that started before the renderer booted.
+ */
+export function hasActiveDirectChatExecutionRun(sessionId: string): boolean {
+  return activeRuns.has(sessionId)
+}
+
 /** Seal the current direct-chat run exactly once. */
 export async function finishDirectChatExecutionRun(
   sessionId: string,

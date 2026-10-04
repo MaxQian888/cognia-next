@@ -24,7 +24,10 @@ let mockMcpHostAvailable = false
 const mockStartMcpServer = jest.fn(async (_args: unknown) => 47890)
 const mockStopMcpServer = jest.fn(async () => undefined)
 const mockRestartMcpServer = jest.fn(async (_args: unknown) => 47890)
+// The rest of the module stays real: the server panel subscribes to the routing
+// plane through `useRemoteHostActive`, and no remote host is attached here.
 jest.mock("@/hooks/use-host-profile", () => ({
+  ...jest.requireActual("@/hooks/use-host-profile"),
   useCapability: () => mockMcpHostAvailable,
 }))
 jest.mock("@/lib/external-bridge/tauri-control", () => ({

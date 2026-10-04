@@ -12,6 +12,21 @@ jest.mock("@/lib/db/governance-ledger", () => ({
     mockReportGovernanceProjectionFailure(...args),
 }))
 
+const mockGetSession = jest.fn()
+const mockPrepareTranscriptRuntimeSend = jest.fn(async (...args: unknown[]) => args[1])
+const mockWithTranscriptRuntimeLock = jest.fn(async (...args: unknown[]) =>
+  (args[1] as () => Promise<unknown>)()
+)
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: (...args: unknown[]) => mockGetSession(...args),
+}))
+jest.mock("@/hooks/chat/claude-chat-send-options", () => ({
+  prepareTranscriptRuntimeSend: (...args: unknown[]) => mockPrepareTranscriptRuntimeSend(...args),
+}))
+jest.mock("@/lib/chat/transcript/revision-events", () => ({
+  withTranscriptRuntimeLock: (...args: unknown[]) => mockWithTranscriptRuntimeLock(...args),
+}))
+
 const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
@@ -89,6 +104,8 @@ let callSpy: jest.SpiedFunction<typeof transport.call>
 beforeEach(() => {
   jest.clearAllMocks()
   mockHasNoLeakingPiiDeep.mockReturnValue(true)
+  mockGetSession.mockReset().mockResolvedValue(undefined)
+  mockPrepareTranscriptRuntimeSend.mockImplementation(async (_sessionId, options) => options)
   setTauri(true)
   callSpy = jest.spyOn(transport, "call")
   mockRecordToolAuthorizationGovernance.mockReset().mockResolvedValue("decision-1")
@@ -1042,5 +1059,110 @@ describe("sendMessageFromMobile", () => {
       content: "hello",
       role: undefined,
     })
+  })
+})
+
+describe("transcript generation dispatch", () => {
+  it("prepares ordinary sends under the transcript lock before transport", async () => {
+    callSpy.mockResolvedValue(undefined)
+    mockPrepareTranscriptRuntimeSend.mockResolvedValueOnce({
+      transcriptInvalidationId: "generation-2",
+      initialConversation: [],
+    })
+    await sendPrompt("edited", "next", { provider: "openai" })
+    expect(mockWithTranscriptRuntimeLock).toHaveBeenCalledWith("edited", expect.any(Function))
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_send",
+      expect.objectContaining({
+        options: { transcriptInvalidationId: "generation-2", initialConversation: [] },
+      })
+    )
+  })
+
+  it("does not lock or prepare again when the controller already holds the lock", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await sendPrompt(
+      "edited",
+      "next",
+      { transcriptInvalidationId: "generation-2" },
+      { transcriptRuntime: "prepared" }
+    )
+    expect(mockWithTranscriptRuntimeLock).not.toHaveBeenCalled()
+    expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
+  })
+
+  it("rejects stale frozen histories without relabeling or dispatching them", async () => {
+    mockGetSession.mockResolvedValue({ runtimeTranscriptGeneration: "generation-2" })
+    await expect(
+      sendPrompt(
+        "edited",
+        "old prompt",
+        { transcriptInvalidationId: "generation-1", initialConversation: [] },
+        { transcriptRuntime: "frozen" }
+      )
+    ).rejects.toMatchObject({ code: "frozen_transcript_generation_mismatch" })
+    expect(callSpy).not.toHaveBeenCalled()
+    expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
+  })
+
+  it("permits frozen replay already prepared for the current pending generation", async () => {
+    callSpy.mockResolvedValue(undefined)
+    mockGetSession.mockResolvedValue({
+      runtimeTranscriptGeneration: "generation-2",
+      runtimeTranscriptInvalidated: "generation-2",
+    })
+    await sendPrompt(
+      "edited",
+      "prompt",
+      { transcriptInvalidationId: "generation-2", initialConversation: [] },
+      { transcriptRuntime: "frozen" }
+    )
+    expect(callSpy).toHaveBeenCalledTimes(1)
+    expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
+  })
+
+  it("rejects frozen replay without its original session", async () => {
+    await expect(
+      sendPrompt("deleted", "prompt", {}, { transcriptRuntime: "frozen" })
+    ).rejects.toMatchObject({ code: "frozen_transcript_session_missing" })
+    expect(callSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("remote transcript authority", () => {
+  beforeEach(() => {
+    setActiveRemoteTransport({
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => {}),
+    } as unknown as Parameters<typeof setActiveRemoteTransport>[0])
+    callSpy.mockResolvedValue(undefined)
+  })
+  afterEach(() => __resetRoutingForTests())
+
+  it("preserves host-issued generation without preparing from mirror history", async () => {
+    await sendPrompt("remote", "prompt", { transcriptInvalidationId: "host-generation" })
+    expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
+    expect(mockWithTranscriptRuntimeLock).not.toHaveBeenCalled()
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_send",
+      expect.objectContaining({ options: { transcriptInvalidationId: "host-generation" } })
+    )
+  })
+
+  it("refuses a legacy remote send after mirror transcript invalidation", async () => {
+    mockGetSession.mockResolvedValue({ runtimeTranscriptGeneration: "mirror-generation" })
+    await expect(sendPrompt("remote", "prompt", {})).rejects.toMatchObject({
+      code: "transcript_authoritative_host_required",
+    })
+    expect(callSpy).not.toHaveBeenCalled()
+    expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
+  })
+
+  it("parks frozen remote replay without consulting mirror authority", async () => {
+    await expect(
+      sendPrompt("remote", "prompt", {}, { transcriptRuntime: "frozen" })
+    ).rejects.toMatchObject({ code: "frozen_transcript_host_unverified" })
+    expect(callSpy).not.toHaveBeenCalled()
+    expect(mockGetSession).not.toHaveBeenCalled()
   })
 })

@@ -43,6 +43,48 @@ describe("createBuiltInSkillRegistry", () => {
     expect(() => reg.register(mkSkill())).toThrow(/duplicate skill id/)
   })
 
+  // A later task = a later load pass. That is what a dev server's hot reload
+  // looks like: the skill module runs again, this registry does not.
+  const nextPass = () => Promise.resolve()
+
+  it("replaces a skill whose module is evaluated again in a later pass", async () => {
+    const reg = createBuiltInSkillRegistry()
+    reg.register(mkSkill())
+    await nextPass()
+    const reloaded = mkSkill({ description: { en: "Edited", "zh-CN": "已编辑" } })
+    expect(() => reg.register(reloaded)).not.toThrow()
+    expect(reg.get(reloaded.id)).toBe(reloaded)
+    expect(reg.list()).toHaveLength(1)
+    expect(reg.families()).toEqual(["lark.calendar"])
+  })
+
+  it("still throws when a later pass brings a different skill under the same id", async () => {
+    const reg = createBuiltInSkillRegistry()
+    reg.register(mkSkill())
+    await nextPass()
+    expect(() => reg.register(mkSkill({ mcpToolName: "lark_calendar_other" }))).toThrow(
+      /duplicate skill id/
+    )
+    expect(() => reg.register(mkSkill({ family: "lark.task" }))).toThrow(/duplicate skill id/)
+  })
+
+  it("still throws on a duplicate within the same pass after a reload", async () => {
+    const reg = createBuiltInSkillRegistry()
+    reg.register(mkSkill())
+    await nextPass()
+    reg.register(mkSkill())
+    expect(() => reg.register(mkSkill())).toThrow(/duplicate skill id/)
+  })
+
+  it("forgets an unregistered or cleared id's pass, so it registers fresh", () => {
+    const reg = createBuiltInSkillRegistry()
+    reg.register(mkSkill())
+    reg.unregister("lark.calendar.list_events")
+    expect(() => reg.register(mkSkill())).not.toThrow()
+    reg.clear()
+    expect(() => reg.register(mkSkill())).not.toThrow()
+  })
+
   it("rejects write/destructive skill without hitlSurface", () => {
     const reg = createBuiltInSkillRegistry()
     expect(() =>

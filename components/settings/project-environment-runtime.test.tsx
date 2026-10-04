@@ -8,6 +8,7 @@ import type {
 import type { ProjectEnvironment, ProjectRuntimeSelection } from "@/types/project-environment"
 import type { EnvironmentCatalogView } from "@/types/sandbox/environment-catalog"
 import en from "@/i18n/messages/en/projectEnvironment.json"
+import zh from "@/i18n/messages/zh-CN/projectEnvironment.json"
 
 // The hook has its own suite. Here it is a controllable double that records
 // what the panel handed it and lets a test drive `save` through `onSave`.
@@ -167,6 +168,16 @@ function renderPanel(over: Partial<Parameters<typeof ProjectEnvironmentRuntime>[
 }
 
 describe("ProjectEnvironmentRuntime", () => {
+  it("limits the runtime selection's promise to external agents in both locales", () => {
+    renderPanel()
+    expect(screen.getByText(en.runtime.description)).toBeInTheDocument()
+    expect(screen.getByText(en.runtime.optIn)).toBeInTheDocument()
+    expect(en.runtime.description).toContain("Built-in agents are not affected")
+    expect(en.runtime.optIn).toContain("external agents")
+    expect(zh.runtime.description).toContain("内置 Agent 不受影响")
+    expect(zh.runtime.optIn).toContain("外部 Agent")
+  })
+
   it("has nothing to attach a selection to before the environment is saved", () => {
     renderPanel({ environment: undefined })
     expect(screen.getByText(en.runtime.noEnvironment)).toBeInTheDocument()

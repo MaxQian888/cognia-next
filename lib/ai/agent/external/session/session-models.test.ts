@@ -1,13 +1,22 @@
 import type { AcpConfigOption, AcpSessionModelState } from "@/types/agent/external-agent"
+import { gatewaySessionId } from "@/lib/ai/agent/external/config/gateway-task"
 
 import {
   externalAgentIdFromProviderId,
   externalAgentProviderId,
   findModelConfigOption,
   isExternalAgentProviderId,
-  resolveExternalAgentModelAxis,
-  resolveExternalAgentCogniaModelAxis,
+  resolveExternalAgentModelSelection,
+  rememberGatewaySession,
+  managedGatewayLinksOf,
+  externalAgentRouteKey,
+  sameCogniaModelBinding,
+  cogniaGatewayGroupId,
+  cogniaProviderIdFromGroupId,
+  EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT,
   resolveExternalAgentModels,
+  reportableConfigOptions,
+  seededModelSurface,
   EMPTY_THINKING_SURFACE,
   findThinkingConfigOption,
   resolveExternalAgentThinking,
@@ -215,113 +224,407 @@ describe("findThinkingConfigOption", () => {
   })
 })
 
-describe("resolveExternalAgentModelAxis", () => {
+describe("resolveExternalAgentModelSelection", () => {
   const AGENT = "pi-local"
   const marker = externalAgentProviderId(AGENT)
+  const kimi = { providerId: "plugin:kimi:subscription", modelId: "kimi-k3", accountId: "acc-a" }
+  const claude = { providerId: "anthropic", modelId: "claude-opus-5" }
+  const link = (task: string, binding?: typeof kimi | typeof claude) =>
+    gatewaySessionId(task, `native-${task}`, binding)
 
-  it("replays the conversation's own pick", () => {
-    expect(
-      resolveExternalAgentModelAxis({
-        agentId: AGENT,
-        sessionModel: "commandcode/claude-opus-5",
-        sessionProviderOverride: marker,
-      })
-    ).toBe("commandcode/claude-opus-5")
+  it("never reads the built-in lane's pick as a Cognia binding", () => {
+    // A Claude pick left over from a built-in turn is what routed a Kimi turn
+    // through the gateway on a phone and failed.
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: { model: "claude-opus-5", providerOverride: "anthropic" },
+    })
+    expect(selection).toEqual({ cogniaModel: undefined, choice: null, source: "none" })
   })
 
-  it("falls back to the app default a pick made before the conversation existed", () => {
-    // The composer offers the agent's models on a brand-new chat, where the
-    // picker has no row to write to and saves the choice as the app default.
-    // Reading only the row is what made the first turn run on the agent's own
-    // model with nothing said about it.
-    expect(
-      resolveExternalAgentModelAxis({
-        agentId: AGENT,
-        defaultModel: "deepseek/deepseek-v4-pro",
-        defaultProvider: marker,
-      })
-    ).toBe("deepseek/deepseek-v4-pro")
+  it("runs an explicit Cognia choice and starts a new task when none serves it", () => {
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: {
+        model: "claude-opus-5",
+        providerOverride: "anthropic",
+        externalAgentModels: { [AGENT]: { kind: "cognia", binding: kimi } },
+      },
+    })
+    expect(selection).toMatchObject({
+      cogniaModel: kimi,
+      resetExternalSession: true,
+      source: "conversation",
+    })
+    expect(selection.gatewayLink).toBeUndefined()
+    expect(selection.model).toBeUndefined()
   })
 
-  it("prefers the conversation over the app default", () => {
-    expect(
-      resolveExternalAgentModelAxis({
-        agentId: AGENT,
-        sessionModel: "a/one",
-        sessionProviderOverride: marker,
-        defaultModel: "b/two",
-        defaultProvider: marker,
-      })
-    ).toBe("a/one")
+  it("resumes the retained task whose binding equals the selection", () => {
+    const kimiLink = link("task-kimi", kimi)
+    const claudeLink = link("task-claude", claude)
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: {
+        externalAgentModels: { [AGENT]: { kind: "cognia", binding: kimi } },
+        externalAgentSession: { agentId: AGENT, sessionId: claudeLink },
+        externalAgentGatewaySessions: [
+          { agentId: AGENT, sessionId: kimiLink },
+          { agentId: "other", sessionId: link("task-other", kimi) },
+          { agentId: AGENT, sessionId: claudeLink },
+        ],
+      },
+    })
+    expect(selection.gatewayLink).toBe(kimiLink)
+    expect(selection.resetExternalSession).toBeUndefined()
   })
 
-  it("never replays a model that belongs to another lane", () => {
-    // Same two columns, different vocabulary. A provider model asked of an
-    // agent is an id it has never heard of, and the legacy unscoped marker
-    // cannot be attributed to any agent at all.
-    expect(
-      resolveExternalAgentModelAxis({
-        agentId: AGENT,
-        sessionModel: "claude-sonnet-5",
-        sessionProviderOverride: "anthropic",
-        defaultModel: "gpt-5.5",
-        defaultProvider: "openai",
-      })
-    ).toBeUndefined()
-    expect(
-      resolveExternalAgentModelAxis({
-        agentId: AGENT,
-        sessionModel: "a/one",
-        sessionProviderOverride: "cognia:external-agent",
-      })
-    ).toBeUndefined()
+  it("rebinds the agent's latest task when switching Cognia models", () => {
+    const kimiLink = link("task-kimi", kimi)
+    const k3 = { ...kimi, modelId: "kimi-k3-256k" }
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: {
+        externalAgentModels: { [AGENT]: { kind: "cognia", binding: k3 } },
+        externalAgentSession: { agentId: AGENT, sessionId: kimiLink },
+      },
+    })
+    // The agent keeps its own history on the new model instead of a summary.
+    expect(selection).toMatchObject({ cogniaModel: k3, gatewayLink: kimiLink, rebind: true })
+    expect(selection.resetExternalSession).toBeUndefined()
   })
 
-  it("never replays another agent's pick", () => {
+  it("starts a new task when the agent has no earlier Cognia task to rebind", () => {
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: { externalAgentModels: { [AGENT]: { kind: "cognia", binding: claude } } },
+    })
+    expect(selection.rebind).toBeUndefined()
+    expect(selection.gatewayLink).toBeUndefined()
+    expect(selection.resetExternalSession).toBe(true)
+  })
+
+  it("rebinds rather than resumes a task bound to another subscription account", () => {
+    const kimiLink = link("task-kimi", kimi)
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: {
+        externalAgentModels: {
+          [AGENT]: { kind: "cognia", binding: { ...kimi, accountId: "acc-b" } },
+        },
+        externalAgentSession: { agentId: AGENT, sessionId: kimiLink },
+      },
+    })
+    // Never resumed as-is on the old account: the manager rebinds it (same
+    // owner, device and runtime) or refuses.
+    expect(selection).toMatchObject({ gatewayLink: kimiLink, rebind: true })
+    expect(selection.resetExternalSession).toBeUndefined()
+  })
+
+  it("accepts the frozen account when the selection leaves it to the provider default", () => {
+    const kimiLink = link("task-kimi", kimi)
+    const { accountId: _account, ...providerDefault } = kimi
     expect(
-      resolveExternalAgentModelAxis({
+      resolveExternalAgentModelSelection({
         agentId: AGENT,
-        sessionModel: "a/one",
-        sessionProviderOverride: externalAgentProviderId("codex-local"),
-        defaultModel: "b/two",
-        defaultProvider: externalAgentProviderId("codex-local"),
+        session: {
+          externalAgentModels: { [AGENT]: { kind: "cognia", binding: providerDefault } },
+          externalAgentSession: { agentId: AGENT, sessionId: kimiLink },
+        },
+      }).gatewayLink
+    ).toBe(kimiLink)
+  })
+
+  it("runs a native choice without any gateway link", () => {
+    const selection = resolveExternalAgentModelSelection({
+      agentId: AGENT,
+      session: {
+        externalAgentModels: { [AGENT]: { kind: "native", modelId: "a/one" } },
+        externalAgentSession: { agentId: AGENT, sessionId: link("task-kimi", kimi) },
+      },
+      agentDefault: kimi,
+    })
+    expect(selection).toEqual({
+      cogniaModel: null,
+      model: "a/one",
+      choice: { kind: "native", modelId: "a/one" },
+      source: "conversation",
+    })
+  })
+
+  it("keeps resuming a pre-existing gateway link when nothing was chosen", () => {
+    const legacyLink = link("task-legacy")
+    expect(
+      resolveExternalAgentModelSelection({
+        agentId: AGENT,
+        session: { externalAgentSession: { agentId: AGENT, sessionId: legacyLink } },
       })
-    ).toBeUndefined()
+    ).toEqual({
+      cogniaModel: undefined,
+      gatewayLink: legacyLink,
+      choice: null,
+      source: "gateway-link",
+    })
+    const boundLink = link("task-kimi", kimi)
+    expect(
+      resolveExternalAgentModelSelection({
+        agentId: AGENT,
+        session: { externalAgentSession: { agentId: AGENT, sessionId: boundLink } },
+      })
+    ).toMatchObject({ cogniaModel: kimi, gatewayLink: boundLink, source: "gateway-link" })
+  })
+
+  it("ignores a malformed or foreign gateway link", () => {
+    expect(
+      resolveExternalAgentModelSelection({
+        agentId: AGENT,
+        session: { externalAgentSession: { agentId: AGENT, sessionId: "cognia-gateway:bad" } },
+      }).source
+    ).toBe("none")
+    expect(
+      resolveExternalAgentModelSelection({
+        agentId: AGENT,
+        session: { externalAgentSession: { agentId: "other", sessionId: link("t", kimi) } },
+      }).source
+    ).toBe("none")
+  })
+
+  it("replays the legacy marker as a native pick, from the row or the app default", () => {
+    expect(
+      resolveExternalAgentModelSelection({
+        agentId: AGENT,
+        session: { model: "commandcode/claude-opus-5", providerOverride: marker },
+      })
+    ).toMatchObject({
+      cogniaModel: null,
+      model: "commandcode/claude-opus-5",
+      source: "legacy-marker",
+    })
+    expect(
+      resolveExternalAgentModelSelection({
+        agentId: AGENT,
+        session: {},
+        appDefaults: { defaultModel: "deepseek/v4", defaultProvider: marker },
+      })
+    ).toMatchObject({ cogniaModel: null, model: "deepseek/v4", source: "legacy-marker" })
+  })
+
+  it("never replays another agent's marker or the unscoped legacy marker", () => {
+    for (const providerOverride of [externalAgentProviderId("codex"), "cognia:external-agent"]) {
+      expect(
+        resolveExternalAgentModelSelection({
+          agentId: AGENT,
+          session: { model: "a/one", providerOverride },
+        }).source
+      ).toBe("none")
+    }
+  })
+
+  it("reads the welcome-screen default only when no conversation exists", () => {
+    const appDefaults = {
+      externalAgentModelDefaults: { [AGENT]: { kind: "cognia" as const, binding: claude } },
+    }
+    expect(
+      resolveExternalAgentModelSelection({ agentId: AGENT, session: null, appDefaults })
+    ).toMatchObject({ cogniaModel: claude, source: "app-default" })
+    expect(
+      resolveExternalAgentModelSelection({ agentId: AGENT, session: {}, appDefaults }).source
+    ).toBe("none")
+  })
+
+  it("falls back to the agent configuration's default, then to native", () => {
+    expect(
+      resolveExternalAgentModelSelection({ agentId: AGENT, session: {}, agentDefault: kimi })
+    ).toMatchObject({ cogniaModel: kimi, resetExternalSession: true, source: "agent-default" })
+    expect(
+      resolveExternalAgentModelSelection({ agentId: AGENT, session: {}, agentDefault: null })
+    ).toMatchObject({ cogniaModel: null, source: "agent-default" })
   })
 })
 
-describe("resolveExternalAgentCogniaModelAxis", () => {
-  it("binds only an explicit internal conversation selection", () => {
-    expect(
-      resolveExternalAgentCogniaModelAxis({
-        agentId: "pi",
-        sessionProviderOverride: "kimi",
-        sessionModel: "kimi-k2",
-        accountId: "account",
-      })
-    ).toEqual({ providerId: "kimi", modelId: "kimi-k2", accountId: "account" })
-    expect(
-      resolveExternalAgentCogniaModelAxis({
-        agentId: "pi",
-        defaultProvider: "kimi",
-        defaultModel: "kimi-k2",
-      })
-    ).toBeUndefined()
-    expect(
-      resolveExternalAgentCogniaModelAxis({
-        agentId: "pi",
-        sessionProviderOverride: "kimi",
-        sessionModel: "auto",
-      })
-    ).toBeUndefined()
+describe("gateway link bookkeeping", () => {
+  const kimi = { providerId: "kimi", modelId: "k3" }
+  const link = (agentId: string, task: string) => ({
+    agentId,
+    sessionId: gatewaySessionId(task, "native", kimi),
   })
-  it("explicitly opts out when the conversation selects an external model", () => {
+
+  it("retains the replaced current link and bounds each agent's list", () => {
+    let row: {
+      externalAgentSession?: { agentId: string; sessionId: string }
+      externalAgentGatewaySessions?: Array<{ agentId: string; sessionId: string }>
+    } = { externalAgentSession: link("a", "t0") }
+    const evicted: Array<{ agentId: string; sessionId: string }> = []
+    for (let index = 1; index <= EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT + 1; index += 1) {
+      const next = link("a", `t${index}`)
+      const result = rememberGatewaySession(row, next)
+      evicted.push(...result.evicted)
+      row = { externalAgentSession: next, externalAgentGatewaySessions: result.sessions }
+    }
+    expect(row.externalAgentGatewaySessions).toHaveLength(EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT)
+    expect(row.externalAgentGatewaySessions?.at(-1)).toEqual(row.externalAgentSession)
+    expect(evicted).toEqual([link("a", "t0"), link("a", "t1")])
+  })
+
+  it("keeps another agent's links out of the bound and ignores native ids", () => {
+    const result = rememberGatewaySession(
+      {
+        externalAgentSession: { agentId: "a", sessionId: "native-thread" },
+        externalAgentGatewaySessions: [link("b", "tb")],
+      },
+      link("a", "ta")
+    )
+    expect(result).toEqual({ sessions: [link("b", "tb"), link("a", "ta")], evicted: [] })
+  })
+
+  it("lists every managed link a row holds, once", () => {
     expect(
-      resolveExternalAgentCogniaModelAxis({
-        agentId: "pi",
-        sessionProviderOverride: externalAgentProviderId("pi"),
-        sessionModel: "native-model",
+      managedGatewayLinksOf({
+        externalAgentSession: link("a", "t1"),
+        externalAgentGatewaySessions: [
+          link("a", "t0"),
+          link("a", "t1"),
+          { agentId: "a", sessionId: "x" },
+        ],
       })
-    ).toBeNull()
+    ).toEqual([link("a", "t1"), link("a", "t0")])
+    expect(managedGatewayLinksOf(undefined)).toEqual([])
+  })
+
+  it("names a route by its task, else by its binding", () => {
+    expect(externalAgentRouteKey({ sessionId: gatewaySessionId("t9", "n", kimi) })).toBe(
+      "cognia:t9"
+    )
+    expect(externalAgentRouteKey({ cogniaModel: { ...kimi, accountId: null } })).toBe(
+      "cognia:kimi/k3/~manual"
+    )
+    expect(externalAgentRouteKey({ sessionId: "native", cogniaModel: null })).toBe("native")
+  })
+
+  it("compares bindings the way the manager resumes them", () => {
+    expect(sameCogniaModelBinding(kimi, { ...kimi, accountId: "x" })).toBe(true)
+    expect(sameCogniaModelBinding({ ...kimi, accountId: null }, { ...kimi, accountId: "x" })).toBe(
+      false
+    )
+    expect(sameCogniaModelBinding(kimi, { ...kimi, modelId: "k2" })).toBe(false)
+  })
+
+  it("tells a picker's Cognia group apart from every other group", () => {
+    const id = cogniaGatewayGroupId("plugin:kimi:subscription")
+    expect(cogniaProviderIdFromGroupId(id)).toBe("plugin:kimi:subscription")
+    expect(cogniaProviderIdFromGroupId(externalAgentProviderId("pi"))).toBeNull()
+    expect(cogniaProviderIdFromGroupId("anthropic")).toBeNull()
+  })
+})
+
+// What `kimi acp` (Kimi Code CLI 2.1.1) answers to `session/new`: no `models`
+// field at all, a `model` and a `thought_level` select under `configOptions`.
+const KIMI_SESSION_NEW_CONFIG_OPTIONS: AcpConfigOption[] = [
+  {
+    type: "select",
+    id: "model",
+    name: "Model",
+    category: "model",
+    currentValue: "kimi-code/kimi-for-coding",
+    options: [
+      { value: "kimi-code/kimi-for-coding", name: "K2.8 Preview" },
+      { value: "kimi-code/kimi-for-coding-highspeed", name: "K2.7 Code Highspeed" },
+      { value: "kimi-code/k3", name: "K3" },
+      { value: "kimi-code/k3-256k", name: "K3-256k" },
+    ],
+  },
+  {
+    type: "select",
+    id: "thinking",
+    name: "Thinking",
+    category: "thought_level",
+    currentValue: "max",
+    options: [
+      { value: "low", name: "Thinking Low" },
+      { value: "high", name: "Thinking High" },
+      { value: "max", name: "Thinking Max" },
+    ],
+  },
+  {
+    type: "select",
+    id: "mode",
+    name: "Mode",
+    category: "mode",
+    currentValue: "default",
+    options: [
+      { value: "default", name: "Default" },
+      { value: "plan", name: "Plan" },
+    ],
+  },
+] as AcpConfigOption[]
+
+describe("Kimi Code's session/new payload", () => {
+  it("resolves to its own models, written through the `model` config option", () => {
+    const surface = resolveExternalAgentModels({ configOptions: KIMI_SESSION_NEW_CONFIG_OPTIONS })
+    expect(surface.choices.map((choice) => choice.name)).toEqual([
+      "K2.8 Preview",
+      "K2.7 Code Highspeed",
+      "K3",
+      "K3-256k",
+    ])
+    expect(surface.currentModelId).toBe("kimi-code/kimi-for-coding")
+    expect(surface.write).toEqual({ kind: "config-option", optionId: "model" })
+    expect(
+      resolveExternalAgentThinking({ configOptions: KIMI_SESSION_NEW_CONFIG_OPTIONS })
+    ).toEqual({
+      levels: ["low", "high", "max"],
+      currentLevel: "max",
+      write: { kind: "config-option", optionId: "thinking" },
+    })
+  })
+})
+
+describe("seededModelSurface", () => {
+  it("routes a pick through the next turn when there are models to pick", () => {
+    const surface = resolveExternalAgentModels({ configOptions: KIMI_SESSION_NEW_CONFIG_OPTIONS })
+    expect(seededModelSurface(surface)).toEqual({ ...surface, write: { kind: "session-seed" } })
+  })
+
+  it("offers no write when there is nothing to pick", () => {
+    expect(
+      seededModelSurface({ choices: [], currentModelId: "x", write: { kind: "none" } }).write
+    ).toEqual({ kind: "none" })
+  })
+})
+
+describe("reportableConfigOptions", () => {
+  it("reports an agent's own option list verbatim", () => {
+    const surfaces = {
+      models: resolveExternalAgentModels({ configOptions: KIMI_SESSION_NEW_CONFIG_OPTIONS }),
+      thinking: resolveExternalAgentThinking({ configOptions: KIMI_SESSION_NEW_CONFIG_OPTIONS }),
+    }
+    expect(reportableConfigOptions(KIMI_SESSION_NEW_CONFIG_OPTIONS, surfaces)).toEqual(
+      KIMI_SESSION_NEW_CONFIG_OPTIONS
+    )
+  })
+
+  it("folds session-model state and an async thinking ladder back into options", () => {
+    const models = resolveExternalAgentModels({ sessionModels: SESSION_MODELS })
+    const thinking = {
+      levels: ["off", "high"],
+      currentLevel: "high",
+      write: { kind: "config-option" as const, optionId: "thinking_level" },
+    }
+    const reported = reportableConfigOptions(undefined, { models, thinking })
+    // The receiving side derives the same surfaces back out of the report.
+    expect(resolveExternalAgentModels({ configOptions: reported })).toEqual({
+      ...models,
+      write: { kind: "config-option", optionId: "model" },
+    })
+    expect(resolveExternalAgentThinking({ configOptions: reported })).toEqual(thinking)
+  })
+
+  it("reports nothing for an agent with no model or thinking concept", () => {
+    expect(
+      reportableConfigOptions(undefined, {
+        models: { choices: [], currentModelId: null, write: { kind: "none" } },
+        thinking: EMPTY_THINKING_SURFACE,
+      })
+    ).toEqual([])
   })
 })

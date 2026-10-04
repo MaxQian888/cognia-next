@@ -280,3 +280,195 @@ describe("ModelSelect compact label", () => {
     expect(trigger.querySelector("svg.lucide-chevrons-up-down")).not.toBeNull()
   })
 })
+
+describe("ModelSelect for a surface run by an external agent", () => {
+  beforeEach(() => act(seedSettings))
+
+  const kimi = {
+    providerId: "cognia:external-agent:eac_1",
+    providerName: "Kimi Code",
+    models: [
+      { id: "kimi-code/kimi-for-coding", name: "K2.8 Preview" },
+      { id: "kimi-code/k3", name: "K3" },
+    ],
+  }
+
+  it("lists only the leading groups when providers are hidden", () => {
+    const onSelect = jest.fn()
+    renderSelect({
+      model: "kimi-code/k3",
+      provider: kimi.providerId,
+      leadingGroups: [kimi],
+      hideProviderGroups: true,
+      onSelect,
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const items = Array.from(document.querySelectorAll('[data-slot="command-item"]'))
+    expect(items.map((node) => node.textContent)).toEqual([
+      expect.stringContaining("K2.8 Preview"),
+      expect.stringContaining("K3"),
+    ])
+    expect(screen.queryByText(ANTHROPIC_NAME ?? ANTHROPIC_MODEL)).toBeNull()
+    fireEvent.click(screen.getByText("K2.8 Preview"))
+    expect(onSelect).toHaveBeenCalledWith({
+      providerId: kimi.providerId,
+      modelId: "kimi-code/kimi-for-coding",
+    })
+  })
+
+  it("prints a row's id under its name unless the id is a placeholder", () => {
+    renderSelect({
+      model: "__agent-default__",
+      provider: kimi.providerId,
+      leadingGroups: [
+        {
+          ...kimi,
+          models: [
+            { id: "__agent-default__", name: "Default model", hideId: true },
+            { id: "kimi-code/k3", name: "K3" },
+          ],
+        },
+      ],
+      hideProviderGroups: true,
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const [placeholder, named] = Array.from(document.querySelectorAll('[data-slot="command-item"]'))
+    expect(placeholder).toHaveTextContent(/^Default model$/)
+    expect(named).toHaveTextContent("kimi-code/k3")
+  })
+
+  it("explains an empty list through the notice, not a missing-provider message", () => {
+    renderSelect({
+      model: "",
+      provider: kimi.providerId,
+      leadingGroups: [],
+      hideProviderGroups: true,
+      leadingNotice: "Kimi Code's models appear after the first message.",
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByText(/appear after the first message/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no providers configured/i)).toBeNull()
+    expect(document.querySelectorAll('[data-slot="command-item"]')).toHaveLength(0)
+  })
+
+  it("labels the trigger with the caller's text, keeping the raw id as its title", () => {
+    renderSelect({
+      model: "kimi-code/k3",
+      provider: kimi.providerId,
+      leadingGroups: [kimi],
+      hideProviderGroups: true,
+      triggerLabel: "K3",
+    })
+    const trigger = screen.getByRole("button", { name: /switch model/i })
+    expect(trigger).toHaveTextContent("K3")
+    expect(screen.getByTitle("kimi-code/k3")).toBeInTheDocument()
+  })
+
+  it("titles a label-only trigger with the label when no model is known", () => {
+    renderSelect({ model: "", provider: kimi.providerId, triggerLabel: "Kimi Code · default" })
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent(
+      "Kimi Code · default"
+    )
+    expect(screen.getByTitle("Kimi Code · default")).toBeInTheDocument()
+  })
+
+  const section = { id: "cognia-gateway", label: "Cognia models", notice: "Applies next message." }
+
+  it("introduces a section's groups once, with its notice", () => {
+    const onSelect = jest.fn()
+    renderSelect({
+      model: "kimi-code/k3",
+      provider: kimi.providerId,
+      hideProviderGroups: true,
+      onSelect,
+      leadingGroups: [
+        kimi,
+        {
+          providerId: "cognia:gateway:anthropic",
+          providerName: "Anthropic",
+          section,
+          models: [{ id: "claude-opus-5", name: "Claude Opus 5" }],
+        },
+        {
+          providerId: "cognia:gateway:openai",
+          providerName: "OpenAI",
+          section,
+          models: [{ id: "gpt-5.5", name: "GPT-5.5" }],
+        },
+      ],
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getAllByText("Cognia models")).toHaveLength(1)
+    expect(screen.getAllByText("Applies next message.")).toHaveLength(1)
+    fireEvent.click(screen.getByText("GPT-5.5"))
+    expect(onSelect).toHaveBeenCalledWith({
+      providerId: "cognia:gateway:openai",
+      modelId: "gpt-5.5",
+    })
+  })
+
+  it("shows an empty section disabled with its reason and no rows", () => {
+    renderSelect({
+      model: "kimi-code/k3",
+      provider: kimi.providerId,
+      hideProviderGroups: true,
+      leadingGroups: [
+        kimi,
+        {
+          providerId: "cognia:gateway:",
+          providerName: "",
+          section: { ...section, notice: "Update the paired Host." },
+          models: [],
+        },
+      ],
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByText("Cognia models")).toBeInTheDocument()
+    expect(screen.getByText("Update the paired Host.")).toBeInTheDocument()
+    expect(document.querySelectorAll('[data-slot="command-item"]')).toHaveLength(2)
+  })
+
+  it("lists a disabled model with its reason and never reports it", () => {
+    const onSelect = jest.fn()
+    renderSelect({
+      model: "",
+      provider: "",
+      hideProviderGroups: true,
+      onSelect,
+      leadingGroups: [
+        {
+          providerId: "cognia:gateway:openai",
+          providerName: "OpenAI",
+          models: [
+            {
+              id: "text-only",
+              name: "Text only",
+              disabled: true,
+              disabledReason: "No tool calling",
+            },
+          ],
+        },
+      ],
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByText("No tool calling")).toBeInTheDocument()
+    const row = document.querySelector('[data-slot="command-item"]') as HTMLElement
+    expect(row).toHaveAttribute("data-disabled", "true")
+    fireEvent.click(screen.getByText("Text only"))
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("takes the caller's glyph and hover title on the trigger", () => {
+    renderSelect({
+      model: "claude-opus-5",
+      provider: "cognia:gateway:anthropic",
+      triggerLabel: "Claude Opus 5",
+      triggerIcon: <span data-testid="cognia-glyph" />,
+      triggerTitle: "Kimi Code → Anthropic/Claude Opus 5 via Cognia",
+    })
+    expect(screen.getByTestId("cognia-glyph")).toBeInTheDocument()
+    expect(screen.getByTitle("Kimi Code → Anthropic/Claude Opus 5 via Cognia")).toHaveTextContent(
+      "Claude Opus 5"
+    )
+  })
+})

@@ -720,7 +720,8 @@ pub(crate) enum PluginCommand {
         #[arg(long, value_name = "DIR")]
         input: PathBuf,
         /// Target ecosystem: claude-code, codex, gemini-cli, agent-plugins,
-        /// cursor, copilot, kimi, devin, opencode, or pi.
+        /// cursor, copilot, kimi, devin, opencode, pi, factory-droid, qoder,
+        /// codebuddy, auggie, or open-plugins.
         #[arg(long, value_name = "ECOSYSTEM")]
         to: String,
         /// Directory to create. Defaults to ./<plugin-id>-<ecosystem>.

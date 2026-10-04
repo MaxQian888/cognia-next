@@ -76,6 +76,13 @@ describe("PresetGalleryCard", () => {
     expect(onPick).toHaveBeenCalledWith("goose")
   })
 
+  it("labels the support tier in the reader's language, not with the wire id", () => {
+    render(<PresetGalleryCard disabled={false} onPick={jest.fn()} />)
+    const card = screen.getByTestId("preset-card-kimi")
+    expect(card).toHaveTextContent("Runs directly")
+    expect(within(card).queryByText("executable")).not.toBeInTheDocument()
+  })
+
   it("renders one card per runnable preset and hides documented-only by default", () => {
     render(<PresetGalleryCard disabled={false} onPick={jest.fn()} />)
     const gallery = screen.getByTestId("preset-gallery-card")

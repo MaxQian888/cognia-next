@@ -1173,7 +1173,13 @@ export function reduceHostStateMutation<TState extends HostStateChannelState>(
           ...state,
           revision: mutation.revision,
           operations,
-          turn: TERMINAL_TURN_STATUSES.includes(session.turn) ? session.turn : "stopping",
+          // Stopping an idle turn has nothing to stop: an external-agent turn never
+          // emits the end event that would move `stopping` on, so it stuck there and
+          // read as a running turn after every relaunch.
+          turn:
+            session.turn === "idle" || TERMINAL_TURN_STATUSES.includes(session.turn)
+              ? session.turn
+              : "stopping",
         } as TState
       }
       if (isDecisionResponse(operation.kind) && operation.targetRequestId) {
@@ -1369,7 +1375,13 @@ export function reduceHostStateIntent<TState extends HostStateChannelState>(
       // against a live turn.
       return {
         ...state,
-        turn: TERMINAL_TURN_STATUSES.includes(session.turn) ? session.turn : "stopping",
+        // Stopping an idle turn has nothing to stop: an external-agent turn never
+        // emits the end event that would move `stopping` on, so it stuck there and
+        // read as a running turn after every relaunch.
+        turn:
+          session.turn === "idle" || TERMINAL_TURN_STATUSES.includes(session.turn)
+            ? session.turn
+            : "stopping",
         revision,
       } as TState
     case "approval.respond":

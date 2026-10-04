@@ -963,6 +963,204 @@
       "outputTyped": true
     },
     {
+      "name": "agent_gateway_host_task_prepare",
+      "category": "agents",
+      "resource": "agent",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_gateway_host_task_prepare (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": [
+              "taskId",
+              "providerId",
+              "model",
+              "ingressProtocol"
+            ],
+            "properties": {
+              "taskId": {
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "ingressProtocol": {
+                "enum": [
+                  "openai-chat",
+                  "openai-responses",
+                  "anthropic"
+                ]
+              },
+              "originDeviceId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticketId",
+          "secret",
+          "endpoint",
+          "accountGeneration",
+          "expiresAtMs",
+          "ownerAccountId"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "accountGeneration": {
+            "type": "integer"
+          },
+          "expiresAtMs": {
+            "type": "integer"
+          },
+          "ownerAccountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelMetadata": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_gateway_host_task_renew",
+      "category": "agents",
+      "resource": "agent",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_gateway_host_task_renew (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "ticketId",
+          "accountGeneration"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "ticketId": {
+            "type": "string"
+          },
+          "accountGeneration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "originDeviceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_gateway_host_task_revoke",
+      "category": "agents",
+      "resource": "agent",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_gateway_host_task_revoke (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "ticketId",
+          "accountGeneration"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "ticketId": {
+            "type": "string"
+          },
+          "accountGeneration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "originDeviceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "agent_gateway_lease_prepare",
       "category": "agents",
       "resource": "agent",
@@ -18596,6 +18794,137 @@
       "outputTyped": true
     },
     {
+      "name": "external_agent_cognia_models",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "external_agent_cognia_models (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "configId"
+        ],
+        "properties": {
+          "configId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Host-owned external-agent configuration whose runtime decides whether Cognia models are offered at all."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "supported",
+              "providers"
+            ],
+            "properties": {
+              "supported": {
+                "const": true
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "providerId",
+                    "providerName",
+                    "models"
+                  ],
+                  "properties": {
+                    "providerId": {
+                      "type": "string"
+                    },
+                    "providerName": {
+                      "type": "string"
+                    },
+                    "accountIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "contextLength": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "supportsTools": {
+                            "type": "boolean"
+                          },
+                          "supportsVision": {
+                            "type": "boolean"
+                          },
+                          "supportsReasoning": {
+                            "type": "boolean"
+                          },
+                          "supportsStreaming": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "supported",
+              "reason"
+            ],
+            "properties": {
+              "supported": {
+                "const": false
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "host-update-required",
+                  "unsupported-runtime",
+                  "no-eligible-models",
+                  "account-locked",
+                  "public-https-required"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
       "name": "external_agent_config_create",
       "category": "agents",
       "resource": "external-agents",
@@ -19466,7 +19795,42 @@
             "description": "Thinking level for this turn, in the app's vocabulary (`low` to `max`). Folded onto whatever ladder the chosen model publishes; an agent with no reasoning axis ignores it."
           },
           "externalSessionId": {
-            "type": "string"
+            "type": "string",
+            "description": "Resume an agent session this conversation already established on the host: a native session id, or a `cognia-gateway:` task session id when the turn runs on a Cognia model."
+          },
+          "cogniaModel": {
+            "description": "Cognia provider/model this turn runs on through the host's gateway, using the host's own provider settings and vault. Omit to inherit the host configuration's own setting; `null` selects the agent's native model configuration explicitly. Identifiers only: credentials never cross the wire.",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "providerId",
+                  "modelId"
+                ],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "accountId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "description": "Omit for the provider default; a host vault account id pins the task; null selects the host's manual API settings."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "callerDeviceId": {
             "type": "string"
@@ -38888,7 +39252,8 @@
                 "github-issue-sync",
                 "issue-wakeup",
                 "radar-report",
-                "provider-diagnostics-refresh"
+                "provider-diagnostics-refresh",
+                "conversation-auto-archive"
               ]
             },
             "status": {
@@ -39172,7 +39537,8 @@
                   "github-issue-sync",
                   "issue-wakeup",
                   "radar-report",
-                  "provider-diagnostics-refresh"
+                  "provider-diagnostics-refresh",
+                  "conversation-auto-archive"
                 ]
               },
               "trigger": {
@@ -39557,7 +39923,8 @@
               "github-issue-sync",
               "issue-wakeup",
               "radar-report",
-              "provider-diagnostics-refresh"
+              "provider-diagnostics-refresh",
+              "conversation-auto-archive"
             ]
           },
           "trigger": {
@@ -40027,7 +40394,8 @@
                     "github-issue-sync",
                     "issue-wakeup",
                     "radar-report",
-                    "provider-diagnostics-refresh"
+                    "provider-diagnostics-refresh",
+                    "conversation-auto-archive"
                   ]
                 },
                 "trigger": {
@@ -40411,7 +40779,8 @@
                   "github-issue-sync",
                   "issue-wakeup",
                   "radar-report",
-                  "provider-diagnostics-refresh"
+                  "provider-diagnostics-refresh",
+                  "conversation-auto-archive"
                 ]
               },
               "trigger": {
@@ -40775,7 +41144,8 @@
                         "github-issue-sync",
                         "issue-wakeup",
                         "radar-report",
-                        "provider-diagnostics-refresh"
+                        "provider-diagnostics-refresh",
+                        "conversation-auto-archive"
                       ]
                     },
                     "trigger": {
@@ -41270,7 +41640,8 @@
                     "github-issue-sync",
                     "issue-wakeup",
                     "radar-report",
-                    "provider-diagnostics-refresh"
+                    "provider-diagnostics-refresh",
+                    "conversation-auto-archive"
                   ]
                 }
               },
@@ -41378,7 +41749,8 @@
                 "github-issue-sync",
                 "issue-wakeup",
                 "radar-report",
-                "provider-diagnostics-refresh"
+                "provider-diagnostics-refresh",
+                "conversation-auto-archive"
               ]
             },
             "trigger": {
@@ -41832,7 +42204,8 @@
                   "github-issue-sync",
                   "issue-wakeup",
                   "radar-report",
-                  "provider-diagnostics-refresh"
+                  "provider-diagnostics-refresh",
+                  "conversation-auto-archive"
                 ]
               },
               "status": {
@@ -42036,7 +42409,8 @@
                 "github-issue-sync",
                 "issue-wakeup",
                 "radar-report",
-                "provider-diagnostics-refresh"
+                "provider-diagnostics-refresh",
+                "conversation-auto-archive"
               ]
             },
             "status": {
@@ -42296,7 +42670,8 @@
                 "github-issue-sync",
                 "issue-wakeup",
                 "radar-report",
-                "provider-diagnostics-refresh"
+                "provider-diagnostics-refresh",
+                "conversation-auto-archive"
               ]
             },
             "trigger": {
@@ -42981,7 +43356,8 @@
                   "github-issue-sync",
                   "issue-wakeup",
                   "radar-report",
-                  "provider-diagnostics-refresh"
+                  "provider-diagnostics-refresh",
+                  "conversation-auto-archive"
                 ]
               },
               "trigger": {
@@ -64926,5 +65302,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "3695b3457d2510ba48010f9ce55a7a9e8331eee46817b3060d61d1c9af32bdaa"
+  "catalogHash": "38a28c69fedd6e8ba14b62b56b34552cfc3483d1084df77ad6786bfa5e04ce98"
 }

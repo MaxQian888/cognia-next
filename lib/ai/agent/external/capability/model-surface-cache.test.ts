@@ -5,7 +5,9 @@ import {
   cachedAgentModelSurface,
   cachedConversationSurface,
   forgetAgentModelSurface,
+  lastKnownNativeSurface,
   loadAgentModelSurface,
+  recordReportedAgentModelSurface,
   subscribeAgentModelSurface,
 } from "./model-surface-cache"
 import { __setProcessPlaneDepsForTests } from "./process-plane"
@@ -405,5 +407,117 @@ describe("a conversation's bound session", () => {
     // `a` is unbound, so with no catalog entry it has nothing to answer from.
     expect(cachedConversationSurface("a", "chat-1")).toBeNull()
     expect(cachedConversationSurface("b", "chat-1")?.thinking).toEqual(THINKING)
+  })
+})
+
+describe("what a paired Host reported about its session", () => {
+  let restore: (() => void) | undefined
+  const SEEDED: ExternalAgentModelSurface = { ...SURFACE, write: { kind: "session-seed" } }
+
+  beforeEach(() => {
+    forgetAgentModelSurface()
+  })
+
+  afterEach(() => {
+    restore?.()
+    restore = undefined
+  })
+
+  it("answers for the conversation that ran the turn, and wakes its readers", () => {
+    const listener = jest.fn()
+    const stop = subscribeAgentModelSurface(listener)
+    recordReportedAgentModelSurface("eac_1", "chat-1", "kimi-session", {
+      models: SEEDED,
+      thinking: THINKING,
+    })
+    stop()
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(cachedConversationSurface("eac_1", "chat-1")).toEqual({
+      status: "ready",
+      surface: SEEDED,
+      thinking: THINKING,
+    })
+    expect(cachedAgentModelSurface("eac_1", "kimi-session")?.surface).toEqual(SEEDED)
+    // Another conversation on the same agent has not run a turn yet.
+    expect(cachedConversationSurface("eac_1", "chat-2")).toBeNull()
+  })
+
+  it("is not overwritten by a load that was already in flight", async () => {
+    let settle: (value: ReturnType<typeof reply>) => void = () => {}
+    restore = __setModelSurfaceDepsForTests({
+      fetchSurface: () =>
+        new Promise((resolve) => {
+          settle = resolve
+        }),
+    })
+    const pending = loadAgentModelSurface("eac_1", "kimi-session")
+    recordReportedAgentModelSurface("eac_1", "chat-1", "kimi-session", {
+      models: SEEDED,
+      thinking: THINKING,
+    })
+    settle(reply({ ...SURFACE, currentModelId: "stale" }))
+    await pending
+    expect(cachedAgentModelSurface("eac_1", "kimi-session")?.surface).toEqual(SEEDED)
+  })
+
+  it("is dropped with the agent, like any other answer", () => {
+    recordReportedAgentModelSurface("eac_1", "chat-1", "kimi-session", {
+      models: SEEDED,
+      thinking: EMPTY_THINKING_SURFACE,
+    })
+    forgetAgentModelSurface("eac_1")
+    expect(cachedConversationSurface("eac_1", "chat-1")).toBeNull()
+  })
+})
+
+describe("the last native list an agent published", () => {
+  let restore: (() => void) | undefined
+
+  beforeEach(() => forgetAgentModelSurface())
+  afterEach(() => {
+    restore?.()
+    restore = undefined
+  })
+
+  it("survives the agent being forgotten, and is offered as a seeded surface", async () => {
+    restore = __setModelSurfaceDepsForTests({ fetchSurface: jest.fn().mockResolvedValue(reply()) })
+    await loadAgentModelSurface("kimi", "native-1")
+    // A gateway turn can reconnect the agent, which forgets its sessions.
+    forgetAgentModelSurface("kimi")
+    expect(cachedAgentModelSurface("kimi", "native-1")).toBeNull()
+    expect(lastKnownNativeSurface("kimi")).toEqual({
+      status: "ready",
+      surface: { ...SURFACE, write: { kind: "session-seed" } },
+      thinking: THINKING,
+    })
+    expect(lastKnownNativeSurface("other")).toBeNull()
+  })
+
+  it("never remembers a gateway task's session, or an empty list", async () => {
+    restore = __setModelSurfaceDepsForTests({
+      fetchSurface: jest
+        .fn()
+        .mockResolvedValueOnce(reply({ ...SURFACE, choices: [] }))
+        .mockResolvedValue(reply()),
+    })
+    await loadAgentModelSurface("kimi", "empty")
+    expect(lastKnownNativeSurface("kimi")).toBeNull()
+    recordReportedAgentModelSurface("kimi", "chat-1", "cognia-gateway:task-1:n", {
+      models: SURFACE,
+      thinking: THINKING,
+    })
+    expect(lastKnownNativeSurface("kimi")).toBeNull()
+    recordReportedAgentModelSurface("kimi", "chat-1", "host-native", {
+      models: SURFACE,
+      thinking: THINKING,
+    })
+    expect(lastKnownNativeSurface("kimi")?.surface.choices).toEqual(SURFACE.choices)
+  })
+
+  it("is dropped only when everything is", async () => {
+    restore = __setModelSurfaceDepsForTests({ fetchSurface: jest.fn().mockResolvedValue(reply()) })
+    await loadAgentModelSurface("kimi", "native-1")
+    forgetAgentModelSurface()
+    expect(lastKnownNativeSurface("kimi")).toBeNull()
   })
 })

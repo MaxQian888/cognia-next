@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { SubAgent, SubAgentStatus } from "@/types/agent/sub-agent"
@@ -197,4 +197,22 @@ describe("run detail", () => {
     render(<RuntimePanel />)
     expect(screen.getByTestId("rejection-blocked")).toHaveTextContent("too deep")
   })
+})
+
+it("does not announce a cancellation before its durable receipt", async () => {
+  let resolve!: (value: boolean) => void
+  cancelSubagentRun.mockReturnValueOnce(
+    new Promise<boolean>((done) => {
+      resolve = done
+    })
+  )
+  seed(run("pending-cancel", { startedAt: new Date() }))
+  render(<RuntimePanel />)
+  await userEvent.click(screen.getByTestId("subagent-runtime-cancel-pending-cancel"))
+  expect(toastSuccess).not.toHaveBeenCalled()
+  await act(async () => {
+    resolve(false)
+  })
+  expect(toastInfo).toHaveBeenCalled()
+  expect(toastSuccess).not.toHaveBeenCalled()
 })

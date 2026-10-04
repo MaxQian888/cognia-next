@@ -24,6 +24,7 @@ import {
   AGENT_MODEL_CATALOG,
   bindConversationSession,
   cachedAgentModelSurface,
+  cachedConversationSurface,
   EMPTY_MODEL_SURFACE,
   loadAgentModelCatalog,
   loadAgentModelSurface,
@@ -31,7 +32,10 @@ import {
   subscribeAgentModelSurface,
   type ModelSurfaceResult,
 } from "@/lib/ai/agent/external/capability/model-surface-cache"
-import { mountHostConfigForCatalog } from "@/lib/ai/agent/external/config/host-config-mount"
+import {
+  hostConfigCatalogMountIsLocal,
+  mountHostConfigForCatalog,
+} from "@/lib/ai/agent/external/config/host-config-mount"
 import {
   externalAgentProcessPlaneScope,
   subscribeExternalAgentProcessPlane,
@@ -44,9 +48,39 @@ import {
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
+/**
+ * How long one discovery may keep the picker on "asking the agent".
+ *
+ * Every step below has its own transport deadline (a spawn over the companion
+ * plane, `session/new`, the catalog's discovery session), but they add up, and
+ * a connect retries. The picker must reach an answer it can explain well
+ * before a user gives up on it. A discovery still running past this keeps
+ * going: when it lands it writes the shared cache and the surface appears.
+ */
+export const MODEL_DISCOVERY_DEADLINE_MS = 45_000
+
+export type ExternalAgentModelsStatus =
+  | ModelSurfaceResult["status"]
+  | "idle"
+  /**
+   * The agent runs on a paired Host and has not reported its models to this
+   * client yet. The Host reports them at the end of every turn, so this is the
+   * state of a conversation before its first message (or of one resumed on a
+   * client that has not seen a turn since it started). The agent runs its own
+   * default model, or the one this conversation picked, until then.
+   */
+  | "deferred"
+
 export interface ExternalAgentModels {
   /** The agent this conversation runs on, or `null` on a built-in lane. */
   agentId: string | null
+  /**
+   * The agent's display name, from wherever this client knows it: the local
+   * agent store, or the label the host-lane runtime ref carries. `null` when
+   * neither has one, and a caller must then use a generic word for "the
+   * agent" rather than a section heading.
+   */
+  agentName: string | null
   /** The agent's open session the surface describes. */
   externalSessionId: string | null
   /** What the agent offers. `null` until an answer arrives. */
@@ -62,7 +96,13 @@ export interface ExternalAgentModels {
   thinking: ExternalAgentThinkingSurface
   loading: boolean
   /** Why there is nothing to show, when the agent was asked and could not say. */
-  status: ModelSurfaceResult["status"] | "idle"
+  status: ExternalAgentModelsStatus
+  /**
+   * Whether {@link refresh} can learn anything new right now. `false` on a
+   * paired Host's lane, where the list arrives with a turn and asking again
+   * from here has nobody to ask.
+   */
+  canRefresh: boolean
   /** Write a chosen model back to the agent, then re-read what it now reports. */
   select: (modelId: string) => Promise<void>
   /**
@@ -80,11 +120,13 @@ export interface ExternalAgentModels {
 
 const IDLE: ExternalAgentModels = {
   agentId: null,
+  agentName: null,
   externalSessionId: null,
   surface: null,
   thinking: EMPTY_THINKING_SURFACE,
   loading: false,
   status: "idle",
+  canRefresh: false,
   select: async () => {},
   refresh: () => {},
 }
@@ -113,6 +155,10 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
   const connectionStatus = useExternalAgentStore((state) =>
     agentId ? state.connectionStatus[agentId] : undefined
   )
+  const storedName = useExternalAgentStore((state) =>
+    agentId ? (state.agents[agentId]?.name ?? null) : null
+  )
+  const agentName = storedName ?? (runtimeRef.kind === "host" ? (runtimeRef.name ?? null) : null)
 
   const [externalSessionId, setExternalSessionId] = useState<string | null>(null)
   const [result, setResult] = useState<ModelSurfaceResult | null>(null)
@@ -133,6 +179,16 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     () => "server"
   )
   /**
+   * A host-owned configuration this client cannot mount without spawning a
+   * rival copy of the agent on the Host (see `hostConfigCatalogMountIsLocal`).
+   * Such a lane never asks: it reads what the Host reported in the run stream.
+   * Re-derived whenever the plane's scope moves, which is when it can change.
+   */
+  const reportedLane = useMemo(() => {
+    void planeScope
+    return hostConfigId !== null && !hostConfigCatalogMountIsLocal()
+  }, [hostConfigId, planeScope])
+  /**
    * The composer mounts a SECOND copy of this hook for the effort chip, with
    * its own `nonce`. Refreshing from the model popover updated the shared
    * cache and neither copy of the other hook, so the effort ladder stayed on a
@@ -149,8 +205,24 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     // No clearing here: the memo below already answers IDLE for a built-in
     // lane, so state left over from a previous agent is unreachable, and
     // clearing it would be a render cascade for a value nothing reads.
-    if (!agentId) return
+    if (!agentId || reportedLane) return
     let cancelled = false
+    // Bounds THIS run's claim on the spinner, not the run itself. See
+    // `MODEL_DISCOVERY_DEADLINE_MS`.
+    const deadline = setTimeout(() => {
+      if (cancelled) return
+      setResult((current) =>
+        current?.status === "ready"
+          ? current
+          : {
+              status: "error",
+              surface: EMPTY_MODEL_SURFACE,
+              thinking: EMPTY_THINKING_SURFACE,
+              detail: `The agent did not answer within ${MODEL_DISCOVERY_DEADLINE_MS / 1000} s`,
+            }
+      )
+      setLoading(false)
+    }, MODEL_DISCOVERY_DEADLINE_MS)
     void (async () => {
       try {
         // A host-owned configuration is not in this shell's agent store, so
@@ -237,12 +309,14 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
         // conversation. Clearing here is what makes the flag this run's own
         // property rather than a latch shared with whatever comes next.
         if (!cancelled) setLoading(false)
+        clearTimeout(deadline)
       }
     })()
     return () => {
       cancelled = true
+      clearTimeout(deadline)
     }
-  }, [agentId, hostConfigId, sessionId, nonce, planeScope, connectionStatus])
+  }, [agentId, hostConfigId, reportedLane, sessionId, nonce, planeScope, connectionStatus])
 
   /**
    * What the shared cache holds right now, derived rather than mirrored.
@@ -259,11 +333,16 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     // `cacheRevision` is the dependency: it moves on every write, which is
     // exactly when this has to be read again.
     void cacheRevision
+    // A reported lane resolves no session of its own: the Host's report binds
+    // the conversation to the session it ran, and the cache answers for it.
+    if (reportedLane) return cachedConversationSurface(agentId, sessionId)
     return cachedAgentModelSurface(agentId, externalSessionId ?? AGENT_MODEL_CATALOG)
-  }, [agentId, externalSessionId, cacheRevision])
+  }, [agentId, externalSessionId, reportedLane, sessionId, cacheRevision])
   // The cache wins when it has an answer. `result` covers the frames before
-  // the first write lands, and whatever this run of the effect is holding.
-  const effective = shared ?? result
+  // the first write lands, and whatever this run of the effect is holding. A
+  // reported lane holds nothing of its own, so a leftover from before the lane
+  // changed must not describe it.
+  const effective = reportedLane ? shared : (shared ?? result)
 
   const refresh = useCallback(() => setNonce((value) => value + 1), [])
 
@@ -301,13 +380,15 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     if (!agentId) return IDLE
     return {
       agentId,
-      externalSessionId,
+      agentName,
+      externalSessionId: reportedLane ? null : externalSessionId,
       surface: effective?.status === "ready" ? effective.surface : null,
       thinking: effective?.thinking ?? EMPTY_THINKING_SURFACE,
-      loading,
-      status: effective?.status ?? "idle",
+      loading: reportedLane ? false : loading,
+      status: effective?.status ?? (reportedLane ? "deferred" : "idle"),
+      canRefresh: !reportedLane,
       select,
       refresh,
     }
-  }, [agentId, externalSessionId, effective, loading, select, refresh])
+  }, [agentId, agentName, externalSessionId, effective, loading, reportedLane, select, refresh])
 }

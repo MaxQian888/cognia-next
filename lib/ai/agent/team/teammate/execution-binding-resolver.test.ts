@@ -72,9 +72,30 @@ describe("resolveTeammateExecutionBinding", () => {
         executionTarget: { mode: "pinned", hostRef: "device:worker-a" },
       },
     })
-    expect(resolved.policy).toEqual({})
+    expect(resolved.policy).toEqual({
+      executionTarget: { mode: "pinned", hostRef: "device:worker-a" },
+    })
     expect(resolved.candidateIds).toEqual(["dep-a"])
     expect(resolved.executionTarget).toEqual({ mode: "pinned", hostRef: "device:worker-a" })
+  })
+
+  it("keeps an explicit host when inheriting the deployment policy", () => {
+    const executionTarget = { mode: "pinned", hostRef: "device:member" } as const
+    const resolved = resolveTeammateExecutionBinding({
+      member: { mode: "inherit", executionTarget },
+      teamDefault: { mode: "pinned", deploymentRef: "dep-team", executionTarget: { mode: "auto" } },
+    })
+    expect(resolved.policy).toEqual({ deploymentRef: "dep-team", executionTarget })
+    expect(resolved.executionTarget).toEqual(executionTarget)
+  })
+
+  it("keeps a host-only binding when every deployment inherits", () => {
+    const executionTarget = { mode: "auto" } as const
+    const resolved = resolveTeammateExecutionBinding({
+      member: { mode: "inherit", executionTarget },
+    })
+    expect(resolved.policy).toEqual({ executionTarget })
+    expect(resolved.executionTarget).toEqual(executionTarget)
   })
 })
 

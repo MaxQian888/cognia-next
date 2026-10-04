@@ -34,6 +34,7 @@ import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { useBiometricPolicyUpdate } from "@/hooks/use-biometric-policy-update"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import {
@@ -73,6 +74,7 @@ function MobileAgentBody() {
   const settings = useSettingsStore((s) => s.settings)
   const update = useSettingsPatch()
   const guard = useBiometricGuard()
+  const { updatePolicy, pending: policyPending } = useBiometricPolicyUpdate(update)
 
   const permissionMode = (settings?.permissionMode ?? "default") as PermissionMode
   const policy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
@@ -149,9 +151,8 @@ function MobileAgentBody() {
           label={t("escalateGate")}
           help={t("escalateGateHelp")}
           checked={policy.escalatePermissionMode ?? true}
-          onChange={(v) =>
-            void update({ biometricRequiredFor: { ...policy, escalatePermissionMode: v } })
-          }
+          disabled={policyPending}
+          onChange={(v) => void updatePolicy({ escalatePermissionMode: v })}
           testid="agent-escalate-gate"
         />
       </MeSection>

@@ -43,6 +43,7 @@ import { createToolSessionContext } from "../../tools/session.ts"
 // A2UI remains Anthropic-only by design.
 
 import { randomUUID } from "node:crypto"
+import { classifyProviderError } from "@cognia/provider-routing/error-classifier"
 import { createEventAdapter } from "./events.ts"
 import { makeInputStream } from "../../shared/input-stream.ts"
 import { extractHttpErrorMeta } from "../../providers/http-error-meta.ts"
@@ -329,11 +330,6 @@ export function dispatchAiSdk({
   }
 
   const sdkSessionId = randomUUID()
-  emit({
-    type: "sdk_session_id",
-    sessionId,
-    sdkSessionId,
-  })
 
   // Model-facing tool names that had to be renamed for the provider
   // (`ocr.extract` → `ocr_extract`), filled in once the tools map is sealed.
@@ -589,7 +585,21 @@ export function dispatchAiSdk({
     isCancelled: () => cancelled,
   })
 
+  // Controls also cancel queued manual requests, which have not created a
+  // compactor job yet and therefore cannot be stopped by its AbortController.
+  let compactionGeneration = 0
+  function invalidateCompaction() {
+    compactionGeneration++
+    manualCompactPending = null
+    maybeCompact.invalidate()
+  }
+
+  let idleCompaction: Promise<void> | null = null
+
   async function runTurn() {
+    // A user send can arrive while an idle manual compaction is awaiting its
+    // provider. Publish that result before starting this turn's model stream.
+    while (idleCompaction) await idleCompaction
     if (active || closing) return
     // Clear any leftover interrupt from a previous turn so this turn streams.
     cancelled = false
@@ -606,6 +616,12 @@ export function dispatchAiSdk({
     nextTurnLedger = null
     nextTurnRemoteContext = undefined
     turnLedgerGate = ledgerGate
+    const settleTurnCompaction = async () => {
+      const settled = maybeCompact.settle()
+      // Release any unanswered background reservation before awaiting it.
+      ledgerGate.drain("turn_ended")
+      await settled
+    }
     /** @type {{ attemptId: string, attemptNo: number, logicalStepId: string } | null} */
     let openLedgerAttempt: { attemptId: string; attemptNo: number; logicalStepId: string } | null =
       null
@@ -834,6 +850,8 @@ export function dispatchAiSdk({
       // Non-ledger calls get the same bounded pre-output retry as reserved
       // transport attempts (opencode v1.18.17: capped retries + jitter).
       let transportRetries = 0
+      let overflowRecoveryAttempted = false
+      let turnProducedOutput = false
       // Unknown finishReasons keep the loop going — bounded so a provider that
       // always ends "other" can't spin the turn forever (opencode v1.18.21).
       let unknownFinishContinues = 0
@@ -847,9 +865,8 @@ export function dispatchAiSdk({
         // leg's text/tool calls distinct instead of merging them into one block.
         adapter.reset()
 
-        // Compact the accumulated history first if the previous leg/turn
-        // overflowed the window — keeps local / OpenAI / Gemini models from
-        // silently exceeding their context the way the Anthropic SDK auto-compacts.
+        // Publish prepared summaries only between legs. The soft threshold
+        // prepares alongside the next model call; the hard threshold waits.
         await maybeCompact(creds, modelParams)
 
         // Enforce the tool-call ↔ tool-result pairing invariant before sending.
@@ -1018,6 +1035,7 @@ export function dispatchAiSdk({
               evt?.type === "tool-input-start"
             ) {
               legProducedOutput = true
+              turnProducedOutput = true
             }
           }
         } catch (err) {
@@ -1046,8 +1064,26 @@ export function dispatchAiSdk({
         // or a socket hangup) is still booked as UNKNOWN — it is retried, but
         // never assumed free.
         if (streamError && !legProducedOutput && !cancelled) {
-          const errorClass = classifyCallError(streamError)
-          const retryable = isRetryableBeforeOutput(errorClass)
+          const contextOverflow =
+            classifyProviderError(errorToMessage(streamError)) === "context-window-exceeded"
+          const errorClass = contextOverflow ? "invalid_request" : classifyCallError(streamError)
+          const retryable = !contextOverflow && isRetryableBeforeOutput(errorClass)
+          if (
+            contextOverflow &&
+            !turnProducedOutput &&
+            !overflowRecoveryAttempted &&
+            sendOptions.compaction?.enabled !== false &&
+            sendOptions.compaction?.trigger !== "manual"
+          ) {
+            overflowRecoveryAttempted = true
+            reportOpenAttempt({ status: "failed", errorClass, reason: errorToMessage(streamError) })
+            const beforeTokens = estimatePromptTokens(conversation)
+            await maybeCompact(creds, modelParams, { force: true, trigger: "auto" })
+            // A refused first call has no output or tools to replay. Retry only
+            // once, with a fresh ledger reservation, after a real reduction.
+            if (!cancelled && !closing && estimatePromptTokens(conversation) < beforeTokens)
+              continue
+          }
           if (openLedgerAttempt) {
             const attemptNo = openLedgerAttempt.attemptNo
             reportOpenAttempt({
@@ -1086,6 +1122,7 @@ export function dispatchAiSdk({
             errorClass: classifyCallError(streamError),
             reason: msg,
           })
+          await settleTurnCompaction()
           emit({
             type: "session_ended",
             sessionId,
@@ -1274,6 +1311,8 @@ export function dispatchAiSdk({
       // is what actually occupies the window after the turn. The renderer's
       // window math reads `contextInputTokens`; cost/session totals keep using
       // the summed `inputTokens`.
+      // Report aborted background side calls before announcing terminal state.
+      await settleTurnCompaction()
       const finishUsage = finishUsageSnapshot()
       const finishEvents = adapter.finish({ usage: finishUsage })
       flushAdapter(finishEvents)
@@ -1318,6 +1357,7 @@ export function dispatchAiSdk({
           reason: errorToMessage(err),
         })
       }
+      await settleTurnCompaction()
       // An aborted turn (user interrupt) is a clean stop, not a failure —
       // streamText rejects with an AbortError once the signal fires.
       if (cancelled || record(err).name === "AbortError" || record(err).name === "TimeoutError") {
@@ -1337,12 +1377,16 @@ export function dispatchAiSdk({
         })
       }
     } finally {
-      ledgerGate.drain("turn_ended")
+      await settleTurnCompaction()
       turnLedgerGate = null
       active = false
       activeAbortController = null
     }
   }
+
+  // Initialization acknowledges restored context, including headless sends.
+  // Keep this after synchronous setup/hydration and before any turn starts.
+  emit({ type: "sdk_session_id", sessionId, sdkSessionId, runtimeAdapter: "ai-sdk" })
 
   // Wire the input-stream consumer: each pushed user message kicks off a turn.
   ;(async () => {
@@ -1363,6 +1407,7 @@ export function dispatchAiSdk({
     .finally(() => {
       // Session loop ended (input closed or fatal error) — kill any background
       // shells the agent left running so none outlive the session.
+      invalidateCompaction()
       void toolSession.disposeProcesses()
       // Signal the host to retire this multi-turn session entry. Per-turn
       // `session_ended` events keep the session alive (so context accumulates);
@@ -1371,6 +1416,7 @@ export function dispatchAiSdk({
     })
 
   return {
+    sdkSessionId,
     // Marks this dispatcher as a long-lived, multi-turn session: the host keeps
     // the session entry across per-turn `session_ended` events so the in-process
     // `conversation[]` (the only place context lives for non-Anthropic
@@ -1379,6 +1425,7 @@ export function dispatchAiSdk({
     q: {
       interrupt: async () => {
         cancelled = true
+        invalidateCompaction()
         // Abort the in-flight provider request so it stops immediately instead
         // of running to completion while we ignore the rest of the stream.
         activeAbortController?.abort()
@@ -1407,6 +1454,9 @@ export function dispatchAiSdk({
       get active() {
         return active
       },
+      get closed() {
+        return closing
+      },
       /**
        * Live model switch — the ai-sdk parity for the Anthropic SDK
        * `Query.setModel`. `claude-host.handleControl` invokes this for the
@@ -1423,6 +1473,7 @@ export function dispatchAiSdk({
        */
       setModel: (nextModel: string) => {
         if (typeof nextModel !== "string" || !nextModel) return
+        invalidateCompaction()
         model = nextModel
         sendOptions.model = nextModel
         adapter.setModel(nextModel)
@@ -1450,9 +1501,15 @@ export function dispatchAiSdk({
         manualCompactPending = { focus }
         return
       }
-      await maybeCompact(lastCreds, lastModelParams, { force: true, focus }).catch((err) =>
-        log("warn", `manual compaction failed: ${errorToMessage(err)}`)
-      )
+      const requestedGeneration = compactionGeneration
+      const task = (async () => {
+        if (idleCompaction) await idleCompaction
+        if (closing || requestedGeneration !== compactionGeneration) return
+        await maybeCompact(lastCreds, lastModelParams, { force: true, focus })
+      })().catch((err) => log("warn", `manual compaction failed: ${errorToMessage(err)}`))
+      idleCompaction = task
+      await task
+      if (idleCompaction === task) idleCompaction = null
     },
     // Undo a prior compaction by restoring the pre-compaction message snapshot.
     // Only valid while the session is live and idle (the renderer gates the UI
@@ -1463,6 +1520,7 @@ export function dispatchAiSdk({
         return false
       }
       if (!Array.isArray(messages) || messages.length === 0) return false
+      invalidateCompaction()
       conversation.splice(0, conversation.length, ...messages)
       lastInputTokens = 0
       frozenSummaryVersion = 0
@@ -1474,6 +1532,7 @@ export function dispatchAiSdk({
       // block teardown).
       closing = true
       cancelled = true
+      invalidateCompaction()
       activeAbortController?.abort()
       turnLedgerGate?.drain("session_closed")
       if (pendingProtocolExecs) {

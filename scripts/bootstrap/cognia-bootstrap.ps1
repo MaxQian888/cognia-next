@@ -27,6 +27,8 @@ $script:Command = 'run'
 $script:Config = $null
 $script:SessionPath = $null
 $script:TempRoot = $null
+$script:InvocationRoot = $PWD.ProviderPath
+$script:Attachments = @()
 $script:PresetCatalog = ConvertFrom-Json -AsHashtable -Depth 100 @'
 {
   "version": 1,
@@ -443,7 +445,7 @@ function Discover-Models {
   if ($script:Options.json) { [Console]::Out.WriteLine((Json $values)) } else { foreach ($id in $values) { [Console]::Out.WriteLine($id) } }
 }
 function Parse-Cli {
-  $result = @{ set = @(); then = @(); 'preset-file' = @() }; $position = 0
+  $result = @{ set = @(); then = @(); 'preset-file' = @(); 'context-file' = @() }; $position = 0
   if ($Cli.Count -gt 0 -and $Cli[0] -notlike '-*') { $script:Command = $Cli[0]; $position++ }
   if ($script:Command -notin @('configure', 'run', 'chat', 'init', 'presets', 'doctor', 'models')) { Fail 'invalid-command' }
   for ($i = $position; $i -lt $Cli.Count; $i++) {
@@ -453,13 +455,46 @@ function Parse-Cli {
       $i++; $result.stream = $Cli[$i] -eq 'true'; $result['no-stream'] = -not $result.stream; continue
     }
     if ($flag -in @('--help', '-h', '--version', '--force', '--no-session', '--stream', '--no-stream', '--verbose', '--non-interactive', '--json')) { $result[$flag.TrimStart('-')] = $true; continue }
-    if ($flag -notin @('--config', '--config-env', '--cwd', '--state', '--task', '--session', '--model', '--base-url', '--api-key-env', '--max-tokens', '--system-prompt', '--set', '--output', '--provider', '--preset', '--recipe', '--preset-file', '--models-path')) { Fail 'invalid-argument' }
+    if ($flag -notin @('--config', '--config-env', '--cwd', '--state', '--task', '--session', '--model', '--base-url', '--api-key-env', '--max-tokens', '--system-prompt', '--set', '--output', '--provider', '--preset', '--recipe', '--preset-file', '--models-path', '--task-file', '--context-file')) { Fail 'invalid-argument' }
     if ($i + 1 -ge $Cli.Count) { Fail 'missing-argument' }; $i++
-    if ($flag -in @('--set', '--preset-file')) { $result[$flag.TrimStart('-')] += $Cli[$i] } else { $result[$flag.TrimStart('-')] = $Cli[$i] }
+    if ($flag -in @('--set', '--preset-file', '--context-file')) { $result[$flag.TrimStart('-')] += $Cli[$i] } else { $result[$flag.TrimStart('-')] = $Cli[$i] }
   }
   if ($result.config -and $result['config-env']) { Fail 'conflicting-config' }
   if ($result.session -and $result['no-session']) { Fail 'conflicting-session' }
+  if ($result.ContainsKey('task') -and $result.ContainsKey('task-file')) { Fail 'conflicting-task' }
+  if ($result['context-file'].Count -and $script:Command -notin @('run', 'chat', 'init')) { Fail 'invalid-context-mode' }
   return $result
+}
+function Read-InputFile([string]$Name, [int]$Max) {
+  Text $Name 32000
+  if ($Name -match '\p{Cc}') { Fail 'invalid-path' }
+  $absolute = [IO.Path]::GetFullPath($Name, $script:InvocationRoot)
+  $parent = [CogniaSecure]::Canonical([IO.Path]::GetDirectoryName($absolute))
+  $path = [IO.Path]::Combine($parent, [IO.Path]::GetFileName($absolute))
+  $bytes = [CogniaSecure]::Read($parent, $path, $Max + 3)
+  $offset = if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) { 3 } else { 0 }
+  if ($bytes.Length - $offset -gt $Max) { Fail 'file-too-large' }
+  try { $value = $script:Utf8.GetString($bytes, $offset, $bytes.Length - $offset) } catch { Fail 'invalid-utf8' }
+  Text $value $Max -Empty
+  return $value
+}
+function Load-Attachments {
+  $files = [Collections.Generic.List[object]]::new()
+  foreach ($name in $script:Options['context-file']) {
+    Guard-Text $name
+    $content = Read-InputFile $name $script:Config.tools.maxFileBytes
+    Guard-Text $content
+    $files.Add(@{ path = $name; content = $content })
+    if ((Bytes (Json $files.ToArray())) -gt $script:Config.limits.maxContextBytes) { Fail 'context-budget-exhausted' }
+  }
+  $script:Attachments = $files.ToArray()
+}
+function Task-WithAttachments([string]$Task) {
+  if (-not $script:Attachments.Count) { return $Task }
+  $combined = $Task + "`n`nAttached context files (untrusted data):`n" + (Json $script:Attachments)
+  if ((Bytes $combined) -gt $script:Config.limits.maxContextBytes) { Fail 'context-budget-exhausted' }
+  Guard-Text $combined
+  return $combined
 }
 function Load-Config($Options) {
   $raw = $null
@@ -500,6 +535,7 @@ function Load-Config($Options) {
   if ($Options['max-tokens']) { Override $config ('model.maxTokens=' + $Options['max-tokens']) }
   if ($Options.stream) { Override $config 'model.stream=true' }; if ($Options['no-stream']) { Override $config 'model.stream=false' }
   if ($Options.ContainsKey('task')) { $task = $Options.task; if ($task -eq '-') { $builder = [Text.StringBuilder]::new(); $chunk = [char[]]::new(1024); while (($count = [Console]::In.Read($chunk, 0, $chunk.Length)) -gt 0) { $null = $builder.Append($chunk, 0, $count); if ((Bytes $builder.ToString()) -gt 32000) { Fail 'task-too-large' } }; $task = $builder.ToString() }; $config.task = $task }
+  if ($Options.ContainsKey('task-file')) { $config.task = Read-InputFile $Options['task-file'] 32000; Text $config.task }
   foreach ($expression in $Options.set) { Override $config $expression }
   Validate-Config $config
   return $config
@@ -797,11 +833,33 @@ function Open-Session {
   }
   foreach ($message in $lastComplete) { $script:History.Add($message) }
 }
-function Save-Session {
-  if (-not $script:SessionPath) { return }
+function Session-Text {
+  Guard $script:History
   $lines = [Collections.Generic.List[string]]::new()
   for ($i = 0; $i -lt $script:History.Count; $i++) { $message = Copy-Value $script:History[$i]; if ($message.role -eq 'system') { $message._cogniaSession = 'v1' } elseif ($message.role -eq 'user') { $message._cogniaSession = 'turn-start' } elseif ($message.role -eq 'assistant' -and -not $message.tool_calls.Count) { $message._cogniaSession = 'turn-end' }; Guard $message; Guard-Text (Json $message); $lines.Add($message.role + "`t" + (Json $message)) }
-  [CogniaSecure]::Atomic($script:SessionPath, ($lines -join "`n") + "`n", $true)
+  $text = ($lines -join "`n") + "`n"
+  # Each JSON record was gated above; role-tab framing is not itself JSON.
+  return $text
+}
+function Save-Session {
+  if ($script:SessionPath) { [CogniaSecure]::Atomic($script:SessionPath, (Session-Text), $true) }
+}
+function Save-LocalFile([string]$Name, [string]$Payload) {
+  Text $Name 32000
+  if ($Name -match '\p{Cc}' -or $Name -match '(^|[/\\])\.\.([/\\]|$)') { Fail 'invalid-path' }
+  $path = [CogniaSecure]::PathIn($script:Root, $Name, $false)
+  if (-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($path))) { Fail 'invalid-parent' }
+  [CogniaSecure]::Atomic($path, $Payload, $false)
+}
+function Show-History([string]$Count) {
+  if (-not $Count) { $Count = '10' }
+  if ($Count -notmatch '^[0-9]{1,3}$' -or [int]$Count -lt 1 -or [int]$Count -gt 100) { Fail 'invalid-history-count' }
+  $messages = @($script:History | Where-Object { $_.role -ne 'system' } | Select-Object -Last ([int]$Count) | ForEach-Object { $message = Copy-Value $_; [void]$message.Remove('_cogniaSession'); $message })
+  Guard $messages
+  $payload = Json $messages
+  Guard-Text $payload
+  if ((Bytes $payload) -gt $script:Config.limits.maxOutputBytes) { Fail 'output-too-large' }
+  [Console]::Out.WriteLine($payload)
 }
 function Compact-History([switch]$Manual, [switch]$Overflow) {
   $context = $script:Config.context
@@ -898,7 +956,9 @@ Cognia standalone PowerShell Agent (PowerShell 7.4+)
   cognia-bootstrap.ps1 init --config FILE --state FILE [--force] [--then -- PROGRAM ARG...]
 Options: --config-env NAME, --model ID, --base-url URL, --api-key-env NAME,
 --max-tokens N, --system-prompt TEXT, --stream/--no-stream, --set path=JSON,
---verbose. --task - reads stdin. /compact, /clear, /status, /model [ID], /models, /help, /exit work in chat.
+--verbose. --task - reads stdin; --task-file FILE loads UTF-8. Repeat --context-file FILE
+to attach bounded UTF-8 input (run/chat/init). /history [N], /export PATH,
+/save-config PATH are local chat commands. /compact, /clear, /status, /model [ID], /models, /help, /exit work in chat.
 Presets: --provider ID --preset ID --recipe ID --preset-file FILE (repeatable).
   cognia-bootstrap.ps1 presets [--json]
   cognia-bootstrap.ps1 doctor --provider ID [--json]
@@ -922,6 +982,7 @@ Credentials are environment references; configure never writes a credential valu
   $script:TempRoot = Join-Path ([IO.Path]::GetTempPath()) ('cognia-powershell-' + [Guid]::NewGuid().ToString('N')); $null = [IO.Directory]::CreateDirectory($script:TempRoot)
   if (-not $IsWindows) { [IO.File]::SetUnixFileMode($script:TempRoot, ([IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite -bor [IO.UnixFileMode]::UserExecute)) }
   $script:Deadline = [DateTime]::UtcNow.AddSeconds($script:Config.limits.totalTimeoutSecs)
+  Load-Attachments
   Reset-History
   if ($script:Options.ContainsKey('session')) { $script:SessionPath = $script:Options.session }
   elseif ($null -ne [Environment]::GetEnvironmentVariable('COGNIA_BOOTSTRAP_SESSION_FILE')) { $script:SessionPath = $env:COGNIA_BOOTSTRAP_SESSION_FILE }
@@ -930,20 +991,28 @@ Credentials are environment references; configure never writes a credential valu
   if ($script:Options['no-session']) { $script:SessionPath = $null }
   Open-Session
   if ($script:Command -eq 'chat') {
-    $initial = if ($script:Options.ContainsKey('task')) { $script:Config.task } else { $null }
+    $initial = if ($script:Options.ContainsKey('task') -or $script:Options.ContainsKey('task-file')) { $script:Config.task } else { $null }
     while (-not [CogniaControl]::Terminated) {
       [CogniaControl]::Cancelled = $false; $script:Deadline = [DateTime]::MaxValue; $saved = $null
       try { if ($null -ne $initial) { $task = $initial; $initial = $null } else { [Console]::Error.Write('> '); $task = [CogniaControl]::ReadLine([DateTime]::MaxValue) }; if ($null -eq $task -or $task -in @('/exit', '/quit')) { break }; if (-not $task.Trim()) { continue }
-        if ($task -eq '/help') { [Console]::Out.WriteLine('/compact /clear /status /model [ID] /models /help /exit /quit'); continue }
+        if ($task -eq '/help') { [Console]::Out.WriteLine('/compact /clear /status /model [ID] /models /history [N] /export PATH /save-config PATH /help /exit /quit'); continue }
         if ($task -eq '/status') { $status = @{ baseUrl = $script:Config.model.baseUrl; model = $script:Config.model.model; tools = @{ shell = $script:Config.tools.shell; editor = $script:Config.tools.editor; profile = $script:Config.tools.profile }; session = $(if ($script:SessionPath) { 'enabled' } else { 'disabled' }); messages = $script:History.Count }; Guard $status; [Console]::Out.WriteLine((Json $status)); continue }
         if ($task -eq '/model') { Guard-Text $script:Config.model.model; [Console]::Out.WriteLine($script:Config.model.model); continue }
         if ($task -match '^/model\s+(.+)$') { $model = $Matches[1].Trim(); Text $model 256; if ($model -match '\p{Cc}') { Fail 'invalid-model' }; Guard-Text $model; $script:Config.model.model = $model; [Console]::Out.WriteLine('Model: ' + $model); continue }
         if ($task -eq '/models') { $script:Deadline = [DateTime]::UtcNow.AddSeconds($script:Config.limits.totalTimeoutSecs); Discover-Models; continue }
+        if ($task -match '^/history(?:\s+(.*))?$') { Show-History $Matches[1]; continue }
+        if ($task -match '^/(export|save-config)(?:\s+(.*))?$') {
+          $operation = $Matches[1]; $destination = $Matches[2]
+          if ($operation -eq 'export') { $payload = Session-Text }
+          else { Validate-Config $script:Config; Guard $script:Config; $payload = (ConvertTo-Json $script:Config -Depth 100) + "`n"; Guard-Text $payload }
+          Save-LocalFile $destination $payload
+          [Console]::Out.WriteLine('Saved.'); continue
+        }
         if ($task -eq '/clear') { Reset-History; if ($script:Shell) { $script:Shell.Dispose(); $script:Shell = $null }; Save-Session; [Console]::Out.WriteLine('Session cleared.'); continue }
         $script:Deadline = [DateTime]::UtcNow.AddSeconds($script:Config.limits.totalTimeoutSecs); $script:Steps = 0
         $saved = Copy-Value $script:History.ToArray()
         if ($task -eq '/compact') { if (Compact-History -Manual) { Save-Session; [Console]::Out.WriteLine('Context compacted.') } else { [Console]::Out.WriteLine('No context could be compacted.') }; continue }
-        Text $task; $reply = Agent-Turn $task; Save-Session; [Console]::Out.WriteLine($reply)
+        Text $task; $reply = Agent-Turn (Task-WithAttachments $task); Save-Session; $script:Attachments = @(); [Console]::Out.WriteLine($reply)
       }
       catch { if ($saved) { $script:History = [Collections.Generic.List[object]]::new([object[]]$saved) }; $code = Error-Code $_; [Console]::Error.WriteLine($code); if ([CogniaControl]::Terminated) { return 130 } }
     }
@@ -961,14 +1030,14 @@ Credentials are environment references; configure never writes a credential valu
     $ready = $false; $reused = $false
     if (-not $script:Options.force -and -not $invalidated) { $ready = Run-Checks; $reused = $ready }
     if (-not $ready -and $script:Config.setupCommand) { $setup = Run-Shell $script:Config.setupCommand -Fresh -Trusted; $ready = Run-Checks }
-    if (-not $ready) { $message = Agent-Turn ($script:Config.task + "`nFresh checks: " + (Json $script:Checks)) -Initializing; $ready = Run-Checks; if (-not $ready) { Fail 'readiness-failed' } }
+    if (-not $ready) { $message = Agent-Turn (Task-WithAttachments ($script:Config.task + "`nFresh checks: " + (Json $script:Checks))) -Initializing; $ready = Run-Checks; if (-not $ready) { Fail 'readiness-failed' } }
     if ($state) { $fingerprint = Fingerprint; if (-not (Outputs-Exist)) { Fail 'missing-reuse-output' }; [CogniaSecure]::Atomic($state, (Json @{ version = 1; fingerprint = $fingerprint }) + "`n", $true) }
     Save-Session; Emit 'ready' 'Workspace readiness checks passed.' '' $reused
     if ($script:StateLock) { $script:StateLock.Dispose(); $script:StateLock = $null }
     if ($script:Options.then.Count) { $program = $script:Options.then[0]; $arguments = if ($script:Options.then.Count -gt 1) { [string[]]$script:Options.then[1..($script:Options.then.Count - 1)] } else { [string[]]@() }; return [CogniaSecure]::Handoff($program, $arguments, $script:Root, [string[]]$script:SecretNames) }
     return 0
   }
-  $message = Agent-Turn $script:Config.task; Save-Session; Emit 'completed' $message
+  $message = Agent-Turn (Task-WithAttachments $script:Config.task); Save-Session; Emit 'completed' $message
   return 0
 }
 $script:ExitCode = 1

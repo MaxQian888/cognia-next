@@ -323,6 +323,192 @@ pub fn aider_model_env_key(key: &str) -> bool {
     )
 }
 
+/// Env key naming plugin Pi package directories (JSON array of absolute paths)
+/// that a Pi session must be able to read. Set by the renderer's Pi adapter
+/// (`PI_PACKAGE_ROOTS_ENV` in `pi-rpc-client.ts`, ADR-0210).
+///
+/// The value is a REQUEST, never a grant: it rides the reviewed
+/// `COGNIA_TOOLHOST_` prefix, so anything that can set a spawn env could name
+/// any path here. [`pi_package_readable_roots`] therefore keeps only entries
+/// that resolve to an existing directory nested under the plugin install root
+/// the HOST derives (never the renderer), and the remote spawn policy drops
+/// the key outright (`SpawnPolicy::validate`).
+pub const PI_PACKAGE_ROOTS_ENV: &str = "COGNIA_TOOLHOST_PI_PACKAGE_ROOTS";
+
+/// Where the desktop app installs plugins: `<data dir>/cognia/plugins`, the
+/// directory `src-tauri/src/lib.rs` hands `PluginRuntimeState`
+/// (`dirs::data_dir()`): `~/Library/Application Support` on macOS,
+/// `$XDG_DATA_HOME` (when absolute) or `~/.local/share` on Linux. Pure, so the
+/// rule is testable without touching the developer's home.
+pub fn desktop_plugin_install_root(
+    os: &str,
+    home: Option<&Path>,
+    xdg_data_home: Option<&Path>,
+) -> Option<PathBuf> {
+    let data_dir = match os {
+        "macos" => home?.join("Library").join("Application Support"),
+        "linux" => match xdg_data_home.filter(|path| path.is_absolute()) {
+            Some(xdg) => xdg.to_path_buf(),
+            None => home?.join(".local").join("share"),
+        },
+        _ => return None,
+    };
+    Some(data_dir.join("cognia").join("plugins"))
+}
+
+/// Every spelling of the host's forbidden readable roots: the literal list
+/// plus its canonical form (`/var` → `/private/var`, `/tmp` → `/private/tmp`
+/// on macOS), so a canonicalized candidate cannot slip past a textual match.
+fn forbidden_readable_spellings() -> Vec<PathBuf> {
+    let mut roots = cognia_exec_sandbox::protected::forbidden_readable_roots();
+    #[cfg(unix)]
+    for extra in ["/private/var", "/private/tmp", "/private/etc"] {
+        roots.push(PathBuf::from(extra));
+    }
+    let canonical: Vec<PathBuf> = roots
+        .iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .collect();
+    roots.extend(canonical);
+    roots
+}
+
+/// Read-only roots for plugin Pi packages, validated so the list can only ever
+/// NARROWLY add reads. An entry survives only when ALL of these hold:
+///
+///   - the command is Pi (the same base-name rule as the state roots);
+///   - it canonicalizes (symlinks resolved) to an existing directory;
+///   - that directory is strictly nested under `plugin_install_root`, the
+///     host-derived plugin store (itself canonicalized) — so the app store's
+///     other contents, the home directory and every system path are out;
+///   - the part below the plugin store names no protected entry (`.ssh`,
+///     `.git`, keychains, …);
+///   - it is not, and is not under or above, a forbidden readable root
+///     (`/var`, `/run`, `/tmp`, … in every spelling);
+///   - it is not nested under any `--deny-readable` root the wrapper emits
+///     (Bot-isolated home, gateway-task deny list, the task-home parent): the
+///     launcher re-opens a readable nested under a deny, so emitting one would
+///     undo that deny;
+///   - it is not, and is not under or above, a `--writable` root the wrapper
+///     emits. Validation canonicalizes HERE and the launcher binds by PATH
+///     later (`--ro-bind-try <path>` under bubblewrap), so a directory the
+///     agent can write is one a sandboxed agent could swap for a symlink
+///     between this check and a sibling spawn's bind. Refusing every overlap
+///     with a writable root closes that window without changing the launcher.
+///     (The stronger option is binding an `O_PATH | O_NOFOLLOW` descriptor
+///     with bubblewrap's `--ro-bind-fd`, which the launcher does not do today.)
+///
+/// A Bot-isolated spawn (`COGNIA_BOT_ISOLATION=1`) gets no package roots at
+/// all — whatever the plugin store's location, even outside the hidden home
+/// (`XDG_DATA_HOME`) — matching ADR-0210 and the adapter's `bot-isolation`
+/// refusal.
+///
+/// Every dropped entry, and an unparseable value, is logged with its reason.
+pub fn pi_package_readable_roots(
+    config: &ExternalAgentSpawnConfig,
+    plugin_install_root: Option<&Path>,
+    deny_roots: &[PathBuf],
+    writable_roots: &[PathBuf],
+) -> Vec<PathBuf> {
+    let Some(raw) = config.env.get(PI_PACKAGE_ROOTS_ENV) else {
+        return Vec::new();
+    };
+    if config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1") {
+        log::warn!("[sandbox] ignoring {PI_PACKAGE_ROOTS_ENV} on a Bot-isolated spawn");
+        return Vec::new();
+    }
+    if base_command(&config.command) != "pi" {
+        log::warn!(
+            "[sandbox] ignoring {PI_PACKAGE_ROOTS_ENV} on a non-Pi spawn ({})",
+            config.command
+        );
+        return Vec::new();
+    }
+    let entries = match serde_json::from_str::<Vec<String>>(raw) {
+        Ok(entries) => entries,
+        Err(error) => {
+            log::warn!("[sandbox] ignoring malformed {PI_PACKAGE_ROOTS_ENV}: {error}");
+            return Vec::new();
+        }
+    };
+    let Some(store) = plugin_install_root.and_then(|root| std::fs::canonicalize(root).ok()) else {
+        if !entries.is_empty() {
+            log::warn!(
+                "[sandbox] ignoring {PI_PACKAGE_ROOTS_ENV}: the plugin install root is unknown \
+                 or does not exist on this host"
+            );
+        }
+        return Vec::new();
+    };
+    let forbidden = forbidden_readable_spellings();
+    let mut denies: Vec<PathBuf> = deny_roots.to_vec();
+    denies.extend(
+        deny_roots
+            .iter()
+            .filter_map(|deny| std::fs::canonicalize(deny).ok()),
+    );
+    let mut writables: Vec<PathBuf> = writable_roots.to_vec();
+    writables.extend(
+        writable_roots
+            .iter()
+            .filter_map(|root| std::fs::canonicalize(root).ok()),
+    );
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let reject = |reason: &str| {
+            log::warn!("[sandbox] dropping Pi package root {entry:?}: {reason}");
+        };
+        let requested = PathBuf::from(&entry);
+        if !requested.is_absolute() {
+            reject("not an absolute path");
+            continue;
+        }
+        let canonical = match std::fs::canonicalize(&requested) {
+            Ok(path) => path,
+            Err(_) => {
+                reject("does not resolve");
+                continue;
+            }
+        };
+        if !canonical.is_dir() {
+            reject("not a directory");
+            continue;
+        }
+        let Ok(below_store) = canonical.strip_prefix(&store) else {
+            reject("not inside the plugin install root");
+            continue;
+        };
+        if below_store.as_os_str().is_empty() {
+            reject("is the plugin install root itself");
+            continue;
+        }
+        if cognia_exec_sandbox::protected::is_protected_anywhere(below_store) {
+            reject("names a protected path");
+            continue;
+        }
+        if cognia_exec_sandbox::protected::is_forbidden_readable(&canonical, &forbidden) {
+            reject("is a forbidden readable root");
+            continue;
+        }
+        if denies.iter().any(|deny| canonical.starts_with(deny)) {
+            reject("is under a root this sandbox denies");
+            continue;
+        }
+        if writables
+            .iter()
+            .any(|writable| canonical.starts_with(writable) || writable.starts_with(&canonical))
+        {
+            reject("overlaps a root this sandbox can write");
+            continue;
+        }
+        if !roots.contains(&canonical) {
+            roots.push(canonical);
+        }
+    }
+    roots
+}
+
 /// Host facts the wrapper needs. A trait so tests can drive every branch
 /// (unsupported platform, missing launcher, file-vs-dir state roots) without
 /// touching the real filesystem or the developer's home directory.
@@ -335,6 +521,12 @@ pub trait SandboxHost {
     fn is_executable(&self, candidate: &Path) -> bool;
     fn ensure_dir(&self, candidate: &Path);
     fn ensure_file(&self, candidate: &Path);
+    /// The host-derived plugin install root (see
+    /// [`desktop_plugin_install_root`]); `None` when unknown, which disables
+    /// plugin Pi package mounts entirely.
+    fn plugin_install_root(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// The real desktop host.
@@ -368,6 +560,16 @@ impl SandboxHost for DesktopSandboxHost {
 
     fn temp_dir(&self) -> PathBuf {
         std::env::temp_dir()
+    }
+
+    fn plugin_install_root(&self) -> Option<PathBuf> {
+        desktop_plugin_install_root(
+            self.os(),
+            self.home().as_deref(),
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .as_deref(),
+        )
     }
 
     #[cfg(unix)]
@@ -780,6 +982,15 @@ pub fn wrap_with_sandbox(
             ".config/opencode",
             ".local/share/opencode",
             ".local/share/cognia-agent-tasks",
+            // Kimi Code (and its archived Python CLI), Copilot CLI, Goose and
+            // Aider keep logins and provider settings here; a task uses its own.
+            ".kimi-code",
+            ".kimi",
+            ".copilot",
+            ".config/goose",
+            ".local/share/goose",
+            ".local/state/goose",
+            ".aider",
         ] {
             args.splice(
                 0..0,
@@ -789,6 +1000,35 @@ pub fn wrap_with_sandbox(
                 ],
             );
         }
+    }
+
+    // Plugin Pi packages (ADR-0210): each validated package directory is
+    // mounted read-only. Computed after every `--deny-readable` above has been
+    // emitted, so no package root can re-open a denied subtree.
+    let emitted_denies: Vec<PathBuf> = args
+        .windows(2)
+        .filter(|pair| pair[0] == "--deny-readable")
+        .map(|pair| PathBuf::from(&pair[1]))
+        .collect();
+    let emitted_writables: Vec<PathBuf> = args
+        .windows(2)
+        .filter(|pair| pair[0] == "--writable")
+        .map(|pair| PathBuf::from(&pair[1]))
+        .collect();
+    let plugin_store = host.plugin_install_root();
+    for root in pi_package_readable_roots(
+        &config,
+        plugin_store.as_deref(),
+        &emitted_denies,
+        &emitted_writables,
+    ) {
+        args.splice(
+            0..0,
+            [
+                "--readable".to_string(),
+                root.to_string_lossy().into_owned(),
+            ],
+        );
     }
 
     let mut env = config.env.clone();
@@ -921,6 +1161,7 @@ mod tests {
         executable: Vec<PathBuf>,
         dirs: RefCell<Vec<PathBuf>>,
         files: RefCell<Vec<PathBuf>>,
+        plugin_root: Option<PathBuf>,
     }
 
     impl FakeHost {
@@ -959,6 +1200,9 @@ mod tests {
         }
         fn ensure_file(&self, candidate: &Path) {
             self.files.borrow_mut().push(candidate.to_path_buf());
+        }
+        fn plugin_install_root(&self) -> Option<PathBuf> {
+            self.plugin_root.clone()
         }
     }
 
@@ -1418,6 +1662,401 @@ mod tests {
             .args
             .iter()
             .any(|arg| arg == "/ambient/tmp" || arg == "/untrusted"));
+    }
+
+    /// A real directory tree for the Pi package root tests. Created under the
+    /// workspace `target/` dir rather than the OS temp dir: `/tmp` and `/var`
+    /// (macOS temp lives in `/private/var`) are forbidden readable roots, so a
+    /// fixture there could never exercise the accepting path.
+    struct PiRootsFixture {
+        _tmp: tempfile::TempDir,
+        base: PathBuf,
+    }
+
+    impl PiRootsFixture {
+        fn new() -> Self {
+            let parent = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/cognia-external-agent-test-fixtures");
+            std::fs::create_dir_all(&parent).unwrap();
+            let tmp = tempfile::tempdir_in(&parent).unwrap();
+            let base = std::fs::canonicalize(tmp.path()).unwrap();
+            Self { _tmp: tmp, base }
+        }
+        fn dir(&self, relative: &str) -> PathBuf {
+            let path = self.base.join(relative);
+            std::fs::create_dir_all(&path).unwrap();
+            path
+        }
+    }
+
+    fn pi_roots_config(command: &str, entries: serde_json::Value) -> ExternalAgentSpawnConfig {
+        let mut cfg = config(command, &["--mode", "rpc"], Some("/work/project"));
+        cfg.env
+            .insert(PI_PACKAGE_ROOTS_ENV.into(), entries.to_string());
+        cfg
+    }
+
+    #[test]
+    fn desktop_plugin_install_root_matches_the_app_plugin_store() {
+        let home = Path::new("/Users/dev");
+        assert_eq!(
+            desktop_plugin_install_root("macos", Some(home), None),
+            Some(PathBuf::from(
+                "/Users/dev/Library/Application Support/cognia/plugins"
+            ))
+        );
+        assert_eq!(
+            desktop_plugin_install_root("linux", Some(Path::new("/home/dev")), None),
+            Some(PathBuf::from("/home/dev/.local/share/cognia/plugins"))
+        );
+        assert_eq!(
+            desktop_plugin_install_root(
+                "linux",
+                Some(Path::new("/home/dev")),
+                Some(Path::new("/data/xdg"))
+            ),
+            Some(PathBuf::from("/data/xdg/cognia/plugins"))
+        );
+        // A relative XDG_DATA_HOME is ignored, as `dirs` does.
+        assert_eq!(
+            desktop_plugin_install_root(
+                "linux",
+                Some(Path::new("/home/dev")),
+                Some(Path::new("rel"))
+            ),
+            Some(PathBuf::from("/home/dev/.local/share/cognia/plugins"))
+        );
+        assert_eq!(
+            desktop_plugin_install_root("windows", Some(home), None),
+            None
+        );
+        assert_eq!(desktop_plugin_install_root("macos", None, None), None);
+    }
+
+    #[test]
+    fn pi_package_roots_keep_only_existing_dirs_inside_the_plugin_store() {
+        let fx = PiRootsFixture::new();
+        let store = fx.dir("data/cognia/plugins");
+        let latex = fx.dir("data/cognia/plugins/latex-workbench");
+        let file = store.join("latex-workbench/README.md");
+        std::fs::write(&file, "x").unwrap();
+        let other_app_data = fx.dir("data/cognia/secrets");
+        let ssh = fx.dir("data/cognia/plugins/evil/.ssh");
+        let cfg = pi_roots_config(
+            "pi",
+            serde_json::json!([
+                latex,
+                latex,
+                format!("{}/../latex-workbench", store.join("evil").display()),
+                "relative/dir",
+                store,
+                other_app_data,
+                file,
+                ssh,
+                store.join("missing"),
+            ]),
+        );
+        assert_eq!(
+            pi_package_readable_roots(&cfg, Some(&store), &[], &[]),
+            vec![latex.clone()]
+        );
+        // No host-derived store → nothing is mounted at all.
+        assert!(pi_package_readable_roots(&cfg, None, &[], &[]).is_empty());
+        assert!(pi_package_readable_roots(&cfg, Some(&fx.base.join("nope")), &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn pi_package_roots_resolve_symlinks_before_checking_containment() {
+        let fx = PiRootsFixture::new();
+        let store = fx.dir("data/cognia/plugins");
+        let home = fx.dir("home");
+        let link = store.join("looks-like-a-plugin");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&home, &link).unwrap();
+        #[cfg(unix)]
+        {
+            let cfg = pi_roots_config("pi", serde_json::json!([link]));
+            assert!(pi_package_readable_roots(&cfg, Some(&store), &[], &[]).is_empty());
+        }
+    }
+
+    #[test]
+    fn pi_package_roots_refuse_malformed_values_and_non_pi_commands() {
+        let fx = PiRootsFixture::new();
+        let store = fx.dir("data/cognia/plugins");
+        let latex = fx.dir("data/cognia/plugins/latex-workbench");
+        let mut malformed = config("pi", &[], Some("/work"));
+        malformed
+            .env
+            .insert(PI_PACKAGE_ROOTS_ENV.into(), "{not json".into());
+        assert!(pi_package_readable_roots(&malformed, Some(&store), &[], &[]).is_empty());
+        let object = pi_roots_config("pi", serde_json::json!({ "root": latex }));
+        assert!(pi_package_readable_roots(&object, Some(&store), &[], &[]).is_empty());
+
+        // `pi.exe` and `PI` are Pi under the wrapper's base-name rule (the same
+        // one that grants Pi its state root); anything else is ignored.
+        for command in ["pi.exe", "PI", "pi"] {
+            let cfg = pi_roots_config(command, serde_json::json!([latex]));
+            assert_eq!(
+                pi_package_readable_roots(&cfg, Some(&store), &[], &[]),
+                vec![latex.clone()],
+                "{command}"
+            );
+        }
+        for command in ["codex", "copilot", "pip"] {
+            let cfg = pi_roots_config(command, serde_json::json!([latex]));
+            assert!(
+                pi_package_readable_roots(&cfg, Some(&store), &[], &[]).is_empty(),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn pi_package_roots_never_name_a_forbidden_readable_root() {
+        // Even if the host store itself were mis-derived onto a system path,
+        // nothing under a forbidden readable root is admitted.
+        for system in ["/var/run", "/var", "/tmp", "/etc"] {
+            let store = PathBuf::from(system);
+            if !store.exists() {
+                continue;
+            }
+            let cfg = pi_roots_config("pi", serde_json::json!([store]));
+            assert!(
+                pi_package_readable_roots(&cfg, Some(Path::new("/")), &[], &[]).is_empty(),
+                "{system}"
+            );
+        }
+    }
+
+    #[test]
+    fn pi_package_roots_under_an_emitted_deny_are_dropped() {
+        let fx = PiRootsFixture::new();
+        let home = fx.dir("home");
+        let store = fx.dir("home/.codex/plugins");
+        let pkg = fx.dir("home/.codex/plugins/latex");
+        let cfg = pi_roots_config("pi", serde_json::json!([pkg]));
+        assert_eq!(
+            pi_package_readable_roots(&cfg, Some(&store), &[], &[]),
+            vec![pkg.clone()]
+        );
+        assert!(
+            pi_package_readable_roots(&cfg, Some(&store), &[home.join(".codex")], &[]).is_empty()
+        );
+        assert!(pi_package_readable_roots(&cfg, Some(&store), &[home], &[]).is_empty());
+    }
+
+    /// L1: a package root that overlaps a writable root (under it, or
+    /// containing it) is dropped — the agent could swap a writable directory
+    /// for a symlink between validation and the bind.
+    #[test]
+    fn pi_package_roots_overlapping_a_writable_root_are_dropped() {
+        let fx = PiRootsFixture::new();
+        let store = fx.dir("data/cognia/plugins");
+        let pkg = fx.dir("data/cognia/plugins/latex");
+        let inner = fx.dir("data/cognia/plugins/latex/work");
+        let cfg = pi_roots_config("pi", serde_json::json!([pkg]));
+        // Writable at the package dir, above it, or below it: all refused.
+        for writable in [pkg.clone(), store.clone(), inner.clone()] {
+            assert!(
+                pi_package_readable_roots(&cfg, Some(&store), &[], std::slice::from_ref(&writable))
+                    .is_empty(),
+                "{}",
+                writable.display()
+            );
+        }
+        // An unrelated writable root leaves it alone.
+        assert_eq!(
+            pi_package_readable_roots(&cfg, Some(&store), &[], &[fx.dir("work/project")]),
+            vec![pkg.clone()]
+        );
+
+        // Wrapper level: the agent's cwd inside the package makes it writable,
+        // so the package is not also mounted as a readable root.
+        let host = FakeHost {
+            plugin_root: Some(store.clone()),
+            home: Some(fx.dir("home")),
+            ..FakeHost::new("macos")
+        };
+        let mut wrapped_cfg = config("pi", &["--mode", "rpc"], Some(inner.to_str().unwrap()));
+        wrapped_cfg.env.insert(
+            PI_PACKAGE_ROOTS_ENV.into(),
+            serde_json::json!([pkg]).to_string(),
+        );
+        let wrapped = wrap_with_sandbox(wrapped_cfg, &host).unwrap();
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair[0] == "--readable" && Path::new(&pair[1]) == pkg));
+    }
+
+    /// L3: Bot isolation mounts no package roots, even when the plugin store
+    /// sits OUTSIDE the hidden home (an absolute `XDG_DATA_HOME`).
+    #[test]
+    fn pi_package_roots_are_never_mounted_for_a_bot_isolated_spawn() {
+        let fx = PiRootsFixture::new();
+        let xdg = fx.dir("xdg-data");
+        let store =
+            desktop_plugin_install_root("linux", Some(&fx.base.join("home")), Some(&xdg)).unwrap();
+        std::fs::create_dir_all(&store).unwrap();
+        let pkg = fx.dir("xdg-data/cognia/plugins/latex");
+        assert!(store.starts_with(&xdg) && !store.starts_with(fx.base.join("home")));
+
+        let mut cfg = pi_roots_config("pi", serde_json::json!([pkg]));
+        assert_eq!(
+            pi_package_readable_roots(&cfg, Some(&store), &[], &[]),
+            vec![pkg.clone()]
+        );
+        cfg.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        assert!(pi_package_readable_roots(&cfg, Some(&store), &[], &[]).is_empty());
+
+        // And through the wrapper, where nothing else would have denied it.
+        let host = FakeHost {
+            plugin_root: Some(store.clone()),
+            home: Some(fx.dir("home")),
+            ..FakeHost::new("linux")
+        };
+        cfg.env.insert(
+            "COGNIA_BOT_STATE_DIR".into(),
+            fx.dir("bot-state").display().to_string(),
+        );
+        let wrapped = wrap_with_sandbox(cfg, &host).unwrap();
+        assert!(!wrapped
+            .args
+            .windows(2)
+            .any(|pair| pair[0] == "--readable" && Path::new(&pair[1]) == pkg));
+    }
+
+    /// Wrapper-level invariant: whatever the mode, no `--readable` that the
+    /// Pi package list contributes lands under any `--deny-readable` the
+    /// wrapper emits, and a package root is never writable.
+    #[test]
+    fn wrapped_pi_package_roots_never_reopen_a_denied_subtree() {
+        let fx = PiRootsFixture::new();
+        let home = fx.dir("home");
+        let store = fx.dir("home/Library/Application Support/cognia/plugins");
+        let pkg = fx.dir("home/Library/Application Support/cognia/plugins/latex");
+        let task_store = fx.dir("home/.local/share/cognia-agent-tasks/plugins");
+        let task_pkg = fx.dir("home/.local/share/cognia-agent-tasks/plugins/latex");
+
+        let readables = |args: &[String]| -> Vec<String> {
+            args.windows(2)
+                .filter(|pair| pair[0] == "--readable")
+                .map(|pair| pair[1].clone())
+                .collect()
+        };
+        let denies = |args: &[String]| -> Vec<PathBuf> {
+            args.windows(2)
+                .filter(|pair| pair[0] == "--deny-readable")
+                .map(|pair| PathBuf::from(&pair[1]))
+                .collect()
+        };
+
+        let modes: Vec<(&str, HashMap<String, String>)> = vec![
+            ("default", HashMap::new()),
+            (
+                "bot",
+                HashMap::from([
+                    ("COGNIA_BOT_ISOLATION".to_string(), "1".to_string()),
+                    (
+                        "COGNIA_BOT_STATE_DIR".to_string(),
+                        fx.dir("bot-state").display().to_string(),
+                    ),
+                ]),
+            ),
+            (
+                "gateway",
+                HashMap::from([(
+                    crate::gateway_task::PAYLOAD_ENV.to_string(),
+                    serde_json::json!({"taskId":"t1","runtime":"pi","binding":{},"files":{}})
+                        .to_string(),
+                )]),
+            ),
+        ];
+        for (mode, env) in modes {
+            for store_override in [None, Some(task_store.clone())] {
+                let host = FakeHost {
+                    plugin_root: store_override.clone().or(Some(store.clone())),
+                    home: Some(home.clone()),
+                    ..FakeHost::new("macos")
+                };
+                let candidate = if store_override.is_some() {
+                    &task_pkg
+                } else {
+                    &pkg
+                };
+                let mut base = config("pi", &["--mode", "rpc"], Some("/work/project"));
+                base.env.extend(env.clone());
+                let without = wrap_with_sandbox(base.clone(), &host).unwrap();
+                let mut with_roots = base;
+                with_roots.env.insert(
+                    PI_PACKAGE_ROOTS_ENV.into(),
+                    serde_json::json!([candidate]).to_string(),
+                );
+                let wrapped = wrap_with_sandbox(with_roots, &host).unwrap();
+                let before = readables(&without.args);
+                let added: Vec<String> = readables(&wrapped.args)
+                    .into_iter()
+                    .filter(|path| !before.contains(path))
+                    .collect();
+                for path in &added {
+                    for deny in denies(&wrapped.args) {
+                        assert!(
+                            !Path::new(path).starts_with(&deny),
+                            "{mode}: {path} re-opens denied {}",
+                            deny.display()
+                        );
+                    }
+                }
+                assert!(!wrapped
+                    .args
+                    .windows(2)
+                    .any(|pair| pair[0] == "--writable" && Path::new(&pair[1]) == candidate));
+                match (mode, store_override.is_some()) {
+                    // Default mode: the package is mounted.
+                    ("default", _) => assert_eq!(added, vec![candidate.display().to_string()]),
+                    // Bot isolation denies the whole home; the store is under it.
+                    ("bot", _) => assert!(added.is_empty(), "{mode}"),
+                    // A gateway task denies the task-home parent.
+                    ("gateway", true) => assert!(added.is_empty(), "{mode}"),
+                    ("gateway", false) => {
+                        assert_eq!(added, vec![candidate.display().to_string()])
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gateway_task_hides_every_supported_runtime_native_state() {
+        let host = FakeHost::new("macos");
+        let mut original = config("kimi", &["acp"], Some("/work/project"));
+        original.env.insert(
+            crate::gateway_task::PAYLOAD_ENV.into(),
+            serde_json::json!({"taskId":"kimi-task","runtime":"kimi","binding":{},"files":{}})
+                .to_string(),
+        );
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        for relative in [
+            ".codex",
+            ".kimi-code",
+            ".kimi",
+            ".copilot",
+            ".config/goose",
+            ".local/share/goose",
+            ".local/state/goose",
+            ".aider",
+        ] {
+            let denied = format!("/home/dev/{relative}");
+            assert!(
+                wrapped
+                    .args
+                    .windows(2)
+                    .any(|pair| pair[0] == "--deny-readable" && pair[1] == denied),
+                "{relative}"
+            );
+        }
     }
 
     #[test]

@@ -87,6 +87,33 @@ describe("resolvePiToolPolicy — fallback for unknown tools", () => {
   })
 })
 
+describe("resolvePiToolPolicy — plugin Pi package tools (ADR-0210)", () => {
+  const latexTools = ["latex_compile", "latex_preview"]
+
+  it("dontAsk allows a declared package tool only when the session pre-approved it", () => {
+    const policy = resolvePiToolPolicy("dontAsk", ["read", "latex_compile"], latexTools)
+    expect(decidePiTool(policy, "latex_compile")).toBe("allow")
+    expect(decidePiTool(policy, "latex_preview")).toBe("deny")
+    // An undeclared extension tool still takes the deny fallback, even when
+    // its name was pre-approved: only manifest-declared tools are admitted.
+    expect(
+      decidePiTool(resolvePiToolPolicy("dontAsk", ["rogue_tool"], latexTools), "rogue_tool")
+    ).toBe("deny")
+  })
+
+  it("never lets a package re-declare a built-in into allow", () => {
+    const policy = resolvePiToolPolicy("dontAsk", ["read"], ["bash"])
+    expect(decidePiTool(policy, "bash")).toBe("deny")
+  })
+
+  it("leaves package tools on the mode fallback outside dontAsk", () => {
+    for (const mode of ["default", "acceptEdits", "plan", "bypassPermissions"]) {
+      const policy = resolvePiToolPolicy(mode, ["latex_compile"], latexTools)
+      expect(decidePiTool(policy, "latex_compile")).toBe(policy.fallback)
+    }
+  })
+})
+
 describe("policy serialization", () => {
   it("round-trips through the env payload", () => {
     const policy = resolvePiToolPolicy("acceptEdits")

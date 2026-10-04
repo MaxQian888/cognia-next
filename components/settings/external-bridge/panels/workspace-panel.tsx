@@ -21,13 +21,14 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { bridgeCallerForClientId, STDIO_BRIDGE_CALLER } from "@/lib/external-bridge/bridge-caller"
-import {
-  isHostManagedBridgeAvailable,
-  listExternalBridgeClients,
-} from "@/lib/external-bridge/tauri-control"
+import { listExternalBridgeClients } from "@/lib/external-bridge/tauri-control"
 import { listAllRoots } from "@/lib/external-bridge/workspace/grants"
 import { WORKSPACE_TOOL_SCOPES } from "@/lib/external-bridge/workspace/tool-names"
 import { useProjectStore } from "@/stores/project/project-store"
+import {
+  useActiveHostSupportsFeature,
+  useRemoteHostStore,
+} from "@/stores/remote-host/remote-host-store"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 
 /** The scopes a root grant is useful for. */
@@ -63,27 +64,52 @@ export function BridgeWorkspacePanel({ settings, onChange }: BridgeWorkspacePane
   const t = useTranslations("settings.externalBridge")
   const projects = useProjectStore((state) => state.projects)
   const roots = useMemo(() => listAllRoots(projects), [projects])
-  const [clients, setClients] = useState<BridgeCaller[]>([])
+  /**
+   * Which machine the client list belongs to, and whether that machine keeps a
+   * host-managed client store at all. Both are subscriptions. This used to be
+   * one `isHostManagedBridgeAvailable()` read in a mount-only effect, so after
+   * the user switched hosts (or returned to local) the panel kept offering
+   * grants for the previous machine's credentials, which the current host has
+   * never heard of.
+   */
+  const activeHostId = useRemoteHostStore((state) => state.activeHostId)
+  const hostManaged = useActiveHostSupportsFeature(
+    "external-bridge.lifecycle",
+    "external_bridge_status"
+  )
+  const hostKey = activeHostId ?? "local"
+  /**
+   * The last list fetched, tagged with the host it came from. Showing it only
+   * while that tag still matches is what makes a switch drop the old list on
+   * the same render, without a state reset inside an effect.
+   */
+  const [loaded, setLoaded] = useState<{ hostKey: string; clients: BridgeCaller[] } | null>(null)
+  const clients = useMemo(
+    () => (hostManaged && loaded?.hostKey === hostKey ? loaded.clients : []),
+    [hostKey, hostManaged, loaded]
+  )
 
   useEffect(() => {
-    if (!isHostManagedBridgeAvailable()) return
+    if (!hostManaged) return
     let cancelled = false
     listExternalBridgeClients()
       .then((list) => {
         if (cancelled) return
-        setClients(
-          list
+        setLoaded({
+          hostKey,
+          clients: list
             .filter((client) => !client.revokedAt)
-            .map((client) => ({ id: bridgeCallerForClientId(client.id), name: client.name }))
-        )
+            .map((client) => ({ id: bridgeCallerForClientId(client.id), name: client.name })),
+        })
       })
       .catch(() => {
         // No host-managed client store (older host / web): stdio still works.
       })
     return () => {
+      // A reply for the host the user just left must not land under the new one.
       cancelled = true
     }
-  }, [])
+  }, [hostKey, hostManaged])
 
   const callers: BridgeCaller[] = useMemo(
     () => [{ id: STDIO_BRIDGE_CALLER, name: t("workspace.stdioClient") }, ...clients],

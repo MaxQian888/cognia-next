@@ -20,6 +20,8 @@ import { computeBackoffDelay } from "@cognia/primitives/backoff"
 import { externalAgentProcessPlaneScope } from "./process-plane"
 import {
   EMPTY_THINKING_SURFACE,
+  isGatewaySessionLink,
+  seededModelSurface,
   type ExternalAgentModelSurface,
   type ExternalAgentThinkingSurface,
 } from "../session/session-models"
@@ -87,6 +89,17 @@ const failures = new Map<string, { attempts: number; retryAt: number }>()
  * session was open it offered a different ladder from the host's own chip.
  */
 const conversationSessions = new Map<string, string>()
+/**
+ * The last list of its OWN models each agent published, keyed by agent id.
+ *
+ * While a conversation runs an agent on a Cognia model, the agent's own
+ * session is not the one open: the turn runs in a gateway task, and an agent
+ * that cannot list models without a session answers nothing. The picker still
+ * has to offer the way back, so it shows the last native list this machine
+ * saw. Survives a per-agent {@link forgetAgentModelSurface} on purpose (a
+ * gateway turn can reconnect the agent); only a change of machine drops it.
+ */
+const lastNativeSurfaces = new Map<string, ExternalAgentSessionSurface>()
 /** Which machine the cached answers describe. See `retireStaleScope`. */
 let cachedScope: string | null = null
 const listeners = new Set<() => void>()
@@ -163,6 +176,7 @@ export function forgetAgentModelSurface(agentId?: string): void {
   if (!agentId) {
     for (const entry of keys) invalidate(entry)
     conversationSessions.clear()
+    lastNativeSurfaces.clear()
     publish()
     return
   }
@@ -207,6 +221,66 @@ export function cachedConversationSurface(
     (bound ? cachedAgentModelSurface(agentId, bound) : null) ??
     cachedAgentModelSurface(agentId, AGENT_MODEL_CATALOG)
   )
+}
+
+/**
+ * Record what the machine running the agent REPORTED about one of its sessions.
+ *
+ * A client paired to a Host cannot ask the Host's agent anything: the session
+ * lives in the Host's manager, and the only way to "ask" from here was to
+ * spawn a second copy of the agent on the Host through the process plane,
+ * under the same process id as the one running the turn. So the Host reports
+ * the session's options in the run stream instead, and this is where they land.
+ *
+ * Stamped as the newest answer for the pair, so a load already in flight for
+ * the same key cannot land on top of it. Binds the conversation to the session
+ * as well, which is what lets {@link cachedConversationSurface} find it.
+ */
+export function recordReportedAgentModelSurface(
+  agentId: string,
+  chatSessionId: string | undefined,
+  externalSessionId: string,
+  reported: ExternalAgentSessionSurface
+): void {
+  retireStaleScope()
+  const id = key(agentId, externalSessionId)
+  issued.set(id, (issued.get(id) ?? 0) + 1)
+  inFlight.delete(id)
+  failures.delete(id)
+  cache.set(id, { status: "ready", surface: reported.models, thinking: reported.thinking })
+  if (chatSessionId) conversationSessions.set(key(agentId, chatSessionId), externalSessionId)
+  rememberNativeSurface(agentId, externalSessionId, reported)
+  publish()
+}
+
+/**
+ * Keep `surface` as the agent's last native list, when it is one: a ready
+ * answer with models, about the agent's own session or catalog. A gateway
+ * task's session describes the Cognia model it was bound to, not the agent's.
+ */
+function rememberNativeSurface(
+  agentId: string,
+  sessionId: string,
+  surface: ExternalAgentSessionSurface
+): void {
+  if (isGatewaySessionLink(sessionId) || surface.models.choices.length === 0) return
+  lastNativeSurfaces.set(agentId, surface)
+}
+
+/**
+ * The last list of its own models `agentId` published on this machine, as a
+ * SEEDED surface (a pick is recorded on the conversation and applied by the
+ * next native turn, because no native session is open to write it to), or
+ * `null` when it never published one.
+ */
+export function lastKnownNativeSurface(agentId: string): ModelSurfaceResult | null {
+  const surface = lastNativeSurfaces.get(agentId)
+  if (!surface) return null
+  return {
+    status: "ready",
+    surface: seededModelSurface(surface.models),
+    thinking: surface.thinking,
+  }
 }
 
 /** Injected so the loader is testable without standing up a manager. */
@@ -313,6 +387,11 @@ export async function loadAgentModelSurface(
     .then((result) => {
       if (isNewest()) {
         cache.set(id, result)
+        if (result.status === "ready")
+          rememberNativeSurface(agentId, sessionId, {
+            models: result.surface,
+            thinking: result.thinking,
+          })
         if (result.status === "error") {
           const attempts = (failures.get(id)?.attempts ?? 0) + 1
           failures.set(id, {

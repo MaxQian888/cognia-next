@@ -6,12 +6,15 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { getWorkSubmission } from "@/lib/db/work-submissions"
 
 import { acceptWorkSubmission, bindWorkExecutionContext } from "./service"
+import { TranscriptRuntimeRecoveryError } from "@/lib/claude/ipc"
 import { createStoredChatDispatch } from "./stored-chat-dispatch"
 
 const mockSendPrompt = jest.fn(async (..._args: unknown[]) => undefined)
 
 jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...args: unknown[]) => mockSendPrompt(...args),
+  TranscriptRuntimeRecoveryError:
+    jest.requireActual("@/lib/claude/ipc").TranscriptRuntimeRecoveryError,
 }))
 const mockAbortRouterFusionSend = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/router-fusion/gate/chat-send", () => ({
@@ -94,7 +97,7 @@ describe("stored chat dispatch", () => {
       "session-1",
       "frozen prompt",
       { cwd: "/original/workspace", model: "claude-sonnet-4-5" },
-      { commandId: "submission-1" }
+      { commandId: "submission-1", transcriptRuntime: "frozen" }
     )
   }, 30_000)
 
@@ -132,6 +135,7 @@ describe("stored chat dispatch", () => {
       )
       expect(mockSendPrompt).toHaveBeenCalledWith("session-1", "frozen prompt", replayed, {
         commandId: "submission-1",
+        transcriptRuntime: "frozen",
       })
     }, 30_000)
 
@@ -181,6 +185,7 @@ describe("stored chat dispatch", () => {
         ).resolves.toEqual({ status: "dispatched" })
         expect(mockSendPrompt).toHaveBeenCalledWith("session-1", "frozen prompt", unledgered, {
           commandId: "submission-1",
+          transcriptRuntime: "frozen",
         })
       }, 30_000)
 
@@ -260,4 +265,18 @@ describe("stored chat dispatch", () => {
     })
     expect(mockSendPrompt).not.toHaveBeenCalled()
   }, 30_000)
+})
+
+it("parks stale frozen transcript replay instead of dispatching current history", async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  const row = await seedReplayableSubmission({ transcriptInvalidationId: "generation-1" })
+  mockSendPrompt.mockRejectedValueOnce(
+    new TranscriptRuntimeRecoveryError("frozen_transcript_generation_mismatch")
+  )
+  await expect(createStoredChatDispatch({ loadKey })(row)).resolves.toEqual({
+    status: "recovery_required",
+    errorCode: "frozen_transcript_generation_mismatch",
+  })
+  expect(mockAbortRouterFusionSend).toHaveBeenCalled()
 })

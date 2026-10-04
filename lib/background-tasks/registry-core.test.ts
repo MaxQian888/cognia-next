@@ -13,6 +13,120 @@ interface ParkedValue {
   usage?: { inputTokens?: number; outputTokens?: number }
 }
 
+describe("owned journal lifecycle", () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it("does not settle an existing owner when a second registry fails admission", async () => {
+    const { journal, settles, records } = createJournal()
+    journal.renewLease = jest.fn().mockResolvedValue(true)
+    const writeStart = journal.recordStart
+    journal.recordStart = async (record) => {
+      if (records.has(record.runId)) throw new Error("duplicate")
+      await writeStart(record)
+    }
+    const first = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      projectForJournal: (value) => value,
+    })
+    const second = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      projectForJournal: (value) => value,
+    })
+    const pending = deferred<ParkedValue>()
+    first.start("same", meta(), pending.promise)
+    second.start("same", meta(), Promise.resolve({ text: "new" }))
+    await expect(second.collect("same")).rejects.toThrow("admission did not commit")
+    expect(settles).toEqual([])
+    expect(records.get("same")?.status).toBe("running")
+    pending.resolve({ text: "original" })
+    await expect(first.collect("same")).resolves.toEqual({ text: "original" })
+    expect(records.get("same")?.resultText).toBe("original")
+  })
+
+  it("refuses duplicate live IDs without replacing the tracked producer", async () => {
+    const { journal } = createJournal()
+    journal.renewLease = jest.fn().mockResolvedValue(true)
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      projectForJournal: (value) => value,
+    })
+    const pending = deferred<ParkedValue>()
+    registry.start("same", meta(), pending.promise)
+    expect(() => registry.start("same", meta(), Promise.resolve({ text: "duplicate" }))).toThrow(
+      "already tracked"
+    )
+    pending.resolve({ text: "original" })
+    await expect(registry.collect("same")).resolves.toEqual({ text: "original" })
+  })
+
+  it("renews plugin and team runs and aborts without delivering a stale result", async () => {
+    const { journal, settles } = createJournal()
+    journal.renewLease = jest.fn().mockResolvedValueOnce(true).mockResolvedValue(false)
+    journal.leaseIntervalMs = 10
+    const onSettle = jest.fn()
+    const onLeaseLost = jest.fn()
+    const pending = deferred<ParkedValue>()
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      onSettle,
+      projectForJournal: (value) => value,
+    })
+    registry.start("owned", meta({ kind: "team-delegation" }), pending.promise, { onLeaseLost })
+    const collected = registry.collect("owned")
+    const rejection = expect(collected).rejects.toThrow("ownership lost")
+    await jest.advanceTimersByTimeAsync(20)
+    await rejection
+    expect(onLeaseLost).toHaveBeenCalledTimes(1)
+    expect(settles).toEqual([])
+    pending.resolve({ text: "late output" })
+    await jest.advanceTimersByTimeAsync(100)
+    expect(onSettle).not.toHaveBeenCalled()
+    expect(settles).toEqual([])
+    expect(journal.renewLease).toHaveBeenCalledTimes(2)
+  })
+
+  it("waits for admission before persisting an already completed result", async () => {
+    const admitted = deferred<void>()
+    const { journal, settles } = createJournal()
+    journal.recordStart = jest.fn(() => admitted.promise)
+    journal.renewLease = jest.fn().mockResolvedValue(true)
+    journal.leaseIntervalMs = 10
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      projectForJournal: (value) => value,
+    })
+    registry.start("owned", meta(), Promise.resolve({ text: "done" }))
+    await Promise.resolve()
+    expect(settles).toEqual([])
+    admitted.resolve()
+    await registry.collect("owned")
+    expect(settles).toHaveLength(1)
+    await jest.advanceTimersByTimeAsync(100)
+    expect(journal.renewLease).not.toHaveBeenCalled()
+  })
+
+  it("does not deliver when the durable ownership fence rejects settlement", async () => {
+    const { journal } = createJournal()
+    journal.recordSettle = jest.fn().mockRejectedValue(new Error("lease expired"))
+    journal.renewLease = jest.fn().mockResolvedValue(true)
+    const onSettle = jest.fn()
+    const onDiscard = jest.fn()
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      onSettle,
+      onDiscard,
+      projectForJournal: (value) => value,
+    })
+    registry.startAccepted("owned", meta(), Promise.resolve({ text: "stale" }), journal)
+    await expect(registry.collect("owned")).rejects.toThrow("lease expired")
+    expect(onSettle).not.toHaveBeenCalled()
+    expect(onDiscard).toHaveBeenCalledWith("owned")
+    await jest.advanceTimersByTimeAsync(100_000)
+    expect(journal.renewLease).not.toHaveBeenCalled()
+  })
+})
+
 function deferred<T>(): {
   promise: Promise<T>
   resolve: (value: T) => void
@@ -437,4 +551,75 @@ describe("interruptRunningTasks", () => {
 
     await expect(interruptRunningTasks(journal, { now: () => 3000 })).resolves.toEqual([])
   })
+})
+
+describe("accepted background settlement", () => {
+  it("does not deliver or collect a result before its terminal commit", async () => {
+    const persisted = deferred<void>()
+    const onSettle = jest.fn()
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      projectForJournal: (value) => value,
+      onSettle,
+    })
+    const journal = { recordStart: jest.fn(), recordSettle: jest.fn(() => persisted.promise) }
+    registry.startAccepted("r1", meta(), Promise.resolve({ text: "saved" }), journal)
+    const collected = registry.collect("r1")
+    await Promise.resolve()
+    expect(onSettle).not.toHaveBeenCalled()
+    expect(journal.recordStart).not.toHaveBeenCalled()
+    persisted.resolve()
+    await expect(collected).resolves.toEqual({ text: "saved" })
+    expect(onSettle).toHaveBeenCalledTimes(1)
+  })
+
+  it("parks a failed terminal commit instead of delivering unpersisted output", async () => {
+    const onSettle = jest.fn()
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      projectForJournal: (value) => value,
+      onSettle,
+    })
+    registry.startAccepted("r1", meta(), Promise.resolve({ text: "unsaved" }), {
+      recordStart: jest.fn(),
+      recordSettle: jest.fn(async () => {
+        throw new Error("disk unavailable")
+      }),
+    })
+    await expect(registry.collect("r1")).rejects.toThrow("disk unavailable")
+    expect(onSettle).not.toHaveBeenCalled()
+  })
+})
+
+it("does not advertise durable cancellation until the async control commits", async () => {
+  const persisted = deferred<void>()
+  const registry = new BackgroundTaskRegistry<ParkedValue>({ projectForJournal: (value) => value })
+  registry.start("r1", meta(), new Promise(() => {}), { cancel: () => persisted.promise })
+  expect(registry.cancel("r1")).toBe(true)
+  expect(registry.list()[0].cancelled).toBeUndefined()
+  persisted.resolve()
+  await Promise.resolve()
+  expect(registry.list()[0].cancelled).toBe(true)
+})
+
+it("retains a visible cancellation error when persistence rejects", async () => {
+  const registry = new BackgroundTaskRegistry<ParkedValue>({ projectForJournal: (value) => value })
+  registry.start("r1", meta(), new Promise(() => {}), {
+    cancel: async () => {
+      throw new Error("cancel journal failed")
+    },
+  })
+  expect(registry.cancel("r1")).toBe(true)
+  await Promise.resolve()
+  expect(registry.list()[0]).toMatchObject({ status: "running", error: "cancel journal failed" })
+  expect(registry.list()[0].cancelled).toBeUndefined()
+})
+
+it("awaited cancellation reports a rejected durable write as unsuccessful", async () => {
+  const registry = new BackgroundTaskRegistry<ParkedValue>({ projectForJournal: (value) => value })
+  registry.start("r1", meta(), new Promise(() => {}), {
+    cancel: async () => {
+      throw new Error("disk full")
+    },
+  })
+  await expect(registry.cancelAndWait("r1")).resolves.toBe(false)
+  expect(registry.list()[0].cancelled).toBeUndefined()
 })

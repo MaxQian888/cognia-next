@@ -26,7 +26,18 @@ jest.mock("@/lib/claude/ipc", () => ({
 let hydratedRows = false
 jest.mock("@/lib/db/sessions", () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
-  listSessions: () => (hydratedRows ? [{ id: "s1" }] : Promise.resolve([])),
+  // One open conversation plus rows the count must skip: an archived
+  // conversation and embedded subagent / workflow-editor sessions.
+  listSessions: () =>
+    hydratedRows
+      ? [
+          { id: "s1" },
+          { id: "s2", archivedAt: 5 },
+          { id: "sub", kind: "subagent" },
+          { id: "wf", kind: "workflow-editor" },
+          { id: "hidden", visibility: "embedded" },
+        ]
+      : Promise.resolve([]),
 }))
 jest.mock("@/lib/db/mcp-servers", () => ({
   listMcpServers: () =>
@@ -283,7 +294,7 @@ describe("SidecarTab — count tiles", () => {
     expect(screen.getByRole("button", { name: "restartBtn" })).not.toBeDisabled()
   })
 
-  it("counts hydrated sessions and enabled-vs-total MCP servers", async () => {
+  it("counts active exposed conversations and enabled-vs-total MCP servers", async () => {
     hydratedRows = true
     getSidecarStatusMock.mockResolvedValue({ ready: true })
     getSessionMock.mockResolvedValue({ sdkSessionId: "x" })

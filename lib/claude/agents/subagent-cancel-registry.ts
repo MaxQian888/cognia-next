@@ -54,6 +54,22 @@ export function requestCancelSubagentRun(runId: string, reason?: string): boolea
   return true
 }
 
+/** Await the runtime's cancellation receipt before announcing a completed stop. */
+export async function requestCancelSubagentRunAndWait(
+  runId: string,
+  reason?: string
+): Promise<boolean> {
+  const cancel = subagentCancellations.get(runId)
+  if (!cancel) return false
+  subagentCancellations.delete(runId)
+  try {
+    await cancel(reason)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Test/diagnostic helper — number of live registered subagent runs. */
 export function liveSubagentRunCount(): number {
   return subagentCancellations.size

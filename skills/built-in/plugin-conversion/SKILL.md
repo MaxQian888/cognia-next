@@ -23,7 +23,7 @@ This skill is explicit-only. Loading its instructions does not authorize an appl
 
 ## Inspect before writing
 
-1. Resolve the source plugin directory relative to the active workspace and the requested target: `cognia`, `claude-code`, `codex`, `gemini-cli`, `agent-plugins`, `cursor`, `copilot`, `kimi`, `devin`, `opencode`, or `pi`.
+1. Resolve the source plugin directory relative to the active workspace and the requested target: `cognia`, `claude-code`, `codex`, `gemini-cli`, `agent-plugins`, `cursor`, `copilot`, `kimi`, `devin`, `opencode`, `pi`, `factory-droid`, `qoder`, `codebuddy`, `auggie`, or `open-plugins`.
 2. Call `plugin_conversion_inspect` with the intended `surface` (`cli`, `desktop`, or `cloud`).
 3. Report the detected source format, fidelity, per-capability delivery outcomes, warnings, and blocking issues. Distinguish a native package from Cognia-hosted tools and identify capabilities retained in Cognia.
 4. If `applicable` is false or `blocking` is non-empty, stop. Explain the unsupported behavior; do not approximate or drop it.

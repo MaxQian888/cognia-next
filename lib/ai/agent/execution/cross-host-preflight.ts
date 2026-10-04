@@ -9,8 +9,9 @@
 //   3. the child's credential reference is resolvable ON the target host
 //      (credential locality — secrets never ride the envelope);
 //   4. the single-writer run lease was claimed BEFORE dispatch.
-// On success the target host is pinned into the child policy so the resolver
-// freezes `hostRef` — side-effectful work never migrates silently.
+// On success the target host is pinned into the envelope. The dispatcher uses
+// rebindResolvedAgentExecutionHost before claiming the lease so its fingerprint
+// and envelope describe the same authenticated worker.
 //
 // AgentTeam remote dispatch calls this gate after claiming the child lease and
 // before session/create. Device identity and authorization are established by
@@ -56,8 +57,6 @@ export interface CrossHostPreflightInput {
 export interface CrossHostPreflightResult {
   /** The envelope with the target host pinned into its execution binding. */
   envelope: HandoffEnvelope
-  /** Host pin the caller must feed into the child's resolver policy. */
-  hostPin: { mode: "pinned"; hostRef: string }
 }
 
 /**
@@ -113,6 +112,5 @@ export function preflightCrossHostDispatch(
       ...roundTripped,
       execution: { ...roundTripped.execution, hostRef: input.target.hostRef },
     },
-    hostPin: { mode: "pinned", hostRef: input.target.hostRef },
   }
 }

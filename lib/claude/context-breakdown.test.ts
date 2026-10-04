@@ -6,6 +6,7 @@ import {
   buildSdkContextBreakdown,
   classifyCategory,
   resolveAutoCompaction,
+  resolveContextBreakdown,
 } from "./context-breakdown"
 import { AUTO_COMPACT_FRACTION } from "./usage"
 
@@ -298,5 +299,24 @@ describe("resolveAutoCompaction", () => {
   it("falls back to the built-in sidecar constant for a built-in turn", () => {
     const p = resolveAutoCompaction(null, ctx)
     expect(p).toEqual({ threshold: AUTO_COMPACT_FRACTION, enabled: true, source: "builtin" })
+  })
+})
+
+describe("resolveContextBreakdown", () => {
+  it("uses the live snapshot when it reports a window", () => {
+    const live = resolveContextBreakdown(
+      { ...base, totalTokens: 10_000, categories: [{ name: "Messages", tokens: 10_000 }] },
+      [],
+      1,
+      2
+    )
+    expect(live.source).toBe("live")
+    expect(live.maxTokens).toBe(100_000)
+  })
+
+  it("estimates from the transcript otherwise, sized to the resolved window", () => {
+    const estimate = resolveContextBreakdown(null, [], 500, 8_000)
+    expect(estimate).toMatchObject({ source: "estimate", usedTokens: 500, maxTokens: 8_000 })
+    expect(resolveContextBreakdown({ ...base, maxTokens: 0 }, [], 1, 2).source).toBe("estimate")
   })
 })

@@ -315,7 +315,9 @@ export async function resolvePetToolDeps(): Promise<PetToolDeps> {
 }
 
 /** Map an access-gate refusal onto the tool failure vocabulary. */
-function refusalToFailure(refusal: import("@/lib/pet/access/gate").PetRefusal): Failure {
+function refusalToFailure(
+  refusal: import("@/lib/pet/access/gate").PetRefusal
+): Failure & { retryAfterMs?: number } {
   switch (refusal.code) {
     case "unavailable":
       return refusal.reason === "disabled"
@@ -331,6 +333,26 @@ function refusalToFailure(refusal: import("@/lib/pet/access/gate").PetRefusal): 
     case "unknown-item":
     case "item-not-owned":
       return fail("item_not_owned", `The pet does not own the item "${refusal.itemId}".`)
+    case "item-kind-mismatch":
+      return fail(
+        "invalid_arguments",
+        `The item "${refusal.itemId}" is for "${refusal.itemKind ?? "another action"}", not "${refusal.kind}".`
+      )
+    case "uninitialized":
+      return fail("pet_uninitialized", "The pet has not been set up on this device yet.")
+    case "not-hatched":
+      return fail(
+        "pet_unhatched",
+        "The pet is still an egg. It has to hatch in the pet console before it can be nurtured."
+      )
+    case "cooling-down":
+      return {
+        ...fail(
+          "cooldown",
+          `The pet is still recovering from the last "${refusal.kind}". Try again in ${Math.ceil(refusal.retryAfterMs / 1000)}s.`
+        ),
+        retryAfterMs: refusal.retryAfterMs,
+      }
   }
 }
 

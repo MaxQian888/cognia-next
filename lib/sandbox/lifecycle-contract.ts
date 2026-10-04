@@ -153,9 +153,6 @@ const FORBIDDEN_STATES: Partial<
   suspend: ["stopped", "uninitialized", "deleting"],
   resume: ["running", "uninitialized", "deleting"],
   stop: ["uninitialized", "deleting"],
-  gui: ["uninitialized", "stopped", "deleting"],
-  workspaceRead: ["uninitialized", "stopped", "deleting"],
-  workspaceExec: ["uninitialized", "stopped", "deleting"],
 }
 
 /**
@@ -176,7 +173,9 @@ export function assertSandboxOperationAllowed(
     })
   }
   const forbidden = FORBIDDEN_STATES[operation]
-  if (forbidden?.includes(ctx.state)) {
+  const requiresRunning =
+    operation === "gui" || operation === "workspaceRead" || operation === "workspaceExec"
+  if (forbidden?.includes(ctx.state) || (requiresRunning && ctx.state !== "running")) {
     throw new SandboxCapabilityError({
       code: "invalid-state",
       operation,

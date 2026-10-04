@@ -60,8 +60,27 @@ jest.mock("@/lib/workspace/session-cwd", () => ({
   __esModule: true,
   resolveSessionCwd: jest.fn(async () => undefined),
 }))
+jest.mock("@/lib/plugin/registries/subagent-registry", () => ({
+  getSubagent: (id: string) => ({ id, name: id, description: "Test agent", prompt: "Test prompt" }),
+}))
+jest.mock("@/lib/background-tasks/redispatch", () => ({
+  captureBackgroundDispatchRecovery: jest.fn(async (input) => ({
+    version: 1,
+    phase: "accepted",
+    namespaceId: "test-db",
+    hostId: "test-host",
+    contextFingerprint: "test-context",
+    sideEffect: "non-idempotent",
+    ...input,
+  })),
+}))
 jest.mock("@/lib/db/background-tasks", () => ({
   __esModule: true,
+  admitBackgroundDispatch: jest.fn(async () => ({
+    journal: { recordStart: jest.fn(), recordSettle: jest.fn(async () => undefined) },
+    markDispatched: jest.fn(async () => undefined),
+    requestCancel: jest.fn(async () => undefined),
+  })),
   createDexieBackgroundTaskJournal: () => ({
     recordStart: jest.fn(),
     recordSettle: jest.fn(),
@@ -297,6 +316,7 @@ describe("runDispatchAgentTool — call modes", () => {
     expect(signal?.aborted).toBe(false)
 
     expect(cancelRendererBackgroundRun(runId!)).toBe(true)
+    await waitFor(() => signal?.aborted)
     expect(signal?.aborted).toBe(true)
   })
 
@@ -534,12 +554,12 @@ describe("runDispatchAgentTool, cancel / multi-collect / model / width", () => {
     await waitFor(() => (countRunningRendererBackgroundRuns() === 0 ? true : undefined))
     // A second cancel finds nothing live.
     const again = await runDispatchAgentTool({ sessionId: "chat-1", args: { cancel: runId } })
-    expect(again).toContain("No running background run")
+    expect(again).toContain("Could not cancel background run")
   })
 
   it("cancel with an unknown id is a readable line, not a throw", async () => {
     const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { cancel: ["ghost"] } })
-    expect(out).toContain('No running background run "ghost"')
+    expect(out).toContain('Could not cancel background run "ghost"')
   })
 
   it("collect with a timeout reports still-running runs as pending, then answers later", async () => {

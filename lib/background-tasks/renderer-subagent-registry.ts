@@ -3,6 +3,7 @@ import {
   backgroundTaskInterruptedMessage,
   type BackgroundTaskControls,
   type BackgroundTaskJournalProjection,
+  type BackgroundTaskJournalWriter,
   type BackgroundTaskSettleInfo,
   type BackgroundTaskUsage,
   type BackgroundTaskStartMeta,
@@ -101,6 +102,7 @@ function projectDispatchResult(
 const registry = new BackgroundTaskRegistry<PluginSubagentDispatchResult>({
   journal,
   projectForJournal: projectDispatchResult,
+  onDiscard: (runId) => emitLifecycle({ type: "settled", runId, status: "error" }),
   onSettle: (runId, meta, settle) => {
     try {
       settleListener?.(runId, meta, settle)
@@ -123,43 +125,43 @@ export function startRendererBackgroundRun(
   emitLifecycle({ type: "started", runId, taskKind: meta.kind })
 }
 
+/** Track an admitted dispatch through the existing result/delivery registry. */
+export function startAcceptedRendererBackgroundRun(
+  runId: string,
+  meta: RendererBackgroundTaskMeta,
+  promise: Promise<PluginSubagentDispatchResult>,
+  journal: BackgroundTaskJournalWriter,
+  controls?: BackgroundTaskControls
+): void {
+  registry.startAccepted(runId, { ...meta, mode: "background" }, promise, journal, controls)
+  emitLifecycle({ type: "started", runId, taskKind: meta.kind })
+}
+
 /**
  * Journal-only tracking for a FOREGROUND dispatch: writes the same Dexie rows
  * as a background run (so a renderer reload reconciles it to `interrupted` on
  * boot) but never enters the in-memory collectable registry — foreground
  * results are awaited inline by the parent turn, never collected.
  */
-export function journalRendererForegroundRun(
+const foregroundRegistry = new BackgroundTaskRegistry<PluginSubagentDispatchResult>({
+  journal,
+  projectForJournal: projectDispatchResult,
+})
+
+export async function journalRendererForegroundRun(
   runId: string,
   meta: RendererBackgroundTaskMeta,
-  promise: Promise<PluginSubagentDispatchResult>
-): void {
-  swallow(() => journal.recordStart({ runId, ...meta, mode: "foreground", status: "running" }))
-  promise.then(
-    (value) => {
-      const projection = projectDispatchResult(value)
-      swallow(() =>
-        journal.recordSettle(runId, {
-          status: projection.error ? "error" : "done",
-          settledAt: Date.now(),
-          resultText: projection.text,
-          ...(projection.error ? { error: projection.error } : {}),
-          ...(projection.usage ? { usage: projection.usage } : {}),
-        })
-      )
-    },
-    (err) => {
-      // The dispatch chain collapses errors into resolved results; this branch
-      // is belt-and-braces for an unexpected rejection.
-      swallow(() =>
-        journal.recordSettle(runId, {
-          status: "error",
-          settledAt: Date.now(),
-          error: err instanceof Error ? err.message : String(err),
-        })
-      )
-    }
-  )
+  promise: Promise<PluginSubagentDispatchResult>,
+  controls?: BackgroundTaskControls
+): Promise<PluginSubagentDispatchResult> {
+  try {
+    foregroundRegistry.start(runId, { ...meta, mode: "foreground" }, promise, controls)
+    const result = await foregroundRegistry.collect(runId)
+    if (!result) throw new Error("Foreground run no longer available")
+    return result
+  } catch (error) {
+    return errorResult(runId, errorMessage(error), { code: "unknown", retryable: false })
+  }
 }
 
 export function hasRendererBackgroundRun(runId: string): boolean {
@@ -242,12 +244,23 @@ export function cancelRendererBackgroundRun(runId: string): boolean {
   return registry.cancel(runId)
 }
 
+/** Await persisted cancellation before showing a successful stop receipt. */
+export function cancelRendererBackgroundRunAndWait(runId: string): Promise<boolean> {
+  return registry.cancelAndWait(runId)
+}
+
 export async function interruptRendererBackgroundTasksOnBoot(options: { now?: () => number } = {}) {
-  return interruptBackgroundTasksOnBoot(options)
+  return interruptBackgroundTasksOnBoot({
+    ...options,
+    host: "renderer",
+    isLive: (runId) => registry.has(runId),
+    recoverInterrupted: true,
+  })
 }
 
 export function __clearRendererBackgroundRunsForTesting(): void {
   registry.__clearForTesting()
+  foregroundRegistry.__clearForTesting()
   settleListener = undefined
   lifecycleListeners.clear()
 }

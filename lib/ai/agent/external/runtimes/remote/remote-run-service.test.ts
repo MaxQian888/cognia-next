@@ -4,6 +4,7 @@ import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-con
 import {
   DECISION_TIMEOUT_MS,
   EXTERNAL_RUN_EVENT_TOPIC,
+  MODEL_REPORT_TIMEOUT_MS,
   activeRemoteExternalRuns,
   cancelRemoteExternalRun,
   remoteDecisionId,
@@ -14,6 +15,7 @@ import {
   type ExternalRunManager,
   type RemoteRunFrame,
 } from "./remote-run-service"
+import { resolveExternalAgentModels } from "../../session/session-models"
 
 function record(over: Partial<ExternalAgentConfigRecord> = {}): ExternalAgentConfigRecord {
   return {
@@ -201,6 +203,72 @@ describe("starting a run", () => {
     expect(h.manager.executed[0]).not.toHaveProperty("reasoningEffort")
   })
 
+  // Host-lane Cognia models (ADR-0090, 2026-10-02). Three distinct states
+  // reach the manager: absent inherits the Host configuration, `null` is the
+  // explicit native choice, a binding runs a gateway task.
+  describe("the Cognia model binding", () => {
+    const binding = { providerId: "kimi-sub", modelId: "kimi-k2", accountId: "acct-1" }
+
+    it("passes a binding through to the manager", async () => {
+      await startRemoteExternalRun({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+        cogniaModel: binding,
+      })
+      expect(h.manager.executed[0]).toMatchObject({ cogniaModel: binding })
+    })
+
+    it("passes an explicit null, and omits an absent binding", async () => {
+      await startRemoteExternalRun({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+        cogniaModel: null,
+      })
+      expect(h.manager.executed[0]).toHaveProperty("cogniaModel", null)
+      h.finish()
+      await flush()
+      await startRemoteExternalRun({
+        runId: "run-2",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+      })
+      expect(h.manager.executed[1]).not.toHaveProperty("cogniaModel")
+    })
+
+    // The device that asked rides into the task context, where the gateway
+    // task binds itself to it.
+    it("carries the calling device in the task context", async () => {
+      await startRemoteExternalRun({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+        cogniaModel: binding,
+        callerDeviceId: "device-phone",
+      })
+      expect(h.manager.executed[0]).toMatchObject({
+        context: { custom: { chatSessionId: "chat-1", callerDeviceId: "device-phone" } },
+      })
+    })
+
+    it("leaves the context without a device when the Host itself started the run", async () => {
+      await startRemoteExternalRun({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+      })
+      expect(
+        (h.manager.executed[0].context as { custom: Record<string, unknown> }).custom
+      ).not.toHaveProperty("callerDeviceId")
+    })
+  })
+
   it("refuses without mounting when admission refuses", async () => {
     setup({ admitRefusal: { kind: "config", reason: "stale-revision" } })
     const result = await startRemoteExternalRun({
@@ -308,6 +376,184 @@ describe("streaming", () => {
     h.finish()
     await flush()
     expect(activeRemoteExternalRuns()).toEqual([])
+  })
+})
+
+// A paired client cannot ask the Host's agent anything, so the session's model
+// and thinking options ride the run stream, sent once the turn has applied the
+// conversation's model.
+describe("reporting the session's models", () => {
+  const KIMI_OPTIONS = [
+    {
+      type: "select",
+      id: "model",
+      name: "Model",
+      category: "model",
+      currentValue: "kimi-code/k3",
+      options: [
+        { value: "kimi-code/kimi-for-coding", name: "K2.8 Preview" },
+        { value: "kimi-code/k3", name: "K3" },
+      ],
+    },
+  ]
+  const fetchSessionModelSurface = jest.fn()
+  const getConfigOptions = jest.fn()
+
+  beforeEach(async () => {
+    fetchSessionModelSurface.mockReset().mockResolvedValue({
+      status: "ok",
+      data: {
+        models: resolveExternalAgentModels({ configOptions: KIMI_OPTIONS as never }),
+        thinking: { levels: [], currentLevel: null, write: { kind: "none" } },
+      },
+    })
+    getConfigOptions.mockReset().mockReturnValue({ status: "ok", data: KIMI_OPTIONS })
+    Object.assign(h.manager, { fetchSessionModelSurface, getConfigOptions })
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+    })
+  })
+
+  it("sends the session's options just before the terminal frame", async () => {
+    h.emit(evt({ type: "message_delta", sessionId: "kimi-session" }))
+    h.finish()
+    await flush()
+    await flush()
+    const types = h.frames.map((f) => f.event.type)
+    expect(types).toEqual(["message_delta", "config_options_update", "session_end"])
+    const report = h.frames[1].event as unknown as {
+      sessionId: string
+      configOptions: unknown
+    }
+    expect(report.sessionId).toBe("kimi-session")
+    expect(report.configOptions).toEqual(KIMI_OPTIONS)
+    expect(fetchSessionModelSurface).toHaveBeenCalledWith("eac_1", "kimi-session")
+  })
+
+  it("reports after a failed turn too, when the session had opened", async () => {
+    h.emit(evt({ type: "message_delta", sessionId: "kimi-session" }))
+    h.fail("model refused")
+    await flush()
+    await flush()
+    expect(h.frames.map((f) => f.event.type)).toEqual([
+      "message_delta",
+      "config_options_update",
+      "session_end",
+    ])
+  })
+
+  it("says nothing when no session ever opened", async () => {
+    h.finish()
+    await flush()
+    expect(fetchSessionModelSurface).not.toHaveBeenCalled()
+    expect(h.frames.map((f) => f.event.type)).toEqual(["session_end"])
+  })
+
+  it("does not hold the terminal frame for a report that never comes", async () => {
+    fetchSessionModelSurface.mockReturnValue(new Promise(() => {}))
+    jest.useFakeTimers()
+    try {
+      h.emit(evt({ type: "message_delta", sessionId: "kimi-session" }))
+      h.finish()
+      await jest.advanceTimersByTimeAsync(MODEL_REPORT_TIMEOUT_MS - 1)
+      expect(h.frames.some((f) => f.terminal)).toBe(false)
+      await jest.advanceTimersByTimeAsync(1)
+      expect(h.frames.filter((f) => f.terminal)).toHaveLength(1)
+      expect(h.frames.some((f) => f.event.type === "config_options_update")).toBe(false)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("never lets an unreadable report cost the turn its terminal frame", async () => {
+    fetchSessionModelSurface.mockRejectedValue(new Error("adapter gone"))
+    h.emit(evt({ type: "message_delta", sessionId: "kimi-session" }))
+    h.finish()
+    await flush()
+    await flush()
+    const terminal = h.frames.filter((f) => f.terminal)
+    expect(terminal).toHaveLength(1)
+    expect(terminal[0]).toMatchObject({ terminal: "completed" })
+    expect(h.frames.some((f) => f.event.type === "config_options_update")).toBe(false)
+  })
+})
+
+// A gateway task's child is released at the end of the turn, and what it would
+// report is its `cognia/<model>` route rather than the agent's native models.
+describe("not reporting models for a Cognia gateway turn", () => {
+  const fetchSessionModelSurface = jest.fn()
+  const getConfigOptions = jest.fn()
+
+  beforeEach(() => {
+    fetchSessionModelSurface.mockReset().mockResolvedValue({
+      status: "ok",
+      data: {
+        models: resolveExternalAgentModels({
+          configOptions: [
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              category: "model",
+              currentValue: "cognia/kimi-k2",
+              options: [{ value: "cognia/kimi-k2", name: "kimi-k2" }],
+            },
+          ] as never,
+        }),
+        thinking: { levels: [], currentLevel: null, write: { kind: "none" } },
+      },
+    })
+    getConfigOptions.mockReset().mockReturnValue({ status: "unsupported" })
+    Object.assign(h.manager, { fetchSessionModelSurface, getConfigOptions })
+  })
+
+  it("skips the report when the session is a gateway task session", async () => {
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+    })
+    h.emit(evt({ type: "message_delta", sessionId: "cognia-gateway:task_1:native-7" }))
+    h.finish()
+    await flush()
+    await flush()
+    expect(h.frames.map((f) => f.event.type)).toEqual(["message_delta", "session_end"])
+    expect(fetchSessionModelSurface).not.toHaveBeenCalled()
+  })
+
+  it("skips the report when the turn was asked to run on a Cognia model", async () => {
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+      cogniaModel: { providerId: "p", modelId: "m" },
+    })
+    h.emit(evt({ type: "message_delta", sessionId: "native-session" }))
+    h.fail("upstream refused")
+    await flush()
+    await flush()
+    expect(h.frames.map((f) => f.event.type)).toEqual(["message_delta", "session_end"])
+    expect(fetchSessionModelSurface).not.toHaveBeenCalled()
+  })
+
+  it("still reports for an explicitly native turn", async () => {
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+      cogniaModel: null,
+    })
+    h.emit(evt({ type: "message_delta", sessionId: "native-session" }))
+    h.finish()
+    await flush()
+    await flush()
+    expect(fetchSessionModelSurface).toHaveBeenCalledWith("eac_1", "native-session")
   })
 })
 

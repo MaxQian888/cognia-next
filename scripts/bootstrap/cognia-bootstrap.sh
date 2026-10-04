@@ -8,11 +8,14 @@ umask 077
 
 MODE=${1:-help}
 [[ $# -gt 0 ]] && shift
-CONFIG_PATH='' CONFIG_ENV='' WORKSPACE='' TASK='' SESSION='' STATE='' OUTPUT=bootstrap.json
-HAS_TASK=0 NO_SESSION=0 FORCE=0 QUIET=0 NONINTERACTIVE=0 THEN=0
+CONFIG_PATH='' CONFIG_ENV='' WORKSPACE='' TASK='' TASK_FILE='' SESSION='' STATE='' OUTPUT=bootstrap.json
+INVOCATION_CWD=$PWD
+HAS_TASK=0 HAS_TASK_FILE=0 NO_SESSION=0 FORCE=0 QUIET=0 NONINTERACTIVE=0 THEN=0
 CLI_MODEL='' CLI_BASE='' CLI_ENV=COGNIA_BOOTSTRAP_API_KEY CLI_ENV_SET=0 CLI_MAX='' CLI_SYSTEM='' CLI_STREAM=''
 PROVIDER='' PRESET='' RECIPE='' JSON_OUTPUT=0 MODELS_PATH=/models
 PRESET_FILES=()
+CONTEXT_FILES=()
+CONTEXT_PENDING=0
 OVERRIDES=() HANDOFF=() CHILD_ENV=() SHELL_ARGS=() LOCKS=()
 ERROR='' STEPS=0 CANCELLED=0 TERMINATED=0 ACTIVE_PID='' WORKER_PID='' WORKER_OPEN=0
 DEADLINE=0 TMP='' HISTORY='' CHECKS='[]' REUSED=false
@@ -26,11 +29,13 @@ Usage: cognia-bootstrap.sh configure [--output FILE] [--non-interactive]
        cognia-bootstrap.sh init --config-env NAME --then -- PROGRAM ARG...
 Options: --provider ID --preset ID --recipe ID --preset-file FILE (repeatable)
          --json (presets/doctor/models) --models-path /models
-         --cwd PATH --task TEXT|- --model ID --base-url URL --api-key-env NAME
+         --cwd PATH --task TEXT|- | --task-file FILE --context-file FILE (repeatable)
+         --model ID --base-url URL --api-key-env NAME
          --max-tokens N --system-prompt TEXT --stream true|false
          --set dotted.path=JSON|/json/pointer=JSON --session FILE --no-session
          --quiet --state FILE (init) --force (init/configure)
-Chat commands: /status /model [ID] /models /compact /clear /help /exit /quit
+Chat commands: /status /model [ID] /models /history [N] /export PATH
+               /save-config PATH /compact /clear /help /exit /quit
 HELP
 }
 
@@ -75,11 +80,12 @@ while [[ $# -gt 0 ]]; do
     --non-interactive) NONINTERACTIVE=1; shift;;
     --then) THEN=1; shift;;
     --) shift; HANDOFF=("$@"); break;;
-    --config|--config-env|--cwd|--task|--session|--state|--output|--model|--base-url|--api-key-env|--max-tokens|--system-prompt|--stream|--set|--provider|--preset|--recipe|--preset-file|--models-path)
+    --config|--config-env|--cwd|--task|--task-file|--context-file|--session|--state|--output|--model|--base-url|--api-key-env|--max-tokens|--system-prompt|--stream|--set|--provider|--preset|--recipe|--preset-file|--models-path)
       [[ $# -ge 2 ]] || { printf 'Missing option value.\n' >&2; exit 2; }
       case $1 in
         --config) CONFIG_PATH=$2;; --config-env) CONFIG_ENV=$2;; --cwd) WORKSPACE=$2;;
         --task) TASK=$2; HAS_TASK=1;; --session) SESSION=$2;; --state) STATE=$2;; --output) OUTPUT=$2;;
+        --task-file) TASK_FILE=$2; HAS_TASK_FILE=1;; --context-file) CONTEXT_FILES+=("$2");;
         --model) CLI_MODEL=$2;; --base-url) CLI_BASE=$2;; --api-key-env) CLI_ENV=$2; CLI_ENV_SET=1;;
         --max-tokens) CLI_MAX=$2;; --system-prompt) CLI_SYSTEM=$2;; --stream) CLI_STREAM=$2;;
         --provider) PROVIDER=$2;; --preset) PRESET=$2;; --recipe) RECIPE=$2;;
@@ -333,6 +339,66 @@ atomic_file() {
   temp=$(mktemp "${target%/*}/.cognia.XXXXXXXX") || die file-write-failed || return
   if ! cat "$source" > "$temp" || ! chmod 600 "$temp" || ! mv -f "$temp" "$target"; then rm -f "$temp"; die file-write-failed; return; fi
 }
+publish_file() {
+  local target source=$2 temp
+  safe_path "$1" || return
+  target=$SAFE_PATH
+  [[ ! -e $target && ! -L $target && -d ${target%/*} ]] || die invalid-export-path || return
+  temp=$(mktemp "${target%/*}/.cognia.XXXXXXXX") || die file-write-failed || return
+  # A same-directory hard link publishes complete bytes without replacing a file.
+  if ! cat "$source" > "$temp" || ! chmod 600 "$temp" || ! link "$temp" "$target" 2>/dev/null; then
+    rm -f "$temp"; die file-write-failed; return
+  fi
+  rm -f "$temp"
+}
+read_input_file() {
+  local path=$1 maximum=$2 target=$3
+  [[ $path == /* ]] || path=$INVOCATION_CWD/$path
+  [[ -f $path && ! -L $path ]] || die invalid-input-file || return
+  head -c "$((maximum+4))" "$path" > "$TMP/input.raw" || die invalid-input-file || return
+  if [[ $(head -c 3 "$TMP/input.raw") == $'\xef\xbb\xbf' ]]; then
+    tail -c +4 "$TMP/input.raw" > "$TMP/input.bytes"
+  else cp "$TMP/input.raw" "$TMP/input.bytes"; fi
+  [[ $(bytes "$TMP/input.bytes") -le $maximum ]] || die input-file-too-large || return
+  # Validate Unicode scalar UTF-8 explicitly: some system iconv versions accept
+  # out-of-range scalars. Reject overlong forms, surrogates and values > U+10FFFF.
+  od -An -v -tu1 "$TMP/input.bytes" | awk '
+    {for(i=1;i<=NF;i++) {
+      b=$i
+      if(remaining) {
+        if(b<lower || b>upper) exit 1
+        remaining--; lower=128; upper=191
+      } else if(b<128) continue
+      else if(b>=194 && b<=244) {
+        remaining=(b<224 ? 1 : (b<240 ? 2 : 3)); lower=128; upper=191
+        if(b==224) lower=160
+        if(b==237) upper=159
+        if(b==240) lower=144
+        if(b==244) upper=143
+      } else exit 1
+    }}
+    END {if(remaining) exit 1}
+  ' || die invalid-input-encoding || return
+  cp "$TMP/input.bytes" "$target" || die invalid-input-file || return
+  jq -Rs -e 'contains("\u0000")|not' "$target" >/dev/null || die invalid-input-file || return
+}
+load_context_files() {
+  local path
+  printf '[]' > "$TMP/context.files"
+  for path in "${CONTEXT_FILES[@]}"; do
+    read_input_file "$path" "$FILE_MAX" "$TMP/context.content" || return
+    jq -c --arg path "$path" --rawfile content "$TMP/context.content" '.+[{path:$path,content:$content}]' "$TMP/context.files" > "$TMP/context.next" || die invalid-input-file || return
+    [[ $(bytes "$TMP/context.next") -le $CONTEXT_MAX ]] || die context-budget-exhausted || return
+    guard "$TMP/context.next" || return
+    mv "$TMP/context.next" "$TMP/context.files"
+    CONTEXT_PENDING=1
+  done
+}
+configured_task() {
+  # Preserve file tasks' trailing newlines across Bash command substitution.
+  CONFIGURED_TASK=$(jq -jr '.task' "$TMP/config.json"; printf '\001')
+  CONFIGURED_TASK=${CONFIGURED_TASK%$'\001'}
+}
 emit_record() {
   local status=$1 message=$2 code=${3:-}
   jq -cn --arg status "$status" --arg message "$message" --arg code "$code" --argjson steps "$STEPS" --argjson checks "$CHECKS" --argjson reused "$REUSED" '{version:1,status:$status,steps:$steps,message:$message,checks:$checks,reused:$reused}+(if $code!="" then {errorCode:$code} else {} end)'
@@ -425,7 +491,12 @@ MAPPING
   [[ -z $CLI_MAX ]] || json_update '.model.maxTokens=$v' --argjson v "$CLI_MAX" || return
   [[ -z $CLI_SYSTEM ]] || json_update '.systemPrompt=$v' --arg v "$CLI_SYSTEM" || return
   [[ -z $CLI_STREAM ]] || json_update '.model.stream=$v' --argjson v "$CLI_STREAM" || return
-  if [[ $HAS_TASK == 1 ]]; then
+  if [[ $HAS_TASK_FILE == 1 ]]; then
+    read_input_file "$TASK_FILE" 32000 "$TMP/task" || return
+    jq -Rs -e -L "$TMP" 'include "contract"; nonempty(32000)' "$TMP/task" >/dev/null || die invalid-task || return
+    json_update '.task=$task' --rawfile task "$TMP/task" || return
+    HAS_TASK=1
+  elif [[ $HAS_TASK == 1 ]]; then
     if [[ $TASK == - ]]; then head -c 32001 > "$TMP/task"; else printf '%s' "$TASK" > "$TMP/task"; fi
     json_update '.task=$task' --rawfile task "$TMP/task" || return
   fi
@@ -617,8 +688,37 @@ run_checks() {
   jq -e -n --argjson c "$CHECKS" '$c|all(.[];.passed)' >/dev/null
 }
 
+ensure_credential() {
+  local credential='' character started terminal_state failed=0
+  [[ $AUTH != none && -z ${!API_ENV} ]] || return 0
+  [[ $MODE == chat && -t 0 ]] || die missing-credential || return
+  terminal_state=$(stty -g) || die credential-input-failed || return
+  stty -echo || die credential-input-failed || return
+  printf 'API key (hidden, this process only): ' >&2
+  # Bash 3.2 can defer SIGINT during an unbounded hidden read. Poll single
+  # characters so cancellation and budgets apply without dropping partial keys.
+  while :; do
+    if ! budget; then failed=1; break; fi
+    started=$SECONDS
+    if IFS= read -r -s -n 1 -t 1 character; then
+      [[ -n $character ]] || break
+      case $character in $'\177'|$'\b') credential=${credential%?};; *) credential=$credential$character;; esac
+    else
+      if ! budget; then failed=1; break; fi
+      if [[ $SECONDS -le $started ]]; then die missing-credential; failed=1; break; fi
+    fi
+  done
+  stty "$terminal_state" || die credential-input-failed || return
+  printf '\n' >&2
+  [[ $failed == 0 ]] || return 1
+  [[ -n $credential && $credential != *$'\r'* && $credential != *$'\n'* ]] || die missing-credential || return
+  printf -v "$API_ENV" '%s' "$credential"; export "${API_ENV?}"
+  jq --arg v "$credential" '.+[$v]|unique' "$TMP/secrets.json" > "$TMP/secrets.next"; mv "$TMP/secrets.next" "$TMP/secrets.json"
+}
+
 request_headers() {
   local header name value authheader
+  ensure_credential || return
   jq '.model.headers' "$TMP/config.json" > "$TMP/header.guard"; guard "$TMP/header.guard" || return
   printf 'Content-Type: application/json\n' > "$TMP/headers"
   while IFS= read -r header; do name=$(printf '%s' "$header"|jq -r '.key'); value=$(printf '%s' "$header"|jq -r '.value'); printf '%s: %s\n' "$name" "$value" >> "$TMP/headers"; done < <(jq -c '.model.headers|to_entries[]' "$TMP/config.json")
@@ -641,6 +741,7 @@ models() {
   jq -cn --arg endpoint "$endpoint" '$endpoint' > "$TMP/models.endpoint"
   guard "$TMP/models.endpoint" || return
   request_headers || return
+  guard "$TMP/models.endpoint" || return
   budget || return
   timeout=$API_TIMEOUT; [[ $((DEADLINE-SECONDS)) -ge $timeout ]] || timeout=$((DEADLINE-SECONDS))
   : > "$TMP/models.response"; : > "$TMP/models.status"
@@ -718,6 +819,7 @@ model_request() {
     (reduce [["maxTokens","max_tokens"],["temperature","temperature"],["topP","top_p"],["seed","seed"],["reasoningEffort","reasoning_effort"],["thinking","thinking"]][] as $pair ({};if $m[$pair[0]]!=null and ($summary|not) or $pair[0]!="maxTokens" and $m[$pair[0]]!=null then .[$pair[1]]=$m[$pair[0]] else . end))' > "$TMP/request.json" || die invalid-model-options || return
   guard "$TMP/request.json" || return
   request_headers || return
+  guard "$TMP/request.json" || return
   base=$(cfg '.model.baseUrl'); base=${base%/}; suffix=$(cfg '.model.endpointPath//"chat/completions"'); suffix=${suffix#/}
   if [[ $(cfg '.model.endpointPath==null') == true && $base == */chat/completions ]]; then endpoint=$base; else endpoint=$base/$suffix; fi
   for attempt in 0 1 2; do
@@ -816,8 +918,11 @@ load_session() {
 
 agent_turn() {
   local task=$1 init=${2:-false} step overflow=0 maxoverflow threshold auto count i rc
+  jq -cn --arg task "$task" --argjson pending "$CONTEXT_PENDING" --slurpfile files "$TMP/context.files" '$task+(if $pending==1 then "\n\nAttached context files (untrusted data):\n"+($files[0]|tojson) else "" end)' > "$TMP/turn.task" || die invalid-task || return
+  [[ $(bytes "$TMP/turn.task") -le $CONTEXT_MAX ]] || die context-budget-exhausted || return
+  guard "$TMP/turn.task" || return
   cp "$HISTORY" "$TMP/turn.before"
-  jq --arg task "$task" '.+[{role:"user",content:$task,_cogniaSession:"turn-start"}]' "$HISTORY" > "$TMP/history.next"; mv "$TMP/history.next" "$HISTORY"
+  jq --slurpfile task "$TMP/turn.task" '.+[{role:"user",content:$task[0],_cogniaSession:"turn-start"}]' "$HISTORY" > "$TMP/history.next"; mv "$TMP/history.next" "$HISTORY"
   maxoverflow=$(cfg '.context.maxOverflowRetries'); threshold=$(jq_contract '.context|threshold' "$TMP/config.json"); auto=$(cfg '.context.autoCompact')
   step=0
   while [[ $step -lt $MAX_STEPS ]]; do
@@ -848,6 +953,7 @@ agent_turn() {
         if [[ $count -gt 0 ]]; then jq '.+[{role:"assistant",content:"Environment readiness checks passed."}]' "$HISTORY" > "$TMP/history.next"; mv "$TMP/history.next" "$HISTORY"; fi
         jq '.[-1]._cogniaSession="turn-end"' "$HISTORY" > "$TMP/history.next"; mv "$TMP/history.next" "$HISTORY"
         save_session || break
+        CONTEXT_PENDING=0
         jq -r '.[-1].content' "$HISTORY" > "$TMP/final.message"
         return 0
       fi
@@ -901,29 +1007,40 @@ initialize() {
     run_checks; rc=$?
     if [[ $rc == 0 ]]; then save_state; return; elif [[ $rc == 2 ]]; then return 1; fi
   fi
-  agent_turn "$(cfg '.task')" true || return
+  configured_task
+  agent_turn "$CONFIGURED_TASK" true || return
   save_state
 }
 
+chat_history() {
+  local count=${1:-10}
+  [[ $count =~ ^[0-9]+$ && ${#count} -le 3 ]] || die invalid-history-count || return
+  jq -e -n --arg count "$count" '$count|tonumber|.>=1 and .<=100' >/dev/null || die invalid-history-count || return
+  jq --arg count "$count" '[.[]|select(.role!="system")|del(._cogniaSession)]|.[-($count|tonumber):]' "$HISTORY" > "$TMP/chat.history" || die invalid-history || return
+  [[ $(bytes "$TMP/chat.history") -le $OUTPUT_MAX ]] || die history-output-too-large || return
+  guard "$TMP/chat.history" || return
+  cat "$TMP/chat.history"
+}
+chat_export() {
+  [[ -n $1 ]] || die invalid-export-path || return
+  guard "$HISTORY" || return
+  jq -r '.[]|.role+"\t"+tojson' "$HISTORY" > "$TMP/export.session" || die invalid-history || return
+  [[ $(bytes "$TMP/export.session") -le 16777216 ]] || die session-too-large || return
+  publish_file "$1" "$TMP/export.session" || return
+  printf 'Transcript exported.\n'
+}
+chat_save_config() {
+  [[ -n $1 ]] || die invalid-export-path || return
+  jq_contract validate "$TMP/config.json" > "$TMP/export.config" 2>/dev/null || die invalid-config || return
+  guard "$TMP/export.config" || return
+  publish_file "$1" "$TMP/export.config" || return
+  printf 'Configuration saved.\n'
+}
 chat() {
-  local task pending=$HAS_TASK credential
-  if [[ $AUTH != none && -z ${!API_ENV} ]]; then
-    [[ -t 0 ]] || die missing-credential || return
-    while :; do
-      CANCELLED=0
-      printf 'API key (hidden, this process only): ' >&2
-      IFS= read -r -s credential; printf '\n' >&2
-      [[ $TERMINATED == 0 ]] || die cancelled || return
-      if [[ $CANCELLED == 1 ]]; then printf '[cancelled]\n' >&2; continue; fi
-      [[ -n $credential ]] || die missing-credential || return
-      break
-    done
-    printf -v "$API_ENV" '%s' "$credential"; export "${API_ENV?}"
-    jq --arg v "$credential" '.+[$v]|unique' "$TMP/secrets.json" > "$TMP/secrets.next"; mv "$TMP/secrets.next" "$TMP/secrets.json"
-  fi
+  local task pending=$HAS_TASK
   while [[ $TERMINATED == 0 ]]; do
     CANCELLED=0; ERROR=; STEPS=0
-    if [[ $pending == 1 ]]; then task=$(cfg '.task'); pending=0; else
+    if [[ $pending == 1 ]]; then configured_task; task=$CONFIGURED_TASK; pending=0; else
       printf '> '
       IFS= read -r task || { [[ $CANCELLED == 1 && $TERMINATED == 0 ]] && continue; break; }
     fi
@@ -934,7 +1051,13 @@ chat() {
       /model) jq '.model.model' "$TMP/config.json" > "$TMP/chat.model"; if guard "$TMP/chat.model"; then jq -r '.' "$TMP/chat.model"; else printf '[%s]\n' "$ERROR" >&2; fi;;
       /model\ *) set_chat_model "${task#/model }" || printf '[%s]\n' "$ERROR" >&2;;
       /models) models || printf '[%s]\n' "$ERROR" >&2;;
-      /help) printf '/status - show active configuration\n/model [ID] - inspect or switch model\n/models - list provider models\n/compact - summarize context\n/clear - clear transcript and shell\n/exit, /quit - exit\n';;
+      /history) chat_history || printf '[%s]\n' "$ERROR" >&2;;
+      /history\ *) chat_history "${task#/history }" || printf '[%s]\n' "$ERROR" >&2;;
+      /export) chat_export '' || printf '[%s]\n' "$ERROR" >&2;;
+      /export\ *) chat_export "${task#/export }" || printf '[%s]\n' "$ERROR" >&2;;
+      /save-config) chat_save_config '' || printf '[%s]\n' "$ERROR" >&2;;
+      /save-config\ *) chat_save_config "${task#/save-config }" || printf '[%s]\n' "$ERROR" >&2;;
+      /help) printf '/status - show active configuration\n/model [ID] - inspect or switch model\n/models - list provider models\n/history [N] - inspect recent messages\n/export PATH - export resumable transcript\n/save-config PATH - save current configuration\n/compact - summarize context\n/clear - clear transcript and shell\n/exit, /quit - exit\n';;
       /clear) stop_shell; jq '[.[0]]' "$HISTORY" > "$TMP/history.next"; mv "$TMP/history.next" "$HISTORY"; save_session || return; printf 'Session cleared.\n' >&2;;
       /compact) if compact_history && save_session; then printf 'Context compacted.\n' >&2; else printf '[%s]\n' "$ERROR" >&2; fi;;
       *) if agent_turn "$task"; then cat "$TMP/final.message"; else printf '[%s]\n' "$ERROR" >&2; fi;;
@@ -944,6 +1067,8 @@ chat() {
 }
 
 main() {
+  [[ $HAS_TASK == 0 || $HAS_TASK_FILE == 0 ]] || die invalid-task-source || return
+  [[ ${#CONTEXT_FILES[@]} == 0 || $MODE == run || $MODE == chat || $MODE == init ]] || die invalid-context-mode || return
   if [[ $MODE == presets ]]; then
     if [[ $JSON_OUTPUT == 1 ]]; then cat "$TMP/presets.json"; else jq -r '"Providers:",(.providers[]|"  "+.id+" - "+.label),"Task presets:",(.presets[]|"  "+.id),"Initialization recipes:",(.recipes[]|"  "+.id)' "$TMP/presets.json"; fi
     return
@@ -960,6 +1085,7 @@ main() {
   if [[ $MODE == configure ]]; then configure; return; fi
   if [[ $MODE == doctor ]]; then doctor; return; fi
   if [[ $MODE == models ]]; then models; return; fi
+  load_context_files || return
   if shell_is_powershell; then die unsupported-shell; return; fi
   [[ $THEN == 0 || $MODE == init && ${#HANDOFF[@]} -gt 0 ]] || die invalid-handoff || return
   [[ ${#HANDOFF[@]} == 0 || $THEN == 1 ]] || die invalid-handoff || return
@@ -977,7 +1103,7 @@ main() {
   load_session || return
   if [[ $MODE == chat ]]; then chat; return; fi
   if [[ $MODE == init ]]; then initialize || return; emit_record ready 'Environment readiness checks passed.';
-  else agent_turn "$(cfg '.task')" || return; emit_record completed "$(cat "$TMP/final.message")"; fi
+  else configured_task; agent_turn "$CONFIGURED_TASK" || return; emit_record completed "$(cat "$TMP/final.message")"; fi
   if [[ $THEN == 1 ]]; then
     stop_shell
     set -m

@@ -20,6 +20,7 @@
  */
 
 import type { UIMessage } from "ai"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 /**
@@ -324,4 +325,38 @@ export function computeContextWindowUsage(
     reported: usage !== null,
     windowSource: agentWindow ? "agent" : maxOverride ? "override" : "catalog",
   }
+}
+
+/**
+ * {@link computeContextWindowUsage}, preferring the SDK's authoritative live
+ * reading when the runtime supplied one.
+ *
+ * The live `getContextUsage()` snapshot knows the TRUE window size and
+ * occupancy, including the system prompt, tool schemas and memory a
+ * message-derived estimate cannot see, so it wins whenever it reports a window.
+ * Every surface that draws the window (the composer's ring, the conversation's
+ * Usage & context panel) resolves it here, so they cannot disagree.
+ */
+export function resolveContextWindowUsage(
+  sdkUsage: SdkContextUsage | null | undefined,
+  usage: UsageInfo | null,
+  modelId: string | undefined,
+  maxOverride?: number
+): ContextWindowUsage {
+  if (sdkUsage && sdkUsage.maxTokens > 0) {
+    const max = sdkUsage.maxTokens
+    const used = sdkUsage.totalTokens
+    const fraction = Math.min(1, Math.max(0, used / max))
+    return {
+      used,
+      max,
+      fraction,
+      remaining: Math.max(0, max - used),
+      level: contextLevel(fraction),
+      compactThresholdTokens: Math.round(max * AUTO_COMPACT_FRACTION),
+      reported: true,
+      windowSource: "agent",
+    }
+  }
+  return computeContextWindowUsage(usage, modelId, maxOverride)
 }

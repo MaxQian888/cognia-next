@@ -14,6 +14,7 @@ import {
   __setBrowserVaultArgon2ParametersForTesting,
 } from "./browser-vault"
 import { canonicalizePattern, canonicalizePin } from "@/lib/accounts/quick-unlock/secret-policy"
+import { CogniaAccountRegistryDB, LocalAccountRegistry } from "@/lib/accounts/account-db"
 
 const PASSWORD = "correct horse battery staple"
 const PIN = canonicalizePin("428193")
@@ -44,6 +45,141 @@ function nextAccount(): string {
 }
 
 describe("browser vault quick unlock", () => {
+  it("does not replace the current session when a late derivation is cancelled", async () => {
+    const accountId = nextAccount()
+    await provisionBrowserVault(accountId, PASSWORD)
+    await enrollBrowserVaultQuickUnlock({
+      accountId,
+      method: "biometric",
+      password: PASSWORD,
+      canonicalSecret: "biometric:old",
+      pepper: pepper(14),
+    })
+    const current = requireSession()
+    const opened = jest.fn()
+    await expect(
+      unlockBrowserVaultWithQuickSecret({
+        accountId,
+        method: "biometric",
+        canonicalSecret: "biometric:old",
+        pepper: pepper(14),
+        isCurrent: () => false,
+        onSessionOpened: opened,
+      })
+    ).rejects.toThrow("Account changed")
+    expect(requireSession()).toBe(current)
+    expect(current.isUnlocked()).toBe(true)
+    expect(opened).not.toHaveBeenCalled()
+  })
+
+  it("revokes only the candidate session, preserving a newer same-account session", async () => {
+    const accountId = nextAccount()
+    await provisionBrowserVault(accountId, PASSWORD)
+    const args = {
+      accountId,
+      method: "biometric" as const,
+      canonicalSecret: "biometric:old",
+      pepper: pepper(14),
+    }
+    await enrollBrowserVaultQuickUnlock({ ...args, password: PASSWORD })
+    const opened = jest.fn<void, [() => void]>()
+    await unlockBrowserVaultWithQuickSecret({ ...args, onSessionOpened: opened })
+    const revoke = opened.mock.calls[0][0]
+    revoke()
+    expect(getActiveBrowserVault()).toBeNull()
+    await unlockBrowserVaultWithQuickSecret(args)
+    const newer = requireSession()
+    revoke()
+    expect(requireSession()).toBe(newer)
+    const encrypted = await newer.encryptSecret("synthetic-proof", "still usable")
+    await expect(newer.decryptSecret("synthetic-proof", encrypted)).resolves.toBe("still usable")
+  })
+
+  it("commits through a real registry transaction in a separate database", async () => {
+    const accountId = nextAccount()
+    const registryDb = new CogniaAccountRegistryDB(`quick-unlock-transaction-${accountId}`)
+    const registry = new LocalAccountRegistry(registryDb)
+    await registry.createAccount({
+      id: accountId,
+      displayName: "Transaction",
+      passwordVerifier: { algorithm: "test", salt: "s", hash: "h", params: {} },
+    })
+    await provisionBrowserVault(accountId, PASSWORD)
+    await enrollBrowserVaultQuickUnlock({
+      accountId,
+      method: "biometric",
+      password: PASSWORD,
+      canonicalSecret: "biometric:new",
+      pepper: pepper(15),
+      persist: async (wrap) => {
+        await registry.updateQuickUnlock(
+          accountId,
+          [
+            {
+              method: "biometric",
+              verifier: { nativeKeyId: "new" },
+              createdAt: wrap.createdAt,
+              failedAttempts: 0,
+            },
+          ],
+          Date.now(),
+          []
+        )
+      },
+    })
+    expect((await registry.listAccounts())[0].quickUnlock?.[0].verifier.nativeKeyId).toBe("new")
+    lockBrowserVault()
+    await expect(
+      unlockBrowserVaultWithQuickSecret({
+        accountId,
+        method: "biometric",
+        canonicalSecret: "biometric:new",
+        pepper: pepper(15),
+      })
+    ).resolves.toBeUndefined()
+    await registryDb.delete()
+  })
+  it("retains the previous biometric wrap when enrollment metadata cannot persist", async () => {
+    const accountId = nextAccount()
+    await provisionBrowserVault(accountId, PASSWORD)
+    const args = { accountId, method: "biometric" as const, password: PASSWORD, pepper: pepper(11) }
+    await enrollBrowserVaultQuickUnlock({ ...args, canonicalSecret: "biometric:old" })
+    await expect(
+      enrollBrowserVaultQuickUnlock({
+        ...args,
+        canonicalSecret: "biometric:new",
+        persist: async () => {
+          throw new Error("registry unavailable")
+        },
+      })
+    ).rejects.toThrow("registry unavailable")
+    lockBrowserVault()
+    await expect(
+      unlockBrowserVaultWithQuickSecret({ ...args, canonicalSecret: "biometric:old" })
+    ).resolves.toBeUndefined()
+    lockBrowserVault()
+    await expect(
+      unlockBrowserVaultWithQuickSecret({ ...args, canonicalSecret: "biometric:new" })
+    ).rejects.toThrow()
+  })
+
+  it("leaves a first biometric enrollment absent when metadata cannot persist", async () => {
+    const accountId = nextAccount()
+    await provisionBrowserVault(accountId, PASSWORD)
+    await expect(
+      enrollBrowserVaultQuickUnlock({
+        accountId,
+        method: "biometric",
+        password: PASSWORD,
+        canonicalSecret: "biometric:new",
+        pepper: pepper(12),
+        persist: async () => {
+          throw new Error("registry unavailable")
+        },
+      })
+    ).rejects.toThrow("registry unavailable")
+    expect(await listBrowserVaultQuickUnlockMethods(accountId)).toEqual([])
+  })
   it("opens the vault with an enrolled PIN", async () => {
     const accountId = nextAccount()
     await provisionBrowserVault(accountId, PASSWORD)

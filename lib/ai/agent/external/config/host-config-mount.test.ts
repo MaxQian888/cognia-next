@@ -2,6 +2,7 @@ import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 import {
   __setHostConfigMountDepsForTests,
+  hostConfigCatalogMountIsLocal,
   mountHostConfigAgent,
   mountHostConfigForCatalog,
   resetHostConfigMountsForTests,
@@ -166,6 +167,43 @@ describe("mountHostConfigForCatalog", () => {
     })
     try {
       await expect(mountHostConfigForCatalog("eac_1")).rejects.toThrow("does not support")
+    } finally {
+      restore()
+    }
+  })
+})
+
+describe("hostConfigCatalogMountIsLocal", () => {
+  it("allows a catalog mount where the agent's process starts in this shell", () => {
+    const restore = __setHostConfigMountDepsForTests({
+      processPlane: () => ({ ok: true, via: "local" }),
+    })
+    try {
+      expect(hostConfigCatalogMountIsLocal()).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  // On a paired phone the mount spawned a second copy of the agent on the
+  // Host, under the process id of the copy the Host's run service drives.
+  it("refuses it where the spawn would cross to a paired Host", () => {
+    const restore = __setHostConfigMountDepsForTests({
+      processPlane: () => ({ ok: true, via: "remote" }),
+    })
+    try {
+      expect(hostConfigCatalogMountIsLocal()).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  it("refuses it where no process can start at all", () => {
+    const restore = __setHostConfigMountDepsForTests({
+      processPlane: () => ({ ok: false, reason: "no-host" }),
+    })
+    try {
+      expect(hostConfigCatalogMountIsLocal()).toBe(false)
     } finally {
       restore()
     }

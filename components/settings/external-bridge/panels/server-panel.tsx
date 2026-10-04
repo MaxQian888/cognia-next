@@ -37,7 +37,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { useCapability } from "@/hooks/use-host-profile"
+import { useCapability, useRemoteHostActive } from "@/hooks/use-host-profile"
 import { generateToken } from "@/lib/external-bridge/token"
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import {
@@ -45,7 +45,6 @@ import {
   getExternalBridgeConfig,
   getExternalBridgeStatus,
   getMcpServerStatus,
-  isHostManagedBridgeAvailable,
   listExternalBridgeClients,
   restartExternalBridge,
   restartMcpServer,
@@ -59,7 +58,7 @@ import {
   type McpServerStatus,
 } from "@/lib/external-bridge/tauri-control"
 import { releaseBridgeClient } from "@/lib/external-bridge/workspace/release-client"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { useActiveHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 
 import { NumberRow } from "../../common/number-row"
@@ -89,8 +88,19 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
     startedAt: null,
   })
   const hostAvailable = useCapability("mcp-runtime")
-  const remoteHostActive = isRemoteHostActive()
-  const hostManaged = remoteHostActive && isHostManagedBridgeAvailable()
+  // Both subscribed, not read once: on a desktop the active remote host can be
+  // switched (or detached) while this panel is open, and its feature manifest
+  // only lands after the probe settles. A one-shot read kept the answer for the
+  // host that was active at the last unrelated re-render, so the panel drove
+  // the wrong machine's bridge until something else happened to re-render it.
+  // The hook pair mirrors `isRemoteHostActive()` and
+  // `isHostManagedBridgeAvailable()`, which stay for non-React callers.
+  const remoteHostActive = useRemoteHostActive()
+  const hostSupportsManagedBridge = useActiveHostSupportsFeature(
+    "external-bridge.lifecycle",
+    "external_bridge_status"
+  )
+  const hostManaged = remoteHostActive && hostSupportsManagedBridge
   const bridgeAvailable = remoteHostActive ? hostManaged : hostAvailable
 
   // Poll the Rust HTTP server status so an external `mcp_server_stop` (e.g. the
@@ -340,9 +350,11 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
   const onCopyToken = useCallback(async () => {
     const credential = hostManaged ? oneTimeCredential : settings.bearerToken
     if (!credential) return
-    await navigator.clipboard.writeText(credential)
-    toast.success(t("server.toastTokenCopied"))
-  }, [hostManaged, oneTimeCredential, settings.bearerToken, t])
+    await revealSecret(async () => {
+      await navigator.clipboard.writeText(credential)
+      toast.success(t("server.toastTokenCopied"))
+    })
+  }, [hostManaged, oneTimeCredential, settings.bearerToken, revealSecret, t])
 
   const statusKey = !bridgeAvailable ? "web" : serverStatus.running ? "live" : "idle"
   const configuredPort = settings.httpPort ?? DEFAULT_BRIDGE_HTTP_PORT

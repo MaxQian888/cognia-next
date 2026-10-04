@@ -241,6 +241,31 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
             "(deny file-read* file-write* (subpath \"{}\"))\n",
             escape_sbpl(denied)
         ));
+        // A root re-opened beneath the denied subtree is only reachable when
+        // its ancestors can be stat'ed: realpath(3), which Node's `fs.realpath`
+        // and `fs.watch` use, lstat()s every component. Grant exactly that
+        // metadata on the denied root and the directories between it and each
+        // re-opened root. Listing and reading stay denied, so sibling entries
+        // (another task's home) remain hidden.
+        let mut metadata = std::collections::BTreeSet::new();
+        for allowed in scope.readable.iter().chain(writable.iter()) {
+            let allowed = Path::new(allowed);
+            if !allowed.starts_with(denied) || allowed == Path::new(denied) {
+                continue;
+            }
+            for ancestor in allowed.ancestors().skip(1) {
+                if !ancestor.starts_with(denied) {
+                    break;
+                }
+                metadata.insert(ancestor.to_string_lossy().into_owned());
+            }
+        }
+        for ancestor in &metadata {
+            out.push_str(&format!(
+                "(allow file-read-metadata (literal \"{}\"))\n",
+                escape_sbpl(ancestor)
+            ));
+        }
         for allowed in scope
             .readable
             .iter()
@@ -396,6 +421,18 @@ mod tests {
         );
         assert!(profile.contains("(deny file-read* file-write* (subpath \"/home/u/.codex\"))"));
         assert!(profile.find(&deny).unwrap() < profile.find(&own_allow).unwrap());
+        // The task can resolve its own home (realpath stats every ancestor),
+        // but the denied root grants metadata only: no listing, no reads.
+        let metadata = format!(
+            "(allow file-read-metadata (literal \"{}\"))",
+            tasks.display()
+        );
+        assert!(profile.find(&deny).unwrap() < profile.find(&metadata).unwrap());
+        assert!(!profile.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            tasks.display()
+        )));
+        assert!(!profile.contains("(allow file-read-metadata (literal \"/home/u/.codex\"))"));
         let args = bwrap_prefix("/usr/bin/bwrap", &managed, root.path());
         assert!(args.windows(3).any(|w| w
             == [

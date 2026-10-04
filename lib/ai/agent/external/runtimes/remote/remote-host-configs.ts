@@ -38,6 +38,10 @@ import type {
 } from "@/types/agent/external-agent-config-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 import type { RunAdmissionRefusal } from "../../policy/run-admission"
+import {
+  isCogniaGatewayModelCatalog,
+  type CogniaGatewayModelCatalog,
+} from "../../config/cognia-model-options"
 
 /** The feature id that groups every operation in this module. */
 export const HOST_CONFIGS_FEATURE = "external-agent.host-configs" as const
@@ -58,9 +62,28 @@ export const HOST_CONFIG_COMMANDS = Object.freeze({
   run: "external_agent_run_turn",
   cancel: "external_agent_cancel_run",
   resolve: "external_agent_resolve_decision",
+  // Which Cognia models a configuration can run on through the Host's own
+  // gateway (ADR-0090, 2026-10-02). A read; the Host answers from its own
+  // provider settings and vault.
+  cogniaModels: "external_agent_cognia_models",
 } as const)
 
 export type HostConfigCommand = (typeof HOST_CONFIG_COMMANDS)[keyof typeof HOST_CONFIG_COMMANDS]
+
+/**
+ * Advertised operations that are not commands: a change to what an existing
+ * command accepts. A Host built before `external_agent_run_turn` took
+ * `cogniaModel` refuses the field outright (its request schema is closed), so
+ * the client has to know before it sends one rather than learn from a 422.
+ */
+export const HOST_CONFIG_CAPABILITIES = Object.freeze({
+  runTurnCogniaModel: "external_agent_run_turn_cognia_model",
+} as const)
+
+export type HostConfigCapability =
+  (typeof HOST_CONFIG_CAPABILITIES)[keyof typeof HOST_CONFIG_CAPABILITIES]
+
+export type HostConfigOperation = HostConfigCommand | HostConfigCapability
 
 /**
  * Used when no specific operation is named — "is this surface worth offering
@@ -87,9 +110,9 @@ export type HostConfigsUnavailableReason = "no-host" | "unsupported" | "manifest
 export class HostConfigsUnsupportedError extends Error {
   readonly reason: HostConfigsUnavailableReason
   readonly feature = HOST_CONFIGS_FEATURE
-  readonly operation?: HostConfigCommand
+  readonly operation?: HostConfigOperation
 
-  constructor(reason: HostConfigsUnavailableReason, operation?: HostConfigCommand) {
+  constructor(reason: HostConfigsUnavailableReason, operation?: HostConfigOperation) {
     super(
       reason === "no-host"
         ? "No paired host owns external-agent configurations."
@@ -146,14 +169,14 @@ export function __setRemoteHostConfigDepsForTests(next: Partial<RemoteHostConfig
  * and a paired host that is simply too old are three different screens.
  */
 export function hostConfigsAvailability(
-  operation?: HostConfigCommand
+  operation?: HostConfigOperation
 ): { ok: true } | { ok: false; reason: HostConfigsUnavailableReason } {
   if (deps.hasLocalAuthority() && !deps.isRemoteHostActive()) return { ok: true }
 
   if (deps.isRemoteHostActive()) {
     const manifest = deps.activeHostFeatureManifest()
     if (!manifest) return { ok: false, reason: "manifest-missing" }
-    const supports = (candidate: HostConfigCommand) =>
+    const supports = (candidate: HostConfigOperation) =>
       supportsHostFeatureOperation(manifest, HOST_CONFIGS_FEATURE, candidate)
     return (operation ? supports(operation) : ANY_COMMAND.some(supports))
       ? { ok: true }
@@ -163,7 +186,7 @@ export function hostConfigsAvailability(
   const host = deps.getRuntimeSnapshot().host
   if (!host) return { ok: false, reason: "no-host" }
   if (host.compatible !== true) return { ok: false, reason: "unsupported" }
-  const supports = (candidate: HostConfigCommand) => host.operations.includes(candidate)
+  const supports = (candidate: HostConfigOperation) => host.operations.includes(candidate)
   return (operation ? supports(operation) : ANY_COMMAND.some(supports))
     ? { ok: true }
     : { ok: false, reason: "unsupported" }
@@ -218,6 +241,58 @@ export async function callApprovedHostConfigCommand<T>(
   if (localAuthority) return deps.call<T>(operation, payload)
   const lease = await deps.issueAdminLease([operation])
   return deps.call<T>(operation, { ...payload, adminLease: lease.token })
+}
+
+/**
+ * The paired Host predates per-turn Cognia model selection.
+ *
+ * Its own class, carrying an i18n key, because this is the one refusal a user
+ * sees mid-conversation — on send — and "update the Host" is the whole fix.
+ * Still a `HostConfigsUnsupportedError`, so anything already handling that
+ * family keeps working.
+ */
+export class HostCogniaModelUpdateRequiredError extends HostConfigsUnsupportedError {
+  readonly code = "host-update-required" as const
+  /** `externalAgent.cogniaModel.hostUpdateRequired` in the split i18n sources. */
+  readonly i18nKey = "externalAgent.cogniaModel.hostUpdateRequired" as const
+
+  constructor() {
+    super("unsupported", HOST_CONFIG_CAPABILITIES.runTurnCogniaModel)
+    this.name = "HostCogniaModelUpdateRequiredError"
+    this.message = "Update the Host to use Cognia models with this agent."
+  }
+}
+
+/**
+ * Can the active Host run a turn on a Cognia model it is handed per turn?
+ * Local authority always can: the field and its handler ship together.
+ */
+export function hostSupportsCogniaModelTurns(): boolean {
+  return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.runTurnCogniaModel).ok
+}
+
+/**
+ * Which Cognia models `configId` can run on through the active Host's gateway.
+ *
+ * A Host that does not advertise the operation answers
+ * `host-update-required` as data, because that is a state the picker renders
+ * ("update the Host"), not a failure. No paired Host, or one whose manifest has
+ * not arrived, is still the structured refusal every sibling call gives.
+ */
+export async function fetchHostCogniaModels(configId: string): Promise<CogniaGatewayModelCatalog> {
+  const operation = HOST_CONFIG_COMMANDS.cogniaModels
+  const availability = hostConfigsAvailability(operation)
+  if (!availability.ok) {
+    if (availability.reason === "unsupported") {
+      return { supported: false, reason: "host-update-required" }
+    }
+    throw new HostConfigsUnsupportedError(availability.reason, operation)
+  }
+  const result = await deps.call<unknown>(operation, { configId })
+  if (!isCogniaGatewayModelCatalog(result)) {
+    throw new Error("The paired host returned a malformed Cognia model catalog")
+  }
+  return result
 }
 
 export async function listRemoteHostConfigs(): Promise<ExternalAgentConfigRecord[]> {

@@ -14,6 +14,9 @@
  * Center re-run, boot auto-resume) can dispatch without a live tool call.
  */
 
+import type { BackgroundDispatchRecovery } from "@/lib/background-tasks/registry-core"
+import { captureBackgroundDispatchRecovery } from "@/lib/background-tasks/redispatch"
+import { admitBackgroundDispatch } from "@/lib/db/background-tasks"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
 import type {
   PluginDispatchErrorEnvelope,
@@ -23,7 +26,7 @@ import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-con
 import { getOrCreateDispatchBudget, isDispatchBudgetExhausted } from "./dispatch-budget"
 import {
   journalRendererForegroundRun,
-  startRendererBackgroundRun,
+  startAcceptedRendererBackgroundRun,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import {
   createDispatchRunTracker,
@@ -34,7 +37,11 @@ import {
   recordDispatchRejected,
   recordDispatchRetry,
 } from "./dispatch-runtime"
-import { registerSubagentRun, unregisterSubagentRun } from "./subagent-cancel-registry"
+import {
+  registerSubagentRun,
+  registerSubagentCancellation,
+  unregisterSubagentRun,
+} from "./subagent-cancel-registry"
 import { toDispatchErrorEnvelope, renderDispatchOutcomeForModel } from "./dispatch-error"
 import {
   DEFAULT_DISPATCH_RETRY,
@@ -198,6 +205,8 @@ function newRunId(): string {
 }
 
 export interface StartDispatchRunParams {
+  /** Verified safe restart; retains the original child session and frozen input. */
+  recovery?: BackgroundDispatchRecovery
   subagentId: string
   prompt: string
   toolsEnabled: boolean
@@ -223,6 +232,7 @@ export interface StartDispatchRunParams {
 }
 
 export interface DispatchRunHandle {
+  error?: string
   runId: string
   /** Model-facing outcome text (or the started-in-background notice). */
   text: string
@@ -233,22 +243,35 @@ export interface DispatchRunHandle {
  * model-facing text (and the structured envelope on the underlying result).
  */
 export async function startDispatchRun(p: StartDispatchRunParams): Promise<DispatchRunHandle> {
+  let effectiveCaller = structuredClone(p.caller)
   const childRunId = p.runId ?? newRunId()
   const label = p.label ?? p.subagentId
   // Every run (foreground OR background) gets a controller so the chat card's
   // Abort button can stop it via the cancel registry.
   const abort = new AbortController()
-  const childDepth = p.caller.parentDepth + 1
+  const childDepth = effectiveCaller.parentDepth + 1
   recordDispatchStart({
     id: childRunId,
     name: p.subagentId,
     task: p.prompt,
     depth: childDepth,
-    ...(p.caller.parentSubagentId ? { parentSubagentId: p.caller.parentSubagentId } : {}),
+    ...(effectiveCaller.parentSubagentId
+      ? { parentSubagentId: effectiveCaller.parentSubagentId }
+      : {}),
     parentSessionId: p.parentSessionId,
     backgrounded: p.background,
   })
-  registerSubagentRun(childRunId, abort)
+  let persistCancellation: (() => Promise<void>) | undefined
+  let cancellation: Promise<void> | undefined
+  const requestCancellation = () =>
+    (cancellation ??= (async () => {
+      if (persistCancellation) await persistCancellation()
+      abort.abort()
+    })().catch((error) => {
+      cancellation = undefined
+      throw error
+    }))
+  if (!p.background) registerSubagentRun(childRunId, abort)
 
   const [{ dispatchSubagent }, { getDispatchableSubagentDef }, nesting] = await Promise.all([
     import("@/lib/plugin/agent-sdk/dispatch"),
@@ -257,22 +280,30 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
   ])
   // Prefer the inline def (projected ids like `template:x` / `pluginId:y` are
   // not resolvable by the registry's `getSubagent`); fall back to the raw id.
-  const resolved = getDispatchableSubagentDef(p.subagentId)
-  const target = resolved && p.model ? { ...resolved, model: p.model } : (resolved ?? p.subagentId)
+  let resolved = getDispatchableSubagentDef(p.subagentId)
+  if (!resolved && p.background) {
+    const { getSubagent } = await import("@/lib/plugin/registries/subagent-registry")
+    resolved = getSubagent(p.subagentId)
+  }
+  let target = resolved
+    ? structuredClone(p.model ? { ...resolved, model: p.model } : resolved)
+    : p.subagentId
   const tracker = createDispatchRunTracker(childRunId)
   const policy: DispatchRetryPolicy = {
     ...DEFAULT_DISPATCH_RETRY,
     maxRetries: nesting.dispatchMaxRetries,
   }
 
+  let recovery = p.recovery
   const attemptDispatch = (): Promise<PluginSubagentDispatchResult> =>
     dispatchSubagent(target, p.prompt, {
       toolsEnabled: p.toolsEnabled,
       _runId: childRunId,
-      _depth: p.caller.parentDepth,
-      _maxDepth: p.caller.maxDepth,
-      _parentChain: p.caller.parentChain,
-      _budgetRootRunId: p.caller.budgetRoot,
+      ...(recovery ? { _sessionId: recovery.executionSessionId } : {}),
+      _depth: effectiveCaller.parentDepth,
+      _maxDepth: effectiveCaller.maxDepth,
+      _parentChain: effectiveCaller.parentChain,
+      _budgetRootRunId: effectiveCaller.budgetRoot,
       _onEvent: tracker.sink,
       abortSignal: abort.signal,
       _approvalRoute: {
@@ -281,11 +312,13 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
         subagentId: p.subagentId,
         backgrounded: p.background,
       },
-      ...(p.caller.deadlineMs ? { _deadlineMs: p.caller.deadlineMs } : {}),
-      ...(p.caller.parentCeiling ? { _permissionCeiling: p.caller.parentCeiling } : {}),
+      ...(effectiveCaller.deadlineMs ? { _deadlineMs: effectiveCaller.deadlineMs } : {}),
+      ...(effectiveCaller.parentCeiling
+        ? { _permissionCeiling: effectiveCaller.parentCeiling }
+        : {}),
       // The child works where its parent works (P0 before this: an app-dispatched
       // child started with no cwd, so it never saw the project's CLAUDE.md).
-      ...(p.caller.cwd ? { cwd: p.caller.cwd } : {}),
+      ...(effectiveCaller.cwd ? { cwd: effectiveCaller.cwd } : {}),
     }).catch((err): PluginSubagentDispatchResult => {
       const envelope = toDispatchErrorEnvelope(err, {
         aborted: abort.signal.aborted,
@@ -303,14 +336,24 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
 
   // Terminal store recording happens exactly once, AFTER the retry loop
   // settles — a retried attempt must never record `failed` first.
+  let foregroundResultReady = false
+  let foregroundFinalized = false
   const finalize = (r: PluginSubagentDispatchResult): PluginSubagentDispatchResult => {
+    if (!p.background) {
+      // Foreground callers and UI consume the same fenced journal outcome.
+      // An adapter may resolve after abort; that result cannot replace it.
+      if (!foregroundResultReady || foregroundFinalized) return r
+      foregroundFinalized = true
+    }
     if (r.rejection) {
       recordDispatchRejected({
         id: childRunId,
         name: p.subagentId,
         task: p.prompt,
         depth: childDepth,
-        ...(p.caller.parentSubagentId ? { parentSubagentId: p.caller.parentSubagentId } : {}),
+        ...(effectiveCaller.parentSubagentId
+          ? { parentSubagentId: effectiveCaller.parentSubagentId }
+          : {}),
         parentSessionId: p.parentSessionId,
         rejection: r.rejection,
       })
@@ -355,14 +398,22 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
         if (envelope) envelope.attempts = attempt
         return finalize(r)
       }
+      // Re-running a tool-capable background attempt cannot be justified by a
+      // transient transport error: the host may have died after the effect.
+      if (p.background && recovery?.sideEffect !== "none") {
+        envelope.attempts = attempt
+        return finalize(r)
+      }
       const nextDelayMs = retryDelayMs(policy, attempt, envelope.retryAfterMs)
       const retry = shouldRetryDispatch(envelope, {
         attempt,
         policy,
         signal: abort.signal,
         nextDelayMs,
-        ...(p.caller.deadlineMs !== undefined ? { deadlineMs: p.caller.deadlineMs } : {}),
-        budgetExhausted: () => isDispatchBudgetExhausted(p.caller.budgetRoot),
+        ...(effectiveCaller.deadlineMs !== undefined
+          ? { deadlineMs: effectiveCaller.deadlineMs }
+          : {}),
+        budgetExhausted: () => isDispatchBudgetExhausted(effectiveCaller.budgetRoot),
       })
       if (!retry) {
         envelope.attempts = attempt
@@ -376,7 +427,6 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
     }
   }
 
-  const promise = runWithRetries()
   const journalMeta = {
     kind: "subagent" as const,
     subagentId: p.subagentId,
@@ -385,21 +435,96 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
     host: "renderer" as const,
     startedAt: Date.now(),
     toolsEnabled: p.toolsEnabled,
+    ...(p.model ? { model: p.model } : {}),
     ...(p.resumeOfRunId ? { resumeOfRunId: p.resumeOfRunId } : {}),
     ...(p.resumeAttempt !== undefined ? { resumeAttempt: p.resumeAttempt } : {}),
   }
 
   if (p.background) {
-    startRendererBackgroundRun(childRunId, journalMeta, promise, {
-      cancel: () => abort.abort(),
-    })
+    try {
+      if (!resolved) throw new Error(`Subagent "${p.subagentId}" is unavailable`)
+      recovery ??= await captureBackgroundDispatchRecovery({
+        sessionId: p.parentSessionId,
+        executionSessionId: `background:${childRunId}`,
+        caller: effectiveCaller,
+        target: typeof target === "string" ? resolved : target,
+        toolsEnabled: p.toolsEnabled,
+      })
+      recovery = { ...recovery, phase: "accepted" }
+      effectiveCaller = recovery.caller
+      target = recovery.target
+      const admission = await admitBackgroundDispatch(
+        {
+          runId: childRunId,
+          ...journalMeta,
+          mode: "background",
+          status: "running",
+          recovery,
+        },
+        p.recovery ? p.resumeOfRunId : undefined,
+        p.recovery?.phase
+      )
+      persistCancellation = admission.requestCancel
+      registerSubagentCancellation(childRunId, requestCancellation)
+      // Persist the dispatch boundary before invoking the runtime. A crash after
+      // this write is ambiguous unless the frozen run provably has no tools.
+      const promise = (async () => {
+        await admission.markDispatched()
+        if (abort.signal.aborted)
+          return finalize(
+            cancelledResult({
+              code: "aborted",
+              retryable: false,
+              message: "Cancelled before dispatch",
+            })
+          )
+        return runWithRetries()
+      })().catch((error) =>
+        finalize({
+          text: error instanceof Error ? error.message : String(error),
+          channel: "text",
+          toolsAvailable: false,
+          runId: childRunId,
+          finishReason: "error",
+          errorEnvelope: {
+            code: "unknown",
+            retryable: false,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        })
+      )
+      startAcceptedRendererBackgroundRun(
+        childRunId,
+        { ...journalMeta, recovery },
+        promise,
+        admission.journal,
+        {
+          cancel: requestCancellation,
+          onLeaseLost: () => abort.abort(),
+        }
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      finalize({
+        text: message,
+        channel: "text",
+        toolsAvailable: false,
+        finishReason: "error",
+        errorEnvelope: { code: "unknown", retryable: false, message },
+      })
+      return { runId: childRunId, text: `[${label}] ${message}`, error: message }
+    }
     return {
       runId: childRunId,
       text: `[${p.subagentId}] started in background (runId: ${childRunId}). Collect later with dispatch_agent({collect:"${childRunId}"}).`,
     }
   }
 
-  journalRendererForegroundRun(childRunId, journalMeta, promise)
-  const r = await promise
+  const promise = runWithRetries()
+  const r = await journalRendererForegroundRun(childRunId, journalMeta, promise, {
+    onLeaseLost: () => abort.abort(),
+  })
+  foregroundResultReady = true
+  finalize(r)
   return { runId: childRunId, text: renderDispatchOutcomeForModel(label, r) }
 }

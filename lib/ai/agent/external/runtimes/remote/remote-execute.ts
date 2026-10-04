@@ -24,6 +24,7 @@
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type {
   AcpMcpServerConfig,
+  ExternalAgentCogniaModelBinding,
   ExternalAgentEvent,
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
@@ -36,13 +37,29 @@ import {
   whenRemoteRunChannelSubscribed,
 } from "./remote-run-client"
 import { remoteDecisionId } from "./remote-run-service"
+import {
+  HostCogniaModelUpdateRequiredError,
+  hostSupportsCogniaModelTurns,
+} from "./remote-host-configs"
+import { recordReportedAgentModelSurface } from "../../capability/model-surface-cache"
+import { hostConfigCatalogMountIsLocal } from "../../config/host-config-mount"
+import {
+  resolveExternalAgentModels,
+  resolveExternalAgentThinking,
+  seededModelSurface,
+} from "../../session/session-models"
 
 export interface RemoteExecuteOptions {
   systemPrompt?: string
   allowedTools?: string[]
   /** Caller-local MCP servers require a reverse tool transport the paired host does not expose. */
   mcpServers?: AcpMcpServerConfig[]
-  cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
+  /**
+   * Run on a Cognia provider/model through the Host's gateway, using the
+   * Host's credentials. Omitted inherits the Host configuration; `null`
+   * explicitly selects the agent's native models; a binding selects Cognia.
+   */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
   /** Which host configuration, at which revision and readiness generation. */
   stamp: ExternalAgentConfigStamp
   /** The chat session the frames are addressed to. */
@@ -86,6 +103,37 @@ function deltaText(event: ExternalAgentEvent): string {
 
 const TEXT_EVENTS = new Set(["message_delta", "content_block_delta"])
 
+/** Gateway task sessions (`gatewaySessionId` in `config/gateway-task`). */
+const GATEWAY_SESSION_PREFIX = "cognia-gateway:"
+
+/**
+ * Keep the Host's report of the session's models for the composer's picker.
+ *
+ * The Host sends the session's options at the end of every turn (see
+ * `reportSessionModels` in the run service). This client cannot write to that
+ * session, so the surface is recorded as SEEDED: a pick is persisted on the
+ * conversation and the Host applies it at the start of the next turn, which is
+ * exactly the `model` this module already forwards.
+ *
+ * Skipped where the configuration is mounted in this same process (a desktop
+ * that owns its host-config store): there the picker reads the live session
+ * directly and can write to it, and a seeded copy would demote that.
+ */
+function recordHostModelReport(
+  options: RemoteExecuteOptions,
+  event: ExternalAgentEvent,
+  externalSessionId: string
+): void {
+  if (event.type !== "config_options_update") return
+  const sessionId = event.sessionId || externalSessionId
+  if (!sessionId || hostConfigCatalogMountIsLocal()) return
+  const configOptions = event.configOptions
+  recordReportedAgentModelSurface(options.stamp.configId, options.chatSessionId, sessionId, {
+    models: seededModelSurface(resolveExternalAgentModels({ configOptions })),
+    thinking: resolveExternalAgentThinking({ configOptions }),
+  })
+}
+
 /**
  * Run one turn on the host and resolve when it ends.
  *
@@ -98,11 +146,13 @@ export async function executeOnRemoteHostAgent(
   prompt: string,
   options: RemoteExecuteOptions
 ): Promise<(ExternalAgentResult & { runId: string }) | null> {
-  if (options.cogniaModel || options.externalSessionId?.startsWith("cognia-gateway:")) {
-    throw new Error(
-      "Cognia gateway tasks require a local agent; remote gateway transport is not configured"
-    )
-  }
+  // A Host built before per-turn Cognia selection closes its request schema
+  // against the field, and cannot resume a gateway task it was never asked to
+  // run. Asking it to would be a 422 at best; say what fixes it instead.
+  const needsCogniaTurns =
+    !!options.cogniaModel || !!options.externalSessionId?.startsWith(GATEWAY_SESSION_PREFIX)
+  const hostTakesCogniaModel = hostSupportsCogniaModelTurns()
+  if (needsCogniaTurns && !hostTakesCogniaModel) throw new HostCogniaModelUpdateRequiredError()
   if (options.mcpServers?.length)
     throw new Error(
       "Paired-host agents cannot attach this device's MCP servers; configure tools on the target host"
@@ -131,6 +181,7 @@ export async function executeOnRemoteHostAgent(
         externalSessionId = (event as { sessionId: string }).sessionId
       }
       if (TEXT_EVENTS.has(event.type)) text += deltaText(event)
+      recordHostModelReport(options, event, externalSessionId)
       options.onEvent?.(event)
     },
     onGap: options.onGap,
@@ -167,6 +218,12 @@ export async function executeOnRemoteHostAgent(
       systemPrompt: options.systemPrompt,
       allowedTools: options.allowedTools,
       externalSessionId: options.externalSessionId,
+      // An explicit `null` ("native") is only sent to a Host that knows the
+      // field. An older Host never took a per-turn selection at all: its own
+      // configuration decides, exactly as it did before this axis existed.
+      ...(options.cogniaModel !== undefined && hostTakesCogniaModel
+        ? { cogniaModel: options.cogniaModel }
+        : {}),
     })
     if (!started.started) {
       stop()

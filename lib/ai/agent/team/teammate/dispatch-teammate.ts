@@ -64,7 +64,11 @@ import type {
   ResolvedAgentExecutionSpec,
 } from "@cognia/agent-config-types/agent-execution"
 import { rebindResolvedAgentExecutionHost } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
-import type { TeammateExecutionTarget } from "@/types/agent/agent-team"
+import { isAgentTeamRemoteDispatchEnabled } from "@/lib/ai/agent/execution/feature-flags"
+import {
+  resolveTeammateExecutionBinding,
+  migrateTeammateExecutionBinding,
+} from "./execution-binding-resolver"
 import {
   getRemoteWorkerRuntime,
   RemoteWorkerWaitingError,
@@ -78,6 +82,28 @@ import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 const DEFAULT_PER_TASK_TIMEOUT_MS = 600_000
 
 export type TeammateChannel = "sidecar" | "text" | "external"
+
+export class RemoteTeammateUnavailableError extends Error {
+  constructor(
+    readonly reason: "remoteDispatchDisabled" | "remoteDispatchUnavailable",
+    message: string
+  ) {
+    super(message)
+    this.name = "RemoteTeammateUnavailableError"
+  }
+}
+
+async function assertRemoteDispatchAvailable(durableReady = true): Promise<void> {
+  const reason = !isAgentTeamRemoteDispatchEnabled()
+    ? "remoteDispatchDisabled"
+    : !durableReady
+      ? "remoteDispatchUnavailable"
+      : undefined
+  if (!reason) return
+  const { getRuntimeTranslator } = await import("@/lib/i18n/runtime-translator")
+  const t = await getRuntimeTranslator("agentTeamsWorkspace.teammateConfig.executionBinding")
+  throw new RemoteTeammateUnavailableError(reason, t(reason))
+}
 
 export interface TokenUsage {
   promptTokens: number
@@ -884,7 +910,14 @@ export async function dispatchTeammate(
 
     const runtime = teammate.config?.runtime ?? "claude"
     let frozenExecutionSpec: ResolvedAgentExecutionSpec | undefined
-    let executionTarget: TeammateExecutionTarget = { mode: "colocate" }
+    const binding = resolveTeammateExecutionBinding({
+      member: teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
+      teamDefault: teamCtx.team.config?.defaultExecution,
+    })
+    const executionTarget = binding.executionTarget
+    // A saved remote target remains authoritative when rollout is disabled.
+    // Refuse before even resolving a local external runtime or workspace.
+    if (executionTarget.mode !== "colocate") await assertRemoteDispatchAvailable()
     let externalAgentId: string | null = null
     const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
     if (teammate.config?.cogniaModel && !wantsExternal) {
@@ -996,23 +1029,13 @@ export async function dispatchTeammate(
     // text rail, claude on the agent rail.
     {
       const { getAgentExecutionFlags } = await import("@/lib/ai/agent/execution/feature-flags")
-      const [
-        { resolveAgentExecutionSpec, channelFromSpec },
-        { resolveTeammateExecutionBinding, migrateTeammateExecutionBinding },
-      ] = await Promise.all([
-        import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-        import("./execution-binding-resolver"),
-      ])
+      const { resolveAgentExecutionSpec, channelFromSpec } =
+        await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
       // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
       // default; run/app-default/managed slots reserved). A legacy raw-cred
       // member migrates to its provider-id deployment ref at dispatch time
       // (refs only — the raw values are never copied). The resulting policy
       // fragment feeds the SAME resolver call.
-      const binding = resolveTeammateExecutionBinding({
-        member:
-          teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
-        teamDefault: teamCtx.team.config?.defaultExecution,
-      })
       // Pool mode: until the coordinator-driven pick lands, the FIRST candidate
       // deployment id is the deterministic selection (documented on the field's
       // pool hint) — never a silent no-op.
@@ -1038,7 +1061,6 @@ export async function dispatchTeammate(
         identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
       })
       frozenExecutionSpec = spec
-      executionTarget = binding.executionTarget
       channel = channelFromSpec(spec, environment)
       // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
       // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
@@ -1180,14 +1202,12 @@ export async function dispatchTeammate(
           promptText,
         ].join("\n")
       }
-      const { isAgentTeamRemoteDispatchEnabled } =
-        await import("@/lib/ai/agent/execution/feature-flags")
-      if (
-        activeDispatch &&
-        frozenExecutionSpec &&
-        executionTarget.mode !== "colocate" &&
-        isAgentTeamRemoteDispatchEnabled()
-      ) {
+      if (executionTarget.mode !== "colocate") {
+        // Recheck after admission: turning rollout off while a child waits
+        // must not send that child down a local runtime branch.
+        await assertRemoteDispatchAvailable(Boolean(activeDispatch && frozenExecutionSpec))
+      }
+      if (activeDispatch && frozenExecutionSpec && executionTarget.mode !== "colocate") {
         const remoteCeiling = deriveExternalSessionPermission(
           teamCtx.parentPermissionCeiling ?? {},
           teamPermissionCeiling(teamCtx.team.config)

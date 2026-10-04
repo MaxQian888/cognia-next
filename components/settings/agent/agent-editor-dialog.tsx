@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/select"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
 import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
@@ -54,9 +54,11 @@ import {
 } from "@/lib/ai/agent/external/policy/permission-modes"
 import {
   extensionPolicyArgs,
+  piPackageRefsFromMetadata,
   resolvePiExtensionPolicy,
   type PiExtensionPolicy,
 } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
+import { PiPluginPackagesField } from "./pi-plugin-packages-field"
 import {
   useExternalAgentStore,
   type LifecycleExternalAgentConfig,
@@ -132,6 +134,11 @@ interface AgentFormData {
    * same models as Pi itself. Project-local extensions still require trust.
    */
   piExtensionPolicy: PiExtensionPolicy
+  /**
+   * Plugin-shipped Pi packages this agent loads in every hosted session
+   * (`metadata.piPackages`, `<pluginId>/<packageId>` references, ADR-0210).
+   */
+  piPackages: string[]
 }
 
 /** Split the newline-separated skill-roots textarea into clean, unique paths. */
@@ -194,6 +201,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   opencodeServerUsername: "",
   opencodeModel: "",
   piExtensionPolicy: "global",
+  piPackages: [],
 }
 
 /**
@@ -311,8 +319,12 @@ export function AgentEditorDialog({
       (editingAgentId ? String(getAgent(editingAgentId)?.metadata?.preset ?? "") : "")
   )
   // A native picker only resolves paths on this device, never on a remote Host.
+  // Subscribed rather than read once: a desktop can attach to (or detach from)
+  // a remote Host while this dialog is open, and a one-shot read kept offering
+  // (or hiding) the picker for whichever machine was active at the last
+  // unrelated re-render.
   const directoryPicker = useDirectoryPicker()
-  const localPaths = !isRemoteHostActive()
+  const localPaths = !useRemoteHostActive()
 
   const [formData, setFormData] = useState<AgentFormData>(() => {
     // Quick-start gallery: open with the preset's defaults so the user only
@@ -386,6 +398,7 @@ export function AgentEditorDialog({
       codexExtraSkillRoots: agent.codexOptions?.extraSkillRoots?.join("\n") ?? "",
       ...opencodeFieldsFromMetadata(agent.metadata),
       piExtensionPolicy: piExtensionPolicyFromMetadata(agent.metadata),
+      piPackages: piPackageRefsFromMetadata(agent.metadata),
     }
   })
 
@@ -609,6 +622,7 @@ export function AgentEditorDialog({
       input.metadata = {
         ...(input.metadata ?? {}),
         piExtensionPolicy: formData.piExtensionPolicy,
+        piPackages: formData.piPackages,
       }
     }
 
@@ -1417,6 +1431,10 @@ export function AgentEditorDialog({
                 </p>
               </div>
               <p className="text-muted-foreground text-xs">{t("piSandboxNote")}</p>
+              <PiPluginPackagesField
+                value={formData.piPackages}
+                onChange={(piPackages) => setFormData({ ...formData, piPackages })}
+              />
               {/* The policy above decides how much of the user's Pi extension
                   stack loads; this is where they can see and change what that
                   stack actually contains, and what it costs per turn. */}

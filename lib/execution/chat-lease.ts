@@ -206,6 +206,19 @@ export async function switchChatLeaseProvider(
   current.lease.release("error")
 }
 
+/**
+ * Whether this realm holds a live broker lease for `sessionId`'s turn.
+ *
+ * Every local send path acquires the lease BEFORE it flips the session to
+ * `streaming`, and the watcher releases it once the session leaves an active
+ * state, so a held lease is the renderer's proof that a turn it started is
+ * still running here. A session that reads busy without one (and is not
+ * queued) was not started by this realm since it booted.
+ */
+export function hasChatLease(sessionId: string): boolean {
+  return held.has(sessionId)
+}
+
 /** Whether a turn for `sessionId` is waiting for admission right now. */
 export function isChatTurnQueued(sessionId: string): boolean {
   return queued.has(sessionId)

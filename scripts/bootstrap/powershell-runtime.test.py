@@ -34,6 +34,95 @@ class PowerShellRuntimeTests(unittest.TestCase):
         if hasattr(self, "fixture"):
             self.fixture.tearDown()
 
+    def test_task_file_bom_and_invocation_directory_are_preserved(self):
+        case = self.fixture
+        nested = case.work / "nested"
+        nested.mkdir()
+        (case.work / "task.txt").write_bytes(b"\xef\xbb\xbfRead this task")
+        (case.work / "notes.txt").write_text("Useful notes", encoding="utf-8")
+        result = case.invoke("run", "--cwd", nested, "--task-file", "task.txt",
+                             "--context-file", "notes.txt")
+        case.succeeded(result)
+        user = case.requests[0]["body"]["messages"][-1]["content"]
+        self.assertTrue(user.startswith("Read this task\n\nAttached context files"))
+        self.assertIn('"path":"notes.txt"', user)
+        self.assertIn("Useful notes", user)
+
+    def test_input_failures_do_not_execute_setup_or_request_model(self):
+        case = self.fixture
+        case.config["setupCommand"] = "Set-Content should-not-exist.txt started"
+        case.config["checks"] = [{"name": "missing", "command": "exit 1"}]
+        bad = case.work / "input.txt"
+        for value in (b"bad\x00data", b"bad\xffdata", b"x" * 32001):
+            bad.write_bytes(value)
+            result = case.invoke("init", "--task-file", bad)
+            self.assertNotEqual(result.returncode, 0)
+        bad.write_bytes(b"\xff")
+        result = case.invoke("init", "--context-file", bad)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((case.work / "should-not-exist.txt").exists())
+        self.assertEqual(case.requests, [])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "Named pipes require Unix")
+    def test_context_fifo_and_leaf_symlink_are_rejected_without_blocking(self):
+        case = self.fixture
+        fifo = case.work / "context-fifo"
+        os.mkfifo(fifo)
+        regular = case.work / "regular.txt"
+        regular.write_text("ordinary", encoding="utf-8")
+        symlink = case.work / "context-link"
+        symlink.symlink_to(regular)
+        for path in (fifo, symlink):
+            result = case.invoke("run", "--context-file", path, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(case.requests, [])
+
+    def test_local_commands_work_without_credentials_and_exports_resume(self):
+        case = self.fixture
+        case.config["model"].update(auth="bearer", apiKeyEnv="ABSENT_TEST_API_KEY")
+        commands = "/model changed-model\n/history\n/export saved session.jsonl\n/save-config saved config.json\n/exit\n"
+        result = case.invoke("chat", "--no-session", stdin=commands,
+                             environment={"ABSENT_TEST_API_KEY": ""})
+        case.succeeded(result)
+        self.assertIn("[]", result.stdout)
+        config = json.loads((case.work / "saved config.json").read_text())
+        self.assertEqual(config["model"]["model"], "changed-model")
+        session = case.work / "saved session.jsonl"
+        self.assertIn('"_cogniaSession":"v1"', session.read_text())
+        self.assertEqual(case.requests, [])
+        if os.name != "nt":
+            self.assertEqual(session.stat().st_mode & 0o777, 0o600)
+        case.config["model"]["auth"] = "none"
+        case.succeeded(case.invoke("run", "--session", session, "--task", "Continue"))
+
+    def test_attachments_remain_after_failed_turn_and_are_consumed_once(self):
+        case = self.fixture
+        notes = case.work / "notes.txt"
+        notes.write_text("ATTACHMENT_MARKER", encoding="utf-8")
+        case.respond = lambda _body, index: ((400, {"error": {"message": "try again"}})
+                                            if index == 0 else contract.answer("Done"))
+        result = case.invoke("chat", "--no-session", "--context-file", notes,
+                             stdin="/history\nfirst\nretry\nthird\n/exit\n")
+        case.succeeded(result)
+        self.assertEqual(len(case.requests), 3)
+        for request in case.requests[:2]:
+            self.assertIn("ATTACHMENT_MARKER", request["body"]["messages"][-1]["content"])
+        self.assertEqual(case.requests[2]["body"]["messages"][-1]["content"], "third")
+        self.assertNotIn('"content":"first', json.dumps(case.requests[2]["body"]))
+
+    def test_export_rejects_traversal_symlinks_overwrite_and_invalid_history(self):
+        case = self.fixture
+        target = case.work / "existing.jsonl"
+        target.write_text("preserve", encoding="utf-8")
+        commands = "/export existing.jsonl\n/export ../escape.jsonl\n/history 0\n/history 101\n/history abc\n/exit\n"
+        result = case.invoke("chat", "--no-session", stdin=commands)
+        case.succeeded(result)
+        self.assertEqual(target.read_text(), "preserve")
+        self.assertIn("file-exists", result.stderr)
+        self.assertIn("invalid-path", result.stderr)
+        self.assertEqual(result.stderr.count("invalid-history-count"), 3)
+        self.assertEqual(case.requests, [])
+
     def test_recipe_shell_dialect_follows_custom_patch_and_final_override(self):
         case = self.fixture
         patch = case.work / "bash-shell.json"
