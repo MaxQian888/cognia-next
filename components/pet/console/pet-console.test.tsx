@@ -48,6 +48,10 @@ jest.mock("@/lib/pet/runtime/rename-pet", () => ({
   isValidPetName: (s: string) => s.trim().length > 0,
   MAX_PET_NAME: 24,
 }))
+const toggleDesktopPetWindow = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/pet/commands", () => ({
+  toggleDesktopPetWindow: () => toggleDesktopPetWindow(),
+}))
 jest.mock("./dex-tab", () => ({ DexTab: () => <div data-testid="tab-dex" /> }))
 jest.mock("./shop-tab", () => ({ ShopTab: () => <div data-testid="tab-shop" /> }))
 
@@ -105,6 +109,7 @@ beforeEach(() => {
   slotProps.mockClear()
   hasPluginExtensions = false
   settingsValue = {}
+  toggleDesktopPetWindow.mockClear()
   useActiveLive2dModel.mockReset()
   useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
   useActiveSpritePack.mockReset()
@@ -116,6 +121,18 @@ describe("PetConsole", () => {
     mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
     render(<PetConsole />)
     expect(screen.getByTestId("pet-console-loading")).toBeInTheDocument()
+  })
+
+  it("keeps the same hooks when the profile finishes loading after mount", () => {
+    // The regression pin: the desktop toggle's state hook sat after the
+    // loading return, so the first render with a profile threw "Rendered
+    // more hooks than during the previous render".
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    const { rerender } = render(<PetConsole />)
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    rerender(<PetConsole />)
+    expect(screen.getByTestId("pet-console")).toBeInTheDocument()
+    expect(screen.getByTestId("pet-console-desktop-toggle")).toBeInTheDocument()
   })
 
   it("offers a hatch action for an unhatched egg", async () => {
@@ -290,5 +307,53 @@ describe("hosts where the pet cannot run", () => {
     render(<PetConsole />)
     expect(screen.queryByTestId("pet-console-unavailable")).not.toBeInTheDocument()
     expect(screen.getByTestId("pet-console")).toBeInTheDocument()
+  })
+})
+
+describe("desktop toggle in the console header", () => {
+  const hatched = () =>
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+
+  it("offers to send a hatched pet out to the desktop", async () => {
+    hatched()
+    render(<PetConsole />)
+    const button = screen.getByTestId("pet-console-desktop-toggle")
+    expect(button).toHaveAttribute("aria-pressed", "false")
+    expect(within(button).getAllByText(/Show desktop pet|quickMenu\.showDesktopPet/).length).toBe(2)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(toggleDesktopPetWindow).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers to call the pet back while it is on the desktop", () => {
+    hatched()
+    settingsValue = { petSettings: { enabled: true, desktopPet: { enabled: true } } }
+    render(<PetConsole />)
+    const button = screen.getByTestId("pet-console-desktop-toggle")
+    expect(button).toHaveAttribute("aria-pressed", "true")
+    expect(within(button).getAllByText(/Hide desktop pet|quickMenu\.hideDesktopPet/).length).toBe(2)
+  })
+
+  it("disables itself while a toggle is in flight", async () => {
+    hatched()
+    let resolve!: (v: boolean) => void
+    toggleDesktopPetWindow.mockReturnValueOnce(new Promise<boolean>((r) => (resolve = r)))
+    render(<PetConsole />)
+    const button = screen.getByTestId("pet-console-desktop-toggle")
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(button).toBeDisabled()
+    await act(async () => {
+      resolve(true)
+    })
+    expect(button).not.toBeDisabled()
+  })
+
+  it("is not offered for an unhatched egg", () => {
+    mockUsePet.mockReturnValue(petResult(null))
+    render(<PetConsole />)
+    expect(screen.queryByTestId("pet-console-desktop-toggle")).toBeNull()
   })
 })

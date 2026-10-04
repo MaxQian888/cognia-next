@@ -1,6 +1,6 @@
 ---
 title: 编辑器内核
-description: Monaco 如何挂载、主题化与布局 —— Tauri 的离线 loader、可调整的三栏 shell、文档轨道、经 cognia-active-theme 的主题同步、符号解析器、片段注册表、插件扩展点、大文档降级档位，以及快捷键分发器。
+description: Monaco 如何挂载、主题化与布局 —— Tauri 的离线 loader、可调整的三栏 shell、文档轨道、通过 cognia-active-theme 同步主题、符号解析器、片段注册表、插件扩展点、大文档降级档位，以及快捷键分发器。
 ---
 
 # 编辑器内核
@@ -10,7 +10,7 @@ description: Monaco 如何挂载、主题化与布局 —— Tauri 的离线 loa
 <TLDR>
   `CanvasPanel`（`components/canvas/canvas-panel.tsx:88`）通过惰性 `next/dynamic` 导入挂载 Monaco
   （`:69`，`ssr: false`），并用 `useCanvasMonacoSetup`（`hooks/canvas/use-canvas-monaco-setup.ts:50`）
-  配置它。在 Tauri 下由 `configureMonacoLoader`（`lib/canvas/monaco-loader.ts:25`）将 loader 指向离线
+  配置编辑器。在 Tauri 下由 `configureMonacoLoader`（`lib/canvas/monaco-loader.ts:25`）将 loader 指向离线
   资源。编辑器主题通过 `syncCogniaActiveTheme`（`lib/canvas/themes/cognia-active-theme.ts:128`）把应用
   调色板同步进单一 Monaco 主题。布局是可调整的三栏 `CanvasShell`（`canvas-shell.tsx:41`），持久化到
   `useCanvasLayoutStore`。
@@ -27,8 +27,7 @@ const MonacoEditorView = dynamic(
 )
 ```
 
-渲染路径按文档 id 给编辑器加 key，使其在切换文档时干净地重挂载，并把 `onMount` 回调接好以捕获编辑器句柄、
-交给 setup hook：
+渲染路径按文档 id 给编辑器加 key，使其在切换文档时干净地重挂载，并把 `onMount` 回调接好以捕获编辑器句柄、交给 setup hook：
 
 ```mermaid
 sequenceDiagram
@@ -53,20 +52,13 @@ sequenceDiagram
 
 面板里有两个不显眼的修正：
 
-- **布局抖动** —— 一个去抖 **60 ms** 的 `ResizeObserver` 调用 `editor.layout()`，规避 Monaco 的
-  flex-shrink bug（`canvas-panel.tsx:177-193`）。
-- **首帧主题** —— `resolvedMonacoTheme` 在自定义主题注册前先解析出具体的 `vs` / `vs-dark` id，避免未知
-  id 闪烁（`canvas-panel.tsx:122-126`）。
+- **布局抖动** —— 一个去抖 **60 ms** 的 `ResizeObserver` 调用 `editor.layout()`，规避 Monaco 的 flex-shrink bug（`canvas-panel.tsx:177-193`）。
+- **首帧主题** —— `resolvedMonacoTheme` 在自定义主题注册前先解析出具体的 `vs` / `vs-dark` id，避免未知 id 闪烁（`canvas-panel.tsx:122-126`）。
 
 
 ## 移动端：轻量编辑器
 
-移动端视口（以及 Capacitor 壳）从不挂载 Monaco。所有代码编辑表面统一换用共享的
-**`LightCodeEditor`**（`components/editor/light-code-editor.tsx`）— 一个具备语法高亮、
-行号、撤销历史与查找替换的 CodeMirror 6 编辑器。语法包按语言懒加载
-（`components/editor/load-language-support.ts`）；CM 内核已随 workflow 表达式编辑器进入
-bundle，增量成本只有当前打开语言的语法包。轻量编辑器从不调用 `mountMonacoWorkbench`，
-因此移动端在结构上不存在任何 LSP 功能残留。
+移动端视口（以及 Capacitor 壳）从不挂载 Monaco。所有代码编辑表面统一换用共享的 **`LightCodeEditor`**（`components/editor/light-code-editor.tsx`）— 一个具备语法高亮、行号、撤销历史与查找替换的 CodeMirror 6 编辑器。语法包按语言懒加载（`components/editor/load-language-support.ts`）；CM 内核已随 workflow 表达式编辑器进入 bundle，增量成本只有当前打开语言的语法包。轻量编辑器从不调用 `mountMonacoWorkbench`，因此移动端在结构上不存在任何 LSP 功能残留。
 
 | 表面      | 桌面端                                | 移动端                                       |
 | --------- | ------------------------------------- | -------------------------------------------- |
@@ -74,8 +66,7 @@ bundle，增量成本只有当前打开语言的语法包。轻量编辑器从�
 | Skills    | Monaco + 可调三栏（持久化）           | `LightCodeEditor` + 文件树/校验 Sheet        |
 | Artifacts | Monaco + LSP workbench（编辑模式）    | `LightCodeEditor`（`panelMode === "mobile"`）|
 
-没有 Monaco 引用时，Canvas 工具栏动作退化为全文档语义：AI 动作作用于整个文档、
-格式化动作在文末追加骨架、自动保存读取 store 中的当前文档内容。
+没有 Monaco 引用时，Canvas 工具栏动作退化为全文档语义：AI 动作作用于整个文档、格式化动作在文末追加骨架、自动保存读取 store 中的当前文档内容。
 
 ## 离线 Loader（Tauri）
 
@@ -91,23 +82,15 @@ Tauri 严格的 CSP 禁止从 CDN 加载 Monaco，因此 `configureMonacoLoader`
 
 编辑器有一个规范主题 id `cognia-active`（`cognia-active-theme.ts:27`），每次变化时都从实时应用外观重建：
 
-- `buildCogniaActiveEditorTheme`（`cognia-active-theme.ts:62`）把 27 字段的外观调色板映射为 20 字段的
-  编辑器 `ThemeColors`，通过提亮/压暗推导行高亮与缩进参考线，并将 `tokenColors` 留空以继承基础主题的语法
-  高亮。
-- `syncCogniaActiveTheme`（`cognia-active-theme.ts:128`）将其注册进 `ThemeRegistry`
-  （`theme-registry.ts:203`）并调用 `monaco.editor.defineTheme`。
-- setup hook 在已解析主题或外观变化时重跑同步（`use-canvas-monaco-setup.ts:130-146`），并应用用户的显式
-  偏好，或在偏好为 `"auto"` 时应用 `cognia-active`（`:151-160`）。
+- `buildCogniaActiveEditorTheme`（`cognia-active-theme.ts:62`）把 27 字段的外观调色板映射为 20 字段的编辑器 `ThemeColors`，通过提亮/压暗推导行高亮与缩进参考线，并将 `tokenColors` 留空以继承基础主题的语法高亮。
+- `syncCogniaActiveTheme`（`cognia-active-theme.ts:128`）将其注册进 `ThemeRegistry`（`theme-registry.ts:203`）并调用 `monaco.editor.defineTheme`。
+- setup hook 在已解析主题或外观变化时重跑同步（`use-canvas-monaco-setup.ts:130-146`），并应用用户的显式偏好，或在偏好为 `"auto"` 时应用 `cognia-active`（`:151-160`）。
 
-`BUILTIN_THEMES`（`theme-registry.ts:93`）内置五个主题：`vs-dark`、`vs`、`monokai`、`github-dark`、
-`one-dark-pro`。`toMonacoTheme`（`:256`）把 `ThemeColors` 记录转换为 Monaco 的 `colors` 映射加 token
-规则，`inherit: true`。
+`BUILTIN_THEMES`（`theme-registry.ts:93`）内置五个主题：`vs-dark`、`vs`、`monokai`、`github-dark`、`one-dark-pro`。`toMonacoTheme`（`:256`）把 `ThemeColors` 记录转换为 Monaco 的 `colors` 映射加 token 规则，`inherit: true`。
 
 ## 布局 Shell
 
-`CanvasShell`（`canvas-shell.tsx:41`）选择 `CanvasDesktopShell`（`:48`）或 `CanvasMobileShell`
-（`:138`）。桌面 shell 是按 `layoutVersion` 加 key 的 `ResizablePanelGroup`，因此布局重置会强制重挂载；
-尺寸被夹紧并按比例缩放到总和 100%，再经 `useCanvasLayoutStore.setSizes` 持久化：
+`CanvasShell`（`canvas-shell.tsx:41`）选择 `CanvasDesktopShell`（`:48`）或 `CanvasMobileShell`（`:138`）。桌面 shell 是按 `layoutVersion` 加 key 的 `ResizablePanelGroup`，因此布局重置会强制重挂载；尺寸被夹紧并按比例缩放到总和 100%，再经 `useCanvasLayoutStore.setSizes` 持久化：
 
 | 面板 | 最小 | 最大 | 内容 |
 | --- | --- | --- | --- |
@@ -115,58 +98,35 @@ Tauri 严格的 CSP 禁止从 CDN 加载 Monaco，因此 `configureMonacoLoader`
 | 中（`canvas-center`） | 46 | — | `CanvasWorkspace`（`:110`） |
 | 右（`canvas-right`） | 16 | 28 | `CanvasSidePanels`（`:130`） |
 
-夹紧常量从该文件导出（`CANVAS_SHELL_LEFT_MIN = 12` … `CANVAS_SHELL_RIGHT_MAX = 28`，
-`canvas-shell.tsx:34-39`）。移动 shell 把轨道和侧栏渲染在左右 `Sheet` 里，编辑器全宽。
+夹紧常量从该文件导出（`CANVAS_SHELL_LEFT_MIN = 12` … `CANVAS_SHELL_RIGHT_MAX = 28`，`canvas-shell.tsx:34-39`）。移动 shell 把轨道和侧栏渲染在左右 `Sheet` 里，编辑器全宽。
 
 ### 布局快捷键
 
-`useCanvasLayoutShortcuts`（`use-canvas-layout-shortcuts.ts:17`）绑定 `Cmd/Ctrl+B`（切换左轨道）与
-`Cmd/Ctrl+J`（切换右轨道）—— 但**当焦点位于 `.monaco-editor` 内时直接放弃**（`:31-37`），让 Monaco
-自带的 `Cmd+B` / `Cmd+J` 继续生效。
+`useCanvasLayoutShortcuts`（`use-canvas-layout-shortcuts.ts:17`）绑定 `Cmd/Ctrl+B`（切换左轨道）与 `Cmd/Ctrl+J`（切换右轨道）—— 但**当焦点位于 `.monaco-editor` 内时直接放弃**（`:31-37`），让 Monaco 自带的 `Cmd+B` / `Cmd+J` 继续生效。
 
 ## 文档轨道
 
-`CanvasDocumentRail`（`canvas-document-rail.tsx:104`）直接读 store，并通过 `groupByTime`（`:65`）按时间
-分组为 置顶 / 今天 / 昨天 / 本周 / 更早（24 小时 = `86400000` ms，`:78`）。置顶由
-`useCanvasLayoutStore.pinnedDocIds` 支撑。逐行右键菜单覆盖 重命名 / 复制 / 导出（Blob → `${title}.md`，
-`:170-180`）/ 置顶 / 删除。
+`CanvasDocumentRail`（`canvas-document-rail.tsx:104`）直接读 store，并通过 `groupByTime`（`:65`）按时间分组为 置顶 / 今天 / 昨天 / 本周 / 更早（24 小时 = `86400000` ms，`:78`）。置顶由 `useCanvasLayoutStore.pinnedDocIds` 支撑。逐行右键菜单覆盖 重命名 / 复制 / 导出（Blob → `${title}.md`，`:170-180`）/ 置顶 / 删除。
 
-列表里刻意省略了 `AnimatePresence`（`:308-319`），因为其退出动画破坏了 jsdom 的搜索过滤测试 —— 只用
-`STAGGER_CONTAINER` 入场动效。
+列表里刻意省略了 `AnimatePresence`（`:308-319`），因为其退出动画破坏了 jsdom 的搜索过滤测试 —— 只用 `STAGGER_CONTAINER` 入场动效。
 
 ## 符号与片段
 
-这些注册表在 `onMount` 里挂载（`use-canvas-monaco-setup.ts:76-99`，每次调用都用 try/catch →
-`loggers.canvas.warn` 包裹）：
+这些注册表在 `onMount` 里挂载（`use-canvas-monaco-setup.ts:76-99`，每次调用都用 try/catch → `loggers.canvas.warn` 包裹）：
 
-- **符号** —— `SymbolParser`（`symbol-parser.ts:45`）是面向 JS/TS/Python 的正则驱动解析器。
-  `parseSymbols`（`:52`）通过括号计数计算行/块区间（`findBlockEnd`，`:149`，失败时上限为
-  `startLine + 20`），递归子符号，并暴露查找（`findSymbolAtLine` `:190`、`getSymbolBreadcrumb` `:246`）。
+- **符号** —— `SymbolParser`（`symbol-parser.ts:45`）是面向 JS/TS/Python 的正则驱动解析器。`parseSymbols`（`:52`）通过括号计数计算行/块区间（`findBlockEnd`，`:149`，失败时上限为 `startLine + 20`），递归子符号，并暴露查找（`findSymbolAtLine` `:190`、`getSymbolBreadcrumb` `:246`）。
 - **片段** —— `SnippetProvider`（`snippet-registry.ts:252`）按语言从 `SNIPPET_REGISTRY`（`:244`）合并内置
-  + 自定义片段；`applySnippet`（`:299`）剥离 `${n:default}` 占位符。
-插件走的是**主**插件系统，而不是 canvas 本地的那一套：`PluginExtensionSlot point="canvas.toolbar"` /
-`"canvas.sidebar"`（在 `lib/plugin/contracts/plugin-points.ts:465` 声明，挂载于 `canvas-panel.tsx`），
-外加 `lib/plugin/api/canvas-api.ts` 的文档 / 选区 / 评论面。`lib/canvas/plugins/` 里曾另有一套
-canvas 本地的 `CanvasPluginManager`，自带 `CanvasPlugin` 形状与补全、诊断、hover 钩子——它没有任何注册
-路径、没有任何消费者，已被删除，而不是被记成"第二套插件模型"。
+  + 自定义片段；`applySnippet`（`:299`）剥离 `${n:default}` 占位符。插件走的是**主**插件系统，而不是 canvas 本地的那一套：`PluginExtensionSlot point="canvas.toolbar"` /`"canvas.sidebar"`（在 `lib/plugin/contracts/plugin-points.ts:465` 声明，挂载于 `canvas-panel.tsx`），外加 `lib/plugin/api/canvas-api.ts` 的文档 / 选区 / 评论面。`lib/canvas/plugins/` 里曾另有一套 canvas 本地的 `CanvasPluginManager`，自带 `CanvasPlugin` 形状与补全、诊断、hover 钩子——它没有任何注册路径、没有任何消费者，已被删除，而不是被记成"第二套插件模型"。
 
 ## 大文档
 
-不存在 JS 侧分块：Monaco 自己已经虚拟化渲染，再套一层分块 store 只会和它的 model 打架。
-`lib/canvas/large-file-optimizer.ts`、`stores/canvas/chunked-document-store.ts` 与
-`hooks/canvas/use-chunk-loader.ts` 实现过一套，零消费者，已删除。
+不存在 JS 侧分块：Monaco 自己已经虚拟化渲染，再套一层分块 store 只会和它的 model 打架。`lib/canvas/large-file-optimizer.ts`、`stores/canvas/chunked-document-store.ts` 与 `hooks/canvas/use-chunk-loader.ts` 实现过一套，零消费者，已删除。
 
-留下来的是降级档位：`getCanvasPerformanceProfile`（`utils.ts:151`）在 `standard` / `large` /
-`very-large` 之间选择，逐模式设置符号解析去抖（500 / 900 / 1500 ms）与特性开关
-（`CANVAS_LARGE_DOCUMENT_THRESHOLDS`，`utils.ts:133`）。
+留下来的是降级档位：`getCanvasPerformanceProfile`（`utils.ts:151`）在 `standard` / `large` /`very-large` 之间选择，逐模式设置符号解析去抖（500 / 900 / 1500 ms）与特性开关（`CANVAS_LARGE_DOCUMENT_THRESHOLDS`，`utils.ts:133`）。
 
 ## 操作快捷键
 
-`useCanvasKeyboardShortcuts`（`use-canvas-keyboard-shortcuts.ts:17`）是快捷键 store 的运行时消费者。在
-Cmd/Ctrl 按下时，它通过 `useKeybindingStore.getActionByKeybinding`（`:22`）解析绑定的操作，并分发一个
-`canvas-action` `CustomEvent`（`:41-50`），由 `CanvasPanel` 监听（`canvas-panel.tsx:141-149`）。回退：
-`Ctrl+K` → 内联命令，以及 `DEFAULT_KEY_ACTION_MAP[e.key]`（`constants.ts:83`）。绑定在
-`KeybindingSettings` 中编辑（见 [执行与评论](./execution-comments#快捷键)）。
+`useCanvasKeyboardShortcuts`（`use-canvas-keyboard-shortcuts.ts:17`）是快捷键 store 的运行时消费者。在 Cmd/Ctrl 按下时，它通过 `useKeybindingStore.getActionByKeybinding`（`:22`）解析绑定的操作，并分发一个 `canvas-action` `CustomEvent`（`:41-50`），由 `CanvasPanel` 监听（`canvas-panel.tsx:141-149`）。回退：`Ctrl+K` → 内联命令，以及 `DEFAULT_KEY_ACTION_MAP[e.key]`（`constants.ts:83`）。绑定在 `KeybindingSettings` 中编辑（见 [执行与评论](./execution-comments#快捷键)）。
 
 ## 下一步
 

@@ -44,9 +44,11 @@ const setFocusMock = jest.fn().mockResolvedValue(undefined)
 const innerSizeMock = jest.fn().mockResolvedValue({ width: 200, height: 240 })
 const setSizeMock = jest.fn().mockResolvedValue(undefined)
 const setResizableMock = jest.fn().mockResolvedValue(undefined)
+const isVisibleMock = jest.fn().mockResolvedValue(true)
 jest.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     show: showMock,
+    isVisible: isVisibleMock,
     setFocus: setFocusMock,
     innerSize: innerSizeMock,
     setSize: setSizeMock,
@@ -90,7 +92,10 @@ beforeEach(() => {
   setSizeMock.mockClear()
   setResizableMock.mockClear()
   revealPetWindowMock.mockClear()
+  revealPetWindowMock.mockResolvedValue(true)
   revealIslandWindowMock.mockClear()
+  isVisibleMock.mockClear()
+  isVisibleMock.mockResolvedValue(true)
   rafCallbacks.length = 0
   rafSpy = jest.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
     rafCallbacks.push(cb)
@@ -112,18 +117,21 @@ describe("schedulePetWindowReveal", () => {
     expect(cancelRafSpy).not.toHaveBeenCalled()
   })
 
-  it("shows the window only after two rAFs, then forces a resize recomposite", async () => {
+  it("reveals through the native owner only after two rAFs, then forces a resize recomposite", async () => {
     mockIsTauri = true
     schedulePetWindowReveal()
 
     // Not shown until BOTH rAFs (layout + post-commit) have run.
-    expect(showMock).not.toHaveBeenCalled()
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
     flushRaf() // rAF #1 only schedules rAF #2
-    expect(showMock).not.toHaveBeenCalled()
-    flushRaf() // rAF #2 runs the reveal (dynamic import + show)
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
+    flushRaf() // rAF #2 runs the reveal (dynamic import + native reveal)
     await flushAsync()
 
-    expect(showMock).toHaveBeenCalledTimes(1)
+    // Off macOS the pet windows still go through the generation-guarded
+    // native reveal, never a raw `show()` that a pending close cannot cancel.
+    expect(revealPetWindowMock).toHaveBeenCalledWith(false, "pet")
+    expect(showMock).not.toHaveBeenCalled()
     // No focus by default — the sprite overlay must never steal focus.
     expect(setFocusMock).not.toHaveBeenCalled()
     // Windows quirk workaround: +1px nudge, restore, re-pin resizable(false).
@@ -222,8 +230,47 @@ describe("schedulePetWindowReveal", () => {
     expect(showMock).toHaveBeenCalled()
   })
 
-  it("focuses after showing when focus is requested (popup blur-to-close)", async () => {
+  it("asks the native owner to focus the popup off macOS (blur-to-close)", async () => {
     mockIsTauri = true
+    mockWindowRole = "popup"
+    schedulePetWindowReveal({ focus: true })
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    expect(revealPetWindowMock).toHaveBeenCalledWith(true, "pet-popup")
+    expect(showMock).not.toHaveBeenCalled()
+    expect(setSizeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("skips the nudge when the native owner refused the reveal (a close won)", async () => {
+    mockIsTauri = true
+    // The generation check suppressed the show: the window stayed hidden.
+    isVisibleMock.mockResolvedValue(false)
+    schedulePetWindowReveal()
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    expect(revealPetWindowMock).toHaveBeenCalledTimes(1)
+    expect(setResizableMock).not.toHaveBeenCalled()
+    expect(setSizeMock).not.toHaveBeenCalled()
+  })
+
+  it("skips the nudge when the native reveal command failed", async () => {
+    mockIsTauri = true
+    revealPetWindowMock.mockResolvedValue(false)
+    schedulePetWindowReveal()
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+    expect(isVisibleMock).not.toHaveBeenCalled()
+    expect(setSizeMock).not.toHaveBeenCalled()
+  })
+
+  it("focuses after showing for non-pet windows on the generic path", async () => {
+    mockIsTauri = true
+    mockWindowRole = "tray-panel"
     schedulePetWindowReveal({ focus: true })
     flushRaf()
     flushRaf()
@@ -245,7 +292,7 @@ describe("schedulePetWindowReveal", () => {
     flushRaf()
     flushRaf()
     await flushAsync()
-    expect(showMock).not.toHaveBeenCalled()
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
   })
 
   it("cancel while the dynamic import is in flight aborts before showing", async () => {
@@ -255,7 +302,7 @@ describe("schedulePetWindowReveal", () => {
     flushRaf() // reveal kicked off; imports are pending microtasks
     cancel()
     await flushAsync()
-    expect(showMock).not.toHaveBeenCalled()
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
   })
 
   it("cancel between show and the nudge skips the resize dance", async () => {
@@ -269,13 +316,14 @@ describe("schedulePetWindowReveal", () => {
     flushRaf()
     flushRaf()
     await flushAsync()
-    expect(showMock).toHaveBeenCalledTimes(1)
+    expect(revealPetWindowMock).toHaveBeenCalledTimes(1)
     expect(setResizableMock).not.toHaveBeenCalled()
     expect(setSizeMock).not.toHaveBeenCalled()
   })
 
   it("swallows window-op failures (best-effort reveal)", async () => {
     mockIsTauri = true
+    mockWindowRole = "tray-panel"
     showMock.mockRejectedValueOnce(new Error("denied"))
     schedulePetWindowReveal()
     flushRaf()

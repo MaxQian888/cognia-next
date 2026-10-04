@@ -268,6 +268,32 @@ describe("applyPetEvent", () => {
       expect(res.coinsEarned).toBe(9)
     })
 
+    it("mints an explicit (budgeted) grant exactly, never streak-multiplied", () => {
+      // A 6-day streak is ×1.5 on the table, but a plugin was granted 9 coins
+      // from its ledger and must not mint 13.
+      const p = profile({ streak: { days: 6, lastDay: YESTERDAY_KEY } })
+      const res = applyPetEvent(
+        p,
+        { source: "plugin", kind: "workflowRun", meta: { coins: 9 }, at: DAY },
+        DAY
+      )
+      expect(res.coinsEarned).toBe(9)
+    })
+
+    it("ignores an item named on an interaction it is not for", () => {
+      const base = {
+        needs: { energy: 30, mood: 50, bond: 50, lastTickAt: new Date(DAY).toISOString() },
+      }
+      // royal-feast is food: on a `petted` event it is not applied at all.
+      const res = applyPetEvent(
+        profile(base),
+        { source: "plugin", kind: "petted", meta: { itemId: "royal-feast" }, at: DAY },
+        DAY
+      )
+      const plain = applyPetEvent(profile(base), { source: "plugin", kind: "petted", at: DAY }, DAY)
+      expect(res.profile.needs).toEqual(plain.profile.needs)
+    })
+
     it("applies an item's differentiated restore instead of the base effect", () => {
       const base = {
         needs: { energy: 30, mood: 50, bond: 50, lastTickAt: new Date(DAY).toISOString() },

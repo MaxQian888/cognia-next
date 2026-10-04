@@ -30,6 +30,21 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => ({ settings: settingsValue, save }) },
 }))
 
+// The cross-window writer, reduced to its contract: apply the updater to the
+// latest persisted record (this suite's `settingsValue` stands in for Dexie)
+// and write it through `save` unless the updater changed nothing.
+jest.mock("@/lib/pet/settings-sync", () => ({
+  updatePetSettings: async (updater: (latest: unknown) => unknown) => {
+    const { DEFAULT_PET_SETTINGS } = jest.requireActual("@/types/pet")
+    const latest =
+      (settingsValue as { petSettings?: unknown } | null)?.petSettings ?? DEFAULT_PET_SETTINGS
+    const next = updater(latest)
+    if (next === latest) return latest
+    await save({ petSettings: next })
+    return next
+  },
+}))
+
 import {
   openDesktopPetWindow,
   PET_INTERACTION_COMMAND_IDS,

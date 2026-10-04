@@ -266,4 +266,89 @@ describe("usePetLocomotion", () => {
     await act(async () => h.advance(4000))
     expect((h.io.getSurfaces as jest.Mock).mock.calls.length).toBe(calls)
   })
+
+  it("settleAt adopts a parked spot: the next wander drops from there, never snapping back", async () => {
+    const h = makeIo()
+    const onSettle = jest.fn()
+    const onLand = jest.fn()
+    const view = await mount(h, { onSettle, onLand })
+    await act(async () => h.flushRaf())
+    await act(async () => h.flushRaf())
+
+    // The user gently dragged the pet to x=1200, mid-screen (y=300).
+    await act(async () => {
+      view.result.current.settleAt(1200, 300)
+    })
+    // Work area re-read (the drag may have crossed monitors).
+    expect(h.io.getWorkArea).toHaveBeenCalledTimes(2)
+    await act(async () => h.flushRaf()) // draws a new rest interval
+    await act(async () => h.flushRaf())
+    await act(async () => h.advance(70_000))
+    await act(async () => h.flushRaf())
+    // It falls straight down from the parked spot, not from the old x=500.
+    expect(view.result.current.locomotion.mode).toBe("falling")
+    let frames = 0
+    while (onSettle.mock.calls.length === 0 && frames < 10_000) {
+      await act(async () => h.flushRaf(16))
+      frames++
+    }
+    const [x, y] = onSettle.mock.calls[0] as [number, number]
+    expect(x).toBe(1200)
+    expect(y).toBe(GROUND)
+    expect(onLand).toHaveBeenCalledTimes(1)
+    // No position in the stream ever went back near the pre-drag x=500.
+    const xs = (h.io.setPosition as jest.Mock).mock.calls.map((c) => c[0] as number)
+    expect(xs.every((v) => v === 1200)).toBe(true)
+  })
+
+  it("settleAt with wandering off just records the spot and moves nothing", async () => {
+    const h = makeIo()
+    const view = await mount(h, { wander: { ...WANDER_ON, enabled: false } })
+    await act(async () => {
+      view.result.current.settleAt(800, 200)
+    })
+    await act(async () => {})
+    await act(async () => h.flushRaf())
+    expect(h.io.setPosition).not.toHaveBeenCalled()
+    expect(h.rafCount()).toBe(0)
+    expect(h.timerCount()).toBe(0)
+  })
+
+  it("re-adopts the native position after a size change moved the window", async () => {
+    const h = makeIo()
+    const view = await mount(h)
+    await act(async () => h.flushRaf())
+    await act(async () => h.flushRaf())
+    // Rust resized around the bottom-center: the top-left moved.
+    ;(h.io.getPosition as jest.Mock).mockResolvedValue({ x: 468, y: GROUND - 64 })
+    view.rerender(makeArgs(h.io, { petSize: 192 }))
+    await act(async () => {})
+    expect(h.io.getPosition).toHaveBeenCalledTimes(2)
+    expect(h.io.getWorkArea).toHaveBeenCalledTimes(2)
+    // The resized window already rests on the new ground line (2000x1000 area,
+    // 288x352 window → 648), so nothing is sent back to the stale spot.
+    await act(async () => h.flushRaf())
+    await act(async () => h.flushRaf())
+    expect(h.io.setPosition).not.toHaveBeenCalled()
+  })
+
+  it("does not re-read the position on the first render", async () => {
+    const h = makeIo()
+    const view = await mount(h)
+    view.rerender(makeArgs(h.io))
+    await act(async () => {})
+    expect(h.io.getPosition).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-reads the work area when wandering resumes after a pause", async () => {
+    const h = makeIo()
+    const view = await mount(h)
+    expect(h.io.getWorkArea).toHaveBeenCalledTimes(1)
+    view.rerender(makeArgs(h.io, { paused: true }))
+    await act(async () => {})
+    view.rerender(makeArgs(h.io, { paused: false }))
+    await act(async () => {})
+    // The window was hidden / the display may have changed meanwhile.
+    expect(h.io.getWorkArea).toHaveBeenCalledTimes(2)
+  })
 })

@@ -7,14 +7,13 @@ description: 把 Claude Pro/Max 订阅或 Console 账户接入 sidecar——OAut
 
 > 架构细节见 [ADR-0010](../adr/0010-claude-subscription-oauth)。
 
-通过粘贴回授权码的 PKCE 流程登录 Claude Pro/Max 或 Console；凭据由 OS keyring 保管，sidecar 通过 `CLAUDE_CODE_OAUTH_TOKEN` 环境变量自动获得 Bearer 鉴权。每次真实 `/v1/messages` 响应都会被 `fetch-interceptor.mjs` 拦截，解析 `anthropic-ratelimit-unified-*` 头并写入 Dexie，5h / 7d 进度条因此免费可见。
+用户通过粘贴授权码的 PKCE 流程登录 Claude Pro/Max 或 Console。OS keyring 保存凭据，sidecar 通过 `CLAUDE_CODE_OAUTH_TOKEN` 环境变量自动获得 Bearer 鉴权。`fetch-interceptor.mjs` 拦截每次真实的 `/v1/messages` 响应，解析 `anthropic-ratelimit-unified-*` 响应头，并写入 Dexie，供 5h / 7d 进度条显示，无需额外查询费用。
 
 订阅 OAuth 子系统让 Cognia 与官方 `claude login` CLI 平行存在，互不污染：
 
 - 我们 **不写** `~/.claude/.credentials.json`——那个文件归 Claude Code CLI 所有。
 - 我们 **只读** `anthropic-ratelimit-*` 响应头——主动探针默认关闭。
-- sidecar 与 OAuth bearer **强绑定**——当 bearer 存在时，`ANTHROPIC_API_KEY` 被显式清除，
-  避免 SDK 端两种鉴权混合带来的未定义行为。
+- sidecar 与 OAuth bearer **强绑定**——当 bearer 存在时，`ANTHROPIC_API_KEY` 被显式清除，避免 SDK 端两种鉴权混合带来的未定义行为。
 
 ## 代码位置
 
@@ -102,8 +101,7 @@ flowchart TB
 
 ## OAuth 流程
 
-Cognia-next 走的是 **粘贴回授权码（manual code）** 变体。我们没有注册回环 redirect，
-因此 Anthropic 的回调页会把授权码直接显示给用户，由用户复制回 Login 对话框。
+Cognia-next 走的是 **粘贴回授权码（manual code）** 变体。我们没有注册回环 redirect，因此 Anthropic 的回调页会把授权码直接显示给用户，由用户复制回 Login 对话框。
 
 <Steps>
 <Step>
@@ -148,9 +146,7 @@ SDK 自动加 Bearer 头 + `oauth-2025-04-20` beta。
 - 主动探针返回 `reason: "auth"`（401/403）——`scheduler.ts` 自动重试一次；
 - 用户点击 Account tab 的"刷新令牌"按钮。
 
-服务端 **可能在每次刷新时轮换 refresh_token**，因此 `buildCredential` 总是优先用响应中的
-`refresh_token`，仅在缺失时回退到入参——任何丢弃响应中新 refresh_token 的实现都会在数天内
-被服务端踢出登录态。
+服务端 **可能在每次刷新时轮换 refresh_token**，因此 `buildCredential` 总是优先用响应中的 `refresh_token`，仅在缺失时回退到入参——任何丢弃响应中新 refresh_token 的实现都会在数天内被服务端踢出登录态。
 
 ### 必带的 beta header
 
@@ -171,10 +167,7 @@ export const OAUTH_REQUEST_HEADERS = {
 } as const
 ```
 
-少了 `oauth-2025-04-20` 服务端直接返回 _"OAuth authentication is currently not supported"_；
-少了 `claude-code-20250219` + `x-app: cli`，Sonnet/Opus 4 系列会对 OAuth 调用方 429。`user-agent`
-被设在 SDK client config 上而不是这里，因为 Node 的 undici fetch 在某些路径里不允许 `customFetch`
-覆盖它。
+少了 `oauth-2025-04-20` 服务端直接返回 _"OAuth authentication is currently not supported"_；少了 `claude-code-20250219` + `x-app: cli`，Sonnet/Opus 4 系列会对 OAuth 调用方 429。`user-agent` 被设在 SDK client config 上而不是这里，因为 Node 的 undici fetch 在某些路径里不允许 `customFetch` 覆盖它。
 
 ## 凭据存储
 
@@ -203,13 +196,11 @@ export const OAUTH_REQUEST_HEADERS = {
   }}
 />
 
-**Tauri-only**：keyring 在 Web 模式不可用，Overview 会渲染一条解释横幅。`isCredentialFresh`
-带 60s 安全余量，所以 Refresh 在过期前一分钟启动而不是擦边。
+**Tauri-only**：keyring 在 Web 模式不可用，Overview 会渲染一条解释横幅。`isCredentialFresh` 带 60s 安全余量，所以 Refresh 在过期前一分钟启动而不是擦边。
 
 ## 用量采集——零额外开销
 
-`anthropic-ratelimit-unified-*` 头随每个真实 `/v1/messages` 响应返回。我们采集它们的方式
-是**被动的**——不发额外请求、不消耗额外 token：
+`anthropic-ratelimit-unified-*` 头随每个真实 `/v1/messages` 响应返回。我们采集它们的方式是**被动的**——不发额外请求、不消耗额外 token：
 
 <Steps>
 <Step>
@@ -240,8 +231,7 @@ Rust `claude/sidecar.rs` 的 stdout pump 把这行转发为 Tauri 事件 `claude
 
 ### 主动探针（opt-in）
 
-`Settings → Subscription → Settings: 启用主动探针` 后，`scheduler.ts` 启动一个可见 / 隐藏
-双速率循环：
+`Settings → Subscription → Settings: 启用主动探针` 后，`scheduler.ts` 启动一个可见 / 隐藏双速率循环：
 
 | 状态 | 默认间隔 | 用途                                 |
 | ---- | -------- | ------------------------------------ |
@@ -249,16 +239,13 @@ Rust `claude/sidecar.rs` 的 stdout pump 把这行转发为 Tauri 事件 `claude
 | 隐藏 | 30 分钟  | 后台 tab，避免被遗忘的浏览器耗光配额 |
 | 下限 | 60 秒    | UI 不允许把任一速率设小于此值        |
 
-每次探针发一个 `max_tokens: 1`、单字符的请求到 `claude-haiku-4-5-20251001`——是仍能
-返回完整 unified-\* 头的最便宜模型。**每次探针消耗约 10 输入 + 1 输出 token**，没有官方
-免费配额；UI 在勾选时会展示这条提示。`ProbeOutcome` 区分 5 种失败原因：
+每次探针发一个 `max_tokens: 1`、单字符的请求到 `claude-haiku-4-5-20251001`——是仍能返回完整 unified-\* 头的最便宜模型。**每次探针消耗约 10 输入 + 1 输出 token**，没有官方免费配额；UI 在勾选时会展示这条提示。`ProbeOutcome` 区分 5 种失败原因：
 
 ```ts title="lib/anthropic-subscription/usage-probe.ts"
 reason: "auth" | "rate-limited" | "no-headers" | "transport" | "http"
 ```
 
-`scheduler.ts` 在 `"auth"` 时自动跑一次 `refreshAccessToken` + `saveCredential` + sidecar
-同步，然后重试一次；其他错误进入退避。
+`scheduler.ts` 在 `"auth"` 时自动跑一次 `refreshAccessToken` + `saveCredential` + sidecar 同步，然后重试一次；其他错误进入退避。
 
 ## 数据库表
 
@@ -276,13 +263,11 @@ this.version(20).stores({
 - `source` —— `"passive" | "probe"`，Usage tab 用它在图上着色。
 - `[source+fetchedAt]` —— 复合索引，用于"过去 24h 的所有 passive 样本"这类查询。
 
-`UsageSnapshot` 同时保留 `rawHeaders`（原始 `anthropic-ratelimit-*` map），方便排查
-"为什么进度条突然回退" 这类问题。
+`UsageSnapshot` 同时保留 `rawHeaders`（原始 `anthropic-ratelimit-*` map），方便排查 "为什么进度条突然回退" 这类问题。
 
 ## 设置 UI 四个 tab
 
-`Settings → Subscription`（`?section=subscription&subTab=…`）由 `SubscriptionSection`
-托管，使用相同的 URL 同步模式。
+`Settings → Subscription`（`?section=subscription&subTab=…`）由 `SubscriptionSection` 托管，使用相同的 URL 同步模式。
 
 <Cards>
   <Card title="Overview" description="状态徽章、5h/7d 进度条、reset 倒计时；未登录时是 CTA。">
@@ -299,9 +284,7 @@ this.version(20).stores({
   </Card>
 </Cards>
 
-`SubscriptionLoginDialog` 是登录入口——它知道两种模式各自的 URL / scope 区别，但
-**不持久化 OAuth flow state**：`OAuthFlowState`（`state` + `codeVerifier` + `mode` + `redirectUri`）
-仅活在对话框组件 state 中，对话框关闭即丢弃，符合 PKCE 的 single-use 假设。
+`SubscriptionLoginDialog` 是登录入口——它知道两种模式各自的 URL / scope 区别，但**不持久化 OAuth flow state**：`OAuthFlowState`（`state` + `codeVerifier` + `mode` + `redirectUri`）仅活在对话框组件 state 中，对话框关闭即丢弃，符合 PKCE 的 single-use 假设。
 
 ## Sidecar 鉴权优先级
 
@@ -317,8 +300,7 @@ if let Some(token) = api_key_state.get_oauth_bearer().await {
 }
 ```
 
-也就是说：**OAuth bearer 存在则强制走 OAuth**——同时把 API key 显式抹掉。`ANTHROPIC_BASE_URL`
-与鉴权模式正交，无论哪种模式都会被转发（用户通过 CCSwitch 接入第三方 proxy 时需要）。
+也就是说：**OAuth bearer 存在则强制走 OAuth**——同时把 API key 显式抹掉。`ANTHROPIC_BASE_URL` 与鉴权模式正交，无论哪种模式都会被转发（用户通过 CCSwitch 接入第三方 proxy 时需要）。
 
 ## 关联子系统
 
@@ -342,18 +324,12 @@ if let Some(token) = api_key_state.get_oauth_bearer().await {
 
 ## 关联 ADR
 
-- [ADR-0010 — Claude Subscription OAuth](../adr/0010-claude-subscription-oauth) ——
-  完整设计原由：为什么用 manual-code、为什么不写 `~/.claude/.credentials.json`、为什么 client_id
-  可以公开。
+- [ADR-0010 — Claude Subscription OAuth](../adr/0010-claude-subscription-oauth) ——完整设计原由：为什么用 manual-code、为什么不写 `~/.claude/.credentials.json`、为什么 client_id 可以公开。
 
 ## 已知限制
 
-- **单账户**：`ACCOUNT` 常量硬编码为 `"default"`，多账户切换还未实现。多账户落地时
-  需要把 service 串升级到 `com.cognia.claude-subscription/v2`，并保留 v1 读路径作为迁移源。
-- **Cognia-next 不是 Anthropic 认证的第三方 OAuth 客户端**——`client_id` 是公开知识、
-  从 Claude Code CLI 抽取出来，如果 Anthropic 修改流程我们必须同步更新 constants.ts。
+- **单账户**：`ACCOUNT` 常量硬编码为 `"default"`，多账户切换还未实现。多账户落地时需要把 service 串升级到 `com.cognia.claude-subscription/v2`，并保留 v1 读路径作为迁移源。
+- **Cognia-next 不是 Anthropic 认证的第三方 OAuth 客户端**——`client_id` 是公开知识、从 Claude Code CLI 抽取出来，如果 Anthropic 修改流程我们必须同步更新 constants.ts。
 - **Web 模式无可用凭据**——浏览器 `keyring` 不存在；Subscription 页面整页降级为说明横幅。
-- **`/v1/oauth/token` 期望 form-encoded**——所有 fetch 都必须用 `URLSearchParams`，JSON
-  body 会被服务端拒绝。
-- **probe 没有官方免费配额**——UI 必须明确告知用户每次探针耗费 token；如未来 Anthropic
-  开放免费 ping 端点，应优先迁移过去。
+- **`/v1/oauth/token` 期望 form-encoded**——所有 fetch 都必须用 `URLSearchParams`，JSON body 会被服务端拒绝。
+- **probe 没有官方免费配额**——UI 必须明确告知用户每次探针耗费 token；如未来 Anthropic 开放免费 ping 端点，应优先迁移过去。

@@ -20,6 +20,7 @@ import { closePetWindow, isPetWindowOpen, openPetWindow } from "@/lib/tauri/pet-
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
+import { updatePetSettings } from "@/lib/pet/settings-sync"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 
 export { PET_INTERACTION_COMMAND_IDS, PET_WINDOW_COMMAND_ID, type PetInteractionCommandId }
@@ -38,13 +39,15 @@ export { PET_INTERACTION_COMMAND_IDS, PET_WINDOW_COMMAND_ID, type PetInteraction
  */
 export async function toggleDesktopPetWindow(): Promise<boolean> {
   if (!isTauri()) return false
-  const store = useSettingsStore.getState()
-  const pet = store.settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const desktop = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
 
   if (await isPetWindowOpen()) {
     await closePetWindow()
-    await store.save({ petSettings: { ...pet, desktopPet: { ...desktop, enabled: false } } })
+    // Against the persisted record (`updatePetSettings`), never a snapshot:
+    // the overlay writes its resting position from its own window.
+    await updatePetSettings((latest) => ({
+      ...latest,
+      desktopPet: { ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: false },
+    }))
     return false
   }
   return openDesktopPetWindow()
@@ -72,10 +75,12 @@ export async function toggleDesktopPetWindow(): Promise<boolean> {
  *    (it opens the overlay when both are set and no window exists) race this
  *    function into a second open.
  * 2. Open the window.
- * 3. Re-read the store and persist both flags. `saveSettings` replaces
- *    `petSettings` whole, and the native `pet://state-changed` echo that
- *    step 2 triggers saves from the store too, so spreading the snapshot
- *    taken at the top could switch the pet straight back off.
+ * 3. Persist both flags against the persisted record. `saveSettings`
+ *    replaces `petSettings` whole, and the native `pet://state-changed` echo
+ *    that step 2 triggers writes too, so spreading the snapshot taken at the
+ *    top could switch the pet straight back off. `updatePetSettings` re-reads
+ *    under a cross-window lock, which also keeps the overlay's own position
+ *    write from being lost.
  */
 export async function openDesktopPetWindow(): Promise<boolean> {
   if (!isTauri()) return false
@@ -83,7 +88,7 @@ export async function openDesktopPetWindow(): Promise<boolean> {
   const desktop = initial.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
 
   if (!initial.enabled) {
-    await useSettingsStore.getState().save({ petSettings: { ...initial, enabled: true } })
+    await updatePetSettings((latest) => (latest.enabled ? latest : { ...latest, enabled: true }))
   }
 
   if (!(await isPetWindowOpen())) {
@@ -98,15 +103,11 @@ export async function openDesktopPetWindow(): Promise<boolean> {
     if (!opened) return false
   }
 
-  const store = useSettingsStore.getState()
-  const latest = store.settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  await store.save({
-    petSettings: {
-      ...latest,
-      enabled: true,
-      desktopPet: { ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: true },
-    },
-  })
+  await updatePetSettings((latest) => ({
+    ...latest,
+    enabled: true,
+    desktopPet: { ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: true },
+  }))
   return true
 }
 

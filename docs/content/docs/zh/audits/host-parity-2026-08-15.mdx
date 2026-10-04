@@ -1,21 +1,21 @@
 ---
 title: 主机能力等价审计 — 2026-08-15
-description: 云端（headless）与桌面之间每一处能力差距的证据化清单，并按「物理不可能」与「只是没迁移」分类。
+description: 云端（headless）与桌面端能力差距的证据清单，按物理限制和待迁移功能分类。
 ---
 
 # 主机能力等价审计 — 2026-08-15
 
 ## 为什么有这份审计
 
-目标是让云端（`headless`）主机的能力与桌面近乎等价。但没人能回答"还差多远"——宿主守卫、单边 dispatch arm、按主机硬编码的 UI 从未被清点过，所以定范围只能靠猜。
+审计目标是判断云端（`headless`）主机与桌面端的能力还有多少差距。此前，宿主守卫、仅在一端实现的 dispatch arm，以及按主机类型硬编码的 UI 尚未经过系统清点，因此无法准确确定迁移范围。
 
-这份审计就是那个清点。数据由 `pnpm audit:host-parity:report` 机械产出；每个子系统的判断由人工记录在 `scripts/gates/host-parity-annotations.json`。两者都由 `pnpm audit:host-parity` 棘轮化，清单无法悄悄变长。
+本审计对这些差距进行系统清点。`pnpm audit:host-parity:report` 自动生成数据，各子系统的人工判断记录在 `scripts/gates/host-parity-annotations.json` 中。`pnpm audit:host-parity` 通过棘轮检查约束两者，防止差距清单在未被发现的情况下扩大。
 
 ## 结论
 
 **等价机制是完整且工作着的；往它上面的迁移大约只做了一半。**
 
-`DispatchHost`（Tauri / Headless 两个 arm）、`setTransport` 的整体传输替换、`protocol/companion-commands.json` 的 1066 条命令分级 —— 这些不是半成品，是成品。缺的是大量代码从未搬上去。
+`DispatchHost`（Tauri / Headless 两个 arm）、`setTransport` 的整体传输替换，以及 `protocol/companion-commands.json` 的 1066 条命令分级均已完整实现。当前缺口主要在于大量代码尚未迁移到这些机制上。
 
 带宿主守卫的 154 个子系统中：
 

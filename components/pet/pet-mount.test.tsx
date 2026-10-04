@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 
 const usePetEventBus = jest.fn()
 const ensurePetAccountId = jest.fn().mockResolvedValue("acct-1")
@@ -21,6 +21,13 @@ const petCommandsDispose = jest.fn()
 const openPetWindow = jest.fn().mockResolvedValue(true)
 const isPetWindowOpen = jest.fn().mockResolvedValue(false)
 const setPetClickThrough = jest.fn().mockResolvedValue(true)
+const setPetWindowSize = jest.fn().mockResolvedValue(true)
+const closePetWindow = jest.fn().mockResolvedValue(true)
+const destroyPetWindow = jest.fn().mockResolvedValue(true)
+const startPetSettingsFollower = jest.fn<() => void, []>()
+const followerDispose = jest.fn()
+const updatePetSettings = jest.fn()
+const petMainRuntimeProps = jest.fn()
 
 jest.mock("@/hooks/pet/use-pet-event-bus", () => ({
   usePetEventBus: (e: boolean, twinAwareness: unknown) => usePetEventBus(e, twinAwareness),
@@ -51,6 +58,19 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   openPetWindow: (opts: unknown) => openPetWindow(opts),
   isPetWindowOpen: () => isPetWindowOpen(),
   setPetClickThrough: (ignore: boolean) => setPetClickThrough(ignore),
+  setPetWindowSize: (w: number, h: number) => setPetWindowSize(w, h),
+  closePetWindow: () => closePetWindow(),
+  destroyPetWindow: () => destroyPetWindow(),
+}))
+jest.mock("@/lib/pet/settings-sync", () => ({
+  startPetSettingsFollower: () => startPetSettingsFollower(),
+  updatePetSettings: (updater: unknown) => updatePetSettings(updater),
+}))
+jest.mock("./pet-main-runtime", () => ({
+  PetMainRuntime: (props: unknown) => {
+    petMainRuntimeProps(props)
+    return null
+  },
 }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startMainPetBridge: (deps: unknown) => startMainPetBridge(deps),
@@ -65,10 +85,12 @@ jest.mock("./pet-widget", () => ({
 }))
 
 let settingsValue: unknown = {}
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (selector: (s: unknown) => unknown) =>
-    selector({ settings: settingsValue, save: jest.fn() }),
-}))
+jest.mock("@/stores/settings", () => {
+  const useSettingsStore = (selector: (s: unknown) => unknown) =>
+    selector({ settings: settingsValue, save: jest.fn() })
+  useSettingsStore.getState = () => ({ settings: settingsValue })
+  return { useSettingsStore }
+})
 
 import { PetMount } from "./pet-mount"
 
@@ -96,7 +118,26 @@ beforeEach(() => {
   isPetWindowOpen.mockReset()
   isPetWindowOpen.mockResolvedValue(false)
   registerPetCommands.mockReturnValue(petCommandsDispose)
+  setPetWindowSize.mockClear()
+  closePetWindow.mockClear()
+  destroyPetWindow.mockClear()
+  followerDispose.mockReset()
+  startPetSettingsFollower.mockReset()
+  startPetSettingsFollower.mockReturnValue(followerDispose)
+  updatePetSettings.mockReset()
+  updatePetSettings.mockResolvedValue(undefined)
+  petMainRuntimeProps.mockClear()
 })
+
+function desktopSettings(desktopPet: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+  return {
+    petSettings: {
+      ...ENABLED_SETTINGS.petSettings,
+      ...extra,
+      desktopPet: { enabled: true, clickThrough: false, size: 128, position: null, ...desktopPet },
+    },
+  }
+}
 
 const ENABLED_SETTINGS = {
   petSettings: {
@@ -434,4 +475,148 @@ it("does not mount or initialize any pet runtime on web with saved enabled setti
   expect(registerPetCommands).not.toHaveBeenCalled()
   expect(startMainPetBridge).not.toHaveBeenCalled()
   expect(openPetWindow).not.toHaveBeenCalled()
+})
+
+describe("PetMount — desktop surfaces and window lifecycle", () => {
+  beforeEach(() => {
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+  })
+
+  it("mounts the main-window runtime alongside the widget", () => {
+    settingsValue = ENABLED_SETTINGS
+    useActiveCharacterId.mockReturnValue("char-3")
+    render(<PetMount />)
+    expect(petMainRuntimeProps).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCharacterId: "char-3" })
+    )
+  })
+
+  it("hides the in-app widget while the pet is out on the desktop, keeping the runtime", () => {
+    settingsValue = desktopSettings({ enabled: true })
+    const { queryByTestId } = render(<PetMount />)
+    expect(queryByTestId("pet-widget")).toBeNull()
+    // The runtime still speaks for the overlay over the bridge.
+    expect(petMainRuntimeProps).toHaveBeenCalled()
+  })
+
+  it("shows the widget again once the desktop pet is put away", () => {
+    settingsValue = desktopSettings({ enabled: false })
+    const { getByTestId } = render(<PetMount />)
+    expect(getByTestId("pet-widget")).toBeInTheDocument()
+  })
+
+  it("follows pet-settings writes from the other windows and stops on unmount", () => {
+    settingsValue = ENABLED_SETTINGS
+    const { unmount } = render(<PetMount />)
+    expect(startPetSettingsFollower).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(followerDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not follow settings off the desktop shell", () => {
+    settingsValue = ENABLED_SETTINGS
+    isTauri.mockReturnValue(false)
+    render(<PetMount />)
+    expect(startPetSettingsFollower).not.toHaveBeenCalled()
+  })
+
+  it("resizes an open overlay live when the size changes, never on first render", async () => {
+    settingsValue = desktopSettings({ size: 128 })
+    isPetWindowOpen.mockResolvedValue(true)
+    const { rerender } = render(<PetMount />)
+    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalled())
+    expect(setPetWindowSize).not.toHaveBeenCalled()
+
+    settingsValue = desktopSettings({ size: 192 })
+    rerender(<PetMount />)
+    await waitFor(() => expect(setPetWindowSize).toHaveBeenCalledWith(192 + 96, 192 + 160))
+    expect(openPetWindow).not.toHaveBeenCalled()
+  })
+
+  it("does not resize a window that is not open", async () => {
+    settingsValue = desktopSettings({ size: 128 })
+    const { rerender } = render(<PetMount />)
+    settingsValue = desktopSettings({ size: 160 })
+    rerender(<PetMount />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(setPetWindowSize).not.toHaveBeenCalled()
+  })
+
+  it("destroys the overlay when the pet is switched off by any route", async () => {
+    settingsValue = desktopSettings({ enabled: true })
+    isPetWindowOpen.mockResolvedValue(true)
+    const { rerender } = render(<PetMount />)
+    // A settings reset / import / sync flips the master switch.
+    settingsValue = desktopSettings({ enabled: true }, { enabled: false })
+    rerender(<PetMount />)
+    await waitFor(() => expect(destroyPetWindow).toHaveBeenCalledTimes(1))
+  })
+
+  it("hides the overlay when only the desktop intent is turned off", async () => {
+    settingsValue = desktopSettings({ enabled: true })
+    isPetWindowOpen.mockResolvedValue(true)
+    const { rerender } = render(<PetMount />)
+    settingsValue = desktopSettings({ enabled: false })
+    rerender(<PetMount />)
+    await waitFor(() => expect(closePetWindow).toHaveBeenCalledTimes(1))
+    expect(destroyPetWindow).not.toHaveBeenCalled()
+  })
+
+  it("never closes the window on a steady off state (a summon is mid-flight)", async () => {
+    // Summon phase 1 switched the pet on but has not persisted the desktop
+    // intent yet while the window is already opening.
+    settingsValue = desktopSettings({ enabled: false }, { enabled: false })
+    isPetWindowOpen.mockResolvedValue(true)
+    const { rerender } = render(<PetMount />)
+    settingsValue = desktopSettings({ enabled: false })
+    rerender(<PetMount />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(closePetWindow).not.toHaveBeenCalled()
+    expect(destroyPetWindow).not.toHaveBeenCalled()
+  })
+
+  type NativeHandler = (state: { open: boolean; clickThrough: boolean }) => void
+  type Updater = (latest: Record<string, unknown>) => Record<string, unknown>
+
+  it("syncs a native open/close and an open window's click-through", () => {
+    settingsValue = desktopSettings({ enabled: false, clickThrough: false })
+    render(<PetMount />)
+    const handler = onPetNativeStateChanged.mock.calls.at(-1)![0] as NativeHandler
+    handler({ open: true, clickThrough: true })
+    const updater = updatePetSettings.mock.calls[0][0] as Updater
+    const latest = desktopSettings({ enabled: false, clickThrough: false }).petSettings
+    expect(updater(latest)).toEqual({
+      ...latest,
+      desktopPet: { ...latest.desktopPet, enabled: true, clickThrough: true },
+    })
+  })
+
+  it("keeps the click-through preference when the window is hidden", () => {
+    settingsValue = desktopSettings({ enabled: true, clickThrough: true })
+    render(<PetMount />)
+    const handler = onPetNativeStateChanged.mock.calls.at(-1)![0] as NativeHandler
+    // Hiding resets the native flag; that must not erase the preference.
+    handler({ open: false, clickThrough: false })
+    const updater = updatePetSettings.mock.calls[0][0] as Updater
+    const latest = desktopSettings({ enabled: true, clickThrough: true }).petSettings
+    expect(updater(latest)).toEqual({
+      ...latest,
+      desktopPet: { ...latest.desktopPet, enabled: false, clickThrough: true },
+    })
+  })
+
+  it("writes nothing when the native state already matches", () => {
+    settingsValue = desktopSettings({ enabled: true, clickThrough: false })
+    render(<PetMount />)
+    const handler = onPetNativeStateChanged.mock.calls.at(-1)![0] as NativeHandler
+    handler({ open: true, clickThrough: false })
+    const updater = updatePetSettings.mock.calls[0][0] as Updater
+    const latest = desktopSettings({ enabled: true, clickThrough: false }).petSettings
+    expect(updater(latest)).toBe(latest)
+  })
 })

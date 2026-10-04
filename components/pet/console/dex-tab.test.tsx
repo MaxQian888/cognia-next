@@ -18,6 +18,17 @@ const useActiveLive2dModel = jest.fn(() => ({
   row: undefined,
   coreReady: undefined as boolean | undefined,
 }))
+// The cross-window writer, reduced to its contract (see settings-sync.ts).
+jest.mock("@/lib/pet/settings-sync", () => ({
+  updatePetSettings: async (updater: (latest: unknown) => unknown) => {
+    const { DEFAULT_PET_SETTINGS } = jest.requireActual("@/types/pet")
+    const latest =
+      (settingsValue as { petSettings?: unknown } | null)?.petSettings ?? DEFAULT_PET_SETTINGS
+    const next = updater(latest)
+    await save({ petSettings: next })
+    return next
+  },
+}))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: () => useActiveLive2dModel(),
 }))

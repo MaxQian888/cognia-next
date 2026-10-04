@@ -88,6 +88,7 @@ export function reducePetVisualState(event: PetEvent, needs: PetNeeds): PetVisua
       return "thinking"
     case "twinMilestone":
     case "radarReport":
+    case "pluginReward":
     case "streakDay":
     case "birthday":
       return "happy"

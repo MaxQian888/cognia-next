@@ -1,11 +1,11 @@
 ---
 title: "ADR-0058 — 桌面宠物子系统"
-description: "将宠物子系统（components/pet/、lib/pet/、hooks/pet/、stores/pet/、types/pet/、src-tauri/src/pet_window/）的架构记录回填其实际当前形状——三窗口角色模型（main/overlay/popup）、Dexie-vs-Zustand状态分割、子系统无关事件总线和三皮肤（SVG/Live2D/sprite-v2）渲染器——这些都未在其他地方记录。还记录了本波的新增内容：浏览器小部件与Tauri叠加层之间的统一drag/throw物理、可选的环境双胞胎感知信号、全局快捷键+持久自定义快捷方式修复、macOS窗口攀爬、托盘快速actions/mood显示，以及兼容精灵宠物的导入Codex。2026-09-25 修订（D9–D11）：宠物端到端仅限桌面壳，召唤经唯一入口并同时启用宠物，雷达报告以带「打开 Insights」操作的事件抵达宠物，⌘K 与可绑定快捷键均可触达宠物。"
+description: "将宠物子系统（components/pet/、lib/pet/、hooks/pet/、stores/pet/、types/pet/、src-tauri/src/pet_window/）的架构记录回填其实际当前形状——三窗口角色模型（main/overlay/popup）、Dexie-vs-Zustand状态分割、子系统无关事件总线和三皮肤（SVG/Live2D/sprite-v2）渲染器——这些都未在其他地方记录。还记录了本波的新增内容：浏览器小部件与Tauri叠加层之间的统一drag/throw物理、可选的数字孪生环境感知信号、全局快捷键+持久自定义快捷方式修复、macOS窗口攀爬、托盘快速actions/mood显示，以及兼容 Codex 的精灵宠物导入。2026-09-25 修订（D9–D11）：宠物端到端仅限桌面壳，召唤经唯一入口并同时启用宠物，雷达报告以带「打开 Insights」操作的事件抵达宠物，⌘K 与可绑定快捷键均可触达宠物。2026-10-04 修订（D12–D13）：悬浮窗与弹出窗口在 DPI、多显示器、焦点与窗口生命周期上都正确，宠物设置写入跨窗口串行化，屏幕上只显示一只宠物，插件宠物 API 完整、受权限门控并如实反馈发放结果。"
 ---
 
 # ADR-0058 — 桌面宠物子系统
 
-**状态**：已接受（2026-07-01）；2026-09-25 修订（D9–D11）**作者**：Max Qian + Claude **Supersedes**：`docs/superpowers/specs/2026-06-02-pet-system-design.md`，`docs/superpowers/specs/2026-06-05-pet-llm-deepening-design.md`
+**状态**：已接受（2026-07-01）；2026-09-25 修订（D9–D11），2026-10-04 修订（D12–D13）**作者**：Max Qian + Claude **Supersedes**：`docs/superpowers/specs/2026-06-02-pet-system-design.md`，`docs/superpowers/specs/2026-06-05-pet-llm-deepening-design.md`
 
 ## 背景
 
@@ -68,7 +68,7 @@ Tauri叠加层的互动更丰富（通过`lib/pet/behavior/ballistics.ts`+`lib/p
 
 宠物之前唯一的双胞胎结合是单向且LLM-side-channel-only：`lib/pet/llm/character-persona.ts`在双胞胎`Character`绑定的对话中阅读预先计算好的、already-PII-redacted `voiceSummary`为宠物增添色彩的*语音文本*——这从未影响mood/animation。
 
-**决策**：一个新的选择加入`PetSettings.twinAwareness`（默认关闭，镜像`proactive`/`llmSpeak`的选择加入形状）允许宠物的情绪通过一个新的`lib/pet/events/sources/twin-activity-source.ts`响应**单用户选择的双胞胎***背景工作活动，而该通过*`PetEventBus`所有其他来源*相同的*线路连接。信号仅基于`TwinJob`元数据（`status`/`kind`/`queuedAt`/`completedAt`——numeric/enum字段，没有自由文本路径），从不依赖Twin内容（源、区块、精简配置文件），因此信号本身无需PII 门禁——这是结构上的PII-avoidance，比事后涂黑文本更强且更便宜。两个衍生事件：`twinBusy`（任何活动作业;重用`thinking`视觉状态）和`twinMilestone`（刚完成的`distill`/`re-distill`作业;重用`happy`）。两者都**不是** `PASSIVE_KINDS` 成员（本记录早先的版本写成两者都是；代码从未这样做，而且代码是对的）：它们各自映射到表现状态，列入该集合会压掉它们存在的意义。与所有表现状态一样，它们是短暂的，结束后回到的需求派生静止状态仍会尊重 `unwell`。两者都携带 `0` XP（纯环境）。气泡复制是特有的（“安静地翻阅你的笔记......”），因此这两种环境状态与普通背景工作有明显区别，尽管它们在这一波的视觉状态上共享。
+**决策**：新增可选启用的 `PetSettings.twinAwareness`（默认关闭，采用与 `proactive`/`llmSpeak` 相同的启用方式）。宠物情绪通过新增的 `lib/pet/events/sources/twin-activity-source.ts` 响应**用户选择的单个数字孪生**的后台工作活动，并使用与 `PetEventBus` 其他来源相同的事件接入方式。信号仅基于`TwinJob`元数据（`status`/`kind`/`queuedAt`/`completedAt`——numeric/enum字段，没有自由文本路径），从不依赖Twin内容（源、区块、精简配置文件），因此信号本身无需PII 门禁——这是结构上的PII-avoidance，比事后涂黑文本更强且更便宜。两个衍生事件：`twinBusy`（任何活动作业;重用`thinking`视觉状态）和`twinMilestone`（刚完成的`distill`/`re-distill`作业;重用`happy`）。两者都**不是** `PASSIVE_KINDS` 成员（本记录早先的版本写成两者都是；代码从未这样做，而且代码是对的）：它们各自映射到表现状态，列入该集合会压掉它们存在的意义。与所有表现状态一样，它们是短暂的，结束后回到的需求派生静止状态仍会尊重 `unwell`。两者都携带 `0` XP（纯环境）。气泡文案是专用的（“安静地翻阅你的笔记......”），因此这两种环境状态与普通背景工作有明显区别，尽管它们在这一波的视觉状态上共享。
 
 **已拒绝**：实时LLM-summarized工作负载评论（重新引入每tick LLM“绝不触碰模型流水线/极小令牌预算”规则以防止）;默认在所有双子之间聚合（双胞胎注册表是明确的多实例，没有“主”指针——显式单一选择更易辨认）;将作业失败映射到`error`可视化状态（如果将背景双流水线的故障误认为“你现在正在做的某件事失败了”，即减速器中最高优先级信号）。
 
@@ -94,39 +94,19 @@ Tauri叠加层的互动更丰富（通过`lib/pet/behavior/ballistics.ts`+`lib/p
 
 ### D7 — 每个 WebView 只有一个受治理渲染边界
 
-设置预览、控制台头像、小部件和浮层过去可以各自初始化 timer、object URL 或 WebGL context。
-同时，皮肤选择是自由字符串，可选 Live2D 资源会被静默丢弃，Sprite v2 的两行视线图元也未使用。
-这些看似不同的症状其实来自同一个所有权问题：没有模块跨 surface 治理渲染器能力、兼容性和资源生命周期。
+设置预览、控制台头像、小部件和浮层过去可以各自初始化 timer、object URL 或 WebGL context。同时，皮肤选择是自由字符串，可选 Live2D 资源会被静默丢弃，Sprite v2 的两行视线图元也未使用。这些看似不同的症状其实来自同一个所有权问题：没有模块跨 surface 治理渲染器能力、兼容性和资源生命周期。
 
-**决策**：`types/pet/skin.ts` 现在承载类型化选择、能力、渲染模式、视线目标和诊断契约。
-`lib/pet/skin-runtime.ts` 是每个 JavaScript realm 的单例（因此每个 WebView 一个），按
-`configuration > interactive > console > thumbnail` 授予唯一 live lease，为其他预览提供快照或
-占位，缓存并撤销 object URL，并向开发/测试暴露资源计数器。Live2D context loss 自动恢复一次；
-第二次则进入显式、可由用户恢复的 degraded 状态。
+**决策**：`types/pet/skin.ts` 现在承载类型化选择、能力、渲染模式、视线目标和诊断契约。`lib/pet/skin-runtime.ts` 是每个 JavaScript realm 的单例（因此每个 WebView 一个），按 `configuration > interactive > console > thumbnail` 授予唯一 live lease，为其他预览提供快照或占位，缓存并撤销 object URL，并向开发/测试暴露资源计数器。Live2D context loss 自动恢复一次；第二次则进入显式、可由用户恢复的 degraded 状态。
 
-三套皮肤统一遵循 `suspended/reduced > held > one-shot > locomotion > semantic state > idle/gaze`。
-Sprite v2 将第 9–10 行映射到顺时针 16 个视线桶；SVG 复用既有面部图元；Live2D 在参数存在时
-使用标准 head/eye/body/mouth 参数。Web 仅使用页内视线。Tauri 新增最小权限、本地 cursor-position
-command，采样不超过 10 Hz，并在视线、可见性或挂起门禁关闭时立即停止。视线样本不会持久化、
-发送给 LLM 或传输到网络。
+三套皮肤统一遵循 `suspended/reduced > held > one-shot > locomotion > semantic state > idle/gaze`。Sprite v2 将第 9–10 行映射到顺时针 16 个视线桶；SVG 复用既有面部图元；Live2D 在参数存在时使用标准 head/eye/body/mouth 参数。Web 仅使用页内视线。Tauri 新增最小权限、本地 cursor-position command，采样不超过 10 Hz，并在视线、可见性或挂起门禁关闭时立即停止。视线样本不会持久化、发送给 LLM 或传输到网络。
 
-Live2D 导入现在校验完整引用图，并在非索引模型元数据中持久化带版本的 `ready`/`degraded`/
-`invalid` 兼容摘要。settings、moc 和必要纹理缺失时阻止激活；缺失可选 motion、expression、sound、
-physics 和 pose 时，清理对应引用并报告。路径穿越、归一化重复、大小写歧义、损坏图片、Cubism 2
-和大小上限都会在持久化前失败。官方 Hiyori/Haru 测试数据固定 revision 与 SHA-256，下载到测试缓存，
-而不提交模型二进制。
+Live2D 导入现在校验完整引用图，并在非索引模型元数据中持久化带版本的 `ready`/`degraded`/`invalid` 兼容摘要。settings、moc 和必要纹理缺失时阻止激活；缺失可选 motion、expression、sound、physics 和 pose 时，清理对应引用并报告。路径穿越、归一化重复、大小写歧义、损坏图片、Cubism 2 和大小上限都会在持久化前失败。官方 Hiyori/Haru 测试数据固定 revision 与 SHA-256，下载到测试缓存，而不提交模型二进制。
 
 ### D8 — 一个主从控制台与一个自定义配置所有者
 
-**决策**：`/pet` 采用响应式主从工作区。桌面端使用分组导航轨道与独立滚动的详情面板，窄容器把
-相同分组放入 shadcn Sheet；`PetConsoleTab`、`?tab=` 深链、插件 slot context 与跨窗口消息形状均
-保持不变。详情区域以平铺 section 和分隔线表达层级，紧凑 widget、popup、overlay 继续保留必要外框。
+**决策**：`/pet` 采用响应式主从工作区。桌面端使用分组导航轨道与独立滚动的详情面板，窄容器把相同分组放入 shadcn Sheet；`PetConsoleTab`、`?tab=` 深链、插件 slot context 与跨窗口消息形状均保持不变。详情区域以平铺 section 和分隔线表达层级，紧凑 widget、popup、overlay 继续保留必要外框。
 
-`components/pet/settings/pet-customization-workspace.tsx` 是 Customize 与 Settings 共同直接渲染的唯一
-配置所有者。它统一暴露 SVG、Live2D、Sprite v2、互动、声音、照料、Twin 与受能力门禁约束的桌宠
-窗口控制，并拥有响应式受治理预览、fallback 诊断与重试。宠物档案重置使用破坏性确认，并与 Settings
-Shell 的配置重置明确区分。本决策只改变 UI 组合与配置所有权，不改变任何持久化结构、成长规则或
-Tauri 窗口协议，因此不需要 schema migration。
+`components/pet/settings/pet-customization-workspace.tsx` 是 Customize 与 Settings 共同直接渲染的唯一配置所有者。它统一暴露 SVG、Live2D、Sprite v2、互动、声音、照料、Twin 与受能力门禁约束的桌宠窗口控制，并拥有响应式受治理预览、fallback 诊断与重试。宠物档案重置使用破坏性确认，并与 Settings Shell 的配置重置明确区分。本决策只改变 UI 组合与配置所有权，不改变任何持久化结构、成长规则或 Tauri 窗口协议，因此不需要 schema migration。
 
 ### D9 — 端到端仅限桌面壳；召唤会启用宠物，且只有一个入口
 
@@ -156,9 +136,49 @@ Tauri 窗口协议，因此不需要 schema migration。
 
 宠物过去没有命令面板入口，且只有窗口切换可绑定。⌘K 现在提供「切换桌宠」（D9 的召唤路径）与「打开宠物面板」（路由跳转，宠物关闭时也可用），由必填的 `GlobalSearchHostContext.petHostAvailable` 门控，其计算方式与 `PetMount` 的结构性判断一致（宿主与窗口角色，设置视为开启）；非桌面端直接隐藏而非禁用。设置 → 快捷键把六个照料命令作为可选行提供，其 id 与命令注册所用列表同源（`lib/pet/command-ids.ts`）。全部七个宠物命令都在桌面主窗口注册，无论宠物是否开启，并使用本地化标题（托盘「所有命令」菜单会显示它们），因此已绑定的组合键不会在系统层被占用却无处派发。宠物关闭时被拒绝的照料命令会发出一条去重、自动过期的通知（`lib/pet/access/notify-unavailable.ts`），而不是悄无声息：组合键通常在 Cognia 处于后台时触发，而已关闭的宠物没有小部件可承载气泡。突发限流的拒绝保持静默，控制器的冷却气泡已能回应重复按键。
 
+### D12 — 窗口管线在 DPI、多显示器、焦点与窗口生命周期上都正确
+
+对悬浮窗与弹出窗口的审查发现，窗口的创建、尺寸、显示与销毁方式存在若干缺陷。每个都不大，但合起来使桌宠在单显示器、100% 缩放的 macOS 之外很不可靠。
+
+**物理像素与 CSS 像素。** 窗口位置是物理像素，而指针 `screenX` 增量是 CSS 像素。拖拽、抛掷速度、凝视边界与弹出锚点都混用了两者，因此在 200% 显示器上宠物只以指针一半的速度移动，弹出窗口也会离宠物很远。指针增量现在按显示器缩放系数换算（`resolveCssToPhysicalScale`，回退到 `devicePixelRatio`）。抛掷阈值仍以 CSS 像素比较，因此手势在任何显示器上手感一致。轻放时，运动引擎在落点停住（`settleAt`）并持久化，宠物不再弹回拖拽前的位置。
+
+**显示器查找。** `monitor_from_point` 在不同平台使用不同的坐标空间，在 macOS 多显示器上会选错显示器。`work_area_for` 现在用窗口中心点去匹配 `available_monitors` 的物理矩形。`ScaleFactorChanged` 以及跨显示器的 `Moved` 事件都会发出 `pet://work-area-changed`，且每当漫游恢复时运动模块都会重新读取工作区，宠物不会在过期的矩形里行走。
+
+**尺寸。** 尺寸滑块过去要到下次打开才生效。`pet_window_set_size` 现在以底部中心为锚点调整正在显示的悬浮窗，宠物仍站在原处，并限制在工作区内。该命令从不显示隐藏的窗口。滑块在松手时提交，而不是每次拖动都提交。
+
+**弹出窗口定位。** 弹出窗口在 Rust 中定位（`resolve_popup_placement`），依据宠物在其所在显示器上的物理矩形。下方、上方与侧方的回退位置都限制在工作区内。随内容变化的尺寸调整会针对保存的锚点重新定位，弹出窗口变大时不再偏离宠物。再次显示时发出 `pet-popup://shown`，丢弃缓存尺寸并重新适配。它不显示插件插槽（D13），并把窗口操作（点击穿透、设置、主窗口、隐藏）归入一个带标签的 2×2 分组。
+
+**焦点。** 两个窗口都以 `.focused(false)` 创建。Windows 上悬浮窗带 `WS_EX_NOACTIVATE`、弹出窗口带 `WS_EX_TOOLWINDOW`，两者都不会抢走正在使用的应用的焦点，也不会出现在 Alt-Tab 中。macOS 保留不激活的 NSPanel。
+
+**生命周期。** 系统关闭（Alt+F4、⌘W）过去会绕过 store 直接销毁窗口。`CloseRequested` 现在走与 UI 相同的关闭路径。`open_pet_window` 会等待生命周期队列，超时即失败，而不是为一次从未发生的打开报告成功。`is_pet_window_open` 报告的是打开意图，而不只是窗口对象存在，这消除了启动时的重复打开（旧的 `PetWindowInitializer` 与 `PetMount` 的对齐逻辑都会打开；该 initializer 已移除）。已有窗口在首帧绘制前不会被显示；显示现在在所有平台上先经由 Rust，再做 1px 重合成微调，这修复了 macOS 以外平台上的显示竞态。悬浮窗与弹出窗口路由在启动脚本中设置 `data-pet-overlay`，因此在 hydrate 前就是透明的。主窗口「退出」关闭行为会退出应用，而不是留下孤立的宠物窗口。
+
+**销毁跟随设置。** 关闭 `PetSettings.enabled` 会销毁悬浮窗，关闭 `desktopPet.enabled` 会关闭它，无论哪个窗口写入了更改（只在状态转换时触发，冷启动不会误销毁）。隐藏悬浮窗会保留点击穿透偏好。
+
+**跨窗口的设置写入。** 每个 WebView 有自己的设置 store，而 `saveSettings` 会整体替换 `petSettings`。因此悬浮窗保存位置时，可能抹掉主窗口刚做的更改。现在所有宠物写入方都经过 `lib/pet/settings-sync.ts:updatePetSettings`。它用 Web Lock 串行化写入，在锁内重新读取最新设置，保存后在 `cognia-pet-settings` 上广播。每个宠物窗口都运行一个跟随者，只重新读取 `petSettings` 切片。
+
+**屏幕上只有一只宠物。** 桌宠在桌面上时，应用内小部件会隐藏。语音与外观 hook 从 `PetWidget` 移到 `PetMainRuntime`，只要宠物可用 `PetMount` 就会挂载它，因此气泡、提醒、洞察与镜像外观会继续流向悬浮窗。`/pet` 控制台头部为已孵化的宠物新增一个桌面切换按钮。
+
+### D13 — 插件宠物 API 完整、受门控且如实反馈
+
+`ctx.pet` 早于访问门禁，并已与之偏离。目录声称 `emitEvent` 只需 `pet:read`。物品 id 可以施加未拥有或类型不符的物品的更强效果。处于冷却中的动作会先扣预算，然后被控制器丢弃。金币会被用户的连击放大，一次调用就能拿走当天的金币预算。插件的账本键可能与用户的冲突。插件也无法区分「宠物关闭所以未发放」和真正的发放。
+
+**决定。**
+
+- **权限。** `emitEvent` 与 `interact` 需要 `pet:interact`。`PET_API_PERMISSIONS` 是守卫的唯一来源，并由一致性测试与 `catalog.json` 对齐。五个 `onPet*` 钩子在 plugin-points 契约中声明 `pet:read`，`executeHook` 会跳过缺少该权限的插件。
+- **可用性。** 新的 `getAvailability()` 返回 `missing-capability`、`disabled`、`unsupported-host`、`secondary-window`、`uninitialized` 或 `not-hatched`。`uninitialized` 与 `not-hatched` 是新的门禁拒绝，与 `unavailable` 一样静默地发放零。
+- **奖励。** 中性的 `pluginReward` 类型（`PET_EVENT_KINDS` 现在是常量数组）会让宠物开心，但不计入照料计数。奖励在每日预算前先按每次调用限额（10 XP、20 金币）截断。显式金币不受连击倍率影响，奖励也从不携带物品。
+- **物品与冷却。** 物品只在其 `interactionKind` 与事件一致时生效（`item-kind-mismatch` → `PetItemKindMismatchError`）。非用户主体在任何扣除之前都会先对照控制器的冷却（`cooling-down` → 带 `retryAfterMs` 的 `PetCooldownError`）。
+- **账本键。** 插件账本键命名空间化为 `plugin:<id>`。
+- **清单贡献。** `petItems` / `petAchievements` 在一个模块中校验（`lib/plugin/registries/pet-contribution-validation.ts`）。同一套规则用于清单校验、注册表注册、SDK 的 `define*` 辅助函数，以及 Python 的 `cognia.pet` 镜像（由一致性测试固定）。
+- **SDK 接口。** `@cognia/plugin-sdk/api/pet` 是一个显式子路径（ADR-0156）。它包含无依赖的契约（`lib/plugin/api/pet-api-contract.ts`、`lib/pet/access/limits.ts`）、错误类与只读注册表视图，但没有注册或按 id 注销的函数。
+- **插槽。** 弹出窗口不渲染插件插槽。`pet.panel.actions` 保留在小部件和控制台中。
+
+`plugins/pet-daily-quests` 全部采用：领取前检查可用性，并通过 `pluginReward` 发放奖励。作者指南见 `plugin-dev/pet`。
+
 ## 后果
 
 - 宠物子系统的真实架构现在无需穿越两个陈旧的规格和源树就能发现。
 - D1–D5 各自可逆（设置标志、hook交换、加法Rust模块、加法DTO字段）——都不需要Dexie迁移。D6 被第三个皮肤注册和一个新增 Dexie table/version 隔离。D7 只增加非索引模型元数据和一个渲染所有者，D8 只改变 UI 组合与配置所有权，因此两者都不需要 Dexie schema 升版。
 - D9–D11 未新增任何 Dexie 表或版本。D9 退役了一个原生托盘动作，并在 hydrate 时迁移两个持久化托盘 store；其余只是设置写入、门禁、一个新事件类型与一个新增的桥字段。
+- D12–D13 未新增任何 Dexie 表或版本。D12 新增一个 Tauri 命令（`pet_window_set_size`）、一个事件（`pet-popup://shown`）与一个 BroadcastChannel；D13 把 `emitEvent`/`interact` 收紧为 `pet:interact`，只声明了 `pet:read` 的插件需要补上。
 - 文档债务故意未完全关闭：`docs/superpowers/specs/2026-06-0{2,5}-*.md`被标记为原地被取代（非删除——根据项目的“标记，不删除”的惯例保留历史价值），而非重写，因此它们捕获的*决策历史*（为什么是SVG-over-sprite-sheet，为什么是侧信道LLM，是前技术研究）得以保持完整。

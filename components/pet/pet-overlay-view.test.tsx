@@ -81,6 +81,7 @@ const getPetWindowPosition = jest.fn()
 const setPetWindowPosition = jest.fn()
 const openPetPopup = jest.fn()
 const showMainWindow = jest.fn()
+const revealPetWindowMock = jest.fn().mockResolvedValue(true)
 let workAreaValue: unknown = { x: 0, y: 0, width: 1920, height: 1080, scaleFactor: 1 }
 jest.mock("@/lib/tauri/pet-window", () => ({
   getPetWindowPosition: () => getPetWindowPosition(),
@@ -89,6 +90,7 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   getPetWorkArea: () => Promise.resolve(workAreaValue),
   openPetPopup: (opts: unknown) => openPetPopup(opts),
   showMainWindow: () => showMainWindow(),
+  revealPetWindow: (focus: boolean, label: string) => revealPetWindowMock(focus, label),
   // Native event subscriptions — inert disposers in jsdom.
   onPetSuspend: () => () => {},
   onPetResume: () => () => {},
@@ -118,6 +120,7 @@ const revealSetResizableMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     show: revealShowMock,
+    isVisible: jest.fn().mockResolvedValue(true),
     innerSize: revealInnerSizeMock,
     setSize: revealSetSizeMock,
     setResizable: revealSetResizableMock,
@@ -136,6 +139,7 @@ jest.mock("@tauri-apps/api/dpi", () => ({
 // surface a controllable beginThrow.
 const locomotionArgs = jest.fn()
 const beginThrowMock = jest.fn()
+const settleAtMock = jest.fn()
 jest.mock("@/hooks/pet/use-pet-locomotion", () => ({
   usePetLocomotion: (args: unknown) => {
     locomotionArgs(args)
@@ -143,6 +147,7 @@ jest.mock("@/hooks/pet/use-pet-locomotion", () => ({
       locomotion: { mode: "resting", facing: "right" },
       scaleFactor: 1,
       beginThrow: beginThrowMock,
+      settleAt: settleAtMock,
     }
   },
 }))
@@ -173,13 +178,29 @@ jest.mock("@/stores/settings", () => {
   return { useSettingsStore }
 })
 
+// The cross-window pet-settings writer, reduced to its contract: merge into
+// the latest persisted record (`settingsValue` stands in for Dexie) and write
+// it through the store's `save`.
+const followerDispose = jest.fn()
+const startPetSettingsFollower = jest.fn(() => followerDispose)
+jest.mock("@/lib/pet/settings-sync", () => ({
+  startPetSettingsFollower: () => startPetSettingsFollower(),
+  updateDesktopPetSettings: async (
+    patch: (latest: Record<string, unknown>) => Record<string, unknown>,
+    defaults: Record<string, unknown>
+  ) => {
+    const latest = ((settingsValue as { petSettings?: Record<string, unknown> }).petSettings ??
+      {}) as Record<string, unknown>
+    const desktop = (latest.desktopPet as Record<string, unknown> | undefined) ?? defaults
+    const next = { ...latest, desktopPet: { ...desktop, ...patch(desktop) } }
+    await saveMock({ petSettings: next })
+    return next
+  },
+}))
+
 import { PetOverlayView } from "./pet-overlay-view"
-import {
-  POPUP_INITIAL_HEIGHT,
-  POPUP_INITIAL_WIDTH,
-  resolvePopupPlacement,
-} from "@/lib/pet/popup-geometry"
-import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
+import { POPUP_INITIAL_HEIGHT, POPUP_INITIAL_WIDTH } from "@/lib/pet/popup-geometry"
+import { petBoxScreenRect } from "@/lib/pet/overlay-geometry"
 
 const PROFILE = { stage: "baby" }
 const VIEW = {
@@ -222,6 +243,12 @@ beforeEach(() => {
   useActiveLive2dModel.mockReset()
   useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
   saveMock.mockClear()
+  settleAtMock.mockClear()
+  beginThrowMock.mockClear()
+  revealPetWindowMock.mockClear()
+  startPetSettingsFollower.mockClear()
+  followerDispose.mockClear()
+  Object.defineProperty(window, "devicePixelRatio", { value: 1, configurable: true })
   bubbleValue = null
   settingsValue = {
     petSettings: {
@@ -278,20 +305,27 @@ describe("PetOverlayView", () => {
 
   it("reveals the sprite window only after the first painted frame on Tauri", async () => {
     mockIsTauri = true
+    // This webview is the "pet" overlay window (role resolution reads the
+    // label synchronously from the Tauri internals).
+    const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+    w.__TAURI_INTERNALS__ = { metadata: { currentWebview: { label: "pet" } } }
     withPet()
     await act(async () => {
       render(<PetOverlayView />)
     })
     // Not shown until BOTH rAFs (layout + post-commit) have run.
-    expect(revealShowMock).not.toHaveBeenCalled()
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
     await act(async () => {
       flushRaf() // rAF #1 schedules rAF #2
     })
-    expect(revealShowMock).not.toHaveBeenCalled()
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
     await act(async () => {
-      flushRaf() // rAF #2 runs reveal (dynamic import + show)
+      flushRaf() // rAF #2 runs reveal (dynamic import + native reveal)
     })
-    expect(revealShowMock).toHaveBeenCalledTimes(1)
+    // Through the generation-guarded native owner, never a raw show(), and
+    // without focus: the sprite never takes it.
+    expect(revealPetWindowMock).toHaveBeenCalledWith(false, "pet")
+    expect(revealShowMock).not.toHaveBeenCalled()
     // Nudge the physical size by 1px then restore it, to force the transparent
     // surface to recomposite (the Windows black-until-resize quirk). Resizing is
     // briefly enabled so the non-resizable window doesn't clamp the nudge.
@@ -300,6 +334,15 @@ describe("PetOverlayView", () => {
     expect(revealSetSizeMock.mock.calls[0][0]).toMatchObject({ width: 200, height: 241 })
     expect(revealSetSizeMock.mock.calls[1][0]).toMatchObject({ width: 200, height: 240 })
     expect(revealSetResizableMock).toHaveBeenNthCalledWith(2, false)
+    delete w.__TAURI_INTERNALS__
+  })
+
+  it("follows pet-settings writes from the other windows and stops on unmount", () => {
+    withPet()
+    const { unmount } = render(<PetOverlayView />)
+    expect(startPetSettingsFollower).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(followerDispose).toHaveBeenCalledTimes(1)
   })
 
   it("starts the overlay bridge on mount and disposes on unmount", () => {
@@ -465,6 +508,55 @@ describe("PetOverlayView", () => {
         }),
       })
     )
+    // A placement hands the spot to the wander engine, so its next walk
+    // starts here instead of snapping back to the pre-drag position.
+    expect(settleAtMock).toHaveBeenCalledWith(140, 230)
+    expect(beginThrowMock).not.toHaveBeenCalled()
+  })
+
+  it("converts CSS-pixel drag deltas to physical pixels on a 2x display", async () => {
+    withPet()
+    workAreaValue = { x: 0, y: 0, width: 3456, height: 2234, scaleFactor: 2 }
+    render(<PetOverlayView />)
+    const pet = screen.getByTestId("pet-overlay-pet")
+
+    await act(async () => {
+      fireEvent.pointerDown(pet, { button: 0, pointerId: 31, screenX: 500, screenY: 500 })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => {
+      fireEvent.pointerMove(pet, { pointerId: 31, screenX: 540, screenY: 530 })
+      flushRaf()
+    })
+    // base window (100,200) + CSS delta (40,30) × 2 — the window keeps pace
+    // with the cursor instead of trailing at half speed.
+    expect(setPetWindowPosition).toHaveBeenCalledWith(180, 260)
+    await act(async () => {
+      fireEvent.pointerUp(pet, { pointerId: 31, screenX: 540, screenY: 530 })
+      await Promise.resolve()
+    })
+    expect(settleAtMock).toHaveBeenCalledWith(180, 260)
+  })
+
+  it("falls back to devicePixelRatio when the monitor scale is unknown", async () => {
+    withPet()
+    workAreaValue = null
+    Object.defineProperty(window, "devicePixelRatio", { value: 1.5, configurable: true })
+    render(<PetOverlayView />)
+    const pet = screen.getByTestId("pet-overlay-pet")
+    await act(async () => {
+      fireEvent.pointerDown(pet, { button: 0, pointerId: 32, screenX: 0, screenY: 0 })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => {
+      fireEvent.pointerMove(pet, { pointerId: 32, screenX: 40, screenY: 20 })
+      flushRaf()
+    })
+    expect(setPetWindowPosition).toHaveBeenCalledWith(160, 230)
   })
 
   it("a click (no drag) sends a 'petted' interaction and does not persist", async () => {
@@ -670,7 +762,7 @@ describe("PetOverlayView", () => {
   })
 
   describe("right-click popup", () => {
-    it("opens the click popup window with a resolved on-screen placement", async () => {
+    it("opens the click popup anchored to the pet's own box", async () => {
       withPet()
       render(<PetOverlayView />)
 
@@ -680,35 +772,49 @@ describe("PetOverlayView", () => {
         await Promise.resolve()
       })
 
-      // The sprite window never resizes/repositions for the menu anymore — the
-      // popup is its own window opened at the resolved size + clamped coords.
+      // The sprite window never resizes/repositions for the menu — the popup
+      // is its own window, placed natively against the pet's box.
       expect(setPetWindowPosition).not.toHaveBeenCalled()
-      expect(openPetPopup).toHaveBeenCalledTimes(1)
-      const opts = openPetPopup.mock.calls[0][0] as {
-        width: number
-        height: number
-        x: number
-        y: number
-      }
-      expect(opts.width).toBe(POPUP_INITIAL_WIDTH)
-      expect(opts.height).toBe(POPUP_INITIAL_HEIGHT)
-      // Placement matches the pure geometry: sprite window rect (pos 100,200,
-      // logical box for size 160, scale 1) + the 1920x1080 work area.
-      const logical = overlayWindowSize(160)
-      const expected = resolvePopupPlacement(
-        { x: 100, y: 200, width: logical.width, height: logical.height },
-        { width: POPUP_INITIAL_WIDTH, height: POPUP_INITIAL_HEIGHT },
-        { x: 0, y: 0, width: 1920, height: 1080 }
-      )
-      expect(opts.x).toBe(expected.x)
-      expect(opts.y).toBe(expected.y)
+      expect(openPetPopup).toHaveBeenCalledWith({
+        width: POPUP_INITIAL_WIDTH,
+        height: POPUP_INITIAL_HEIGHT,
+        anchor: petBoxScreenRect({ x: 100, y: 200 }, 160, 1),
+      })
     })
 
-    it("does not open the popup when the work area can't be resolved", async () => {
+    it("scales the anchor by the monitor's factor on a 2x display", async () => {
+      withPet()
+      workAreaValue = { x: 0, y: 0, width: 3456, height: 2234, scaleFactor: 2 }
+      render(<PetOverlayView />)
+      await act(async () => {
+        fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(openPetPopup).toHaveBeenCalledWith(
+        expect.objectContaining({ anchor: petBoxScreenRect({ x: 100, y: 200 }, 160, 2) })
+      )
+    })
+
+    it("still opens with the pixel-ratio scale when the work area is unknown", async () => {
       withPet()
       workAreaValue = null
+      Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true })
       render(<PetOverlayView />)
+      await act(async () => {
+        fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(openPetPopup).toHaveBeenCalledWith(
+        expect.objectContaining({ anchor: petBoxScreenRect({ x: 100, y: 200 }, 160, 2) })
+      )
+    })
 
+    it("does not open the popup when the window position can't be read", async () => {
+      withPet()
+      getPetWindowPosition.mockResolvedValue(null)
+      render(<PetOverlayView />)
       await act(async () => {
         fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
         await Promise.resolve()
@@ -750,6 +856,40 @@ describe("PetOverlayView", () => {
       expect(y).toBe(200 + 40)
       expect(vx).toBeGreaterThan(0)
       expect(saveMock).not.toHaveBeenCalled()
+      expect(settleAtMock).not.toHaveBeenCalled()
+    })
+
+    it("hands a throw physical-pixel velocity on a 2x display", async () => {
+      withPet()
+      workAreaValue = { x: 0, y: 0, width: 3456, height: 2234, scaleFactor: 2 }
+      render(<PetOverlayView />)
+      const pet = screen.getByTestId("pet-overlay-pet")
+      await act(async () => {
+        fireEvent.pointerDown(pet, { button: 0, pointerId: 22, screenX: 0, screenY: 0 })
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      const nowSpy = jest.spyOn(performance, "now").mockImplementation(() => 1000)
+      act(() => {
+        fireEvent.pointerMove(pet, { pointerId: 22, screenX: 100, screenY: 0 })
+      })
+      nowSpy.mockImplementation(() => 1100)
+      act(() => {
+        fireEvent.pointerMove(pet, { pointerId: 22, screenX: 200, screenY: 0 })
+        flushRaf()
+      })
+      nowSpy.mockRestore()
+      await act(async () => {
+        fireEvent.pointerUp(pet, { pointerId: 22, screenX: 200, screenY: 0 })
+        await Promise.resolve()
+      })
+      // 100 CSS px in 100ms = 1000 CSS px/s: a throw by feel, and 2000 px/s in
+      // the physical space the ballistics run in.
+      expect(beginThrowMock).toHaveBeenCalledTimes(1)
+      const [x, , vx] = beginThrowMock.mock.calls[0] as [number, number, number, number]
+      expect(x).toBe(100 + 200 * 2)
+      expect(vx).toBeCloseTo(2000)
     })
 
     it("wires pause signals + settle persistence into the locomotion hook", async () => {

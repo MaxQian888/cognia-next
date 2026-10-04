@@ -1,11 +1,13 @@
-// App-wide mount point for the pet widget. Reads the pet settings, gates the
-// whole subsystem on `enabled`, wires the event bus, and lazily ensures the
-// profile exists (resolving / persisting the deterministic account seed). Mounted
-// once in `app/layout.tsx`.
+// App-wide mount point for the pet. Reads the pet settings, gates the whole
+// subsystem on `enabled`, wires the event bus, lazily ensures the profile
+// exists (resolving / persisting the deterministic account seed), owns the
+// desktop overlay's lifecycle from the main window, and decides which surface
+// shows the pet: the in-app widget, or — while the desktop overlay is out —
+// the overlay alone. Mounted once by the app runtime.
 
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useSettingsStore } from "@/stores/settings"
@@ -23,15 +25,20 @@ import { getPetWindowRole } from "@/lib/pet/window-role"
 import { isPetAvailable } from "@/lib/pet/access/availability"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import {
+  closePetWindow,
+  destroyPetWindow,
   isPetWindowOpen,
   onPetNativeStateChanged,
   openPetWindow,
   setPetClickThrough,
+  setPetWindowSize,
 } from "@/lib/tauri/pet-window"
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import { onPetConsoleRequest } from "@/lib/pet/console-request"
+import { startPetSettingsFollower, updatePetSettings } from "@/lib/pet/settings-sync"
+import { PetMainRuntime } from "./pet-main-runtime"
 import { PetWidget } from "./pet-widget"
 
 export function PetMount() {
@@ -59,6 +66,14 @@ export function PetMount() {
   // this asks the predicate with the setting held on.
   const isMainDesktopWindow = isPetAvailable({ enabled: true, role, platform }) && isTauri()
   const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+
+  // The overlay and popup write pet settings from their own webviews (the
+  // resting position, click-through); follow those writes so this window's
+  // copy, and everything it persists next, never reverts them.
+  useEffect(() => {
+    if (!isMainDesktopWindow) return
+    return startPetSettingsFollower()
+  }, [isMainDesktopWindow])
 
   usePetEventBus(widgetEnabled, pet.twinAwareness)
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
@@ -176,9 +191,56 @@ export function PetMount() {
     widgetEnabled,
   ])
 
+  // Size reaches an open overlay live through a native resize that keeps the
+  // pet's feet where they stood and never reveals a hidden window. The first
+  // render only records the size the window was opened (or will open) with.
+  const appliedSizeRef = useRef(desktopPet.size)
+  useEffect(() => {
+    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    if (appliedSizeRef.current === desktopPet.size) return
+    appliedSizeRef.current = desktopPet.size
+    let cancelled = false
+    void isPetWindowOpen().then((open) => {
+      if (cancelled || !open) return
+      const { width, height } = overlayWindowSize(desktopPet.size)
+      void setPetWindowSize(width, height)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [desktopPet.enabled, desktopPet.size, isMainDesktopWindow, widgetEnabled])
+
+  // Tear the overlay down when the pet is switched off by ANY route, not only
+  // the two switches that call `destroyPetWindow` themselves: a settings
+  // reset, a settings import, a sync from another device. Otherwise the
+  // always-on-top sprite stayed on the desktop, frozen, with no controller
+  // behind it. Transitions only (on → off), never a steady "off": a summon
+  // switches `enabled` on before it opens the window and persists
+  // `desktopPet.enabled` after, and reacting to the in-between state would
+  // close the window it is opening.
+  const prevEnabledRef = useRef(enabled)
+  const prevDesktopEnabledRef = useRef(desktopPet.enabled)
+  useEffect(() => {
+    const wasEnabled = prevEnabledRef.current
+    const wasDesktopEnabled = prevDesktopEnabledRef.current
+    prevEnabledRef.current = enabled
+    prevDesktopEnabledRef.current = desktopPet.enabled
+    if (!isMainDesktopWindow) return
+    if (wasEnabled && !enabled) {
+      void isPetWindowOpen().then((open) => {
+        if (open) void destroyPetWindow()
+      })
+      return
+    }
+    if (enabled && wasDesktopEnabled && !desktopPet.enabled) {
+      void isPetWindowOpen().then((open) => {
+        if (open) void closePetWindow()
+      })
+    }
+  }, [desktopPet.enabled, enabled, isMainDesktopWindow])
+
   // Click-through has a dedicated native command that does not reveal or raise
-  // the window, so it is the one overlay setting that can be reconciled live.
-  // Size has no such command; it applies on the next open, as it did before.
+  // the window, so it is reconciled live too.
   useEffect(() => {
     if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
     let cancelled = false
@@ -192,32 +254,39 @@ export function PetMount() {
   }, [desktopPet.clickThrough, desktopPet.enabled, isMainDesktopWindow, widgetEnabled])
 
   // Keep PetSettings in sync with NATIVE window mutations the renderer didn't
-  // initiate (tray toggle, tray click-through recovery): the Rust side
-  // broadcasts `pet://state-changed` on every open/close/click-through change;
-  // patch only on real drift so renderer-initiated changes (which already
-  // persisted) don't loop. Independent of `enabled` — a tray open must land in
-  // settings even while the widget is off.
+  // initiate (a native close, the tray's click-through recovery): the Rust
+  // side broadcasts `pet://state-changed` on every open/close/click-through
+  // change; patch only on real drift so renderer-initiated changes (which
+  // already persisted) don't loop. Independent of `enabled` — a native change
+  // must land in settings even while the widget is off.
+  //
+  // A hidden window always reports `clickThrough: false`, because hiding
+  // resets the native flag so a hidden window can never strand the pointer.
+  // That is window state, not the user's preference: only an OPEN window's
+  // flag is synced, or every hide would erase the preference and the next
+  // summon would come back solid.
   useEffect(() => {
     if (!isMainDesktopWindow) return
     return onPetNativeStateChanged((native) => {
-      const store = useSettingsStore.getState()
-      const latest = store.settings?.petSettings
-      if (!latest) return
-      const desktop = latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
-      if (desktop.enabled === native.open && desktop.clickThrough === native.clickThrough) return
-      void store.save({
-        petSettings: {
-          ...latest,
-          desktopPet: {
-            ...desktop,
-            enabled: native.open,
-            clickThrough: native.clickThrough,
-          },
-        },
+      if (!useSettingsStore.getState().settings?.petSettings) return
+      void updatePetSettings((latest) => {
+        const desktop = latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+        const clickThrough = native.open ? native.clickThrough : desktop.clickThrough
+        if (desktop.enabled === native.open && desktop.clickThrough === clickThrough) return latest
+        return { ...latest, desktopPet: { ...desktop, enabled: native.open, clickThrough } }
       })
     })
   }, [isMainDesktopWindow])
 
   if (!widgetEnabled) return null
-  return <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
+  return (
+    <>
+      <PetMainRuntime settings={pet} activeCharacterId={activeCharacterId} />
+      {/* One pet on screen at a time: while it is out on the desktop the
+          overlay is the pet, and the widget would be a second copy of it. */}
+      {desktopPet.enabled && isMainDesktopWindow ? null : (
+        <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
+      )}
+    </>
+  )
 }

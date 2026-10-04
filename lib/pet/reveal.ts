@@ -67,8 +67,25 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
         ])
         if (cancelled) return
         const win = getCurrentWindow()
-        await win.show()
-        if (options.focus) await win.setFocus()
+        const role = getPetWindowRole()
+        if (role === "overlay" || role === "popup") {
+          // The pet windows show through their native owner on every
+          // platform: it checks the open generation first, so a close that
+          // landed between the open and this frame wins instead of being
+          // revealed here, and it records the sprite's first paint (a second
+          // open racing the build then leaves the reveal to this call).
+          const shown = await revealPetWindow(
+            Boolean(options.focus),
+            role === "popup" ? PET_POPUP_WINDOW_LABEL : PET_WINDOW_LABEL
+          )
+          if (!shown || cancelled) return
+          // A cancelled generation shows nothing; there is no surface to
+          // recomposite, and resizing a hidden window could flash it.
+          if (!(await win.isVisible())) return
+        } else {
+          await win.show()
+          if (options.focus) await win.setFocus()
+        }
         const size = await win.innerSize()
         if (cancelled) return
         await win.setResizable(true)

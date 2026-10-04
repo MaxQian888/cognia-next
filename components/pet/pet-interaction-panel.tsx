@@ -50,6 +50,13 @@ export interface PetInteractionPanelProps {
    * to process it (the bridge only carries the seven care interactions).
    */
   showInventory?: boolean
+  /**
+   * Render the `pet.panel.actions` plugin slot. Must be false in the popup
+   * window: plugins run only in the main window (the plugin runtime refuses
+   * to start in a secondary webview), so the slot there could only ever be
+   * empty while looking like a place plugins can reach.
+   */
+  showPluginActions?: boolean
   className?: string
 }
 
@@ -67,6 +74,7 @@ export function PetInteractionPanel({
   selection,
   onOpenConsole,
   showInventory = true,
+  showPluginActions = true,
   className,
 }: PetInteractionPanelProps) {
   const t = useTranslations("pet")
@@ -118,17 +126,19 @@ export function PetInteractionPanel({
 
       {showInventory && <PetInventoryStrip />}
 
-      <PluginExtensionSlot
-        point="pet.panel.actions"
-        limit={4}
-        className="flex items-center gap-1 empty:hidden"
-        context={{
-          level: profile.level,
-          stage: profile.stage,
-          mood: view.mood,
-          condition: view.condition,
-        }}
-      />
+      {showPluginActions && (
+        <PluginExtensionSlot
+          point="pet.panel.actions"
+          limit={4}
+          className="flex items-center gap-1 empty:hidden"
+          context={{
+            level: profile.level,
+            stage: profile.stage,
+            mood: view.mood,
+            condition: view.condition,
+          }}
+        />
+      )}
 
       {talkOpen && <PetTalkComposer onTalk={onTalk} />}
 

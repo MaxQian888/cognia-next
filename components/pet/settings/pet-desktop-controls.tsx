@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { ArrowRightIcon } from "lucide-react"
@@ -20,6 +21,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { isLinuxPlatform } from "@/lib/tauri/os"
 import { openDesktopPetWindow } from "@/lib/pet/commands"
 import { destroyPetWindow, setPetClickThrough } from "@/lib/tauri/pet-window"
+import { updateDesktopPetSettings } from "@/lib/pet/settings-sync"
 import {
   DEFAULT_PET_DESKTOP_OVERLAY,
   DEFAULT_PET_WANDER,
@@ -34,16 +36,28 @@ import type { PetControlsProps } from "./pet-appearance-controls"
 const WANDER_FREQUENCIES: PetWanderFrequency[] = ["calm", "normal", "lively"]
 const WANDER_RANGES: PetWanderRange[] = ["full", "near"]
 
-export function PetDesktopControls({ pet, patch }: PetControlsProps) {
+export function PetDesktopControls({ pet }: PetControlsProps) {
   const t = useTranslations("settings.pet")
   const desktopPet: PetDesktopOverlaySettings = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
   const wander: PetWanderSettings = desktopPet.wander ?? DEFAULT_PET_WANDER
   const climbWindowsSupported = !isLinuxPlatform()
+  // The size slider shows a local draft while it is dragged and persists once,
+  // on release: every persisted size resizes the live desktop window natively,
+  // and a drag across the range is a dozen steps.
+  const [sizeDraft, setSizeDraft] = useState<number | null>(null)
+  const shownSize = sizeDraft ?? desktopPet.size
 
+  // Nested fields merge into the freshly persisted desktop record, never into
+  // this render's copy: the overlay persists its resting position from its own
+  // window every time it settles, and spreading `desktopPet` from props here
+  // reverted it.
   const patchDesktop = (next: Partial<PetDesktopOverlaySettings>) =>
-    patch({ desktopPet: { ...desktopPet, ...next } })
+    void updateDesktopPetSettings(() => next, DEFAULT_PET_DESKTOP_OVERLAY)
   const patchWander = (next: Partial<PetWanderSettings>) =>
-    patchDesktop({ wander: { ...wander, ...next } })
+    void updateDesktopPetSettings(
+      (latest) => ({ wander: { ...(latest.wander ?? DEFAULT_PET_WANDER), ...next } }),
+      DEFAULT_PET_DESKTOP_OVERLAY
+    )
 
   const handleDesktopEnabled = (enabled: boolean) => {
     if (enabled) {
@@ -106,15 +120,19 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
 
       <Field>
         <FieldLabel htmlFor="pet-desktop-size">
-          {t("desktopPet.size.label", { size: desktopPet.size })}
+          {t("desktopPet.size.label", { size: shownSize })}
         </FieldLabel>
         <Slider
           id="pet-desktop-size"
           min={96}
           max={256}
           step={16}
-          value={[desktopPet.size]}
-          onValueChange={([size]) => patchDesktop({ size })}
+          value={[shownSize]}
+          onValueChange={([size]) => setSizeDraft(size)}
+          onValueCommit={([size]) => {
+            setSizeDraft(null)
+            if (size !== desktopPet.size) patchDesktop({ size })
+          }}
         />
       </Field>
 

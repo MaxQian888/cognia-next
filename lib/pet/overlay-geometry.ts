@@ -15,6 +15,56 @@ export function overlayWindowSize(petSize: number): { width: number; height: num
 }
 
 /**
+ * Physical rectangle of the pet's own box inside the overlay window. The pet is
+ * bottom-anchored and horizontally centered (see `PetOverlayView`), so the box
+ * sits `OVERLAY_CHROME_W / 2` in from each side and `OVERLAY_CHROME_H` below
+ * the window top. This, not the whole window, is what the click popup anchors
+ * to: the window's transparent headroom exists for the speech bubble, and
+ * anchoring to it parked the popup ~160px above the pet's head.
+ *
+ * `windowPos` is the window's PHYSICAL top-left (`pet_window_get_position`);
+ * `scale` is the monitor scale factor.
+ */
+export function petBoxScreenRect(
+  windowPos: { x: number; y: number },
+  petSize: number,
+  scale: number
+): { x: number; y: number; width: number; height: number } {
+  const window = overlayWindowSize(petSize)
+  return {
+    x: windowPos.x + ((window.width - petSize) / 2) * scale,
+    y: windowPos.y + (window.height - petSize) * scale,
+    width: petSize * scale,
+    height: petSize * scale,
+  }
+}
+
+/**
+ * Pick the scale factor that converts this webview's CSS pixels to physical
+ * screen pixels: the monitor's reported factor when known, else the webview's
+ * `devicePixelRatio` (the pet windows apply no page zoom, so the two agree),
+ * else 1. Pointer `screenX`/`screenY` deltas are CSS pixels while every
+ * window coordinate the pet moves through is physical; adding the two
+ * unconverted moved the pet half as far as the cursor on a 2x display.
+ */
+export function resolveCssToPhysicalScale(
+  monitorScale: number | null | undefined,
+  devicePixelRatio: number | null | undefined
+): number {
+  if (typeof monitorScale === "number" && Number.isFinite(monitorScale) && monitorScale > 0) {
+    return monitorScale
+  }
+  if (
+    typeof devicePixelRatio === "number" &&
+    Number.isFinite(devicePixelRatio) &&
+    devicePixelRatio > 0
+  ) {
+    return devicePixelRatio
+  }
+  return 1
+}
+
+/**
  * Work-area rectangle of one monitor (taskbar excluded), in PHYSICAL pixels —
  * the same unit `pet_window_set_position` consumes. Reported by the Rust
  * `pet_window_get_work_area` command.

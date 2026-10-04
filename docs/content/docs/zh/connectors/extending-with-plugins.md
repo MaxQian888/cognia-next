@@ -5,19 +5,13 @@ description: 如何编写一个 cognia-next 插件，使其贡献一个新的消
 
 # 用插件扩展平台连接器
 
-cognia-next 内置了十一个平台适配器（Telegram、Discord、Slack、Lark、OneBot、钉钉、
-企业微信、微信公众号、个人微信、QQ 官方机器人和 Matrix）。**插件连接器桥**
-（`lib/plugin/bridge/connectors-bridge.ts`）让任何已安装的插件都能贡献额外的适配器 ——
-例如 Mastodon、Bluesky 或内部消息系统 —— 而无需改动 cognia-next 的源码。Email、
-KOOK、LINE 与 Mattermost 仍明确处于规划状态，不计入可用适配器。
+cognia-next 内置十一个平台适配器：Telegram、Discord、Slack、Lark、OneBot、钉钉、企业微信、微信公众号、个人微信、QQ 官方机器人和 Matrix。**插件连接器桥**（`lib/plugin/bridge/connectors-bridge.ts`）允许已安装的插件提供额外适配器，例如 Mastodon、Bluesky 或内部消息系统，无需修改 cognia-next 源码。Email、KOOK、LINE 和 Mattermost 仍处于规划阶段，不计入可用适配器。
 
 ## 工作原理
 
 1. 插件在 `capabilities` 中声明 `"connectors"`，并在清单中提供一个 `connectors[]` 数组。
-2. 插件启用时，`registerPluginAdapters()` 会调用插件导出模块中的工厂函数，
-   并将生成的 `PlatformAdapter` 交给 `ConnectorBus`。
-3. 该适配器随后便参与到完整的流水线中：入站去重 → 策略评估 →
-   模式路由 → 出站 FIFO 队列 → 熔断器 → 审计日志。
+2. 插件启用时，`registerPluginAdapters()` 会调用插件导出模块中的工厂函数，并将生成的 `PlatformAdapter` 交给 `ConnectorBus`。
+3. 该适配器随后便参与到完整的流水线中：入站去重 → 策略评估 → 模式路由 → 出站 FIFO 队列 → 熔断器 → 审计日志。
 
 ## 演练 —— 假想的 Mastodon 适配器
 
@@ -102,8 +96,7 @@ export function createMastodonAdapter(ctx: PluginAdapterContext): PlatformAdapte
 
 ### 3. 通过桥进行注册 / 注销
 
-当用户启用或禁用插件时，插件生命周期会自动调用该桥。你无需手动调用 ——
-`PluginManager` 会处理这一切。
+当用户启用或禁用插件时，插件生命周期会自动调用该桥。你无需手动调用 ——`PluginManager` 会处理这一切。
 
 调试时你可以直接调用该桥：
 
@@ -136,8 +129,7 @@ await connectorsKeyringSet(adapterId, "accessToken", token)
 const token = await connectorsKeyringGet(adapterId, "accessToken")
 ```
 
-凭据以加密形式存储在操作系统的 keyring 中（macOS Keychain、Windows Credential Manager、
-Linux 上的 libsecret）。它们绝不会被记入日志或包含在备份中。
+凭据以加密形式存储在操作系统的 keyring 中（macOS Keychain、Windows Credential Manager、Linux 上的 libsecret）。它们绝不会被记入日志或包含在备份中。
 
 ## 传输模式
 
@@ -148,13 +140,11 @@ Linux 上的 libsecret）。它们绝不会被记入日志或包含在备份中�
 | `reverse-ws` | 设备连接到 cognia-next（OneBot / NapCat 模式）。                         |
 | `gateway`    | 维持一条到平台的长连接 WS（Discord）。                                   |
 
-对于 `webhook` 和 `reverse-ws`，你需要在 Rust 连接器模块中注册一个 axum 路由。
-示例参见 `src-tauri/src/connectors/`。
+对于 `webhook` 和 `reverse-ws`，你需要在 Rust 连接器模块中注册一个 axum 路由。示例参见 `src-tauri/src/connectors/`。
 
 ## 覆盖率要求
 
-插件贡献的适配器与内置代码遵循同样的 ≥90% 测试覆盖率规则
-（参见 `CLAUDE.md`）。请使用同样的 `foo.test.ts` 同目录约定，将测试与你的插件一起发布。
+插件贡献的适配器与内置代码遵循同样的 ≥90% 测试覆盖率规则（参见 `CLAUDE.md`）。请使用同样的 `foo.test.ts` 同目录约定，将测试与你的插件一起发布。
 
 ## 参考
 

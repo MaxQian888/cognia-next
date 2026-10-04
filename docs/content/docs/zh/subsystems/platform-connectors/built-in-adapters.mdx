@@ -8,12 +8,12 @@ description: 十一个内置 IM 平台适配器——Telegram、Discord、Lark�
 <Status variant="stable" />
 
 <TLDR>
-  十一个内置适配器随源码树内置在 `lib/connectors/adapters/<platform>/` 下。每个都遵循
+  十一个内置适配器随源码发布，位于 `lib/connectors/adapters/<platform>/` 下。每个都遵循
   **相同的分解结构**——`parse.ts`（平台信封 → `NormalizedInboundEvent`）、`serialize.ts`
   （`OutboundRequest` → 平台调用）、一个或多个 `transport-*.ts` 驱动、一个 `capability.ts` 矩阵，
   以及一个把它们接在一起的 `index.ts` `createXxxAdapter(opts)` 工厂。入站只有一条
   路径：transport 产出原始帧，parser 将其归一化，`gateInboundEvent`（`lib/connectors/at-gate.ts`）
-  施加 at-strategy + 允许/拦截名单门控，然后 `ctx.emit(event)` 落到 `bus.dispatchInboundFull`。
+  施加 at-strategy + 允许/拦截名单门控，然后 `ctx.emit(event)` 调用 `bus.dispatchInboundFull`。
   **交互式回调绕过 emit**——内联按钮 / 卡片 / 交互直接调用
   `getBus().dispatchConnectorCallback(...)`，以便恢复 A2UI surface 绑定。Transport
   涵盖 long-poll、webhook、gateway（WSS）、reverse-WS、Socket Mode、Stream Mode 和 Matrix `/sync`。
@@ -28,11 +28,7 @@ description: 十一个内置 IM 平台适配器——Telegram、Discord、Lark�
   <Stat label="仅 Webhook" value="wechat-oa" hint="Rust 验签 + 解密" />
 </StatGrid>
 
-这十一个适配器是 [`PlatformAdapter`](./adapter-model) 契约的具体实现。
-本页讲解它们*共有*的部分、完整的 transport/签名矩阵，以及对四个参考适配器的深入剖析。
-它们所依赖的 Rust 信令/解密平面记录在
-[Rust 层](./rust-layer)；入站事件如何被门控见 [入站门控](./inbound-gating)；
-每个适配器如何宣告富内容见 [AI 与 A2UI](./ai-and-a2ui)。
+这十一个适配器是 [`PlatformAdapter`](./adapter-model) 契约的具体实现。本页讲解它们*共有*的部分、完整的 transport/签名矩阵，以及对四个参考适配器的深入剖析。它们所依赖的 Rust 信令/解密平面记录在 [Rust 层](./rust-layer)；入站事件如何被门控见 [入站门控](./inbound-gating)；每个适配器如何宣告富内容见 [AI 与 A2UI](./ai-and-a2ui)。
 
 ## 共有的分解结构
 
@@ -46,12 +42,9 @@ description: 十一个内置 IM 平台适配器——Telegram、Discord、Lark�
 | `capability.ts` | 该平台的静态能力标志 + A2UI 能力矩阵。 |
 | `index.ts` | 把上述一切组装成 `PlatformAdapter` 的 `createXxxAdapter(opts)` 工厂。 |
 
-签名验证（在存在的地方）位于 **Rust** 中（`src-tauri/src/connectors/sigverify/*`），因为
-静态导出的限制意味着没有 Next.js HTTP 服务器来接收 webhook——axum 服务器拥有 socket，
-并通过 Tauri 事件把已验签的帧交给 TS。
+签名验证（在存在的地方）位于 **Rust** 中（`src-tauri/src/connectors/sigverify/*`），因为静态导出的限制意味着没有 Next.js HTTP 服务器来接收 webhook——axum 服务器拥有 socket，并通过 Tauri 事件把已验签的帧交给 TS。
 
-`buildAdapterFromRow`（[adapter-model](./adapter-model)）内部的 `buildXxx` 步骤通过
-keyring resolvers（惰性、rotation-safe）解析凭据，通过 identity probe 解析 bot 自身的 id，然后调用工厂。
+`buildAdapterFromRow`（[adapter-model](./adapter-model)）内部的 `buildXxx` 步骤通过 keyring resolvers（惰性、rotation-safe）解析凭据，通过 identity probe 解析 bot 自身的 id，然后调用工厂。
 
 ### 入站路径（每个适配器都是同一条路径）
 
@@ -67,10 +60,7 @@ flowchart TD
   D --> R["resolve A2UI surface binding"]
 ```
 
-这个分流是 load-bearing 的：**普通消息**走门控和 `ctx.emit`；**交互式回调**
-（`callback_query`、`INTERACTION_CREATE`、`im.interactive_message.action_triggered_v1`……）跳过门控并调用
-`dispatchConnectorCallback`，以便 bus 能恢复出站时写入的 `surfaceId` / `componentId`
-并驱动下一个 assistant 回合。
+这个分流是 load-bearing 的：**普通消息**走门控和 `ctx.emit`；**交互式回调**（`callback_query`、`INTERACTION_CREATE`、`im.interactive_message.action_triggered_v1`……）跳过门控并调用 `dispatchConnectorCallback`，以便 bus 能恢复出站时写入的 `surfaceId` / `componentId` 并驱动下一个 assistant 回合。
 
 ## Transport 与签名矩阵
 
@@ -94,21 +84,13 @@ flowchart TD
 
 ## Telegram
 
-工厂 `createTelegramAdapter(opts)`（`lib/connectors/adapters/telegram/index.ts:52`）。`start()`
-（`index.ts:132`）按 `opts.transport` 选择信源：long-poll（`startLongPoll`）或 webhook
-（`startWebhookTransport`）。drive 循环把每个 update 分三路路由：
+工厂 `createTelegramAdapter(opts)`（`lib/connectors/adapters/telegram/index.ts:52`）。`start()`（`index.ts:132`）按 `opts.transport` 选择信源：long-poll（`startLongPoll`）或 webhook（`startWebhookTransport`）。drive 循环把每个 update 分三路路由：
 
-1. `update.callback_query` → `parseTelegramCallbackQuery` → `dispatchConnectorCallback` + best-effort
-   `answerCallbackQuery`（`index.ts:156-175`）。
-2. 匹配未决 ForceReply 绑定的回复 → `parseTelegramForceReplyCorrelation` →
-   `dispatchConnectorCallback`，`actionType:"input"`（`index.ts:183-198`）。
+1. `update.callback_query` → `parseTelegramCallbackQuery` → `dispatchConnectorCallback` + best-effort `answerCallbackQuery`（`index.ts:156-175`）。
+2. 匹配未决 ForceReply 绑定的回复 → `parseTelegramForceReplyCorrelation` → `dispatchConnectorCallback`，`actionType:"input"`（`index.ts:183-198`）。
 3. 否则 `parseTelegramUpdate` → `gateInboundEvent` → `ctx.emit`（`index.ts:201-207`）。
 
-**Parse 管线。** `parseTelegramUpdate`（`parse.ts:676-717`）对 update 信封进行解复用：
-`edited_message` / `edited_channel_post` → `kind:"edit"` 带 `replacesMessageId`；`message_reaction` →
-`reactionToEvent` 系统事件；`callback_query` → `null`（在回调通道上处理）；否则
-`message`/`channel_post` 由 `messageToEvent`（`parse.ts:391-469`）投影，它会调用 `buildConversationKey`、
-`detectMentions`（共享 `MentionAccumulator`）和 `buildSegments`（媒体 → `tg://file/<file_id>` URL）。
+**Parse 管线。** `parseTelegramUpdate`（`parse.ts:676-717`）对 update 信封进行解复用：`edited_message` / `edited_channel_post` → `kind:"edit"` 带 `replacesMessageId`；`message_reaction` → `reactionToEvent` 系统事件；`callback_query` → `null`（在回调通道上处理）；否则 `message`/`channel_post` 由 `messageToEvent`（`parse.ts:391-469`）投影，它会调用 `buildConversationKey`、`detectMentions`（共享 `MentionAccumulator`）和 `buildSegments`（媒体 → `tg://file/<file_id>` URL）。
 
 特征片段——让 `getUpdates` 实现 exactly-once 的 long-poll 游标推进：
 
@@ -124,17 +106,9 @@ for (const update of body.result) {
 
 ## Discord
 
-工厂 `createDiscordAdapter(opts)`（`lib/connectors/adapters/discord/index.ts:58`）。`start()`
-（`index.ts:87`）打开 Gateway 客户端并 `for await` 其 `dispatches`。`INTERACTION_CREATE`
-（components / modal_submit）→ `parseDiscordInteraction` → `dispatchConnectorCallback`（`index.ts:116-123`）；
-其余 → `parseDiscordDispatch` → `gateInboundEvent` → `ctx.emit`（`index.ts:125-131`）。`selfId`
-从 gateway READY 事件中刷新，捕获在 `client.selfId`（`index.ts:108-110`）。
+工厂 `createDiscordAdapter(opts)`（`lib/connectors/adapters/discord/index.ts:58`）。`start()`（`index.ts:87`）打开 Gateway 客户端并 `for await` 其 `dispatches`。`INTERACTION_CREATE`（components / modal_submit）→ `parseDiscordInteraction` → `dispatchConnectorCallback`（`index.ts:116-123`）；其余 → `parseDiscordDispatch` → `gateInboundEvent` → `ctx.emit`（`index.ts:125-131`）。`selfId` 从 gateway READY 事件中刷新，捕获在 `client.selfId`（`index.ts:108-110`）。
 
-**Parse 管线。** `parseDiscordDispatch`（`parse.ts:510-541`）按 dispatch 类型分支：
-`MESSAGE_CREATE` → `messageToEvent`；`MESSAGE_UPDATE` → `messageToEvent(..., "edit")`；`MESSAGE_DELETE` →
-`deleteToEvent`；`MESSAGE_REACTION_ADD` / `MESSAGE_REACTION_REMOVE` → `reactionToEvent`。`fetchHistory`
-把每个 `GET /channels/:id/messages` 行重新包成合成的 `MESSAGE_CREATE` 并跑同一个
-parser，因此历史事件与实时事件形状一致。
+**Parse 管线。** `parseDiscordDispatch`（`parse.ts:510-541`）按 dispatch 类型分支：`MESSAGE_CREATE` → `messageToEvent`；`MESSAGE_UPDATE` → `messageToEvent(..., "edit")`；`MESSAGE_DELETE` → `deleteToEvent`；`MESSAGE_REACTION_ADD` / `MESSAGE_REACTION_REMOVE` → `reactionToEvent`。`fetchHistory` 把每个 `GET /channels/:id/messages` 行重新包成合成的 `MESSAGE_CREATE` 并跑同一个 parser，因此历史事件与实时事件形状一致。
 
 特征片段——Gateway opcode 处理，包括 READY self-id 捕获：
 
@@ -156,20 +130,9 @@ case OP_DISPATCH: {
 
 ## Lark
 
-工厂 `createLarkAdapter(opts)`（`lib/connectors/adapters/lark/index.ts:97`）。`start()`（`index.ts:159`）
-会做一次**预检凭据检查**——没有 appId/appSecret 的行会被干净地跳过，而不是空转一个
-注定失败的重连——然后驱动 long-connection 或 webhook transport，把每一帧都路由经共享的
-`dispatchEnvelope`。该 dispatcher 在普通消息路径之前对两种事件类型做特殊处理：
-`im.interactive_message.action_triggered_v1` → `parseLarkInteractiveCallback` → `dispatchConnectorCallback`
-（`index.ts:211-218`）；`application.bot.menu_v6` → `parseLarkBotMenuEvent`（quick-command）→ gate → emit
-（`index.ts:221-234`）；否则 `parseLarkEventEnvelope` → gate → emit（`index.ts:235-255`）。
+工厂 `createLarkAdapter(opts)`（`lib/connectors/adapters/lark/index.ts:97`）。`start()`（`index.ts:159`）会做一次**预检凭据检查**——没有 appId/appSecret 的行会被干净地跳过，而不是空转一个注定失败的重连——然后驱动 long-connection 或 webhook transport，把每一帧都路由经共享的 `dispatchEnvelope`。该 dispatcher 在普通消息路径之前对两种事件类型做特殊处理：`im.interactive_message.action_triggered_v1` → `parseLarkInteractiveCallback` → `dispatchConnectorCallback`（`index.ts:211-218`）；`application.bot.menu_v6` → `parseLarkBotMenuEvent`（quick-command）→ gate → emit（`index.ts:221-234`）；否则 `parseLarkEventEnvelope` → gate → emit（`index.ts:235-255`）。
 
-**Parse 管线。** `parseLarkEventEnvelope`（`parse.ts:228-353`）读取 `header.event_type`：
-`im.message.message_read_v1` → `read_indicator` 系统事件；`im.message.recalled_v1` → `kind:"delete"`；
-`im.chat.member.*` → member-added/removed 系统事件；`im.message.receive_v1` → `kind:"create"`（sender 经
-`open_id`、mentions、segments，`chat_type === "p2p"` → private）。Auth：`getTenantAccessToken`
-（`auth.ts:65-100`）按其 TTL（`expire ?? 7200` 秒）缓存 `tenant_access_token`，以
-`appId:appSecret` 为键。
+**Parse 管线。** `parseLarkEventEnvelope`（`parse.ts:228-353`）读取 `header.event_type`：`im.message.message_read_v1` → `read_indicator` 系统事件；`im.message.recalled_v1` → `kind:"delete"`；`im.chat.member.*` → member-added/removed 系统事件；`im.message.receive_v1` → `kind:"create"`（sender 经 `open_id`、mentions、segments，`chat_type === "p2p"` → private）。Auth：`getTenantAccessToken`（`auth.ts:65-100`）按其 TTL（`expire ?? 7200` 秒）缓存 `tenant_access_token`，以 `appId:appSecret` 为键。
 
 特征片段——在每条交付的信封上重置退避的 long-connection consume 循环：
 
@@ -190,18 +153,9 @@ while (!ended && !opts.signal.aborted) {
 
 ## OneBot
 
-工厂 `createOneBotAdapter(opts)`（`lib/connectors/adapters/onebot/index.ts:91`）。它在前面就选定 transport——
-存在 URL 时用 `forward-ws`，否则用 reverse-WS 默认。`start()`（`index.ts:173`）以
-`onOpen`/`onClose`/`onEvent` 处理器调用 `transport.start(...)`；`onOpen` 触发 `probeUpstreamImpl`，后者调用
-OneBot `get_version_info` action 并把 NapCat / Lagrange 特性标志（`markdown-card`、
-`upload_group_file`、`set_msg_emoji_like`）记录到适配器行上。`onEvent` 运行 `parseOneBotEvent` → gate →
-`ctx.emit`。
+工厂 `createOneBotAdapter(opts)`（`lib/connectors/adapters/onebot/index.ts:91`）。它在前面就选定 transport——存在 URL 时用 `forward-ws`，否则用 reverse-WS 默认。`start()`（`index.ts:173`）以 `onOpen`/`onClose`/`onEvent` 处理器调用 `transport.start(...)`；`onOpen` 触发 `probeUpstreamImpl`，后者调用 OneBot `get_version_info` action 并把 NapCat / Lagrange 特性标志（`markdown-card`、`upload_group_file`、`set_msg_emoji_like`）记录到适配器行上。`onEvent` 运行 `parseOneBotEvent` → gate → `ctx.emit`。
 
-**Parse 管线。** `parseOneBotEvent`（`parse.ts:42-60`）检测一次协议变体
-（`detectVariant`，按适配器缓存），然后委托给 `parseV11Event` 或 `parseV12Event`。`parseV11Event`
-（`v11.ts:189-320`）过滤掉 bot 自身的 `message_sent` 回声，把 `notice_type` recall → `kind:"delete"`、
-member-change notice → 系统事件、`message` post → `kind:"create"` 带 CQ-code segments。没有
-edit API、没有 markdown、也没有卡片——交互式 A2UI surface 降级为纯文本镜像尾部。
+**Parse 管线。** `parseOneBotEvent`（`parse.ts:42-60`）检测一次协议变体（`detectVariant`，按适配器缓存），然后委托给 `parseV11Event` 或 `parseV12Event`。`parseV11Event`（`v11.ts:189-320`）过滤掉 bot 自身的 `message_sent` 回声，把 `notice_type` recall → `kind:"delete"`、member-change notice → 系统事件、`message` post → `kind:"create"` 带 CQ-code segments。没有 edit API、没有 markdown、也没有卡片——交互式 A2UI surface 降级为纯文本镜像尾部。
 
 特征片段——把出站 action 与其响应配对的 echo-matched RPC 帧：
 
@@ -223,21 +177,14 @@ return new Promise<OneBotRpcResponse>((resolve, reject) => {
 
 ## 自身身份 (whoami)
 
-每个适配器都解析其 bot 自身的 id，以便检测 self-mention 并标注 UI。`lib/connectors/whoami/`
-下的专用 probe 用 keyring token 调用平台身份端点，并把
-`lastWhoamiResult` + `lastWhoamiAt` 持久化到适配器行上：
+每个适配器都解析其 bot 自身的 id，以便检测 self-mention 并标注 UI。`lib/connectors/whoami/` 下的专用 probe 用 keyring token 调用平台身份端点，并把 `lastWhoamiResult` + `lastWhoamiAt` 持久化到适配器行上：
 
-- **Telegram**——`probeTelegramIdentity` 调用 `getMe` 并存储 `@username` / `result.id`
-  （`telegram-whoami.ts:54-108`）。
-- **Slack**——`probeSlackIdentity` 调用 `auth.test` 并存储 `user @ team` / `user_id` / `team_id`
-  （`slack-whoami.ts:47-109`）。
-- **Discord**——`probeDiscordIdentity` 调用 `GET /users/@me` 并存储 bot 名称 + 头像 + snowflake id
-  （`discord-whoami.ts:49-102`）。
-- **Matrix**——`probeMatrixIdentity` 调用 `/account/whoami`，并在 homeserver 返回时存储 Matrix user id
-  与 device id（`matrix-whoami.ts`）。
+- **Telegram**——`probeTelegramIdentity` 调用 `getMe` 并存储 `@username` / `result.id`（`telegram-whoami.ts:54-108`）。
+- **Slack**——`probeSlackIdentity` 调用 `auth.test` 并存储 `user @ team` / `user_id` / `team_id`（`slack-whoami.ts:47-109`）。
+- **Discord**——`probeDiscordIdentity` 调用 `GET /users/@me` 并存储 bot 名称 + 头像 + snowflake id（`discord-whoami.ts:49-102`）。
+- **Matrix**——`probeMatrixIdentity` 调用 `/account/whoami`，并在 homeserver 返回时存储 Matrix user id 与 device id（`matrix-whoami.ts`）。
 
-持久化的结果在 **Adapters → Config** 中渲染为 "Connected as …"，让操作者一眼
-确认 token 有效且绑定到预期的 bot。
+持久化的结果在 **Adapters → Config** 中渲染为 "Connected as …"，让操作者一眼确认 token 有效且绑定到预期的 bot。
 
 ## 相关
 

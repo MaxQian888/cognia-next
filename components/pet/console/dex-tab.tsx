@@ -19,12 +19,12 @@ import { listPetModels, type PetModelRow } from "@/lib/db/pet-models"
 import { useSettingsStore } from "@/stores/settings"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { DEFAULT_PET_SETTINGS, type PetBones } from "@/types/pet"
+import { updatePetSettings } from "@/lib/pet/settings-sync"
 import { PetRenderer } from "../pet-renderer"
 
 export function DexTab({ bones }: { bones: PetBones }) {
   const t = useTranslations("pet")
   const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
   const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
   const models = useLiveQuery(() => listPetModels(), [], [] as PetModelRow[])
   const { modelId: activeModelId, coreReady } = useActiveLive2dModel(pet)
@@ -33,9 +33,15 @@ export function DexTab({ bones }: { bones: PetBones }) {
   // Tapping a model makes it the active pet — switch to the Live2D skin too, so
   // the choice takes effect immediately instead of silently staying on SVG.
   // (Named without a `use` prefix so they don't read as React hooks.)
+  // Written against the persisted record (cross-window lock), so a pick never
+  // reverts what another pet window saved since this one rendered.
   const pickModel = (id: string) =>
-    void save({ petSettings: { ...pet, skinId: "live2d", activeLive2dModelId: id } })
-  const pickMascot = () => void save({ petSettings: { ...pet, skinId: "svg" } })
+    void updatePetSettings((latest) => ({
+      ...latest,
+      skinId: "live2d",
+      activeLive2dModelId: id,
+    }))
+  const pickMascot = () => void updatePetSettings((latest) => ({ ...latest, skinId: "svg" }))
 
   return (
     <div data-testid="pet-dex" className="space-y-6">

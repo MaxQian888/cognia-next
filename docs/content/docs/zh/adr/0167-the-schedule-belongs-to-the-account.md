@@ -1,13 +1,11 @@
 ---
 title: "0167 - 日程属于账户"
-description: "定时任务用的是一个机器级、未加密、不在数据治理和备份范围内的独立数据库；它的权限策略执行函数零调用；agent 能碰到的只有三个受 IM 门控的 MCP 工具。三件事同一个根因：日程一直被当成机器的资产，而不是账户的。"
+description: "定时任务此前使用机器级、未加密且不在数据治理和备份范围内的独立数据库。权限策略没有执行调用方，agent 只能使用三个受 IM 门控的 MCP 工具。三者均源于将日程归属机器而非账户。"
 ---
 
 # ADR 0167 - 日程属于账户
 
-**状态：** 已接受
-**日期：** 2026-09-04
-**相关：** [ADR-0002](./0002-scheduler-agent-tool-resolution)、[ADR-0026](./0026-marketplace-integrations)、[ADR-0079](./0079-scheduler-extension-contract)、[ADR-0128](./0128-host-neutral-scheduler)
+**状态：** 已接受**日期：** 2026-09-04 **相关：** [ADR-0002](./0002-scheduler-agent-tool-resolution)、[ADR-0026](./0026-marketplace-integrations)、[ADR-0079](./0079-scheduler-extension-contract)、[ADR-0128](./0128-host-neutral-scheduler)
 
 ## 背景
 
@@ -81,7 +79,7 @@ Schema v219 在 `CURRENT_SCHEMA` 中声明 `scheduledTasks` 和 `scheduledTaskRu
 
 上面那条附注其实就是问题本身：没有任何界面会设置 `enableBuiltInSkills`，所以在桌面端 `schedule.*` 技能族已交付却够不到。而在够得到的地方，默认策略（`agentAutoCreate: false`）会在用户已经在确认对话框里点了「确认」之后拒绝一个 `chat` 任务，因为闸门分不清有人值守和无人值守的写入。
 
-**1. 定时任务技能族有自己的开关。** `SchedulerPermissionPolicy` 新增 `agentToolsEnabled`（默认开；在它出现之前保存的策略按「开」读取）。`resolveSendOptions` 只对上下文设置了 `interactiveChat` 的回合单独提供 `schedule.*` 技能族，并且只经由 `pluginTools`：也就是有人在本应用聊天面板里输入的回合，由实时聊天控制器通过 `buildSendOptions(…, { interactive: true })` 标记。定时运行、CLI、小队、评测、数字分身，以及从配对手机转发过来的回合都不设置：那里没人能回应桌面审批对话框，定时运行也不能给自己继续加日程。这些条目绝不会扩大一个空的允许列表（那会把「所有工具」变成「只有这九个」）；已被其他因素收窄的回合，则像其他技能一样把它们加进去。开关关闭时，这个技能族在任何模式下都会被剔除，旧的 IM 定时工具不再提供，`authorizeTaskWrite` 会以 `agent-tools-disabled` 拒绝任何 agent 写入，`list` / `inspect` 也拒绝读取。策略模块无法加载时按「关」处理。
+**1. 定时任务技能族有自己的开关。** `SchedulerPermissionPolicy` 新增 `agentToolsEnabled`（默认开；在它出现之前保存的策略按「开」读取）。`resolveSendOptions` 只对上下文设置了 `interactiveChat` 的回合单独提供 `schedule.*` 技能族，并且只经由 `pluginTools`：也就是有人在本应用聊天面板里输入的回合，由实时聊天控制器通过 `buildSendOptions(…, { interactive: true })` 标记。定时运行、CLI、小队、评测、数字分身，以及从配对手机转发过来的回合都不设置：这些语境无法回应桌面审批对话框，定时运行也不能为自己创建新日程。这些条目绝不会扩大一个空的允许列表（那会把「所有工具」变成「只有这九个」）；已被其他因素收窄的回合，则像其他技能一样把它们加进去。开关关闭时，这个技能族在任何模式下都会被剔除，旧的 IM 定时工具不再提供，`authorizeTaskWrite` 会以 `agent-tools-disabled` 拒绝任何 agent 写入，`list` / `inspect` 也拒绝读取。策略模块无法加载时按「关」处理。
 
 **2. 人的确认满足「是否有人在」这类规则。** 技能分发器自己设置 `ctx.humanConfirmed`（调用方无法冒充）：点击了本次请求的桌面对话框，或 IM 确认卡回调之后为 true；记住的「本会话内允许」授权为 false。定时任务写入根本不提供这种授权（`suppressAlwaysAllowRule`），因为每一次写入之后都会在无人值守时运行。带 `humanConfirmed` 的 `authorizeTaskWrite` 会跳过 `agent-auto-create-disabled`，对 `confirmationRequired` 类型也不再二次询问；主机闸门、agent 开关、脚本开关和额度仍然生效。没有它时，仍需要人的判定就是拒绝，这也堵上了反方向的漏洞：关闭了写入确认的 IM 渠道，此前可以创建用户明确说过始终需要自己确认的 `goal` 和 `agent-team` 任务。`agentAutoCreate` 现在的含义就是它字面上说的：agent 能否无人值守地写入。
 

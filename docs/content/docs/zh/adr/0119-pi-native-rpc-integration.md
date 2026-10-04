@@ -1,6 +1,6 @@
 ---
 title: ADR-0119 — Pi 原生 RPC 接入
-description: "新增内建 `pi-rpc` 协议，直接驱动 `pi --mode rpc` 取代社区 ACP 桥，且不削弱外部智能体的强制沙箱。"
+description: "新增内建 `pi-rpc` 协议，直接驱动 `pi --mode rpc`。用它取代社区 ACP 桥，同时保留外部智能体的强制沙箱要求。"
 ---
 
 # ADR-0119 — Pi 原生 RPC 接入
@@ -81,7 +81,7 @@ settings / prompt template / subagent / skill / memory 导入；`VendorRoots.piA
 2. **rate limits 与 MCP logs 保持 `sidecarOnly` / `agentOwned`。** 同上。
 3. **不支持 per-session `mcpServers`。** Pi 的 RPC 协议没有该参数 —— `mcpServers` 在其整个发行物中零命中。上文记录的 `COGNIA_TOOLHOST_*` 环境通道即是既定权衡；要关闭它需要上游改协议，而不是在这里改。
 4. **Windows 上不支持本地运行 Pi。** 这是强制沙箱的后果，上文已记录。Windows 现在可以**配置** Pi —— 读取其设置、为另一台机器管理其扩展包 —— 但依然无法在本地运行它。
-5. **不做包注册中心集成。** pi.dev/packages 是 npm 关键字画廊，没有 JSON API；npm 本身只能给出版本与下载量，永远给不出重叠组、上下文开销或维护信号 —— 而这些才是目录条目有价值的地方。因此目录在仓库内人工整理并带日期，散文走 i18n，使两个 locale 都可被校验。
+5. **不做包注册中心集成。** pi.dev/packages 是 npm 关键字画廊，没有 JSON API；npm 本身只能给出版本与下载量，永远给不出重叠组、上下文开销或维护信号 —— 而这些才是目录条目有价值的地方。因此目录在仓库内人工整理并带日期，说明文本通过 i18n 管理，使两个 locale 都可被校验。
 
 #### 已知限制
 
@@ -94,45 +94,39 @@ Cognia 无法读取 Pi 各扩展包自己的配置文件，因此重叠检测只
 
 #### 已撤销：「`pi-acp` 作为独立的 experimental 兼容 preset 保留」
 
-上文「影响」一节把社区桥与原生适配器并列保留，并提供显式、可回滚的迁移。该决定现予撤销。`pi-acp`
-runtime、它的 `pi` preset、它的 ecosystem surface、它的 `npx` 允许名单条目、它的能力精化，以及那套原地迁移
-（`lib/ai/agent/external/pi-migration.ts` 及其设置卡片）全部删除。
+上文「影响」一节把社区桥与原生适配器并列保留，并提供显式、可回滚的迁移。该决定现予撤销。`pi-acp` runtime、它的 `pi` preset、它的 ecosystem surface、它的 `npx` 允许名单条目、它的能力精化，以及那套原地迁移（`lib/ai/agent/external/pi-migration.ts` 及其设置卡片）全部删除。
 
 这座桥已经换不来任何可度量的东西：
 
-- 它需要与原生适配器**完全相同**的强制沙箱和**完全相同**的 macOS/Linux 平台集合，因此从来不是
-  Windows 逃生口，也不是免沙箱通道；
-- 它内部桥到 `pi --mode rpc`，也就是 Cognia 现在直接讲的协议，所以它严格地只是通往同一处的更长路径，
-  且在执行路径上多塞了一个第三方进程；
-- 它唯一的功能差异是覆盖 Pi 0.80.4–0.84.0 —— 而本 ADR **本来就**在原生路径上以
-  `runtime_version_unsupported` 拒绝这个区间。用一个未钉版本的第三方进程，去支持产品自己声明不支持的
-  版本区间，这是不一致，不是特性。
+- 它需要与原生适配器**完全相同**的强制沙箱和**完全相同**的 macOS/Linux 平台集合，因此从来不是 Windows 逃生口，也不是免沙箱通道；
+- 它内部桥到 `pi --mode rpc`，也就是 Cognia 现在直接讲的协议，所以它严格地只是通往同一处的更长路径，且在执行路径上多塞了一个第三方进程；
+- 它唯一的功能差异是覆盖 Pi 0.80.4–0.84.0 —— 而本 ADR **本来就**在原生路径上以 `runtime_version_unsupported` 拒绝这个区间。用一个未钉版本的第三方进程，去支持产品自己声明不支持的版本区间，这是不一致，不是特性。
 
-移除它同时把 `unpinnedLaunchWaivers` 从四条缩到三条。`pi-acp` 经 `npx -y pi-acp` 启动，每次启动都从网络
-重新解析该包。目录声明这份清单只能缩小、且条目只能通过钉住 distribution 来移除 —— 这里改为移除 runtime
-本身，以更直接的方式满足同一不变量。另外三条 waiver（`codex-acp`、`gemini-cli`、`qwen-code`）刻意不动：
-与 Pi 不同，那三个 agent 没有第一方替代，它们的 waiver 是承重的。
+移除它同时把 `unpinnedLaunchWaivers` 从四条缩到三条。`pi-acp` 经 `npx -y pi-acp` 启动，每次启动都从网络重新解析该包。目录声明这份清单只能缩小、且条目只能通过钉住 distribution 来移除 —— 这里改为移除 runtime 本身，以更直接的方式满足同一不变量。另外三条 waiver（`codex-acp`、`gemini-cli`、`qwen-code`）刻意不动：与 Pi 不同，那三个 agent 没有第一方替代，它们的 waiver 是承重的。
 
-「钉住 `pi-acp`」这条路被考虑过并否决。那会让 Cognia 事实上成为一个第三方桥的发行方 —— 拥有它的
-frozen lock、传递依赖树与 CVE 响应 —— 并且会拿我们本就想删掉的那个 runtime，去首次在生产中启用整套
-托管发行路径（lock 校验、provider 安装、回滚）。目录里从来没有任何一个 runtime 带过 `distributions` 条目。
+「钉住 `pi-acp`」这条路被考虑过并否决。那会让 Cognia 事实上成为一个第三方桥的发行方 —— 拥有它的 frozen lock、传递依赖树与 CVE 响应 —— 并且会拿我们本就想删掉的那个 runtime，去首次在生产中启用整套托管发行路径（lock 校验、provider 安装、回滚）。目录里从来没有任何一个 runtime 带过 `distributions` 条目。
 
-安全策略不再把 `pi-acp` 列入允许名单，因此仍指向它的手工配置会在启动时被拒绝，而不是静默地跑起一座
-未钉版本的桥。
+安全策略不再把 `pi-acp` 列入允许名单，因此仍指向它的手工配置会在启动时被拒绝，而不是静默地跑起一座未钉版本的桥。
 
 #### 已补上：本 ADR 规定过却从未实现的凭证诊断
 
-「影响」一节写明认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`。这条约束被写下来后
-从未实现 —— 未认证的 Pi 只会表现为第一次提示词失败，而不是一条诊断。现在
-`lib/ai/agent/external/runtimes/pi/pi-auth.ts` 与 agent 设置面板上的「Pi 凭证」卡片实现了它，且是对照 Pi 0.84.1 自带的
-`dist/cli/auth-check.d.ts` 实测确认，而非推断：
+「影响」一节写明认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`。这条约束被写下来后从未实现 —— 未认证的 Pi 只会表现为第一次提示词失败，而不是一条诊断。现在 `lib/ai/agent/external/runtimes/pi/pi-auth.ts` 与 agent 设置面板上的「Pi 凭证」卡片实现了它，且是对照 Pi 0.84.1 自带的 `dist/cli/auth-check.d.ts` 实测确认，而非推断：
 
-- CLI 的 **exit code 不能主导分类**：`1` 在正常路径上是 `not_ready`，但同时也表示「参数解析失败」；
-  `2` 既覆盖真正的 `invalid` 判定，也覆盖用法错误。只有 stdout 上可解析的 JSON 才是权威；
-- **错误路径不认 `--json`** —— 参数与用法错误把散文写到 stderr，stdout 完全为空，因此没有判定的探针
-  归为 `unreadable`，绝不归为「未认证」；
-- `--no-refresh` 是承重的而非装饰：它让 Pi 以 `ReadOnlyAuthStorage` 打开凭证库，这才是「Cognia 的诊断
-  不可能刷新、轮换或过期用户自己的凭证」这一保证的来源。
+- CLI 的 **exit code 不能主导分类**：`1` 在正常路径上是 `not_ready`，但同时也表示「参数解析失败」；`2` 既覆盖真正的 `invalid` 判定，也覆盖用法错误。只有 stdout 上可解析的 JSON 才是权威；
+- **错误路径不认 `--json`** —— 参数与用法错误把散文写到 stderr，stdout 完全为空，因此没有判定的探针归为 `unreadable`，绝不归为「未认证」；
+- `--no-refresh` 是承重的而非装饰：它让 Pi 以 `ReadOnlyAuthStorage` 打开凭证库，这才是「Cognia 的诊断不可能刷新、轮换或过期用户自己的凭证」这一保证的来源。
 
-`print-api-key`、`print-bearer-token` 与 `--credentials` 仍然禁用，且现在是在 argv 构造处被拒绝，而不再
-只靠约定。
+`print-api-key`、`print-bearer-token` 与 `--credentials` 仍然禁用，且现在是在 argv 构造处被拒绝，而不再只靠约定。
+
+### 2026-10-02 —— 插件携带的 Pi 包（ADR-0210）
+
+插件现在可以携带 Pi 包（能力 `pi-package`，清单字段 `piPackages`）。本修订只记录原生 RPC 集成层面的变化，能力本身的决策见 ADR-0210。
+
+- **按智能体选择加入。** `pi-rpc` 智能体在 `metadata.piPackages` 中列出包引用（`<pluginId>/<packageId>`）。没有引用的智能体走原有路径 —— 适配器甚至不会调用解析器。
+- **加载顺序。** 每个声明的扩展按引用顺序以 `-e <绝对路径>` 追加，位于 Cognia 自身扩展**之前**，后者仍是 Pi 加载的最后一个 `-e`。`-e` 在 `--no-extensions` 下依然生效，因此插件包在 `isolated` 策略下也可用。
+- **绝不静默跳过。** 引用在回收进程槽位之前，经由可注入的解析器（默认是插件注册表）解析。插件缺失或已禁用、`builtin://` 插件、未完成 prepare 的包、未声明 `hostedSession` 的包、没有工作目录的 workspace 绑定、相互冲突的环境变量值，或高于当前 Pi 的 `minPiVersion`，都会以 `PiPackageUnavailableError`（`pi_package_unavailable`）使会话启动失败。
+- **环境变量。** 包的值只以 `COGNIA_PIPKG_<NAME>` 转发，该前缀专为此目的加入 `ENV_PREFIX_ALLOWLIST`（及 CLI 镜像）。值只来自清单、插件自身配置或工作区路径，绝不来自模型，并展开在所有 Cognia 自有键之前。
+- **权限。** 对逐次调用权限表而言，包内工具是扩展工具，采用模式的 `fallback`。在 `dontAsk` 下，会话按名称预先批准的已声明包工具（`hostedSession.tools`）会被允许并保留在 `--tools` 下限中；包永远不能重新声明内置工具名。
+- **握手时限。** `session_start` 也会等待插件扩展，因此每个插件扩展在既有 120 秒上限内增加 `PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS`，超时信息会点名它们。
+- **重复加载。** 若包同时安装在会话会加载的 Pi 范围中（`global`：用户；`trusted-project`：用户与项目），且其托管扩展位于包目录之外，会以 `double-load` 拒绝：Pi 只按规范路径（`ResourceLoader.mergePaths`）对 `-e` 与已安装包的扩展去重，且没有按会话排除包的方式。位于包目录内的托管扩展保留 `-e`，只加载一次。
+- **沙箱。** 桌面包装器依据 `COGNIA_TOOLHOST_PI_PACKAGE_ROOTS` 仅为 Pi 以只读方式挂载包目录，且只保留规范化后位于宿主推导出的插件存储之下、不触及禁止/受保护/拒绝根的条目（ADR-0210 §4）；远程启动会丢弃该键。智能体运行在已配对主机上或处于 Bot 隔离时无法加载这些包。

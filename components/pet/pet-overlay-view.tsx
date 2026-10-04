@@ -8,8 +8,13 @@
 // Responsibilities:
 //  - Make the window paint through to the desktop (`data-pet-overlay` on <html>).
 //  - Render the pet (effective skin) + its speech bubble, centered.
-//  - Drag the OS window with a small movement threshold (rAF-throttled), and
-//    persist the resting position into PetSettings on pointer-up.
+//  - Drag the OS window with a small movement threshold (rAF-throttled),
+//    converting the pointer's CSS-pixel deltas to the physical pixels every
+//    window coordinate uses, and persist the resting position into
+//    PetSettings on pointer-up.
+//  - Follow pet-settings writes made in the other windows (size, wander,
+//    gaze, click-through), so this long-lived webview never runs on the copy
+//    it booted with.
 //  - Treat a non-drag click as a "pet" interaction (mirrors the widget delight).
 //
 // The right-click quick menu wraps the stable `data-testid="pet-overlay-root"`
@@ -37,6 +42,7 @@ import { usePetLocomotion } from "@/hooks/pet/use-pet-locomotion"
 import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { startOverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import { startPetSettingsFollower, updateDesktopPetSettings } from "@/lib/pet/settings-sync"
 import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   getPetWindowPosition,
@@ -48,13 +54,13 @@ import {
   showMainWindow,
 } from "@/lib/tauri/pet-window"
 import type { PetConsoleTab } from "@/lib/pet/console-tabs"
-import { MIN_THROW_SPEED, overlayWindowSize } from "@/lib/pet/overlay-geometry"
-import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
 import {
-  POPUP_INITIAL_HEIGHT,
-  POPUP_INITIAL_WIDTH,
-  resolvePopupPlacement,
-} from "@/lib/pet/popup-geometry"
+  MIN_THROW_SPEED,
+  petBoxScreenRect,
+  resolveCssToPhysicalScale,
+} from "@/lib/pet/overlay-geometry"
+import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
+import { POPUP_INITIAL_HEIGHT, POPUP_INITIAL_WIDTH } from "@/lib/pet/popup-geometry"
 import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
 import { withCareCondition } from "@/lib/pet/state/reducer"
 import { resolveCharacterSkinSelection } from "@/lib/pet/binding/resolve-skin"
@@ -65,7 +71,6 @@ import { PetBubbleView } from "./pet-bubble"
 export function PetOverlayView() {
   const t = useTranslations("pet.overlay")
   const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
   const pet: PetSettings = settings?.petSettings ?? DEFAULT_PET_SETTINGS
   const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
   const size = desktopPet.size ?? DEFAULT_PET_DESKTOP_OVERLAY.size
@@ -113,16 +118,23 @@ export function PetOverlayView() {
       offResume()
     }
   }, [])
+  // The native cursor is PHYSICAL screen pixels, so the pet's box must be
+  // too: the window's CSS-pixel screen origin scaled by this webview's pixel
+  // ratio, plus the box's inset (it is centered horizontally and
+  // bottom-anchored inside the window's bubble headroom).
   const nativeLookTarget = usePetLookTarget({
     enabled: pet.gazeFollowing !== false && !reduced,
     native: true,
     suspended: hidden || nativeSuspended || desktopPet.clickThrough,
-    getBounds: () => ({
-      left: window.screenX,
-      top: window.screenY + Math.max(0, window.innerHeight - size),
-      width: size,
-      height: size,
-    }),
+    getBounds: () => {
+      const scale = resolveCssToPhysicalScale(null, window.devicePixelRatio)
+      return {
+        left: (window.screenX + Math.max(0, window.innerWidth - size) / 2) * scale,
+        top: (window.screenY + Math.max(0, window.innerHeight - size)) * scale,
+        width: size * scale,
+        height: size * scale,
+      }
+    },
   })
   const lookTarget = nativeLookTarget ?? bridgedLookTarget
 
@@ -139,6 +151,11 @@ export function PetOverlayView() {
       delete root.dataset.petOverlay
     }
   }, [])
+
+  // This webview lives as long as the overlay does (hide/show reuses it), so
+  // it follows the other windows' pet-settings writes instead of rendering
+  // the size / wander / gaze it booted with.
+  useEffect(() => startPetSettingsFollower(), [])
 
   // Reveal the sprite window only AFTER the first painted frame. Rust creates
   // it `visible(false)` and no longer shows it on open — see
@@ -179,45 +196,33 @@ export function PetOverlayView() {
   }, [])
 
   // Right-click opens the click popup in its own "pet-popup" window (the menu +
-  // interaction panel + talk composer live there now). The sprite window no
-  // longer resizes or shifts for a menu — it stays put, killing the old
-  // resize/reposition races. Placement is resolved from the sprite window's
-  // physical rect + the monitor work area, then the popup opens already clamped
-  // on-screen. Left-click (pet/drag) and the bubble are untouched.
+  // interaction panel + talk composer live there). The sprite window never
+  // resizes or shifts for a menu. The popup is anchored to the pet's own box
+  // (physical pixels, scaled by the monitor this window is on); the native
+  // side places it above the pet (below when there is no room), clamps it to
+  // that monitor's work area, and re-places it whenever it fits itself to its
+  // card. Left-click (pet/drag) and the bubble are untouched.
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     void (async () => {
       const [pos, workArea] = await Promise.all([getPetWindowPosition(), getPetWorkArea()])
-      if (!pos || !workArea) return
-      const logical = overlayWindowSize(size)
-      const sprite = {
-        x: pos.x,
-        y: pos.y,
-        width: logical.width * scaleFactor,
-        height: logical.height * scaleFactor,
-      }
-      const popupSizePhys = {
-        width: POPUP_INITIAL_WIDTH * scaleFactor,
-        height: POPUP_INITIAL_HEIGHT * scaleFactor,
-      }
-      const { x, y } = resolvePopupPlacement(sprite, popupSizePhys, workArea)
-      await openPetPopup({ width: POPUP_INITIAL_WIDTH, height: POPUP_INITIAL_HEIGHT, x, y })
+      if (!pos) return
+      const scale = resolveCssToPhysicalScale(workArea?.scaleFactor, window.devicePixelRatio)
+      await openPetPopup({
+        width: POPUP_INITIAL_WIDTH,
+        height: POPUP_INITIAL_HEIGHT,
+        anchor: petBoxScreenRect(pos, size, scale),
+      })
     })()
   }
 
-  // Persist the resting position back into PetSettings. `save` is a shallow
-  // top-level merge, so the whole `petSettings` (with the nested desktopPet)
-  // must be passed. Read the latest snapshot at call time — wander settles
-  // long after the closure that scheduled them was rendered.
+  // Persist the resting position back into PetSettings, merged into the
+  // freshly persisted record under the cross-window lock. A component
+  // snapshot here reverted every pet setting the main window had changed
+  // since this overlay opened (wander settles long after the closure that
+  // scheduled them was rendered, and `save` replaces `petSettings` whole).
   const persistOverlayPosition = async (x: number, y: number) => {
-    const latest = useSettingsStore.getState().settings?.petSettings ?? pet
-    const latestDesktop = latest.desktopPet ?? desktopPet
-    await save({
-      petSettings: {
-        ...latest,
-        desktopPet: { ...latestDesktop, position: { x, y } },
-      },
-    })
+    await updateDesktopPetSettings(() => ({ position: { x, y } }), DEFAULT_PET_DESKTOP_OVERLAY)
   }
   const persistRef = useRef(persistOverlayPosition)
   useEffect(() => {
@@ -230,7 +235,7 @@ export function PetOverlayView() {
   const wander = desktopPet.wander ?? DEFAULT_PET_WANDER
   const locomotionPaused =
     dragging || Boolean(bubble) || hidden || nativeSuspended || desktopPet.clickThrough
-  const { locomotion, scaleFactor, beginThrow } = usePetLocomotion({
+  const { locomotion, beginThrow, settleAt } = usePetLocomotion({
     enabled: !reduced,
     paused: locomotionPaused,
     wander,
@@ -248,10 +253,17 @@ export function PetOverlayView() {
   // widget); this view only owns what "moving" means here — the window's own
   // screen origin, fetched async on pointerdown since drag deltas must apply
   // relative to it once it lands.
+  //
+  // Units: the gesture reports CSS-pixel deltas (pointer `screenX`/`screenY`)
+  // while the window origin and every position command are PHYSICAL pixels.
+  // The scale is captured with the origin (the monitor's factor, falling
+  // back to this webview's pixel ratio); without it the pet slid out from
+  // under the cursor at half speed on a 2x display.
   const originRef = useRef<{
     pointerId: number
     winX: number | null
     winY: number | null
+    scale: number
   } | null>(null)
 
   const dragGesture = usePetDragGesture({
@@ -259,7 +271,7 @@ export function PetOverlayView() {
     onDragMove: (dx, dy) => {
       const o = originRef.current
       if (!o || o.winX == null || o.winY == null) return // window origin not known yet
-      void setPetWindowPosition(o.winX + dx, o.winY + dy)
+      void setPetWindowPosition(o.winX + dx * o.scale, o.winY + dy * o.scale)
     },
     onRelease: ({ wasDrag, dx, dy, vx, vy, event }) => {
       const o = originRef.current
@@ -267,12 +279,18 @@ export function PetOverlayView() {
       if (wasDrag) {
         setDragging(false)
         if (o && o.winX != null && o.winY != null) {
-          const x = o.winX + dx
-          const y = o.winY + dy
+          const x = o.winX + dx * o.scale
+          const y = o.winY + dy * o.scale
+          // The throw threshold is a feel, measured in CSS px/s so it does
+          // not change with the display; the physics runs in physical px.
           if (!reduced && Math.hypot(vx, vy) >= MIN_THROW_SPEED) {
             // A flick → ballistic fall; the landing persists the position.
-            beginThrow(x, y, vx, vy)
+            beginThrow(x, y, vx * o.scale, vy * o.scale)
           } else {
+            // A placement: the pet stays where it was put. The engine adopts
+            // the spot, or its next wander would start from the pre-drag
+            // position and snap the window back there.
+            settleAt(x, y)
             void persistOverlayPosition(x, y)
           }
         }
@@ -308,14 +326,20 @@ export function PetOverlayView() {
     // click-vs-drag disambiguation never races this async window-position
     // fetch; fill the window origin when it lands.
     const id = e.pointerId
-    originRef.current = { pointerId: id, winX: null, winY: null }
+    originRef.current = {
+      pointerId: id,
+      winX: null,
+      winY: null,
+      scale: resolveCssToPhysicalScale(null, window.devicePixelRatio),
+    }
     void (async () => {
-      const winPos = await getPetWindowPosition()
+      const [winPos, workArea] = await Promise.all([getPetWindowPosition(), getPetWorkArea()])
       const base = winPos ?? { x: 0, y: 0 }
       const o = originRef.current
       if (o && o.pointerId === id) {
         o.winX = base.x
         o.winY = base.y
+        o.scale = resolveCssToPhysicalScale(workArea?.scaleFactor, window.devicePixelRatio)
       }
     })()
     dragGesture.onPointerDown(e)

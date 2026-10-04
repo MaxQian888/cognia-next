@@ -36,6 +36,7 @@ jest.mock("./pet-interaction-panel", () => ({
     selection,
     onOpenConsole,
     showInventory,
+    showPluginActions,
   }: {
     onFeed: () => void
     onPlay: () => void
@@ -48,6 +49,7 @@ jest.mock("./pet-interaction-panel", () => ({
     selection?: { skinId: string; modelId?: string; packId?: string }
     onOpenConsole?: (tab: string) => void
     showInventory?: boolean
+    showPluginActions?: boolean
   }) => (
     <div
       data-testid="pet-interaction-panel"
@@ -60,6 +62,7 @@ jest.mock("./pet-interaction-panel", () => ({
             : selection?.skinId
       }
       data-show-inventory={String(showInventory ?? true)}
+      data-show-plugin-actions={String(showPluginActions ?? true)}
     >
       <button onClick={() => onFeed()}>feed</button>
       <button onClick={() => onPlay()}>play</button>
@@ -100,10 +103,16 @@ const closePetWindow = jest.fn().mockResolvedValue(true)
 const resizePetPopup = jest.fn().mockResolvedValue(true)
 const setPetClickThrough = jest.fn().mockResolvedValue(true)
 const showMainWindow = jest.fn().mockResolvedValue(true)
+let popupShownHandler: (() => void) | null = null
+const popupShownDispose = jest.fn()
 jest.mock("@/lib/tauri/pet-window", () => ({
   closePetPopup: () => closePetPopup(),
   closePetWindow: () => closePetWindow(),
   onPetPopupHidden: jest.fn(() => jest.fn()),
+  onPetPopupShown: (handler: () => void) => {
+    popupShownHandler = handler
+    return popupShownDispose
+  },
   resizePetPopup: (w: number, h: number) => resizePetPopup(w, h),
   setPetClickThrough: (v: boolean) => setPetClickThrough(v),
   showMainWindow: () => showMainWindow(),
@@ -117,6 +126,26 @@ let settingsValue: unknown = {
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: { settings: unknown; save: unknown }) => unknown) =>
     selector({ settings: settingsValue, save: saveMock }),
+}))
+
+// The cross-window pet-settings writer, reduced to its contract: merge into
+// the latest persisted record (`settingsValue` stands in for Dexie) and write
+// it through the store's `save`.
+const followerDispose = jest.fn()
+const startPetSettingsFollower = jest.fn(() => followerDispose)
+jest.mock("@/lib/pet/settings-sync", () => ({
+  startPetSettingsFollower: () => startPetSettingsFollower(),
+  updateDesktopPetSettings: async (
+    patch: (latest: Record<string, unknown>) => Record<string, unknown>,
+    defaults: Record<string, unknown>
+  ) => {
+    const latest = ((settingsValue as { petSettings?: Record<string, unknown> }).petSettings ??
+      {}) as Record<string, unknown>
+    const desktop = (latest.desktopPet as Record<string, unknown> | undefined) ?? defaults
+    const next = { ...latest, desktopPet: { ...desktop, ...patch(desktop) } }
+    await saveMock({ petSettings: next })
+    return next
+  },
 }))
 
 import { PetPopupView } from "./pet-popup-view"
@@ -159,6 +188,10 @@ beforeEach(() => {
   setPetClickThrough.mockClear()
   showMainWindow.mockClear()
   saveMock.mockClear()
+  startPetSettingsFollower.mockClear()
+  followerDispose.mockClear()
+  popupShownHandler = null
+  popupShownDispose.mockClear()
   settingsValue = {
     petSettings: { enabled: true, desktopPet: { enabled: true, clickThrough: false, size: 160 } },
   }
@@ -197,6 +230,13 @@ describe("PetPopupView", () => {
     expect(revealCancel).not.toHaveBeenCalled()
     unmount()
     expect(revealCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it("follows pet-settings writes from the other windows and stops on unmount", () => {
+    const { unmount } = render(<PetPopupView />)
+    expect(startPetSettingsFollower).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(followerDispose).toHaveBeenCalledTimes(1)
   })
 
   it("starts the bridge on mount and disposes on unmount", () => {
@@ -299,6 +339,50 @@ describe("PetPopupView", () => {
     expect(screen.getByTestId("pet-interaction-panel").dataset.showInventory).toBe("false")
   })
 
+  it("omits the plugin slot (no plugin runtime in this window)", () => {
+    render(<PetPopupView />)
+    expect(screen.getByTestId("pet-interaction-panel").dataset.showPluginActions).toBe("false")
+  })
+
+  it("lays the window actions out as one labelled group of four", () => {
+    render(<PetPopupView />)
+    const group = screen.getByTestId("pet-popup-window-actions")
+    expect(group).toHaveAttribute("role", "group")
+    expect(group).toHaveAttribute("aria-label", "windowActions")
+    const ids = Array.from(group.querySelectorAll("[data-window-action]")).map((el) =>
+      el.getAttribute("data-window-action")
+    )
+    expect(ids).toEqual(["click-through", "settings", "main-window", "hide"])
+    // Click-through explains how to undo it before the user loses the pointer.
+    expect(group.querySelector('[data-window-action="click-through"]')).toHaveAttribute(
+      "title",
+      "clickThroughDescription"
+    )
+  })
+
+  it("settings opens the customization tab in the main window and closes the popup", () => {
+    render(<PetPopupView />)
+    fireEvent.click(screen.getByText("openSettings"))
+    expect(showMainWindow).toHaveBeenCalledTimes(1)
+    expect(bridgeSendOpenConsole).toHaveBeenCalledWith("customize")
+    expect(closePetPopup).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-fits an unchanged card when the native window is shown again", () => {
+    render(<PetPopupView />)
+    expect(resizePetPopup).toHaveBeenCalledTimes(1)
+    // Rust reset the re-shown window to the estimate; the card did not change.
+    popupShownHandler?.()
+    expect(resizePetPopup).toHaveBeenCalledTimes(2)
+    expect(resizePetPopup).toHaveBeenLastCalledWith(316, 416)
+  })
+
+  it("stops listening for re-shows on unmount", () => {
+    const { unmount } = render(<PetPopupView />)
+    unmount()
+    expect(popupShownDispose).toHaveBeenCalledTimes(1)
+  })
+
   it("quick-nav raises the main window, sends open-console, and closes the popup", () => {
     render(<PetPopupView />)
     fireEvent.click(screen.getByText("open shop"))
@@ -313,7 +397,7 @@ describe("PetPopupView", () => {
     expect(closePetPopup).toHaveBeenCalledTimes(1)
   })
 
-  it("fits the window to the measured card size (size only, never reposition)", () => {
+  it("fits the window to the measured card size (Rust re-places it)", () => {
     render(<PetPopupView />)
     // 300x400 measured + 16 shadow margin.
     expect(resizePetPopup).toHaveBeenCalledWith(316, 416)

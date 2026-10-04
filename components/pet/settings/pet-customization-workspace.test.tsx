@@ -33,6 +33,20 @@ jest.mock("@/lib/tauri/pet-window", () => ({
 
 const resetPet = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/pet", () => ({ resetPet: () => resetPet() }))
+// The cross-window writer, reduced to its contract: apply the updater to the
+// latest persisted record (`settingsValue` stands in for Dexie) and write it
+// through the store's `save`.
+jest.mock("@/lib/pet/settings-sync", () => ({
+  updatePetSettings: async (updater: (latest: unknown) => unknown) => {
+    const { DEFAULT_PET_SETTINGS } = jest.requireActual("@/types/pet")
+    const latest =
+      (settingsValue as { petSettings?: unknown } | null)?.petSettings ?? DEFAULT_PET_SETTINGS
+    const next = updater(latest)
+    if (next === latest) return latest
+    await save({ petSettings: next })
+    return next
+  },
+}))
 
 jest.mock("@/hooks/pet/use-pet", () => ({
   usePet: () => mockPetValue,

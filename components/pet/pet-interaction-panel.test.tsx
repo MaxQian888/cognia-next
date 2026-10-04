@@ -145,6 +145,25 @@ describe("PetInteractionPanel", () => {
     )
   })
 
+  it("omits the plugin slot where no plugin runtime runs (the popup window)", () => {
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    slotProps.mockClear()
+    render(
+      <PetInteractionPanel
+        profile={profile}
+        view={computePetView(profile, null, 0)}
+        {...makeHandlers()}
+        showPluginActions={false}
+      />
+    )
+    expect(screen.queryByTestId("pet-panel-slot")).toBeNull()
+    expect(slotProps).not.toHaveBeenCalled()
+  })
+
   it("renders the wallet strip and hides quick-nav without onOpenConsole", () => {
     setup()
     const wallet = screen.getByTestId("pet-wallet-strip")

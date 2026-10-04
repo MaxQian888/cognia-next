@@ -1,3 +1,8 @@
+/** @jest-environment jsdom */
+jest.mock("@/lib/db/seed", () => ({ seedBuiltIns: jest.fn().mockResolvedValue(undefined) }))
+
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+
 import {
   createBackgroundTaskSource,
   wireBackgroundTaskSource,
@@ -5,9 +10,14 @@ import {
 } from "./background-task-source"
 import {
   __clearRendererBackgroundRunsForTesting,
+  collectRendererBackgroundResult,
   startRendererBackgroundRun,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+
+const database = createDbTestFixture()
+beforeAll(database.initialize)
+afterAll(database.dispose)
 
 describe("createBackgroundTaskSource", () => {
   it("aggregates concurrent tasks and settles only after the last task finishes", () => {
@@ -120,7 +130,9 @@ describe("createBackgroundTaskSource", () => {
       },
       Promise.resolve(result)
     )
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(await collectRendererBackgroundResult("runtime-run")).toMatchObject({
+      text: "private result",
+    })
 
     expect(emit.mock.calls.map(([event]) => event.kind)).toEqual(["thinking", "success"])
     expect(JSON.stringify(emit.mock.calls)).not.toContain("private")

@@ -57,6 +57,7 @@ import { resolveEffectiveSkinSelection } from "../skins/resolve-effective-skin"
 import { PetAppearanceControls } from "./pet-appearance-controls"
 import { PetCareControls } from "./pet-care-controls"
 import { PetCosmeticControls } from "./pet-cosmetic-controls"
+import { updatePetSettings } from "@/lib/pet/settings-sync"
 import { PetDesktopControls } from "./pet-desktop-controls"
 import { PetInteractionControls } from "./pet-interaction-controls"
 import { PetLive2dLookControls } from "./pet-live2d-look-controls"
@@ -73,9 +74,12 @@ export function PetCustomizationWorkspace() {
   const t = useTranslations("settings.pet")
   const tc = useTranslations("pet.customize")
   const settings = useSettingsStore((state) => state.settings)
-  const save = useSettingsStore((state) => state.save)
   const pet: PetSettings = settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const patch = (next: Partial<PetSettings>) => void save({ petSettings: { ...pet, ...next } })
+  // Merged into the PERSISTED record under the cross-window lock, never into
+  // this render's copy: the desktop overlay writes its resting position from
+  // its own window, and `save` replaces `petSettings` whole.
+  const patch = (next: Partial<PetSettings>) =>
+    void updatePetSettings((latest) => ({ ...latest, ...next }))
 
   /**
    * Turning the whole subsystem off has to take the desktop window with it.
@@ -93,10 +97,11 @@ export function PetCustomizationWorkspace() {
       return
     }
     void destroyPetWindow()
-    patch({
+    void updatePetSettings((latest) => ({
+      ...latest,
       enabled,
-      desktopPet: { ...(pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: false },
-    })
+      desktopPet: { ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: false },
+    }))
   }
 
   const { profile, view } = usePet()

@@ -282,6 +282,17 @@ pub(crate) fn panel_has_in_flight_builds(role: PetPanelRole) -> bool {
         != 0
 }
 
+/// Whether the latest lifecycle for `role` is an open (not a hide/cancel).
+///
+/// This, not `WebviewWindow::is_visible`, is what "the pet window is open"
+/// means: a freshly built window stays hidden until its renderer paints, so a
+/// visibility probe answered "closed" for that whole window and a second
+/// caller re-opened (and prematurely revealed) a window that was already on
+/// its way.
+pub(crate) fn panel_open_intent_is_set(role: PetPanelRole) -> bool {
+    panel_open_intent(role).load(Ordering::SeqCst)
+}
+
 pub(crate) fn current_panel_generation(role: PetPanelRole) -> u64 {
     panel_generation(role).load(Ordering::SeqCst)
 }
@@ -848,6 +859,23 @@ mod tests {
             PetPanelRole::Sprite,
             generation
         ));
+    }
+
+    #[test]
+    fn open_intent_follows_the_latest_lifecycle_not_visibility() {
+        let _serial = lock_panel_state_for_test();
+        // An open sets the intent before any reveal ran, so a still-hidden
+        // first-paint window already counts as open.
+        begin_panel_open(PetPanelRole::Sprite);
+        assert!(panel_open_intent_is_set(PetPanelRole::Sprite));
+        // A hide clears it.
+        cancel_panel_reveal(PetPanelRole::Sprite);
+        assert!(!panel_open_intent_is_set(PetPanelRole::Sprite));
+        // Destroy clears it too.
+        begin_panel_open(PetPanelRole::Sprite);
+        begin_panel_destroy(PetPanelRole::Sprite);
+        assert!(!panel_open_intent_is_set(PetPanelRole::Sprite));
+        assert!(finish_panel_destroy(PetPanelRole::Sprite));
     }
 
     #[test]

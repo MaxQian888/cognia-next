@@ -19,9 +19,15 @@
 import type { PetEventKind } from "@/types/pet"
 import type { Platform } from "@/lib/platform/detect"
 import type { PetWindowRole } from "@/lib/pet/window-role"
+import type { PetProfile } from "@/types/pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { getPetItem } from "@/lib/pet/economy/item-catalog"
-import { decrementPetInventory } from "@/lib/db/pet"
+import { decrementPetInventory, getPetProfile } from "@/lib/db/pet"
+import {
+  INTERACTION_COOLDOWN_MS,
+  normalizeInteractionGate,
+  remainingCooldownMs,
+} from "@/lib/pet/interaction/gate"
 import { XP_AWARD } from "@/lib/pet/xp/award-table"
 import { COIN_AWARD } from "@/lib/pet/economy/coin-table"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
@@ -32,6 +38,14 @@ import {
   type PetUnavailableReason,
 } from "@/lib/pet/access/availability"
 import { consumePetBudget, getRemainingPetBudget } from "@/lib/pet/access/reward-budget"
+import {
+  MAX_COINS_PER_REWARD,
+  MAX_XP_PER_REWARD,
+  PET_INTERACTION_KINDS,
+  PET_REWARDABLE_KINDS,
+  type PetInteractionKind,
+  type PetRewardableKind,
+} from "@/lib/pet/access/limits"
 
 /**
  * Who is asking.
@@ -62,6 +76,14 @@ export type PetRefusal =
   | { code: "kind-not-allowed"; kind: string }
   | { code: "unknown-item"; itemId: string }
   | { code: "item-not-owned"; itemId: string }
+  /** The item exists but is for a different interaction (food is not a pat). */
+  | { code: "item-kind-mismatch"; itemId: string; kind: string; itemKind?: string }
+  /** No pet profile exists on this device yet. */
+  | { code: "uninitialized" }
+  /** The pet is still an egg; nurturing it would do nothing. */
+  | { code: "not-hatched" }
+  /** The controller would drop this action: it is still cooling down. */
+  | { code: "cooling-down"; kind: string; retryAfterMs: number }
 
 /**
  * Reduce a caller's free-form meta to the id-shaped whitelist.
@@ -86,17 +108,14 @@ function sanitizeEventMeta(meta: Record<string, unknown> | undefined): Record<st
 export type PetAccessResult =
   { ok: true; grantedXp: number; grantedCoins: number } | { ok: false; refusal: PetRefusal }
 
-/** Nurture kinds any subject may drive directly. */
-export const PET_INTERACTION_KINDS = [
-  "fed",
-  "played",
-  "petted",
-  "talked",
-  "slept",
-  "cleaned",
-  "treated",
-] as const
-export type PetInteractionKind = (typeof PET_INTERACTION_KINDS)[number]
+export {
+  MAX_COINS_PER_REWARD,
+  MAX_XP_PER_REWARD,
+  PET_INTERACTION_KINDS,
+  PET_REWARDABLE_KINDS,
+  type PetInteractionKind,
+  type PetRewardableKind,
+}
 
 const INTERACTION_KIND_SET: ReadonlySet<string> = new Set(PET_INTERACTION_KINDS)
 
@@ -105,20 +124,7 @@ function isPetInteractionKind(kind: string): kind is PetInteractionKind {
   return INTERACTION_KIND_SET.has(kind)
 }
 
-/** Kinds a non-user subject may reward through {@link requestPetReward}. */
-export const PET_REWARDABLE_KINDS: readonly PetEventKind[] = [
-  "fed",
-  "played",
-  "petted",
-  "talked",
-  "slept",
-  "cleaned",
-  "treated",
-  "workflowRun",
-]
-
-/** Hard per-call XP ceiling, below the daily budget. */
-export const MAX_XP_PER_REWARD = 10
+const REWARDABLE_KIND_SET: ReadonlySet<string> = new Set(PET_REWARDABLE_KINDS)
 
 export interface PetAccessDeps {
   now?: () => number
@@ -129,14 +135,25 @@ export interface PetAccessDeps {
   rateLimiter?: { check: (subjectKey: string, operation: string) => void }
   emit?: typeof emitPetEvent
   decrementInventory?: (id: string, qty?: number) => Promise<boolean>
+  /** Reads the durable profile for the advisory controller check. */
+  getProfile?: () => Promise<PetProfile | undefined | null>
 }
+
+/** Subject kinds whose ledger keys a plugin id must never land on. */
+const NON_PLUGIN_SUBJECT_KEYS: ReadonlySet<string> = new Set(["user", "agent", "plugin"])
 
 /**
  * Ledger and bucket key. Plugins keep their bare id so an in-flight day's
- * ledger and the existing per-plugin buckets survive this refactor unchanged.
+ * ledger and the existing per-plugin buckets survive this refactor unchanged,
+ * except an id that spells another subject's key ("user", "agent" are valid
+ * plugin ids): those are namespaced, or that plugin would share the agent's
+ * daily ledger and burst bucket.
  */
 export function petSubjectKey(subject: PetAccessSubject): string {
-  if (subject.kind === "plugin") return subject.id ?? "plugin"
+  if (subject.kind === "plugin") {
+    const id = subject.id ?? "plugin"
+    return NON_PLUGIN_SUBJECT_KEYS.has(id) ? `plugin:${id}` : id
+  }
   return subject.kind
 }
 
@@ -171,14 +188,51 @@ function checkBurst(subjectKey: string, operation: string, deps: PetAccessDeps):
  * `needsEffect` in place of the base interaction restore, so an unowned id was
  * a free upgrade: the shop path checks ownership and decrements, and this path
  * did neither. Refusing rather than quietly dropping the id keeps the caller
- * honest about what it asked for.
+ * honest about what it asked for. An item is spent only on the interaction it
+ * is for, so nobody pays for food that a `petted` event would then ignore.
  */
-async function spendItem(itemId: string, deps: PetAccessDeps): Promise<PetRefusal | null> {
+async function spendItem(
+  itemId: string,
+  kind: PetInteractionKind,
+  deps: PetAccessDeps
+): Promise<PetRefusal | null> {
   const item = getPetItem(itemId)
   if (!item || !item.consumable) return { code: "unknown-item", itemId }
+  if (item.interactionKind !== kind) {
+    return { code: "item-kind-mismatch", itemId, kind, itemKind: item.interactionKind }
+  }
   const decrement = deps.decrementInventory ?? decrementPetInventory
   const consumed = await decrement(itemId, 1)
   return consumed ? null : { code: "item-not-owned", itemId }
+}
+
+/**
+ * Ask the controller's own durable state whether it would accept a driven
+ * nurture right now, BEFORE anything is spent.
+ *
+ * The controller stays the authority (it re-checks on the event), but it can
+ * only drop an event after the fact: the ledger was already charged, the item
+ * already decremented, and the caller already told it was granted rewards that
+ * were never applied. A `user` subject is exempt, as from the ledger: its
+ * refusal is answered by the controller's own cooldown bubble. Kinds without a
+ * cooldown are ambient and pass.
+ */
+async function checkControllerWouldAccept(
+  subject: PetAccessSubject,
+  kind: string,
+  deps: PetAccessDeps
+): Promise<PetRefusal | null> {
+  if (subject.kind === "user" || INTERACTION_COOLDOWN_MS[kind] === undefined) return null
+  const profile = await (deps.getProfile ?? getPetProfile)()
+  if (!profile) return { code: "uninitialized" }
+  if (!profile.soul) return { code: "not-hatched" }
+  const now = (deps.now ?? Date.now)()
+  const retryAfterMs = remainingCooldownMs(
+    normalizeInteractionGate(profile.interactionGate),
+    kind,
+    now
+  )
+  return retryAfterMs > 0 ? { code: "cooling-down", kind, retryAfterMs } : null
 }
 
 /** Remaining daily reward allowance for a subject. */
@@ -214,8 +268,15 @@ export async function requestPetInteraction(
   const limited = checkBurst(subjectKey, "pet:interact", deps)
   if (limited) return { ok: false, refusal: limited }
 
+  // Not awaited for a `user` subject (exempt anyway): a hotkey's event still
+  // reaches the bus in the same tick, the way the command registry always did.
+  if (subject.kind !== "user") {
+    const notNow = await checkControllerWouldAccept(subject, kind, deps)
+    if (notNow) return { ok: false, refusal: notNow }
+  }
+
   if (opts.itemId) {
-    const itemRefusal = await spendItem(opts.itemId, deps)
+    const itemRefusal = await spendItem(opts.itemId, kind, deps)
     if (itemRefusal) return { ok: false, refusal: itemRefusal }
   }
 
@@ -250,6 +311,11 @@ export async function requestPetInteraction(
  * Grant a milestone reward for a whitelisted kind. Amounts are clamped per call
  * and against the daily ledger rather than rejected, so an exhausted budget is
  * a successful call that granted zero.
+ *
+ * A reward never consumes an item, so it never carries one either: the
+ * sanitized meta drops `itemId`. Before that, `emitEvent("fed", { meta: {
+ * itemId } })` applied a premium item's restore without owning or spending it,
+ * the very upgrade `requestPetInteraction` refuses.
  */
 export async function requestPetReward(
   subject: PetAccessSubject,
@@ -259,15 +325,22 @@ export async function requestPetReward(
 ): Promise<PetAccessResult> {
   const unavailable = checkAvailability(deps)
   if (unavailable) return { ok: false, refusal: unavailable }
-  if (!PET_REWARDABLE_KINDS.includes(kind)) {
+  if (!REWARDABLE_KIND_SET.has(kind)) {
     return { ok: false, refusal: { code: "kind-not-allowed", kind } }
   }
 
   const subjectKey = petSubjectKey(subject)
-  const limited = checkBurst(subjectKey, "pet:emit", deps)
+  // A care kind drives the pet exactly like `requestPetInteraction`, so it is
+  // limited by the same (stricter) bucket rather than the reward bucket.
+  const bucket = isPetInteractionKind(kind) ? "pet:interact" : "pet:emit"
+  const limited = checkBurst(subjectKey, bucket, deps)
   if (limited) return { ok: false, refusal: limited }
 
+  const notNow = await checkControllerWouldAccept(subject, kind, deps)
+  if (notNow) return { ok: false, refusal: notNow }
+
   const askXp = Math.min(MAX_XP_PER_REWARD, Math.max(0, Math.floor(opts.xp ?? 0)))
+  const askCoins = Math.min(MAX_COINS_PER_REWARD, Math.max(0, Math.floor(opts.coins ?? 0)))
   // A `user` subject is exempt from the daily ledger here for the same reason
   // it is exempt in `requestPetInteraction`, and because
   // `remainingPetAllowance` already reports an unbounded allowance for one.
@@ -275,9 +348,10 @@ export async function requestPetReward(
   const { grantedXp, grantedCoins } =
     subject.kind === "user"
       ? { grantedXp: askXp, grantedCoins: Math.max(0, Math.floor(opts.coins ?? 0)) }
-      : consumePetBudget(subjectKey, { xp: askXp, coins: opts.coins })
+      : consumePetBudget(subjectKey, { xp: askXp, coins: askCoins })
   const emit = deps.emit ?? emitPetEvent
-  const meta: Record<string, unknown> = { ...sanitizeEventMeta(opts.meta), coins: grantedCoins }
+  const { itemId: _droppedItemId, ...rewardMeta } = sanitizeEventMeta(opts.meta)
+  const meta: Record<string, unknown> = { ...rewardMeta, coins: grantedCoins }
   if (subject.kind === "plugin" && subject.id) meta.pluginId = subject.id
   emit({
     source: subject.kind === "agent" ? "system" : "plugin",

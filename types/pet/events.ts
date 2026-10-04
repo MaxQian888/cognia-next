@@ -25,54 +25,67 @@ export type PetEventSource =
   // budget-clamped in lib/plugin/api/pet-api.ts; meta carries pluginId).
   | "plugin"
 
-/** Neutral event vocabulary the reducer + XP table understand. */
-export type PetEventKind =
+/**
+ * Neutral event vocabulary the reducer + XP table understand, as a runtime
+ * list so a contribution that names a kind (a plugin achievement counting
+ * one) can be validated against the kinds the activity ledger records.
+ */
+export const PET_EVENT_KINDS = [
   // agent-state radar
-  | "thinking"
-  | "waiting"
-  | "review"
-  | "success"
-  | "error"
-  | "idle"
+  "thinking",
+  "waiting",
+  "review",
+  "success",
+  "error",
+  "idle",
   // subsystem milestones (XP-bearing)
-  | "goalProgress"
-  | "goalComplete"
-  | "teamRun"
-  | "inboundMessage"
-  | "scheduledRun"
+  "goalProgress",
+  "goalComplete",
+  "teamRun",
+  "inboundMessage",
+  "scheduledRun",
   // a scheduled task began running (expressive "thinking")
-  | "scheduledRunStarting"
+  "scheduledRunStarting",
   // a scheduled task/reminder is due right now (drives the pet reminder)
-  | "scheduledRunDue"
-  | "workflowRun"
+  "scheduledRunDue",
+  "workflowRun",
   // ambient twin-awareness signals (opt-in; job metadata only, never content)
-  | "twinBusy"
-  | "twinMilestone"
+  "twinBusy",
+  "twinMilestone",
   // a new Attention Radar report landed (ambient, 0 XP; meta carries only
   // { reportId }, never report content — `hooks/pet/use-pet-insight.ts` owns
   // the bubble and reads the verdict through the PII gate itself)
-  | "radarReport"
+  "radarReport",
+  // a plugin granted a budgeted reward through ctx.pet.emitEvent (quest done,
+  // milestone reached). Neutral on purpose: it is not a workflow run, a goal or
+  // a care action, so it feeds no counter, achievement or stat besides the XP
+  // and coins it carries explicitly.
+  "pluginReward",
   // direct user interactions
-  | "fed"
-  | "played"
-  | "petted"
-  | "talked"
-  | "slept"
-  | "cleaned"
-  | "treated"
+  "fed",
+  "played",
+  "petted",
+  "talked",
+  "slept",
+  "cleaned",
+  "treated",
   // lifecycle
-  | "hatched"
-  | "levelUp"
-  | "evolved"
-  | "achievementUnlocked"
-  | "greeting"
+  "hatched",
+  "levelUp",
+  "evolved",
+  "achievementUnlocked",
+  "greeting",
   // care transition (controller-emitted on well → unwell; 0 XP)
-  | "unwell"
+  "unwell",
   // daily-care streak advanced to a new day (controller-emitted, ceremony
   // only — 0 XP/coins; meta carries { days, multiplier })
-  | "streakDay"
+  "streakDay",
   // hatch anniversary (birthday-source, once per birthday local-day)
-  | "birthday"
+  "birthday",
+] as const
+
+/** Neutral event vocabulary the reducer + XP table understand. */
+export type PetEventKind = (typeof PET_EVENT_KINDS)[number]
 
 export interface PetEvent {
   source: PetEventSource

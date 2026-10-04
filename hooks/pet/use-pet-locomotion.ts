@@ -84,6 +84,14 @@ export interface UsePetLocomotionResult {
    * px(/s). Enters the falling mode regardless of the wander switch.
    */
   beginThrow: (x: number, y: number, vx: number, vy: number) => void
+  /**
+   * Hand off a gentle drag release: the user parked the window at physical
+   * `(x, y)`. The engine adopts it as the new resting spot, so the next wander
+   * starts from there (dropping first when it is mid-air) instead of snapping
+   * back to where the pet stood before the drag. Also re-reads the work area,
+   * since the drag may have crossed onto another monitor.
+   */
+  settleAt: (x: number, y: number) => void
 }
 
 const DEFAULT_IO: PetLocomotionIo = {
@@ -358,10 +366,18 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
   }, [io])
 
   // (Re)activate the loop whenever the gates open. The loop parks itself when
-  // resting + paused/disabled, so flipping a gate must kick it again.
+  // resting + paused/disabled, so flipping a gate must kick it again. A
+  // RE-activation also re-reads the work area: the gates reopen after the
+  // window was hidden (and after a sleep/wake, which reveals it again), and a
+  // moved taskbar or a rearranged display while it was parked is otherwise
+  // only noticed at the next landing. The first activation reads it anyway.
   const active = args.enabled && args.wander.enabled && !args.paused
+  const activatedOnceRef = useRef(false)
   useEffect(() => {
-    if (active) engineRef.current?.kick()
+    if (!active) return
+    if (activatedOnceRef.current) engineRef.current?.refreshArea()
+    activatedOnceRef.current = true
+    engineRef.current?.kick()
   }, [active])
 
   // Surface polling runs only while wandering AND climb-windows is on.
@@ -378,5 +394,33 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
     engineRef.current?.kick()
   }
 
-  return { locomotion, scaleFactor, beginThrow }
+  const settleAt = (x: number, y: number) => {
+    stateRef.current = createLocomotionState(x, y, stateRef.current?.facing ?? "right")
+    lastSentRef.current = { x: Math.round(x), y: Math.round(y) }
+    engineRef.current?.refreshArea()
+    engineRef.current?.kick()
+  }
+
+  // A size change resizes the native window around its bottom-center, which
+  // moves its top-left without the engine knowing. Re-adopt the real position
+  // (and the work area) so the next step does not drag the window back to the
+  // pre-resize coordinates. The first render only records the size.
+  const sizeRef = useRef(args.petSize)
+  useEffect(() => {
+    if (sizeRef.current === args.petSize) return
+    sizeRef.current = args.petSize
+    let cancelled = false
+    void io.getPosition().then((pos) => {
+      if (cancelled || disposedRef.current || !pos) return
+      stateRef.current = createLocomotionState(pos.x, pos.y, stateRef.current?.facing ?? "right")
+      lastSentRef.current = { x: Math.round(pos.x), y: Math.round(pos.y) }
+      engineRef.current?.refreshArea()
+      engineRef.current?.kick()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [args.petSize, io])
+
+  return { locomotion, scaleFactor, beginThrow, settleAt }
 }

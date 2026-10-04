@@ -7,9 +7,11 @@ import {
   isOnPlatform,
   nearestSupportBelow,
   overlayWindowSize,
+  petBoxScreenRect,
   platformBoundsX,
   reachablePlatformAbove,
   releaseVelocityFromSamples,
+  resolveCssToPhysicalScale,
   resolveGroundTop,
   resolvePlatformTop,
   samePlatform,
@@ -31,6 +33,48 @@ describe("overlayWindowSize", () => {
     const large = overlayWindowSize(256)
     expect(large.width - small.width).toBe(160)
     expect(large.height - small.height).toBe(160)
+  })
+})
+
+describe("petBoxScreenRect", () => {
+  it("locates the bottom-centered pet box inside the window at 1x", () => {
+    const rect = petBoxScreenRect({ x: 1000, y: 600 }, 128, 1)
+    expect(rect).toEqual({
+      x: 1000 + OVERLAY_CHROME_W / 2,
+      y: 600 + OVERLAY_CHROME_H,
+      width: 128,
+      height: 128,
+    })
+  })
+
+  it("scales the logical offsets and size to physical pixels", () => {
+    const rect = petBoxScreenRect({ x: 2000, y: 1200 }, 128, 2)
+    expect(rect).toEqual({
+      x: 2000 + OVERLAY_CHROME_W,
+      y: 1200 + OVERLAY_CHROME_H * 2,
+      width: 256,
+      height: 256,
+    })
+    // The box's bottom edge is the window's bottom edge.
+    const win = overlayWindowSize(128)
+    expect(rect.y + rect.height).toBe(1200 + win.height * 2)
+  })
+})
+
+describe("resolveCssToPhysicalScale", () => {
+  it("prefers the monitor's reported scale factor", () => {
+    expect(resolveCssToPhysicalScale(1.5, 2)).toBe(1.5)
+  })
+
+  it("falls back to devicePixelRatio when the monitor is unknown", () => {
+    expect(resolveCssToPhysicalScale(null, 2)).toBe(2)
+    expect(resolveCssToPhysicalScale(undefined, 1.25)).toBe(1.25)
+  })
+
+  it("rejects non-positive or non-finite values and ends at 1", () => {
+    expect(resolveCssToPhysicalScale(0, Number.NaN)).toBe(1)
+    expect(resolveCssToPhysicalScale(-2, 0)).toBe(1)
+    expect(resolveCssToPhysicalScale(Number.POSITIVE_INFINITY, undefined)).toBe(1)
   })
 })
 

@@ -1,5 +1,6 @@
-import type { PetEvent } from "@/types/pet"
+import type { PetEvent, PetProfile } from "@/types/pet"
 import {
+  MAX_COINS_PER_REWARD,
   MAX_XP_PER_REWARD,
   petSubjectKey,
   remainingPetAllowance,
@@ -17,6 +18,16 @@ import { COIN_AWARD } from "@/lib/pet/economy/coin-table"
 
 let emitted: Array<Omit<PetEvent, "at">>
 
+const NOW = 1_800_000_000_000
+
+/** A hatched pet with nothing cooling down. */
+function hatched(lastAtByKind: Record<string, number> = {}): PetProfile {
+  return {
+    soul: { name: "Boba", personality: "x", hatchDate: "" },
+    interactionGate: { lastAtByKind },
+  } as unknown as PetProfile
+}
+
 function deps(over: Partial<PetAccessDeps> = {}): PetAccessDeps {
   return {
     isEnabled: () => true,
@@ -27,6 +38,8 @@ function deps(over: Partial<PetAccessDeps> = {}): PetAccessDeps {
       emitted.push(e)
     }) as PetAccessDeps["emit"],
     decrementInventory: async () => true,
+    getProfile: async () => hatched(),
+    now: () => NOW,
     ...over,
   }
 }
@@ -136,6 +149,14 @@ describe("plugin and agent subjects", () => {
     expect(petSubjectKey({ kind: "plugin", id: "p1" })).toBe("p1")
   })
 
+  it("never lets a plugin id land on another subject's ledger", () => {
+    // "agent" and "user" are valid plugin ids; bare, they shared the agent's
+    // daily ledger and burst bucket.
+    expect(petSubjectKey({ kind: "plugin", id: "agent" })).toBe("plugin:agent")
+    expect(petSubjectKey({ kind: "plugin", id: "user" })).toBe("plugin:user")
+    expect(petSubjectKey({ kind: "plugin", id: "plugin" })).toBe("plugin:plugin")
+  })
+
   it("drains to a successful zero grant rather than refusing", async () => {
     const subject = { kind: "agent" } as const
     for (let i = 0; i < 200; i += 1) {
@@ -180,6 +201,27 @@ describe("item spending", () => {
     expect(emitted).toEqual([])
   })
 
+  it("refuses an item used for an interaction it is not for, without spending it", async () => {
+    const decrements: string[] = []
+    const res = await requestPetInteraction(
+      { kind: "plugin", id: "p1" },
+      "petted",
+      { itemId: "berry" },
+      deps({
+        decrementInventory: async (id) => {
+          decrements.push(id)
+          return true
+        },
+      })
+    )
+    expect(res).toEqual({
+      ok: false,
+      refusal: { code: "item-kind-mismatch", itemId: "berry", kind: "petted", itemKind: "fed" },
+    })
+    expect(decrements).toEqual([])
+    expect(emitted).toEqual([])
+  })
+
   it("decrements the owned item exactly once and forwards the id", async () => {
     const decrements: string[] = []
     const res = await requestPetInteraction(
@@ -208,6 +250,48 @@ describe("rewards", () => {
       deps()
     )
     expect(res).toEqual({ ok: true, grantedXp: MAX_XP_PER_REWARD, grantedCoins: 5 })
+  })
+
+  it("clamps coins per call too, so one call cannot take the whole day", async () => {
+    const res = await requestPetReward(
+      { kind: "plugin", id: "p1" },
+      "pluginReward",
+      { xp: 1, coins: 100 },
+      deps()
+    )
+    expect(res).toEqual({ ok: true, grantedXp: 1, grantedCoins: MAX_COINS_PER_REWARD })
+    expect(remainingPetAllowance({ kind: "plugin", id: "p1" }).coins).toBe(
+      PET_DAILY_COIN_BUDGET - MAX_COINS_PER_REWARD
+    )
+  })
+
+  it("accepts the neutral pluginReward kind", async () => {
+    const res = await requestPetReward(
+      { kind: "plugin", id: "p1" },
+      "pluginReward",
+      { xp: 5, coins: 5 },
+      deps()
+    )
+    expect(res).toEqual({ ok: true, grantedXp: 5, grantedCoins: 5 })
+    expect(emitted.at(-1)).toMatchObject({ source: "plugin", kind: "pluginReward", xp: 5 })
+  })
+
+  it("never carries an item on a reward (no unowned upgrade through emitEvent)", async () => {
+    await requestPetReward(
+      { kind: "plugin", id: "p1" },
+      "fed",
+      { meta: { itemId: "royal-feast" } },
+      deps()
+    )
+    expect(emitted.at(-1)?.meta).not.toHaveProperty("itemId")
+  })
+
+  it("limits a care-kind reward by the interaction bucket, not the reward bucket", async () => {
+    const ops: string[] = []
+    const rateLimiter = { check: (_key: string, op: string) => void ops.push(op) }
+    await requestPetReward({ kind: "plugin", id: "p1" }, "fed", {}, deps({ rateLimiter }))
+    await requestPetReward({ kind: "plugin", id: "p1" }, "pluginReward", {}, deps({ rateLimiter }))
+    expect(ops).toEqual(["pet:interact", "pet:emit"])
   })
 
   it("starts from the full daily allowance", () => {
@@ -253,7 +337,8 @@ describe("event meta is sanitized by whatever emits it", () => {
       { meta: { itemId: "berry", userText: "secret words", nested: { x: 1 } } },
       deps()
     )
-    expect(emitted.at(-1)?.meta).toEqual({ itemId: "berry", coins: 0 })
+    // A reward carries no item (see "never carries an item on a reward").
+    expect(emitted.at(-1)?.meta).toEqual({ coins: 0 })
   })
 
   it("keeps the id-shaped keys it is meant to carry", async () => {
@@ -269,5 +354,95 @@ describe("event meta is sanitized by whatever emits it", () => {
       stage: "adult",
       pluginId: "p1",
     })
+  })
+})
+
+describe("the controller's own state is consulted before anything is spent", () => {
+  it("refuses a cooling action for a plugin, spending neither ledger nor item", async () => {
+    const decrements: string[] = []
+    const res = await requestPetInteraction(
+      { kind: "plugin", id: "p1" },
+      "fed",
+      { itemId: "berry" },
+      deps({
+        // Fed 500ms ago; `fed` cools for 1500ms.
+        getProfile: async () => hatched({ fed: NOW - 500 }),
+        decrementInventory: async (id) => {
+          decrements.push(id)
+          return true
+        },
+      })
+    )
+    expect(res).toEqual({
+      ok: false,
+      refusal: { code: "cooling-down", kind: "fed", retryAfterMs: 1000 },
+    })
+    expect(decrements).toEqual([])
+    expect(emitted).toEqual([])
+    expect(remainingPetAllowance({ kind: "plugin", id: "p1" })).toEqual({
+      xp: PET_DAILY_XP_BUDGET,
+      coins: PET_DAILY_COIN_BUDGET,
+    })
+  })
+
+  it("refuses a cooling care-kind reward the same way", async () => {
+    const res = await requestPetReward(
+      { kind: "agent" },
+      "treated",
+      { xp: 5, coins: 5 },
+      deps({ getProfile: async () => hatched({ treated: NOW - 1000 }) })
+    )
+    expect(res).toEqual({
+      ok: false,
+      refusal: { code: "cooling-down", kind: "treated", retryAfterMs: 9000 },
+    })
+    expect(remainingPetAllowance({ kind: "agent" }).coins).toBe(PET_DAILY_COIN_BUDGET)
+  })
+
+  it("lets an ambient reward kind through regardless of cooldowns", async () => {
+    const res = await requestPetReward(
+      { kind: "plugin", id: "p1" },
+      "pluginReward",
+      { xp: 2 },
+      deps({ getProfile: async () => null })
+    )
+    expect(res.ok).toBe(true)
+  })
+
+  it("refuses nurturing an egg", async () => {
+    const res = await requestPetInteraction(
+      { kind: "plugin", id: "p1" },
+      "played",
+      {},
+      deps({ getProfile: async () => ({ soul: null }) as unknown as PetProfile })
+    )
+    expect(res).toEqual({ ok: false, refusal: { code: "not-hatched" } })
+  })
+
+  it("refuses before a profile exists", async () => {
+    const res = await requestPetInteraction(
+      { kind: "agent" },
+      "played",
+      {},
+      deps({ getProfile: async () => undefined })
+    )
+    expect(res).toEqual({ ok: false, refusal: { code: "uninitialized" } })
+  })
+
+  it("leaves the user path to the controller (its cooldown bubble answers)", async () => {
+    const getProfile = jest.fn(async () => hatched({ fed: NOW - 100 }))
+    const res = await requestPetInteraction({ kind: "user" }, "fed", {}, deps({ getProfile }))
+    expect(res.ok).toBe(true)
+    expect(getProfile).not.toHaveBeenCalled()
+  })
+
+  it("accepts once the cooldown has elapsed", async () => {
+    const res = await requestPetInteraction(
+      { kind: "plugin", id: "p1" },
+      "fed",
+      {},
+      deps({ getProfile: async () => hatched({ fed: NOW - 1500 }) })
+    )
+    expect(res.ok).toBe(true)
   })
 })

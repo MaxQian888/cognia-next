@@ -111,8 +111,12 @@ export function applyPetEvent(
   // frequent events is a no-op beyond advancing `lastTickAt`.
   // An item consumption rides its interaction kind with `meta.itemId`; the
   // item's differentiated restore replaces the base interaction effect (an
-  // unknown id falls back to the base table).
-  const item = typeof event.meta?.itemId === "string" ? getPetItem(event.meta.itemId) : undefined
+  // unknown id falls back to the base table). Only for the kind the item is
+  // FOR: a premium food named on a `petted` event is not a pat, and honoring
+  // it let any caller upgrade any interaction with the strongest item.
+  const namedItem =
+    typeof event.meta?.itemId === "string" ? getPetItem(event.meta.itemId) : undefined
+  const item = namedItem?.interactionKind === event.kind ? namedItem : undefined
   const needs = INTERACTION_KINDS.has(event.kind)
     ? item?.needsEffect
       ? applyNeedEffect(profile.needs, item.needsEffect, now)
@@ -141,10 +145,17 @@ export function applyPetEvent(
       ? advanceStreak(prevStreak, now)
       : prevStreak
   const streakAdvancedTo = streak.days > prevStreak.days ? streak.days : null
+  // An explicit amount is a grant somebody already budgeted (a plugin or the
+  // agent spending its daily ledger), so it is minted exactly as granted: the
+  // streak multiplier only scales the host's own table. Multiplying the grant
+  // minted more than the caller was told it received, and more than the
+  // daily cap the ledger exists to enforce.
   const explicitCoins = typeof event.meta?.coins === "number" ? event.meta.coins : undefined
-  const coinsEarned =
-    Math.floor(coinsForEvent(event.kind, explicitCoins) * coinMultiplier(streak.days)) +
-    (leveledUpTo ? leveledUpTo * LEVEL_UP_COIN_RATE : 0)
+  const baseCoins =
+    explicitCoins !== undefined
+      ? coinsForEvent(event.kind, explicitCoins)
+      : Math.floor(coinsForEvent(event.kind) * coinMultiplier(streak.days))
+  const coinsEarned = baseCoins + (leveledUpTo ? leveledUpTo * LEVEL_UP_COIN_RATE : 0)
   const coins = normalizeCoins(profile.coins) + coinsEarned
 
   // 2b) Stat growth (additive on top of the deterministic base bones stats).

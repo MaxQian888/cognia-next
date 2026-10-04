@@ -20,6 +20,8 @@ import {
   MenuIcon,
   MessageCircleIcon,
   MonitorIcon,
+  MonitorOffIcon,
+  MonitorUpIcon,
   PaletteIcon,
   PlugIcon,
   ScanLineIcon,
@@ -49,6 +51,7 @@ import { cn } from "@/lib/utils"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useSettingsStore } from "@/stores/settings"
 import { hatchPet } from "@/lib/pet/runtime/init-pet"
+import { toggleDesktopPetWindow } from "@/lib/pet/commands"
 import { renamePet } from "@/lib/pet/runtime/rename-pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
@@ -58,7 +61,7 @@ import {
   PluginExtensionSlot,
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
-import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import type { PetAssetDiagnostic } from "@/types/pet"
 import { PET_CONSOLE_TABS, type PetConsoleTab } from "@/lib/pet/console-tabs"
 import { toPetAssetDiagnostics } from "@/lib/pet/live2d/compatibility-diagnostics"
@@ -174,6 +177,9 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
     platform,
   })
   const visibleTabs = hasPluginTabs ? TABS : TABS.filter((id) => id !== "plugins")
+  // Declared before the early returns below: a hook after them would change
+  // the hook count the moment the profile finishes loading.
+  const [desktopPending, setDesktopPending] = useState(false)
 
   // "Cannot run here" and "has not loaded yet" used to render the same
   // spinner. The surface contract lists /pet as a navigable route, and on the
@@ -206,6 +212,15 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
         {t("console.loading")}
       </div>
     )
+  }
+
+  // Whether the pet is out on the desktop. `desktopPet.enabled` tracks the
+  // native window (PetMount syncs every native open/close into it), so the
+  // header action can label itself without probing the window.
+  const onDesktop = (pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY).enabled
+  const toggleDesktop = () => {
+    setDesktopPending(true)
+    void toggleDesktopPetWindow().finally(() => setDesktopPending(false))
   }
 
   const hatch = async () => {
@@ -247,6 +262,34 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
             onConfigure={pet.skinId !== "svg" ? () => setTab("customize") : undefined}
           />
         </div>
+        {/* The console is where people look after the pet, so it is also
+            where they send it out to the desktop and call it back, without a
+            detour through Settings or the title bar. A hatched pet only:
+            an egg on the desktop has nothing to do. */}
+        {profile.soul ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={onDesktop ? "outline" : "secondary"}
+            className="ml-auto shrink-0"
+            data-testid="pet-console-desktop-toggle"
+            aria-pressed={onDesktop}
+            disabled={desktopPending}
+            onClick={toggleDesktop}
+          >
+            {onDesktop ? (
+              <MonitorOffIcon className="size-4" aria-hidden />
+            ) : (
+              <MonitorUpIcon className="size-4" aria-hidden />
+            )}
+            <span className="hidden sm:inline">
+              {onDesktop ? t("quickMenu.hideDesktopPet") : t("quickMenu.showDesktopPet")}
+            </span>
+            <span className="sr-only sm:hidden">
+              {onDesktop ? t("quickMenu.hideDesktopPet") : t("quickMenu.showDesktopPet")}
+            </span>
+          </Button>
+        ) : null}
       </header>
 
       <div className="mt-3 flex items-center gap-2 border-y px-3 py-2 md:hidden">

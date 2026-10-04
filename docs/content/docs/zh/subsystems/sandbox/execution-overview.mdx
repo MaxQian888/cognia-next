@@ -14,7 +14,7 @@ description: "ADR-0028 的五层混合执行沙盒：启用它的 build-options 
   `SandboxRuntimeRef`。随后模型会被引导至
   四个 `sandbox_*` 工具（来自 `cognia-sandboxed-tools` 插件），这些工具会路由到 OS
   后端（T1）或 e2b microVM（T4）。T2/T3 层负责插件代码；T5 是针对 `computer_use` 的
-  按动作策略门。这里**没有任何旁路**——当某个后端不可用时，调用将被拒绝。
+  按动作执行的策略检查。这里**没有任何旁路**——当某个后端不可用时，调用将被拒绝。
 </TLDR>
 
 ## 五个层级
@@ -27,12 +27,11 @@ T1–T5 覆盖正交的威胁面。并非每个会话都会触及每个层级。
 | **T2** | 插件 JS 执行器                             | 依据清单权限以 Node 24 `--permission` 重执行                       | [插件隔离](./plugin-isolation)                               |
 | **T3** | 插件 WASM 模块                            | Wasmtime + WASI，预打开项来自授权账本                              | [插件隔离](./plugin-isolation)                               |
 | **T4** | 为 T1 工具按需提供更强隔离                 | e2b Firecracker microVM（按角色 / 按应用层级）                     | [microVM 与 Web](./microvm-and-web)                         |
-| **T5** | `computer_use`（无法进行进程级沙盒化）      | 按动作策略门（app / window / url / 屏幕区域）                      | [可观测性与 UI](./observability-and-ui)                     |
+| **T5** | `computer_use`（无法进行进程级沙盒化）      | 按动作执行的策略检查（app / window / url / 屏幕区域）                      | [可观测性与 UI](./observability-and-ui)                     |
 
 ## 是什么启用了它——优先级链
 
-整个特性由 `lib/claude/build-options.ts` 中解析出的一个布尔值控制。该链按
-session → character → app-settings 依次走，默认为**关闭**：
+整个特性由 `lib/claude/build-options.ts` 中解析出的一个布尔值控制。该链按 session → character → app-settings 依次走，默认为**关闭**：
 
 ```ts title="lib/claude/build-options.ts:1134-1138"
 const sandboxEnabled =
@@ -42,13 +41,9 @@ const sandboxEnabled =
   false
 ```
 
-shell 层级与 Computer Use 目标会被一起解析成同一个 `SandboxSessionBinding`
-（`lib/sandbox/binding.ts`），每条轴各自沿 session → character → app-settings 下行。
-两者必须一起解析：选择 `cua-desktop` 层级意味着"shell、文件和 GUI 都在那台桌面里跑"，
-因此它会把 GUI 轴强制指向同一个连接。
+shell 层级与 Computer Use 目标会被一起解析成同一个 `SandboxSessionBinding`（`lib/sandbox/binding.ts`），每条轴各自沿 session → character → app-settings 下行。两者必须一起解析：选择 `cua-desktop` 层级意味着"shell、文件和 GUI 都在那台桌面里跑"，因此它会把 GUI 轴强制指向同一个连接。
 
-该 binding 连同已解析的资源策略与限制，会**每次发送绑定一次**，写入一份不可变的放置记录。
-`resolveSendOptions` 把得到的引用挂在发送信封上；它仅限宿主使用，绝不会到达任何模型提供方：
+该 binding 连同已解析的资源策略与限制，会**每次发送绑定一次**，写入一份不可变的放置记录。`resolveSendOptions` 把得到的引用挂在发送信封上；它仅限宿主使用，绝不会到达任何模型提供方：
 
 ```ts title="lib/claude/build-options.ts"
 opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
@@ -62,10 +57,7 @@ opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
 })
 ```
 
-被它取代的按会话注册表 `setActiveSandboxTier` / `setActiveSandboxPolicy` /
-`setActiveSandboxConfine` 已经**移除**。它们原本是三张以 session id 为键的 Map，各个面各自回读，
-这让层级、上限与 GUI 目标可能在同一次发送中彼此漂移。现在一个引用同时承载三者——见
-[microVM 与 Web](./microvm-and-web)。
+被它取代的按会话注册表 `setActiveSandboxTier` / `setActiveSandboxPolicy` /`setActiveSandboxConfine` 已经**移除**。它们原本是三张以 session id 为键的 Map，各个面各自回读，这让层级、上限与 GUI 目标可能在同一次发送中彼此漂移。现在一个引用同时承载三者——见 [microVM 与 Web](./microvm-and-web)。
 
 ### 配置字段映射
 
@@ -81,8 +73,7 @@ opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
 
 ## 工具替换
 
-当 `sandboxEnabled` 为 true 时，SDK 内置工具会被拒绝，原生编辑器工具会从
-Anthropic 工具投影中剥离——这样模型就**无法**触及任何未沙盒化的路径：
+当 `sandboxEnabled` 为 true 时，SDK 内置工具会被拒绝，原生编辑器工具会从 Anthropic 工具投影中剥离——这样模型就**无法**触及任何未沙盒化的路径：
 
 ```ts title="lib/claude/build-options.ts:1139-1147"
 if (sandboxEnabled) {
@@ -96,9 +87,7 @@ if (sandboxEnabled) {
   }
 ```
 
-这四个 `sandbox_*` 替代工具**并非**在此处添加——它们已经在 `opts.pluginTools`
-中（由 `buildPluginToolsManifest()` 从 `cognia-sandboxed-tools` 插件在上游构建）。此代码块
-仅移除未沙盒化路径，然后用一条系统提示说明引导模型：
+这四个 `sandbox_*` 替代工具**并非**在此处添加——它们已经在 `opts.pluginTools` 中（由 `buildPluginToolsManifest()` 从 `cognia-sandboxed-tools` 插件在上游构建）。此代码块仅移除未沙盒化路径，然后用一条系统提示说明引导模型：
 
 ```ts title="lib/claude/build-options.ts:1154-1161"
 const sandboxHint =
@@ -111,8 +100,7 @@ const existing = opts.appendSystemPrompt?.trim() ?? ""
 opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
 ```
 
-当会话既未启用沙盒也未启用 Computer Use 时，绑定会被**释放**而不是重置，
-这样上一次发送留下的放置不会残留：
+当会话既未启用沙盒也未启用 Computer Use 时，绑定会被**释放**而不是重置，这样上一次发送留下的放置不会残留：
 
 ```ts title="lib/claude/build-options.ts"
 } else if (session?.id) {
@@ -128,9 +116,7 @@ opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHi
 
 ### 当绑定无法建立时
 
-绑定可能被用户在别处改动的状态拒绝——被删除的沙盒连接、仍钉在已撤回的 `cua-desktop` 层级上的
-character、找不到远端工作区可认领的 microVM 预检。这既不能让整次发送失败，也**绝不能**把
-"我无法隔离它"静默地回答成"那就在这里无限制地跑"：
+绑定可能被用户在别处改动的状态拒绝——被删除的沙盒连接、仍钉在已撤回的 `cua-desktop` 层级上的 character、找不到远端工作区可认领的 microVM 预检。这既不能让整次发送失败，也**绝不能**把 "我无法隔离它"静默地回答成"那就在这里无限制地跑"：
 
 ```ts title="lib/claude/build-options.ts"
 } catch (err) {
@@ -139,8 +125,7 @@ character、找不到远端工作区可认领的 microVM 预检。这既不能�
 }
 ```
 
-`bindUnplacedSession` 记录会话*请求*的那份放置。已解析的上限仍会约束每一个合法在本机运行的面，
-而那些本应离开本机的面则在调用时以 `placement-unavailable` 拒绝：
+`bindUnplacedSession` 记录会话*请求*的那份放置。已解析的上限仍会约束每一个合法在本机运行的面，而那些本应离开本机的面则在调用时以 `placement-unavailable` 拒绝：
 
 | 请求的放置                              | 绑定失败后的行为                                     |
 | --------------------------------------- | ---------------------------------------------------- |
@@ -182,14 +167,9 @@ flowchart TD
 
 ## 没有 Tauri 的宿主上的 OS 层
 
-`executeSandbox` 的 `os` 分支过去只有 `transport.call("sandbox_exec")` 一条路，而它就是 Tauri 的
-`invoke`。在 `cognia-agent` CLI 上，那条 stdio 传输会直接回答 `unsupported command`；伴侣传输也从未
-携带这个命令名，因为它在伴侣目录里是 `target: client`。于是这一层在桌面之外根本不存在——而 CLI 会话
-仍然绑定了资源天花板、仍然按它裁剪模型的每一次请求，并且把沙盒报告为已启用。
+`executeSandbox` 的 `os` 分支过去只有 `transport.call("sandbox_exec")` 一条路，而它就是 Tauri 的 `invoke`。在 `cognia-agent` CLI 上，那条 stdio 传输会直接回答 `unsupported command`；伴侣传输也从未携带这个命令名，因为它在伴侣目录里是 `target: client`。于是这一层在桌面之外根本不存在——而 CLI 会话仍然绑定了资源天花板、仍然按它裁剪模型的每一次请求，并且把沙盒报告为已启用。
 
-`lib/sandbox/os-exec-bridge` 就是补上的那道接缝，形状与旁边的 microVM 桥完全一致：Node 宿主在启动时
-注册一个执行器，路由优先用它；桌面不注册任何东西，`invoke` 那条路一字未动。主动约束探针遵循同一条
-规则——拿桌面的 `sandbox_health_check` 去回答一个 CLI 会话，描述的是另一台机器。
+`lib/sandbox/os-exec-bridge` 就是补上的那道接缝，形状与旁边的 microVM 桥完全一致：Node 宿主在启动时注册一个执行器，路由优先用它；桌面不注册任何东西，`invoke` 那条路一字未动。主动约束探针遵循同一条规则——拿桌面的 `sandbox_health_check` 去回答一个 CLI 会话，描述的是另一台机器。
 
 ```ts title="lib/sandbox/session-runtime.ts"
 const hostExecutor = getOsSandboxExec()
@@ -197,15 +177,9 @@ if (hostExecutor) return hostExecutor.execute(osPayload)
 return await transport.call<MicrovmResult>("sandbox_exec", osPayload)
 ```
 
-CLI 的执行器会拉起 [`cognia-sandbox-exec`](./os-backends)，并把 `cognia-sandboxed-tools` 插件本就
-构造好的载荷原样递过去，所以策略解析和每一步硬化都留在 Rust 侧。拒绝理由直接复用 Rust 的
-`#[error]` 字符串，两条轨道上读到的是同一句话。即使 helper 二进制缺失，执行器仍然会被注册：它会带着
-原因和补救方式拒绝——与不注册是同样的 fail-closed 结果，但这一句话是运维能据以行动的。
+CLI 的执行器会拉起 [`cognia-sandbox-exec`](./os-backends)，并把 `cognia-sandboxed-tools` 插件本就构造好的载荷原样递过去，所以策略解析和每一步硬化都留在 Rust 侧。拒绝理由直接复用 Rust 的 `#[error]` 字符串，两条轨道上读到的是同一句话。即使 helper 二进制缺失，执行器仍然会被注册：它会带着原因和补救方式拒绝——与不注册是同样的 fail-closed 结果，但这一句话是运维能据以行动的。
 
-后端是否存在是一个运行期事实，而插件 manifest 只能声明静态事实，因此 `cognia-sandboxed-tools` 会在
-每一个"可能带后端"的宿主上被提供，由调用本身在没有后端时拒绝。此前声明 `browser: blocked` 反而把这些
-工具从 CLI 上藏了起来——CLI 虽然是带真实后端的 Node 宿主，却解析到 `browser` profile——于是一个启用了
-沙盒的会话既没有沙盒工具，也没有被沙盒模式禁掉的那些未受限内置工具。
+后端是否存在是一个运行期事实，而插件 manifest 只能声明静态事实，因此 `cognia-sandboxed-tools` 会在每一个"可能带后端"的宿主上被提供，由调用本身在没有后端时拒绝。此前声明 `browser: blocked` 反而把这些工具从 CLI 上藏了起来——CLI 虽然是带真实后端的 Node 宿主，却解析到 `browser` profile——于是一个启用了沙盒的会话既没有沙盒工具，也没有被沙盒模式禁掉的那些未受限内置工具。
 
 ### 从 CLI 打开它
 
@@ -221,33 +195,17 @@ CLI 填的就是桌面从 `AppSettings` 读的那三级，因此两条轨道用�
 }
 ```
 
-`sandbox/status` 报告的是主动约束探针观测到的结果，而不是"策略字段填没填"；旧含义保留在自己的
-`policyConfigured` 字段里，这样"配了天花板但没人执行"这种状态是可见的，而不会被压平成两个答案中的
-任意一个。
+`sandbox/status` 报告的是主动约束探针观测到的结果，而不是"策略字段填没填"；旧含义保留在自己的 `policyConfigured` 字段里，这样"配了天花板但没人执行"这种状态是可见的，而不会被压平成两个答案中的任意一个。
 
 ## 严格模式——没有旁路
 
-ADR-0028 写得很明确：当某个 T1 后端不可用时（Windows setup 未运行、`bwrap` 缺失、
-runner 以非零退出），工具调用会**严格拒绝**。在策略层既没有用于关闭沙盒的设置开关，
-也没有 `COGNIA_SANDBOX_BYPASS` 环境变量后门。渲染端会改为显示一个
-「Setup required」徽章和一个「Retry setup」按钮。microVM 层同理：如果某个
-会话解析到 `microvm` 但没有注册任何 e2b exec，`cognia-sandboxed-tools` 插件会
-抛出异常，而不是悄悄回退到 OS 层（见 [沙盒化工具](./sandboxed-tools)）。
+ADR-0028 写得很明确：当某个 T1 后端不可用时（Windows setup 未运行、`bwrap` 缺失、runner 以非零退出），工具调用会**严格拒绝**。在策略层既没有用于关闭沙盒的设置开关，也没有 `COGNIA_SANDBOX_BYPASS` 环境变量后门。渲染端会改为显示一个「Setup required」徽章和一个「Retry setup」按钮。microVM 层同理：如果某个会话解析到 `microvm` 但没有注册任何 e2b exec，`cognia-sandboxed-tools` 插件会抛出异常，而不是悄悄回退到 OS 层（见 [沙盒化工具](./sandboxed-tools)）。
 
 ## 审计面
 
-每一次 OS 和 E2B 沙盒调用都会被记录到专门的审计面。Rust 的 `Surface` 枚举带有一个
-`Sandbox` 变体（`crates/cognia-automation/src/automation/permission.rs:50`）；调度器会为每次
-`sandbox_exec` 调用记录一条 allow/deny/error 的 `AuditEntry` 并发出一个 `automation:event`
-（`crates/cognia-automation/src/sandbox.rs:153-278`）。由于沙盒拥有自己的严格模式策略，
-共享权限门会对其短路——`Surface::Sandbox => Decision::Allow`
-（`permission.rs:661`）——同时全局 kill-switch 仍会出于纵深防御而拦截。
-诊断标签页通过 `SandboxAuditCard` 渲染这些记录；见 [可观测性与 UI](./observability-and-ui)。
+每一次 OS 和 E2B 沙盒调用都会被记录到专门的审计面。Rust 的 `Surface` 枚举带有一个 `Sandbox` 变体（`crates/cognia-automation/src/automation/permission.rs:50`）；调度器会为每次 `sandbox_exec` 调用记录一条 allow/deny/error 的 `AuditEntry` 并发出一个 `automation:event`（`crates/cognia-automation/src/sandbox.rs:153-278`）。由于沙盒拥有自己的严格模式策略，共享权限门会对其短路——`Surface::Sandbox => Decision::Allow`（`permission.rs:661`）——同时全局 kill-switch 仍会出于纵深防御而拦截。诊断标签页通过 `SandboxAuditCard` 渲染这些记录；见 [可观测性与 UI](./observability-and-ui)。
 
-stdout 与 stderr 各自限制为 1,000,000 个 UTF-8 字节。原生后端增量读取 child pipe；E2B
-响应在跨越工具边界前截断。结果包含 `stdout_truncated` 与 `stderr_truncated`，并追加可见截断标记。
-审计行也通过既有字段记录有效 tier/provider、拒绝或终止、请求 timeout、是否超时、exit code、
-两个截断标志与 duration。
+stdout 与 stderr 各自限制为 1,000,000 个 UTF-8 字节。原生后端增量读取 child pipe；E2B 响应在跨越工具边界前截断。结果包含 `stdout_truncated` 与 `stderr_truncated`，并追加可见截断标记。审计行也通过既有字段记录有效 tier/provider、拒绝或终止、请求 timeout、是否超时、exit code、两个截断标志与 duration。
 
 ## 下一步
 

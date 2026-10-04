@@ -21,6 +21,9 @@
 //! Only the pure position math and the DTO serde shape are unit-tested; the
 //! window ops are smoke-tested via `pnpm tauri dev`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Runtime, Webview};
 
@@ -61,6 +64,120 @@ pub(crate) use macos_panel::lock_panel_state_for_test as lock_overlay_panel_stat
 /// Margin (in physical pixels) kept between the overlay and the work-area
 /// edges when falling back to the bottom-right corner.
 const EDGE_MARGIN: f64 = 24.0;
+
+/// How long an open waits for a concurrent build / re-show / destroy of the
+/// same label before giving up (200 x 10 ms).
+const LIFECYCLE_WAIT_STEPS: u32 = 200;
+
+/// Whether the current sprite webview has revealed itself after its first
+/// painted frame (or been force-revealed by the safety net).
+///
+/// A re-open that lands while a freshly built window is still waiting for its
+/// first paint must not reveal it: on Windows a `transparent(true)` window
+/// shown before its WebView commits a frame composites as an opaque black
+/// rectangle. Reset on every new build and on destroy.
+static SPRITE_FIRST_PAINT_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Physical rectangle `(x, y, width, height)`.
+pub(crate) type PhysicalRect = (f64, f64, f64, f64);
+
+/// Index of the first rectangle containing `point` (half-open on the far
+/// edges, so two monitors that touch never both claim the seam). Pure so the
+/// monitor pick is unit-tested without a display.
+fn index_of_rect_containing(point: (f64, f64), rects: &[PhysicalRect]) -> Option<usize> {
+    rects.iter().position(|&(x, y, w, h)| {
+        point.0 >= x && point.0 < x + w && point.1 >= y && point.1 < y + h
+    })
+}
+
+/// The monitor whose PHYSICAL bounds contain `point`.
+///
+/// `AppHandle::monitor_from_point` is not usable with the pet's coordinates:
+/// on macOS tao tests the point against `CGDisplayBounds`, which are logical
+/// points, while every coordinate the pet stores (window positions, the
+/// persisted drag spot) is physical. With a Retina laptop beside an external
+/// display that picked the wrong monitor and clamped the pet onto it.
+pub(crate) fn monitor_containing_physical_point<R: Runtime>(
+    app: &AppHandle<R>,
+    point: (f64, f64),
+) -> Option<tauri::Monitor> {
+    let monitors = app.available_monitors().ok()?;
+    let rects: Vec<PhysicalRect> = monitors
+        .iter()
+        .map(|m| {
+            let p = m.position();
+            let s = m.size();
+            (p.x as f64, p.y as f64, s.width as f64, s.height as f64)
+        })
+        .collect();
+    let index = index_of_rect_containing(point, &rects)?;
+    monitors.into_iter().nth(index)
+}
+
+/// Work area of a monitor as `(x, y, width, height, scale)` in physical px.
+pub(crate) fn monitor_work_area(monitor: &tauri::Monitor) -> (f64, f64, f64, f64, f64) {
+    let rect = monitor.work_area();
+    (
+        rect.position.x as f64,
+        rect.position.y as f64,
+        rect.size.width as f64,
+        rect.size.height as f64,
+        monitor.scale_factor(),
+    )
+}
+
+/// Resize a non-resizable overlay to a logical size.
+///
+/// Both pet windows are built `resizable(false)`, which on Windows and Linux
+/// pins min == max and clamps a programmatic resize; resizing is re-enabled
+/// across the write there (`lib/pet/reveal.ts` does the same for its nudge).
+/// macOS honors `setContentSize` regardless, and toggling the style mask
+/// there would rewrite the non-activating NSPanel's mask, so it is skipped.
+pub(crate) fn set_fixed_logical_size<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let toggle = cfg!(not(target_os = "macos"));
+    if toggle {
+        window.set_resizable(true).map_err(|e| e.to_string())?;
+    }
+    let result = window
+        .set_size(LogicalSize::new(width, height))
+        .map_err(|e| e.to_string());
+    if toggle {
+        let _ = window.set_resizable(false);
+    }
+    result
+}
+
+/// New top-left that keeps a window's bottom-center fixed across a resize, so
+/// the pet's feet stay where they stood when its size changes. Physical px.
+fn resize_anchored_bottom_center(
+    position: (f64, f64),
+    old_size: (f64, f64),
+    new_size: (f64, f64),
+) -> (f64, f64) {
+    (
+        position.0 + (old_size.0 - new_size.0) / 2.0,
+        position.1 + old_size.1 - new_size.1,
+    )
+}
+
+/// Identity of the monitor a window sits on, for change detection.
+type MonitorKey = (i32, i32, u32, u32, u64);
+
+fn monitor_key(monitor: &tauri::Monitor) -> MonitorKey {
+    let p = monitor.position();
+    let s = monitor.size();
+    (
+        p.x,
+        p.y,
+        s.width,
+        s.height,
+        monitor.scale_factor().to_bits(),
+    )
+}
 
 /// Options the renderer passes when opening / re-showing the pet window.
 /// Mirrors the TS wrapper in `lib/tauri/pet-window.ts`.
@@ -141,17 +258,10 @@ fn work_area_for<R: Runtime>(
     saved: Option<(f64, f64)>,
 ) -> (f64, f64, f64, f64, f64) {
     let monitor = saved
-        .and_then(|(x, y)| app.monitor_from_point(x, y).ok().flatten())
+        .and_then(|point| monitor_containing_physical_point(app, point))
         .or_else(|| app.primary_monitor().ok().flatten());
     if let Some(monitor) = monitor {
-        let rect = monitor.work_area();
-        (
-            rect.position.x as f64,
-            rect.position.y as f64,
-            rect.size.width as f64,
-            rect.size.height as f64,
-            monitor.scale_factor(),
-        )
+        monitor_work_area(&monitor)
     } else {
         // Conservative default desktop size; keeps the fallback corner sane.
         (0.0, 0.0, 1920.0, 1080.0, 1.0)
@@ -210,17 +320,16 @@ fn open_pet_window_claimed<R: Runtime>(
     opts: PetWindowOpts,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
-        window
-            .set_size(LogicalSize::new(opts.width, opts.height))
-            .map_err(|error| error.to_string())?;
+        set_fixed_logical_size(&window, opts.width, opts.height)?;
         // Re-validate the position before revealing: monitors may have been
         // unplugged / rearranged / DPI-changed while the window sat hidden
         // (the window-state plugin is denylisted for "pet", so nothing else
         // ever rescues stale physical coordinates). Clamp against the work
-        // area of whichever monitor now contains the point.
+        // area of whichever monitor now contains the window's center.
         if let Ok(pos) = window.outer_position() {
             let saved = (pos.x as f64, pos.y as f64);
-            let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, Some(saved));
+            let probe = (saved.0 + opts.width / 2.0, saved.1 + opts.height / 2.0);
+            let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, Some(probe));
             let size = physical_overlay_size((opts.width, opts.height), scale);
             let (x, y) =
                 resolve_initial_position(Some(saved), (area_x, area_y, area_w, area_h), size);
@@ -230,6 +339,14 @@ fn open_pet_window_claimed<R: Runtime>(
         }
         apply_click_through(&window, opts.click_through)?;
         let generation = macos_panel::begin_panel_open(macos_panel::PetPanelRole::Sprite);
+        if !SPRITE_FIRST_PAINT_DONE.load(Ordering::SeqCst) {
+            // Still waiting for its first frame (a second open raced the
+            // build: the boot reconcile, a double-pressed hotkey). The
+            // renderer's own reveal will show it once it has painted; the
+            // fresh open intent above is what lets that reveal through.
+            emit_pet_state(app, true, opts.click_through);
+            return Ok(());
+        }
         if let Err(error) = macos_panel::reveal_pet_panel(
             &window,
             macos_panel::PetPanelRole::Sprite,
@@ -251,7 +368,11 @@ fn open_pet_window_claimed<R: Runtime>(
 
     let generation = macos_panel::begin_panel_open(macos_panel::PetPanelRole::Sprite);
 
-    let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, opts.x.zip(opts.y));
+    let probe = opts
+        .x
+        .zip(opts.y)
+        .map(|(x, y)| (x + opts.width / 2.0, y + opts.height / 2.0));
+    let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, probe);
     // The monitor work area and any persisted drag position are PHYSICAL pixels,
     // but `inner_size` (and `opts.width/height`) are LOGICAL. Resolve placement
     // entirely in physical pixels — converting the logical overlay size up by
@@ -280,6 +401,12 @@ fn open_pet_window_claimed<R: Runtime>(
             .skip_taskbar(true)
             .resizable(false)
             .shadow(false)
+            // The sprite never takes focus: not when it is created, not when
+            // it is revealed (tao shows a never-focused window with
+            // SW_SHOWNOACTIVATE), and — via `WS_EX_NOACTIVATE` below — not when
+            // it is clicked or dragged, so petting it never pulls the keyboard
+            // away from whatever the user is typing in.
+            .focused(false)
             .visible(false)
             .inner_size(opts.width, opts.height)
             .build()
@@ -287,6 +414,7 @@ fn open_pet_window_claimed<R: Runtime>(
                 macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
                 error.to_string()
             })?;
+    SPRITE_FIRST_PAINT_DONE.store(false, Ordering::SeqCst);
 
     // Configure the freshly built (still hidden) window. Any failure here
     // closes the window before propagating: a half-configured hidden window
@@ -306,6 +434,11 @@ fn open_pet_window_claimed<R: Runtime>(
 
         // Apply click-through before the first paint (Linux-tolerant).
         apply_click_through(&window, opts.click_through)?;
+
+        // Windows: non-activating + tool window (no taskbar button, no
+        // Alt-Tab entry). `skip_taskbar` alone only deletes the taskbar tab.
+        #[cfg(target_os = "windows")]
+        crate::window_utils::apply_windows_no_activate(&window)?;
 
         // macOS: reclass to a non-activating NSPanel so the pet floats over every
         // Space + full-screen apps and never steals the foreground app's focus.
@@ -334,16 +467,61 @@ fn open_pet_window_claimed<R: Runtime>(
         return Ok(());
     }
 
-    // Monitor topology / DPI changes: nudge the renderer to re-read its work
-    // area immediately (the wander loop otherwise only notices on its next
-    // poll, leaving the pet wandering against stale bounds after a display
-    // change).
+    // Native window events:
+    //  - DPI changes, and a move that lands the window on another monitor
+    //    (a drag, a throw, a wander, a display unplugged), nudge the renderer
+    //    to re-read its work area immediately. The wander loop otherwise only
+    //    re-reads on a landing, so a pet dragged to a second screen kept
+    //    walking against the first screen's bounds.
+    //  - A native close (Alt+F4 on Windows, a window manager's close on
+    //    Linux) becomes the same hide the renderer's toggle performs. Letting
+    //    it through destroyed the webview behind every owner's back: no
+    //    `pet://state-changed`, a stranded popup, and a saved "open" intent
+    //    that the next launch re-opened. Destroy raises its flag before it
+    //    closes, so its own close still goes through.
     {
         let app_handle = app.clone();
-        window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::ScaleFactorChanged { .. }) {
+        let last_monitor: Arc<Mutex<Option<MonitorKey>>> = Arc::new(Mutex::new(
+            window
+                .current_monitor()
+                .ok()
+                .flatten()
+                .as_ref()
+                .map(monitor_key),
+        ));
+        window.on_window_event(move |event| match event {
+            tauri::WindowEvent::ScaleFactorChanged { .. } => {
                 let _ = app_handle.emit("pet://work-area-changed", serde_json::Value::Null);
             }
+            tauri::WindowEvent::Moved(_) => {
+                let Some(window) = app_handle.get_webview_window("pet") else {
+                    return;
+                };
+                let key = window
+                    .current_monitor()
+                    .ok()
+                    .flatten()
+                    .as_ref()
+                    .map(monitor_key);
+                let changed = {
+                    let mut last = last_monitor.lock().unwrap_or_else(|p| p.into_inner());
+                    let changed = *last != key;
+                    *last = key;
+                    changed
+                };
+                if changed {
+                    let _ = app_handle.emit("pet://work-area-changed", serde_json::Value::Null);
+                }
+            }
+            tauri::WindowEvent::CloseRequested { api, .. }
+                if !macos_panel::panel_is_destroying(macos_panel::PetPanelRole::Sprite) =>
+            {
+                api.prevent_close();
+                if let Err(error) = close_pet_window_inner(&app_handle) {
+                    log::warn!("pet: native close could not hide the window: {error}");
+                }
+            }
+            _ => {}
         });
     }
 
@@ -381,12 +559,16 @@ fn open_pet_window_claimed<R: Runtime>(
                     log::warn!(
                         "pet window still hidden 8s after open; force-showing (renderer never signaled first paint)"
                     );
-                    let _ = macos_panel::reveal_pet_panel(
+                    if macos_panel::reveal_pet_panel(
                         &window,
                         macos_panel::PetPanelRole::Sprite,
                         false,
                         generation,
-                    );
+                    )
+                    .is_ok()
+                    {
+                        SPRITE_FIRST_PAINT_DONE.store(true, Ordering::SeqCst);
+                    }
                 }
             }
         });
@@ -396,33 +578,26 @@ fn open_pet_window_claimed<R: Runtime>(
     Ok(())
 }
 
-fn open_pet_window_inner<R: Runtime>(
+/// Claim the sprite lifecycle and open. When a builder, re-show or
+/// asynchronous destroy currently owns the label, wait for it to become idle
+/// (never two same-label builders) and report a timeout as an error.
+///
+/// The wait is awaited, not spawned: a queued open used to return `Ok` at
+/// once, so the renderer persisted `desktopPet.enabled` for a window that
+/// might never appear, and the next launch retried it forever.
+async fn open_pet_window_inner<R: Runtime>(
     app: &AppHandle<R>,
     opts: PetWindowOpts,
 ) -> Result<(), String> {
-    if let Some(_build_guard) =
-        macos_panel::try_begin_panel_build(macos_panel::PetPanelRole::Sprite)
-    {
-        return open_pet_window_claimed(app, opts);
-    }
-
-    // A builder/re-show or asynchronous close currently owns the label. Queue
-    // this intent off the native event thread and claim the lifecycle only when
-    // it becomes idle; this prevents concurrent same-label builders.
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        for _ in 0..200 {
-            if let Some(_build_guard) =
-                macos_panel::try_begin_panel_build(macos_panel::PetPanelRole::Sprite)
-            {
-                let _ = open_pet_window_claimed(&handle, opts);
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    for _ in 0..LIFECYCLE_WAIT_STEPS {
+        if let Some(_build_guard) =
+            macos_panel::try_begin_panel_build(macos_panel::PetPanelRole::Sprite)
+        {
+            return open_pet_window_claimed(app, opts);
         }
-        log::error!("pet: timed out waiting for the window lifecycle to become idle");
-    });
-    Ok(())
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    Err("pet: timed out waiting for the window lifecycle to become idle".to_string())
 }
 
 /// Core "hide for toggle" logic behind the `close_pet_window` command.
@@ -445,17 +620,22 @@ fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
     Ok(())
 }
 
-/// True when the pet window exists AND is currently visible.
+/// True when the pet window exists and its latest lifecycle is an open.
+///
+/// Deliberately not `is_visible`: a freshly built window stays hidden until
+/// its renderer paints, and answering "closed" during that window made every
+/// second caller (the boot reconcile, a double-pressed hotkey) re-open — and
+/// prematurely reveal — a window that was already on its way.
 fn is_pet_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.get_webview_window("pet")
-        .map(|w| w.is_visible().unwrap_or(false))
-        .unwrap_or(false)
+    app.get_webview_window("pet").is_some()
+        && !macos_panel::panel_is_destroying(macos_panel::PetPanelRole::Sprite)
+        && macos_panel::panel_open_intent_is_set(macos_panel::PetPanelRole::Sprite)
 }
 
 /// Open the desktop pet window, or order it in front if it already exists.
 #[tauri::command]
 pub async fn open_pet_window(app: AppHandle, opts: PetWindowOpts) -> Result<(), String> {
-    open_pet_window_inner(&app, opts)
+    open_pet_window_inner(&app, opts).await
 }
 
 /// Resolve a caller-supplied target label to one of the two pet-panel roles.
@@ -481,7 +661,16 @@ pub async fn reveal_pet_window(
         .get_webview_window(&target_label)
         .ok_or_else(|| format!("pet overlay window '{target_label}' no longer exists"))?;
     let generation = macos_panel::current_panel_generation(role);
-    macos_panel::reveal_pet_panel(&window, role, focus, generation)
+    // Every platform reveals through here (the generation check is what lets
+    // a close that landed between the open and the renderer's first frame win
+    // over the reveal), so this is also where the first paint is recorded.
+    macos_panel::reveal_pet_panel(&window, role, focus, generation)?;
+    if role == macos_panel::PetPanelRole::Sprite
+        && macos_panel::panel_generation_is_current(role, generation)
+    {
+        SPRITE_FIRST_PAINT_DONE.store(true, Ordering::SeqCst);
+    }
+    Ok(())
 }
 
 /// Hide the desktop pet window (toggle semantics — reopen is cheap).
@@ -564,6 +753,7 @@ async fn destroy_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), 
     if sprite_result.is_ok() {
         let _ = macos_panel::finish_panel_destroy(macos_panel::PetPanelRole::Sprite);
     }
+    SPRITE_FIRST_PAINT_DONE.store(false, Ordering::SeqCst);
     emit_pet_state(app, false, false);
     popup_result.and(sprite_result)
 }
@@ -606,6 +796,44 @@ pub async fn pet_window_set_position(app: AppHandle, x: f64, y: f64) -> Result<(
             .set_position(PhysicalPosition::new(x, y))
             .map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// Resize the pet window to a new logical size, keeping its bottom-center
+/// where it stood (the pet's feet stay put) and the whole window inside the
+/// work area of the monitor it is on.
+///
+/// This is how a size change reaches an open overlay. The only other resize
+/// path is the re-show branch of `open_pet_window`, which also reveals the
+/// window and restarts its animation loops, so the Settings size slider used
+/// to do nothing until the pet was hidden and shown again. Never reveals.
+#[tauri::command]
+pub async fn pet_window_set_size(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
+        return Err(format!("pet: invalid window size {width}x{height}"));
+    }
+    let Some(window) = app.get_webview_window("pet") else {
+        return Ok(());
+    };
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let old_size = window.outer_size().map_err(|e| e.to_string())?;
+    let monitor = window.current_monitor().ok().flatten();
+    let (area_x, area_y, area_w, area_h, scale) = match monitor.as_ref() {
+        Some(monitor) => monitor_work_area(monitor),
+        None => work_area_for(&app, None),
+    };
+    let new_size = physical_overlay_size((width, height), scale);
+    let anchored = resize_anchored_bottom_center(
+        (position.x as f64, position.y as f64),
+        (old_size.width as f64, old_size.height as f64),
+        new_size,
+    );
+    let (x, y) =
+        resolve_initial_position(Some(anchored), (area_x, area_y, area_w, area_h), new_size);
+    set_fixed_logical_size(&window, width, height)?;
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -799,6 +1027,47 @@ mod tests {
         let area = (0.0, 0.0, 200.0, 200.0);
         let (x, y) = resolve_initial_position(Some((50.0, 50.0)), area, WIN);
         assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn rect_lookup_uses_physical_bounds_and_half_open_seams() {
+        // A 2x Retina laptop (3456x2234 physical) with a 1x external display to
+        // its right. The external display's physical origin is the laptop's
+        // physical width — the point a logical-points lookup got wrong.
+        let rects = [(0.0, 0.0, 3456.0, 2234.0), (3456.0, 0.0, 1920.0, 1080.0)];
+        assert_eq!(index_of_rect_containing((100.0, 100.0), &rects), Some(0));
+        assert_eq!(index_of_rect_containing((3500.0, 200.0), &rects), Some(1));
+        // The shared seam belongs to the right-hand monitor only.
+        assert_eq!(index_of_rect_containing((3456.0, 10.0), &rects), Some(1));
+        // Below the shorter external display: no monitor.
+        assert_eq!(index_of_rect_containing((4000.0, 1500.0), &rects), None);
+        assert_eq!(index_of_rect_containing((-1.0, 0.0), &rects), None);
+    }
+
+    #[test]
+    fn resize_keeps_the_bottom_center_fixed() {
+        // Growing 224x288 -> 288x352 keeps the feet on the same spot.
+        let (x, y) = resize_anchored_bottom_center((1000.0, 700.0), (224.0, 288.0), (288.0, 352.0));
+        assert_eq!((x, y), (968.0, 636.0));
+        assert_eq!(x + 288.0 / 2.0, 1000.0 + 224.0 / 2.0);
+        assert_eq!(y + 352.0, 700.0 + 288.0);
+        // Shrinking moves the top-left the other way.
+        let (x, y) = resize_anchored_bottom_center((968.0, 636.0), (288.0, 352.0), (224.0, 288.0));
+        assert_eq!((x, y), (1000.0, 700.0));
+    }
+
+    #[test]
+    fn resize_near_the_edge_is_clamped_back_into_the_work_area() {
+        // A pet resting on the bottom-right corner grows: the anchored spot
+        // would push it past both edges, the clamp pulls it fully back in.
+        let anchored = resize_anchored_bottom_center(
+            (1920.0 - 224.0, 1080.0 - 288.0),
+            (224.0, 288.0),
+            (448.0, 576.0),
+        );
+        let (x, y) = resolve_initial_position(Some(anchored), WORK_AREA, (448.0, 576.0));
+        assert!(x + 448.0 <= 1920.0);
+        assert_eq!(y + 576.0, 1080.0);
     }
 
     #[test]

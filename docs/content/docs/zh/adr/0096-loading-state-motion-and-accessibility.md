@@ -1,6 +1,6 @@
 ---
 title: "ADR-0096 — 加载状态动效与无障碍"
-description: "按本质性分级动画，修正反转速度偏好，并赋予加载区域单一语音。"
+description: "按必要程度为动画分级，修正反转速度偏好，并为加载区域提供唯一的读屏播报来源。"
 ---
 
 ## 状态
@@ -13,7 +13,7 @@ description: "按本质性分级动画，修正反转速度偏好，并赋予加
 
 **减少运动保护冻结了所有加载指示器。** `app/globals.css`在三条路径上对`*`应用`animation-duration: 1ms; animation-iteration-count: 1`（`.reduce-motion`类、`[data-reduce-motion="true"]`属性和`prefers-reduced-motion`媒体查询）。装饰方面没错。对`animate-spin`来说，这意味着旋转1毫秒后停顿——220个文件的旋转器被渲染成静态、破碎的字形，骨架则变成惰性的灰色块。要求减少动作的用户失去了应用仍在运行的所有信号。没有任何测试。
 
-**动画速度偏好被反转了。** 设置UI标注为“快速（1.5×）”和“慢（0.5×）”，但`resolveMotionState`直接写入`--motion-duration-scale`，消费者乘以基准时长：`calc(200ms * var(--motion-duration-scale))`。选择“快速”后，每个对话、工作表、码头和面板的过渡速度都慢了50%。JS侧则是相应的：`0.18 * speed`延长一个渐进距离以获得更快的偏好，`damping: 30 / speed`降低阻尼，使得“快速”弹簧振荡时间更长。
+**动画速度偏好被反转了。** 设置UI标注为“快速（1.5×）”和“慢（0.5×）”，但`resolveMotionState`直接写入`--motion-duration-scale`，消费者乘以基准时长：`calc(200ms * var(--motion-duration-scale))`。选择“快速”后，每个对话框、Sheet、Dock 和面板的过渡都慢了 50%。JS侧则是相应的：`0.18 * speed`在用户选择更快速度时反而延长淡入淡出时长，`damping: 30 / speed`降低阻尼，使得“快速”弹簧振荡时间更长。
 
 **无障碍功能两端都颠倒了。** `Skeleton`在~174个呼叫站点中完全没有任何 ARIA，而`Spinner`硬编码的`role="status"`加上一个英文`aria-label="Loading"`——因此其呼叫站点，大多是已经显示自己状态的按钮，每次坐骑都会触发第二次未翻译的实时区域更新。（`components/ui/`免于`lint:i18n`，这也是英国字符串的运输方式。）
 
@@ -77,60 +77,36 @@ commit`，其中 `processedForPhase(phase)` **只**返回该阶段的下标，�
 
 正是这一个决定，让两个难点属性自然成立，而不需要有人去持续维护：
 
-- **单调** —— `processed` 是阶段名的函数，永远不是"实际完成了多少工作"
-  的函数，因此不可能回退。
-- **被跳过的可选工作照样推进** —— 一个没有 `manifest.dexie`、也没有依赖的
-  插件，仍然会*进入* `schema` 与 `dependencies` 阶段，仍然上报 2/7 和 1/7。
+- **单调** —— `processed` 是阶段名的函数，永远不是"实际完成了多少工作" 的函数，因此不可能回退。
+- **被跳过的可选工作照样推进** —— 一个没有 `manifest.dexie`、也没有依赖的插件，仍然会*进入* `schema` 与 `dependencies` 阶段，仍然上报 2/7 和 1/7。
 
-对应到 `lib/plugin/core/manager.ts` 的规则是：**任何 `advance` 调用都不得
-放在条件分支里。** 有一个回归测试专门跑"无 Dexie 表、无依赖"的 manifest，
-断言它产出的阶段序列与满配置的完全一致 —— 这正是用来抓住"某人后来把
-`advance` 挪进了某个 `if`"的测试。
+对应到 `lib/plugin/core/manager.ts` 的规则是：**任何 `advance` 调用都不得放在条件分支里。** 有一个回归测试专门跑"无 Dexie 表、无依赖"的 manifest，断言它产出的阶段序列与满配置的完全一致 —— 这正是用来抓住"某人后来把 `advance` 挪进了某个 `if`"的测试。
 
-依赖子激活完全不需要额外记账：递归走的是同一层包装，因此每个依赖有自己的
-条目独立从 0/7 跑到 7/7，而父插件在循环返回之前一直冻结在 `dependencies`
-1/7。这是调用图的性质，不是状态管理的性质。
+依赖子激活完全不需要额外记账：递归走的是同一层包装，因此每个依赖有自己的条目独立从 0/7 跑到 7/7，而父插件在循环返回之前一直冻结在 `dependencies` 1/7。这是调用图的性质，不是状态管理的性质。
 
 ### 裁定：回滚顺序，以及为什么没有 `finally`
 
-`enablePluginInner` 自己的 catch 会跑完整个回滚 —— 反注册 contributions、
-写入插件错误、发 `PLUGIN_ENABLE_FAILED_EVENT` —— 然后才把异常抛给记录失败
-的外层 catch。因此在回滚期间，条目仍然处于失败阶段的 `running` 状态，这是
-对的：工作确实还没结束。`fail` 严格发生在所有回滚副作用（包括 toast）之后。
+`enablePluginInner` 自己的 catch 会跑完整个回滚 —— 反注册 contributions、写入插件错误、发 `PLUGIN_ENABLE_FAILED_EVENT` —— 然后才把异常抛给记录失败的外层 catch。因此在回滚期间，条目仍然处于失败阶段的 `running` 状态，这是对的：工作确实还没结束。`fail` 严格发生在所有回滚副作用（包括 toast）之后。
 
-如果给内层 try 加 `finally`，它会在异常抵达外层 catch 之前触发，把顺序整个
-颠倒过来。改动点的注释写明了这一条，因为这个写法看上去像是疏忽。
+如果给内层 try 加 `finally`，它会在异常抵达外层 catch 之前触发，把顺序整个颠倒过来。改动点的注释写明了这一条，因为这个写法看上去像是疏忽。
 
 ### 新增：`LoadingRegion` 增加确定性变体
 
 `progress?: { processed, total, phaseLabel? } | null`，纯增量。
 
-- 仅供读屏的 `role="status"` 文本变成 `"<base> — <阶段> — <n>/<total>"`，
-  一次激活最多变化七次 —— 恰好是本 ADR 所设计的重播报节奏。
-- 可见的 `<Progress>` 渲染为状态 span 的**兄弟节点，绝不是子节点**，这样
-  Radix 隐含的 `role="progressbar"` 位于 live region 之外，数值更新不会被
-  播报。
-- `total <= 0` 时**忽略** `progress`，回退到不确定态。确定性的 0% 进度条是
-  一个断言；转圈才是事实。
-- **没有 `onCancel`。** `enablePlugin` 没有取消令牌，而本 ADR 规定：只有在
-  取消真的能停止工作时才提供取消。
+- 仅供读屏的 `role="status"` 文本变成 `"<base> — <阶段> — <n>/<total>"`，一次激活最多变化七次 —— 恰好是本 ADR 所设计的重播报节奏。
+- 可见的 `<Progress>` 渲染为状态 span 的**兄弟节点，绝不是子节点**，这样 Radix 隐含的 `role="progressbar"` 位于 live region 之外，数值更新不会被播报。
+- `total <= 0` 时**忽略** `progress`，回退到不确定态。确定性的 0% 进度条是一个断言；转圈才是事实。
+- **没有 `onCancel`。** `enablePlugin` 没有取消令牌，而本 ADR 规定：只有在取消真的能停止工作时才提供取消。
 
 ### 修复：`Progress` 从未输出 `aria-valuenow`
 
-`components/ui/progress.tsx` 解构出 `value` 却只用于 CSS transform，从未把它
-传给 `ProgressPrimitive.Root`。全应用每一个进度条都是"视觉上确定、无障碍上
-不确定"。改动一行；而上面那条确定性无障碍契约正是建立在它之上。
+`components/ui/progress.tsx` 解构出 `value` 却只用于 CSS transform，从未把它传给 `ProgressPrimitive.Root`。全应用每一个进度条都是"视觉上确定、无障碍上不确定"。改动一行；而上面那条确定性无障碍契约正是建立在它之上。
 
 ### 修复：`/plugins` 的开关从来没有真正激活任何东西
 
-四个开关调用点都只写 Dexie 的 `enabled` 标志，而没有任何 reconciler 订阅它
-—— `manager.enablePlugin` 能从启动恢复、更新器、远程控制到达，唯独到不了
-面板。现在它们改走 manager，Dexie 写入成为状态迁移的*结果*而不是它的替代品，
-并在失败时回滚乐观开关。
+四个开关调用点都只写 Dexie 的 `enabled` 标志，而没有任何 reconciler 订阅它—— `manager.enablePlugin` 能从启动恢复、更新器、远程控制到达，唯独到不了面板。现在它们改走 manager，Dexie 写入成为状态迁移的*结果*而不是它的替代品，并在失败时回滚乐观开关。
 
-这也让此前形同死代码的 `PluginStatusPill` `loading` 分支复活：既然没有任何
-代码路径往 Dexie 行里写 `enabling`/`loading`，那条 `isLoading` 推导就永远不
-会从面板触发。批量操作条的 `Promise.all` 改成了顺序循环 —— 对存在相互依赖的
-插件做并行激活，并不是 manager 的生命周期锁让人可以放心假定的事。
+这也让此前形同死代码的 `PluginStatusPill` `loading` 分支复活：既然没有任何代码路径往 Dexie 行里写 `enabling`/`loading`，那条 `isLoading` 推导就永远不会从面板触发。批量操作条的 `Promise.all` 改成了顺序循环 —— 对存在相互依赖的插件做并行激活，并不是 manager 的生命周期锁让人可以放心假定的事。
 
 **未经验证。** 减少动员合同仅涵盖单位保障。jsdom 不运行动画，因此仍需进行真实浏览器检查;第一次尝试发现，应用在Playwright的模拟下报告`prefers-reduced-motion: false`，尽管相同的模拟在`about:blank`上也能工作，这需要单独调查才能信任某个规范。

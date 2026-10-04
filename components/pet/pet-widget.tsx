@@ -1,7 +1,9 @@
 // The floating pet widget. Anchored to a corner, draggable, minimizable; shows
 // the live pet (animated by the visual-state machine), its current bubble, and —
 // when expanded — the interaction panel. Pure presentation over the hooks; gating
-// + settings come from PetMount.
+// + settings come from PetMount, and everything that makes the pet speak or
+// mirrors its appearance to the desktop windows lives in `PetMainRuntime`, so
+// PetMount can hide this widget while the pet is out on the desktop.
 
 "use client"
 
@@ -14,11 +16,6 @@ import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/platform/detect"
 import { usePet } from "@/hooks/pet/use-pet"
 import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
-import { usePetBubbles } from "@/hooks/pet/use-pet-bubbles"
-import { usePetSpeak } from "@/hooks/pet/use-pet-speak"
-import { usePetProactive } from "@/hooks/pet/use-pet-proactive"
-import { usePetInsight } from "@/hooks/pet/use-pet-insight"
-import { usePetScheduledReminder } from "@/hooks/pet/use-pet-scheduled-reminder"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
@@ -94,22 +91,6 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
     reduced,
     effectiveSkin === "live2d" ? { holdFloorMs: LIVE2D_ONE_SHOT_HOLD_MS } : {}
   )
-  usePetBubbles(settings.enabled && !settings.mutedBubbles, view?.effectiveStats.snark ?? 0)
-  // Owns every `talked` bubble (LLM side channel + template fallback). Main
-  // window only — overlay talk replays here through the cross-window bridge.
-  usePetSpeak({
-    profile,
-    view,
-    enabled: settings.enabled && !settings.mutedBubbles,
-    activeCharacterId,
-  })
-  // Proactive speech (opt-in): event comments / idle chatter / time greetings.
-  usePetProactive({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
-  // Attention Radar teaser: nudge when a fresh info-diet report lands.
-  usePetInsight(settings.enabled && !settings.mutedBubbles)
-  // Scheduled-task reminders: flourish + Notification-Center alert when a task
-  // is due. Gated only on `enabled` — a reminder is real, not idle chatter.
-  usePetScheduledReminder(settings.enabled)
 
   const bubble = usePetStore((s) => s.bubble)
   const minimized = usePetStore((s) => s.minimized)
@@ -137,9 +118,6 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
         height: settings.size,
       },
   })
-  useEffect(() => {
-    usePetStore.getState().setAppearanceSelection(selection)
-  }, [selection])
   useEffect(() => {
     usePetStore.getState().setLookTarget(lookTarget)
   }, [lookTarget])

@@ -6,8 +6,6 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("@/hooks/pet/use-pet")
-jest.mock("@/hooks/pet/use-pet-bubbles", () => ({ usePetBubbles: jest.fn() }))
-jest.mock("@/hooks/pet/use-pet-insight", () => ({ usePetInsight: jest.fn() }))
 // Default: no active Live2D model, so the widget renders the SVG skin.
 jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
   useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
@@ -42,6 +40,21 @@ jest.mock("@/stores/settings", () => {
   useSettingsStore.getState = () => ({ save: saveMock, settings: settingsValue })
   return { useSettingsStore }
 })
+
+// The cross-window pet-settings writer, reduced to its contract: apply the
+// updater to the latest persisted record (`settingsValue` stands in for
+// Dexie) and write it through the store's `save`.
+jest.mock("@/lib/pet/settings-sync", () => ({
+  updatePetSettings: async (updater: (latest: unknown) => unknown) => {
+    const { DEFAULT_PET_SETTINGS } = jest.requireActual("@/types/pet")
+    const latest =
+      (settingsValue as { petSettings?: unknown } | null)?.petSettings ?? DEFAULT_PET_SETTINGS
+    const next = updater(latest)
+    if (next === latest) return latest
+    await saveMock({ petSettings: next })
+    return next
+  },
+}))
 
 // `var` (not `let`/`const`): lib/tauri's transport picker calls isTauri() while
 // the test module's import graph is still evaluating — before a `let` would
