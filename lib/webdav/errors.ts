@@ -2,6 +2,14 @@
 // branch (404 → "no snapshot yet", 401/403 → "bad credentials") without
 // string-matching messages.
 
+export const NATIVE_CERTIFICATE_OVERRIDE_UNAVAILABLE = "native_certificate_override_unavailable"
+
+/** Preserve server errors, but localize this app-owned capability failure. */
+export function webDavErrorMessage(error: unknown, certificateOverrideMessage: string): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message === NATIVE_CERTIFICATE_OVERRIDE_UNAVAILABLE ? certificateOverrideMessage : message
+}
+
 export class WebDavError extends Error {
   readonly status: number
   constructor(message: string, status: number) {

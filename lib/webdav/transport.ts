@@ -3,7 +3,7 @@
 // Platform-routed HTTP transport for the WebDAV client.
 //
 //   - Mobile (Capacitor native): CapacitorHttp.request — bypasses the WebView
-//     CORS/interceptor and supports `serverTrustMode: "self-signed"`.
+//     CORS/interceptor and uses OS certificate validation.
 //   - Desktop (Tauri): connectors_http_request (reqwest) — bypasses CORS and
 //     accepts arbitrary WebDAV methods.
 //   - Web: throws. Self-hosted WebDAV servers almost never send CORS headers,
@@ -12,7 +12,7 @@
 import { isTauri } from "@/lib/tauri"
 import { getCapacitorHttp } from "@/lib/connectivity/capacitor-http"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
-import { WebDavError } from "./errors"
+import { WebDavError, NATIVE_CERTIFICATE_OVERRIDE_UNAVAILABLE } from "./errors"
 import type { WebDavRequest, WebDavResponse, WebDavTransport } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -66,13 +66,15 @@ class CapacitorHttpTransport implements WebDavTransport {
   async send(req: WebDavRequest): Promise<WebDavResponse> {
     const cap = getCapacitorHttp()
     if (!cap) throw new WebDavError("CapacitorHttp is unavailable", 0)
+    if (this.trustSelfSigned) {
+      throw new WebDavError(NATIVE_CERTIFICATE_OVERRIDE_UNAVAILABLE, 0)
+    }
     const timeout = req.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const resp = await cap.request({
       url: req.url,
       method: req.method,
       headers: req.headers,
       data: req.body,
-      serverTrustMode: this.trustSelfSigned ? "self-signed" : "default",
       connectTimeout: timeout,
       readTimeout: timeout,
       responseType: "text",
@@ -112,4 +114,9 @@ export function createWebDavTransport(opts: CreateTransportOptions = {}): WebDav
  */
 export function isWebDavSupported(): boolean {
   return Boolean(getCapacitorHttp()) || isTauri()
+}
+
+/** Only the desktop transport implements an explicit certificate override. */
+export function isWebDavCertificateOverrideSupported(): boolean {
+  return !getCapacitorHttp() && isTauri()
 }

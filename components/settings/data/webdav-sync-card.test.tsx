@@ -31,9 +31,11 @@ jest.mock("@/lib/webdav/config", () => ({
 jest.mock("@/lib/webdav/client", () => ({
   createWebDavClient: (...a: unknown[]) => createWebDavClientMock(...a),
 }))
+let certificateOverrideSupported = true
 let supported = true
 jest.mock("@/lib/webdav/transport", () => ({
   isWebDavSupported: () => supported,
+  isWebDavCertificateOverrideSupported: () => certificateOverrideSupported,
 }))
 const loadPersistedMock = jest.fn(async (..._a: unknown[]) => false)
 const persistSyncPassphraseMock = jest.fn(async (..._a: unknown[]) => {})
@@ -79,6 +81,7 @@ beforeEach(() => {
   hasPassword = false
   hasPass = false
   supported = true
+  certificateOverrideSupported = true
   saveSettingsMock.mockClear()
   setWebDavPasswordMock.mockClear()
   setSyncPassphraseMock.mockClear()
@@ -275,4 +278,34 @@ describe("WebDavSyncCard", () => {
     // Save still works — persisting config is fine anywhere.
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
+})
+
+it("lets mobile users remove an unsupported saved override but not enable it", async () => {
+  certificateOverrideSupported = false
+  storedSettings = { webdavSync: { allowInvalidCertificates: true } }
+  const user = userEvent.setup()
+  render(<WebDavSyncCard />)
+  const toggle = screen.getByTestId("webdav-allow-invalid-certificates")
+  await waitFor(() => expect(toggle).toHaveAttribute("data-state", "checked"))
+  expect(toggle).toBeEnabled()
+  await user.click(toggle)
+  expect(toggle).toHaveAttribute("data-state", "unchecked")
+  expect(toggle).toBeDisabled()
+})
+
+it("localizes a serialized mobile certificate error from sync", async () => {
+  hasPass = true
+  runSyncNowMock.mockResolvedValueOnce({
+    ok: false,
+    error: "native_certificate_override_unavailable",
+  })
+  const user = userEvent.setup()
+  render(<WebDavSyncCard />)
+  await screen.findByText("Unlocked")
+  await user.click(screen.getByRole("button", { name: "Sync now" }))
+  await waitFor(() =>
+    expect(toastError).toHaveBeenCalledWith(
+      expect.stringContaining("Certificate overrides are available only in the desktop app")
+    )
+  )
 })

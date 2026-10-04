@@ -4,6 +4,13 @@ import { BackupRestoreTab } from "./backup-restore-tab"
 
 const mockRun = jest.fn()
 const mockRequireBiometric = jest.fn()
+let mockShareBiometricBlock: string | null = null
+jest.mock("@/hooks/data/use-backup-export-guard", () => ({
+  useBackupExportGuard: () => async (action: () => Promise<unknown>) =>
+    mockShareBiometricBlock
+      ? { kind: "blocked", reason: mockShareBiometricBlock }
+      : { kind: "ok", value: await action() },
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -115,6 +122,7 @@ function packageWith(payload: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  mockShareBiometricBlock = null
   mockRun.mockReset().mockResolvedValue({ ok: true, canceled: false })
   mockRequireBiometric.mockReset()
   mockToastError.mockReset()
@@ -170,6 +178,22 @@ it("does not start plaintext backup when the user cancels", async () => {
 })
 
 describe("share link PII gate", () => {
+  it.each(["cancelled", "lockout"])(
+    "does not prepare or disclose backup contents when biometrics are %s",
+    async (reason) => {
+      mockShareBiometricBlock = reason
+      const user = userEvent.setup()
+      render(<BackupRestoreTab />)
+      await user.click(screen.getByRole("button", { name: "choose-plaintext" }))
+      await user.click(screen.getByTestId("backup-share-button"))
+      expect(mockBuildBackupPackage).not.toHaveBeenCalled()
+      expect(mockDefaultPassphrase).not.toHaveBeenCalled()
+      expect(screen.queryByTestId("stub-share-dialog")).toBeNull()
+      if (reason === "cancelled") expect(mockToastError).not.toHaveBeenCalled()
+      else expect(mockToastError).toHaveBeenCalledWith("biometricBlocked")
+    }
+  )
+
   it("shows the hit report and only opens the share dialog after the owner confirms", async () => {
     const user = userEvent.setup()
     mockBuildBackupPackage.mockResolvedValue(

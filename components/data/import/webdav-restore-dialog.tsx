@@ -27,6 +27,7 @@ import {
 import { PassphraseInput } from "@/components/data/shared/passphrase-input"
 import { ImportSummary as ImportSummaryView } from "./import-summary"
 import { listRemoteSnapshots, restoreFromWebDav, type RemoteSnapshot } from "@/lib/webdav/restore"
+import { webDavErrorMessage } from "@/lib/webdav/errors"
 import type { BackupManifestV3, ImportMergeStrategy, ImportSummary } from "@/lib/data/types"
 
 const LATEST_VALUE = "__latest__"
@@ -53,6 +54,7 @@ export function WebDavRestoreDialog({
   onOpenChange: onOpenChangeProp,
 }: Props) {
   const t = useTranslations("settings.data.webdav.restoreDialog")
+  const tWebDav = useTranslations("settings.data.webdav")
   const [openState, setOpenState] = useState(false)
   const controlled = openProp !== undefined
   const open = controlled ? openProp : openState
@@ -78,7 +80,10 @@ export function WebDavRestoreDialog({
       const snapshots = await listRemoteSnapshots()
       setPhase({ status: "ready", snapshots })
     } catch (err) {
-      setPhase({ status: "error", message: err instanceof Error ? err.message : String(err) })
+      setPhase({
+        status: "error",
+        message: webDavErrorMessage(err, tWebDav("certificateOverrideUnavailable")),
+      })
     }
   }
 
@@ -90,7 +95,10 @@ export function WebDavRestoreDialog({
       const result = await restoreFromWebDav({ path, passphrase, mergeStrategy: strategy })
       setPhase({ status: "done", summary: result.summary, sourceDevice: result.sourceDevice })
     } catch (err) {
-      setPhase({ status: "error", message: err instanceof Error ? err.message : String(err) })
+      setPhase({
+        status: "error",
+        message: webDavErrorMessage(err, tWebDav("certificateOverrideUnavailable")),
+      })
     }
   }
 

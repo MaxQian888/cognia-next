@@ -10,6 +10,19 @@ import { listBackupHistory } from "@/lib/db/backup-history"
 import { readStreamPackage } from "@/lib/data/read-stream-package"
 import { blobFileStream } from "@/lib/files/file-bridge"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+import type { SaveExportOptions, SaveExportOutcome } from "@/lib/files/save-export"
+const mockSaveExport = jest.fn<Promise<SaveExportOutcome>, [SaveExportOptions]>()
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (options: SaveExportOptions) => mockSaveExport(options),
+}))
+let mockBiometricBlock: string | null = null
+jest.mock("@/hooks/data/use-backup-export-guard", () => ({
+  useBackupExportGuard: () => async (action: () => Promise<unknown>) =>
+    mockBiometricBlock
+      ? { kind: "blocked", reason: mockBiometricBlock }
+      : { kind: "ok", value: await action() },
+}))
+jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 
 const mockExportPortableRetrievalKeys = jest.fn(
   async (_passphrase?: string, _store?: unknown) => []
@@ -36,6 +49,10 @@ beforeAll(() => {
 })
 
 beforeEach(async () => {
+  mockSaveExport
+    .mockReset()
+    .mockImplementation(jest.requireActual("@/lib/files/save-export").saveExport)
+  mockBiometricBlock = null
   mockExportPortableRetrievalKeys.mockClear()
   await getDb().delete()
   __resetDbForTesting()
@@ -49,6 +66,82 @@ beforeEach(async () => {
 })
 
 describe("useFullBackup", () => {
+  it.each(["saved", "cancelled", "error"] as const)(
+    "honours the native saver outcome %s before recording backup success",
+    async (kind) => {
+      mockSaveExport.mockResolvedValueOnce(
+        kind === "saved"
+          ? {
+              kind,
+              platform: "mobile",
+              filename: "backup.cbk",
+              location: "file:///Documents/backup.cbk",
+            }
+          : kind === "error"
+            ? { kind, message: "Storage permission denied" }
+            : { kind }
+      )
+      const { result } = renderHook(() => useFullBackup())
+      let outcome: Awaited<ReturnType<typeof result.current.run>> | undefined
+      await act(async () => {
+        outcome = await result.current.run({
+          includeSessions: false,
+          includeApiKey: false,
+          encryption: "plaintext",
+          plaintextConfirmed: true,
+        })
+      })
+      expect(mockSaveExport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.any(Blob),
+          mobileSubdir: "cognia/backups",
+          mimeType: "application/octet-stream",
+        })
+      )
+      expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled()
+      const history = await listBackupHistory()
+      if (kind === "saved") {
+        expect(outcome).toMatchObject({ ok: true, canceled: false })
+        expect(history).toHaveLength(1)
+        expect(history[0].success).toBe(true)
+      } else if (kind === "cancelled") {
+        expect(outcome).toEqual({ ok: true, canceled: true })
+        expect(history).toEqual([])
+      } else {
+        expect(outcome).toEqual({ ok: false, error: "Storage permission denied" })
+        expect(history).toHaveLength(1)
+        expect(history[0]).toMatchObject({
+          success: false,
+          errorMessage: "Storage permission denied",
+        })
+      }
+    }
+  )
+
+  it.each(["cancelled", "lockout"])(
+    "does not read or export backup data when biometrics are %s",
+    async (reason) => {
+      mockBiometricBlock = reason
+      const { result } = renderHook(() => useFullBackup())
+      let outcome: Awaited<ReturnType<typeof result.current.run>> | undefined
+      await act(async () => {
+        outcome = await result.current.run({
+          includeSessions: true,
+          includeApiKey: true,
+          encryption: "auto-key",
+        })
+      })
+      expect(outcome).toEqual(
+        reason === "cancelled"
+          ? { ok: true, canceled: true }
+          : { ok: false, error: "biometricBlocked" }
+      )
+      expect(mockExportPortableRetrievalKeys).not.toHaveBeenCalled()
+      expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled()
+      expect(await listBackupHistory()).toEqual([])
+    }
+  )
+
   it("plaintext export records a successful row in backupHistory", async () => {
     const { result } = renderHook(() => useFullBackup())
     type Outcome = Awaited<ReturnType<typeof result.current.run>>

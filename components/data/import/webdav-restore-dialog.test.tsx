@@ -90,3 +90,14 @@ describe("WebDavRestoreDialog", () => {
     await waitFor(() => expect(screen.getByText(/bad passphrase/)).toBeInTheDocument())
   })
 })
+
+it("explains unsupported mobile certificate policy without exposing an error code", async () => {
+  listMock.mockRejectedValueOnce(new Error("native_certificate_override_unavailable"))
+  const user = userEvent.setup()
+  render(<WebDavRestoreDialog trigger={<Button>Open</Button>} />)
+  await user.click(screen.getByRole("button", { name: "Open" }))
+  expect(
+    await screen.findByText(/Certificate overrides are available only in the desktop app/)
+  ).toBeInTheDocument()
+  expect(screen.queryByText(/native_certificate_override_unavailable/)).not.toBeInTheDocument()
+})

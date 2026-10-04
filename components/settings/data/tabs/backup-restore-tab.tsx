@@ -31,6 +31,8 @@ import { BatchExportDialog } from "@/components/data/export/batch-export-dialog"
 import { ScheduleCard } from "@/components/data/export/schedule-card"
 import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dialog"
 import { useFullBackup } from "@/hooks/data/use-full-backup"
+import { useBackupExportGuard } from "@/hooks/data/use-backup-export-guard"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useScheduler } from "@/hooks/scheduler"
 import { rotateBackupKey } from "@/lib/data/backup-key"
 import {
@@ -75,6 +77,9 @@ export function BackupRestoreTab() {
 function ExportBlock() {
   const t = useTranslations("settings.data")
   const tShare = useTranslations("share")
+  const tBackup = useTranslations("mobile.backup")
+  const guardExport = useBackupExportGuard()
+  const blockReason = useBiometricBlockReason()
   const [includeSessions, setIncludeSessions] = useState(false)
   const [includeApiKey, setIncludeApiKey] = useState(false)
   const [includeBuiltIns, setIncludeBuiltIns] = useState(false)
@@ -96,57 +101,65 @@ function ExportBlock() {
     }
     setPreparingShare(true)
     try {
-      const sharePassphrase =
-        encryption === "plaintext"
-          ? undefined
-          : encryption === "passphrase"
-            ? passphrase
-            : await getDefaultBackupPassphrase()
-      if (encryption !== "plaintext" && !sharePassphrase) {
-        toast.error(t("backup.shareScan.keyUnavailable"))
-        return
-      }
-      const basePackage = await buildBackupPackage({
-        includeSessions,
-        includeApiKey,
-        includeBuiltIns,
-      })
-      const pkg = sharePassphrase
-        ? await attachPortableRetrievalKeys(basePackage, sharePassphrase)
-        : basePackage
-      const plaintext = serializePackage(pkg)
-      let artifact: BackupPackageV3 | EncryptedEnvelopeV1 = pkg
-      let serialized = plaintext
-      if (sharePassphrase) {
-        const envelope = await encryptBackupPackage(plaintext, sharePassphrase, {
-          version: pkg.manifest.version,
-          schemaVersion: pkg.manifest.schemaVersion,
-          traceId: pkg.manifest.traceId,
-          exportedAt: pkg.manifest.exportedAt,
-          appVersion: pkg.manifest.appVersion,
-          backend: pkg.manifest.backend,
-          encryption: { enabled: true, format: "encrypted-envelope-v1" },
+      const outcome = await guardExport(async () => {
+        const sharePassphrase =
+          encryption === "plaintext"
+            ? undefined
+            : encryption === "passphrase"
+              ? passphrase
+              : await getDefaultBackupPassphrase()
+        if (encryption !== "plaintext" && !sharePassphrase) {
+          toast.error(t("backup.shareScan.keyUnavailable"))
+          return
+        }
+        const basePackage = await buildBackupPackage({
+          includeSessions,
+          includeApiKey,
+          includeBuiltIns,
         })
-        artifact = envelope
-        serialized = JSON.stringify(envelope, null, 2)
-      }
-      const scan = scanBackupForShare(artifact)
-      loggers.export.info("backup_share_scanned", {
-        encryption,
-        scan: scan.kind,
-        hits: scan.kind === "hits" ? scan.total : 0,
-        domains: scan.kind === "hits" ? scan.domains.map((entry) => entry.domain) : [],
-      })
-      setSharePayload(
-        backupPayload(
-          serialized,
-          defaultExportFileName(new Date(), sharePassphrase ? "encrypted" : "plain")
+        const pkg = sharePassphrase
+          ? await attachPortableRetrievalKeys(basePackage, sharePassphrase)
+          : basePackage
+        const plaintext = serializePackage(pkg)
+        let artifact: BackupPackageV3 | EncryptedEnvelopeV1 = pkg
+        let serialized = plaintext
+        if (sharePassphrase) {
+          const envelope = await encryptBackupPackage(plaintext, sharePassphrase, {
+            version: pkg.manifest.version,
+            schemaVersion: pkg.manifest.schemaVersion,
+            traceId: pkg.manifest.traceId,
+            exportedAt: pkg.manifest.exportedAt,
+            appVersion: pkg.manifest.appVersion,
+            backend: pkg.manifest.backend,
+            encryption: { enabled: true, format: "encrypted-envelope-v1" },
+          })
+          artifact = envelope
+          serialized = JSON.stringify(envelope, null, 2)
+        }
+        const scan = scanBackupForShare(artifact)
+        loggers.export.info("backup_share_scanned", {
+          encryption,
+          scan: scan.kind,
+          hits: scan.kind === "hits" ? scan.total : 0,
+          domains: scan.kind === "hits" ? scan.domains.map((entry) => entry.domain) : [],
+        })
+        setSharePayload(
+          backupPayload(
+            serialized,
+            defaultExportFileName(new Date(), sharePassphrase ? "encrypted" : "plain")
+          )
         )
-      )
-      setShareScan(scan)
-      if (scan.kind === "hits" || (scan.kind === "clean" && (scan.uninspectedAttachments ?? 0) > 0))
-        setScanOpen(true)
-      else setShareOpen(true)
+        setShareScan(scan)
+        if (
+          scan.kind === "hits" ||
+          (scan.kind === "clean" && (scan.uninspectedAttachments ?? 0) > 0)
+        )
+          setScanOpen(true)
+        else setShareOpen(true)
+      })
+      if (outcome.kind === "blocked" && outcome.reason !== "cancelled") {
+        toast.error(tBackup("biometricBlocked", { reason: blockReason(outcome.reason) }))
+      }
     } catch (err) {
       loggers.export.error("backup_share_prepare_failed", undefined, {
         error: err instanceof Error ? err.message : String(err),

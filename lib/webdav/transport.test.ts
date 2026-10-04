@@ -58,14 +58,14 @@ describe("createWebDavTransport", () => {
     )
   })
 
-  it("prefers CapacitorHttp when native, passes self-signed trust", async () => {
+  it("prefers CapacitorHttp with system certificate trust", async () => {
     capPlugin = {
       request: jest.fn().mockResolvedValue({ status: 200, headers: {}, data: "body", url: "u" }),
     }
-    const t = createWebDavTransport({ trustSelfSigned: true })
+    const t = createWebDavTransport()
     const resp = await t.send({ method: "GET", url: "https://d/x" })
     expect(capPlugin.request).toHaveBeenCalledWith(
-      expect.objectContaining({ method: "GET", serverTrustMode: "self-signed", data: undefined })
+      expect.objectContaining({ method: "GET", data: undefined })
     )
     expect(resp.body).toBe("body")
     // Capacitor wins even if Tauri is also reported.
@@ -89,4 +89,16 @@ describe("createWebDavTransport", () => {
     const resp = await t.send({ method: "GET", url: "https://d/x" })
     expect(resp.body).toBe('{"a":1}')
   })
+})
+
+it("rejects unsupported certificate overrides before sending credentials", async () => {
+  capPlugin = { request: jest.fn() }
+  await expect(
+    createWebDavTransport({ trustSelfSigned: true }).send({
+      method: "GET",
+      url: "https://nas.test",
+      headers: { Authorization: "synthetic" },
+    })
+  ).rejects.toThrow("native_certificate_override_unavailable")
+  expect(capPlugin.request).not.toHaveBeenCalled()
 })

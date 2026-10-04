@@ -34,7 +34,8 @@ import {
   getWebDavPassword,
 } from "@/lib/webdav/config"
 import { createWebDavClient } from "@/lib/webdav/client"
-import { isWebDavSupported } from "@/lib/webdav/transport"
+import { webDavErrorMessage } from "@/lib/webdav/errors"
+import { isWebDavSupported, isWebDavCertificateOverrideSupported } from "@/lib/webdav/transport"
 import {
   getSyncPassphrase,
   hasSyncPassphrase,
@@ -73,11 +74,13 @@ export function WebDavSyncCard() {
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
   const [supported, setSupported] = useState(true)
+  const [certificateOverrideSupported, setCertificateOverrideSupported] = useState(false)
 
   useEffect(() => {
     void (async () => {
       const settings = await getSettings()
       setSupported(isWebDavSupported())
+      setCertificateOverrideSupported(isWebDavCertificateOverrideSupported())
       const cfg = settings.webdavSync
       setEnabled(cfg?.enabled ?? false)
       setBaseUrl(cfg?.baseUrl ?? "")
@@ -205,7 +208,9 @@ export function WebDavSyncCard() {
       await client.ensureCollection(dir.startsWith("/") ? dir : `/${dir}`)
       toast.success(t("testSuccess"))
     } catch (err) {
-      toast.error(t("testFailed", { error: err instanceof Error ? err.message : String(err) }))
+      toast.error(
+        t("testFailed", { error: webDavErrorMessage(err, t("certificateOverrideUnavailable")) })
+      )
     } finally {
       setBusy(false)
     }
@@ -224,7 +229,11 @@ export function WebDavSyncCard() {
         setLastSyncAt(new Date().toISOString())
         toast.success(t("syncSuccess"))
       } else {
-        toast.error(t("syncFailed", { error: result.error }))
+        toast.error(
+          t("syncFailed", {
+            error: webDavErrorMessage(result.error, t("certificateOverrideUnavailable")),
+          })
+        )
       }
     } finally {
       setBusy(false)
@@ -365,6 +374,7 @@ export function WebDavSyncCard() {
       <label className="flex items-start gap-2 text-sm">
         <Switch
           checked={allowInvalidCertificates}
+          disabled={!certificateOverrideSupported && !allowInvalidCertificates}
           data-testid="webdav-allow-invalid-certificates"
           onCheckedChange={setAllowInvalidCertificates}
         />
@@ -373,6 +383,11 @@ export function WebDavSyncCard() {
           <span className="block text-xs text-muted-foreground">
             {t("allowInvalidCertificatesDescription")}
           </span>
+          {!certificateOverrideSupported && (
+            <span className="block text-xs text-muted-foreground">
+              {t("certificateOverrideUnavailable")}
+            </span>
+          )}
         </span>
       </label>
 
