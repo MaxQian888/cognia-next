@@ -72,6 +72,20 @@ describe("derivedPersonFromToken", () => {
     })
   })
 
+  it("takes an official-account subject as the id, as the host does", async () => {
+    const official = token({
+      iss: "https://id.cognia.cn/api/auth",
+      sub: "usr_0123456789abcdef0123456789abcdef",
+    })
+    expect(await derivedPersonFromToken(official, "oidc")).toEqual({
+      userId: "usr_0123456789abcdef0123456789abcdef",
+    })
+    // Without the kind the subject is opaque, so it is derived.
+    expect((await derivedPersonFromToken(official))?.userId).not.toBe(
+      "usr_0123456789abcdef0123456789abcdef"
+    )
+  })
+
   it("has nothing to derive from an opaque token", async () => {
     expect(await derivedPersonFromToken("opaque")).toBeNull()
     expect(await derivedPersonFromToken(token({ sub: "no-issuer" }))).toBeNull()
@@ -91,6 +105,23 @@ describe("on the desktop", () => {
       orgId: await deriveOrgId(ISSUER, "org_logto_1"),
       canonicalUserId: "usr_ada",
       canonicalOrgId: "org_acme",
+    })
+  })
+
+  it("sends the official subject itself as the verifiable id", async () => {
+    const invokeFn = jest.fn().mockResolvedValue(undefined)
+    const sub = "usr_0123456789abcdef0123456789abcdef"
+    const official = token({ iss: "https://id.cognia.cn/api/auth", sub })
+    await bindHostPerson(
+      { localAccountId: "acct_a", userId: sub, accessToken: official, issuerKind: "oidc" },
+      { invokeFn, isDesktop: desktop }
+    )
+    expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
+      accessToken: official,
+      userId: sub,
+      orgId: null,
+      canonicalUserId: null,
+      canonicalOrgId: null,
     })
   })
 

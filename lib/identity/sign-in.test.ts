@@ -3,12 +3,14 @@ import "fake-indexeddb/auto"
 
 import { ACCOUNT_REGISTRY_DB_NAME, CogniaAccountRegistryDB } from "@/lib/accounts/account-db"
 import { isOrgId, isUserId } from "@/types/identity"
+import idVectors from "@/crates/cognia-companion-security/fixtures/identity-id-vectors.json"
 
 import {
   SignInError,
   bindSignedInIdentity,
   deriveOrgId,
   deriveUserId,
+  expectedUserId,
   resolveIdentityFromClaims,
   type IdentityProjectionWriter,
   type SignedInIdentity,
@@ -62,6 +64,20 @@ describe("id derivation", () => {
   })
 })
 
+describe("expectedUserId", () => {
+  // The same vectors the desktop host's `official_identity` tests read, so the
+  // renderer and the host cannot disagree about who a token names.
+  it.each(idVectors)("$note", async ({ issuer, subject, issuerKind, userId }) => {
+    expect(await expectedUserId(issuer, subject, issuerKind === "oidc" ? "oidc" : undefined)).toBe(
+      userId
+    )
+  })
+
+  it("never takes a Logto subject as the id, however it looks", async () => {
+    expect(await expectedUserId(ISSUER, "usr_0123456789abcdef")).not.toBe("usr_0123456789abcdef")
+  })
+})
+
 describe("resolveIdentityFromClaims", () => {
   const at = 1_000
 
@@ -105,6 +121,21 @@ describe("resolveIdentityFromClaims", () => {
 })
 
 describe("bindSignedInIdentity", () => {
+  it("binds an official-account person under the subject the issuer minted", async () => {
+    const registry = await freshRegistry("official-subject")
+    const official: LogtoSession = {
+      ...session({ sub: "usr_0123456789abcdef0123456789abcdef" }),
+      issuer: "https://id.cognia.cn/api/auth",
+      issuerKind: "oidc",
+    }
+    const identity = await bindSignedInIdentity(official, {
+      localAccountId: "acct_official",
+      registry,
+    })
+    expect(identity.user.id).toBe("usr_0123456789abcdef0123456789abcdef")
+    expect(identity.binding.userId).toBe("usr_0123456789abcdef0123456789abcdef")
+  })
+
   it("binds the profile to the person the token describes", async () => {
     const registry = await freshRegistry("bind")
     const result = await bindSignedInIdentity(

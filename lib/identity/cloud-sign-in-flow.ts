@@ -297,6 +297,7 @@ export async function adoptOrganization(
         legacyUserId: binding.userId,
         canonicalUserId: target.userId,
         accessToken: merged.accessToken,
+        ...(merged.issuerKind ? { issuerKind: merged.issuerKind } : {}),
         orgId: target.orgId,
         now: now(),
       },

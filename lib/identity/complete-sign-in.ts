@@ -77,6 +77,7 @@ export async function completeSignIn(
         // NOT. The host reads those from its own configuration, because a
         // caller that picks its own trust anchor is not being verified at all.
         accessToken: session.accessToken,
+        ...(session.issuerKind ? { issuerKind: session.issuerKind } : {}),
         ...(identity.org ? { orgId: identity.org.id } : {}),
       },
       deps.host ?? {}

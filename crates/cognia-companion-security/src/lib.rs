@@ -17,6 +17,7 @@ pub mod device_grants;
 pub mod host_identity;
 pub mod idempotency;
 pub mod jwt;
+pub mod official_identity;
 pub mod oidc;
 pub mod operations;
 pub mod principal;

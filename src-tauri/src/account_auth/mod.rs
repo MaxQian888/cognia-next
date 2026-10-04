@@ -1,7 +1,6 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
-use sha2::Digest as _;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -519,28 +518,16 @@ pub async fn account_bind_person(
     // also an SSRF primitive: the host fetched any URL named over IPC.
     //
     // The environment (COGNIA_LOGTO_ISSUER / COGNIA_LOGTO_AUDIENCE) wins on a
-    // headless host. A desktop has no such environment and uses the deployment
-    // record `account_set_cloud_deployment` fetched itself. Neither configured
-    // means the host refuses to bind a person rather than take the caller's
-    // word for one.
-    let verifier =
-        cloud_deployment::resolve_verifier(security_session.data_dir()).ok_or_else(|| {
-            "this host is not configured for Logto sign-in (no COGNIA_LOGTO_ISSUER / \
-             COGNIA_LOGTO_AUDIENCE, and no cloud deployment has been chosen)"
-                .to_owned()
-        })?;
-    let issuer = verifier.issuer().to_owned();
-    let claims = verifier
-        .authenticate(&access_token)
-        .await
-        .map_err(|error| format!("Logto access token was rejected: {error}"))?;
-    let expected_user_id = derive_identity_id("usr_", "user", &issuer, &claims.sub);
-    let expected_org_id = claims
-        .organization_id
-        .as_deref()
-        .map(|organization| derive_identity_id("org_", "org", &issuer, organization));
-    if user_id != expected_user_id || org_id != expected_org_id {
-        return Err("the requested person does not match the verified Logto token".into());
+    // headless host; a desktop uses the deployment record
+    // `account_set_cloud_deployment` fetched itself. The official account's
+    // issuer, compiled into the build, is trusted beside either (ADR-0215).
+    let anchors = cloud_deployment::resolve_anchors(security_session.data_dir());
+    let verified =
+        cognia_companion_security::official_identity::verify_person(&anchors, &access_token)
+            .await
+            .map_err(|error| error.to_string())?;
+    if user_id != verified.user_id || org_id != verified.org_id {
+        return Err("the requested person does not match the verified access token".into());
     }
     // Shape only. These are unverified by construction (see the doc comment).
     let canonical_user_id = canonical_user_id
@@ -724,11 +711,6 @@ fn verifier_digest_of(verifier: &AccountPasswordVerifier) -> String {
         &verifier.salt,
         &verifier.hash,
     )
-}
-
-fn derive_identity_id(prefix: &str, kind: &str, issuer: &str, subject: &str) -> String {
-    let digest = sha2::Sha256::digest(format!("{kind}\n{issuer}\n{subject}").as_bytes());
-    format!("{prefix}{}", hex::encode(digest)[..24].to_owned())
 }
 
 fn create_password_verifier_with_salt(
@@ -1207,18 +1189,6 @@ mod tests {
         assert!(gateway.status().owner_account_id.is_none());
         assert!(gateway.status().account_generation > generation);
         assert!(session.require_active().is_err());
-    }
-
-    #[test]
-    fn native_logto_identity_derivation_matches_the_renderer_contract() {
-        assert_eq!(
-            derive_identity_id("usr_", "user", "https://logto.test/oidc", "subject-1"),
-            "usr_d066005448858a8ba6bb2f96"
-        );
-        assert_eq!(
-            derive_identity_id("org_", "org", "https://logto.test/oidc", "tenant-1"),
-            "org_b6f56214a98891636d36e8c5"
-        );
     }
 
     #[test]

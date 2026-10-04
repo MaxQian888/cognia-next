@@ -239,6 +239,29 @@ describe("reconcileUserId", () => {
     })
   })
 
+  it("passes the issuer kind on, so the host is asked for the id it will verify", async () => {
+    await seedLegacyPerson()
+    const invokeFn = jest.fn(async () => undefined)
+    const sub = "usr_0123456789abcdef0123456789abcdef"
+    const officialToken = `h.${Buffer.from(
+      JSON.stringify({ iss: "https://id.cognia.cn/api/auth", sub })
+    ).toString("base64url")}.s`
+    await reconcileUserId(
+      {
+        localAccountId: "acct_a",
+        legacyUserId: LEGACY,
+        canonicalUserId: CANONICAL,
+        accessToken: officialToken,
+        issuerKind: "oidc",
+      },
+      { registry: registry(), host: { invokeFn: invokeFn as never, isDesktop: () => true } }
+    )
+    expect(invokeFn).toHaveBeenCalledWith(
+      "account_bind_person",
+      expect.objectContaining({ userId: sub, canonicalUserId: CANONICAL })
+    )
+  })
+
   it("reports a host failure without undoing the local rekey", async () => {
     await seedLegacyPerson()
     const onHostMirrorFailed = jest.fn()

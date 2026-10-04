@@ -29,7 +29,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::companion_api::oidc::{OidcAuthenticator, OidcVerifierConfig};
+use crate::companion_api::oidc::OidcAuthenticator;
+use cognia_companion_security::official_identity::{
+    host_anchors, AnchorSource, IssuerKind, TrustAnchor,
+};
 
 const CONFIG_FILE: &str = "cloud-deployment.json";
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -49,6 +52,10 @@ pub struct CloudDeploymentConfig {
     pub issuer: String,
     /// The API resource the gateway announced, verbatim.
     pub audience: String,
+    /// `oidc` when the gateway announced a non-Logto issuer (auth config v4);
+    /// absent means Logto, like every record saved before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_service_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -74,6 +81,8 @@ pub struct RemoteAuthConfig {
 pub struct RemoteOidcConfig {
     pub issuer: String,
     pub audience: String,
+    #[serde(default)]
+    pub issuer_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -337,28 +346,30 @@ pub fn config_from_remote(
         ),
         None => (None, None),
     };
+    let issuer_kind = (IssuerKind::parse(oidc.issuer_kind.as_deref()) == IssuerKind::Oidc)
+        .then(|| "oidc".to_owned());
     Ok(CloudDeploymentConfig {
         gateway_url,
         fingerprint,
         issuer,
         audience,
+        issuer_kind,
         collaboration_service_url,
         web_origin,
         saved_at: now,
     })
 }
 
-/// The verifier `account_bind_person` uses: the environment when it is set
-/// (a headless host), else the stored deployment, else nothing.
-pub fn resolve_verifier(data_dir: Option<&Path>) -> Option<Arc<OidcAuthenticator>> {
-    if let Some(from_env) = OidcAuthenticator::from_env() {
-        return Some(from_env);
-    }
-    let stored = load(data_dir)?;
-    Some(Arc::new(OidcAuthenticator::new(
-        OidcVerifierConfig::new(stored.issuer, stored.audience, Vec::new()),
-        JWKS_TTL,
-    )))
+/// The issuers `account_bind_person` trusts, each with its verifier: the
+/// environment or else the stored deployment, plus the official account.
+pub fn resolve_anchors(data_dir: Option<&Path>) -> Vec<(TrustAnchor, Arc<OidcAuthenticator>)> {
+    let stored = load(data_dir).map(|stored| TrustAnchor {
+        kind: IssuerKind::parse(stored.issuer_kind.as_deref()),
+        issuer: stored.issuer,
+        audience: stored.audience,
+        source: AnchorSource::Stored,
+    });
+    host_anchors(stored, JWKS_TTL)
 }
 
 #[cfg(test)]
@@ -382,6 +393,7 @@ mod tests {
             fingerprint: Some("ab".repeat(32)),
             issuer: "https://auth.example/oidc".into(),
             audience: "https://cloud.example/api".into(),
+            issuer_kind: None,
             collaboration_service_url: Some("https://cloud.example/collab".into()),
             web_origin: Some("https://cloud.example".into()),
             saved_at: 42,
@@ -476,7 +488,15 @@ mod tests {
         );
         assert_eq!(config.web_origin.as_deref(), Some("https://cloud.example"));
         assert_eq!(config.saved_at, 7);
+        assert_eq!(config.issuer_kind, None);
         assert!(parse_auth_config(b"nope").is_err());
+
+        let oidc = parse_auth_config(
+            br#"{"deploymentMode": "multi-tenant", "oidc": {"issuer": "https://id.example/api/auth", "audience": "https://sync.example", "issuerKind": "oidc"}}"#,
+        )
+        .unwrap();
+        let config = config_from_remote("https://cloud.example".into(), None, oidc, 7).unwrap();
+        assert_eq!(config.issuer_kind.as_deref(), Some("oidc"));
     }
 
     #[test]
@@ -541,9 +561,15 @@ mod tests {
             return;
         }
         let dir = temp_dir("verifier");
-        assert!(resolve_verifier(Some(&dir)).is_none());
+        assert!(resolve_anchors(Some(&dir))
+            .iter()
+            .all(|(a, _)| a.source == AnchorSource::Official));
         save(Some(&dir), &sample()).unwrap();
-        let verifier = resolve_verifier(Some(&dir)).unwrap();
+        let (stored, verifier) = &resolve_anchors(Some(&dir))[0];
+        assert_eq!(
+            (stored.source, stored.kind),
+            (AnchorSource::Stored, IssuerKind::Logto)
+        );
         assert_eq!(verifier.issuer(), "https://auth.example/oidc");
     }
 }

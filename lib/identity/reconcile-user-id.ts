@@ -32,6 +32,7 @@
 
 import { UserBindingRegistry } from "./user-binding"
 import { bindHostPerson, type HostPersonDeps } from "./host-person"
+import type { OidcIssuerKind } from "@/lib/logto/client"
 
 import { getDb } from "@/lib/db/schema"
 import { orgMembershipId, workspaceMembershipId, type User } from "@/types/identity"
@@ -43,6 +44,8 @@ export interface ReconcileUserIdInput {
   canonicalUserId: string
   /** Re-mirror the person to the host with this token, when there is a host. */
   accessToken?: string
+  /** The kind of issuer that minted `accessToken` (absent: Logto). */
+  issuerKind?: OidcIssuerKind
   orgId?: string
   now?: number
 }
@@ -220,6 +223,7 @@ export async function reconcileUserId(
           localAccountId: input.localAccountId,
           userId: to,
           accessToken: input.accessToken,
+          ...(input.issuerKind ? { issuerKind: input.issuerKind } : {}),
           ...(input.orgId ? { orgId: input.orgId } : {}),
         },
         deps.host ?? {}

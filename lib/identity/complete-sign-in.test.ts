@@ -69,6 +69,35 @@ describe("completeSignIn", () => {
     })
   })
 
+  it("mirrors an official-account person under the subject the issuer minted", async () => {
+    const registry = await freshRegistry("official")
+    const invokeFn = jest.fn().mockResolvedValue(undefined)
+    const sub = "usr_0123456789abcdef0123456789abcdef"
+    const issuer = "https://id.cognia.cn/api/auth"
+    const official: LogtoSession = {
+      ...session(),
+      issuer,
+      issuerKind: "oidc",
+      accessToken: token({ iss: issuer, sub }),
+    }
+
+    const identity = await completeSignIn(official, {
+      localAccountId: "acct_official",
+      registry,
+      projection: collector().projection,
+      host: { invokeFn, isDesktop: () => true },
+    })
+
+    expect(identity.user.id).toBe(sub)
+    expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
+      accessToken: official.accessToken,
+      userId: sub,
+      orgId: null,
+      canonicalUserId: null,
+      canonicalOrgId: null,
+    })
+  })
+
   it("does not undo a completed sign-in when the host mirror fails", async () => {
     // A desktop whose companion server has never started has no SecurityStore.
     const registry = await freshRegistry("host-down")

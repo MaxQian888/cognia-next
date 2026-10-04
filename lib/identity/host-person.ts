@@ -33,7 +33,8 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/platform/detect"
 import { decodeJwtPayload, stringClaim } from "@/lib/security/jwt-payload"
 
-import { deriveOrgId, deriveUserId } from "./sign-in"
+import type { OidcIssuerKind } from "@/lib/logto/client"
+import { deriveOrgId, expectedUserId } from "./sign-in"
 
 export const ACCOUNT_BIND_PERSON_COMMAND = "account_bind_person"
 export const ACCOUNT_UNBIND_PERSON_COMMAND = "account_unbind_person"
@@ -75,16 +76,20 @@ function resolve(deps: HostPersonDeps) {
   }
 }
 
-/** The ids the host will derive from this token, or `null` when it cannot. */
+/**
+ * The ids the host will derive from this token, or `null` when it cannot.
+ * `issuerKind` is the kind of the issuer that minted it (absent: Logto).
+ */
 export async function derivedPersonFromToken(
-  accessToken: string
+  accessToken: string,
+  issuerKind?: OidcIssuerKind
 ): Promise<{ userId: string; orgId?: string } | null> {
   const payload = decodeJwtPayload(accessToken)
   const issuer = stringClaim(payload, "iss")
   const subject = stringClaim(payload, "sub")
   if (!issuer || !subject) return null
   const organizationId = stringClaim(payload, "organization_id")
-  const userId = await deriveUserId(issuer, subject)
+  const userId = await expectedUserId(issuer, subject, issuerKind)
   return organizationId ? { userId, orgId: await deriveOrgId(issuer, organizationId) } : { userId }
 }
 
@@ -103,12 +108,13 @@ export async function bindHostPerson(
     userId: string
     orgId?: string
     accessToken: string
+    issuerKind?: OidcIssuerKind
   },
   deps: HostPersonDeps = {}
 ): Promise<boolean> {
   const { call, desktop } = resolve(deps)
   if (!desktop) return false
-  const derived = await derivedPersonFromToken(input.accessToken)
+  const derived = await derivedPersonFromToken(input.accessToken, input.issuerKind)
   if (!derived) {
     throw new Error("the access token carries no readable issuer and subject to mirror")
   }
