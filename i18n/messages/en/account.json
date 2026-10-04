@@ -532,7 +532,8 @@
         "unauthorized": "Your session expired. Sign in again first.",
         "generic": "Could not reach the account service: {message}"
       }
-    }
+    },
+    "signInOtherProfile": "Switch to this profile to sign it in."
   },
   "invite": {
     "title": "Invitation",

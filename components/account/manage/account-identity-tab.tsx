@@ -32,6 +32,7 @@ import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cl
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
 import { discoverDeployment, type DeploymentDiscovery } from "@/lib/identity/deployment-discovery"
 import { issuerIdentities } from "@/lib/identity/issuer-identities"
+import { isOfficialIssuer } from "@/lib/identity/official-deployment"
 import { externalProviderFor } from "@/lib/identity/link-signed-in-identities"
 import { requestCloudSignIn } from "@/lib/identity/sign-in-request"
 import { signOutFromLogto, signOutLeftTokensLive } from "@/lib/logto/app-session"
@@ -40,6 +41,7 @@ import { createPlatformFetch } from "@/lib/network/platform-fetch"
 import { forgetOfflineChoice } from "@/components/account/cloud-sign-in-gate"
 import { CloudDeploymentCard } from "@/components/settings/companion/cloud-deployment-card"
 import { OfficialAccountDeletion } from "@/components/account/manage/official-account-deletion"
+import { useAccountStore } from "@/stores/account/account-store"
 
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
@@ -82,6 +84,10 @@ async function defaultSignOut(localAccountId: string) {
 export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabProps) {
   const t = useTranslations("account.identity")
   const tProvider = useTranslations("account.cloud.provider")
+  // The gate serves one profile; it answers sign-in requests for that one only.
+  const servedAccountId = useAccountStore(
+    (store) => store.unlockedAccountId ?? store.activeAccountId
+  )
   const [state, setState] = useState<CloudSessionState | null>(null)
   const [discovery, setDiscovery] = useState<DeploymentDiscovery | null>(null)
   const [memberships, setMemberships] = useState<CollabAccountMembership[] | null>(null)
@@ -180,16 +186,21 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
 
   const currentOrgId = state.status === "active" ? state.identity.orgId : undefined
   const official = discovery.status === "official" ? discovery.deployment : null
-  const linked =
-    official && state.status === "active"
-      ? issuerIdentities(state.session).map((identity) => {
-          const provider = externalProviderFor(identity.provider) ?? identity.provider
-          return {
-            key: `${identity.provider}:${identity.tenant ?? ""}:${identity.subject}`,
-            label: provider === "lark" ? "feishu" : provider,
-          }
-        })
-      : []
+  // A session another issuer minted (a deployment since forgotten) is not the
+  // official account: no linked sign-ins, and no deletion sent its token.
+  const officialSession =
+    official && state.status === "active" && isOfficialIssuer(state.session.issuer, official)
+      ? state.session
+      : null
+  const linked = officialSession
+    ? issuerIdentities(officialSession).map((identity) => {
+        const provider = externalProviderFor(identity.provider) ?? identity.provider
+        return {
+          key: `${identity.provider}:${identity.tenant ?? ""}:${identity.subject}`,
+          label: provider === "lark" ? "feishu" : provider,
+        }
+      })
+    : []
 
   return (
     <div
@@ -213,7 +224,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
           <dd className="truncate" data-testid="account-identity-person">
             {state.identity.displayName ?? state.identity.email ?? state.identity.userId}
           </dd>
-          {official ? (
+          {officialSession ? (
             <>
               <dt className="text-muted-foreground">{t("linked")}</dt>
               <dd className="text-xs" data-testid="account-identity-linked">
@@ -226,7 +237,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
                   : t("linkedNone")}
               </dd>
             </>
-          ) : (
+          ) : official ? null : (
             <>
               <dt className="text-muted-foreground">{t("organization")}</dt>
               <dd className="truncate font-mono text-xs" data-testid="account-identity-org">
@@ -318,15 +329,23 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
             {t("signOut")}
           </Button>
         ) : discovery.status === "ready" || official ? (
-          <Button type="button" size="sm" onClick={signIn} data-testid="account-identity-sign-in">
+          <Button
+            type="button"
+            size="sm"
+            onClick={signIn}
+            // The official screen is the gate's, and the gate serves one profile.
+            disabled={!!official && account.id !== servedAccountId}
+            title={official && account.id !== servedAccountId ? t("signInOtherProfile") : undefined}
+            data-testid="account-identity-sign-in"
+          >
             <LogInIcon data-icon="inline-start" />
             {t("signIn")}
           </Button>
         ) : null}
       </div>
 
-      {official && state.status === "active" ? (
-        <OfficialAccountDeletion deployment={official} session={state.session} />
+      {official && officialSession ? (
+        <OfficialAccountDeletion deployment={official} session={officialSession} />
       ) : null}
 
       {discovery.status !== "ready" ? (

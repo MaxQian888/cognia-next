@@ -1767,6 +1767,7 @@
       "sessionExpires": "{date} 过期",
       "sessionUnknownExpiry": "过期时间未知",
       "signIn": "登录",
+      "signInOtherProfile": "请先切换到此配置文件再登录。",
       "signOut": "退出登录",
       "signOutDone": "已退出登录。",
       "signedOut": "此配置文件尚未登录云端身份。",

@@ -53,15 +53,17 @@ description: 各端登录背后的可选官方账号——运行在 Cloudflare W
 
 ## 此人的 id
 
-Logto 的 subject 不透明，因此其 id 由哈希派生（`usr_` + SHA-256(`user\n<issuer>\n<subject>`) 的前 24 个十六进制字符）。
-官方签发方本身就签发 `usr_` id，因此对 `oidc` 签发方，合法用户 id 形式的 subject **就是** id。
+subject 不透明，因此 id 由哈希派生（`usr_` + SHA-256(`user\n<issuer>\n<subject>`) 的前 24 个十六进制字符）。
+只有**官方**签发方例外：它本身签发 `usr_` id，因此其合法用户 id 形式的 subject **就是** id。其他所有签发方（包括自托管 OIDC 签发方）
+一律哈希派生：渲染层可以指定的网关绝不能签发一个等于他人官方 id 的 subject。
 渲染层（`expectedUserId`）与宿主（`expected_user_id`）都读取
 `crates/cognia-companion-security/fixtures/identity-id-vectors.json`。
 
 ## 桌面宿主信任什么
 
-`account_bind_person` 在记录此人之前验证访问令牌。它的信任锚是环境变量（headless 宿主）或用户选定的部署，
-**再加上**编译进构建的官方签发方。令牌中未经验证的 `iss` 只用于选择；release 构建绝不从运行环境读取官方签发方。
+`account_bind_person` 在记录此人之前验证访问令牌。headless 宿主只信任其环境变量中的签发方；桌面信任用户选定的部署，
+**再加上**编译进构建的官方签发方；若选定的部署就是官方签发方，则按官方锚处理。令牌中未经验证的 `iss` 只用于选择；
+release 构建绝不从运行环境读取官方签发方。
 
 | 覆盖项 | 位置 | 作用 |
 | --- | --- | --- |

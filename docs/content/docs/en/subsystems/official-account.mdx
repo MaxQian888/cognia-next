@@ -59,18 +59,20 @@ There is no organization and no collaboration server: an active session passes t
 
 ## The person's id
 
-A Logto subject is opaque, so its person id is derived (`usr_` + 24 hex of
-SHA-256(`user\n<issuer>\n<subject>`)). The official issuer already mints `usr_` ids, so for an
-`oidc` issuer a subject that is a valid user id **is** the id. The renderer (`expectedUserId`) and
-the host (`expected_user_id`) both read
-`crates/cognia-companion-security/fixtures/identity-id-vectors.json`.
+A subject is opaque, so the person id is derived (`usr_` + 24 hex of
+SHA-256(`user\n<issuer>\n<subject>`)). Only the **official** issuer is different: it mints `usr_`
+ids, so its subject, when it is a valid user id, **is** the id. Every other issuer, a self-hosted
+OIDC issuer included, is hashed: a gateway the renderer can name must never be able to mint a
+subject that equals somebody's official id. The renderer (`expectedUserId`) and the host
+(`expected_user_id`) both read `crates/cognia-companion-security/fixtures/identity-id-vectors.json`.
 
 ## What the desktop host trusts
 
-`account_bind_person` verifies the access token before recording the person. Its anchors are the
-environment (a headless host) or the deployment the person chose, **plus** the official issuer
-compiled into the build. The token's unverified `iss` only selects among them; a release build
-never reads the official issuer from the runtime environment.
+`account_bind_person` verifies the access token before recording the person. A headless host
+trusts exactly the issuer in its environment. A desktop trusts the deployment the person chose
+**plus** the official issuer compiled into the build; a chosen deployment that is the official
+issuer becomes the official anchor. The token's unverified `iss` only selects among them, and a
+release build never reads the official issuer from the runtime environment.
 
 | Override | Where | Effect |
 | --- | --- | --- |

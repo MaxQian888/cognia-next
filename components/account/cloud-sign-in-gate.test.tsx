@@ -663,6 +663,8 @@ describe("CloudSignInGate with the official account", () => {
     expect(readOfficialPromptDecision("acct_a")).toBeNull()
   })
 
+  const officialSession = { ...session, issuer: official.issuer }
+
   it("passes a personal session with no organization, and never settles it", async () => {
     const settle = jest.fn()
     renderGate(
@@ -671,13 +673,121 @@ describe("CloudSignInGate with the official account", () => {
         settle,
         readState: jest.fn(async () => ({
           status: "active" as const,
-          session,
+          session: officialSession,
           identity: { userId: "usr_1", logtoSubject: "usr_1" },
         })),
       })
     )
     expect(await screen.findByTestId("app")).toBeInTheDocument()
     expect(settle).not.toHaveBeenCalled()
+  })
+
+  it("passes an official session kept while the issuer is unreachable", async () => {
+    renderGate(
+      deps({
+        discover: discoverOfficial(),
+        readState: jest.fn(async () => ({
+          status: "offline" as const,
+          sessionMetadata: { ...officialSession, accessToken: undefined } as never,
+        })) as never,
+      })
+    )
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+  })
+
+  it("offers the official account over a session another issuer minted", async () => {
+    renderGate(
+      deps({
+        discover: discoverOfficial(),
+        readState: jest.fn(async () => ({
+          status: "active" as const,
+          session, // a self-hosted login whose deployment was forgotten
+          identity: { userId: "usr_1", logtoSubject: "s" },
+        })),
+      })
+    )
+    expect(await screen.findByTestId("cloud-sign-in-official")).toBeInTheDocument()
+  })
+
+  it("accepts a pasted callback on the desktop", async () => {
+    let seenCode: { code: string; state: string } | undefined
+    const signInOfficial = jest.fn(
+      async (_deployment: unknown, drivers: { waitForCode: (r: never) => Promise<never> }) => {
+        seenCode = await drivers.waitForCode({ state: "st", redirectUri: "x" } as never)
+        return personal
+      }
+    )
+    renderGate(
+      deps({
+        discover: discoverOfficial(),
+        signInOfficial: signInOfficial as never,
+        profile: "desktop",
+      })
+    )
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-official-github"))
+    fireEvent.change(await screen.findByTestId("cloud-sign-in-code-input"), {
+      target: { value: "cn.cognia.app:/auth/callback?code=pasted-code&state=st" },
+    })
+    fireEvent.click(screen.getByTestId("cloud-sign-in-code-submit"))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(seenCode).toEqual({ code: "pasted-code", state: "st" })
+  })
+
+  it("returns to the official screen when the person cancels the paste", async () => {
+    const signInOfficial = jest.fn(
+      async (_deployment: unknown, drivers: { waitForCode: (r: never) => Promise<never> }) => {
+        await drivers.waitForCode({ state: "st", redirectUri: "x" } as never)
+        return personal
+      }
+    )
+    renderGate(
+      deps({
+        discover: discoverOfficial(),
+        signInOfficial: signInOfficial as never,
+        profile: "desktop",
+      })
+    )
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-official-github"))
+    await screen.findByTestId("cloud-sign-in-code-input")
+    fireEvent.click(screen.getByText("cancel"))
+    expect(await screen.findByTestId("cloud-sign-in-official")).toBeInTheDocument()
+    expect(screen.queryByTestId("cloud-sign-in-error")).not.toBeInTheDocument()
+  })
+
+  it("answers a Settings request for a self-hosted deployment with its own screen", async () => {
+    renderGate(
+      deps({
+        readState: jest.fn(async () => ({
+          status: "active" as const,
+          session,
+          identity: { userId: "usr_1", logtoSubject: "s", orgId: "org_1" },
+        })),
+      })
+    )
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    act(() => requestCloudSignIn("acct_a"))
+    expect(await screen.findByTestId("cloud-sign-in-social-github")).toBeInTheDocument()
+  })
+
+  it("discovers on demand when Settings asks a gate that was skipped (development)", async () => {
+    const environment = jest.replaceProperty(process, "env", {
+      ...process.env,
+      NODE_ENV: "development",
+      NEXT_PUBLIC_ACCOUNT_GATE: "0",
+    })
+    try {
+      const discover = discoverOfficial()
+      renderGate(deps({ discover }))
+      expect(screen.getByTestId("app")).toBeInTheDocument()
+      expect(discover).not.toHaveBeenCalled()
+      act(() => requestCloudSignIn("acct_a"))
+      expect(await screen.findByTestId("cloud-sign-in-official")).toBeInTheDocument()
+      expect(discover).toHaveBeenCalledTimes(1)
+      fireEvent.click(screen.getByTestId("cloud-sign-in-offline"))
+      expect(await screen.findByTestId("app")).toBeInTheDocument()
+    } finally {
+      environment.restore()
+    }
   })
 
   it("does not ask again after the screen was answered, even when signed out", async () => {
@@ -708,6 +818,12 @@ describe("CloudSignInGate with the official account", () => {
         readState: jest.fn(async () => ({
           status: "reauth-required" as const,
           reason: "expired" as const,
+          sessionMetadata: {
+            issuer: official.issuer,
+            clientId: "cognia-app",
+            resource: "r",
+            scopes: [],
+          },
         })) as never,
       })
     )

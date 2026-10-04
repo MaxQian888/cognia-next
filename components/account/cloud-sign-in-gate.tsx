@@ -69,6 +69,7 @@ import {
   shouldOfferOfficialSignIn,
 } from "@/lib/identity/official-sign-in-prompt"
 import { signInToOfficialAccount } from "@/lib/identity/personal-sign-in"
+import { isOfficialIssuer } from "@/lib/identity/official-deployment"
 import { subscribeCloudSignInRequest } from "@/lib/identity/sign-in-request"
 import {
   CloudSignInError,
@@ -164,6 +165,8 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   const localAccountId = unlockedAccountId ?? activeAccountId
 
   const [phase, setPhase] = useState<"checking" | "pass" | "screen">("checking")
+  // Settings asked for the screen: shown even where the gate is skipped.
+  const [requested, setRequested] = useState(false)
   const [view, setView] = useState<CloudSignInView>({ kind: "checking" })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -276,20 +279,32 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
 
   // Settings → Account asks for the screen; the gate shows it for the
   // deployment it already discovered, without a reload.
+  // A gate that never decided (skipped in development, or still checking)
+  // discovers on demand, so the request is never silently dropped.
   useEffect(
     () =>
       subscribeCloudSignInRequest((request) => {
-        if (request.localAccountId !== localAccountId) return
-        const official = officialRef.current
-        const deployment = deploymentRef.current
-        if (!official && !deployment) return
-        setError(null)
-        setView(
-          official
-            ? { kind: "official", deployment: official }
-            : { kind: "sign-in", deployment: deployment!, canContinueOffline: true }
-        )
-        setPhase("screen")
+        if (!localAccountId || request.localAccountId !== localAccountId) return
+        void (async () => {
+          if (!officialRef.current && !deploymentRef.current) {
+            const discovery = await (
+              depsRef.current.discover ?? (() => discoverDeployment({ localAccountId }))
+            )()
+            if (discovery.status === "official") officialRef.current = discovery.deployment
+            else if (discovery.status === "ready") deploymentRef.current = discovery
+          }
+          const official = officialRef.current
+          const deployment = deploymentRef.current
+          if (!official && !deployment) return
+          setError(null)
+          setView(
+            official
+              ? { kind: "official", deployment: official }
+              : { kind: "sign-in", deployment: deployment!, canContinueOffline: true }
+          )
+          setRequested(true)
+          setPhase("screen")
+        })()
       }),
     [localAccountId]
   )
@@ -330,12 +345,20 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
             ((id: string) => readCloudSessionState({ localAccountId: id }))
           )(localAccountId)
           if (cancelled) return
-          // A session (or one kept while its issuer is unreachable) is enough:
-          // the official account has no organization to settle. Without one,
-          // the screen is offered until the profile answers it, once.
+          // An official session (or one kept while the issuer is unreachable)
+          // is enough: the official account has no organization to settle. A
+          // session some other issuer minted (a deployment since forgotten) is
+          // not this account. Without one, the screen is offered until the
+          // profile answers it, once.
+          const issuer =
+            state.status === "active"
+              ? state.session.issuer
+              : state.status === "offline" || state.status === "reauth-required"
+                ? (state.sessionMetadata?.issuer ?? null)
+                : null
+          const ours = issuer !== null && isOfficialIssuer(issuer, discovery.deployment)
           if (
-            state.status === "active" ||
-            state.status === "offline" ||
+            (ours && (state.status === "active" || state.status === "offline")) ||
             !shouldOfferOfficialSignIn(localAccountId)
           ) {
             setPhase("pass")
@@ -344,7 +367,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
           setView({
             kind: "official",
             deployment: discovery.deployment,
-            ...(state.status === "reauth-required" ? { reauth: state.reason } : {}),
+            ...(ours && state.status === "reauth-required" ? { reauth: state.reason } : {}),
           })
           setPhase("screen")
           return
@@ -441,6 +464,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
         // that never hands the deep link back.
         pasted: (state) => {
           pendingState.current = state
+          // The sign-in is waiting on the person now: the paste box must take
+          // input, which a still-busy screen would refuse.
+          setBusy(false)
           setView({ kind: "awaiting-code" })
           return new Promise<{ code: string; state: string }>((resolve, reject) => {
             codeResolver.current = resolve
@@ -537,7 +563,8 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       setPhase("pass")
     })
 
-  if (!loaded || locked || !localAccountId || ungated) return <>{children}</>
+  if (!loaded || locked || !localAccountId) return <>{children}</>
+  if (ungated && !requested) return <>{children}</>
   if (phase === "pass") return <>{children}</>
 
   return (

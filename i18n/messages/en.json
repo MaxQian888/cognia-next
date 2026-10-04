@@ -1767,6 +1767,7 @@
       "sessionExpires": "Expires {date}",
       "sessionUnknownExpiry": "Expiry unknown",
       "signIn": "Sign in",
+      "signInOtherProfile": "Switch to this profile to sign it in.",
       "signOut": "Sign out",
       "signOutDone": "Signed out.",
       "signedOut": "This profile is not signed in to a cloud identity.",

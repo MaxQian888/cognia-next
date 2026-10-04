@@ -25,6 +25,12 @@ jest.mock("sonner", () => ({
 }))
 jest.mock("@/lib/accounts/active-account-id", () => ({ getActiveAccountId: () => "acct_active" }))
 jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
+// The default check path; tests that inject `discover` never reach it.
+const mockDiscoverDeployment = jest.fn()
+jest.mock("@/lib/identity/deployment-discovery", () => ({
+  ...jest.requireActual("@/lib/identity/deployment-discovery"),
+  discoverDeployment: (...args: unknown[]) => mockDiscoverDeployment(...args),
+}))
 jest.mock("@/lib/logto/app-session", () => ({
   signOutFromLogto: jest.fn(),
   signOutLeftTokensLive: () => false,
@@ -258,6 +264,43 @@ describe("CloudDeploymentCard", () => {
     )
     // With a gateway stored, forgetting it is going back to the official account.
     expect(await screen.findByTestId("cloud-deployment-forget")).toHaveTextContent("useOfficial")
+  })
+
+  it("asks the typed gateway only, never falling back to the official account", async () => {
+    mockDiscoverDeployment.mockResolvedValue(ready as DeploymentDiscovery)
+    const { discover: _unused, ...rest } = deps()
+    render(<CloudDeploymentCard deps={rest} />)
+    fireEvent.change(screen.getByTestId("cloud-deployment-url"), {
+      target: { value: "https://gw.example" },
+    })
+    fireEvent.click(screen.getByTestId("cloud-deployment-check"))
+    await screen.findByTestId("cloud-deployment-result")
+    expect(mockDiscoverDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({ localAccountId: "acct_a", officialFallback: false })
+    )
+  })
+
+  it("never presents an official answer as this gateway accepting sign-in", async () => {
+    const d = deps({
+      discover: jest.fn(
+        async () =>
+          ({
+            status: "official",
+            deployment: officialDeployment({})!,
+            reason: "single-user",
+          }) as DeploymentDiscovery
+      ),
+    })
+    render(<CloudDeploymentCard deps={d} />)
+    fireEvent.change(screen.getByTestId("cloud-deployment-url"), {
+      target: { value: "https://gw.example" },
+    })
+    fireEvent.click(screen.getByTestId("cloud-deployment-check"))
+    expect(await screen.findByTestId("cloud-deployment-result")).toHaveAttribute(
+      "data-status",
+      "none"
+    )
+    expect(screen.queryByTestId("cloud-deployment-use")).not.toBeInTheDocument()
   })
 
   it("leaves the official notice out of a build without the official account", () => {

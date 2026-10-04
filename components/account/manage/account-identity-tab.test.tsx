@@ -28,6 +28,12 @@ jest.mock("@/components/settings/companion/cloud-deployment-card", () => ({
     />
   ),
 }))
+let mockServed = "acct_a"
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (
+    selector: (state: { unlockedAccountId: string | null; activeAccountId: string }) => unknown
+  ) => selector({ unlockedAccountId: mockServed, activeAccountId: mockServed }),
+}))
 jest.mock("@/components/account/manage/official-account-deletion", () => ({
   OfficialAccountDeletion: (props: { session: { accessToken: string } }) => (
     <div data-testid="stub-official-deletion" data-token={props.session.accessToken} />
@@ -215,12 +221,51 @@ describe("AccountIdentityTab", () => {
       expect(screen.queryByTestId("stub-official-deletion")).not.toBeInTheDocument()
     })
 
+    it("does not treat a session from another issuer as the official account", async () => {
+      const d = deps({
+        discover: discoverOfficial,
+        readState: jest.fn(async () => ({
+          status: "active" as const,
+          // A self-hosted login left behind after its deployment was forgotten.
+          session: { ...session, issuer: "https://logto.example/oidc", idToken },
+          identity: { userId: "usr_1", logtoSubject: "s", displayName: "Ada" },
+        })),
+      })
+      render(<AccountIdentityTab account={account} deps={d} />)
+      expect(await screen.findByTestId("account-identity-person")).toHaveTextContent("Ada")
+      expect(screen.queryByTestId("account-identity-linked")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("stub-official-deletion")).not.toBeInTheDocument()
+      expect(screen.getByTestId("account-identity-sign-out")).toBeInTheDocument()
+    })
+
+    it("only lets the profile the gate serves ask for the official screen", async () => {
+      mockServed = "acct_other"
+      try {
+        const requestSignIn = jest.fn()
+        render(
+          <AccountIdentityTab
+            account={account}
+            deps={deps({
+              discover: discoverOfficial,
+              readState: jest.fn(async () => ({ status: "signed-out" as const })),
+              requestSignIn,
+            })}
+          />
+        )
+        const button = await screen.findByTestId("account-identity-sign-in")
+        expect(button).toBeDisabled()
+        expect(button).toHaveAttribute("title", "signInOtherProfile")
+      } finally {
+        mockServed = "acct_a"
+      }
+    })
+
     it("says so when the issuer reported no linked sign-ins", async () => {
       const d = deps({
         discover: discoverOfficial,
         readState: jest.fn(async () => ({
           status: "active" as const,
-          session,
+          session: { ...session, issuer: official.issuer },
           identity: { userId: "usr_1", logtoSubject: "usr_1" },
         })),
       })

@@ -3,42 +3,49 @@
     "note": "Logto: the subject is opaque, so the id is derived",
     "issuer": "https://logto.example.com/oidc",
     "subject": "2ik8kizaqtf7",
-    "issuerKind": "logto",
+    "official": false,
     "userId": "usr_fedf4b334015476107b9bca1"
   },
   {
     "note": "Logto: the vector the desktop and renderer pinned before ADR-0215",
     "issuer": "https://logto.test/oidc",
     "subject": "subject-1",
-    "issuerKind": "logto",
+    "official": false,
     "userId": "usr_d066005448858a8ba6bb2f96"
   },
   {
     "note": "Logto, even when the subject looks like a user id",
     "issuer": "https://logto.example.com/oidc",
     "subject": "usr_0123456789abcdef0123456789abcdef",
-    "issuerKind": "logto",
+    "official": false,
     "userId": "usr_ccad7c9399e6a87bb873f586"
   },
   {
     "note": "Official account: the subject is the user id",
     "issuer": "https://id.cognia.cn/api/auth",
     "subject": "usr_0123456789abcdef0123456789abcdef",
-    "issuerKind": "oidc",
+    "official": true,
     "userId": "usr_0123456789abcdef0123456789abcdef"
   },
   {
     "note": "Official issuer with a subject that is not a user id: derived",
     "issuer": "https://id.cognia.cn/api/auth",
     "subject": "not a user id",
-    "issuerKind": "oidc",
+    "official": true,
     "userId": "usr_1dca3d2ec303ef5da7995e0c"
   },
   {
-    "note": "Local identity Worker",
+    "note": "Any other OIDC issuer cannot claim an id: its usr_ subject is derived",
+    "issuer": "https://id.self-hosted.example/api/auth",
+    "subject": "usr_0123456789abcdef0123456789abcdef",
+    "official": false,
+    "userId": "usr_d6ccb01e85a9db79065d96b4"
+  },
+  {
+    "note": "Local identity Worker as a debug build's official anchor",
     "issuer": "http://localhost:8787/api/auth",
     "subject": "usr_feedfacecafebeef0000000000000000",
-    "issuerKind": "oidc",
+    "official": true,
     "userId": "usr_feedfacecafebeef0000000000000000"
   }
 ]

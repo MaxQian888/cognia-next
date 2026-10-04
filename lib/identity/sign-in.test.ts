@@ -67,14 +67,15 @@ describe("id derivation", () => {
 describe("expectedUserId", () => {
   // The same vectors the desktop host's `official_identity` tests read, so the
   // renderer and the host cannot disagree about who a token names.
-  it.each(idVectors)("$note", async ({ issuer, subject, issuerKind, userId }) => {
-    expect(await expectedUserId(issuer, subject, issuerKind === "oidc" ? "oidc" : undefined)).toBe(
-      userId
-    )
+  it.each(idVectors)("$note", async ({ issuer, subject, official, userId }) => {
+    expect(await expectedUserId(issuer, subject, official)).toBe(userId)
   })
 
-  it("never takes a Logto subject as the id, however it looks", async () => {
+  it("takes a subject as the id from this build's official issuer only", async () => {
+    const sub = "usr_0123456789abcdef0123456789abcdef"
+    expect(await expectedUserId("https://id.cognia.cn/api/auth/", sub)).toBe(sub)
     expect(await expectedUserId(ISSUER, "usr_0123456789abcdef")).not.toBe("usr_0123456789abcdef")
+    expect(await expectedUserId("https://id.self-hosted.example/api/auth", sub)).not.toBe(sub)
   })
 })
 
@@ -126,7 +127,6 @@ describe("bindSignedInIdentity", () => {
     const official: LogtoSession = {
       ...session({ sub: "usr_0123456789abcdef0123456789abcdef" }),
       issuer: "https://id.cognia.cn/api/auth",
-      issuerKind: "oidc",
     }
     const identity = await bindSignedInIdentity(official, {
       localAccountId: "acct_official",

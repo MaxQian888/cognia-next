@@ -113,8 +113,11 @@ async function loginSub(
   const scopesRaw = stringFlag(args, "scope") ?? env.COGNIA_LOGTO_SCOPES
   const scopes = scopesRaw ? scopesRaw.split(/[,\s]+/).filter(Boolean) : undefined
   const organizationId = stringFlag(args, "org") ?? env.COGNIA_LOGTO_ORG
-  if (official && organizationId) {
-    out.error("logto login: --org applies to a self-hosted Logto deployment only")
+  if (official && (organizationId || scopes)) {
+    out.error(
+      "logto login: --org and --scope (COGNIA_LOGTO_ORG / COGNIA_LOGTO_SCOPES) apply to a " +
+        "self-hosted Logto deployment only"
+    )
     return 2
   }
 

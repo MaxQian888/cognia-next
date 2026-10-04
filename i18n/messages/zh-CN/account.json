@@ -532,7 +532,8 @@
         "unauthorized": "会话已过期，请先重新登录。",
         "generic": "无法连接账号服务：{message}"
       }
-    }
+    },
+    "signInOtherProfile": "请先切换到此配置文件再登录。"
   },
   "invite": {
     "title": "邀请",

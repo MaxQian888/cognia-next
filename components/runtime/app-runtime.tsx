@@ -209,9 +209,10 @@ export function AppRuntime({ children }: { children: React.ReactNode }) {
                         {/* Cloud identity (ADR-0149). BELOW recovery, so a
                          * broken app is repaired before anyone is asked to
                          * sign in, and ABOVE onboarding, because on a shared
-                         * deployment the invitation comes first. Renders its
-                         * children unchanged when there is no multi-tenant
-                         * deployment, which is most installs. */}
+                         * deployment the invitation comes first. Without a
+                         * multi-tenant deployment it offers the official
+                         * Cognia account once per profile (ADR-0215), then
+                         * renders its children unchanged. */}
                         <CloudSignInGate>
                           {/* First-run routing (ADR-0122). Sits BELOW
                            * RecoveryBootGate — the app being broken outranks the

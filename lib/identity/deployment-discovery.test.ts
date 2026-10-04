@@ -266,7 +266,11 @@ describe("discoverDeployment", () => {
           serverStatus: async () => ({ running: false }),
           buildTimeUrl: () => null,
         })
-      ).toMatchObject({ status: "official", deployment: { issuer: official.issuer } })
+      ).toMatchObject({
+        status: "official",
+        reason: "server-stopped",
+        deployment: { issuer: official.issuer },
+      })
     })
 
     it("never replaces a self-hosted deployment, nor one that failed", async () => {
@@ -357,6 +361,18 @@ describe("discoverDeployment", () => {
         official: () => null,
       })
       expect(result).toEqual({ status: "none", reason: "host-link-only" })
+    })
+
+    it("offers the official account to a phone that reaches its Host over the relay only", async () => {
+      const official = officialDeployment({})!
+      const result = await discoverDeployment({
+        profile: "mobile-companion",
+        deploymentSource: () => null,
+        companionConfig: () => pairing(true),
+        fetchConfig: pinningRefused,
+        official: () => official,
+      })
+      expect(result).toEqual({ status: "official", deployment: official, reason: "host-link-only" })
     })
 
     it("still reports a pairing with no relay room as unavailable: it has no route at all", async () => {

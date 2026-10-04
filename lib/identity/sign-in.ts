@@ -44,7 +44,8 @@ import {
   type User,
 } from "@/types/identity"
 
-import type { LogtoSession, OidcIssuerKind } from "@/lib/logto/client"
+import type { LogtoSession } from "@/lib/logto/client"
+import { isOfficialIssuer } from "./official-deployment"
 import { readLogtoIdentity, type LogtoIdentity } from "./logto-claims"
 import { UserBindingRegistry, type BindUserInput } from "./user-binding"
 import { unlinkSelfBoundPrincipals } from "@/lib/connectors/principal/login-link"
@@ -69,17 +70,19 @@ export async function deriveUserId(issuer: string, subject: string): Promise<str
 
 /**
  * The person's id for a verified `(issuer, subject)`. The official account
- * (an `oidc` issuer) already mints `usr_` ids as its subject, so a subject that
- * is a valid user id IS the id there; anything else is derived. The desktop
- * host applies the same rule (`official_identity::expected_user_id`), pinned
- * by `crates/cognia-companion-security/fixtures/identity-id-vectors.json`.
+ * already mints `usr_` ids as its subject, so a subject from the official
+ * issuer that is a valid user id IS the id there; every other issuer's is
+ * derived, so no deployment can mint a subject that equals somebody's
+ * official id. The desktop host applies the same rule
+ * (`official_identity::expected_user_id`), pinned by
+ * `crates/cognia-companion-security/fixtures/identity-id-vectors.json`.
  */
 export async function expectedUserId(
   issuer: string,
   subject: string,
-  issuerKind?: OidcIssuerKind
+  official: boolean = isOfficialIssuer(issuer)
 ): Promise<string> {
-  if (issuerKind === "oidc" && isUserId(subject)) return subject
+  if (official && isUserId(subject)) return subject
   return deriveUserId(issuer, subject)
 }
 
@@ -134,13 +137,12 @@ export class SignInError extends Error {
 export async function resolveIdentityFromClaims(
   identity: LogtoIdentity,
   issuer: string,
-  now: number,
-  issuerKind?: OidcIssuerKind
+  now: number
 ): Promise<{ user: User; org?: Org; orgRole?: OrgRole }> {
   const { access, profile, orgRole } = identity
 
   const user: User = {
-    id: await expectedUserId(issuer, access.subject, issuerKind),
+    id: await expectedUserId(issuer, access.subject),
     // Falling back to the subject keeps a roster readable when Logto asserted
     // no profile at all; it is a label, and it is replaced on the next sign-in
     // that carries one.
@@ -186,12 +188,7 @@ export async function bindSignedInIdentity(
 
   const now = (deps.now ?? Date.now)()
   const registry = deps.registry ?? new UserBindingRegistry()
-  const { user, org, orgRole } = await resolveIdentityFromClaims(
-    identity,
-    session.issuer,
-    now,
-    session.issuerKind
-  )
+  const { user, org, orgRole } = await resolveIdentityFromClaims(identity, session.issuer, now)
 
   const input: BindUserInput = {
     localAccountId: deps.localAccountId,

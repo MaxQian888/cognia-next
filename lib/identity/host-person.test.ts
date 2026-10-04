@@ -77,11 +77,15 @@ describe("derivedPersonFromToken", () => {
       iss: "https://id.cognia.cn/api/auth",
       sub: "usr_0123456789abcdef0123456789abcdef",
     })
-    expect(await derivedPersonFromToken(official, "oidc")).toEqual({
+    expect(await derivedPersonFromToken(official)).toEqual({
       userId: "usr_0123456789abcdef0123456789abcdef",
     })
-    // Without the kind the subject is opaque, so it is derived.
-    expect((await derivedPersonFromToken(official))?.userId).not.toBe(
+    // Any other issuer's user-id-shaped subject is opaque, so it is derived.
+    const elsewhere = token({
+      iss: "https://id.self-hosted.example/api/auth",
+      sub: "usr_0123456789abcdef0123456789abcdef",
+    })
+    expect((await derivedPersonFromToken(elsewhere))?.userId).not.toBe(
       "usr_0123456789abcdef0123456789abcdef"
     )
   })
@@ -113,7 +117,7 @@ describe("on the desktop", () => {
     const sub = "usr_0123456789abcdef0123456789abcdef"
     const official = token({ iss: "https://id.cognia.cn/api/auth", sub })
     await bindHostPerson(
-      { localAccountId: "acct_a", userId: sub, accessToken: official, issuerKind: "oidc" },
+      { localAccountId: "acct_a", userId: sub, accessToken: official },
       { invokeFn, isDesktop: desktop }
     )
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {

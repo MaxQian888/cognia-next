@@ -210,12 +210,13 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 - CORS 只开放给 Web 源。`/api/account/deletion` 实现 §10 的冷静期，由每小时的 cron 清除到期账号。
 - 运维指南见其 README，故障处理见 `docs/runbooks/identity-worker.md`。
 
-**此人的 id。** 对 `oidc` 签发方，若 subject 本身是合法的 `usr_` id，它就是此人的 id；Logto 的 subject 仍做哈希派生。渲染层（`lib/identity/sign-in.ts`）与桌面宿主（`crates/cognia-companion-security/src/official_identity.rs`）读取同一组向量（`fixtures/identity-id-vectors.json`）。
+**此人的 id。** 只有官方签发方的 subject（当它是合法的 `usr_` id 时）才直接作为此人的 id；其他所有签发方（Logto 与任何自托管 OIDC 签发方）的 subject 都与签发方一起做哈希派生。部署自称的类型从不决定这一点，因此任何网关都无法签发一个等于他人官方 id 的 subject。渲染层（`lib/identity/sign-in.ts`）与桌面宿主（`crates/cognia-companion-security/src/official_identity.rs`）读取同一组向量（`fixtures/identity-id-vectors.json`）。
 
-**桌面的信任锚。** 宿主信任：
+**桌面的信任锚。**
 
-- 编译进构建的官方签发方（构建时的 `COGNIA_OFFICIAL_ISSUER`；仅 debug 构建可从运行环境读取）；
-- 再加上环境变量，或用户选定的部署。
+- headless 宿主只信任其环境变量中的签发方。
+- 桌面信任用户选定的部署，再加上编译进构建的官方签发方（构建时的 `COGNIA_OFFICIAL_ISSUER`；仅 debug 构建可从运行环境读取）。
+- 若选定的部署就是官方签发方，则按官方锚处理。
 
 令牌中未经验证的 `iss` 只用于在这些锚之间选择。
 

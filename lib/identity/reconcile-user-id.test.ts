@@ -239,7 +239,7 @@ describe("reconcileUserId", () => {
     })
   })
 
-  it("passes the issuer kind on, so the host is asked for the id it will verify", async () => {
+  it("asks the host for the official subject itself, the id it will verify", async () => {
     await seedLegacyPerson()
     const invokeFn = jest.fn(async () => undefined)
     const sub = "usr_0123456789abcdef0123456789abcdef"
@@ -252,7 +252,6 @@ describe("reconcileUserId", () => {
         legacyUserId: LEGACY,
         canonicalUserId: CANONICAL,
         accessToken: officialToken,
-        issuerKind: "oidc",
       },
       { registry: registry(), host: { invokeFn: invokeFn as never, isDesktop: () => true } }
     )

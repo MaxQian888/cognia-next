@@ -210,12 +210,13 @@ Phase 1 ships the identity half: the official account, signing in to it everywhe
 - CORS covers the web origins. `/api/account/deletion` runs the §10 cooling-off, and an hourly cron purges.
 - Operator guide: its README. Incidents: `docs/runbooks/identity-worker.md`.
 
-**The person's id.** For an `oidc` issuer, a subject that is a valid `usr_` id is the person's id. A Logto subject is still hashed. The renderer (`lib/identity/sign-in.ts`) and the desktop host (`crates/cognia-companion-security/src/official_identity.rs`) read the same vectors (`fixtures/identity-id-vectors.json`).
+**The person's id.** Only the official issuer's subject, when it is a valid `usr_` id, is the person's id. Every other issuer's subject is hashed with the issuer, Logto's and any self-hosted OIDC issuer's alike. A deployment's own claims about its kind never decide this, so no gateway can mint a subject that equals somebody's official id. The renderer (`lib/identity/sign-in.ts`) and the desktop host (`crates/cognia-companion-security/src/official_identity.rs`) read the same vectors (`fixtures/identity-id-vectors.json`).
 
-**The desktop's trust anchor.** The host trusts:
+**The desktop's trust anchor.**
 
-- the official issuer compiled into the build (`COGNIA_OFFICIAL_ISSUER` at build time, or in the environment in debug builds only);
-- plus the environment, or the deployment the person chose.
+- A headless host trusts exactly the issuer in its environment.
+- A desktop trusts the deployment the person chose, plus the official issuer compiled into the build (`COGNIA_OFFICIAL_ISSUER` at build time, or in the environment in debug builds only).
+- A chosen deployment that is the official issuer becomes the official anchor.
 
 A token's unverified `iss` only picks among those anchors.
 

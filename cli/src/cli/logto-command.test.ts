@@ -248,6 +248,17 @@ describe("logtoCommand", () => {
         startCallbackServer,
       })
     ).toBe(2)
+    // Scopes would be dropped silently on the official path, so they are refused.
+    const scope = captureOut()
+    expect(
+      await logtoCommand(parseArgv(["logto", "login"]), {
+        home: HOME,
+        out: scope.sink,
+        env: { COGNIA_LOGTO_SCOPES: "brain:rpc" },
+        startCallbackServer,
+      })
+    ).toBe(2)
+    expect(scope.errText()).toMatch(/--scope/)
     expect(startCallbackServer).not.toHaveBeenCalled()
   })
 
