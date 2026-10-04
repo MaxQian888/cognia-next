@@ -67,6 +67,8 @@ export interface LogtoClientConfig {
    * The official account's provider hint (`provider=<id>` on the authorize
    * request): its hosted sign-in page goes straight to that provider. The
    * counterpart of Logto's `directSignIn`; sent only to a non-Logto issuer.
+   * It also sends `prompt=login`: the person chose this provider, and an
+   * issuer session left by another one must not answer for them.
    */
   socialProvider?: string
   /**
@@ -282,7 +284,10 @@ export async function loginToLogto(
     extraAuthParams.prompt = "consent"
     if (config.directSignIn) extraAuthParams.direct_sign_in = config.directSignIn
   } else {
-    if (config.socialProvider) extraAuthParams.provider = config.socialProvider
+    if (config.socialProvider) {
+      extraAuthParams.provider = config.socialProvider
+      extraAuthParams.prompt = "login"
+    }
     if (config.freshLogin) {
       extraAuthParams.prompt = "login"
       extraAuthParams.max_age = "0"

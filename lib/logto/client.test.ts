@@ -187,6 +187,28 @@ describe("a generic OIDC issuer (ADR-0215 §2)", () => {
     expect(logtoUrl.searchParams.get("max_age")).toBeNull()
   })
 
+  it("makes a chosen provider sign in even when the issuer has another session", async () => {
+    const official = jest.fn()
+    await loginToLogto(baseConfig({ issuerKind: "oidc", socialProvider: "github" }), {
+      openUrl: official,
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    const url = new URL((official.mock.calls[0] as string[])[0])
+    expect(url.searchParams.get("provider")).toBe("github")
+    expect(url.searchParams.get("prompt")).toBe("login")
+    // Not a freshness demand: only account deletion needs `auth_time` now.
+    expect(url.searchParams.get("max_age")).toBeNull()
+
+    const unhinted = jest.fn()
+    await loginToLogto(baseConfig({ issuerKind: "oidc" }), {
+      openUrl: unhinted,
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    expect(new URL((unhinted.mock.calls[0] as string[])[0]).searchParams.get("prompt")).toBeNull()
+  })
+
   it("refreshes a stored official session as the official issuer", async () => {
     const config = refreshConfigFor({
       issuer: "https://id.cognia.cn/api/auth",
