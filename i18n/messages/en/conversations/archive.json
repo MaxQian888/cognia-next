@@ -1,0 +1,17 @@
+{
+  "empty": {
+    "action": "Empty archive…",
+    "body": "This permanently deletes them and all their messages. This cannot be undone.",
+    "cancel": "Cancel",
+    "confirm": "{count, plural, one {Delete # conversation} other {Delete # conversations}}",
+    "lockedKept": "{count, plural, one {# conversation handed off to another device is kept.} other {# conversations handed off to another device are kept.}}",
+    "more": "{count, plural, one {and # more} other {and # more}}",
+    "nothingBody": "There are no archived conversations to delete.",
+    "nothingTitle": "The archive is empty",
+    "scope": "Scope: {scope}.",
+    "success": "{count, plural, one {Deleted # archived conversation} other {Deleted # archived conversations}}",
+    "title": "{count, plural, one {Delete # archived conversation?} other {Delete all # archived conversations?}}"
+  },
+  "restoredBySend": "Moved back to your conversations",
+  "scopeAllWorkspaces": "All workspaces"
+}

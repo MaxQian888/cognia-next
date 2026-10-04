@@ -1,4 +1,11 @@
 {
+  "drill": {
+    "pointHint": "Click a point to see its traces in Explore",
+    "pointLabel": "Show traces from {time}",
+    "showFailing": "{metric}: {value} — show failing traces",
+    "showFailingHint": "Show these failures in Explore",
+    "showTraces": "Show traces for {value}"
+  },
   "droppedSpans": {
     "label": "{count, plural, =1 {# span dropped} other {# spans dropped}}",
     "tooltip": "{count, plural, =1 {# provider span was} other {# provider spans were}} not recorded because no trace context was threaded through the call. The waterfall below is missing them."
@@ -8,8 +15,36 @@
     "title": "No telemetry in this window",
     "widen": "Widen to last 30d"
   },
+  "enums": {
+    "operation": {
+      "chat": "Model call",
+      "embeddings": "Embeddings",
+      "execute_tool": "Tool call",
+      "invoke_agent": "Agent run",
+      "invoke_workflow": "Workflow run",
+      "retrieval": "Retrieval"
+    },
+    "spanKind": {
+      "client": "Client",
+      "internal": "Internal",
+      "server": "Server"
+    },
+    "surface": {
+      "agent-rpc": "Agent RPC",
+      "agent-team": "Agent team",
+      "chat": "Chat",
+      "connector": "Connector",
+      "embedding": "Embedding",
+      "mcp": "MCP",
+      "plugin": "Plugin",
+      "plugin-hook": "Plugin hook",
+      "retrieval": "Retrieval",
+      "workflow": "Workflow"
+    }
+  },
   "export": {
     "dashboardJson": "Dashboard as JSON",
+    "exportList": "Export list",
     "importDashboard": "Import dashboard…",
     "importFailed": "Could not import: invalid dashboard file",
     "imported": "Dashboard config imported",
@@ -33,8 +68,15 @@
     },
     "empty": "No options",
     "label": "Filters",
-    "search": "Search…"
+    "search": "Search…",
+    "searchLabel": "Search {dimension} values"
   },
+  "loadError": {
+    "hint": "The local database didn’t answer. This is usually temporary — retry in a moment.",
+    "retry": "Retry",
+    "title": "Couldn’t read the trace store"
+  },
+  "loading": "Loading telemetry…",
   "metricToggle": {
     "cost": "Cost",
     "errors": "Errors",
@@ -67,7 +109,9 @@
     "absolute": "Absolute range",
     "apply": "Apply",
     "custom": "Custom range",
+    "customLabel": "{from} → {to}",
     "from": "From",
+    "orderError": "“From” must be earlier than “To”.",
     "presets": {
       "15m": "Last 15m",
       "1h": "Last 1h",
@@ -99,7 +143,8 @@
     "p50": "p50",
     "p95": "p95",
     "p99": "p99",
-    "perSec": "Requests/s"
+    "perSec": "Requests/s",
+    "perSecValue": "{value}/s"
   },
   "settings": {
     "data": {
@@ -114,11 +159,6 @@
       "pruneDone": "Pruned {count} traces",
       "stored": "{count} spans stored",
       "title": "Data"
-    },
-    "defaults": {
-      "range": "Default time range",
-      "refresh": "Auto-refresh",
-      "title": "Defaults"
     },
     "description": "Tune thresholds, panels and retention for the observability dashboard.",
     "metrics": {
@@ -141,7 +181,17 @@
     "title": "Dashboard settings",
     "unitFraction": "0–1 fraction",
     "unitMs": "milliseconds",
-    "unitUsd": "USD"
+    "unitUsd": "USD",
+    "view": {
+      "custom": "Custom range",
+      "range": "Time range",
+      "refresh": "Auto-refresh",
+      "title": "Current view"
+    }
+  },
+  "thresholdLevel": {
+    "crit": "Critical threshold crossed",
+    "warn": "Warning threshold crossed"
   },
   "toolbar": {
     "edit": "Edit layout",
@@ -151,7 +201,9 @@
   },
   "waterfall": {
     "cost": "Cost {value}",
-    "toggleEvents": "Toggle span details",
+    "eventOffset": "+{offset}",
+    "failed": "Failed",
+    "toggleEvents": "Toggle details for {name}",
     "tokens": "{count} tokens"
   }
 }

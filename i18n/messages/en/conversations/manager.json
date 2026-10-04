@@ -1,0 +1,40 @@
+{
+  "archivedNote": "Archived conversations keep their pin and folder while they are archived, and get both back when you restore them. Sending a message to one restores it.",
+  "columns": {
+    "actions": "Actions",
+    "activity": "Last activity",
+    "agent": "Agent",
+    "cost": "Cost",
+    "created": "Created",
+    "selectAll": "Select every conversation in this view",
+    "title": "Conversation",
+    "tokens": "Tokens",
+    "turns": "Turns",
+    "workspace": "Workspace"
+  },
+  "contentMatch": "Matched in the messages",
+  "description": "Every conversation across your workspaces. Find, rename, file, archive and restore them in one place.",
+  "emptyArchive": "Empty archive…",
+  "inFolder": "In {name}",
+  "loading": "Loading conversations",
+  "newChat": "New chat",
+  "noWorkspace": "No workspace",
+  "none": "—",
+  "openRow": "Open {title}",
+  "rowActions": "Actions for {title}",
+  "rowSelect": "Select {title}",
+  "searchAria": "Search conversations",
+  "searchClear": "Clear search",
+  "searchContent": "Search message content",
+  "searchPlaceholder": "Search conversations…",
+  "showMore": "Show {count} more",
+  "shownOf": "Showing {shown} of {total}",
+  "sortBy": "Sort by {column}",
+  "summary": "{active, plural, one {# active} other {# active}} · {archived, plural, one {# archived} other {# archived}}",
+  "tabs": {
+    "active": "Active",
+    "archived": "Archived"
+  },
+  "tabsAria": "Which conversations to show",
+  "title": "Conversations"
+}

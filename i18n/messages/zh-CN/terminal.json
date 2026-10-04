@@ -100,11 +100,10 @@
     "spawnDenied": "终端被插件拦截",
     "spawnError": "无法打开终端：{message}",
     "splitRight": "向右分屏（Ctrl+\\）",
-    "sshConnected": {
-      "learned": "已连接，并保存了主机指纹",
-      "verified": "已连接，主机指纹校验通过"
-    },
-    "sshCredentialRequired": "请先在 设置 → 终端 中为「{name}」设置密码，然后再连接。"
+    "restartSshUnknownProfile": "此 SSH 标签页创建时尚未记录其对应的已保存主机，因此无法重新连接。请从“+”菜单重新打开该主机。",
+    "restartUnsupported": "此标签页无法重启。请从“+”菜单重新打开。",
+    "restartError": "无法重启终端：{message}",
+    "sshConnecting": "正在连接 {name}…"
   },
   "emptyState": {
     "cloud": {
@@ -170,7 +169,9 @@
     "toggle": {
       "local": "启用或停用本地转发 {summary}",
       "remote": "启用或停用远程转发 {summary}"
-    }
+    },
+    "edit": "编辑转发规则",
+    "editHint": "这里只列出建立此连接时已启用的规则。如需添加，请在已保存的主机中启用该规则后重新连接。"
   },
   "ghost": {
     "acceptHint": "Tab"
@@ -330,7 +331,10 @@
     "sshLabel": "SSH 主机",
     "tmuxLabel": "tmux 会话",
     "tmuxSession": "{name}（{count, plural, other {# 个窗口}}）",
-    "zsh": "zsh"
+    "zsh": "zsh",
+    "sshLabelThisDesktop": "SSH 主机 · 从本桌面端发起连接",
+    "sshManage": "管理 SSH 主机…",
+    "sshAdd": "添加 SSH 主机…"
   },
   "stickyScroll": {
     "label": "固定的命令标题"
@@ -376,7 +380,10 @@
       "rename": "重命名 tab",
       "restart": "重启",
       "selectAll": "全选",
-      "trustAgent": "信任此 tab 的智能体"
+      "trustAgent": "信任此 tab 的智能体",
+      "reconnect": "重新连接",
+      "browseSshFiles": "通过 SFTP 浏览文件",
+      "editSshHost": "编辑 SSH 主机"
     },
     "rename": {
       "inputLabel": "新 tab 名称",
@@ -398,5 +405,40 @@
     "selectPlaceholder": "请选择",
     "title": "填写模板变量"
   },
-  "sshConnectedViaHost": "已通过宿主连接。宿主用它保存的副本核对了服务器密钥。"
+  "sshConnect": {
+    "unknownHost": "此 SSH 主机已不在已保存列表中。",
+    "credentialRequired": "“{name}”使用密码认证，但此桌面端尚未保存密码。",
+    "credentialRequiredBastion": "“{name}”需经由“{bastion}”连接，而“{bastion}”使用密码认证且此桌面端尚未保存密码。",
+    "chainBroken": "“{name}”的跳板机已被删除、形成了循环，或超过五跳。",
+    "notOnHost": "当前连接的主机上没有保存“{name}”。只有该主机自身桌面端保存的 SSH 主机才能从这里打开。",
+    "invalidProfile": "“{name}”的配置不完整，无法连接。",
+    "invalidField": {
+      "name": "需要填写显示名称。",
+      "host": "主机地址为空或包含空格。",
+      "port": "端口必须在 1 到 65535 之间。",
+      "username": "用户名为空或包含空格。",
+      "privateKeyPath": "私钥认证需要填写私钥路径。",
+      "profile": "请检查已保存的字段。",
+      "jumpChain": "路由中的某个跳板机缺少主机、用户名或端口。",
+      "localForward": "某条本地转发规则无效。",
+      "remoteForward": "某条远程转发规则无效。"
+    },
+    "agentUnavailable": "“{name}”无法连接到 SSH agent",
+    "failed": "无法连接到“{name}”",
+    "connected": {
+      "learned": "已连接到 {name}，并保存了主机指纹",
+      "verified": "已连接到 {name}，主机指纹验证通过",
+      "viaHost": "已通过主机连接到 {name}。主机使用其保存的副本验证了服务器密钥。"
+    },
+    "actions": {
+      "addPassword": "添加密码",
+      "editHost": "编辑主机"
+    }
+  },
+  "host": {
+    "thisDesktop": "这台桌面设备",
+    "unknown": "未知主机",
+    "runsOn": "终端主机：{host}",
+    "differentTarget": "终端主机：{host}。+ 新建会在当前主机上打开，不会沿用此标签页的主机。"
+  }
 }

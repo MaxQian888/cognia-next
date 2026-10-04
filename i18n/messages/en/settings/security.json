@@ -48,6 +48,15 @@
       "label": "Confirm before signing out"
     }
   },
+  "policyChangeTitle": "Change biometric protection",
+  "policyChangeReason": "Verify your identity before turning off this protection",
+  "policyChangeBlocked": "Protection was not changed. {reason}",
+  "policyChangeFailed": "Could not save the protection setting. Try again.",
+  "policyChangeContextChanged": "The account or connected Host changed. Try again from the current settings.",
+  "testSuccess": "Biometric verification succeeded.",
+  "testBlocked": "Biometric test did not complete. {reason}",
+  "testError": "Could not run the biometric test. Try again.",
+  "testPending": "Waiting for verification…",
   "testCta": "Test biometric prompt",
   "testDescription": "This is a no-op check to confirm your device biometric works.",
   "testReason": "Verify your biometric is working",

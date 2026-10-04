@@ -1,0 +1,17 @@
+{
+  "empty": {
+    "action": "清空归档…",
+    "body": "这些会话及其全部消息将被永久删除，且无法撤销。",
+    "cancel": "取消",
+    "confirm": "删除 {count} 个会话",
+    "lockedKept": "{count} 个已移交到其他设备的会话会被保留。",
+    "more": "以及另外 {count} 个",
+    "nothingBody": "没有可删除的已归档会话。",
+    "nothingTitle": "归档为空",
+    "scope": "范围：{scope}。",
+    "success": "已删除 {count} 个已归档会话",
+    "title": "{count, plural, =1 {删除 # 个已归档会话？} other {删除全部 # 个已归档会话？}}"
+  },
+  "restoredBySend": "已移回会话列表",
+  "scopeAllWorkspaces": "全部工作区"
+}

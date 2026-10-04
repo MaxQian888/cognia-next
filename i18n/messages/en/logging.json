@@ -19,21 +19,21 @@
     "autoRefreshOff": "Off",
     "autoRefreshOn": "On",
     "autoRefreshStatus": "Auto Refresh",
-    "detailDescription": "Inspect the crash log entry and the diagnostic snapshot captured with it.",
-    "detailTitle": "Crash detail",
+    "detailDescription": "The logged error and the diagnostic snapshot taken with it.",
+    "detailTitle": "Error detail",
     "diagnostics": {
       "runtime": "Runtime Diagnostics",
       "title": "Diagnostic Snapshots",
       "window": "Window Diagnostics"
     },
-    "emptyDescription": "Try broadening the filters or trigger the failing flow again.",
-    "emptyTitle": "No Crash Logs Found",
-    "errorTitle": "Failed to Load Crash Logs",
+    "emptyDescription": "Error and fatal log entries from this device appear here as they are recorded. If you expected some, widen the filters.",
+    "emptyTitle": "No errors logged",
+    "errorTitle": "Could not load error logs",
     "lastUpdated": "Last Updated",
     "levels": {
       "all": "All Levels"
     },
-    "loading": "Loading crash logs...",
+    "loading": "Loading error logs…",
     "native": {
       "details": "Full Native Logging Details",
       "logDirectory": "Log Directory",
@@ -43,7 +43,16 @@
       "platformLevel": "Platform Threshold",
       "status": "Status",
       "title": "Native Logging",
-      "unavailable": "Unavailable"
+      "unavailable": "Unavailable",
+      "statuses": {
+        "active": "Active",
+        "healthy": "Healthy",
+        "degraded": "Degraded",
+        "error": "Error",
+        "inactive": "Inactive",
+        "unavailable": "Unavailable",
+        "other": "Other ({status})"
+      }
     },
     "noSelectionDescription": "Pick a row on the left to inspect crash details.",
     "noSelectionTitle": "No Incident Selected",
@@ -56,8 +65,8 @@
       "title": "Before You Share"
     },
     "refreshing": "Refreshing...",
-    "resizeDetail": "Resize diagnostics detail pane",
-    "searchPlaceholder": "Search crash logs...",
+    "resizeDetail": "Resize error detail pane",
+    "searchPlaceholder": "Search errors…",
     "sourceCount": "sources",
     "sourceLabel": "Source filter",
     "sources": {
@@ -70,7 +79,34 @@
       "native": "Native Logging",
       "recent": "Recent Errors",
       "recentDescription": "In-memory failures from this session",
-      "total": "Visible Incidents"
+      "total": "Visible errors"
+    },
+    "snapshot": {
+      "title": "Diagnostic snapshot",
+      "summaries": {
+        "diagnostics_error": "Diagnostics could not be collected",
+        "runtime_error": "The local runtime reported an error",
+        "native_degraded": "Native logging is degraded",
+        "native_inactive": "Native logging is inactive in this runtime",
+        "snapshot": "Latest native diagnostics snapshot"
+      }
+    },
+    "clearStored": {
+      "title": "Clear stored error logs?",
+      "description": "This permanently deletes the error and fatal entries stored on this device. Other log history is kept.",
+      "cancel": "Keep logs",
+      "confirm": "Clear stored"
+    },
+    "toasts": {
+      "copied": "Copied to the clipboard",
+      "copyFailed": "Could not write to the clipboard",
+      "openDirectoryFailed": "Could not open the log directory",
+      "exported": "Export saved",
+      "exportFailed": "Export failed",
+      "refreshFailed": "Could not refresh error logs",
+      "recentCleared": "Recent errors cleared",
+      "storedCleared": "{count, plural, =0 {No stored error logs to clear} =1 {Cleared 1 stored error log} other {Cleared # stored error logs}}",
+      "clearFailed": "Could not clear the logs"
     }
   },
   "dashboard": {
@@ -103,24 +139,46 @@
     "uniqueModules": "Unique Modules",
     "uniqueTraces": "Unique Traces",
     "warningRate": "Warning Rate",
-    "warnings": "warnings"
+    "warnings": "warnings",
+    "spanMinutes": "{value}m",
+    "spanHours": "{value}h",
+    "spanDays": "{value}d",
+    "errorCount": "{count, plural, one {# error} other {# errors}}",
+    "warningCount": "{count, plural, one {# warning} other {# warnings}}",
+    "logCount": "{count, plural, one {# log} other {# logs}}",
+    "showErrors": "Show errors in the list",
+    "showWarnings": "Show warnings in the list",
+    "showModule": "Show this module in the list",
+    "platformBackendNone": "None",
+    "platformError": "Platform Error",
+    "moduleListLabel": "Filter by module"
   },
   "description": "View, search, and export application logs",
   "detail": {
     "addBookmark": "Bookmark",
+    "close": "Close details",
     "copyData": "Copy data",
+    "copyEntry": "Copy entry",
     "copyJson": "Copy JSON",
     "copyMessage": "Copy message",
+    "copySessionId": "Copy session ID",
     "copyStack": "Copy stack trace",
     "copyTraceId": "Copy trace ID",
+    "focusSession": "Show this session",
+    "focusTrace": "Show this trace",
+    "jsonItems": "{count, plural, one {# item} other {# items}}",
+    "jsonKeys": "{count, plural, one {# key} other {# keys}}",
     "message": "Message",
     "module": "Module",
     "nextLog": "Next log",
+    "openTrace": "Open in Traces",
     "prevLog": "Previous log",
     "relatedLogs": "Related Logs",
+    "relatedWindowed": "Showing {shown} of {total} entries around this one.",
     "removeBookmark": "Remove bookmark",
     "sessionId": "Session ID",
     "tags": "Tags",
+    "thisEntry": "this entry",
     "timestamp": "Timestamp",
     "title": "Log Detail"
   },
@@ -146,7 +204,8 @@
     "searchPlaceholder": "Filter messages…",
     "truncatedBadge": "Older entries beyond scan window",
     "unavailableDescription": "On mobile, pair with a desktop first — native logs are read from the desktop app.",
-    "unavailableTitle": "Native logs unavailable"
+    "unavailableTitle": "Native logs unavailable",
+    "errorTitle": "Couldn't read the native log"
   },
   "panel": {
     "addBookmark": "Bookmark this log",
@@ -162,7 +221,7 @@
         "title": "Agent trace"
       },
       "statsBar": {
-        "avgLatencyHint": "Avg latency {ms} ms",
+        "avgLatencyHint": "Avg latency {value}",
         "cacheHitRate": "Cache hit rate",
         "cacheReadHint": "Cache reads: {count}",
         "errors": "Errors",
@@ -187,7 +246,9 @@
         "empty": "No spans for this trace yet.",
         "loading": "Loading trace…",
         "title": "Trace",
-        "treeLabel": "Span tree"
+        "treeLabel": "Span tree",
+        "tokens": "{input} in / {output} out",
+        "failed": "Failed:"
       }
     },
     "agentTraceModule": "Agent Trace",
@@ -220,7 +281,6 @@
     "allLevelsTab": "All",
     "allModules": "All Modules",
     "allSources": "All Sources",
-    "autoRefresh": "Auto-refresh",
     "back": "Back",
     "bookmarked": "Bookmarked",
     "clear": "Clear logs",
@@ -229,13 +289,13 @@
     "clearConfirmDescription": "This permanently deletes every persisted log entry on this device. Exports and bookmarks of deleted entries stop working.",
     "clearConfirmTitle": "Clear all logs?",
     "clearSearchHistory": "Clear history",
-    "clearSessionFocus": "Clear session focus",
-    "clearTraceFocus": "Clear trace focus",
     "clearedToast": "Logs cleared",
     "closeDetails": "Close Detail Panel",
     "closeTransportDetails": "Close",
+    "collapseEntry": "Collapse entry",
     "copied": "Copied!",
     "copyEntry": "Copy log entry",
+    "copyFailed": "Couldn't copy to the clipboard",
     "copyLogEntry": "Copy log entry",
     "copyShareUrl": "Copy share URL",
     "customTimeRange": "Custom...",
@@ -262,10 +322,12 @@
     "error": "Error",
     "errorAndFatal": "Error",
     "errorLoading": "Failed to load logs",
+    "expandEntry": "Expand entry",
     "export": "Export logs",
     "exportAs": "Export as...",
     "exportText": "Plain Text",
     "filterChip": {
+      "clearAll": "Clear all",
       "clearModule": "Clear module filter",
       "clearSession": "Clear session filter",
       "clearSource": "Clear source filter {value}",
@@ -276,8 +338,7 @@
       "sessionLabel": "Session:",
       "sourceLabel": "Source:",
       "traceLabel": "Trace:",
-      "transportLabel": "Transport:",
-      "transportPrefix": "Transport: {name}"
+      "transportLabel": "Transport:"
     },
     "filterIn": "in:",
     "filters": "Filters",
@@ -287,11 +348,20 @@
     "focusTrace": "Focus this trace",
     "focusTraceMenu": "Focus on this trace",
     "groupByTrace": "Group by Trace",
+    "healthStatus": {
+      "degraded": "degraded",
+      "healthy": "healthy",
+      "inactive": "inactive",
+      "offline": "offline"
+    },
     "highSeverityOnly": "Toggle high-severity only",
     "jumpToLatest": "Jump to latest",
     "keyboardShortcuts": "Keyboard shortcuts",
     "levelFilterGroup": "Filter by level",
     "listView": "List View",
+    "live": "Live",
+    "liveOffAria": "Live follow off — start following new entries",
+    "liveOnAria": "Live follow on — new entries load automatically",
     "loadingLogs": "Loading logs...",
     "logDetails": "Log details",
     "logRatePulse": "Live log stream activity",
@@ -327,6 +397,10 @@
     },
     "pageSize": "Page Size",
     "pauseAutoScroll": "Pause auto-scroll",
+    "presetCancel": "Cancel",
+    "presetDefaultName": "Preset {index}",
+    "presetNameHint": "Saves level, module, source, session, time range, search, trace and transport filters.",
+    "presetNameLabel": "Preset name",
     "presets": "Presets",
     "previousPage": "Previous Page",
     "recentSearches": {
@@ -336,6 +410,13 @@
     },
     "refresh": "Refresh logs",
     "regexPlaceholder": "Regex pattern...",
+    "relativeTime": {
+      "days": "{count}d ago",
+      "hours": "{count}h ago",
+      "justNow": "just now",
+      "minutes": "{count}m ago",
+      "seconds": "{count}s ago"
+    },
     "removeBookmark": "Remove bookmark",
     "resumeAutoScroll": "Resume auto-scroll",
     "savePreset": "Save current filters as preset",
@@ -347,7 +428,6 @@
     "sessionPlaceholder": "Session ID...",
     "shareUrlCopied": "Share URL copied to clipboard",
     "shareUrlFailed": "Could not copy share URL",
-    "shiftClickPrefix": "Shift-click to",
     "shortcutAction": "Action",
     "shortcutKey": "Key",
     "shortcuts": {
@@ -361,10 +441,12 @@
       "openPresets": "Open presets",
       "previousEntry": "Previous entry",
       "refresh": "Refresh",
-      "showShortcuts": "Show shortcuts"
+      "showShortcuts": "Show shortcuts",
+      "traceView": "Trace view"
     },
     "showingRange": "{start}–{end} of {total}",
     "source": "Source",
+    "sourceFilterLabel": "Source",
     "sources": {
       "frontend": "Frontend",
       "internal": "Internal",
@@ -384,25 +466,81 @@
     "total": "Total",
     "traceDurationLabel": "Duration",
     "traceId": "Trace ID",
-    "traceOverflow": "+{count} more traces hidden",
+    "traceOverflow": "{count, plural, one {# more trace} other {# more traces}}",
     "traceTotal": "events",
     "traceView": "Trace View",
     "transportDetails": "Transport Details",
     "transportDropped": "Dropped",
+    "transportDroppedTitle": "Dropped entries: {count}",
     "transportFilterPrefix": "Transport: {value}",
-    "transportHealthOverflow": "Show more transports",
     "transportLastFailure": "Last Failure",
     "transportLastSuccess": "Last Success",
     "transportQueueDepth": "Queue Depth",
+    "transportQueueDepthTitle": "Queue depth: {count}",
     "transportQueueHistory": "Queue depth history",
     "transportRetries": "Retries",
+    "transportSummaryAria": "Log transports: {healthy} of {total} healthy",
+    "transportSummaryLabel": "Transports",
+    "transportSummaryTitle": "Log transports",
+    "transportTileAria": "{name}: {status}, queue {queue}",
     "unsavedChanges": "Unsaved changes",
     "viewDetails": "View Details",
     "viewDetailsMenu": "View details",
     "viewDiagnostics": "View Diagnostics",
     "viewModeGroup": "Log view",
     "viewNativeDiagnostics": "View Native Diagnostics",
-    "warning": "Warning"
+    "warning": "Warning",
+    "windowCapped": "Only the newest {count} entries are loaded. Search, level, source and time filters apply within them; filter by module or focus a trace to reach older entries.",
+    "traceIdValue": "Trace ID: {id}",
+    "logListLabel": "Log entries",
+    "emptyStateWindowCapped": "Only the newest {count} entries were loaded and searched — older matches are not shown. Narrow by module or trace to reach further back.",
+    "durationUnits": {
+      "ms": "{value} ms",
+      "s": "{value} s",
+      "m": "{value} min",
+      "h": "{value} h"
+    },
+    "traceRowAria": "Show trace {id}: {count, plural, one {# event} other {# events}} over {duration}",
+    "traceEventCount": "{count, plural, one {# event} other {# events}}",
+    "fieldValue": "{label}: {value}",
+    "openTraceAria": "Open trace {id} in Traces",
+    "traceShowMore": "Show {count} more",
+    "logRateValue": "~{rate} logs/min",
+    "transportQueueShort": "q{count}",
+    "transportDroppedShort": "d{count}",
+    "nativeTileLabel": "Native",
+    "nativeTileAria": "Native logging: {status}",
+    "transportSummaryCount": "{healthy}/{total}",
+    "transportDetailsTitle": "Transport details: {name}",
+    "openLogSettings": "Log settings",
+    "nativeStartupMode": {
+      "full": "Full",
+      "fallback": "Fallback",
+      "disabled": "Disabled",
+      "unknown": "Unknown"
+    },
+    "nativeBridgeState": {
+      "active": "active",
+      "inactive": "inactive",
+      "degraded": "degraded"
+    },
+    "customTimeRangeActive": "Custom range",
+    "shortcutsDescription": "Keys work anywhere in the panel except while typing in a field.",
+    "customTimeRangeValue": "{start} → {end}",
+    "clearFailedToast": "Couldn't clear the logs",
+    "logDetailsDescription": "The selected log entry: its message, metadata, data, stack and related entries.",
+    "emptyChips": {
+      "level": "Level: {value}",
+      "module": "Module: {value}",
+      "source": "Source: {value}",
+      "session": "Session: {value}",
+      "time": "Time: {value}",
+      "customTime": "Time: custom range",
+      "search": "Search: {value}",
+      "trace": "Trace: {value}",
+      "transport": "Transport: {value}",
+      "bookmarks": "Bookmarked only"
+    }
   },
   "settings": {
     "advanced": {
@@ -512,7 +650,11 @@
       "moduleLabel": "Target",
       "removeAria": "Remove {module} override",
       "saved": "Applied",
-      "title": "Native (Rust) Levels"
+      "title": "Native (Rust) Levels",
+      "unsaved": "Unsaved changes",
+      "loadError": "Couldn't read the current native levels.",
+      "retry": "Retry",
+      "loading": "Loading native levels…"
     },
     "nav": {
       "badgeTransportsAria": "{enabled} of {total} transports enabled",
@@ -693,9 +835,11 @@
   "settingsTitle": "Logging Configuration",
   "statusSr": "status: {status}",
   "timeline": {
+    "bucketAria": "{time}: {total, plural, one {# entry} other {# entries}}, {errors, plural, one {# error} other {# errors}}, {warnings, plural, one {# warning} other {# warnings}}",
     "clear": "Clear",
     "empty": "No data yet",
     "errors": "Errors",
+    "otherLevels": "Other",
     "title": "Timeline",
     "total": "Total",
     "warnings": "Warnings"
@@ -718,7 +862,16 @@
     "tokenUsage": "Token Usage",
     "toolArgs": "Arguments",
     "toolName": "Tool",
-    "totalTokens": "Total"
+    "totalTokens": "Total",
+    "unknownEvent": "unknown event",
+    "operations": {
+      "invoke_agent": "Agent run",
+      "execute_tool": "Tool call",
+      "chat": "Model call",
+      "invoke_workflow": "Workflow run",
+      "retrieval": "Retrieval",
+      "embeddings": "Embeddings"
+    }
   },
   "workspace": {
     "breadcrumbHome": "Home",
@@ -783,13 +936,23 @@
         "download": "Download",
         "audit": "Audit trail",
         "noAudit": "No audit events.",
-        "system": "system"
+        "system": "system",
+        "part": "#{number} · {kind} · {size}",
+        "downloaded": "Saved {filename}",
+        "downloadFailed": "The artifact could not be downloaded"
       },
       "policy": {
         "title": "Tenant policy",
         "load": "Load tenant policy",
         "rawMinidump": "Allow raw minidump downloads",
-        "rawMinidumpDescription": "Minidumps can contain process memory. While this is off the service refuses every raw minidump read, and each allowed read is recorded in the incident's audit trail with the operator's identity."
+        "rawMinidumpDescription": "Minidumps can contain process memory. While this is off the service refuses every raw minidump read, and each allowed read is recorded in the incident's audit trail with the operator's identity.",
+        "confirmEnableTitle": "Allow raw minidump downloads for the whole tenant?",
+        "confirmEnableDescription": "Every triager on this tenant will be able to download minidumps, which can contain process memory. Each download is recorded in the incident's audit trail.",
+        "confirmDisableTitle": "Stop raw minidump downloads for the whole tenant?",
+        "confirmDisableDescription": "The service will refuse every raw minidump read on this tenant until an admin allows it again.",
+        "confirmEnable": "Allow downloads",
+        "confirmDisable": "Stop downloads",
+        "cancel": "Cancel"
       },
       "errors": {
         "insufficient_grant_scope": "This identity is not allowed to do that.",
@@ -800,6 +963,63 @@
         "incident_not_found": "That incident no longer exists.",
         "network_unavailable": "The diagnostic service could not be reached.",
         "console_failed": "The console request did not complete."
+      },
+      "gates": {
+        "loading": "Reading the diagnostic service connection…",
+        "probing": "Checking your access to the console…",
+        "sessionRequired": "An identity session is needed",
+        "sessionRequiredDescription": "This connection can submit this device's own crashes. Reading and triaging everyone's needs an identity session token, added in Settings → Diagnostics.",
+        "roleFailed": "Your access could not be confirmed",
+        "retry": "Try again"
+      },
+      "detail": {
+        "title": "Crash group",
+        "description": "The group, the incidents in it, and its triage controls.",
+        "loading": "Loading the crash group…",
+        "resize": "Resize crash group detail pane"
+      },
+      "processingStates": {
+        "received": "Received",
+        "scanning": "Scanning",
+        "symbolicating": "Symbolicating",
+        "grouping": "Grouping",
+        "accepted": "Accepted",
+        "retryable_failure": "Failed, will retry",
+        "permanent_failure": "Failed permanently",
+        "deleted": "Deleted",
+        "unknown": "Other ({state})"
+      },
+      "artifactKinds": {
+        "manifest": "Manifest",
+        "events": "Events",
+        "attachment": "Attachment",
+        "minidump": "Minidump",
+        "screenshot": "Screenshot",
+        "unknown": "Other ({kind})"
+      },
+      "auditActions": {
+        "alert_permanent_failure": "Alert: processing failed permanently",
+        "artifact_read": "Artifact downloaded",
+        "consent_withdrawn": "Consent withdrawn",
+        "group_triaged": "Group triaged",
+        "incident_accepted": "Incident accepted",
+        "incident_cancelled": "Upload cancelled",
+        "incident_created": "Incident created",
+        "incident_deleted": "Incident deleted",
+        "incident_processing_failed": "Processing failed",
+        "incident_processing_queued": "Processing queued",
+        "incident_resumed": "Upload resumed",
+        "retention_artifact_deleted": "Artifact removed by retention",
+        "retention_incident_deleted": "Incident removed by retention",
+        "retention_permanent_failure": "Retention failed permanently",
+        "symbol_indexed": "Symbols indexed",
+        "tenant_policy_changed": "Tenant policy changed",
+        "tenant_key_created": "Tenant key created",
+        "tenant_key_crypto_shredded": "Tenant key crypto-shredded",
+        "tenant_key_rotated": "Tenant key rotated",
+        "upload_part_rejected": "Upload part rejected",
+        "upload_part_stored": "Upload part stored",
+        "unknown": "Other event ({action})"
       }
     },
     "delete": {
@@ -807,18 +1027,20 @@
       "cancel": "Keep report",
       "confirm": "Delete report",
       "description": "This removes the local diagnostic artifacts from this device. The action cannot be undone.",
-      "title": "Delete this crash report?"
+      "title": "Delete this crash report?",
+      "done": "Crash report deleted.",
+      "failed": "Could not delete the crash report: {error}"
     },
     "detail": {
-      "description": "Review redacted local diagnostics and optional attachments.",
+      "description": "Review the redacted report, choose what to send, and see its receipt.",
       "loading": "Loading redacted preview…",
       "noPreview": "Select the report again to load its local preview.",
       "previewDescription": "This is the local, redacted payload. Optional attachments remain excluded.",
       "previewTitle": "Redacted preview",
-      "resize": "Resize incident detail pane",
-      "runtime": "Runtime",
+      "resize": "Resize crash report detail pane",
       "state": "State",
-      "title": "Incident detail"
+      "title": "Crash report",
+      "source": "Source"
     },
     "filters": {
       "sourceLabel": "Incident source",
@@ -831,10 +1053,12 @@
       "receiptsOnly": "Receipts only"
     },
     "incidents": {
-      "emptyDescription": "New crash reports and abnormal exits will be retained here before submission.",
-      "emptyTitle": "No matching incidents",
-      "error": "Local incident storage could not be read.",
-      "loading": "Loading local incidents…"
+      "emptyDescription": "Crash reports this device captures are kept here until you decide whether to send them.",
+      "emptyTitle": "No matching crash reports",
+      "error": "Crash reports on this device could not be read.",
+      "loading": "Loading crash reports…",
+      "uncollectedTitle": "Crash reports are collected by the apps",
+      "uncollectedDescription": "Crash reports are collected by the desktop and mobile apps. A browser tab has no crash handler, so there is nothing to list here."
     },
     "moreActions": "More actions",
     "navigation": {
@@ -849,14 +1073,15 @@
     "states": {
       "accepted": "Accepted",
       "all": "All states",
-      "awaitingConsent": "Awaiting consent",
       "cancelled": "Cancelled",
       "deleted": "Deleted",
       "detected": "Detected",
       "processing": "Processing",
       "queued": "Queued",
       "rejected": "Rejected",
-      "uploading": "Uploading"
+      "uploading": "Uploading",
+      "packaged": "Packaged",
+      "awaiting_consent": "Awaiting consent"
     },
     "status": {
       "transports": "{healthy}/{total} transports",
@@ -897,7 +1122,14 @@
         "submission_failed": "The submission did not complete.",
         "submission_not_found": "There is no submission recorded for this report.",
         "unauthorized": "The service refused this installation's credentials."
-      }
+      },
+      "checkingSupport": "Checking whether this device can submit…",
+      "unsupported": "This device has no way to submit crash reports. They are sent from the desktop app, or from the mobile app with its crash reporter installed.",
+      "mobileReceiptNote": "Sent from this phone. To withdraw it or have it deleted, quote this support code to the service operator.",
+      "confirmWithdrawTitle": "Withdraw consent for this report?",
+      "confirmDeleteRemoteTitle": "Delete this report from the service?",
+      "confirmDeleteRemoteDescription": "The service deletes its copy and everything derived from it. The local report stays on this device.",
+      "confirmCancel": "Cancel"
     },
     "title": "Logs and diagnostics",
     "traces": {
@@ -908,7 +1140,7 @@
       "emptyTitle": "No agent traces yet",
       "errorsOnly": "Errors only",
       "export": {
-        "label": "Export",
+        "label": "Export trace",
         "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
         "copy": {
           "json": "Copy spans as JSON",
@@ -983,7 +1215,10 @@
         "sessionId": "Session",
         "runId": "Run",
         "openInLogs": "Show this trace in logs",
-        "openSession": "Show this session in logs"
+        "openSession": "Show this session in logs",
+        "offsetValue": "+{value}",
+        "copyValue": "Copy {label} ID",
+        "copied": "{label} ID copied"
       },
       "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
       "timeline": {
@@ -1005,29 +1240,81 @@
         },
         "spans": "{count, plural, =1 {1 span} other {# spans}}",
         "resetZoom": "Reset zoom",
-        "brushHint": "Drag to zoom into a time range · double-click to reset",
+        "brushHint": "Drag across the strip or the lanes to zoom · double-click to reset",
         "laneErrors": "{count, plural, =1 {1 failed span} other {# failed spans}}",
         "blockAria": "{label} in {lane}, {duration}",
-        "blockError": "This span failed"
+        "blockError": "This span failed",
+        "spansOf": "{count, number} of {total, plural, =1 {1 span} other {# spans}}",
+        "totalDuration": "Whole trace: {value}",
+        "tokens": "{value} tokens",
+        "errorCount": "{count, plural, =1 {1 failed span} other {# failed spans}}",
+        "zoomIn": "Zoom in",
+        "zoomInHint": "Zoom in (+)",
+        "zoomOut": "Zoom out",
+        "zoomOutHint": "Zoom out (−)",
+        "resetZoomHint": "Show the whole trace (0)",
+        "sequenceTick": "#{index}",
+        "collapse": "Collapse timeline",
+        "expand": "Expand timeline"
       },
       "truncated": "Showing the newest {shown, number} of {total, number} spans in this window.",
       "waterfallEmpty": "This trace has no persisted spans.",
       "windowEmpty": "No spans in the selected window.",
       "windowLabel": "Trace time window",
-      "windowedTo": "windowed to {count} of {total}",
       "windows": {
         "today": "Today",
         "week": "7 days",
         "month": "30 days",
         "all": "All time"
-      }
+      },
+      "notFoundTitle": "Trace not found",
+      "notFoundDescription": "No spans are stored for {id}. It may have been pruned or cleared, or the link is wrong.",
+      "clearSelection": "Clear selection",
+      "closeTrace": "Close trace",
+      "closeTraceHint": "Close trace (Esc)",
+      "waterfallLabel": "Spans in this trace",
+      "listLabel": "Traces",
+      "pending": "{count, plural, =1 {1 new · show} other {# new · show}}",
+      "selectionOutside": "The selected trace isn’t in this list — it’s outside the time range or hidden by a filter.",
+      "widenRange": "Widen to last 30d",
+      "subViewHint": "{view} (V to switch)",
+      "traceFailed": "{count, plural, =1 {1 failed span} other {# failed spans}}"
     },
     "views": {
       "logs": "Logs",
       "traces": "Traces",
-      "diagnostics": "Diagnostics",
-      "incidents": "Incidents",
+      "diagnostics": "Errors",
+      "incidents": "Crash reports",
       "service": "Service"
+    },
+    "viewDescriptions": {
+      "logs": "Everything this app logged",
+      "traces": "Agent and request traces",
+      "diagnostics": "Error and fatal log entries from this device",
+      "incidents": "Native crash reports this device captured",
+      "service": "Crashes a diagnostic service accepted from everyone"
+    },
+    "sources": {
+      "panic": "Rust panic",
+      "native": "Native crash",
+      "unknown": "Unknown",
+      "android-acra": "Android crash",
+      "android-application-exit": "Android abnormal exit",
+      "ios-kscrash": "iOS crash",
+      "ios-metrickit": "iOS MetricKit report",
+      "other": "Other ({source})"
     }
+  },
+  "autoSubmit": {
+    "sent": "Crash report sent · support code {code}",
+    "sentDescription": "Sent automatically, without optional attachments. The receipt is in Logs → Crash reports.",
+    "failed": "{count, plural, =1 {A crash report could not be sent} other {# crash reports could not be sent}}",
+    "failedRetry": "They stay on this device and will be tried again on the next launch.",
+    "failedFinal": "They stay on this device. Review and send them from Logs → Crash reports.",
+    "view": "View"
+  },
+  "virtualizedList": {
+    "retry": "Retry",
+    "details": "Details"
   }
 }

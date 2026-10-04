@@ -6,6 +6,11 @@
     "confirmCancel": "Stay here",
     "confirmSwitch": "Switch anyway",
     "confirmTitle": "Switch execution host while work is running?",
+    "reconnectTitle": "Reconnect while work is running?",
+    "reconnectBody": "A turn is in flight. Reconnecting to {label} replaces the link under it, and the running turn may never finish.",
+    "reconnectConfirm": "Reconnect anyway",
+    "removeActive": "{label} is the host this window is driving. Removing it returns this window to this machine.",
+    "removeActiveBusy": "{label} is the host this window is driving, and a turn is in flight on it. Removing it returns this window to this machine at once, and the running turn stays on the host.",
     "hint": "Where this window's file, git and agent calls run.",
     "local": "This machine",
     "localDetail": "Terminals, files and git run here.",
@@ -13,7 +18,7 @@
     "state": {
       "connecting": "Connecting",
       "degraded": "Degraded",
-      "disconnected": "Disconnected",
+      "disconnected": "Not connected",
       "ready": "Ready",
       "revoked": "Revoked",
       "versionMismatch": "Upgrade required"
@@ -38,6 +43,13 @@
     "ssh-host": "SSH host",
     "worker": "Execution worker"
   },
+  "kindPlural": {
+    "local": "This device",
+    "paired-device": "Paired",
+    "remote-host": "Hosts",
+    "worker": "Workers",
+    "ssh-host": "SSH"
+  },
   "capabilityState": {
     "reported": "Reported",
     "expected": "Expected",
@@ -57,11 +69,13 @@
     "searchPlaceholder": "Search devices",
     "searchAria": "Search devices by name, address or platform",
     "filterAria": "Filter by device kind",
-    "filterAll": "All kinds",
+    "filterAll": "All",
     "emptyTitle": "No devices",
     "emptyBody": "Pair a phone or add a remote host to see it here.",
     "emptyFiltered": "No device matches the current search or filter.",
-    "label": "Device list"
+    "label": "Device list",
+    "filterAttention": "Needs attention",
+    "clearFilters": "Clear filters"
   },
   "row": {
     "needsAttention": "Needs attention"
@@ -134,12 +148,11 @@
     "reportedAt": "Reported {when}",
     "neverReportedTitle": "This device has never reported its capabilities",
     "neverReportedBody": "Nothing below is confirmed. Entries marked Expected come from the platform baseline; the rest are simply unknown. The device reports on its next connection.",
-    "noVocabularyTitle": "No capability vocabulary for this device",
     "noVocabulary": {
       "local": "This machine's capabilities are probed locally rather than reported.",
       "paired-device": "This device has not reported, and its platform is unknown, so there is no baseline to infer from.",
       "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
-      "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab.",
+      "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities, so there is no platform matrix to show.",
       "ssh-host": "An SSH server never reports anything and holds no capability set of ours. Nothing here is absent, it was simply never asked."
     },
     "title": "Capabilities",
@@ -194,18 +207,36 @@
       "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
       "reachableVerified": "Reachable. The host key matched the one already trusted.",
       "running": "Testing…",
-      "unreachable": "Could not connect: {message}"
+      "unreachable": "Could not connect: {message}",
+      "invalidReason": {
+        "name": "it has no display name",
+        "host": "its host address is empty or contains spaces",
+        "port": "its port is outside 1–65535",
+        "username": "its username is empty or contains spaces",
+        "privateKeyPath": "private-key authentication has no key path",
+        "profile": "a saved field is invalid",
+        "jumpChain": "its jump host is missing, loops back, or is incomplete",
+        "localForward": "a local forward is invalid",
+        "remoteForward": "a remote forward is invalid"
+      }
     },
     "viaHostTitle": "Connected by the paired host",
     "viaHostBody": "This shell does not hold SSH credentials, so the paired host opens the connection with the key or password it keeps. Only hosts the host's own desktop has registered can be opened this way, and no host key is reported back over this transport.",
     "noHostTitle": "No terminal host to connect through",
     "noHostBody": "SSH runs on a machine, not in a browser tab. Pair a host, or open the desktop app, and this host becomes connectable again.",
-    "notOnHost": "The paired host has no SSH profile called {name}. Profiles are registered by the desktop that owns the host, so add it there and connect again."
+    "credentialRequiredBastionBody": "“{name}” connects through “{bastion}”, which uses a password and has none stored. Save one on “{bastion}” in the SSH hosts editor, then connect."
   },
-  "shellOnly": {
-    "title": "Not applicable to a shell",
-    "description": "What this console asks of every machine, and why an SSH host has no answer.",
-    "runtime": "Sandbox and workspaces"
+  "notApplicable": {
+    "title": "Does not apply here",
+    "nav": "Not applicable",
+    "runtime": "Sandbox and workspaces",
+    "description": {
+      "local": "What this console asks of every machine, and why this one has no answer.",
+      "paired-device": "What this console asks of every machine, and why a paired device has no answer.",
+      "remote-host": "What this console asks of every machine, and why a remote host has no answer from here.",
+      "worker": "What this console asks of every machine, and why a worker has no answer.",
+      "ssh-host": "What this console asks of every machine, and why an SSH host has no answer."
+    }
   },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
@@ -213,14 +244,23 @@
   "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
   "hostUnreachableTitle": "Showing the local record",
   "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
+  "missingLinkTitle": "That device is not in this fleet",
+  "missingLinkBody": "The link names a device that is no longer paired or added here, so this machine is shown instead.",
+  "missingLinkDismiss": "Dismiss",
   "actions": {
     "pair": "Pair a device",
     "addHost": "Add a host",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "refreshFailed": "Could not refresh the device list",
+    "grow": "Pair a device or add a host",
+    "addSshHost": "Add SSH host"
   },
   "detail": {
     "noSelectionTitle": "No device selected",
-    "noSelectionBody": "Pick a device from the list to see what it can do."
+    "noSelectionBody": "Pick a device from the list to see what it can do.",
+    "drawerTitle": "Device details",
+    "sectionNavAria": "Jump to a section"
   },
   "access": {
     "partialHint": "This device holds only some of the capabilities this grant confers. Toggle it off and on to bring it back in line.",
@@ -230,14 +270,11 @@
       "lockedUseUnavailable": "This grant has no enforcement point on this build, so it cannot be handed out.",
       "ownerMismatch": "This device belongs to a different person than the one signed in here, so the host is not honouring its grants. Nothing was revoked — they take effect again for the person it belongs to."
     },
-    "lifecycle": "Lifecycle",
-    "lifecycleHint": "Pausing blocks this device until you resume it. Revoking is permanent — the device has to pair again.",
     "pause": "Pause",
     "resume": "Resume",
     "revoke": "Revoke",
     "revokedTitle": "This device is revoked",
     "revokedBody": "It holds no capabilities and cannot reconnect without pairing again.",
-    "notApplicableTitle": "No grants to manage",
     "notApplicable": {
       "local": "This machine does not grant itself access.",
       "remote-host": "A remote host decides what this client may do; grants are administered on the host, not here.",
@@ -249,7 +286,15 @@
     "heldCount": "{held}/{total} granted",
     "ownerSuspendedHint": "Grants suspended: this device belongs to someone else.",
     "terminalReachesSsh": "This grant also lets the device open any SSH host saved on this machine. The host connects with the key or password it keeps, and the saved list is shared across granted devices rather than chosen per device.",
-    "sshFilesReachIsWhole": "This grant has no folder limit. SFTP paths are that machine's own absolute paths and it resolves its own symlinks, so there is no root to confine this to."
+    "sshFilesReachIsWhole": "This grant has no folder limit. SFTP paths are that machine's own absolute paths and it resolves its own symlinks, so there is no root to confine this to.",
+    "revokeConfirmTitle": "Revoke {label}?",
+    "revokeConfirmBody": "Revoking is permanent. The device loses every grant and its key, and has to pair again to come back. To stop it for now, pause it instead.",
+    "pauseHint": "Pausing blocks this device until you resume it.",
+    "lifecycleBlocked": {
+      "no-host": "This browser is not connected to a Host, so a pause, resume or revoke has nowhere to go.",
+      "needs-desktop-shell": "Pausing, resuming and revoking need the desktop app on the Host.",
+      "not-owner": "Only the Host's owner device may pause, resume or revoke a paired device."
+    }
   },
   "runtime": {
     "probeEmpty": "This host reports no worktrees.",
@@ -267,10 +312,8 @@
       "cuaDesktopNoConnection": "Needs a bound machine that carries shell and file execution. A Docker connection provides it through `docker exec`, which runs inside the container. Cloud and Lume connections have no adapter yet, so they offer the remote desktop only."
     },
     "sandbox": "Sandbox connections",
-    "sandboxUnsupportedTitle": "No sandbox connections here",
     "workspaces": "Workspace environments",
     "workspacesInactiveTitle": "Not the current routing target",
-    "workspacesUnsupportedTitle": "No workspaces here",
     "reason": {
       "sandboxIsClientLocal": "Sandbox connections are local to the machine running this window and are never routed to another device.",
       "sandboxNotHosted": "This kind of device does not host sandboxes.",
@@ -337,8 +380,6 @@
     }
   },
   "host": {
-    "controls": "Host controls",
-    "controlsHint": "Connecting makes this host the execution target for this window. Adding and discovering hosts stays in Settings.",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "reconnect": "Reconnect",
@@ -360,13 +401,14 @@
       "revoked": "This device was revoked",
       "versionMismatch": "Upgrade required"
     },
-    "managePairing": "Manage paired Host"
+    "managePairing": "Manage paired Host",
+    "moreAria": "More actions for {label}"
   },
   "settingsLink": {
     "pairedTitle": "Paired devices",
     "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
     "hostsTitle": "Remote hosts",
-    "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Connecting, renaming and removing are managed in the device console.",
+    "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Capabilities, workspaces and live presence are in the device console.",
     "open": "Open device console"
   },
   "placementReason": {
@@ -422,7 +464,11 @@
   "files": {
     "title": "Files",
     "transfers": "Transfers",
-    "unknownProfile": "This row does not name a saved SSH host, so there is nothing to browse."
+    "unknownProfile": "This row does not name a saved SSH host, so there is nothing to browse.",
+    "credentialRequired": "Files on “{name}” open over the same login as its shell, and it uses a password that is not saved yet.",
+    "credentialRequiredBastion": "Files on “{name}” are reached through “{bastion}”, which uses a password that is not saved yet.",
+    "chainBroken": "“{name}” goes through a jump host that was removed, loops back, or is more than five hops deep, so its files cannot be reached.",
+    "fixInSettings": "Fix in SSH hosts"
   },
   "justNow": "just now",
   "pairingAlert": {

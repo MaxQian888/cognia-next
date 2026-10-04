@@ -42,6 +42,10 @@
     }
   },
   "channelList": {
+    "archivedChipAria": "已归档 — 返回活跃会话",
+    "archivedToggle": "已归档会话",
+    "manageConversations": "管理会话…",
+    "viewArchivedCount": "显示已归档会话（{count}）",
     "archivedTitleSuffix": "已归档",
     "bucketOlder": "更早",
     "bucketPrev30": "过去 30 天",
@@ -67,9 +71,16 @@
       "selectedCount": "已选 {count} 项",
       "share": "分享",
       "unarchive": "取消归档",
-      "unarchiveSuccess": "已恢复 {count} 个会话",
+      "unarchiveSuccess": "已取消归档 {count} 个会话",
       "unpin": "取消置顶",
-      "unpinSuccess": "已取消置顶 {count} 个会话"
+      "unpinSuccess": "已取消置顶 {count} 个会话",
+      "selectHint": "未选择会话",
+      "selectAll": "全选（{count}）",
+      "deselectAll": "取消全选",
+      "done": "完成",
+      "markUnread": "标为未读",
+      "newFolder": "新建文件夹…",
+      "deleteConfirmMore": "以及另外 {count} 个"
     },
     "cancel": "取消",
     "chatsEmpty": "还没有对话——发起一个",
@@ -83,7 +94,6 @@
     "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
     "directMessages": "对话",
     "displayOptions": "显示选项",
-    "emptyArchived": "没有已归档的会话。",
     "emptyDm": "还没有对话，挑选一个角色开始。",
     "emptyFiltered": "没有会话符合当前的 {count} 项筛选条件。",
     "emptyFolder": "空文件夹——把会话移动到这里。",
@@ -170,7 +180,17 @@
     "ungroupedTeam": "对话",
     "ungroupedWorkspace": "未归属工作区",
     "viewActive": "显示活跃会话",
-    "viewArchived": "显示已归档会话"
+    "viewArchived": "显示已归档会话",
+    "selectConversations": "选择会话",
+    "emptyArchivedTitle": "暂无归档",
+    "emptyArchivedHint": "归档可以整理列表而不删除会话，已归档的会话仍可在这里查找。",
+    "backToConversations": "返回会话列表",
+    "searchWiden": {
+      "content": "同时搜索消息正文",
+      "archived": "包含已归档会话",
+      "workspaces": "搜索所有工作区"
+    },
+    "selectConversationsHere": "选择此处的会话"
   },
   "chatRuntime": {
     "connectionTitle": "等待主机连接",
@@ -190,7 +210,27 @@
       "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
       "unsupported": "当前运行目标尚未实现聊天能力。"
     },
-    "title": "聊天当前为只读"
+    "title": "聊天当前为只读",
+    "strip": {
+      "connecting": "正在重连",
+      "cacheOnly": "仅可查看缓存",
+      "placeholder": "主机恢复连接后即可发送",
+      "states": {
+        "available": "聊天可用",
+        "incompatible": "需要升级主机",
+        "offline": "主机离线",
+        "queued": "等待主机重连",
+        "readOnly": "聊天只读",
+        "requiresGrant": "需要设备授权",
+        "requiresPairing": "未配对主机",
+        "requiresUnlock": "Vault 已锁定",
+        "unsupported": "暂不支持聊天"
+      },
+      "actions": {
+        "connectionSettings": "设置",
+        "pair": "配对"
+      }
+    }
   },
   "find": {
     "close": "关闭查找",
@@ -204,6 +244,7 @@
     "a2ui": "小应用",
     "agentRuns": "智能体运行",
     "aliases": {
+      "conversations": "历史, 聊天记录, 会话记录, 会话, 归档, 已归档会话, conversations, history",
       "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts",
       "files": "资源库, 素材, 附件, 上传, 文档, 图片, 产物, 收藏, library, files",
       "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
@@ -220,6 +261,7 @@
       "system": "系统",
       "you": "个人"
     },
+    "conversations": "会话管理",
     "createTeam": "创建团队",
     "customize": {
       "behaviour": "行为",
@@ -585,6 +627,7 @@
     "pickedUp": "已拿起{item}。位置 {position}/{total}。"
   },
   "sessionRow": {
+    "archived": "已归档",
     "actionsMenu": "会话操作",
     "archive": "归档",
     "branchedFrom": "分支会话——打开父会话",
@@ -634,7 +677,8 @@
     "selectedState": "已选中",
     "unarchive": "取消归档",
     "unpin": "取消置顶",
-    "untitled": "（无标题）"
+    "untitled": "（无标题）",
+    "newFolder": "新建文件夹…"
   },
   "shell": {
     "desktopOnlyBodyMiddle": " 启动应用，而不是 ",
@@ -701,8 +745,13 @@
         "connectHost": "连接 Host",
         "reconnect": "立即重连",
         "recover": "修复连接",
-        "settings": "Companion 设置"
+        "settings": "连接设置",
+        "returnLocal": "切回本机",
+        "manageHosts": "管理主机"
       },
+      "activeHost": "当前主机",
+      "drivenAria": "正在驱动 {label}：{state}",
+      "drivenScope": "这个窗口的终端、文件、Git 与 Agent 调用都在 {label} 上运行。",
       "address": "Host 地址",
       "auth": {
         "locked": "已锁定",

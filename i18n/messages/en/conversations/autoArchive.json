@@ -1,0 +1,15 @@
+{
+  "card": {
+    "description": "Tidy the conversation list by archiving conversations nobody has touched for a while.",
+    "title": "Archive"
+  },
+  "description": "Archives a conversation once it has had no activity for the chosen time. Pinned, running, handed-off and IM conversations are never auto-archived, nor the one you have open. Archived conversations can be restored at any time.",
+  "hostDecides": "Your Host owns these conversations, so it decides when they are archived. Change this on the Host.",
+  "hostPlaceholder": "Set on the Host",
+  "label": "Auto-archive",
+  "options": {
+    "days": "{count, plural, one {After # day of inactivity} other {After # days of inactivity}}",
+    "off": "Off"
+  },
+  "selectLabel": "Auto-archive inactive conversations"
+}

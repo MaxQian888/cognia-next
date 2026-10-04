@@ -31,5 +31,6 @@
   "strategyOverwrite": "覆盖（导入项优先）",
   "strategySkip": "保留本地（跳过冲突）",
   "title": "备份与同步",
-  "webModeNote": "Web 模式：备份会以普通文件下载。"
+  "webModeNote": "Web 模式：备份会以普通文件下载。",
+  "reminderFailed": "无法更新备份提醒，请检查通知权限后重试。"
 }

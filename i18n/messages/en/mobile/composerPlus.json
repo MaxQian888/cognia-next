@@ -1,9 +1,11 @@
 {
   "album": "Album",
+  "back": "Back",
   "camera": "Camera",
   "file": "File",
   "permissionDeniedCamera": "Camera permission required.",
   "permissionDeniedMic": "Microphone permission required.",
+  "photoFailed": "Could not load the photo. Please try again.",
   "sheetDescription": "Attach media, change what this turn can do, or reach another tool.",
   "toggleAria": "Add to this message",
   "unsupported": "Not supported on this platform.",

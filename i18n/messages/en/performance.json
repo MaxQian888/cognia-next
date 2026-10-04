@@ -2,17 +2,42 @@
   "captures": {
     "active": {
       "elapsed": "Elapsed {seconds}s",
-      "gaps": "{count} gaps",
-      "title": "Active capture"
+      "gaps": "{count, plural, one {# gap} other {# gaps}}",
+      "title": "Active capture",
+      "description": "Record encrypted evidence for later comparison. Captures keep running while you navigate.",
+      "progress": "Capture progress"
     },
     "comparison": {
-      "absolute": "Absolute delta",
-      "compare": "Compare selected captures",
+      "compare": "Compare",
       "mad": "MAD",
       "median": "Median",
       "na": "N/A",
       "p95": "Type-7 p95",
-      "percent": "Percent delta"
+      "title": "Compare captures",
+      "swap": "Swap",
+      "baseline": "Baseline",
+      "candidate": "Candidate",
+      "sourceMismatch": "These captures come from different sources; their metrics are not comparable.",
+      "metric": "Metric",
+      "acceptEnvironment": "Accept a different environment",
+      "running": "Comparing…",
+      "eligible": "Comparable — like-for-like captures.",
+      "ineligible": "Not comparable — read these numbers as context, not a verdict.",
+      "reasons": {
+        "minimum-valid-intervals": "At least 10 valid intervals are needed in each capture.",
+        "minimum-coverage": "At least 90% of intervals must be valid (baseline {baseline}%, candidate {candidate}%).",
+        "metric-definition-mismatch": "The metric definitions differ.",
+        "unit-mismatch": "The units differ.",
+        "source-kind-mismatch": "The captures come from different source kinds.",
+        "metric-schema-mismatch": "The metric schema versions differ.",
+        "requested-cadence-mismatch": "The captures were recorded at different cadences.",
+        "discontinuous-incarnation": "A capture spans a restart or reload.",
+        "environment-missing": "A capture has no environment fingerprint.",
+        "environment-mismatch": "The captures were recorded in different environments."
+      },
+      "statistic": "Statistic",
+      "validIntervals": "Valid / expected intervals",
+      "deltaLine": "Median change: {absolute} ({percent})"
     },
     "controls": {
       "cadence": "Capture cadence",
@@ -24,23 +49,25 @@
       "selectCompare": "Select capture {id} for comparison",
       "source": "Capture source",
       "start": "Start capture",
-      "stop": "Stop capture"
+      "stop": "Stop capture",
+      "exportShort": "Export (redacted)",
+      "rawExportShort": "Export raw evidence",
+      "deleteShort": "Delete"
     },
     "errors": {
-      "compareSelection": "Select exactly two captures to compare.",
       "locked": "Unlock the active account to access encrypted captures."
     },
     "library": {
-      "bytes": "{value} bytes",
       "empty": "No captures are stored for this target.",
-      "frames": "{count} frames",
+      "frames": "{count, plural, one {# frame} other {# frames}}",
       "retention": "Unpinned captures retain for {days} days and at most {count} per target. Account quota: {quota} GiB.",
-      "title": "Capture library"
+      "title": "Capture library",
+      "compareHint": "Tick two ready captures to compare them."
     },
     "milliseconds": "{value} ms",
     "minutes": "{value} min",
     "raw": {
-      "attachment": "Attachment {ordinal} · {type} · {bytes} bytes",
+      "attachment": "Attachment {ordinal} · {type} · {bytes}",
       "attachments": "Explicit attachment selection",
       "cancel": "Cancel",
       "confirm": "I understand, export raw evidence",
@@ -52,11 +79,12 @@
       "label": "Active performance capture",
       "return": "Open",
       "stop": "Stop performance capture",
-      "summary": "{target} · {seconds}s · {gaps} gaps"
+      "summary": "{target} · {seconds}s · {gaps, plural, one {# gap} other {# gaps}}"
     },
     "source": {
       "host": "Selected host",
-      "renderer": "Local Renderer"
+      "renderer": "Local Renderer",
+      "hostUnavailable": "Selected host (not connected)"
     },
     "state": {
       "idle": "Idle",
@@ -67,7 +95,70 @@
       "imported": "Capture imported and verified.",
       "rawExported": "Raw capture exported after confirmation.",
       "started": "Capture started.",
-      "stopped": "Capture stopped."
+      "stopped": "Capture stopped.",
+      "deleted": "Capture deleted."
+    },
+    "status": {
+      "recording": "Recording",
+      "finalizing": "Finalizing",
+      "importing": "Importing",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "stopReason": {
+      "manual": "Stopped",
+      "duration-limit": "Duration reached",
+      "target-switched": "Target switched",
+      "remote-timeout": "Host timed out",
+      "terminal-host-state": "Host stopped",
+      "account-locked": "Account locked",
+      "quota-exceeded": "Quota exceeded",
+      "client-terminated": "Window closed"
+    },
+    "trust": {
+      "verified": "Signature verified",
+      "valid-untrusted": "Valid, untrusted signer",
+      "origin-unverified": "Origin unverified",
+      "rejected-invalid": "Invalid signature"
+    },
+    "delete": {
+      "title": "Delete this capture?",
+      "description": "Its encrypted frames, attachments and gaps are removed from this device and its quota is released. This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "errorCodes": {
+      "unknown": "Something went wrong: {detail}",
+      "account-locked": "The account was locked, so the capture stopped.",
+      "performance-capture-account-locked": "Unlock the active account to use encrypted captures.",
+      "performance-capture-already-active": "A capture is already recording.",
+      "performance-capture-cadence-invalid": "Capture cadence must be at least 500 ms.",
+      "performance-capture-not-ready": "This capture is not ready yet.",
+      "performance-capture-not-found": "This capture no longer exists.",
+      "performance-capture-frame-schema-invalid": "The capture's frames are damaged or from an unsupported version.",
+      "performance-capture-metadata-schema-invalid": "The capture's metadata is damaged or from an unsupported version.",
+      "performance-capture-source-mismatch": "The metrics source changed during the capture.",
+      "performance-capture-target-mismatch": "The target changed during the capture.",
+      "performance-capture-stopped": "The capture has already stopped.",
+      "performance-capture-attachment-invalid": "An attachment is invalid.",
+      "performance-attachment-too-large": "An attachment exceeds the size limit.",
+      "performance-account-quota-exceeded": "The account's capture storage quota is full. Delete captures to free space.",
+      "performance-security-generation-changed": "Account security changed while working; try again.",
+      "performance-budget-immutable": "A budget with this id already exists; budgets cannot be changed.",
+      "performance-budget-required-field-missing": "Name, metric and unit are required.",
+      "performance-budget-threshold-order-invalid": "The warning threshold must come before the failure threshold.",
+      "performance-budget-threshold-invalid": "Thresholds must be numbers.",
+      "performance-budget-cadence-invalid": "Budget cadence must be at least 500 ms.",
+      "performance-budget-envelope-mismatch": "A stored budget is damaged.",
+      "cognia-perf-signature-invalid": "The package signature is invalid.",
+      "cognia-perf-format-unsupported": "This package format is not supported.",
+      "cognia-perf-manifest-missing": "The package has no manifest.",
+      "cognia-perf-manifest-invalid": "The package manifest is invalid.",
+      "cognia-perf-compressed-size-exceeded": "The package is too large.",
+      "cognia-perf-decompression-limit-exceeded": "The package expands beyond the allowed size.",
+      "cognia-perf-entry-count-invalid": "The package contains an invalid number of entries.",
+      "cognia-perf-frame-schema-invalid": "The package's frames are damaged or from an unsupported version.",
+      "cognia-perf-samples-missing": "The package contains no samples."
     }
   },
   "desktopOnly": {
@@ -76,7 +167,8 @@
   },
   "diagnose": {
     "logs": "Open Logs",
-    "observability": "Open Observability"
+    "observability": "Open trace dashboard",
+    "description": "Where the time goes: host span hotspots, this window's timings, and the state of every metrics source."
   },
   "hotspots": {
     "columns": {
@@ -91,7 +183,18 @@
       "total": "Total"
     },
     "empty": "No hotspots recorded yet.",
-    "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
+    "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table.",
+    "title": "Backend hotspots",
+    "description": "Instrumented host operations, cumulative since the host started or since the last reset.",
+    "reset": {
+      "label": "Reset statistics",
+      "done": "Hotspot statistics reset.",
+      "failed": "Could not reset hotspot statistics: {error}",
+      "confirmTitle": "Reset hotspot statistics?",
+      "confirmDescription": "This clears the host's cumulative span statistics for every consumer, including other windows. Captures keep their own copies.",
+      "cancel": "Cancel",
+      "confirm": "Reset"
+    }
   },
   "hud": {
     "clear": "clear",
@@ -172,10 +275,41 @@
     "diskIo": "Disk I/O",
     "memory": "App memory",
     "runtimeBusy": "Runtime busy",
-    "tasks": "Async tasks"
+    "tasks": "Async tasks",
+    "eventLoopUtilization": "Event loop utilization",
+    "eventLoopDelay": "Event loop delay (p95)",
+    "nodeHeap": "Heap used",
+    "fps": "Frame rate",
+    "mainThreadBlocked": "Main thread blocked",
+    "longTasks": "Long tasks",
+    "jsHeap": "JS heap"
   },
   "overview": {
-    "selectMetric": "Select a metric"
+    "selectMetric": "Select a metric",
+    "groups": {
+      "host": "Selected host",
+      "renderer": "This window"
+    },
+    "unavailable": {
+      "host": {
+        "connecting": "Connecting to the host's metrics stream…",
+        "live": "The host is connected but reports no chartable metrics.",
+        "stale": "The host stopped sending metrics.",
+        "error": "The host's metrics stream failed.",
+        "unsupported": "No host is attached in this runtime — only this window is measured."
+      },
+      "renderer": {
+        "connecting": "Starting to measure this window…",
+        "live": "This browser exposes no chartable metrics.",
+        "stale": "This window stopped reporting metrics.",
+        "error": "Measuring this window failed.",
+        "unsupported": "This browser exposes no chartable metrics."
+      }
+    },
+    "openDiagnose": "Source details",
+    "waiting": "Waiting for the first sample…",
+    "summary": "Peak {peak} · Average {average} · Last {seconds}s",
+    "noMetrics": "No source is reporting metrics yet."
   },
   "process": {
     "columns": {
@@ -204,10 +338,6 @@
       "totalDisk": "Disk I/O",
       "totalMemory": "Total memory"
     }
-  },
-  "resources": {
-    "host": "Host",
-    "renderer": "Renderer"
   },
   "runtime": {
     "aliveTasks": "Alive tasks",
@@ -268,9 +398,21 @@
       "stale": "Stale",
       "unsupported": "Unsupported"
     },
-    "title": "Sources and capabilities"
+    "title": "Sources and capabilities",
+    "noticeGaps": "{count, plural, one {# gap} other {# gaps}} in the visible window",
+    "details": "Details",
+    "gapReason": {
+      "sequence-gap": "missed frames",
+      "source-reset": "source reset",
+      "clock-discontinuity": "clock jump",
+      "transport-disconnected": "connection lost",
+      "target-switched": "target switched",
+      "lease-expired": "lease expired",
+      "buffer-overrun": "buffer overrun",
+      "collection-error": "collection error"
+    }
   },
-  "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+  "subtitle": "Live metrics for this window and the selected host — what is running, where the time goes, and evidence over time.",
   "system": {
     "build": {
       "appVersion": "App version",
@@ -302,7 +444,7 @@
     "diagnose": "Diagnose",
     "hotspots": "Hotspots",
     "managed": "Managed",
-    "overview": "Performance",
+    "overview": "Overview",
     "processes": "Processes",
     "resources": "Resources",
     "runtime": "Async runtime",
@@ -320,7 +462,174 @@
     "intervalLabel": "Sampling interval",
     "intervalValue": "{seconds}s",
     "pause": "Pause",
-    "reset": "Reset hotspots",
-    "resume": "Resume"
+    "reset": "Clear graphs",
+    "resume": "Resume",
+    "resetHint": "Start the rolling graphs over from now. Hotspot statistics and captures are not affected.",
+    "status": {
+      "live": "Live · {seconds}s",
+      "paused": "Paused",
+      "recording": "Recording"
+    }
+  },
+  "metricDescriptions": {
+    "cpu": "CPU used by the host's main process, normalized across all cores.",
+    "memory": "Resident memory of the host's main process.",
+    "diskIo": "Combined disk read and write throughput across the app's process tree.",
+    "runtimeBusy": "Share of time the async runtime's workers spent running tasks.",
+    "tasks": "Async tasks currently alive in the runtime.",
+    "eventLoopUtilization": "Share of time the Node event loop was busy rather than idle.",
+    "eventLoopDelay": "How late timers fired — the 95th percentile event-loop delay.",
+    "nodeHeap": "JavaScript heap in use by the Node host.",
+    "fps": "Frames this window painted per second. Unmeasured while the window is hidden.",
+    "mainThreadBlocked": "Share of each interval spent in long tasks (over 50 ms) that block input and rendering.",
+    "longTasks": "Main-thread tasks longer than 50 ms in each interval.",
+    "jsHeap": "JavaScript heap in use by this window."
+  },
+  "hostUnavailable": {
+    "title": {
+      "processes": "Processes need a host",
+      "runtime": "Async runtime needs a host",
+      "managed": "Managed processes need a host",
+      "system": "System details need the desktop host",
+      "hotspots": "Backend hotspots need the desktop host"
+    },
+    "reason": {
+      "notReported": "The selected host's runtime does not report this.",
+      "issue": {
+        "contended": "Another window holds the host's metrics stream; this page takes over automatically when it is released.",
+        "rejected": "The host refused the metrics stream.",
+        "renew-failed": "The metrics stream stopped renewing; it reconnects on its own.",
+        "unreachable": "The selected host could not be reached for metrics."
+      },
+      "state": {
+        "connecting": "Connecting to the host's metrics stream…",
+        "live": "Waiting for the host's first frame…",
+        "stale": "The host stopped sending metrics.",
+        "error": "The host's metrics stream failed.",
+        "unsupported": "This runtime has no host to measure. Open the desktop app or connect to a host."
+      }
+    },
+    "openDiagnose": "See source details"
+  },
+  "rendererTimings": {
+    "title": "Renderer timings",
+    "description": "User-visible latency measured in this window: chat turns, React commits and other instrumented work. Last 60 entries per name.",
+    "filterLabel": "Filter by category",
+    "categories": {
+      "all": "All",
+      "chat": "Chat",
+      "react": "Render",
+      "other": "Other"
+    },
+    "clear": "Clear",
+    "empty": "No timings recorded yet.",
+    "hint": "Send a chat message or open a heavy view to record timings.",
+    "columns": {
+      "name": "Measure",
+      "count": "Count",
+      "last": "Last",
+      "p50": "p50",
+      "p95": "p95",
+      "max": "Max"
+    }
+  },
+  "budgets": {
+    "title": "Budgets",
+    "description": "Immutable thresholds for one metric. Check a capture against a budget to get pass, warn or fail — only when the capture is long, continuous and recorded in a matching environment.",
+    "new": "New budget",
+    "locked": "Unlock the active account to use budgets.",
+    "empty": "No budgets yet.",
+    "summary": "{aggregation} · {direction} · warn {warning} · fail {failure} · {cadence}s",
+    "aggregation": {
+      "median": "Median",
+      "p95": "p95"
+    },
+    "direction": {
+      "lower": "lower is better",
+      "higher": "higher is better"
+    },
+    "runtimeKind": {
+      "browser": "Browser",
+      "tauri-rust": "Desktop (Rust)",
+      "node-headless": "Node host"
+    },
+    "buildProfile": {
+      "production": "Production",
+      "profiling": "Profiling",
+      "development": "Development"
+    },
+    "sourceKind": {
+      "renderer": "This window (Renderer)",
+      "host": "Selected host"
+    },
+    "check": {
+      "title": "Check a capture",
+      "budget": "Budget",
+      "capture": "Capture",
+      "noCaptures": "No matching captures",
+      "acceptEnvironment": "Accept a different environment",
+      "run": "Check",
+      "running": "Checking…",
+      "detail": "Value {value} over {valid} of {expected} intervals.",
+      "environmentAccepted": "Environment mismatch accepted for this check."
+    },
+    "verdict": {
+      "pass": "Pass",
+      "warn": "Warning",
+      "fail": "Fail",
+      "insufficient-data": "Insufficient data",
+      "incomparable": "Not comparable"
+    },
+    "reason": {
+      "unknown-metric": "This budget's metric is no longer in the catalog.",
+      "mutable-budget": "The budget is not immutable.",
+      "minimum-valid-intervals": "At least 10 valid intervals are needed.",
+      "minimum-coverage": "At least 90% of intervals must be valid.",
+      "discontinuous-incarnation": "The capture spans a restart or reload.",
+      "metadata-mismatch": "The capture's metric, source, schema or cadence does not match the budget.",
+      "environment-mismatch": "The capture was recorded on a runtime or build the budget does not apply to."
+    },
+    "created": "Budget “{name}” created.",
+    "form": {
+      "title": "New budget",
+      "description": "Budgets are immutable once saved. To change a threshold, create a new budget.",
+      "name": "Name",
+      "namePlaceholder": "e.g. Chat stays smooth",
+      "source": "Source",
+      "metric": "Metric",
+      "aggregation": "Aggregation",
+      "cadence": "Cadence",
+      "cadenceValue": "{seconds}s",
+      "warning": "Warning threshold ({unit})",
+      "failure": "Failure threshold ({unit})",
+      "unit": {
+        "percent": "%",
+        "bytes": "MB",
+        "bytes-per-second": "MB/s",
+        "count": "count",
+        "ms": "ms",
+        "fps": "fps"
+      },
+      "directionHint": {
+        "lower": "Lower is better: warning ≤ failure.",
+        "higher": "Higher is better: warning ≥ failure."
+      },
+      "runtimeKinds": "Applies to runtimes",
+      "buildProfiles": "Applies to builds",
+      "immutable": "Saved budgets cannot be edited or overwritten.",
+      "errors": {
+        "metric": "Choose a metric for this source.",
+        "name": "Enter a name.",
+        "thresholds": "Enter both thresholds as numbers.",
+        "order": {
+          "lower": "For this metric the warning threshold must be at or below the failure threshold.",
+          "higher": "For this metric the warning threshold must be at or above the failure threshold."
+        },
+        "runtimeKinds": "Choose at least one runtime.",
+        "buildProfiles": "Choose at least one build."
+      },
+      "cancel": "Cancel",
+      "save": "Save budget"
+    }
   }
 }

@@ -8,7 +8,7 @@
     "invalid_pair_code": "Pair code must be exactly 6 digits.",
     "malformed": "Enter the 6-digit code shown on the desktop.",
     "malformed_request": "The server could not parse the request. Update the app and try again.",
-    "pair_code_expired": "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Companion.",
+    "pair_code_expired": "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Connectivity → Pairing.",
     "pair_code_not_found": "That code is unknown or has already been used — request a fresh one on the desktop."
   },
   "codeHint": "Find this code on the desktop PairDeviceCard, beside the QR. Useful when the camera can't focus on the QR (e.g. Android emulator).",
@@ -36,13 +36,13 @@
     "help": {
       "docsCta": "Read the setup guide",
       "openSettings": "Open system settings",
-      "tipEnableServer": "Turn on the companion server in desktop Settings → Companion.",
+      "tipEnableServer": "Turn on the companion server in desktop Settings → Connectivity → Local host.",
       "tipFirewall": "Allow Cognia through the desktop firewall.",
       "tipSameNetwork": "Both devices must be on the same Wi-Fi network.",
       "trigger": "Can't find your desktop?"
     },
     "latencyMs": "{ms} ms",
-    "loopbackBlockedBody": "It refused this browser. Open its Settings → Companion → browser access and add {origin} to the allowed origins.",
+    "loopbackBlockedBody": "It refused this browser. Open its Settings → Connectivity → Local host → Browser access and add {origin} to the allowed origins.",
     "loopbackBlockedTitle": "A Host is running on this computer",
     "nearbyTitle": "On this network",
     "precheckOk": "Reachable · v{version} · {ms} ms",
@@ -79,10 +79,10 @@
       "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
       "checkHostLogs": "Check the Host's logs for the matching error.",
       "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
-      "enableBrowserAccess": "On the Host: Settings → Companion → browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
-      "freshInvitation": "Issue a new invitation on the Host — Settings → Companion, or “cognia-server pair” — and paste it here.",
+      "enableBrowserAccess": "On the Host: Settings → Connectivity → Local host → Browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
+      "freshInvitation": "Issue a new invitation on the Host — Settings → Connectivity → Pairing, or “cognia-server pair” — and paste it here.",
       "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
-      "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
+      "removeStaleDevice": "On the Host, remove this device in the device console (Devices) before pairing again.",
       "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
       "unlockAccount": "Sign in to your local account with its password, then pair again.",
       "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
@@ -144,7 +144,7 @@
     "searching": "Looking for a Host on this computer…"
   },
   "httpError": {
-    "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
+    "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Connectivity → Pairing.",
     "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
     "403Identity": "The Host refused this account — its recorded binding or tenant doesn't match this device. A fresh invitation from the same account will be refused the same way.",
     "403Spent": "The Host refused the invitation itself — it has expired or was already redeemed. Issue a new one; re-sending this string cannot work.",
@@ -152,7 +152,7 @@
     "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
     "generic": "Pairing failed (HTTP {status})."
   },
-  "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+  "intro": "Scan the QR shown in desktop Settings → Connectivity → Pairing. You can also paste the 5-minute pair token manually.",
   "invitationCard": {
     "replace": "Replace",
     "showRaw": "Show the invitation string",
@@ -214,7 +214,7 @@
     "repair": "Re-pair this Host",
     "requiresGrant": {
       "description": "This device is missing the exact Host capability: {grant}.",
-      "instructions": "On the Host, open Settings → Companion → Paired Devices and update this device. A Web client cannot grant itself Host authority.",
+      "instructions": "On the Host, open the device console (Devices), select this device and update its grants. A Web client cannot grant itself Host authority.",
       "title": "Host permission required",
       "unknownGrant": "unknown capability"
     },
@@ -272,7 +272,7 @@
     "clipboardEmpty": "The clipboard is empty. Copy the full cgnp3 invitation first, then tap Paste again.",
     "clipboardReadFailed": "The browser could not read the clipboard. Paste the full invitation manually.",
     "clipboardWriteFailed": "The browser could not copy the command. Select it and copy it manually.",
-    "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
+    "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Connectivity → Pairing.",
     "commandCopied": "Command copied",
     "commandMode": {
       "compose": "Docker",

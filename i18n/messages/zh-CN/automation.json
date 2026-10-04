@@ -392,6 +392,7 @@
     "empty": "尚未配置任何沙箱。",
     "host": "主机",
     "image": "Docker 镜像",
+    "imageHelp": "内置 Linux 桌面会在首次启动时于本地构建，需要联网，可能耗时数分钟。自定义镜像需兼容 computer-server 协议、Cognia 桌面鉴权，并提供 Python 3。",
     "lifecycleTitle": "生命周期",
     "manage": "管理",
     "memoryMb": "内存上限（MiB）",
@@ -441,7 +442,60 @@
     "unsupportedAction": "当前导入的提供商没有实现此操作的实时适配器",
     "workspaceContainerPath": "机器内的路径",
     "workspaceHostPath": "要挂载的宿主目录",
-    "workspaceMountHelp": "两项必须同时填写。不挂载目录，机器内的 shell 与文件操作就无法访问任何宿主路径。"
+    "workspaceMountHelp": "两项必须同时填写。不挂载目录，机器内的 shell 与文件操作就无法访问任何宿主路径。",
+    "desktopViewer": {
+      "title": "桌面",
+      "readOnly": "仅查看",
+      "controlling": "正在由你控制",
+      "cadence": "此视图可见时，桌面截图约每秒刷新一次。",
+      "screen": "沙箱桌面截图",
+      "loading": "正在连接桌面…",
+      "disconnected": "桌面已断开，正在自动重试…",
+      "unavailable": "在桌面应用中启动此沙箱后即可查看画面。",
+      "refresh": "刷新画面",
+      "acquiring": "正在接管…",
+      "release": "释放控制权",
+      "takeControl": "接管控制",
+      "controlHelp": "点击画面后可使用键盘，也可拖拽和滚动。Escape 释放控制权；此窗口失去焦点时也会释放。接管期间智能体输入会暂停。",
+      "textLabel": "发送到沙箱的文字",
+      "textPlaceholder": "在此输入或粘贴文字，支持中文输入法。",
+      "sendText": "发送文字",
+      "sendEscape": "发送 Escape",
+      "error": {
+        "capture": "无法获取桌面画面，控制权已释放。",
+        "control": "无法获取或续期控制权，请重新接管。",
+        "input": "无法确认输入是否成功，控制权已释放；请检查画面后再重试。",
+        "release": "无法确认控制权是否已释放；控制权将在 15 秒内自动过期。"
+      },
+      "doubleClick": "双击模式"
+    },
+    "deleteConfirmTitle": "删除 {name}？",
+    "deleteConfirmDescription": "此操作将永久删除容器及其内部存储的所有文件，挂载的主机目录中的文件会保留。请先导出需要保留的文件。",
+    "deleteConfirm": "永久删除",
+    "deleting": "正在删除…",
+    "fileTransfer": {
+      "title": "文件",
+      "help": "上传或下载单个最大 {limit} MiB 的二进制文件。上传目标必须是已存在的目录，且不会覆盖现有文件。上传会释放手动桌面控制权。",
+      "missingContainer": "请先刷新连接健康状态以确定容器，再传输文件。",
+      "folder": "沙箱内已存在的目录",
+      "downloadPath": "沙箱内的文件路径",
+      "upload": "选择文件并上传",
+      "uploading": "正在上传…",
+      "download": "下载文件",
+      "downloading": "正在下载…",
+      "notice": {
+        "cancelled": "文件传输已取消。",
+        "uploaded": "文件已上传到所选沙箱。",
+        "downloaded": "文件已保存。",
+        "tooLarge": "文件超过 8 MiB 传输限制。",
+        "readFailed": "无法读取所选文件。",
+        "saveFailed": "无法保存下载的文件。",
+        "uploadFailed": "上传失败。请确认仍是同一运行中的容器、目录存在、文件名未被占用且控制权可用。",
+        "downloadFailed": "下载失败。请确认仍是同一运行中的容器且文件可读。",
+        "invalidPath": "请输入沙箱内的绝对路径，不可包含上级目录跳转。",
+        "invalidPayload": "下载文件的大小或校验和检查失败。"
+      }
+    }
   },
   "screenOff": {
     "activeMonitor": {

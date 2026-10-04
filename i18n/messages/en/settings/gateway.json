@@ -4,10 +4,12 @@
   "accountLocked": "Your local account is locked. Gateway keys belong to an account, so none can be used or created until you unlock it.",
   "add": "Add",
   "allowlist": "IP allowlist",
+  "allowlistAddRangeAria": "Add {range} to the IP allowlist",
   "allowlistEmpty": "The allowlist is empty, so every connection is refused — including from this machine.",
   "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. Defaults to loopback-only; widen it for LAN peers.",
   "allowlistInvalid": "Enter an IPv4 address or CIDR range, such as 192.168.1.0/24.",
   "allowlistPlaceholder": "192.168.1.0/24",
+  "allowlistRestoreLoopback": "Allow this machine ({entry})",
   "anthropicSnippet": "Anthropic clients (Claude Code)",
   "authNote": "Use an API key as the credential — Authorization: Bearer '<key>' or x-api-key: '<key>'.",
   "autoStrategy": "Virtual model auto · effective strategy {strategy}",
@@ -41,10 +43,14 @@
   "colStream": "Streaming",
   "colTime": "Time",
   "colTokens": "Tokens",
-  "concurrencyHeading": "Upstream protection",
-  "concurrencyHelp": "Cool down rate-limited accounts, disable dead ones, and cap concurrent load so a burst can't trip your upstream accounts' risk-control.",
+  "concurrencyHeading": "Concurrency limits",
+  "concurrencyHelp": "Cap simultaneous load per key and per upstream account, so a burst can't trip your upstream accounts' risk-control.",
   "concurrencyWait": "Queue wait (ms)",
   "concurrencyWaitHelp": "How long a request waits for a free concurrency slot before it is rejected with 429. 0 = reject immediately.",
+  "configLoadFailed": "Nothing on this panel can be shown or edited until the saved configuration is read, so editing cannot overwrite it with defaults.",
+  "configLoadFailedTitle": "Gateway settings could not be loaded",
+  "configLoading": "Loading gateway settings…",
+  "configRetry": "Try again",
   "connectHeading": "Connect external tools",
   "connectHelp": "Point any OpenAI- or Anthropic-compatible client at the gateway by setting one of these environment variables.",
   "connectLanNote": "From other devices on your network, replace 127.0.0.1 with this machine's LAN address.",
@@ -76,7 +82,8 @@
   "copyKey": "Copy key",
   "costUnknown": "—",
   "createKey": "Create key",
-  "createKeyHelp": "The secret is shown once, right after creation. Run API scopes can be granted afterwards from the key's edit form.",
+  "createKeyHelp": "The secret is shown once, right after creation. Run API scopes can be granted here or later from the key's edit form.",
+  "createScopesFailed": "The key was created, but its Run API scopes could not be granted: {error}. Grant them from the key's edit form.",
   "customApplied": "Custom gateway settings applied",
   "customHeading": "Custom configuration",
   "customHelp": "Edit and validate the complete gateway configuration as JSON or YAML.",
@@ -139,9 +146,13 @@
   "keyScopes": "Run API scopes",
   "keyScopesHelp": "What this key may do on the Router + Fusion Run API. A key with no scopes keeps working on the chat endpoints exactly as before, and /v1/runs refuses it.",
   "keyScopesNone": "none (passthrough only)",
-  "keysEmpty": "No keys yet. Create one to authenticate external tools.",
+  "keyViewLogs": "View this key's requests",
+  "keyViewLogsAria": "{usage} — view the requests made with {name}",
+  "keysEmpty": "No keys yet — fill in the form above to create the first one.",
   "keysHeading": "API keys",
   "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
+  "keysLoadFailed": "API keys could not be read",
+  "keysLoading": "Loading API keys…",
   "keysLockedEmpty": "Unlock your local account to see and manage its keys.",
   "lanAllowlistLoopbackOnly": "The listener binds to your network, but the allowlist only admits this machine. Add a range such as 192.168.1.0/24 for other devices to connect.",
   "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
@@ -155,10 +166,14 @@
   "localRoutingLegacy": "Legacy snapshot routing is active.",
   "logAttempts": "{count, plural, one {# attempt} other {# attempts}}",
   "logClearFailed": "Could not clear the log",
+  "logClearFilters": "Clear filters",
   "logCleared": "Log cleared",
   "logDecisionId": "Decision",
   "logDistribution": "Distribution",
   "logEmpty": "No requests yet.",
+  "logEmptyFiltered": "No requests match these filters",
+  "logEmptyFilteredHelp": "Widen or clear the filters to see more of the log.",
+  "logEmptyHelp": "Requests appear here as soon as an external tool calls the gateway.",
   "logExport": "Export",
   "logExportCsv": "Export as CSV",
   "logExportFailed": "Could not export the log",
@@ -232,13 +247,14 @@
         "label": "Route tickets"
       },
       "upstream": {
-        "description": "Concurrency, cooldowns and stripping",
+        "description": "Parked accounts, cooldowns, concurrency and stripping",
         "label": "Upstream protection"
       }
     },
     "mobileTrigger": "Panels",
     "title": "Gateway settings"
   },
+  "newKey": "New key",
   "newKeyHeading": "Key created",
   "newKeyReveal": "Copy this key now — for your security it is shown only once.",
   "openaiSnippet": "OpenAI clients",
@@ -292,11 +308,37 @@
   "selfCheckRun": "Run check",
   "selfCheckSummary": "{ok} of {total, plural, one {# candidate} other {# candidates}} answered",
   "serverHeading": "Server",
+  "setup": {
+    "description": "Three steps route an external tool through Cognia. Each one completes on its own as the gateway reports it.",
+    "done": "Done",
+    "progress": "{done} of {total} done",
+    "stepConnectAction": "Show snippets",
+    "stepKeyAction": "Create key",
+    "stepKeyLocked": "Unlock your local account to create a key.",
+    "stepStartAction": "Start gateway",
+    "stepStartBlocked": "Available once a key exists — the listener will not start without one.",
+    "steps": {
+      "connect": {
+        "help": "Point a client at the gateway with a snippet below. Done once the first request arrives.",
+        "title": "Connect a tool"
+      },
+      "key": {
+        "help": "External tools authenticate with a gateway key, one per tool.",
+        "title": "Create an API key"
+      },
+      "start": {
+        "help": "Run the local HTTP listener so tools can reach it.",
+        "title": "Start the gateway"
+      }
+    },
+    "title": "Get started"
+  },
   "snapshotGeneratedAt": "published {time}",
   "snapshotLabel": "Routing snapshot",
   "snapshotNone": "No routing snapshot has been published yet.",
   "statAliases": "Aliases",
   "statCalls": "Requests served",
+  "statCallsOpenLog": "Open the request log",
   "statLastCall": "Last request",
   "statNever": "Never",
   "statProviders": "Providers",
@@ -312,6 +354,8 @@
   "summaryCost": "Est. cost",
   "summaryErrorsHint": "{errors, plural, one {# error} other {# errors}} · {rate}",
   "summaryRequests": "Requests",
+  "summaryScope": "Totals for the {count, plural, one {# request} other {# requests}} listed below.",
+  "summaryScopeFiltered": "Totals for the {count, plural, one {# request} other {# requests}} that match the filters.",
   "summaryTokens": "Tokens (in/out)",
   "tickets": {
     "activeHeading": "Active tickets",
@@ -354,7 +398,7 @@
     "yes": "Allowed"
   },
   "timeoutsHeading": "Timeouts",
-  "timeoutsHelp": "How long the gateway waits for an upstream to connect and to answer.",
+  "timeoutsHelp": "How long the gateway waits for an upstream to connect, to answer, and to keep a stream alive.",
   "title": "Inbound Gateway",
   "verifySnippet": "Check the connection"
 }

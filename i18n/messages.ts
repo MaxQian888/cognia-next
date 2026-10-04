@@ -13,6 +13,8 @@ import enRecovery from "./messages/en/whiteScreenRecovery.json"
 import zhRecovery from "./messages/zh-CN/whiteScreenRecovery.json"
 import enSplash from "./messages/en/mobile/splash.json"
 import zhSplash from "./messages/zh-CN/mobile/splash.json"
+import enBarcodeScanner from "./messages/en/mobile/barcodeScanner.json"
+import zhBarcodeScanner from "./messages/zh-CN/mobile/barcodeScanner.json"
 import { defaultLocale, type Locale } from "./config"
 
 export type Messages = typeof en
@@ -26,7 +28,7 @@ export const startupMessages = {
     diagnostics: enDiagnostics,
     exitDialog: enExit,
     whiteScreenRecovery: enRecovery,
-    mobile: { splash: enSplash },
+    mobile: { splash: enSplash, barcodeScanner: enBarcodeScanner },
   },
   "zh-CN": {
     account: zhAccount,
@@ -35,7 +37,7 @@ export const startupMessages = {
     diagnostics: zhDiagnostics,
     exitDialog: zhExit,
     whiteScreenRecovery: zhRecovery,
-    mobile: { splash: zhSplash },
+    mobile: { splash: zhSplash, barcodeScanner: zhBarcodeScanner },
   },
 } satisfies Record<Locale, Record<string, unknown>>
 

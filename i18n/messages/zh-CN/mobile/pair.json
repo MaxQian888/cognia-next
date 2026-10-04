@@ -8,7 +8,7 @@
     "invalid_pair_code": "配对码必须是 6 位数字。",
     "malformed": "请输入桌面上的 6 位数字配对码。",
     "malformed_request": "服务器无法解析请求，请升级 App 后重试。",
-    "pair_code_expired": "该配对码已过期（5 分钟有效），请在桌面 设置 → Companion 重新生成。",
+    "pair_code_expired": "该配对码已过期（5 分钟有效），请在桌面 设置 → 连接 → 配对 中重新生成。",
     "pair_code_not_found": "该配对码不存在或已使用，请在桌面重新生成。"
   },
   "codeHint": "在桌面 PairDeviceCard 上、QR 旁边可以看到这组数字。当相机无法对焦（例如 Android 仿真器）时使用。",
@@ -36,13 +36,13 @@
     "help": {
       "docsCta": "查看配置指南",
       "openSettings": "打开系统设置",
-      "tipEnableServer": "在桌面端 设置 → Companion 中开启 Companion 服务。",
+      "tipEnableServer": "在桌面端 设置 → 连接 → 本机主机 中开启 Companion 服务。",
       "tipFirewall": "请在桌面防火墙中允许 Cognia 通过。",
       "tipSameNetwork": "两台设备需连接到同一 Wi-Fi 网络。",
       "trigger": "找不到桌面？"
     },
     "latencyMs": "{ms} 毫秒",
-    "loopbackBlockedBody": "它拒绝了这个浏览器。打开它的 设置 → Companion → 浏览器访问，把 {origin} 加进允许的来源。",
+    "loopbackBlockedBody": "它拒绝了这个浏览器。打开它的 设置 → 连接 → 本机主机 → 浏览器访问，把 {origin} 加进允许的来源。",
     "loopbackBlockedTitle": "这台电脑上有一个 Host 在运行",
     "nearbyTitle": "本网络内",
     "precheckOk": "可连接 · v{version} · {ms} 毫秒",
@@ -79,10 +79,10 @@
       "allowlistOrigin": "把这个来源原样加入允许列表：{origin}",
       "checkHostLogs": "查看 Host 日志中对应的错误。",
       "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
-      "enableBrowserAccess": "在 Host 上打开 设置 → Companion → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
-      "freshInvitation": "在 Host 上重新生成邀请码（设置 → Companion，或执行 “cognia-server pair”），然后粘贴到这里。",
+      "enableBrowserAccess": "在 Host 上打开 设置 → 连接 → 本机主机 → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
+      "freshInvitation": "在 Host 上重新生成邀请码（设置 → 连接 → 配对，或执行 “cognia-server pair”），然后粘贴到这里。",
       "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。",
-      "removeStaleDevice": "在 Host 的 设置 → Companion → 已配对设备 中移除这台设备，然后重新配对。",
+      "removeStaleDevice": "在 Host 的设备控制台（设备）中移除这台设备，然后重新配对。",
       "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
       "unlockAccount": "用密码登录本地账户后再配对。",
       "updateHost": "把 Host 更新到能签发 cgnp3 邀请码的版本并重启。",
@@ -144,7 +144,7 @@
     "searching": "正在这台机器上寻找 Host…"
   },
   "httpError": {
-    "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
+    "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → 连接 → 配对 中重新生成。",
     "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
     "403Identity": "Host 拒绝了这个账户——它记录的绑定或租户与本设备对不上。用同一个账户再发一份邀请也会被同样拒绝。",
     "403Spent": "Host 拒绝的是这份邀请本身——它已过期或已被用掉。请重新签发一份；再发同一串是不可能成功的。",
@@ -152,7 +152,7 @@
     "5xx": "服务器错误（HTTP {status}），请查看桌面日志后重试。",
     "generic": "配对失败（HTTP {status}）。"
   },
-  "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+  "intro": "扫一下桌面端的二维码即可完成配对。二维码在桌面 设置 → 连接 → 配对 中；也可以手动粘贴那里的 5 分钟令牌。",
   "invitationCard": {
     "replace": "更换",
     "showRaw": "查看邀请原文",
@@ -214,7 +214,7 @@
     "repair": "重新配对此 Host",
     "requiresGrant": {
       "description": "此设备缺少准确的 Host 能力：{grant}。",
-      "instructions": "请在 Host 上打开“设置 → Companion → 已配对设备”并更新此设备。Web 客户端不能自行授予 Host 权限。",
+      "instructions": "请在 Host 上打开设备控制台（设备），选中此设备并更新它的授权。Web 客户端不能自行授予 Host 权限。",
       "title": "需要 Host 权限",
       "unknownGrant": "未知能力"
     },
@@ -272,7 +272,7 @@
     "clipboardEmpty": "剪贴板是空的。请先复制完整的 cgnp3 邀请，再点「粘贴」。",
     "clipboardReadFailed": "浏览器无法读取剪贴板，请手动粘贴完整配对邀请。",
     "clipboardWriteFailed": "浏览器无法复制命令，请手动选择并复制。",
-    "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 伴侣 中复制。",
+    "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 连接 → 配对 中复制。",
     "commandCopied": "命令已复制",
     "commandMode": {
       "compose": "Docker",

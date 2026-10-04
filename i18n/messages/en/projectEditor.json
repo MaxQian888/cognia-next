@@ -45,7 +45,9 @@
   "deletedOnDisk": "Deleted on disk",
   "deletedTab": "{name} — deleted on disk",
   "editorTab": "Editor",
+  "emptyBrowseFiles": "Browse files",
   "emptyEditor": "Open a file from the tree to start editing.",
+  "emptyEditorMobile": "Open a file to start editing.",
   "externallyChanged": "Changed on disk",
   "fallback": {
     "binary": "This file isn't displayed because it's either binary or uses an unsupported text encoding.",

@@ -1637,7 +1637,7 @@
       "errorInvalidPassword": "That password is not correct.",
       "errorInvalidRecoveryKey": "That recovery key is not correct.",
       "errorPasswordRequired": "Enter your password.",
-      "errorSecretStoreUnavailable": "This device’s credential store did not keep the password. Untick “Unlock automatically on this device” to unlock without it.",
+      "errorSecretStoreUnavailable": "This device’s credential store did not keep the password. Untick “Remember password” to unlock without it.",
       "errorStorageLayoutUnsupported": "This device's local data was written by a different version of the app and cannot be opened.",
       "errorThrottled": "Too many attempts. Wait for the cooldown to end.",
       "errorUnknown": "Unlocking failed. Copy the details below if it keeps happening.",
@@ -1671,8 +1671,8 @@
       "recoveryUnlockDescription": "Enter the one-time recovery key you saved when this account was created, then choose a new password. The recovery key keeps working afterwards.",
       "recoveryUnlockForm": "Unlock with a recovery key",
       "reloadWindow": "Reload the window",
-      "rememberOnDeviceHelp": "Keeps the password in this device’s credential store so you are not asked again here. Your password keeps working.",
-      "rememberOnDeviceLabel": "Unlock automatically on this device",
+      "rememberOnDeviceHelp": "Saved in this device’s secure storage, so it opens without asking next time. Your password keeps working.",
+      "rememberOnDeviceLabel": "Remember password",
       "revealPassword": "Show password",
       "runtimeBadgeBrowser": "Browser Vault on this device",
       "runtimeBadgeDesktop": "Desktop keychain on this device",
@@ -1698,7 +1698,8 @@
       "unlockForm": "Unlock local account",
       "unlockTitle": "Unlock {name}",
       "unlocking": "Unlocking...",
-      "useRecoveryKey": "Forgot your password?"
+      "useRecoveryKey": "Forgot your password?",
+      "welcomeBack": "Welcome back"
     },
     "identity": {
       "current": "Current",
@@ -1844,6 +1845,17 @@
     },
     "quickUnlock": {
       "attemptsLeft": "{count, plural, =0 {No attempts left} =1 {1 attempt left before this method is disabled} other {# attempts left before this method is disabled}}",
+      "biometricAction": "Unlock with biometrics",
+      "biometricCancel": "Cancel",
+      "biometricFailure": {
+        "cancelled": "Cancelled. You can try again or use your password.",
+        "failed": "Biometric unlock failed. Try again, or use your password.",
+        "lockout": "Biometrics are temporarily locked. Use your password.",
+        "unavailable": "Biometric unlock is unavailable. Use your password; if your enrolled fingerprints or face changed, set it up again in account settings."
+      },
+      "biometricReason": "Authenticate to unlock this account on this device.",
+      "biometricTitle": "Unlock account",
+      "biometricWaiting": "Waiting for biometric authentication…",
       "failure": {
         "failed": "Something went wrong. Try again, or use your password.",
         "locked-out": "This method is disabled. Use your password.",
@@ -1853,6 +1865,7 @@
       },
       "lockedOut": "{method} is disabled after too many attempts. Unlock with your password to turn it back on.",
       "method": {
+        "biometric": "Fingerprint / Face ID",
         "passkey": "Passkey",
         "pattern": "Pattern",
         "pin": "PIN"
@@ -1896,6 +1909,15 @@
       "settings": {
         "active": "Ready",
         "add": "Add {method}",
+        "biometricAction": "Set up fingerprint / Face ID",
+        "biometricFailure": {
+          "cancelled": "Setup cancelled. No biometric unlock was added.",
+          "failed": "Biometric unlock could not be set up. Check your account password and try again.",
+          "lockout": "Biometrics are temporarily locked. Try again later.",
+          "unavailable": "Secure biometric storage is unavailable. Enroll a supported fingerprint or face in system settings, or use your account password."
+        },
+        "biometricPrompt": "Use your fingerprint or face to protect an unlock key on this device. Your account password will also be checked.",
+        "biometricTitle": "Set up biometric unlock",
         "cancel": "Cancel",
         "confirm": "Confirm",
         "continue": "Continue",
@@ -3787,7 +3809,7 @@
         "hostPinned": "{host} (online)",
         "hostPinnedOffline": "{host} (offline)",
         "hostTarget": "Execution host",
-        "hostWaitingWarning": "This pinned worker is offline; the task will remain queued without migrating.",
+        "hostWaitingWarning": "This pinned worker is offline. With remote dispatch enabled, the task stays queued; resume it after the worker is ready. It will not run on another host.",
         "modeInherit": "Inherit team default",
         "modePinned": "Pinned",
         "modePool": "Candidate pool",
@@ -3798,7 +3820,9 @@
         "modelRolePrimary": "Primary",
         "previewNative": "Native delegation",
         "previewOrchestrated": "Orchestrated ({reasons})",
-        "remotePrerequisitesHint": "Remote targets require resolver v2, remote dispatch, Task Workspace, and a placement-ready worker profile.",
+        "remoteDispatchDisabled": "Remote teammate dispatch is disabled. Enable it in Fleet settings or explicitly choose Run with coordinator, then retry. This task will not run locally.",
+        "remoteDispatchUnavailable": "Remote teammate dispatch could not start its durable run. Retry after restoring team run admission. This task will not run locally.",
+        "remotePrerequisitesHint": "Remote targets require remote dispatch and an online, placement-ready worker with Task Workspace enabled.",
         "runtimeAiSdk": "AI SDK",
         "runtimeAuto": "Auto",
         "runtimeClaudeSdk": "Claude Agent SDK",
@@ -4175,6 +4199,13 @@
       },
       "close": "Close workspace",
       "currentTask": "Current task",
+      "filePreview": {
+        "back": "Back to workspace",
+        "emptyFile": "This file is empty.",
+        "openInEditor": "Edit",
+        "openInEditorLabel": "Open in the workspace editor",
+        "readOnly": "Read-only"
+      },
       "missingProject": {
         "description": "Link this conversation to a project before editing workspace files.",
         "title": "No project linked"
@@ -4242,6 +4273,7 @@
         "loadMoreEvents": "Load more events",
         "loading": "Loading task resource",
         "modified": "Modified",
+        "moreActions": "More actions",
         "originFilter": "Filter by source",
         "overflowCount": "{count} watcher gaps reconciled",
         "pin": "Pin task",
@@ -4697,12 +4729,66 @@
       "cpus": "CPU limit",
       "cpusHelp": "For example 1.5. Leave blank for no limit.",
       "delete": "Delete",
+      "deleteConfirm": "Delete permanently",
+      "deleteConfirmDescription": "This permanently deletes the container and all files stored inside it. Files in mounted host folders remain. Export any files you need before deleting.",
+      "deleteConfirmTitle": "Delete {name}?",
       "deleteHelp": "Destroys the container and everything in it that is not on a mounted directory.",
+      "deleting": "Deleting…",
       "description": "Run computer-use actions inside an isolated cua Docker desktop instead of this machine. Requires Docker on the host.",
       "desktopOnly": "Available in the desktop app only",
+      "desktopViewer": {
+        "acquiring": "Taking control…",
+        "cadence": "Screenshots refresh about once per second while this view is visible.",
+        "controlHelp": "Click the screen to use the keyboard. Drag or scroll to interact. Escape releases control. Control also ends when this window loses focus. Agent input is paused while you have control.",
+        "controlling": "You have control",
+        "disconnected": "Desktop disconnected. Retrying automatically…",
+        "doubleClick": "Double-click mode",
+        "error": {
+          "capture": "Unable to capture the desktop. Control has been released.",
+          "control": "Unable to acquire or renew control. Try taking control again.",
+          "input": "The input could not be confirmed. Control has been released; check the screen before retrying.",
+          "release": "The release could not be confirmed. Control expires automatically within 15 seconds."
+        },
+        "loading": "Connecting to the desktop…",
+        "readOnly": "View only",
+        "refresh": "Refresh screen",
+        "release": "Release control",
+        "screen": "Sandbox desktop screenshot",
+        "sendEscape": "Send Escape",
+        "sendText": "Send text",
+        "takeControl": "Take control",
+        "textLabel": "Text to type in the sandbox",
+        "textPlaceholder": "Compose or paste text here, including Chinese input.",
+        "title": "Desktop",
+        "unavailable": "Start this sandbox in the desktop app to view its screen."
+      },
       "empty": "No sandboxes configured yet.",
+      "fileTransfer": {
+        "download": "Download file",
+        "downloadPath": "File path inside the sandbox",
+        "downloading": "Downloading…",
+        "folder": "Existing folder inside the sandbox",
+        "help": "Upload or download one binary file up to {limit} MiB. Uploads use an existing folder and never overwrite a file. Uploading releases manual desktop control.",
+        "missingContainer": "Refresh the connection health to identify its container before transferring files.",
+        "notice": {
+          "cancelled": "File transfer cancelled.",
+          "downloadFailed": "Download failed. Check that the same container is running and the file is readable.",
+          "downloaded": "File saved.",
+          "invalidPath": "Enter an absolute path inside the sandbox without parent-directory traversal.",
+          "invalidPayload": "The downloaded file failed its size or checksum check.",
+          "readFailed": "Unable to read the selected file.",
+          "saveFailed": "Unable to save the downloaded file.",
+          "tooLarge": "The file exceeds the 8 MiB transfer limit.",
+          "uploadFailed": "Upload failed. Check that the same container is running, the folder exists, the filename is unused, and control is available.",
+          "uploaded": "File uploaded to the selected sandbox."
+        },
+        "title": "Files",
+        "upload": "Choose file and upload",
+        "uploading": "Uploading…"
+      },
       "host": "Host",
       "image": "Docker image",
+      "imageHelp": "The built-in Linux desktop is prepared locally on first start. Setup needs internet access and may take several minutes. Custom images require the computer-server protocol, Cognia desktop authentication, and Python 3.",
       "lifecycleTitle": "Lifecycle",
       "manage": "Manage",
       "memoryMb": "Memory limit (MiB)",
@@ -6570,7 +6656,14 @@
         "session": "A new conversation",
         "sessionHint": "Appears in the sidebar. For a direction you mean to keep."
       },
-      "title": "Branch conversation"
+      "title": "Branch conversation",
+      "workingSet": {
+        "current": "Current state",
+        "historical": "At the branch point",
+        "initial": "Start fresh",
+        "label": "Working state",
+        "unavailable": "Historical state is unavailable. Choose current state or start fresh."
+      }
     },
     "branchNavigator": {
       "nextBranch": "Next response",
@@ -7022,11 +7115,15 @@
         "userLabel": "User memory"
       },
       "modelPicker": {
+        "agentDefaultModel": "{agent} · default",
+        "agentDefaultModelRow": "Default model",
+        "agentFallbackName": "Agent",
+        "agentModelAppliesNextTurn": "The model you pick is applied on the next message.",
         "agentModelSwitchFailed": "The agent refused that model: {reason}",
+        "agentModelsDeferred": "{agent}'s models appear after the first message. Until then it runs its own default model.",
         "agentModelsFailed": "Could not load models from {agent}. Try refreshing again.",
-        "agentModelsGroup": "Agent models",
-        "agentModelsLoading": "Asking {agent} which models it has.",
-        "agentNoModels": "{agent} reported no models of its own. The models below are the ones configured in Cognia.",
+        "agentModelsLoading": "Reading {agent}'s models…",
+        "agentNoModels": "{agent} reported no models to choose from, so it runs its own default.",
         "agentNoSession": "{agent} is connected with nothing open, so its models arrive with the first turn.",
         "agentNotConnected": "{agent} is not connected, so its own models are not listed yet.",
         "autoBadge": "Auto",
@@ -7038,6 +7135,23 @@
         "capReasoning": "Reasoning",
         "capTools": "Tool use",
         "capVision": "Vision",
+        "cogniaAccountLocked": "The Host's account is locked. Unlock it to run {agent} on Cognia models.",
+        "cogniaChipTitle": "{agent} → {provider}/{model} via Cognia",
+        "cogniaGlyph": "Cognia model",
+        "cogniaHostUpdateRequired": "Update the paired Host to run {agent} on Cognia models.",
+        "cogniaModelNoStreaming": "No streaming",
+        "cogniaModelNoTools": "No tool calling",
+        "cogniaModelSwitchFailed": "Couldn't save the model choice: {reason}",
+        "cogniaModelsFailed": "Could not ask the Host for its Cognia models. Reopen the list to try again.",
+        "cogniaModelsLoading": "Asking the Host which Cognia models it can use…",
+        "cogniaNetworkEndpoint": "{agent} connects to a network endpoint, so it cannot run on Cognia models.",
+        "cogniaNoEligibleModels": "No configured provider can serve {agent}: it needs an OpenAI- or Anthropic-compatible provider with an API key, tool calling and streaming.",
+        "cogniaNoProcess": "{agent} has no local process for Cognia to launch, so it cannot run on Cognia models.",
+        "cogniaPublicHttpsRequired": "The paired Host must be reachable over public HTTPS to run {agent} on Cognia models.",
+        "cogniaRemoteServer": "{agent} is attached to a remote server, so it cannot run on Cognia models.",
+        "cogniaSection": "Cognia models",
+        "cogniaSectionHint": "Runs {agent} on a Cognia provider through the local gateway. A pick applies from the next message.",
+        "cogniaUnsupportedRuntime": "{agent} cannot run on Cognia models: its runtime has no isolated gateway launch.",
         "contextWindowLabel": "Context window",
         "liveSwitchFailed": "Couldn't switch the live model",
         "liveSwitched": "Switched to {model}",
@@ -7278,6 +7392,7 @@
         "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
       },
       "stopTooltip": "Stop",
+      "stopTooltipKeyboard": "Stop (Esc)",
       "templateParams": {
         "hint": "Enter or Esc to close · Tab for the next parameter",
         "loading": "Searching…",
@@ -8553,6 +8668,8 @@
       },
       "code": {
         "ariaInLanguage": "Code in {language}",
+        "close": "Close",
+        "closeAria": "Close fullscreen view",
         "copy": "Copy",
         "copyAria": "Copy code",
         "defaultLabel": "Code",
@@ -8686,7 +8803,6 @@
     "runPanel": {
       "ariaDiscardQueue": "Discard queued messages",
       "ariaEditQueued": "Edit this queued message",
-      "ariaInterrupt": "Interrupt the current turn",
       "ariaLocateSteer": "Go to the first undelivered message",
       "ariaManageSteer": "Show the queued messages",
       "ariaRemoveQueued": "Remove this queued message",
@@ -8722,8 +8838,6 @@
     },
     "runStatus": {
       "ariaSteerNow": "Interrupt the current turn and send queued messages now",
-      "interruptHint": "Esc to interrupt",
-      "interruptHintTouch": "Tap to interrupt",
       "metricContext": "context {pct}%",
       "metricSpeed": "{value} tok/s",
       "metricTokens": "{value} tok",
@@ -9088,6 +9202,7 @@
       "dismiss": "Dismiss",
       "inputLabel": "Input",
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
+      "noInputDetails": "The agent sent no arguments for this call — only its name.",
       "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
       "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
       "titleFallback": "Allow {tool}?",
@@ -10907,6 +11022,7 @@
     "add": "Add",
     "all": "All",
     "back": "Back",
+    "backToApp": "Back to app",
     "biometricBlocked": {
       "cancelled": "The biometric check was cancelled.",
       "error": "The biometric check failed.",
@@ -10919,6 +11035,7 @@
     "copied": "Copied",
     "copy": "Copy",
     "delete": "Delete",
+    "desktopOnly": "This window is only available in the desktop app.",
     "dismiss": "Dismiss",
     "duplicate": "Duplicate",
     "edit": "Edit",
@@ -11388,6 +11505,63 @@
       "searchPlaceholder": "Search files, web pages, and tools…",
       "title": "Conversation sources"
     },
+    "sessionUsage": {
+      "composition": {
+        "aria": "Context window: {used} of {max} tokens",
+        "ofAttributed": "Estimated from the transcript: shares of what could be attributed, not of the whole window.",
+        "ofWindow": "Shares of the whole window, as reported live by the runtime."
+      },
+      "description": "What this conversation spends, and what fills its context window.",
+      "empty": "No billed turns yet. Charts appear after the first reply.",
+      "growth": {
+        "compactAt": "Auto-compact",
+        "context": "Context",
+        "drops": "{count, plural, =1 {Context dropped once (compaction, cleared history or a new branch).} other {Context dropped # times (compaction, cleared history or a new branch).}}",
+        "empty": "No turns to chart yet.",
+        "summary": "Peak {peak}, latest {latest}.",
+        "turn": "Turn {index}",
+        "window": "Window"
+      },
+      "kpi": {
+        "avgCost": "Avg / turn",
+        "cacheHit": "Cache hit",
+        "cost": "Cost",
+        "speed": "Speed",
+        "tokPerSec": "{value} tok/s",
+        "tokens": "Tokens",
+        "turns": "Turns"
+      },
+      "loading": "Reading this conversation's usage…",
+      "modelDetail": "{turns} turns · {tokens} tokens",
+      "openReport": "Health report",
+      "refresh": "Refresh live context reading",
+      "sections": {
+        "cost": "Cost per turn",
+        "efficiency": "Efficiency",
+        "growth": "Context over turns",
+        "models": "Models",
+        "tokenMix": "Token mix",
+        "tools": "Tool calls",
+        "window": "Context window"
+      },
+      "title": "Usage & context",
+      "tokenMix": {
+        "aria": "{total} tokens by type",
+        "cacheRead": "Cache read",
+        "cacheWrite": "Cache write",
+        "empty": "No tokens recorded yet.",
+        "input": "Input",
+        "output": "Output",
+        "reasoning": "{tokens} of the output was reasoning ({pct})."
+      },
+      "tools": {
+        "empty": "No tool calls in this conversation.",
+        "errors": "· {count} failed ({pct}%)",
+        "other": "Other",
+        "summary": "{total, plural, =1 {1 call} other {# calls}}"
+      },
+      "windowEmpty": "The runtime has not reported what is in the window yet."
+    },
     "sidechatPlaceholder": {
       "description": "Open a conversation first, then use Side chat to investigate something without adding noise to the main thread.",
       "title": "No conversation is open"
@@ -11598,6 +11772,7 @@
       "content": "Search message content",
       "contentHint": "Needs {count} characters, and reads the local message index.",
       "hint": "How far the search field looks.",
+      "includeActive": "Include active conversations",
       "includeArchived": "Include archived conversations",
       "label": "Search reach",
       "labelActive": "Search reach — {count} widened",
@@ -11669,6 +11844,85 @@
       "any": "Any workspace",
       "label": "Workspace",
       "unassigned": "No workspace"
+    }
+  },
+  "conversations": {
+    "archive": {
+      "empty": {
+        "action": "Empty archive…",
+        "body": "This permanently deletes them and all their messages. This cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "{count, plural, one {Delete # conversation} other {Delete # conversations}}",
+        "lockedKept": "{count, plural, one {# conversation handed off to another device is kept.} other {# conversations handed off to another device are kept.}}",
+        "more": "{count, plural, one {and # more} other {and # more}}",
+        "nothingBody": "There are no archived conversations to delete.",
+        "nothingTitle": "The archive is empty",
+        "scope": "Scope: {scope}.",
+        "success": "{count, plural, one {Deleted # archived conversation} other {Deleted # archived conversations}}",
+        "title": "{count, plural, one {Delete # archived conversation?} other {Delete all # archived conversations?}}"
+      },
+      "restoredBySend": "Moved back to your conversations",
+      "scopeAllWorkspaces": "All workspaces"
+    },
+    "autoArchive": {
+      "card": {
+        "description": "Tidy the conversation list by archiving conversations nobody has touched for a while.",
+        "title": "Archive"
+      },
+      "description": "Archives a conversation once it has had no activity for the chosen time. Pinned, running, handed-off and IM conversations are never auto-archived, nor the one you have open. Archived conversations can be restored at any time.",
+      "hostDecides": "Your Host owns these conversations, so it decides when they are archived. Change this on the Host.",
+      "hostPlaceholder": "Set on the Host",
+      "label": "Auto-archive",
+      "options": {
+        "days": "{count, plural, one {After # day of inactivity} other {After # days of inactivity}}",
+        "off": "Off"
+      },
+      "selectLabel": "Auto-archive inactive conversations"
+    },
+    "banner": {
+      "body": "Archived {since}. Sending a message moves it back to your conversations.",
+      "title": "This conversation is archived",
+      "unarchive": "Unarchive"
+    },
+    "manager": {
+      "archivedNote": "Archived conversations keep their pin and folder while they are archived, and get both back when you restore them. Sending a message to one restores it.",
+      "columns": {
+        "actions": "Actions",
+        "activity": "Last activity",
+        "agent": "Agent",
+        "cost": "Cost",
+        "created": "Created",
+        "selectAll": "Select every conversation in this view",
+        "title": "Conversation",
+        "tokens": "Tokens",
+        "turns": "Turns",
+        "workspace": "Workspace"
+      },
+      "contentMatch": "Matched in the messages",
+      "description": "Every conversation across your workspaces. Find, rename, file, archive and restore them in one place.",
+      "emptyArchive": "Empty archive…",
+      "inFolder": "In {name}",
+      "loading": "Loading conversations",
+      "newChat": "New chat",
+      "noWorkspace": "No workspace",
+      "none": "—",
+      "openRow": "Open {title}",
+      "rowActions": "Actions for {title}",
+      "rowSelect": "Select {title}",
+      "searchAria": "Search conversations",
+      "searchClear": "Clear search",
+      "searchContent": "Search message content",
+      "searchPlaceholder": "Search conversations…",
+      "showMore": "Show {count} more",
+      "shownOf": "Showing {shown} of {total}",
+      "sortBy": "Sort by {column}",
+      "summary": "{active, plural, one {# active} other {# active}} · {archived, plural, one {# archived} other {# archived}}",
+      "tabs": {
+        "active": "Active",
+        "archived": "Archived"
+      },
+      "tabsAria": "Which conversations to show",
+      "title": "Conversations"
     }
   },
   "crashDialog": {
@@ -11993,7 +12247,10 @@
       }
     },
     "channelList": {
+      "archivedChipAria": "Archived — show active conversations",
       "archivedTitleSuffix": "Archived",
+      "archivedToggle": "Archived conversations",
+      "backToConversations": "Back to conversations",
       "bucketOlder": "Older",
       "bucketPrev30": "Previous 30 Days",
       "bucketPrev7": "Previous 7 Days",
@@ -12005,20 +12262,27 @@
         "cancel": "Cancel",
         "delete": "Delete",
         "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
+        "deleteConfirmMore": "{count, plural, one {and # more} other {and # more}}",
         "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
         "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+        "deselectAll": "Deselect all",
+        "done": "Done",
         "folderOtherWorkspace": "Dimmed folders are in a different workspace from some of the selected conversations.",
         "markRead": "Mark as read",
+        "markUnread": "Mark as unread",
         "moveSuccess": "{count, plural, one {Moved # conversation} other {Moved # conversations}}",
         "moveToFolder": "Move to folder",
+        "newFolder": "New folder…",
         "pin": "Pin",
         "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
         "removeFromFolder": "Remove from folder",
         "removeFromFolderSuccess": "{count, plural, one {Took # conversation out of its folder} other {Took # conversations out of their folders}}",
+        "selectAll": "Select all ({count})",
+        "selectHint": "None selected",
         "selectedCount": "{count, plural, one {# selected} other {# selected}}",
         "share": "Share",
         "unarchive": "Unarchive",
-        "unarchiveSuccess": "{count, plural, one {Restored # conversation} other {Restored # conversations}}",
+        "unarchiveSuccess": "{count, plural, one {Unarchived # conversation} other {Unarchived # conversations}}",
         "unpin": "Unpin",
         "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
       },
@@ -12034,7 +12298,8 @@
       "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
       "directMessages": "Chats",
       "displayOptions": "Display options",
-      "emptyArchived": "No archived conversations.",
+      "emptyArchivedHint": "Archive a conversation to tidy the list without deleting it. Archived conversations stay searchable here.",
+      "emptyArchivedTitle": "Nothing archived",
       "emptyDm": "No chats yet. Pick a character to begin.",
       "emptyFiltered": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
       "emptyFolder": "Empty — move conversations here.",
@@ -12063,6 +12328,7 @@
       "groupShowLess": "Show less",
       "groupShowMore": "Show {count} more",
       "listActions": "List actions",
+      "manageConversations": "Manage conversations…",
       "metadata": {
         "agent": "Agent",
         "label": "Row details",
@@ -12097,10 +12363,17 @@
       "searchPlaceholder": "Search chats…",
       "searchShortcutHint": "Press / to search",
       "searchTruncated": "Some results may be hidden — refine your search.",
+      "searchWiden": {
+        "archived": "Include archived conversations",
+        "content": "Also search message content",
+        "workspaces": "Search all workspaces"
+      },
       "searchingMessages": "Searching messages…",
       "sectionPinned": "Pinned",
       "sectionRecent": "Recent",
       "sectionResults": "Results",
+      "selectConversations": "Select conversations",
+      "selectConversationsHere": "Select conversations here",
       "showCustomIcons": "Show custom Agent and Team icons",
       "showPreview": "Show message previews",
       "showTimestamps": "Show activity time",
@@ -12121,7 +12394,8 @@
       "ungroupedTeam": "Chats",
       "ungroupedWorkspace": "No workspace",
       "viewActive": "Show active conversations",
-      "viewArchived": "Show archived conversations"
+      "viewArchived": "Show archived conversations",
+      "viewArchivedCount": "Show archived conversations ({count})"
     },
     "chatRuntime": {
       "actions": {
@@ -12141,6 +12415,26 @@
         "requiresUnlock": "Unlock the local Vault to use this host.",
         "unsupported": "Chat is not implemented for the current runtime target."
       },
+      "strip": {
+        "actions": {
+          "connectionSettings": "Settings",
+          "pair": "Pair"
+        },
+        "cacheOnly": "Cached chats only",
+        "connecting": "Reconnecting",
+        "placeholder": "You can send once the host reconnects",
+        "states": {
+          "available": "Chat available",
+          "incompatible": "Host needs an update",
+          "offline": "Host offline",
+          "queued": "Waiting for host",
+          "readOnly": "Chat is read-only",
+          "requiresGrant": "Device permission needed",
+          "requiresPairing": "No host paired",
+          "requiresUnlock": "Vault locked",
+          "unsupported": "Chat unsupported here"
+        }
+      },
       "title": "Chat is read-only right now"
     },
     "find": {
@@ -12155,6 +12449,7 @@
       "a2ui": "Mini-Apps",
       "agentRuns": "Agent runs",
       "aliases": {
+        "conversations": "History, chat history, sessions, archive, archived conversations, transcripts",
         "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
         "files": "Library, assets, attachments, uploads, documents, images, artifacts, favorites",
         "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
@@ -12171,6 +12466,7 @@
         "system": "System",
         "you": "You"
       },
+      "conversations": "Conversations",
       "createTeam": "Create team",
       "customize": {
         "behaviour": "Behaviour",
@@ -12538,6 +12834,7 @@
     "sessionRow": {
       "actionsMenu": "Session actions",
       "archive": "Archive",
+      "archived": "Archived",
       "branch": "Branch conversation",
       "branchedFrom": "Branched conversation — open parent",
       "cancel": "Cancel",
@@ -12566,6 +12863,7 @@
       "markUnread": "Mark as unread",
       "moveToFolder": "Move to folder",
       "moveToWorkspace": "Move to workspace",
+      "newFolder": "New folder…",
       "openInCodexApp": "Open in Codex app",
       "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
       "openInTerminal": "Open in terminal",
@@ -12650,10 +12948,13 @@
       "connectionCenter": {
         "actions": {
           "connectHost": "Connect Host",
+          "manageHosts": "Manage hosts",
           "reconnect": "Reconnect now",
           "recover": "Repair connection",
-          "settings": "Companion settings"
+          "returnLocal": "Return to local",
+          "settings": "Connectivity settings"
         },
+        "activeHost": "Active host",
         "address": "Host address",
         "auth": {
           "locked": "Locked",
@@ -12665,6 +12966,8 @@
         "capabilityCount": "{count, plural, =0 {None advertised} one {# operation} other {# operations}}",
         "cloudHost": "Cloud Host",
         "desktopHost": "Desktop Host",
+        "drivenAria": "Driving {label}: {state}",
+        "drivenScope": "Terminals, files, git and agent calls from this window run on {label}.",
         "eventPlane": "Events",
         "eventPlaneDegradedHint": "Requests answer but no events arrive. Changes made elsewhere will not appear until the event stream reconnects.",
         "eventPlaneState": {
@@ -12819,8 +13122,11 @@
   "devices": {
     "access": {
       "heldCount": "{held}/{total} granted",
-      "lifecycle": "Lifecycle",
-      "lifecycleHint": "Pausing blocks this device until you resume it. Revoking is permanent — the device has to pair again.",
+      "lifecycleBlocked": {
+        "needs-desktop-shell": "Pausing, resuming and revoking need the desktop app on the Host.",
+        "no-host": "This browser is not connected to a Host, so a pause, resume or revoke has nowhere to go.",
+        "not-owner": "Only the Host's owner device may pause, resume or revoke a paired device."
+      },
       "notApplicable": {
         "local": "This machine does not grant itself access.",
         "paired-device": "No grants to manage.",
@@ -12828,10 +13134,10 @@
         "ssh-host": "An SSH host is reached with a key or a password, not with a grant. Access is decided by the server's own configuration.",
         "worker": "A worker's capabilities come from its enrollment. Revoke it from Settings → Fleet to withdraw them."
       },
-      "notApplicableTitle": "No grants to manage",
       "ownerSuspendedHint": "Grants suspended: this device belongs to someone else.",
       "partialHint": "This device holds only some of the capabilities this grant confers. Toggle it off and on to bring it back in line.",
       "pause": "Pause",
+      "pauseHint": "Pausing blocks this device until you resume it.",
       "reason": {
         "deviceRevoked": "Revoked devices hold nothing, whatever the local record still says.",
         "lockedUseUnavailable": "This grant has no enforcement point on this build, so it cannot be handed out.",
@@ -12840,6 +13146,8 @@
       },
       "resume": "Resume",
       "revoke": "Revoke",
+      "revokeConfirmBody": "Revoking is permanent. The device loses every grant and its key, and has to pair again to come back. To stop it for now, pause it instead.",
+      "revokeConfirmTitle": "Revoke {label}?",
       "revokedBody": "It holds no capabilities and cannot reconnect without pairing again.",
       "revokedTitle": "This device is revoked",
       "sshFilesReachIsWhole": "This grant has no folder limit. SFTP paths are that machine's own absolute paths and it resolves its own symlinks, so there is no root to confine this to.",
@@ -12848,8 +13156,12 @@
     },
     "actions": {
       "addHost": "Add a host",
+      "addSshHost": "Add SSH host",
+      "grow": "Pair a device or add a host",
       "pair": "Pair a device",
-      "refresh": "Refresh"
+      "refresh": "Refresh",
+      "refreshFailed": "Could not refresh the device list",
+      "refreshing": "Refreshing…"
     },
     "activity": {
       "attempts": "attempt {attempts} of {max}",
@@ -12913,9 +13225,8 @@
         "paired-device": "This device has not reported, and its platform is unknown, so there is no baseline to infer from.",
         "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
         "ssh-host": "An SSH server never reports anything and holds no capability set of ours. Nothing here is absent, it was simply never asked.",
-        "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab."
+        "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities, so there is no platform matrix to show."
       },
-      "noVocabularyTitle": "No capability vocabulary for this device",
       "reportedAt": "Reported {when}",
       "reportedCount": "{reported}/{total} reported",
       "source": {
@@ -12942,8 +13253,10 @@
     },
     "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
     "detail": {
+      "drawerTitle": "Device details",
       "noSelectionBody": "Pick a device from the list to see what it can do.",
-      "noSelectionTitle": "No device selected"
+      "noSelectionTitle": "No device selected",
+      "sectionNavAria": "Jump to a section"
     },
     "eventPlane": {
       "connecting": "Connecting",
@@ -12968,16 +13281,25 @@
       "local": "This machine",
       "localDetail": "Terminals, files and git run here.",
       "manage": "Manage devices",
+      "reconnectBody": "A turn is in flight. Reconnecting to {label} replaces the link under it, and the running turn may never finish.",
+      "reconnectConfirm": "Reconnect anyway",
+      "reconnectTitle": "Reconnect while work is running?",
+      "removeActive": "{label} is the host this window is driving. Removing it returns this window to this machine.",
+      "removeActiveBusy": "{label} is the host this window is driving, and a turn is in flight on it. Removing it returns this window to this machine at once, and the running turn stays on the host.",
       "state": {
         "connecting": "Connecting",
         "degraded": "Degraded",
-        "disconnected": "Disconnected",
+        "disconnected": "Not connected",
         "ready": "Ready",
         "revoked": "Revoked",
         "versionMismatch": "Upgrade required"
       }
     },
     "files": {
+      "chainBroken": "“{name}” goes through a jump host that was removed, loops back, or is more than five hops deep, so its files cannot be reached.",
+      "credentialRequired": "Files on “{name}” open over the same login as its shell, and it uses a password that is not saved yet.",
+      "credentialRequiredBastion": "Files on “{name}” are reached through “{bastion}”, which uses a password that is not saved yet.",
+      "fixInSettings": "Fix in SSH hosts",
       "title": "Files",
       "transfers": "Transfers",
       "unknownProfile": "This row does not name a saved SSH host, so there is nothing to browse."
@@ -12992,10 +13314,9 @@
     "host": {
       "cancel": "Cancel",
       "connect": "Connect",
-      "controls": "Host controls",
-      "controlsHint": "Connecting makes this host the execution target for this window. Adding and discovering hosts stays in Settings.",
       "disconnect": "Disconnect",
       "managePairing": "Manage paired Host",
+      "moreAria": "More actions for {label}",
       "reconnect": "Reconnect",
       "remove": "Remove",
       "removeAria": "Remove {label}",
@@ -13025,17 +13346,41 @@
       "ssh-host": "SSH host",
       "worker": "Execution worker"
     },
+    "kindPlural": {
+      "local": "This device",
+      "paired-device": "Paired",
+      "remote-host": "Hosts",
+      "ssh-host": "SSH",
+      "worker": "Workers"
+    },
     "listPane": {
+      "clearFilters": "Clear filters",
       "emptyBody": "Pair a phone or add a remote host to see it here.",
       "emptyFiltered": "No device matches the current search or filter.",
       "emptyTitle": "No devices",
-      "filterAll": "All kinds",
+      "filterAll": "All",
       "filterAria": "Filter by device kind",
+      "filterAttention": "Needs attention",
       "label": "Device list",
       "searchAria": "Search devices by name, address or platform",
       "searchPlaceholder": "Search devices"
     },
+    "missingLinkBody": "The link names a device that is no longer paired or added here, so this machine is shown instead.",
+    "missingLinkDismiss": "Dismiss",
+    "missingLinkTitle": "That device is not in this fleet",
     "never": "Never",
+    "notApplicable": {
+      "description": {
+        "local": "What this console asks of every machine, and why this one has no answer.",
+        "paired-device": "What this console asks of every machine, and why a paired device has no answer.",
+        "remote-host": "What this console asks of every machine, and why a remote host has no answer from here.",
+        "ssh-host": "What this console asks of every machine, and why an SSH host has no answer.",
+        "worker": "What this console asks of every machine, and why a worker has no answer."
+      },
+      "nav": "Not applicable",
+      "runtime": "Sandbox and workspaces",
+      "title": "Does not apply here"
+    },
     "notAvailable": "—",
     "overview": {
       "added": "Added",
@@ -13129,7 +13474,6 @@
       "routeLocally": "Route locally",
       "routing": "Execution routing",
       "sandbox": "Sandbox connections",
-      "sandboxUnsupportedTitle": "No sandbox connections here",
       "shellTiers": "Shell tiers",
       "tierAvailable": "Available",
       "tierCount": "{available}/{total} available",
@@ -13143,20 +13487,14 @@
       "timingAuthorityAria": "Make {label} the scheduled timing authority",
       "timingAuthorityHint": "When set, only this machine arms scheduled work. Leave it off and every host arms its own; duplicates are absorbed by the deterministic idempotency key.",
       "workspaces": "Workspace environments",
-      "workspacesInactiveTitle": "Not the current routing target",
-      "workspacesUnsupportedTitle": "No workspaces here"
+      "workspacesInactiveTitle": "Not the current routing target"
     },
     "settingsLink": {
-      "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Connecting, renaming and removing are managed in the device console.",
+      "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Capabilities, workspaces and live presence are in the device console.",
       "hostsTitle": "Remote hosts",
       "open": "Open device console",
       "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
       "pairedTitle": "Paired devices"
-    },
-    "shellOnly": {
-      "description": "What this console asks of every machine, and why an SSH host has no answer.",
-      "runtime": "Sandbox and workspaces",
-      "title": "Not applicable to a shell"
     },
     "ssh": {
       "auth": {
@@ -13171,6 +13509,7 @@
       "chainBrokenTitle": "Jump chain cannot be resolved",
       "connect": "Open a shell",
       "connecting": "Connecting…",
+      "credentialRequiredBastionBody": "“{name}” connects through “{bastion}”, which uses a password and has none stored. Save one on “{bastion}” in the SSH hosts editor, then connect.",
       "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting.",
       "credentialRequiredTitle": "Password not saved",
       "edit": "Edit in Settings",
@@ -13186,12 +13525,22 @@
       "forwardsNone": "No forwarding rules.",
       "noHostBody": "SSH runs on a machine, not in a browser tab. Pair a host, or open the desktop app, and this host becomes connectable again.",
       "noHostTitle": "No terminal host to connect through",
-      "notOnHost": "The paired host has no SSH profile called {name}. Profiles are registered by the desktop that owns the host, so add it there and connect again.",
       "probe": {
         "action": "Test connection",
         "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward.",
         "desktopOnly": "Testing a connection dials from this machine, so it can only be done from the desktop app. Opening a shell still works here: the paired desktop dials for you.",
         "invalid": "This profile cannot produce a connection ({reason}), so the host was never contacted. Fix it in Settings → Terminal.",
+        "invalidReason": {
+          "host": "its host address is empty or contains spaces",
+          "jumpChain": "its jump host is missing, loops back, or is incomplete",
+          "localForward": "a local forward is invalid",
+          "name": "it has no display name",
+          "port": "its port is outside 1–65535",
+          "privateKeyPath": "private-key authentication has no key path",
+          "profile": "a saved field is invalid",
+          "remoteForward": "a remote forward is invalid",
+          "username": "its username is empty or contains spaces"
+        },
         "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
         "reachableVerified": "Reachable. The host key matched the one already trusted.",
         "running": "Testing…",
@@ -13490,6 +13839,10 @@
       "permissionDenied": {
         "hint": "The agent refused an action it wasn't allowed to take — adjust its permission mode.",
         "label": "Permission denied"
+      },
+      "piPackageUnavailable": {
+        "hint": "A plugin Pi package this agent loads couldn't be loaded, so the session didn't start. Prepare the package or enable its plugin, or remove it from the agent's settings.",
+        "label": "Pi package unavailable"
       },
       "pluginToolMissing": {
         "hint": "The requested tool isn't available — enable the plugin that provides it.",
@@ -15289,6 +15642,7 @@
       "description": "Each task uses isolated agent configuration and a temporary gateway credential. Provider keys stay in Cognia. Filesystem and network access follow the selected sandbox. Model and account changes require a new task.",
       "empty": "No compatible configured models. Add an API provider or subscription in Settings.",
       "enable": "Use Cognia models",
+      "hostUpdateRequired": "The paired Host must be updated before this agent can run on a Cognia model.",
       "input": "Maximum input: {tokens, number}",
       "invalid": "Choose a model and a supported local agent runtime.",
       "loadingModels": "Loading account model information…",
@@ -15993,6 +16347,11 @@
     "statusError": "Error",
     "statusReconnecting": "Reconnecting",
     "stepsCompleted": "completed",
+    "supportTier": {
+      "documentedOnly": "Docs only",
+      "executable": "Runs directly",
+      "guided": "Guided setup"
+    },
     "togglePlan": "Toggle execution plan",
     "traceHealth": {
       "cost": "Cost",
@@ -19371,6 +19730,14 @@
     "zh-CN": "中"
   },
   "logging": {
+    "autoSubmit": {
+      "failed": "{count, plural, =1 {A crash report could not be sent} other {# crash reports could not be sent}}",
+      "failedFinal": "They stay on this device. Review and send them from Logs → Crash reports.",
+      "failedRetry": "They stay on this device and will be tried again on the next launch.",
+      "sent": "Crash report sent · support code {code}",
+      "sentDescription": "Sent automatically, without optional attachments. The receipt is in Logs → Crash reports.",
+      "view": "View"
+    },
     "crash": {
       "actions": {
         "back": "Back to list",
@@ -19391,21 +19758,27 @@
       "autoRefreshOff": "Off",
       "autoRefreshOn": "On",
       "autoRefreshStatus": "Auto Refresh",
-      "detailDescription": "Inspect the crash log entry and the diagnostic snapshot captured with it.",
-      "detailTitle": "Crash detail",
+      "clearStored": {
+        "cancel": "Keep logs",
+        "confirm": "Clear stored",
+        "description": "This permanently deletes the error and fatal entries stored on this device. Other log history is kept.",
+        "title": "Clear stored error logs?"
+      },
+      "detailDescription": "The logged error and the diagnostic snapshot taken with it.",
+      "detailTitle": "Error detail",
       "diagnostics": {
         "runtime": "Runtime Diagnostics",
         "title": "Diagnostic Snapshots",
         "window": "Window Diagnostics"
       },
-      "emptyDescription": "Try broadening the filters or trigger the failing flow again.",
-      "emptyTitle": "No Crash Logs Found",
-      "errorTitle": "Failed to Load Crash Logs",
+      "emptyDescription": "Error and fatal log entries from this device appear here as they are recorded. If you expected some, widen the filters.",
+      "emptyTitle": "No errors logged",
+      "errorTitle": "Could not load error logs",
       "lastUpdated": "Last Updated",
       "levels": {
         "all": "All Levels"
       },
-      "loading": "Loading crash logs...",
+      "loading": "Loading error logs…",
       "native": {
         "details": "Full Native Logging Details",
         "logDirectory": "Log Directory",
@@ -19414,6 +19787,15 @@
         "platformHealth": "Platform Health",
         "platformLevel": "Platform Threshold",
         "status": "Status",
+        "statuses": {
+          "active": "Active",
+          "degraded": "Degraded",
+          "error": "Error",
+          "healthy": "Healthy",
+          "inactive": "Inactive",
+          "other": "Other ({status})",
+          "unavailable": "Unavailable"
+        },
         "title": "Native Logging",
         "unavailable": "Unavailable"
       },
@@ -19428,8 +19810,18 @@
         "title": "Before You Share"
       },
       "refreshing": "Refreshing...",
-      "resizeDetail": "Resize diagnostics detail pane",
-      "searchPlaceholder": "Search crash logs...",
+      "resizeDetail": "Resize error detail pane",
+      "searchPlaceholder": "Search errors…",
+      "snapshot": {
+        "summaries": {
+          "diagnostics_error": "Diagnostics could not be collected",
+          "native_degraded": "Native logging is degraded",
+          "native_inactive": "Native logging is inactive in this runtime",
+          "runtime_error": "The local runtime reported an error",
+          "snapshot": "Latest native diagnostics snapshot"
+        },
+        "title": "Diagnostic snapshot"
+      },
       "sourceCount": "sources",
       "sourceLabel": "Source filter",
       "sources": {
@@ -19442,29 +19834,51 @@
         "native": "Native Logging",
         "recent": "Recent Errors",
         "recentDescription": "In-memory failures from this session",
-        "total": "Visible Incidents"
+        "total": "Visible errors"
+      },
+      "toasts": {
+        "clearFailed": "Could not clear the logs",
+        "copied": "Copied to the clipboard",
+        "copyFailed": "Could not write to the clipboard",
+        "exportFailed": "Export failed",
+        "exported": "Export saved",
+        "openDirectoryFailed": "Could not open the log directory",
+        "recentCleared": "Recent errors cleared",
+        "refreshFailed": "Could not refresh error logs",
+        "storedCleared": "{count, plural, =0 {No stored error logs to clear} =1 {Cleared 1 stored error log} other {Cleared # stored error logs}}"
       }
     },
     "dashboard": {
       "currentPeriod": "Current Period",
+      "errorCount": "{count, plural, one {# error} other {# errors}}",
       "errorRate": "Error Rate",
       "errorTrend": "Error Trend",
       "errors": "errors",
       "levelDistribution": "Level Distribution",
+      "logCount": "{count, plural, one {# log} other {# logs}}",
       "logRate": "Log Rate",
       "logVolume": "Log Volume Over Time",
       "logsPerMinUnit": "logs/min",
       "logsSeries": "Logs",
       "moduleActivity": "Module Activity",
+      "moduleListLabel": "Filter by module",
       "noData": "No log data available for visualization",
       "occurrences": "occurrences",
       "otherSeries": "Other",
       "platformBackend": "Platform Backend",
+      "platformBackendNone": "None",
+      "platformError": "Platform Error",
       "platformHealth": "Platform Health",
       "platformLogging": "Platform Logging",
       "platformTargets": "Targets",
       "platformThreshold": "Platform Threshold",
       "previousPeriod": "Previous Period",
+      "showErrors": "Show errors in the list",
+      "showModule": "Show this module in the list",
+      "showWarnings": "Show warnings in the list",
+      "spanDays": "{value}d",
+      "spanHours": "{value}h",
+      "spanMinutes": "{value}m",
       "timeSpan": "Time Span",
       "topErrors": "Top Errors",
       "topModule": "Most Active Module",
@@ -19474,25 +19888,36 @@
       "trendUp": "Increasing",
       "uniqueModules": "Unique Modules",
       "uniqueTraces": "Unique Traces",
+      "warningCount": "{count, plural, one {# warning} other {# warnings}}",
       "warningRate": "Warning Rate",
       "warnings": "warnings"
     },
     "description": "View, search, and export application logs",
     "detail": {
       "addBookmark": "Bookmark",
+      "close": "Close details",
       "copyData": "Copy data",
+      "copyEntry": "Copy entry",
       "copyJson": "Copy JSON",
       "copyMessage": "Copy message",
+      "copySessionId": "Copy session ID",
       "copyStack": "Copy stack trace",
       "copyTraceId": "Copy trace ID",
+      "focusSession": "Show this session",
+      "focusTrace": "Show this trace",
+      "jsonItems": "{count, plural, one {# item} other {# items}}",
+      "jsonKeys": "{count, plural, one {# key} other {# keys}}",
       "message": "Message",
       "module": "Module",
       "nextLog": "Next log",
+      "openTrace": "Open in Traces",
       "prevLog": "Previous log",
       "relatedLogs": "Related Logs",
+      "relatedWindowed": "Showing {shown} of {total} entries around this one.",
       "removeBookmark": "Remove bookmark",
       "sessionId": "Session ID",
       "tags": "Tags",
+      "thisEntry": "this entry",
       "timestamp": "Timestamp",
       "title": "Log Detail"
     },
@@ -19507,6 +19932,7 @@
     "nativeViewer": {
       "empty": "No matching entries in the scanned window.",
       "entryCount": "{count} entries",
+      "errorTitle": "Couldn't read the native log",
       "filePlain": "Plain log",
       "fileSelectLabel": "Log file",
       "fileStructured": "Structured log",
@@ -19534,7 +19960,7 @@
           "title": "Agent trace"
         },
         "statsBar": {
-          "avgLatencyHint": "Avg latency {ms} ms",
+          "avgLatencyHint": "Avg latency {value}",
           "cacheHitRate": "Cache hit rate",
           "cacheReadHint": "Cache reads: {count}",
           "errors": "Errors",
@@ -19557,8 +19983,10 @@
         },
         "tree": {
           "empty": "No spans for this trace yet.",
+          "failed": "Failed:",
           "loading": "Loading trace…",
           "title": "Trace",
+          "tokens": "{input} in / {output} out",
           "treeLabel": "Span tree"
         }
       },
@@ -19592,7 +20020,6 @@
       "allLevelsTab": "All",
       "allModules": "All Modules",
       "allSources": "All Sources",
-      "autoRefresh": "Auto-refresh",
       "back": "Back",
       "bookmarked": "Bookmarked",
       "clear": "Clear logs",
@@ -19600,21 +20027,24 @@
       "clearConfirmConfirm": "Clear logs",
       "clearConfirmDescription": "This permanently deletes every persisted log entry on this device. Exports and bookmarks of deleted entries stop working.",
       "clearConfirmTitle": "Clear all logs?",
+      "clearFailedToast": "Couldn't clear the logs",
       "clearSearchHistory": "Clear history",
-      "clearSessionFocus": "Clear session focus",
-      "clearTraceFocus": "Clear trace focus",
       "clearedToast": "Logs cleared",
       "closeDetails": "Close Detail Panel",
       "closeTransportDetails": "Close",
+      "collapseEntry": "Collapse entry",
       "copied": "Copied!",
       "copyEntry": "Copy log entry",
+      "copyFailed": "Couldn't copy to the clipboard",
       "copyLogEntry": "Copy log entry",
       "copyShareUrl": "Copy share URL",
       "customTimeRange": "Custom...",
+      "customTimeRangeActive": "Custom range",
       "customTimeRangeApply": "Apply",
       "customTimeRangeChipPrefix": "time",
       "customTimeRangeClear": "Clear",
       "customTimeRangePickerLabel": "Pick a date range",
+      "customTimeRangeValue": "{start} → {end}",
       "dashboardView": "Dashboard View",
       "data": "Data",
       "deletePreset": "Delete selected preset",
@@ -19625,19 +20055,41 @@
       },
       "densityMenuLabel": "Row density",
       "disableAutoRefresh": "Disable auto-refresh",
+      "durationUnits": {
+        "h": "{value} h",
+        "m": "{value} min",
+        "ms": "{value} ms",
+        "s": "{value} s"
+      },
+      "emptyChips": {
+        "bookmarks": "Bookmarked only",
+        "customTime": "Time: custom range",
+        "level": "Level: {value}",
+        "module": "Module: {value}",
+        "search": "Search: {value}",
+        "session": "Session: {value}",
+        "source": "Source: {value}",
+        "time": "Time: {value}",
+        "trace": "Trace: {value}",
+        "transport": "Transport: {value}"
+      },
       "emptyStateClearFilters": "Clear filters",
       "emptyStateDescription": "Logs appear here automatically as you use the app. Press ? for keyboard shortcuts.",
       "emptyStateFilterPrefix": "No logs match the active filters:",
       "emptyStateOpenPresets": "Open presets",
       "emptyStateTitle": "No logs collected yet",
+      "emptyStateWindowCapped": "Only the newest {count} entries were loaded and searched — older matches are not shown. Narrow by module or trace to reach further back.",
       "enableAutoRefresh": "Enable auto-refresh",
       "error": "Error",
       "errorAndFatal": "Error",
       "errorLoading": "Failed to load logs",
+      "expandEntry": "Expand entry",
       "export": "Export logs",
       "exportAs": "Export as...",
       "exportText": "Plain Text",
+      "fieldValue": "{label}: {value}",
       "filterChip": {
+        "clearAll": "Clear all",
         "clearModule": "Clear module filter",
         "clearSession": "Clear session filter",
         "clearSource": "Clear source filter {value}",
@@ -19648,8 +20100,7 @@
         "sessionLabel": "Session:",
         "sourceLabel": "Source:",
         "traceLabel": "Trace:",
-        "transportLabel": "Transport:",
-        "transportPrefix": "Transport: {name}"
+        "transportLabel": "Transport:"
       },
       "filterIn": "in:",
       "filters": "Filters",
@@ -19659,14 +20110,26 @@
       "focusTrace": "Focus this trace",
       "focusTraceMenu": "Focus on this trace",
       "groupByTrace": "Group by Trace",
+      "healthStatus": {
+        "degraded": "degraded",
+        "healthy": "healthy",
+        "inactive": "inactive",
+        "offline": "offline"
+      },
       "highSeverityOnly": "Toggle high-severity only",
       "jumpToLatest": "Jump to latest",
       "keyboardShortcuts": "Keyboard shortcuts",
       "levelFilterGroup": "Filter by level",
       "listView": "List View",
+      "live": "Live",
+      "liveOffAria": "Live follow off — start following new entries",
+      "liveOnAria": "Live follow on — new entries load automatically",
       "loadingLogs": "Loading logs...",
       "logDetails": "Log details",
+      "logDetailsDescription": "The selected log entry: its message, metadata, data, stack and related entries.",
+      "logListLabel": "Log entries",
       "logRatePulse": "Live log stream activity",
+      "logRateValue": "~{rate} logs/min",
       "logs": "logs",
       "logsPerMin": "logs/min",
       "modulePlaceholder": "Module",
@@ -19674,6 +20137,11 @@
       "moreFilters": {
         "hide": "Hide more filters",
         "show": "More filters"
+      },
+      "nativeBridgeState": {
+        "active": "active",
+        "degraded": "degraded",
+        "inactive": "inactive"
       },
       "nativeLoggingBridge": "Bridge",
       "nativeLoggingDetails": "Native Logging Details",
@@ -19683,6 +20151,14 @@
       "nativeLoggingNoTargets": "none",
       "nativeLoggingStatus": "Status",
       "nativeLoggingTargets": "Targets",
+      "nativeStartupMode": {
+        "disabled": "Disabled",
+        "fallback": "Fallback",
+        "full": "Full",
+        "unknown": "Unknown"
+      },
+      "nativeTileAria": "Native logging: {status}",
+      "nativeTileLabel": "Native",
       "newLogsToast": "{count, plural, =0 {} one {1 new log} other {# new logs}}",
       "nextPage": "Next Page",
       "noLogs": "No logs yet",
@@ -19691,6 +20167,8 @@
       "noTraceEventsHint": "Logs without traceId are excluded",
       "noTraceId": "No Trace ID",
       "openDetailsPanel": "Open details panel",
+      "openLogSettings": "Log settings",
+      "openTraceAria": "Open trace {id} in Traces",
       "pageHeader": {
         "breadcrumbHome": "Home",
         "breadcrumbLogs": "Logs",
@@ -19699,6 +20177,10 @@
       },
       "pageSize": "Page Size",
       "pauseAutoScroll": "Pause auto-scroll",
+      "presetCancel": "Cancel",
+      "presetDefaultName": "Preset {index}",
+      "presetNameHint": "Saves level, module, source, session, time range, search, trace and transport filters.",
+      "presetNameLabel": "Preset name",
       "presets": "Presets",
       "previousPage": "Previous Page",
       "recentSearches": {
@@ -19708,6 +20190,13 @@
       },
       "refresh": "Refresh logs",
       "regexPlaceholder": "Regex pattern...",
+      "relativeTime": {
+        "days": "{count}d ago",
+        "hours": "{count}h ago",
+        "justNow": "just now",
+        "minutes": "{count}m ago",
+        "seconds": "{count}s ago"
+      },
       "removeBookmark": "Remove bookmark",
       "resumeAutoScroll": "Resume auto-scroll",
       "savePreset": "Save current filters as preset",
@@ -19719,7 +20208,6 @@
       "sessionPlaceholder": "Session ID...",
       "shareUrlCopied": "Share URL copied to clipboard",
       "shareUrlFailed": "Could not copy share URL",
-      "shiftClickPrefix": "Shift-click to",
       "shortcutAction": "Action",
       "shortcutKey": "Key",
       "shortcuts": {
@@ -19733,10 +20221,13 @@
         "openPresets": "Open presets",
         "previousEntry": "Previous entry",
         "refresh": "Refresh",
-        "showShortcuts": "Show shortcuts"
+        "showShortcuts": "Show shortcuts",
+        "traceView": "Trace view"
       },
+      "shortcutsDescription": "Keys work anywhere in the panel except while typing in a field.",
       "showingRange": "{start}–{end} of {total}",
       "source": "Source",
+      "sourceFilterLabel": "Source",
       "sources": {
         "frontend": "Frontend",
         "internal": "Internal",
@@ -19755,26 +20246,40 @@
       "toggleRegex": "Toggle Regex Search",
       "total": "Total",
       "traceDurationLabel": "Duration",
+      "traceEventCount": "{count, plural, one {# event} other {# events}}",
       "traceId": "Trace ID",
-      "traceOverflow": "+{count} more traces hidden",
+      "traceIdValue": "Trace ID: {id}",
+      "traceOverflow": "{count, plural, one {# more trace} other {# more traces}}",
+      "traceRowAria": "Show trace {id}: {count, plural, one {# event} other {# events}} over {duration}",
+      "traceShowMore": "Show {count} more",
       "traceTotal": "events",
       "traceView": "Trace View",
       "transportDetails": "Transport Details",
+      "transportDetailsTitle": "Transport details: {name}",
       "transportDropped": "Dropped",
+      "transportDroppedShort": "d{count}",
+      "transportDroppedTitle": "Dropped entries: {count}",
       "transportFilterPrefix": "Transport: {value}",
-      "transportHealthOverflow": "Show more transports",
       "transportLastFailure": "Last Failure",
       "transportLastSuccess": "Last Success",
       "transportQueueDepth": "Queue Depth",
+      "transportQueueDepthTitle": "Queue depth: {count}",
       "transportQueueHistory": "Queue depth history",
+      "transportQueueShort": "q{count}",
       "transportRetries": "Retries",
+      "transportSummaryAria": "Log transports: {healthy} of {total} healthy",
+      "transportSummaryCount": "{healthy}/{total}",
+      "transportSummaryLabel": "Transports",
+      "transportSummaryTitle": "Log transports",
+      "transportTileAria": "{name}: {status}, queue {queue}",
       "unsavedChanges": "Unsaved changes",
       "viewDetails": "View Details",
       "viewDetailsMenu": "View details",
       "viewDiagnostics": "View Diagnostics",
       "viewModeGroup": "Log view",
       "viewNativeDiagnostics": "View Native Diagnostics",
-      "warning": "Warning"
+      "warning": "Warning",
+      "windowCapped": "Only the newest {count} entries are loaded. Search, level, source and time filters apply within them; filter by module or focus a trace to reach older entries."
     },
     "settings": {
       "advanced": {
@@ -19881,10 +20386,14 @@
         "empty": "No native overrides yet.",
         "error": "Failed to apply",
         "levelLabel": "Level",
+        "loadError": "Couldn't read the current native levels.",
+        "loading": "Loading native levels…",
         "moduleLabel": "Target",
         "removeAria": "Remove {module} override",
+        "retry": "Retry",
         "saved": "Applied",
-        "title": "Native (Rust) Levels"
+        "title": "Native (Rust) Levels",
+        "unsaved": "Unsaved changes"
       },
       "nav": {
         "badgeTransportsAria": "{enabled} of {total} transports enabled",
@@ -20065,9 +20574,11 @@
     "settingsTitle": "Logging Configuration",
     "statusSr": "status: {status}",
     "timeline": {
+      "bucketAria": "{time}: {total, plural, one {# entry} other {# entries}}, {errors, plural, one {# error} other {# errors}}, {warnings, plural, one {# warning} other {# warnings}}",
       "clear": "Clear",
       "empty": "No data yet",
       "errors": "Errors",
+      "otherLevels": "Other",
       "title": "Timeline",
       "total": "Total",
       "warnings": "Warnings"
@@ -20083,6 +20594,14 @@
       "failed": "Failed",
       "files": "Files",
       "modelId": "Model",
+      "operations": {
+        "chat": "Model call",
+        "embeddings": "Embeddings",
+        "execute_tool": "Tool call",
+        "invoke_agent": "Agent run",
+        "invoke_workflow": "Workflow run",
+        "retrieval": "Retrieval"
+      },
       "promptTokens": "Prompt",
       "responsePreview": "Response Preview",
       "stepNumber": "Step",
@@ -20090,7 +20609,12 @@
       "tokenUsage": "Token Usage",
       "toolArgs": "Arguments",
       "toolName": "Tool",
-      "totalTokens": "Total"
+      "totalTokens": "Total",
+      "unknownEvent": "unknown event"
+    },
+    "virtualizedList": {
+      "details": "Details",
+      "retry": "Retry"
     },
     "workspace": {
       "breadcrumbHome": "Home",
@@ -20106,7 +20630,45 @@
         "title": "Submission preview"
       },
       "console": {
+        "artifactKinds": {
+          "attachment": "Attachment",
+          "events": "Events",
+          "manifest": "Manifest",
+          "minidump": "Minidump",
+          "screenshot": "Screenshot",
+          "unknown": "Other ({kind})"
+        },
+        "auditActions": {
+          "alert_permanent_failure": "Alert: processing failed permanently",
+          "artifact_read": "Artifact downloaded",
+          "consent_withdrawn": "Consent withdrawn",
+          "group_triaged": "Group triaged",
+          "incident_accepted": "Incident accepted",
+          "incident_cancelled": "Upload cancelled",
+          "incident_created": "Incident created",
+          "incident_deleted": "Incident deleted",
+          "incident_processing_failed": "Processing failed",
+          "incident_processing_queued": "Processing queued",
+          "incident_resumed": "Upload resumed",
+          "retention_artifact_deleted": "Artifact removed by retention",
+          "retention_incident_deleted": "Incident removed by retention",
+          "retention_permanent_failure": "Retention failed permanently",
+          "symbol_indexed": "Symbols indexed",
+          "tenant_key_created": "Tenant key created",
+          "tenant_key_crypto_shredded": "Tenant key crypto-shredded",
+          "tenant_key_rotated": "Tenant key rotated",
+          "tenant_policy_changed": "Tenant policy changed",
+          "unknown": "Other event ({action})",
+          "upload_part_rejected": "Upload part rejected",
+          "upload_part_stored": "Upload part stored"
+        },
         "configure": "Open diagnostics settings",
+        "detail": {
+          "description": "The group, the incidents in it, and its triage controls.",
+          "loading": "Loading the crash group…",
+          "resize": "Resize crash group detail pane",
+          "title": "Crash group"
+        },
         "errors": {
           "console_failed": "The console request did not complete.",
           "group_not_found": "That crash group no longer exists.",
@@ -20124,6 +20686,14 @@
           "searchLabel": "Filter groups by exception, module or fingerprint",
           "status": "Status",
           "statusAll": "Any status"
+        },
+        "gates": {
+          "loading": "Reading the diagnostic service connection…",
+          "probing": "Checking your access to the console…",
+          "retry": "Try again",
+          "roleFailed": "Your access could not be confirmed",
+          "sessionRequired": "An identity session is needed",
+          "sessionRequiredDescription": "This connection can submit this device's own crashes. Reading and triaging everyone's needs an identity session token, added in Settings → Diagnostics."
         },
         "group": {
           "assign": "Assign",
@@ -20149,8 +20719,11 @@
           "audit": "Audit trail",
           "close": "Close",
           "download": "Download",
+          "downloadFailed": "The artifact could not be downloaded",
+          "downloaded": "Saved {filename}",
           "noArtifacts": "No stored artifacts.",
           "noAudit": "No audit events.",
+          "part": "#{number} · {kind} · {size}",
           "system": "system"
         },
         "incidents": {
@@ -20162,10 +20735,28 @@
         "notConnected": "No diagnostic service connected",
         "notConnectedDescription": "Connect this account to a self-hosted diagnostic service to triage the crashes it has accepted.",
         "policy": {
+          "cancel": "Cancel",
+          "confirmDisable": "Stop downloads",
+          "confirmDisableDescription": "The service will refuse every raw minidump read on this tenant until an admin allows it again.",
+          "confirmDisableTitle": "Stop raw minidump downloads for the whole tenant?",
+          "confirmEnable": "Allow downloads",
+          "confirmEnableDescription": "Every triager on this tenant will be able to download minidumps, which can contain process memory. Each download is recorded in the incident's audit trail.",
+          "confirmEnableTitle": "Allow raw minidump downloads for the whole tenant?",
           "load": "Load tenant policy",
           "rawMinidump": "Allow raw minidump downloads",
           "rawMinidumpDescription": "Minidumps can contain process memory. While this is off the service refuses every raw minidump read, and each allowed read is recorded in the incident's audit trail with the operator's identity.",
           "title": "Tenant policy"
+        },
+        "processingStates": {
+          "accepted": "Accepted",
+          "deleted": "Deleted",
+          "grouping": "Grouping",
+          "permanent_failure": "Failed permanently",
+          "received": "Received",
+          "retryable_failure": "Failed, will retry",
+          "scanning": "Scanning",
+          "symbolicating": "Symbolicating",
+          "unknown": "Other ({state})"
         },
         "refresh": "Refresh",
         "statuses": {
@@ -20179,18 +20770,20 @@
         "cancel": "Keep report",
         "confirm": "Delete report",
         "description": "This removes the local diagnostic artifacts from this device. The action cannot be undone.",
+        "done": "Crash report deleted.",
+        "failed": "Could not delete the crash report: {error}",
         "title": "Delete this crash report?"
       },
       "detail": {
-        "description": "Review redacted local diagnostics and optional attachments.",
+        "description": "Review the redacted report, choose what to send, and see its receipt.",
         "loading": "Loading redacted preview…",
         "noPreview": "Select the report again to load its local preview.",
         "previewDescription": "This is the local, redacted payload. Optional attachments remain excluded.",
         "previewTitle": "Redacted preview",
-        "resize": "Resize incident detail pane",
-        "runtime": "Runtime",
+        "resize": "Resize crash report detail pane",
+        "source": "Source",
         "state": "State",
-        "title": "Incident detail"
+        "title": "Crash report"
       },
       "filters": {
         "receiptsOnly": "Receipts only",
@@ -20203,10 +20796,12 @@
         "stateLabel": "Incident state"
       },
       "incidents": {
-        "emptyDescription": "New crash reports and abnormal exits will be retained here before submission.",
-        "emptyTitle": "No matching incidents",
-        "error": "Local incident storage could not be read.",
-        "loading": "Loading local incidents…"
+        "emptyDescription": "Crash reports this device captures are kept here until you decide whether to send them.",
+        "emptyTitle": "No matching crash reports",
+        "error": "Crash reports on this device could not be read.",
+        "loading": "Loading crash reports…",
+        "uncollectedDescription": "Crash reports are collected by the desktop and mobile apps. A browser tab has no crash handler, so there is nothing to list here.",
+        "uncollectedTitle": "Crash reports are collected by the apps"
       },
       "moreActions": "More actions",
       "navigation": {
@@ -20218,13 +20813,24 @@
       },
       "refresh": "Refresh",
       "reset": "Reset layout",
+      "sources": {
+        "android-acra": "Android crash",
+        "android-application-exit": "Android abnormal exit",
+        "ios-kscrash": "iOS crash",
+        "ios-metrickit": "iOS MetricKit report",
+        "native": "Native crash",
+        "other": "Other ({source})",
+        "panic": "Rust panic",
+        "unknown": "Unknown"
+      },
       "states": {
         "accepted": "Accepted",
         "all": "All states",
-        "awaitingConsent": "Awaiting consent",
+        "awaiting_consent": "Awaiting consent",
         "cancelled": "Cancelled",
         "deleted": "Deleted",
         "detected": "Detected",
+        "packaged": "Packaged",
         "processing": "Processing",
         "queued": "Queued",
         "rejected": "Rejected",
@@ -20236,7 +20842,12 @@
         "transports": "{healthy}/{total} transports"
       },
       "submission": {
+        "checkingSupport": "Checking whether this device can submit…",
         "configure": "Open diagnostics settings",
+        "confirmCancel": "Cancel",
+        "confirmDeleteRemoteDescription": "The service deletes its copy and everything derived from it. The local report stays on this device.",
+        "confirmDeleteRemoteTitle": "Delete this report from the service?",
+        "confirmWithdrawTitle": "Withdraw consent for this report?",
         "deleteRemote": "Delete from service",
         "desktopOnly": "Submission is available in the desktop app.",
         "errors": {
@@ -20255,6 +20866,7 @@
         "incidentId": "Incident",
         "includedMinidump": "Minidump included",
         "includedScreenshot": "Screenshot included",
+        "mobileReceiptNote": "Sent from this phone. To withdraw it or have it deleted, quote this support code to the service operator.",
         "notConfigured": "No diagnostic service is configured yet.",
         "parts": "{uploaded} uploaded · {resumed} already stored",
         "processingState": "Processing",
@@ -20267,12 +20879,16 @@
         "submittedAt": "Submitted",
         "submitting": "Submitting…",
         "supportCode": "Support code",
+        "unsupported": "This device has no way to submit crash reports. They are sent from the desktop app, or from the mobile app with its crash reporter installed.",
         "withdraw": "Withdraw consent",
         "withdrawDescription": "Blocks processing and schedules deletion. Stays available even while the service has stopped accepting new reports.",
         "withdrawn": "Consent withdrawn"
       },
       "title": "Logs and diagnostics",
       "traces": {
+        "clearSelection": "Clear selection",
+        "closeTrace": "Close trace",
+        "closeTraceHint": "Close trace (Esc)",
         "counts": "{matched} / {total}",
         "detailDescription": "Span waterfall and the selected span's full record.",
         "detailTitle": "Trace detail",
@@ -20286,7 +20902,7 @@
             "otlp": "Copy as OTLP"
           },
           "copyFailed": "Could not write to the clipboard",
-          "label": "Export",
+          "label": "Export trace",
           "redactPreviews": "Strip content previews",
           "save": {
             "json": "Save spans as JSON…",
@@ -20296,16 +20912,21 @@
           "saved": "Trace exported",
           "spanCount": "{count, plural, =1 {1 span} other {# spans}}"
         },
+        "listLabel": "Traces",
         "loading": "Loading traces…",
         "nextPage": "Next",
         "noMatchDescription": "Widen the time window or clear the filters.",
         "noMatchTitle": "No traces match",
+        "notFoundDescription": "No spans are stored for {id}. It may have been pruned or cleared, or the link is wrong.",
+        "notFoundTitle": "Trace not found",
         "openDashboard": "Dashboard",
         "pageOf": "{page} / {total}",
+        "pending": "{count, plural, =1 {1 new · show} other {# new · show}}",
         "previousPage": "Previous",
         "searchLabel": "Filter traces by name, id, or surface",
         "searchPlaceholder": "Filter traces…",
         "selectPrompt": "Select a trace to see its span waterfall.",
+        "selectionOutside": "The selected trace isn’t in this list — it’s outside the time range or hidden by a filter.",
         "span": {
           "agent": "Agent",
           "cacheRead": "Cache read",
@@ -20313,6 +20934,8 @@
           "cacheWriteSplit": "({short} 5m · {long} 1h)",
           "content": "Content",
           "contentHint": "Captured only when content capture is on, and only after the redaction gate passes.",
+          "copied": "{label} ID copied",
+          "copyValue": "Copy {label} ID",
           "cost": "Cost",
           "duration": "Duration",
           "empty": "Select a span in the waterfall.",
@@ -20329,6 +20952,7 @@
           "metadata": "Metadata",
           "model": "Model",
           "offset": "Offset in trace",
+          "offsetValue": "+{value}",
           "openInLogs": "Show this trace in logs",
           "openSession": "Show this session in logs",
           "outputTokens": "Output tokens",
@@ -20353,6 +20977,7 @@
           "usage": "Usage"
         },
         "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
+        "subViewHint": "{view} (V to switch)",
         "subViewLabel": "Trace workspace view",
         "subViews": {
           "dashboard": "Dashboard",
@@ -20361,9 +20986,12 @@
         "timeline": {
           "blockAria": "{label} in {lane}, {duration}",
           "blockError": "This span failed",
-          "brushHint": "Drag to zoom into a time range · double-click to reset",
+          "brushHint": "Drag across the strip or the lanes to zoom · double-click to reset",
+          "collapse": "Collapse timeline",
           "empty": "This trace has no spans to plot.",
           "emptyWindow": "No spans in the selected window. Double-click the strip to zoom out.",
+          "errorCount": "{count, plural, =1 {1 failed span} other {# failed spans}}",
+          "expand": "Expand timeline",
           "groupingLabel": "Lane grouping",
           "groupings": {
             "agent": "Agent",
@@ -20375,18 +21003,29 @@
           "loading": "Building the timeline…",
           "regionLabel": "Trace timeline",
           "resetZoom": "Reset zoom",
+          "resetZoomHint": "Show the whole trace (0)",
           "scaleLabel": "Timeline scale",
           "scales": {
             "duration": "Duration",
             "sequence": "Sequence"
           },
-          "spans": "{count, plural, =1 {1 span} other {# spans}}"
+          "sequenceTick": "#{index}",
+          "spans": "{count, plural, =1 {1 span} other {# spans}}",
+          "spansOf": "{count, number} of {total, plural, =1 {1 span} other {# spans}}",
+          "tokens": "{value} tokens",
+          "totalDuration": "Whole trace: {value}",
+          "zoomIn": "Zoom in",
+          "zoomInHint": "Zoom in (+)",
+          "zoomOut": "Zoom out",
+          "zoomOutHint": "Zoom out (−)"
         },
+        "traceFailed": "{count, plural, =1 {1 failed span} other {# failed spans}}",
         "truncated": "Showing the newest {shown, number} of {total, number} spans in this window.",
         "waterfallEmpty": "This trace has no persisted spans.",
+        "waterfallLabel": "Spans in this trace",
+        "widenRange": "Widen to last 30d",
         "windowEmpty": "No spans in the selected window.",
         "windowLabel": "Trace time window",
-        "windowedTo": "windowed to {count} of {total}",
         "windows": {
           "all": "All time",
           "month": "30 days",
@@ -20394,9 +21033,16 @@
           "week": "7 days"
         }
       },
+      "viewDescriptions": {
+        "diagnostics": "Error and fatal log entries from this device",
+        "incidents": "Native crash reports this device captured",
+        "logs": "Everything this app logged",
+        "service": "Crashes a diagnostic service accepted from everyone",
+        "traces": "Agent and request traces"
+      },
       "views": {
-        "diagnostics": "Diagnostics",
-        "incidents": "Incidents",
+        "diagnostics": "Errors",
+        "incidents": "Crash reports",
         "logs": "Logs",
         "service": "Service",
         "traces": "Traces"
@@ -21506,6 +22152,7 @@
       "importing": "Restoring…",
       "passphraseLabel": "Passphrase (at least {min} characters)",
       "passphraseRequiredHint": "Required so the encrypted archive can be opened later.",
+      "reminderFailed": "Could not update the backup reminder. Please check notification permission and try again.",
       "shareFile": "Share file",
       "shareTitle": "Cognia Backup",
       "strategyDuplicate": "Duplicate (keep both)",
@@ -21513,6 +22160,14 @@
       "strategySkip": "Keep local (skip conflicts)",
       "title": "Backup & sync",
       "webModeNote": "Web mode: backup downloads as a regular file."
+    },
+    "barcodeScanner": {
+      "cancel": "Cancel scanning",
+      "instruction": "Point the camera at a QR code. It will be scanned automatically.",
+      "title": "Scan QR code",
+      "torchError": "Unable to change the flashlight. Please try again.",
+      "torchOff": "Turn flashlight off",
+      "torchOn": "Turn flashlight on"
     },
     "characterEdit": {
       "avatarColorLabel": "Avatar color",
@@ -22061,10 +22716,12 @@
     },
     "composerPlus": {
       "album": "Album",
+      "back": "Back",
       "camera": "Camera",
       "file": "File",
       "permissionDeniedCamera": "Camera permission required.",
       "permissionDeniedMic": "Microphone permission required.",
+      "photoFailed": "Could not load the photo. Please try again.",
       "sheetDescription": "Attach media, change what this turn can do, or reach another tool.",
       "toggleAria": "Add to this message",
       "unsupported": "Not supported on this platform.",
@@ -22273,25 +22930,59 @@
       "reject": "Reject"
     },
     "externalAgents": {
+      "add": "Add agent",
+      "addAria": "Add an external agent",
+      "added": "{name} was added to your Host.",
+      "advancedSummary": "Protocol, command, environment and retries",
+      "advancedTitle": "Advanced settings",
+      "allSection": "All agents",
       "backAria": "Back to settings",
+      "backToListAria": "Back to external agents",
+      "backToPickerAria": "Back to choosing an agent",
+      "configureCustomTitle": "Custom agent",
+      "configureTitle": "Add {name}",
+      "createFailed": "Could not add the agent: {message}",
+      "customDescription": "Any ACP, A2A or OpenCode agent. Enter the command or endpoint yourself.",
+      "customTitle": "Custom",
+      "deleteCancel": "Cancel",
+      "deleteConfirm": "Remove",
+      "deleteConfirmBody": "{name} is removed from your Host. Conversations that already used it keep their history.",
+      "deleteConfirmTitle": "Remove {name}?",
+      "desktopLocalDescription": "Configured in the desktop app itself. They run when you work on the desktop, not from this phone.",
+      "desktopLocalTitle": "Desktop-only agents",
+      "detectedSection": "Installed on your Host",
       "disabled": "Off",
-      "empty": "No external agents are configured on the paired desktop yet.",
+      "emptyDescription": "Add Claude Code, Codex, Gemini and more. They run on your paired Host; this phone sends them the work.",
+      "emptyTitle": "No agents on your Host yet",
       "enabled": "On",
       "enabledAria": "Enable {name}",
-      "intro": "Manage the external agents configured on your paired desktop. Toggle each one on or off and pick the permission mode the desktop runs it under.",
+      "hostSectionTitle": "On your Host",
+      "intro": "Agents set up on your paired Host. Every agent here can be picked from the chat composer's runtime menu.",
       "loadFailed": "Could not load external agents: {message}",
+      "loadFailedTitle": "Couldn't reach your Host's agents",
       "loading": "Loading external agents…",
-      "manageOnDesktop": "Adding, removing and editing external agents (command, endpoint, retries) is done on the desktop. Open Settings → External Agents there.",
+      "moreActionsAria": "More actions for {name}",
+      "noMatches": "No agent matches “{query}”.",
       "permissionAcceptEdits": "Accept edits",
       "permissionBypass": "Bypass permissions",
       "permissionDefault": "Default",
       "permissionDontAsk": "Don't ask",
+      "permissionHint": "How much the agent may do without asking. You can change it later.",
       "permissionLabel": "Permission mode",
       "permissionModeAria": "Permission mode for {name}",
       "permissionPlan": "Plan",
-      "sectionTitle": "Configured agents",
+      "pickIntro": "Choose the agent to run on your Host. You can review every setting before it's added.",
+      "pickTitle": "Add external agent",
+      "removed": "{name} was removed.",
+      "retry": "Try again",
+      "runsOnHost": "Runs on your paired Host",
+      "searchAria": "Search agents",
+      "searchPlaceholder": "Search agents",
+      "submit": "Add to Host",
+      "submitting": "Adding…",
       "title": "External agents",
       "toggleFailed": "Could not save the change: {message}",
+      "unknownPreset": "That agent is no longer available. Pick another one.",
       "updateQueued": "Change saved on the Host."
     },
     "fleet": {
@@ -22395,12 +23086,9 @@
         "title": "Customize home"
       },
       "edit": "Edit",
-      "emptyArchived": "No archived chats.",
-      "emptyChats": "No chats yet. Tap + to start one.",
-      "emptyFiltered": "No chats match “{query}”.",
-      "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
       "folderEmpty": "Empty — long-press a chat to move it here.",
       "hideSection": "Hide {section}",
+      "listActions": "Conversation list actions",
       "loadingChats": "Loading conversations…",
       "pinned": "Pinned",
       "presenceStreaming": "Streaming",
@@ -22421,6 +23109,7 @@
         "quickActions": "Quick actions",
         "recents": "Recent chats"
       },
+      "selectionRowHint": "Tap a chat to select or deselect it. Press Escape or Done to stop selecting.",
       "swipeArchive": "Archive",
       "swipeDelete": "Delete",
       "swipePin": "Pin",
@@ -22434,6 +23123,7 @@
       "viewArchived": "Show archived chats",
       "viewTabActive": "Chats",
       "viewTabArchived": "Archived",
+      "viewTabArchivedCount": "Archived · {count}",
       "viewTabsLabel": "Conversation view"
     },
     "hooks": {
@@ -23009,9 +23699,10 @@
       }
     },
     "offline": {
-      "bannerHostOffline": "Host unreachable — sends will queue until it is back.",
-      "bannerOffline": "Offline — sends will queue and retry automatically.",
-      "bannerReconnecting": "Reconnecting…",
+      "connectionSettings": "Connection",
+      "detailCacheOnly": "cached data only",
+      "detailHostOffline": "sends wait until it's back",
+      "detailNetworkOffline": "you can still browse; sends will be queued",
       "notifBody": "{count} messages waiting. Will retry when online.",
       "notifChannel": "cognia",
       "notifTitle": "cognia outbound queue",
@@ -23046,7 +23737,10 @@
         "withdrawnUnconfirmed": "Withdrawn. An earlier attempt may already have reached the host, so it could still run there."
       },
       "review": "Review",
-      "staleWarning": "{count} messages waiting > 30 min."
+      "staleWarning": "{count} messages waiting > 30 min.",
+      "stateHostOffline": "Host offline",
+      "stateNetworkOffline": "You're offline",
+      "stateReconnecting": "Reconnecting to host"
     },
     "pair": {
       "accountContextMissing": "An active local account is required before pairing a Host.",
@@ -23058,7 +23752,7 @@
         "invalid_pair_code": "Pair code must be exactly 6 digits.",
         "malformed": "Enter the 6-digit code shown on the desktop.",
         "malformed_request": "The server could not parse the request. Update the app and try again.",
-        "pair_code_expired": "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Companion.",
+        "pair_code_expired": "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Connectivity → Pairing.",
         "pair_code_not_found": "That code is unknown or has already been used — request a fresh one on the desktop."
       },
       "codeHint": "Find this code on the desktop PairDeviceCard, beside the QR. Useful when the camera can't focus on the QR (e.g. Android emulator).",
@@ -23086,13 +23780,13 @@
         "help": {
           "docsCta": "Read the setup guide",
           "openSettings": "Open system settings",
-          "tipEnableServer": "Turn on the companion server in desktop Settings → Companion.",
+          "tipEnableServer": "Turn on the companion server in desktop Settings → Connectivity → Local host.",
           "tipFirewall": "Allow Cognia through the desktop firewall.",
           "tipSameNetwork": "Both devices must be on the same Wi-Fi network.",
           "trigger": "Can't find your desktop?"
         },
         "latencyMs": "{ms} ms",
-        "loopbackBlockedBody": "It refused this browser. Open its Settings → Companion → browser access and add {origin} to the allowed origins.",
+        "loopbackBlockedBody": "It refused this browser. Open its Settings → Connectivity → Local host → Browser access and add {origin} to the allowed origins.",
         "loopbackBlockedTitle": "A Host is running on this computer",
         "nearbyTitle": "On this network",
         "precheckOk": "Reachable · v{version} · {ms} ms",
@@ -23129,10 +23823,10 @@
           "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
           "checkHostLogs": "Check the Host's logs for the matching error.",
           "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
-          "enableBrowserAccess": "On the Host: Settings → Companion → browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
-          "freshInvitation": "Issue a new invitation on the Host — Settings → Companion, or “cognia-server pair” — and paste it here.",
+          "enableBrowserAccess": "On the Host: Settings → Connectivity → Local host → Browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
+          "freshInvitation": "Issue a new invitation on the Host — Settings → Connectivity → Pairing, or “cognia-server pair” — and paste it here.",
           "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
-          "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
+          "removeStaleDevice": "On the Host, remove this device in the device console (Devices) before pairing again.",
           "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
           "unlockAccount": "Sign in to your local account with its password, then pair again.",
           "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
@@ -23194,7 +23888,7 @@
         "searching": "Looking for a Host on this computer…"
       },
       "httpError": {
-        "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
+        "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Connectivity → Pairing.",
         "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
         "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
         "403Identity": "The Host refused this account — its recorded binding or tenant doesn't match this device. A fresh invitation from the same account will be refused the same way.",
@@ -23202,7 +23896,7 @@
         "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
         "generic": "Pairing failed (HTTP {status})."
       },
-      "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+      "intro": "Scan the QR shown in desktop Settings → Connectivity → Pairing. You can also paste the 5-minute pair token manually.",
       "invitationCard": {
         "replace": "Replace",
         "showRaw": "Show the invitation string",
@@ -23264,7 +23958,7 @@
         "repair": "Re-pair this Host",
         "requiresGrant": {
           "description": "This device is missing the exact Host capability: {grant}.",
-          "instructions": "On the Host, open Settings → Companion → Paired Devices and update this device. A Web client cannot grant itself Host authority.",
+          "instructions": "On the Host, open the device console (Devices), select this device and update its grants. A Web client cannot grant itself Host authority.",
           "title": "Host permission required",
           "unknownGrant": "unknown capability"
         },
@@ -23322,7 +24016,7 @@
         "clipboardEmpty": "The clipboard is empty. Copy the full cgnp3 invitation first, then tap Paste again.",
         "clipboardReadFailed": "The browser could not read the clipboard. Paste the full invitation manually.",
         "clipboardWriteFailed": "The browser could not copy the command. Select it and copy it manually.",
-        "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
+        "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Connectivity → Pairing.",
         "commandCopied": "Command copied",
         "commandMode": {
           "compose": "Docker",
@@ -23565,6 +24259,7 @@
       "sessionMenu": "Session menu",
       "sessionSettings": "Session settings",
       "settings": "Settings",
+      "shareConversation": "Share conversation…",
       "tabBarAria": "Main navigation"
     },
     "skills": {
@@ -23774,9 +24469,6 @@
       "historyTitle": "Recent commands",
       "newSession": "New terminal session",
       "search": "Search in terminal",
-      "sshConnectFailed": "Could not open the SSH session",
-      "sshCredentialRequired": "{name} uses password authentication and no password is stored. Add one in Settings, Terminal, then connect again.",
-      "sshUnknownHost": "That SSH host is no longer saved.",
       "title": "Terminal"
     },
     "transportTier": {
@@ -23957,6 +24649,8 @@
         "modeEdit": "Edit",
         "modeRead": "View",
         "orientationLock": "Lock to landscape",
+        "orientationPending": "Checking orientation lock…",
+        "orientationUnavailable": "Orientation lock unavailable",
         "orientationUnlock": "Allow portrait",
         "publicationInvalidated": "Workflow saved and unpublished because its callable interface changed. Publish it again to expose the new contract.",
         "redo": "Redo",
@@ -24233,6 +24927,13 @@
     }
   },
   "observability": {
+    "drill": {
+      "pointHint": "Click a point to see its traces in Explore",
+      "pointLabel": "Show traces from {time}",
+      "showFailing": "{metric}: {value} — show failing traces",
+      "showFailingHint": "Show these failures in Explore",
+      "showTraces": "Show traces for {value}"
+    },
     "droppedSpans": {
       "label": "{count, plural, =1 {# span dropped} other {# spans dropped}}",
       "tooltip": "{count, plural, =1 {# provider span was} other {# provider spans were}} not recorded because no trace context was threaded through the call. The waterfall below is missing them."
@@ -24242,8 +24943,36 @@
       "title": "No telemetry in this window",
       "widen": "Widen to last 30d"
     },
+    "enums": {
+      "operation": {
+        "chat": "Model call",
+        "embeddings": "Embeddings",
+        "execute_tool": "Tool call",
+        "invoke_agent": "Agent run",
+        "invoke_workflow": "Workflow run",
+        "retrieval": "Retrieval"
+      },
+      "spanKind": {
+        "client": "Client",
+        "internal": "Internal",
+        "server": "Server"
+      },
+      "surface": {
+        "agent-rpc": "Agent RPC",
+        "agent-team": "Agent team",
+        "chat": "Chat",
+        "connector": "Connector",
+        "embedding": "Embedding",
+        "mcp": "MCP",
+        "plugin": "Plugin",
+        "plugin-hook": "Plugin hook",
+        "retrieval": "Retrieval",
+        "workflow": "Workflow"
+      }
+    },
     "export": {
       "dashboardJson": "Dashboard as JSON",
+      "exportList": "Export list",
       "importDashboard": "Import dashboard…",
       "importFailed": "Could not import: invalid dashboard file",
       "imported": "Dashboard config imported",
@@ -24267,8 +24996,15 @@
       },
       "empty": "No options",
       "label": "Filters",
-      "search": "Search…"
+      "search": "Search…",
+      "searchLabel": "Search {dimension} values"
     },
+    "loadError": {
+      "hint": "The local database didn’t answer. This is usually temporary — retry in a moment.",
+      "retry": "Retry",
+      "title": "Couldn’t read the trace store"
+    },
+    "loading": "Loading telemetry…",
     "metricToggle": {
       "cost": "Cost",
       "errors": "Errors",
@@ -24301,7 +25037,9 @@
       "absolute": "Absolute range",
       "apply": "Apply",
       "custom": "Custom range",
+      "customLabel": "{from} → {to}",
       "from": "From",
+      "orderError": "“From” must be earlier than “To”.",
       "presets": {
         "15m": "Last 15m",
         "1h": "Last 1h",
@@ -24333,7 +25071,8 @@
       "p50": "p50",
       "p95": "p95",
       "p99": "p99",
-      "perSec": "Requests/s"
+      "perSec": "Requests/s",
+      "perSecValue": "{value}/s"
     },
     "settings": {
       "data": {
@@ -24348,11 +25087,6 @@
         "pruneDone": "Pruned {count} traces",
         "stored": "{count} spans stored",
         "title": "Data"
-      },
-      "defaults": {
-        "range": "Default time range",
-        "refresh": "Auto-refresh",
-        "title": "Defaults"
       },
       "description": "Tune thresholds, panels and retention for the observability dashboard.",
       "metrics": {
@@ -24375,7 +25109,17 @@
       "title": "Dashboard settings",
       "unitFraction": "0–1 fraction",
       "unitMs": "milliseconds",
-      "unitUsd": "USD"
+      "unitUsd": "USD",
+      "view": {
+        "custom": "Custom range",
+        "range": "Time range",
+        "refresh": "Auto-refresh",
+        "title": "Current view"
+      }
+    },
+    "thresholdLevel": {
+      "crit": "Critical threshold crossed",
+      "warn": "Warning threshold crossed"
     },
     "toolbar": {
       "edit": "Edit layout",
@@ -24385,7 +25129,9 @@
     },
     "waterfall": {
       "cost": "Cost {value}",
-      "toggleEvents": "Toggle span details",
+      "eventOffset": "+{offset}",
+      "failed": "Failed",
+      "toggleEvents": "Toggle details for {name}",
       "tokens": "{count} tokens"
     }
   },
@@ -25284,48 +26030,213 @@
     "title": "Cognia"
   },
   "performance": {
+    "budgets": {
+      "aggregation": {
+        "median": "Median",
+        "p95": "p95"
+      },
+      "buildProfile": {
+        "development": "Development",
+        "production": "Production",
+        "profiling": "Profiling"
+      },
+      "check": {
+        "acceptEnvironment": "Accept a different environment",
+        "budget": "Budget",
+        "capture": "Capture",
+        "detail": "Value {value} over {valid} of {expected} intervals.",
+        "environmentAccepted": "Environment mismatch accepted for this check.",
+        "noCaptures": "No matching captures",
+        "run": "Check",
+        "running": "Checking…",
+        "title": "Check a capture"
+      },
+      "created": "Budget “{name}” created.",
+      "description": "Immutable thresholds for one metric. Check a capture against a budget to get pass, warn or fail — only when the capture is long, continuous and recorded in a matching environment.",
+      "direction": {
+        "higher": "higher is better",
+        "lower": "lower is better"
+      },
+      "empty": "No budgets yet.",
+      "form": {
+        "aggregation": "Aggregation",
+        "buildProfiles": "Applies to builds",
+        "cadence": "Cadence",
+        "cadenceValue": "{seconds}s",
+        "cancel": "Cancel",
+        "description": "Budgets are immutable once saved. To change a threshold, create a new budget.",
+        "directionHint": {
+          "higher": "Higher is better: warning ≥ failure.",
+          "lower": "Lower is better: warning ≤ failure."
+        },
+        "errors": {
+          "buildProfiles": "Choose at least one build.",
+          "metric": "Choose a metric for this source.",
+          "name": "Enter a name.",
+          "order": {
+            "higher": "For this metric the warning threshold must be at or above the failure threshold.",
+            "lower": "For this metric the warning threshold must be at or below the failure threshold."
+          },
+          "runtimeKinds": "Choose at least one runtime.",
+          "thresholds": "Enter both thresholds as numbers."
+        },
+        "failure": "Failure threshold ({unit})",
+        "immutable": "Saved budgets cannot be edited or overwritten.",
+        "metric": "Metric",
+        "name": "Name",
+        "namePlaceholder": "e.g. Chat stays smooth",
+        "runtimeKinds": "Applies to runtimes",
+        "save": "Save budget",
+        "source": "Source",
+        "title": "New budget",
+        "unit": {
+          "bytes": "MB",
+          "bytes-per-second": "MB/s",
+          "count": "count",
+          "fps": "fps",
+          "ms": "ms",
+          "percent": "%"
+        },
+        "warning": "Warning threshold ({unit})"
+      },
+      "locked": "Unlock the active account to use budgets.",
+      "new": "New budget",
+      "reason": {
+        "discontinuous-incarnation": "The capture spans a restart or reload.",
+        "environment-mismatch": "The capture was recorded on a runtime or build the budget does not apply to.",
+        "metadata-mismatch": "The capture's metric, source, schema or cadence does not match the budget.",
+        "minimum-coverage": "At least 90% of intervals must be valid.",
+        "minimum-valid-intervals": "At least 10 valid intervals are needed.",
+        "mutable-budget": "The budget is not immutable.",
+        "unknown-metric": "This budget's metric is no longer in the catalog."
+      },
+      "runtimeKind": {
+        "browser": "Browser",
+        "node-headless": "Node host",
+        "tauri-rust": "Desktop (Rust)"
+      },
+      "sourceKind": {
+        "host": "Selected host",
+        "renderer": "This window (Renderer)"
+      },
+      "summary": "{aggregation} · {direction} · warn {warning} · fail {failure} · {cadence}s",
+      "title": "Budgets",
+      "verdict": {
+        "fail": "Fail",
+        "incomparable": "Not comparable",
+        "insufficient-data": "Insufficient data",
+        "pass": "Pass",
+        "warn": "Warning"
+      }
+    },
     "captures": {
       "active": {
+        "description": "Record encrypted evidence for later comparison. Captures keep running while you navigate.",
         "elapsed": "Elapsed {seconds}s",
-        "gaps": "{count} gaps",
+        "gaps": "{count, plural, one {# gap} other {# gaps}}",
+        "progress": "Capture progress",
         "title": "Active capture"
       },
       "comparison": {
-        "absolute": "Absolute delta",
-        "compare": "Compare selected captures",
+        "acceptEnvironment": "Accept a different environment",
+        "baseline": "Baseline",
+        "candidate": "Candidate",
+        "compare": "Compare",
+        "deltaLine": "Median change: {absolute} ({percent})",
+        "eligible": "Comparable — like-for-like captures.",
+        "ineligible": "Not comparable — read these numbers as context, not a verdict.",
         "mad": "MAD",
         "median": "Median",
+        "metric": "Metric",
         "na": "N/A",
         "p95": "Type-7 p95",
-        "percent": "Percent delta"
+        "reasons": {
+          "discontinuous-incarnation": "A capture spans a restart or reload.",
+          "environment-mismatch": "The captures were recorded in different environments.",
+          "environment-missing": "A capture has no environment fingerprint.",
+          "metric-definition-mismatch": "The metric definitions differ.",
+          "metric-schema-mismatch": "The metric schema versions differ.",
+          "minimum-coverage": "At least 90% of intervals must be valid (baseline {baseline}%, candidate {candidate}%).",
+          "minimum-valid-intervals": "At least 10 valid intervals are needed in each capture.",
+          "requested-cadence-mismatch": "The captures were recorded at different cadences.",
+          "source-kind-mismatch": "The captures come from different source kinds.",
+          "unit-mismatch": "The units differ."
+        },
+        "running": "Comparing…",
+        "sourceMismatch": "These captures come from different sources; their metrics are not comparable.",
+        "statistic": "Statistic",
+        "swap": "Swap",
+        "title": "Compare captures",
+        "validIntervals": "Valid / expected intervals"
       },
       "controls": {
         "cadence": "Capture cadence",
         "delete": "Delete capture {id}",
+        "deleteShort": "Delete",
         "duration": "Capture duration",
         "export": "Export capture {id}",
+        "exportShort": "Export (redacted)",
         "import": "Import .cognia-perf",
         "rawExport": "Export raw capture {id}",
+        "rawExportShort": "Export raw evidence",
         "selectCompare": "Select capture {id} for comparison",
         "source": "Capture source",
         "start": "Start capture",
         "stop": "Stop capture"
       },
+      "delete": {
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "description": "Its encrypted frames, attachments and gaps are removed from this device and its quota is released. This cannot be undone.",
+        "title": "Delete this capture?"
+      },
+      "errorCodes": {
+        "account-locked": "The account was locked, so the capture stopped.",
+        "cognia-perf-compressed-size-exceeded": "The package is too large.",
+        "cognia-perf-decompression-limit-exceeded": "The package expands beyond the allowed size.",
+        "cognia-perf-entry-count-invalid": "The package contains an invalid number of entries.",
+        "cognia-perf-format-unsupported": "This package format is not supported.",
+        "cognia-perf-frame-schema-invalid": "The package's frames are damaged or from an unsupported version.",
+        "cognia-perf-manifest-invalid": "The package manifest is invalid.",
+        "cognia-perf-manifest-missing": "The package has no manifest.",
+        "cognia-perf-samples-missing": "The package contains no samples.",
+        "cognia-perf-signature-invalid": "The package signature is invalid.",
+        "performance-account-quota-exceeded": "The account's capture storage quota is full. Delete captures to free space.",
+        "performance-attachment-too-large": "An attachment exceeds the size limit.",
+        "performance-budget-cadence-invalid": "Budget cadence must be at least 500 ms.",
+        "performance-budget-envelope-mismatch": "A stored budget is damaged.",
+        "performance-budget-immutable": "A budget with this id already exists; budgets cannot be changed.",
+        "performance-budget-required-field-missing": "Name, metric and unit are required.",
+        "performance-budget-threshold-invalid": "Thresholds must be numbers.",
+        "performance-budget-threshold-order-invalid": "The warning threshold must come before the failure threshold.",
+        "performance-capture-account-locked": "Unlock the active account to use encrypted captures.",
+        "performance-capture-already-active": "A capture is already recording.",
+        "performance-capture-attachment-invalid": "An attachment is invalid.",
+        "performance-capture-cadence-invalid": "Capture cadence must be at least 500 ms.",
+        "performance-capture-frame-schema-invalid": "The capture's frames are damaged or from an unsupported version.",
+        "performance-capture-metadata-schema-invalid": "The capture's metadata is damaged or from an unsupported version.",
+        "performance-capture-not-found": "This capture no longer exists.",
+        "performance-capture-not-ready": "This capture is not ready yet.",
+        "performance-capture-source-mismatch": "The metrics source changed during the capture.",
+        "performance-capture-stopped": "The capture has already stopped.",
+        "performance-capture-target-mismatch": "The target changed during the capture.",
+        "performance-security-generation-changed": "Account security changed while working; try again.",
+        "unknown": "Something went wrong: {detail}"
+      },
       "errors": {
-        "compareSelection": "Select exactly two captures to compare.",
         "locked": "Unlock the active account to access encrypted captures."
       },
       "library": {
-        "bytes": "{value} bytes",
+        "compareHint": "Tick two ready captures to compare them.",
         "empty": "No captures are stored for this target.",
-        "frames": "{count} frames",
+        "frames": "{count, plural, one {# frame} other {# frames}}",
         "retention": "Unpinned captures retain for {days} days and at most {count} per target. Account quota: {quota} GiB.",
         "title": "Capture library"
       },
       "milliseconds": "{value} ms",
       "minutes": "{value} min",
       "raw": {
-        "attachment": "Attachment {ordinal} · {type} · {bytes} bytes",
+        "attachment": "Attachment {ordinal} · {type} · {bytes}",
         "attachments": "Explicit attachment selection",
         "cancel": "Cancel",
         "confirm": "I understand, export raw evidence",
@@ -25337,22 +26248,47 @@
         "label": "Active performance capture",
         "return": "Open",
         "stop": "Stop performance capture",
-        "summary": "{target} · {seconds}s · {gaps} gaps"
+        "summary": "{target} · {seconds}s · {gaps, plural, one {# gap} other {# gaps}}"
       },
       "source": {
         "host": "Selected host",
+        "hostUnavailable": "Selected host (not connected)",
         "renderer": "Local Renderer"
       },
       "state": {
         "idle": "Idle",
         "recording": "Recording"
       },
+      "status": {
+        "failed": "Failed",
+        "finalizing": "Finalizing",
+        "importing": "Importing",
+        "ready": "Ready",
+        "recording": "Recording"
+      },
+      "stopReason": {
+        "account-locked": "Account locked",
+        "client-terminated": "Window closed",
+        "duration-limit": "Duration reached",
+        "manual": "Stopped",
+        "quota-exceeded": "Quota exceeded",
+        "remote-timeout": "Host timed out",
+        "target-switched": "Target switched",
+        "terminal-host-state": "Host stopped"
+      },
       "toast": {
+        "deleted": "Capture deleted.",
         "exported": "Capture exported with default redaction.",
         "imported": "Capture imported and verified.",
         "rawExported": "Raw capture exported after confirmation.",
         "started": "Capture started.",
         "stopped": "Capture stopped."
+      },
+      "trust": {
+        "origin-unverified": "Origin unverified",
+        "rejected-invalid": "Invalid signature",
+        "valid-untrusted": "Valid, untrusted signer",
+        "verified": "Signature verified"
       }
     },
     "desktopOnly": {
@@ -25360,8 +26296,35 @@
       "title": "Performance panel is desktop-only"
     },
     "diagnose": {
+      "description": "Where the time goes: host span hotspots, this window's timings, and the state of every metrics source.",
       "logs": "Open Logs",
-      "observability": "Open Observability"
+      "observability": "Open trace dashboard"
+    },
+    "hostUnavailable": {
+      "openDiagnose": "See source details",
+      "reason": {
+        "issue": {
+          "contended": "Another window holds the host's metrics stream; this page takes over automatically when it is released.",
+          "rejected": "The host refused the metrics stream.",
+          "renew-failed": "The metrics stream stopped renewing; it reconnects on its own.",
+          "unreachable": "The selected host could not be reached for metrics."
+        },
+        "notReported": "The selected host's runtime does not report this.",
+        "state": {
+          "connecting": "Connecting to the host's metrics stream…",
+          "error": "The host's metrics stream failed.",
+          "live": "Waiting for the host's first frame…",
+          "stale": "The host stopped sending metrics.",
+          "unsupported": "This runtime has no host to measure. Open the desktop app or connect to a host."
+        }
+      },
+      "title": {
+        "hotspots": "Backend hotspots need the desktop host",
+        "managed": "Managed processes need a host",
+        "processes": "Processes need a host",
+        "runtime": "Async runtime needs a host",
+        "system": "System details need the desktop host"
+      }
     },
     "hotspots": {
       "columns": {
@@ -25375,8 +26338,19 @@
         "p95": "p95",
         "total": "Total"
       },
+      "description": "Instrumented host operations, cumulative since the host started or since the last reset.",
       "empty": "No hotspots recorded yet.",
-      "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
+      "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table.",
+      "reset": {
+        "cancel": "Cancel",
+        "confirm": "Reset",
+        "confirmDescription": "This clears the host's cumulative span statistics for every consumer, including other windows. Captures keep their own copies.",
+        "confirmTitle": "Reset hotspot statistics?",
+        "done": "Hotspot statistics reset.",
+        "failed": "Could not reset hotspot statistics: {error}",
+        "label": "Reset statistics"
+      },
+      "title": "Backend hotspots"
     },
     "hud": {
       "clear": "clear",
@@ -25452,15 +26426,60 @@
       "title": "Memory pressure",
       "utilization": "Used / total memory"
     },
+    "metricDescriptions": {
+      "cpu": "CPU used by the host's main process, normalized across all cores.",
+      "diskIo": "Combined disk read and write throughput across the app's process tree.",
+      "eventLoopDelay": "How late timers fired — the 95th percentile event-loop delay.",
+      "eventLoopUtilization": "Share of time the Node event loop was busy rather than idle.",
+      "fps": "Frames this window painted per second. Unmeasured while the window is hidden.",
+      "jsHeap": "JavaScript heap in use by this window.",
+      "longTasks": "Main-thread tasks longer than 50 ms in each interval.",
+      "mainThreadBlocked": "Share of each interval spent in long tasks (over 50 ms) that block input and rendering.",
+      "memory": "Resident memory of the host's main process.",
+      "nodeHeap": "JavaScript heap in use by the Node host.",
+      "runtimeBusy": "Share of time the async runtime's workers spent running tasks.",
+      "tasks": "Async tasks currently alive in the runtime."
+    },
     "metrics": {
       "cpu": "App CPU",
       "diskIo": "Disk I/O",
+      "eventLoopDelay": "Event loop delay (p95)",
+      "eventLoopUtilization": "Event loop utilization",
+      "fps": "Frame rate",
+      "jsHeap": "JS heap",
+      "longTasks": "Long tasks",
+      "mainThreadBlocked": "Main thread blocked",
       "memory": "App memory",
+      "nodeHeap": "Heap used",
       "runtimeBusy": "Runtime busy",
       "tasks": "Async tasks"
     },
     "overview": {
-      "selectMetric": "Select a metric"
+      "groups": {
+        "host": "Selected host",
+        "renderer": "This window"
+      },
+      "noMetrics": "No source is reporting metrics yet.",
+      "openDiagnose": "Source details",
+      "selectMetric": "Select a metric",
+      "summary": "Peak {peak} · Average {average} · Last {seconds}s",
+      "unavailable": {
+        "host": {
+          "connecting": "Connecting to the host's metrics stream…",
+          "error": "The host's metrics stream failed.",
+          "live": "The host is connected but reports no chartable metrics.",
+          "stale": "The host stopped sending metrics.",
+          "unsupported": "No host is attached in this runtime — only this window is measured."
+        },
+        "renderer": {
+          "connecting": "Starting to measure this window…",
+          "error": "Measuring this window failed.",
+          "live": "This browser exposes no chartable metrics.",
+          "stale": "This window stopped reporting metrics.",
+          "unsupported": "This browser exposes no chartable metrics."
+        }
+      },
+      "waiting": "Waiting for the first sample…"
     },
     "process": {
       "columns": {
@@ -25490,9 +26509,27 @@
         "totalMemory": "Total memory"
       }
     },
-    "resources": {
-      "host": "Host",
-      "renderer": "Renderer"
+    "rendererTimings": {
+      "categories": {
+        "all": "All",
+        "chat": "Chat",
+        "other": "Other",
+        "react": "Render"
+      },
+      "clear": "Clear",
+      "columns": {
+        "count": "Count",
+        "last": "Last",
+        "max": "Max",
+        "name": "Measure",
+        "p50": "p50",
+        "p95": "p95"
+      },
+      "description": "User-visible latency measured in this window: chat turns, React commits and other instrumented work. Last 60 entries per name.",
+      "empty": "No timings recorded yet.",
+      "filterLabel": "Filter by category",
+      "hint": "Send a chat message or open a heavy view to record timings.",
+      "title": "Renderer timings"
     },
     "runtime": {
       "aliveTasks": "Alive tasks",
@@ -25524,7 +26561,18 @@
       "workers": "Worker threads"
     },
     "sourceHealth": {
+      "details": "Details",
       "error": "Latest error",
+      "gapReason": {
+        "buffer-overrun": "buffer overrun",
+        "clock-discontinuity": "clock jump",
+        "collection-error": "collection error",
+        "lease-expired": "lease expired",
+        "sequence-gap": "missed frames",
+        "source-reset": "source reset",
+        "target-switched": "target switched",
+        "transport-disconnected": "connection lost"
+      },
       "gaps": "Visible gaps",
       "issue": {
         "contended": {
@@ -25545,6 +26593,7 @@
       "latestGap": "Latest gap: {reason}, {start}–{end}",
       "none": "None",
       "notAvailable": "N/A",
+      "noticeGaps": "{count, plural, one {# gap} other {# gaps}} in the visible window",
       "overhead": "Collection overhead",
       "state": {
         "connecting": "Connecting",
@@ -25555,7 +26604,7 @@
       },
       "title": "Sources and capabilities"
     },
-    "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+    "subtitle": "Live metrics for this window and the selected host — what is running, where the time goes, and evidence over time.",
     "system": {
       "build": {
         "appVersion": "App version",
@@ -25587,7 +26636,7 @@
       "diagnose": "Diagnose",
       "hotspots": "Hotspots",
       "managed": "Managed",
-      "overview": "Performance",
+      "overview": "Overview",
       "processes": "Processes",
       "resources": "Resources",
       "runtime": "Async runtime",
@@ -25605,8 +26654,14 @@
       "intervalLabel": "Sampling interval",
       "intervalValue": "{seconds}s",
       "pause": "Pause",
-      "reset": "Reset hotspots",
-      "resume": "Resume"
+      "reset": "Clear graphs",
+      "resetHint": "Start the rolling graphs over from now. Hotspot statistics and captures are not affected.",
+      "resume": "Resume",
+      "status": {
+        "live": "Live · {seconds}s",
+        "paused": "Paused",
+        "recording": "Recording"
+      }
     }
   },
   "pet": {
@@ -25829,6 +26884,10 @@
         "So fun!",
         "Again!",
         "Wheee!"
+      ],
+      "pluginReward": [
+        "A reward! Thank you!",
+        "Ooh, a treat from a quest!"
       ],
       "refused": {
         "cooldown": [
@@ -26154,6 +27213,7 @@
     "quickMenu": {
       "clean": "Clean",
       "clickThrough": "Click-through",
+      "clickThroughDescription": "Clicks pass through the pet to what's behind it. Turn it back off from the tray menu or Settings → Pet.",
       "feed": "Feed",
       "hideDesktopPet": "Hide desktop pet",
       "minimize": "Minimize",
@@ -26165,7 +27225,8 @@
       "showMainWindow": "Show main window",
       "sleep": "Sleep",
       "talk": "Talk",
-      "treat": "Treat"
+      "treat": "Treat",
+      "windowActions": "Desktop pet window"
     },
     "rarity": {
       "common": "Common",
@@ -27519,17 +28580,22 @@
       "noIssues": "No conversion issues detected.",
       "source": "Detected source: {source}",
       "sources": {
-        "agent-plugins": "Agent Plugins 1.0",
+        "agent-plugins": "Agent Plugins",
+        "auggie": "Auggie",
         "claude-code": "Claude Code",
+        "codebuddy": "CodeBuddy",
         "codex": "Codex",
         "cognia": "Cognia",
         "copilot": "GitHub Copilot",
         "cursor": "Cursor",
         "devin": "Devin",
+        "factory-droid": "Factory Droid",
         "gemini-cli": "Gemini CLI",
-        "kimi": "Kimi Code",
+        "kimi": "Kimi CLI",
+        "open-plugins": "Open Plugins (legacy .plugin)",
         "opencode": "OpenCode",
-        "pi": "Pi"
+        "pi": "Pi",
+        "qoder": "Qoder CLI"
       },
       "title": "Conversion report"
     },
@@ -28562,6 +29628,95 @@
       "normalSection": "Standard permissions",
       "reviewAria": "Review permissions for {name}",
       "title": "Permissions"
+    },
+    "piPackages": {
+      "errors": {
+        "binaryMissing": "{program} wasn't found on this machine. Install it, then retry.",
+        "botIsolation": "Bot-isolated agents can't load plugin Pi packages: the package folder lives in your home directory, which isolation hides.",
+        "declined": "The prepare step wasn't approved.",
+        "desktopOnly": "Only available in the desktop app.",
+        "doubleLoad": "This package is also installed in Pi in a scope this agent loads, so it would load twice. Switch the agent to the isolated policy, or remove the package from Pi.",
+        "envConflict": "Two packages this agent loads set the same setting to different values. Remove one of them from the agent.",
+        "executionFailed": "The operation failed.",
+        "exitCode": "The prepare step ({program}) exited with code {code}.",
+        "invalidPath": "The package declares a path outside the plugin folder.",
+        "markerMissing": "The prepare step finished but didn't produce its marker file.",
+        "needsPrepare": "Run the prepare step first.",
+        "noPrepare": "This package has no prepare step.",
+        "notFound": "No enabled plugin provides this package.",
+        "notHosted": "This package can't be loaded into hosted sessions.",
+        "notOnDisk": "This plugin isn't installed in a folder (built-in plugins can't ship Pi packages), so Pi has nothing to read.",
+        "notPrepared": "The package's prepare step hasn't run yet.",
+        "piVersion": "This package needs Pi {version} or newer; this host runs {installed}.",
+        "resolutionFailed": "The package couldn't be loaded.",
+        "symlinksCreated": "The prepare step created a symbolic link ({path}), and Cognia refuses to load plugins that contain links. The plugin author needs a prepare step that installs without links.",
+        "timeout": "The prepare step ({program}) timed out after {seconds}s.",
+        "workspaceRequired": "The package needs a workspace folder."
+      },
+      "fromPlugin": "From {plugin}",
+      "hosted": {
+        "available": "Loadable in hosted Pi sessions",
+        "controlsSession": "Takes over the session's tool surface. Agents that load it may lose access to their other tools.",
+        "installOnly": "Install only",
+        "tools": "Tools: {tools}"
+      },
+      "install": {
+        "degraded": "Pi isn't reachable, so Cognia records the package path in Pi's settings.json instead of running pi install. Pi resolves it on its next launch.",
+        "failureToast": "Couldn't install {name}: {message}",
+        "install": "Install",
+        "installed": "Installed",
+        "noWorkspace": "Open a workspace to install into the project scope.",
+        "notInstalled": "Not installed",
+        "remove": "Remove",
+        "removeFailureToast": "Couldn't remove {name}: {message}",
+        "removeSuccessToast": "Removed {name} ({scope})",
+        "scopeProject": "Project",
+        "scopeStatus": "{scope}: {status}",
+        "scopeUser": "User",
+        "successDegradedToast": "Recorded {name} in Pi's settings ({scope}). Pi loads it on its next launch.",
+        "successToast": "Installed {name} ({scope})",
+        "working": "Working…"
+      },
+      "loading": "Checking package status…",
+      "minPiVersion": "Pi ≥ {version}",
+      "minPiVersionUnmet": "Needs Pi {version} or newer (installed: {installed})",
+      "paneGroupDescription": "Pi packages contributed by your enabled Cognia plugins.",
+      "paneGroupTitle": "From Cognia plugins",
+      "pathLabel": "Path",
+      "picker": {
+        "empty": "No enabled plugin ships a Pi package that supports hosted sessions.",
+        "hint": "Each selected package loads into every session of this agent, before Cognia's own extension.",
+        "label": "Plugin Pi packages",
+        "notPrepared": "Not prepared: run its prepare step from the plugin's page before starting a session.",
+        "remove": "Remove",
+        "unavailable": "{ref} is no longer available. Sessions will fail to start until it is removed.",
+        "unavailableTitle": "Unavailable packages"
+      },
+      "pluginDisabled": "Enable this plugin to install its Pi packages or load them into hosted sessions.",
+      "prepare": {
+        "cancel": "Cancel",
+        "commandLabel": "Command",
+        "confirm": "Run",
+        "cwdLabel": "Working directory",
+        "dialogDescription": "{plugin} needs to install this package's dependencies. Cognia will run exactly this command in the package directory, without a shell:",
+        "dialogTitle": "Run this package's prepare step?",
+        "failureToast": "Couldn't prepare {name}: {message}",
+        "rerun": "Run prepare again",
+        "run": "Prepare",
+        "running": "Preparing…",
+        "status": {
+          "missing": "Not prepared",
+          "notRequired": "No dependency step",
+          "prepared": "Prepared",
+          "unknown": "Couldn't check preparation",
+          "unverifiable": "Prepare status unknown"
+        },
+        "successToast": "Prepared {name}",
+        "thenInstall": "The package is installed into Pi after this step succeeds.",
+        "timeout": "Time limit: {seconds}s"
+      },
+      "sectionDescription": "Pi coding-agent packages shipped by this plugin. Install them into your Pi, or let Pi agents load them in Cognia-hosted sessions.",
+      "sectionTitle": "Pi packages"
     },
     "preInstall": {
       "back": "Back",
@@ -29601,7 +30756,9 @@
     "deletedOnDisk": "Deleted on disk",
     "deletedTab": "{name} — deleted on disk",
     "editorTab": "Editor",
+    "emptyBrowseFiles": "Browse files",
     "emptyEditor": "Open a file from the tree to start editing.",
+    "emptyEditorMobile": "Open a file to start editing.",
     "externallyChanged": "Changed on disk",
     "fallback": {
       "binary": "This file isn't displayed because it's either binary or uses an unsupported text encoding.",
@@ -30294,7 +31451,7 @@
         "title": "Repository declaration",
         "user": "Runs as {user}"
       },
-      "description": "Choose the container image this project's agents run in.",
+      "description": "Choose the container image this project's external agents run in. Built-in agents are not affected.",
       "driver": "Sandbox driver: {driver}",
       "driverUnreachable": "The sandbox driver is unreachable: {reason}",
       "egress": "Network presets",
@@ -30310,8 +31467,8 @@
       "localContainer": "Run in a local container on this device",
       "localContainerDormant": "This device cannot run local containers yet, so a project that turns this on is refused rather than run unsandboxed.",
       "noEnvironment": "Create and enable an environment above to choose a runtime environment for it.",
-      "optIn": "Run this project's agents in a runtime environment",
-      "optInHint": "Off: agents run on the standard execution path, exactly as before.",
+      "optIn": "Run this project's external agents in a runtime environment",
+      "optInHint": "Off: external agents run on the standard execution path, exactly as before.",
       "poolOff": "Runtime environments are not enabled on this deployment, so runs use the standard execution path.",
       "poolOffKept": "This project's selection is kept and takes effect once an operator enables them.",
       "ports": {
@@ -30325,11 +31482,11 @@
         "declaredUser": "Runs as the declared user {user}",
         "imageUser": "Runs as the image's user {user}",
         "off": "Standard execution path — nothing is sandboxed.",
-        "placed": "The next run is sandboxed in {image}",
+        "placed": "The next external-agent run is sandboxed in {image}",
         "requestedTier": "Requested isolation: at least {tier}",
         "size": "Size: {size}",
         "tierDefaultUser": "Runs as the tier's default user",
-        "title": "What the next run would do"
+        "title": "What the next external-agent run would do"
       },
       "save": "Save runtime environment",
       "saved": "Runtime environment saved.",
@@ -32354,6 +33511,7 @@
       "latestUpdate": "Latest update",
       "loadMore": "Load more incidents",
       "loadMoreError": "Older incidents could not be loaded.",
+      "loadOlder": "Look for older incidents",
       "loadingMore": "Loading…",
       "noMore": "No older incidents.",
       "pastEmpty": "No past incidents recorded.",
@@ -33580,12 +34738,18 @@
     "surfaceBoundary": {
       "back": "Back",
       "backToChat": "Back to chat",
+      "band": {
+        "cacheOnly": "cached data only",
+        "hostOffline": "Host offline",
+        "readOnly": "Read-only",
+        "reconnecting": "Reconnecting to host"
+      },
+      "connectionSettings": "Connection settings",
       "diagnose": "Open diagnostics",
       "pairHost": "Pair or switch host",
-      "readOnly": "Read-only mode: {reason}",
       "reasons": {
         "companion-not-paired": "This device isn't paired with a host yet, or its pairing no longer works.",
-        "connection-offline": "The current host is offline. This action will not be replayed automatically.",
+        "connection-offline": "This page needs a live connection to your host. It comes back on its own once the host reconnects.",
         "host-admin-only": "This operation is restricted to host administrators.",
         "host-manifest-missing": "The host did not provide a compatible capability manifest.",
         "host-protocol": "The host protocol is not compatible with this browser.",
@@ -33597,9 +34761,10 @@
         "requires-companion": "This capability needs a paired desktop or cloud host.",
         "service-only": "This operation can only run inside a trusted service.",
         "unknown-command": "This operation is not present in the shared command manifest.",
-        "vault-locked": "Unlock the local Vault before using this target."
+        "vault-locked": "Your local Vault is locked. Unlock your account to keep using this host."
       },
       "states": {
+        "connecting": "Reconnecting to host",
         "incompatible": "Host upgrade required",
         "offline": "Host offline",
         "requires-grant": "Device permission required",
@@ -33607,7 +34772,7 @@
         "requires-unlock": "Vault locked",
         "unsupported": "Not available on this device"
       },
-      "unlockVault": "Unlock Vault"
+      "unlockVault": "Unlock account"
     }
   },
   "safeMode": {
@@ -33688,6 +34853,8 @@
       "empty": "Nothing scheduled in the next two weeks",
       "emptyDay": "Nothing scheduled that day",
       "runsCount": "{count, plural, one {# run} other {# runs}}",
+      "showFewerDays": "Show fewer days",
+      "showMoreDays": "{count, plural, one {Show # more day} other {Show # more days}}",
       "times": "×{count}",
       "today": "Today",
       "tomorrow": "Tomorrow",
@@ -34020,7 +35187,16 @@
       "openAuthoringConversation": "Open the conversation that created it",
       "originTitle": "Origin",
       "outcomesTitle": "Outcomes, 14 days",
+      "payloadTitle": "What it runs",
       "starting": "Starting…",
+      "stats": {
+        "averageDuration": "Avg duration",
+        "lastRun": "Last run",
+        "lastRunWhen": "Last run, {when}",
+        "runsLifetime": "Runs, all time",
+        "runsLoaded": "Runs loaded",
+        "successRate": "Success"
+      },
       "storage": "Stored in",
       "tagsTitle": "Tags",
       "updatedAt": "Updated",
@@ -34249,13 +35425,21 @@
       "serverListLabel": "Available MCP servers"
     },
     "mobile": {
+      "backToList": "Tasks",
       "fabCreateAria": "Create scheduled task",
+      "noRuns": "No runs recorded yet",
+      "outcomesTitle": "Outcomes, 14 days",
+      "recentRunsTitle": "Recent runs",
+      "refresh": "Refresh",
       "statStripLabels": {
         "active": "Active",
         "executions": "Executions",
         "paused": "Paused",
         "successRate": "Success"
-      }
+      },
+      "tabActivity": "Activity",
+      "tabTasks": "Tasks",
+      "viewLabel": "Scheduler view"
     },
     "more": "More",
     "moreOptions": "More options",
@@ -34526,6 +35710,24 @@
     "payloadFieldErrors": "Please fix the highlighted fields",
     "payloadHelp": "JSON configuration passed to the task executor",
     "payloadStructuredHelp": "Pick the agent / tools / MCP servers / built-in tool toggles for this run.",
+    "payloadSummary": {
+      "allowedTools": "Allowed tools",
+      "condition": "Condition",
+      "copied": "Copied",
+      "copy": "Copy {label}",
+      "delay": "Delay",
+      "disabledSkills": "Disabled skills",
+      "disallowedTools": "Disallowed tools",
+      "echo": "Echo",
+      "empty": "This task stores no payload.",
+      "failWith": "Fail with",
+      "handlerArgs": "Handler arguments",
+      "maxRuntime": "Maximum runtime",
+      "missingReference": "{id} (no longer exists)",
+      "raw": "Stored payload (JSON)",
+      "session": "Session",
+      "timeout": "Timeout"
+    },
     "payloadTooLarge": "Payload exceeds 64KB limit",
     "permissionModeUseDefault": "Use default",
     "permissionModes": {
@@ -34843,6 +36045,13 @@
     "systemTrigger": "Trigger",
     "systemTriggerType": "Trigger Type",
     "tags": "Tags",
+    "tagsInput": {
+      "full": "Up to {max} tags",
+      "hint": "Enter or a comma adds a tag. Search the list with #tag.",
+      "label": "Tags",
+      "placeholder": "Add a tag",
+      "remove": "Remove tag {tag}"
+    },
     "taskName": "Task Name",
     "taskNamePlaceholder": "Enter task name",
     "taskPayload": "Task Payload",
@@ -34862,6 +36071,7 @@
       "connection:outbound:send": "Outbound Send",
       "connection:presence:refresh": "Presence Refresh",
       "connection:scheduled:digest": "Scheduled Digest",
+      "conversation-auto-archive": "Conversation Auto-archive",
       "custom": "Custom",
       "external-agent": "External Agent (ACP)",
       "github-issue-sync": "GitHub Issue Sync",
@@ -35810,7 +37020,23 @@
       "title": "Per-turn averages",
       "tokens": "Tokens"
     },
+    "costTimeline": {
+      "concentration": "Turn {index} alone carried {pct}% of this conversation’s cost.",
+      "context": "Context",
+      "contextShort": "{tokens} context",
+      "cost": "Cost",
+      "growth": "Context grew {ratio}× from the first turn to the last ({from} → {to}). Compacting or starting fresh keeps later turns cheaper.",
+      "jump": "Jump to turn {index}",
+      "jumpFailed": "Could not find that turn in the conversation.",
+      "priciest": "Priciest turns",
+      "rank": "Costs more than {pct}% of your other conversations in the last {days} days (median {median}, {peers} compared).",
+      "title": "Cost per turn",
+      "turn": "Turn {index}"
+    },
     "degradedTree": "Conversation shown as a linear timeline (branch data isn't stored).",
+    "efficiency": {
+      "title": "Efficiency"
+    },
     "empty": "Not enough activity to analyze yet.",
     "idle": {
       "headline": "{count} idle gap(s) over {seconds}s between turns"
@@ -36463,41 +37689,58 @@
         }
       },
       "sessions": {
-        "ago": {
-          "days": "{n}d ago",
-          "hours": "{n}h ago",
-          "justNow": "just now",
-          "minutes": "{n}m ago"
+        "bound": {
+          "archived": "Archived",
+          "cancel": "Cancel",
+          "col": {
+            "actions": "Actions",
+            "conversation": "Conversation",
+            "cost": "Cost",
+            "lastActivity": "Last activity",
+            "sdkSession": "SDK session",
+            "storage": "Storage",
+            "tokens": "Tokens",
+            "turns": "Turns"
+          },
+          "count": "{count, plural, one {# conversation} other {# conversations}}",
+          "description": "Cognia conversations that resume a native Claude Agent SDK session on their next turn, with the usage recorded for each.",
+          "empty": "No conversation is bound to an SDK session yet. A conversation binds once its first turn completes on a provider that issues SDK session ids.",
+          "emptyFilter": "No SDK-bound conversation matches this filter.",
+          "filterLabel": "Filter SDK-bound conversations",
+          "filterPlaceholder": "Filter by title or id…",
+          "fork": "Fork SDK session",
+          "forkFailedToast": "Couldn't fork the SDK session.",
+          "forkHint": "Starts a new conversation that resumes this SDK session without copying its messages. To keep the messages, use “Branch conversation” on a message in the chat.",
+          "forkNamed": "Fork the SDK session of “{title}”",
+          "forkedToast": "Forked into “{title}”.",
+          "loading": "Loading SDK-bound conversations",
+          "lockedReason": "This conversation is read-only while it is handed off to another device.",
+          "open": "Open conversation",
+          "openNamed": "Open “{title}”",
+          "runningReason": "Wait for the current turn to finish before unlinking the SDK session.",
+          "storage": {
+            "filesystem": "Local files",
+            "hostSqlite": "Host store"
+          },
+          "title": "SDK-bound conversations",
+          "unlink": "Unlink SDK session",
+          "unlinkConfirm": "Unlink",
+          "unlinkDescription": "“{title}” keeps all of its messages, but its next turn starts a fresh SDK conversation instead of resuming {sdkSessionId}. The native SDK session itself is not deleted.",
+          "unlinkFailedToast": "Couldn't unlink the SDK session.",
+          "unlinkNamed": "Unlink the SDK session from “{title}”",
+          "unlinkTitle": "Unlink the SDK session?",
+          "unlinkedToast": "SDK session unlinked."
         },
-        "cancel": "Cancel",
-        "colActions": "Actions",
-        "colCost": "Cost",
-        "colKind": "Kind",
-        "colTitle": "Session",
-        "colTokens": "Tokens",
-        "colTurns": "Turns",
-        "colUpdated": "Updated",
-        "delete": "Delete",
-        "deleteDesc": "This permanently removes `{title}` and every message + usage row tied to it. The action can't be undone.",
-        "deleteTitle": "Delete session?",
-        "deletedToast": "Session deleted.",
-        "description": "Every chat session, with token + USD totals captured from each turn's SDK result. Resume to switch the active chat; fork to branch off the SDK conversation; rename or delete in place.",
-        "emptyAll": "No sessions yet. Start a chat to fill this list.",
-        "emptyFilter": "No sessions match this filter.",
-        "filterPlaceholder": "Filter by title or id…",
-        "fork": "Fork SDK session",
-        "forkDisabledTip": "Unavailable until this session has an SDK conversation to fork — it needs at least one completed turn, and only providers that issue a session id have one.",
-        "forkFailedToast": "Couldn't fork the SDK session.",
-        "forkedToast": "Forked into `{title}`.",
-        "rename": "Rename",
-        "renameDesc": "Pick a new display title. Changing the title doesn't affect the chat history or SDK conversation.",
-        "renameEmpty": "Title can't be empty.",
-        "renamePlaceholder": "Session title",
-        "renameTitle": "Rename session",
-        "renamedToast": "Renamed.",
-        "resume": "Resume",
-        "resumedToast": "Resumed `{title}`.",
-        "save": "Save",
+        "manager": {
+          "activeCount": "{count, plural, one {# active conversation} other {# active conversations}}",
+          "archivedCount": "{count, plural, one {# archived conversation} other {# archived conversations}}",
+          "countsLabel": "Conversations across all workspaces",
+          "description": "Rename, archive, delete and browse conversations from every workspace on the Conversations page. This tab only shows how conversations bind to the agent runtime.",
+          "loading": "Loading conversation counts",
+          "open": "Open conversations",
+          "openArchive": "Open archive",
+          "title": "Conversation history"
+        },
         "sdk": {
           "cancel": "Cancel",
           "close": "Close",
@@ -36507,6 +37750,7 @@
           "delete": "Delete SDK session",
           "deleteConfirm": "Delete permanently",
           "deleteDescription": "This removes the native SDK transcript and all of its subagent transcripts. This action cannot be undone.",
+          "deleteLinkedNote": "{count, plural, one {The linked Cognia chat keeps its messages; its next turn starts a fresh SDK conversation.} other {# linked Cognia chats keep their messages; their next turn starts a fresh SDK conversation.}}",
           "deleteTitle": "Delete native SDK session?",
           "deleted": "SDK session deleted.",
           "description": "Sessions stored by the Claude Agent SDK, including transcripts that are not yet linked to a Cognia chat.",
@@ -36525,12 +37769,17 @@
             "importFailed": "The SDK session could not be imported.",
             "loadFailed": "SDK sessions could not be loaded.",
             "renameFailed": "The SDK session could not be renamed.",
-            "tagFailed": "The SDK session tag could not be saved."
+            "tagFailed": "The SDK session tag could not be saved.",
+            "unlinkAfterDeleteFailed": "The SDK session was deleted, but a linked chat could not be unlinked. Unlink it from the SDK-bound conversations list."
           },
           "fork": "Fork SDK session",
           "forked": "SDK session forked.",
           "importStore": "Import into SessionStore",
           "imported": "SDK session imported into SessionStore.",
+          "lastModified": "Updated {time}",
+          "linked": "{count, plural, one {Linked to a chat} other {Linked to # chats}}",
+          "linkedOpen": "Open the linked chat “{title}”",
+          "loading": "Loading native SDK sessions",
           "loadingDetails": "Loading SDK session details",
           "mainTranscript": "Main transcript",
           "refresh": "Refresh SDK sessions",
@@ -36539,6 +37788,7 @@
           "renameTitle": "Rename native SDK session",
           "renamed": "SDK session renamed.",
           "save": "Save",
+          "subagentTranscript": "Subagent {agentId}",
           "subagentTranscripts": "Subagent transcripts",
           "tagDescription": "Use a short tag to group this native SDK session. Leave it blank to clear the tag.",
           "tagLabel": "Session tag",
@@ -36546,9 +37796,7 @@
           "tagged": "SDK session tag saved.",
           "title": "Native SDK sessions",
           "titleLabel": "Session title"
-        },
-        "title": "Sessions",
-        "untitled": "(untitled)"
+        }
       },
       "sidecar": {
         "capabilities": {
@@ -36565,7 +37813,7 @@
         "countHooks": "Hooks",
         "countHooksHint": "Open hooks",
         "countMcpServers": "MCP servers",
-        "countSessions": "Sessions",
+        "countSessions": "Conversations",
         "countSlashCommands": "Slash commands",
         "countsDescription": "Live counts across the related Claude Code settings sections — click a tile to jump.",
         "countsTitle": "Linked surfaces",
@@ -39579,8 +40827,8 @@
         "intentsInvalid": "Gateway intents must be a non-negative integer.",
         "intentsLabel": "Gateway intents (advanced)",
         "intentsPlaceholder": "Default: 46593",
-        "openCompanion": "Open Companion settings",
-        "openCompanionAria": "Open Mobile Companion → Tunnel",
+        "openCompanion": "Open tunnel settings",
+        "openCompanionAria": "Open the tunnel controls in Connections → Overview",
         "openConsole": "Open Discord Developer Portal",
         "openConsoleAria": "Open Discord Developer Portal → General Information for this app",
         "publicKeyHelp": "Ed25519 public key from the Discord Developer Portal. Used to verify Interactions webhook signatures.",
@@ -39622,7 +40870,7 @@
         "webhookUrlNewAdapterHint": "Save the adapter first; the endpoint URL is generated using the new adapter ID.",
         "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the interactions endpoint URL cannot be built. Serve the app behind the same front door as the companion, then reopen this dialog.",
         "webhookUrlTunnelLoading": "Checking tunnel status…",
-        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel under Settings → Connections → Overview, then return here.",
         "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound interaction. Open the desktop app, or pair this browser with a host first."
       },
       "dispatchRules": {
@@ -39770,7 +41018,7 @@
         },
         "authorizeButton": "Connect account",
         "authorizeNeedsAppId": "Save the App ID first — authorization needs it.",
-        "authorizeNeedsRedirect": "Set a redirect URL first (or start the Companion tunnel to derive one) — authorization needs it.",
+        "authorizeNeedsRedirect": "Set a redirect URL first (or start the tunnel under Settings → Connections → Overview to derive one) — authorization needs it.",
         "authorizeNeedsSavedAdapter": "Save the adapter first; authorizing needs the saved credentials.",
         "authorizeOpened": "Authorization opened in your browser. Approve there, then return.",
         "cancel": "Cancel",
@@ -39930,8 +41178,8 @@
           "workbenchSaveFailed": "Could not save the workbench mode. Please retry.",
           "workbenchUrlLabel": "App homepage URL"
         },
-        "openCompanion": "Open Companion settings",
-        "openCompanionAria": "Open Mobile Companion → Tunnel",
+        "openCompanion": "Open tunnel settings",
+        "openCompanionAria": "Open the tunnel controls in Connections → Overview",
         "openConsole": "Open Lark console",
         "openConsoleAria": "Open Lark Open Platform → Event subscriptions for this app",
         "openConsoleSecurityAria": "Open Lark Open Platform → Security settings for this app",
@@ -40138,7 +41386,7 @@
         "webhookUrlNewAdapterHint": "Save the adapter first; the callback URL is generated using the new adapter ID.",
         "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the callback URL cannot be built. Set COGNIA_LARK_PUBLIC_BASE (or serve the app behind the same front door as the companion) and reopen this dialog.",
         "webhookUrlTunnelLoading": "Checking tunnel status…",
-        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel under Settings → Connections → Overview, then return here.",
         "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound request. Open the desktop app, or pair this browser with a host first.",
         "whitelist": {
           "addChatIdPlaceholder": "oc_… (paste chat id)",
@@ -40416,8 +41664,8 @@
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "QQ bot",
         "displayNameRequired": "Display name is required",
-        "openCompanion": "Open Companion settings",
-        "openCompanionAria": "Open Mobile Companion → Tunnel",
+        "openCompanion": "Open tunnel settings",
+        "openCompanionAria": "Open the tunnel controls in Connections → Overview",
         "openConsole": "Open QQ Bot console",
         "openConsoleAria": "Open the QQ Bot console development settings for this bot",
         "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
@@ -40451,7 +41699,7 @@
         "webhookUrlNewAdapterHint": "Save the adapter first. The callback URL is generated using the new adapter ID.",
         "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the callback URL cannot be built. Serve the app behind the same front door as the companion, then reopen this dialog.",
         "webhookUrlTunnelLoading": "Checking tunnel status…",
-        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel under Settings → Connections → Overview, then return here.",
         "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound request. Open the desktop app, or pair this browser with a host first."
       },
       "quickCommands": {
@@ -40598,8 +41846,8 @@
         "oauthNeedsSavedAdapter": "Save this connection first — the authorization is bound to it.",
         "oauthOpened": "Slack authorization opened in your browser.",
         "oauthRedirectHint": "Register this exact redirect URL in your Slack app: {url}",
-        "openCompanion": "Open Companion settings",
-        "openCompanionAria": "Open Mobile Companion → Tunnel",
+        "openCompanion": "Open tunnel settings",
+        "openCompanionAria": "Open the tunnel controls in Connections → Overview",
         "openConsole": "Open Slack app console",
         "openConsoleAria": "Open Slack App → Event Subscriptions for this app",
         "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone.",
@@ -40636,7 +41884,7 @@
         "webhookUrlNewAdapterHint": "Save the adapter first; the request URL is generated using the new adapter ID.",
         "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the request URL cannot be built. Serve the app behind the same front door as the companion, then reopen this dialog.",
         "webhookUrlTunnelLoading": "Checking tunnel status…",
-        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel under Settings → Connections → Overview, then return here.",
         "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound request. Open the desktop app, or pair this browser with a host first."
       },
       "tabs": {
@@ -40674,8 +41922,8 @@
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "My Telegram Bot",
         "displayNameRequired": "Display name is required.",
-        "openCompanion": "Open Tunnel settings",
-        "openCompanionAria": "Open the Tunnel tab",
+        "openCompanion": "Open tunnel settings",
+        "openCompanionAria": "Open the tunnel controls in Connections → Overview",
         "openDocs": "Open Telegram docs",
         "openDocsAria": "Open the Telegram Bot API setWebhook reference",
         "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone.",
@@ -40920,8 +42168,8 @@
         "encodingAesKeyHelp": "43-character key from Server Config (safe mode) — used to decrypt callbacks.",
         "encodingAesKeyInvalid": "EncodingAESKey must be exactly 43 characters.",
         "encodingAesKeyLabel": "EncodingAESKey",
-        "openCompanion": "Open companion",
-        "openCompanionAria": "Open the companion tunnel settings",
+        "openCompanion": "Open tunnel settings",
+        "openCompanionAria": "Open the tunnel controls in Connections → Overview",
         "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
         "save": "Save",
         "sectionAdvanced": "Advanced",
@@ -40951,7 +42199,7 @@
         "webhookUrlNewAdapterHint": "Save the adapter first. The webhook URL is generated using the new adapter ID.",
         "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the webhook URL cannot be built. Serve the app behind the same front door as the companion, then reopen this dialog.",
         "webhookUrlTunnelLoading": "Checking tunnel status…",
-        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel under Settings → Connections → Overview, then return here.",
         "webhookUrlUnsupportedHelp": "This browser has no Cognia host behind it, so nothing can receive an inbound request. Open the desktop app, or pair this browser with a host first.",
         "windowNote": "Replies use the 客服 message API and are only allowed within 48h of the user's last message."
       },
@@ -41281,9 +42529,11 @@
         "goDevices": "Device console",
         "goPairing": "Pair a device",
         "goRelay": "Relay and tunnel",
+        "goRemoteHosts": "Remote hosts",
         "hostMode": "This shell",
         "hostModeValue": {
           "companion": "Drives a Host",
+          "driving": "Is a Host, driving another",
           "host": "Is a Host",
           "standalone": "Standalone"
         },
@@ -41313,7 +42563,8 @@
         "runtimeTitle": "Runtime",
         "shortcutsTitle": "Go to",
         "tier": "Transport",
-        "tierNotApplicable": "Not applicable: this shell runs work locally."
+        "tierNotApplicable": "Not applicable: this shell runs work locally.",
+        "tierPending": "Not reported yet: the link to this host is still being negotiated."
       },
       "pairing": {
         "reachDirect": "Same network",
@@ -41405,10 +42656,12 @@
       },
       "remoteHosts": {
         "active": "Active",
-        "addDescription": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
+        "addDescription": "Paste an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
+        "addDescriptionScan": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
         "addTitle": "Add a host",
+        "connect": "Connect",
         "count": "{count, plural, =0 {none} =1 {1 host} other {# hosts}}",
-        "drive": "Drive",
+        "disconnect": "Disconnect",
         "empty": "No hosts are registered yet. Add one below with an invitation from the Host.",
         "registryDescription": "Hosts this device can drive. One is active at a time.",
         "registryTitle": "Registered hosts",
@@ -41418,10 +42671,10 @@
         "state": {
           "connecting": "Connecting",
           "degraded": "Degraded",
-          "disconnected": "Disconnected",
+          "disconnected": "Not connected",
           "ready": "Ready",
           "revoked": "Revoked",
-          "versionMismatch": "Version mismatch"
+          "versionMismatch": "Upgrade required"
         }
       },
       "statusPage": {
@@ -42360,6 +43613,7 @@
         "aiSessionTitle": "Configure {provider} backup",
         "allowInvalidCertificatesDescription": "Use only for a self-signed certificate on a server you control. This disables certificate verification for this WebDAV endpoint and can expose credentials to interception.",
         "allowInvalidCertificatesLabel": "Allow an invalid or self-signed certificate",
+        "certificateOverrideUnavailable": "Certificate overrides are available only in the desktop app. On mobile, use a trusted HTTPS certificate and turn this option off.",
         "clear": "Clear",
         "cleared": "Password cleared.",
         "credentialHints": {
@@ -42754,19 +44008,10 @@
       }
     },
     "diagnostics": {
-      "crashReports": {
-        "delete": "Delete report",
-        "description": "Self-contained reports written by the Rust crash handler (panics) and the out-of-process minidump monitor (native faults). Each carries a full backtrace or .dmp, system details, and a redacted config snapshot.",
-        "desktopOnly": "Native crash reports are only available in the desktop app.",
-        "dialogTitle": "Crash report",
-        "empty": "No crash reports — nothing has crashed.",
-        "kindNative": "Native",
-        "kindPanic": "Panic",
-        "kindUnknown": "Report",
-        "openFolder": "Open folder",
-        "refresh": "Refresh",
-        "title": "Native crash reports",
-        "view": "View report"
+      "crashReportsLink": {
+        "description": "Review, submit or delete the crash reports this device captured in Logs.",
+        "open": "Open in Logs",
+        "title": "Crash reports"
       },
       "developer": {
         "chatMiddleware": "Plugin chat middleware",
@@ -42810,7 +44055,7 @@
       },
       "service": {
         "autoSubmit": "Submit crash reports automatically",
-        "autoSubmitDescription": "Off by default. When on, a captured crash is packaged and sent without the consent preview — minidumps and screenshots are still never included unless you ask for them per report.",
+        "autoSubmitDescription": "Off by default. When on, crashes captured from then on are sent at the next launch without the consent preview, with a receipt notification. Minidumps and screenshots are never included automatically; reports already on this device stay local.",
         "browserTransport": "In a browser, requests reach the service only if it opts into CORS. The desktop and mobile apps have a direct transport.",
         "connect": "Connect",
         "connected": "Connected",
@@ -42823,6 +44068,14 @@
           "url": "Enter an http or https service URL."
         },
         "projectId": "Project ID",
+        "roleErrors": {
+          "invalid_oidc_session": "The service rejected this identity session token.",
+          "network_unavailable": "The diagnostic service could not be reached to check access.",
+          "other": "Access could not be confirmed with the diagnostic service.",
+          "session_token_missing": "No identity session token is stored for this connection."
+        },
+        "roleProbing": "Checking access…",
+        "roleRetry": "Try again",
         "roles": {
           "admin": "Admin",
           "triager": "Triager",
@@ -43467,10 +44720,12 @@
       "accountLocked": "Your local account is locked. Gateway keys belong to an account, so none can be used or created until you unlock it.",
       "add": "Add",
       "allowlist": "IP allowlist",
+      "allowlistAddRangeAria": "Add {range} to the IP allowlist",
       "allowlistEmpty": "The allowlist is empty, so every connection is refused — including from this machine.",
       "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. Defaults to loopback-only; widen it for LAN peers.",
       "allowlistInvalid": "Enter an IPv4 address or CIDR range, such as 192.168.1.0/24.",
       "allowlistPlaceholder": "192.168.1.0/24",
+      "allowlistRestoreLoopback": "Allow this machine ({entry})",
       "anthropicSnippet": "Anthropic clients (Claude Code)",
       "authNote": "Use an API key as the credential — Authorization: Bearer '<key>' or x-api-key: '<key>'.",
       "autoStrategy": "Virtual model auto · effective strategy {strategy}",
@@ -43504,10 +44759,14 @@
       "colStream": "Streaming",
       "colTime": "Time",
       "colTokens": "Tokens",
-      "concurrencyHeading": "Upstream protection",
-      "concurrencyHelp": "Cool down rate-limited accounts, disable dead ones, and cap concurrent load so a burst can't trip your upstream accounts' risk-control.",
+      "concurrencyHeading": "Concurrency limits",
+      "concurrencyHelp": "Cap simultaneous load per key and per upstream account, so a burst can't trip your upstream accounts' risk-control.",
       "concurrencyWait": "Queue wait (ms)",
       "concurrencyWaitHelp": "How long a request waits for a free concurrency slot before it is rejected with 429. 0 = reject immediately.",
+      "configLoadFailed": "Nothing on this panel can be shown or edited until the saved configuration is read, so editing cannot overwrite it with defaults.",
+      "configLoadFailedTitle": "Gateway settings could not be loaded",
+      "configLoading": "Loading gateway settings…",
+      "configRetry": "Try again",
       "connectHeading": "Connect external tools",
       "connectHelp": "Point any OpenAI- or Anthropic-compatible client at the gateway by setting one of these environment variables.",
       "connectLanNote": "From other devices on your network, replace 127.0.0.1 with this machine's LAN address.",
@@ -43539,7 +44798,8 @@
       "copyKey": "Copy key",
       "costUnknown": "—",
       "createKey": "Create key",
-      "createKeyHelp": "The secret is shown once, right after creation. Run API scopes can be granted afterwards from the key's edit form.",
+      "createKeyHelp": "The secret is shown once, right after creation. Run API scopes can be granted here or later from the key's edit form.",
+      "createScopesFailed": "The key was created, but its Run API scopes could not be granted: {error}. Grant them from the key's edit form.",
       "customApplied": "Custom gateway settings applied",
       "customHeading": "Custom configuration",
       "customHelp": "Edit and validate the complete gateway configuration as JSON or YAML.",
@@ -43602,9 +44862,13 @@
       "keyScopes": "Run API scopes",
       "keyScopesHelp": "What this key may do on the Router + Fusion Run API. A key with no scopes keeps working on the chat endpoints exactly as before, and /v1/runs refuses it.",
       "keyScopesNone": "none (passthrough only)",
-      "keysEmpty": "No keys yet. Create one to authenticate external tools.",
+      "keyViewLogs": "View this key's requests",
+      "keyViewLogsAria": "{usage} — view the requests made with {name}",
+      "keysEmpty": "No keys yet — fill in the form above to create the first one.",
       "keysHeading": "API keys",
       "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
+      "keysLoadFailed": "API keys could not be read",
+      "keysLoading": "Loading API keys…",
       "keysLockedEmpty": "Unlock your local account to see and manage its keys.",
       "lanAllowlistLoopbackOnly": "The listener binds to your network, but the allowlist only admits this machine. Add a range such as 192.168.1.0/24 for other devices to connect.",
       "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
@@ -43618,10 +44882,14 @@
       "localRoutingLegacy": "Legacy snapshot routing is active.",
       "logAttempts": "{count, plural, one {# attempt} other {# attempts}}",
       "logClearFailed": "Could not clear the log",
+      "logClearFilters": "Clear filters",
       "logCleared": "Log cleared",
       "logDecisionId": "Decision",
       "logDistribution": "Distribution",
       "logEmpty": "No requests yet.",
+      "logEmptyFiltered": "No requests match these filters",
+      "logEmptyFilteredHelp": "Widen or clear the filters to see more of the log.",
+      "logEmptyHelp": "Requests appear here as soon as an external tool calls the gateway.",
       "logExport": "Export",
       "logExportCsv": "Export as CSV",
       "logExportFailed": "Could not export the log",
@@ -43695,13 +44963,14 @@
             "label": "Route tickets"
           },
           "upstream": {
-            "description": "Concurrency, cooldowns and stripping",
+            "description": "Parked accounts, cooldowns, concurrency and stripping",
             "label": "Upstream protection"
           }
         },
         "mobileTrigger": "Panels",
         "title": "Gateway settings"
       },
+      "newKey": "New key",
       "newKeyHeading": "Key created",
       "newKeyReveal": "Copy this key now — for your security it is shown only once.",
       "openaiSnippet": "OpenAI clients",
@@ -43755,11 +45024,37 @@
       "selfCheckRun": "Run check",
       "selfCheckSummary": "{ok} of {total, plural, one {# candidate} other {# candidates}} answered",
       "serverHeading": "Server",
+      "setup": {
+        "description": "Three steps route an external tool through Cognia. Each one completes on its own as the gateway reports it.",
+        "done": "Done",
+        "progress": "{done} of {total} done",
+        "stepConnectAction": "Show snippets",
+        "stepKeyAction": "Create key",
+        "stepKeyLocked": "Unlock your local account to create a key.",
+        "stepStartAction": "Start gateway",
+        "stepStartBlocked": "Available once a key exists — the listener will not start without one.",
+        "steps": {
+          "connect": {
+            "help": "Point a client at the gateway with a snippet below. Done once the first request arrives.",
+            "title": "Connect a tool"
+          },
+          "key": {
+            "help": "External tools authenticate with a gateway key, one per tool.",
+            "title": "Create an API key"
+          },
+          "start": {
+            "help": "Run the local HTTP listener so tools can reach it.",
+            "title": "Start the gateway"
+          }
+        },
+        "title": "Get started"
+      },
       "snapshotGeneratedAt": "published {time}",
       "snapshotLabel": "Routing snapshot",
       "snapshotNone": "No routing snapshot has been published yet.",
       "statAliases": "Aliases",
       "statCalls": "Requests served",
+      "statCallsOpenLog": "Open the request log",
       "statLastCall": "Last request",
       "statNever": "Never",
       "statProviders": "Providers",
@@ -43775,6 +45070,8 @@
       "summaryCost": "Est. cost",
       "summaryErrorsHint": "{errors, plural, one {# error} other {# errors}} · {rate}",
       "summaryRequests": "Requests",
+      "summaryScope": "Totals for the {count, plural, one {# request} other {# requests}} listed below.",
+      "summaryScopeFiltered": "Totals for the {count, plural, one {# request} other {# requests}} that match the filters.",
       "summaryTokens": "Tokens (in/out)",
       "tickets": {
         "activeHeading": "Active tickets",
@@ -43817,7 +45114,7 @@
         "yes": "Allowed"
       },
       "timeoutsHeading": "Timeouts",
-      "timeoutsHelp": "How long the gateway waits for an upstream to connect and to answer.",
+      "timeoutsHelp": "How long the gateway waits for an upstream to connect, to answer, and to keep a stream alive.",
       "title": "Inbound Gateway",
       "verifySnippet": "Check the connection"
     },
@@ -45610,7 +46907,7 @@
         "connectAfter": "Connect after pairing",
         "discover": {
           "empty": "No Cognia hosts are advertising on this network.",
-          "emptyHint": "The host needs its companion server running with mDNS on (its Settings → Companion).",
+          "emptyHint": "The host needs its companion server running with mDNS on (its Settings → Connectivity → Local host).",
           "matchLive": "This host is advertising at {url}.",
           "matchStale": "This invitation points at {claimed}, but the host is advertising at {live}.",
           "notAdvertising": "This host isn't advertising here — pairing will use the address in the invitation.",
@@ -45633,18 +46930,20 @@
           "absent": "No host answered on this computer's loopback port.",
           "absentHint": "A browser can only reach a host over http://127.0.0.1. For a host on another machine, paste its invitation above.",
           "blocked": "A host answered at {url} but has not allowed this browser.",
-          "blockedHint": "On that machine, add {origin} under Settings → Companion → Browser access.",
+          "blockedHint": "On that machine, add {origin} under Settings → Connectivity → Local host → Browser access.",
+          "commandCopied": "Command copied. Run it on the host, then paste the invitation below.",
+          "copyCommand": "Copy pairing command",
+          "copyFailed": "Could not copy the command. Select it and copy it by hand.",
           "found": "Found cognia {version} at {url}.",
-          "foundHint": "Run `cognia-server pair` on that machine and paste what it prints above.",
+          "foundHint": "Pairing needs an invitation, not this address. On a headless server, run the command below there and paste what it prints into the invitation field below. On the desktop app, create one under Settings → Connectivity → Pairing.",
           "probe": "Look for a host",
           "probing": "Looking…",
-          "title": "On this computer",
-          "useAddress": "Use this address"
+          "title": "On this computer"
         },
         "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
         "payloadLabel": "Pair payload or JWT",
         "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
-        "seededFrom": "Seeded from {url}. The invitation still has to be pasted.",
+        "seededFrom": "Adding the host at {url}. Paste an invitation from it below: the address alone cannot pair.",
         "submit": "Pair host",
         "submitting": "Pairing…",
         "success": "Paired {label}."
@@ -45826,6 +47125,11 @@
         "whyTitle": "Why this action"
       },
       "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
+      "policyChangeBlocked": "Protection was not changed. {reason}",
+      "policyChangeContextChanged": "The account or connected Host changed. Try again from the current settings.",
+      "policyChangeFailed": "Could not save the protection setting. Try again.",
+      "policyChangeReason": "Verify your identity before turning off this protection",
+      "policyChangeTitle": "Change biometric protection",
       "revealGate": {
         "description": "Settings → Security requires verification before an API key or token is shown.",
         "reason": "Confirm to show this secret",
@@ -45849,9 +47153,13 @@
           "label": "Confirm before signing out"
         }
       },
+      "testBlocked": "Biometric test did not complete. {reason}",
       "testCta": "Test biometric prompt",
       "testDescription": "This is a no-op check to confirm your device biometric works.",
+      "testError": "Could not run the biometric test. Try again.",
+      "testPending": "Waiting for verification…",
       "testReason": "Verify your biometric is working",
+      "testSuccess": "Biometric verification succeeded.",
       "testTitle": "Test biometric prompt",
       "title": "Security & Privacy"
     },
@@ -45876,6 +47184,7 @@
         "commandPaletteToggle": "Open global search / command palette",
         "conversationNext": "Next conversation",
         "conversationPrevious": "Previous conversation",
+        "conversationToggleArchive": "Archive or unarchive conversation",
         "dockLayoutRedo": "Redo dock layout change",
         "dockLayoutReset": "Reset the dock layout",
         "dockLayoutUndo": "Undo dock layout change",
@@ -45901,6 +47210,7 @@
         "observabilityOpenSettings": "Open settings",
         "observabilityRefresh": "Refresh",
         "observabilityToggleEdit": "Toggle edit layout",
+        "observabilityToggleSubView": "Switch Explore / Dashboard",
         "searchFocus": "Focus search",
         "sessionSummaryToggle": "Chat: toggle task summary",
         "settingsOpen": "Open settings",
@@ -46985,6 +48295,59 @@
         "max": "Maximum (21)",
         "off": "Off"
       },
+      "nav": {
+        "groups": {
+          "connectGroup": "Connect",
+          "generalGroup": "Terminal",
+          "hostGroup": "Host",
+          "workspaceGroup": "Workspaces"
+        },
+        "items": {
+          "agents": {
+            "description": "What agents may run in the dock, and how unattended runs ask.",
+            "label": "Agents & automation"
+          },
+          "ai": {
+            "description": "Inline suggestions while you type.",
+            "label": "AI autocomplete"
+          },
+          "appearance": {
+            "description": "Font, cursor, colors and rendering.",
+            "label": "Appearance"
+          },
+          "behavior": {
+            "description": "Copy, paste, bell, scrolling and closing tabs.",
+            "label": "Behavior"
+          },
+          "host": {
+            "description": "The process that keeps sessions alive, remote access and its limits.",
+            "label": "Durable terminal host"
+          },
+          "productivity": {
+            "description": "Quick fixes, command actions and sticky scroll.",
+            "label": "Productivity"
+          },
+          "profiles": {
+            "description": "Named shells the new-tab menu can open.",
+            "label": "Launch profiles"
+          },
+          "project": {
+            "description": "A workspace's own shell, working directory and environment.",
+            "label": "Per-workspace override"
+          },
+          "shell": {
+            "description": "Default shell, scrollback, encoding and sandboxing.",
+            "label": "Shell & session"
+          },
+          "ssh": {
+            "description": "Saved servers, how they authenticate, jump hosts and port forwards.",
+            "label": "SSH hosts"
+          }
+        },
+        "mobileTrigger": "Topics",
+        "sshCountAria": "{count, plural, =1 {# saved SSH host} other {# saved SSH hosts}}",
+        "title": "Terminal topics"
+      },
       "profiles": {
         "add": "Add profile",
         "argsLabel": "Arguments (one per line)",
@@ -47078,6 +48441,8 @@
           "password": "Password",
           "privateKey": "Private key"
         },
+        "browseFiles": "Browse files",
+        "collapse": "Collapse {name}",
         "configImport": {
           "absent": "No config file at {path}.",
           "adjustments": {
@@ -47119,7 +48484,11 @@
         },
         "connect": "Connect",
         "connecting": "Connecting…",
+        "copyName": "{name} (copy)",
+        "duplicate": "Duplicate",
         "empty": "No SSH hosts saved yet.",
+        "emptyHint": "Add a server here, or import the hosts already in your ~/.ssh/config.",
+        "expand": "Edit {name}",
         "fields": {
           "agentNotice": "Signing is delegated to your running ssh-agent. No password, passphrase, or key path is stored for this host.",
           "authMethod": "Authentication method",
@@ -47133,11 +48502,15 @@
           "port": "Port",
           "privateKeyPath": "Private key path",
           "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
+          "secretDesktopOnly": "Passwords and passphrases are kept in the desktop's keyring, so they can only be entered in the desktop app.",
+          "secretSavedOnConnect": "Saved to the system keyring when you connect.",
           "username": "Username"
         },
+        "filterPlaceholder": "Filter by name, user or address",
+        "forgetCredential": "Forget saved secret",
         "forwarding": {
           "add": "Add rule",
-          "desktopApplies": "Configured here, applied by the desktop. A jump chain and a forwarding rule are stripped from the profile the Host receives, so on a paired device these fields are recorded and never take effect: a phone naming a profile gets a shell, never a listening port.",
+          "desktopApplies": "Port forwards are applied only by the desktop that dials. The Host receives this profile with its jump hosts, so a connection made through it from a paired device takes the same route, but it never receives a forwarding rule: a phone naming a profile gets a shell, never a listening port.",
           "errors": {
             "duplicate_local_port": "Another rule already listens on this local port.",
             "duplicate_remote_port": "Another rule already uses this port on the server.",
@@ -47184,29 +48557,100 @@
           "unknownFingerprint": "Not readable from known_hosts"
         },
         "newName": "New SSH host",
-        "notSynced": "Saved on this device only. The desktop app is what pushes these to the Host, so a host added here will not exist there until the desktop syncs it, and Connect will report that the profile is not on the Host. Jump hosts and port forwards never sync at all, by design.",
+        "noMatch": "No saved host matches “{query}”.",
+        "notSynced": "Saved on this device only. The desktop app is what pushes these to the Host, so a host added here will not exist there until the desktop syncs it, and Connect will report that the profile is not on the Host. The Host receives each profile with its jump hosts; port forwards never sync, by design.",
+        "probe": {
+          "action": "Test connection",
+          "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward.",
+          "desktopOnly": "Testing a connection dials from this machine, so it can only be done from the desktop app.",
+          "invalid": {
+            "host": "Not tested: Its host address is empty or contains spaces.",
+            "jumpChain": "Not tested: Its jump host is missing, loops back, or is incomplete.",
+            "localForward": "Not tested: A local forward is invalid.",
+            "name": "Not tested: It has no display name.",
+            "port": "Not tested: Its port is outside 1–65535.",
+            "privateKeyPath": "Not tested: Private-key authentication has no key path.",
+            "profile": "Not tested: A saved field is invalid.",
+            "remoteForward": "Not tested: A remote forward is invalid.",
+            "username": "Not tested: Its username is empty or contains spaces."
+          },
+          "reachableLearned": "Reachable. First connection: the host key {fingerprint} has been trusted and saved.",
+          "reachableVerified": "Reachable. The host key {fingerprint} matched the one already trusted.",
+          "running": "Testing…",
+          "unreachable": "Could not connect: {message}"
+        },
         "remove": "Remove SSH host",
+        "removeConfirm": {
+          "body": "The saved host is removed from this device and from the terminal host. Open sessions stay open.",
+          "bodyWithCredential": "The saved host and its password or passphrase in the system keyring are removed. Open sessions stay open.",
+          "cancel": "Cancel",
+          "confirm": "Remove host",
+          "dependents": "{names} connect through this host. They will refuse to connect until you pick another jump host for them.",
+          "title": "Remove “{name}”?"
+        },
+        "summary": {
+          "auth": {
+            "agent": "SSH agent",
+            "password": "Password",
+            "privateKey": "Private key"
+          },
+          "forwards": "{count, plural, =1 {# forward} other {# forwards}}",
+          "issue": {
+            "chainBroken": "Jump host missing",
+            "invalid": {
+              "host": "Needs a host",
+              "name": "Needs a name",
+              "port": "Invalid port",
+              "privateKeyPath": "Needs a key path",
+              "username": "Needs a username"
+            },
+            "passwordMissing": "No password saved"
+          },
+          "untitled": "Untitled host",
+          "via": "via {names}"
+        },
         "title": "SSH hosts",
         "toasts": {
-          "agentUnavailable": "No SSH agent is reachable",
-          "connectFailed": "SSH connection failed",
-          "connectedViaHost": "Connected through the host, which verified the server key with the copy it keeps.",
-          "credentialRequired": "Enter a password before connecting.",
+          "credentialClearFailed": "Could not remove the saved secret from the keyring",
+          "credentialCleared": "Saved secret removed",
+          "credentialSaveFailed": "Could not save the secret to the keyring",
           "hostKeyForgetFailed": "Could not update known_hosts",
-          "hostKeyForgotten": "Old host key forgotten. Connect again to trust the new one.",
+          "hostKeyForgotten": "Old host key forgotten. Reconnecting to trust the new one…",
           "importJumpsDropped": "These hosts will connect directly because their jump host was not imported: {names}",
           "imported": "Imported {created} new and replaced {replaced} SSH host(s)",
-          "learned": "Connected and saved the host fingerprint",
           "removeFailed": "Could not remove the SSH host",
-          "syncFailed": "Could not synchronize SSH profiles with the terminal host",
-          "verified": "Connected with a verified host fingerprint"
+          "syncFailed": "Could not synchronize SSH profiles with the terminal host"
+        },
+        "trustedKeys": {
+          "confirm": {
+            "action": "Forget key",
+            "body": "The next connection will trust the key that this server presents. Verify its fingerprint through another channel before reconnecting. Saved profiles, credentials and existing connections are not changed.",
+            "cancel": "Cancel",
+            "title": "Forget the trusted key for {address}?"
+          },
+          "description": "SSH server keys trusted by this desktop, including jump hosts. These keys stay on this desktop when you switch Cognia hosts.",
+          "desktopOnly": "Open the desktop app to view or forget its trusted SSH host keys. Paired browsers and phones cannot manage this trust file.",
+          "empty": "No SSH host keys have been trusted on this desktop yet.",
+          "fingerprint": "SHA256 fingerprint",
+          "forget": "Forget",
+          "forgetEntry": "Forget key {fingerprint} for {address}",
+          "forgetFailed": "Could not forget this host key. The trusted key may have changed; cancel and refresh the list before trying again.",
+          "forgetting": "Forgetting…",
+          "keyType": "Key type",
+          "loadFailed": "Could not read this desktop’s trusted host keys.",
+          "loading": "Reading trusted host keys…",
+          "noProfiles": "No saved profiles point to this address and port.",
+          "profiles": "Saved profiles: {names}",
+          "refresh": "Refresh keys",
+          "retry": "Retry",
+          "title": "Trusted host keys"
         }
       },
       "stickyScroll": {
         "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
         "label": "Sticky scroll"
       },
-      "subheading": "Default shell, font and scrollback for the bottom dock. Per-workspace overrides take precedence over these defaults.",
+      "subheading": "How the dock looks and behaves, the host process that keeps sessions alive, and where a new tab can connect: launch profiles and saved SSH hosts. Per-workspace overrides take precedence over these defaults.",
       "unattended": {
         "askPolicy": {
           "consent": "Ask in the terminal dock",
@@ -47483,6 +48927,7 @@
   },
   "sftp": {
     "browser": {
+      "approvalRefused": "Could not obtain host approval to create {path}. Approve this device's transfer on the host, then try again.",
       "failure": {
         "capacity": "The machine has no room for this: {path}",
         "conflict": "Something is already there, or the folder is not empty: {path}",
@@ -50658,6 +52103,10 @@
     },
     "title": "Subscription",
     "usage": {
+      "activity": {
+        "description": "When in the week your turns ran. Unattended runs at odd hours show up here.",
+        "title": "Activity pattern"
+      },
       "budget": {
         "description": "Live spend against the hard USD ceilings. At 100% the next request is held until you approve it.",
         "empty": "No spending limit configured. Set one under Settings, Usage and cost.",
@@ -50669,10 +52118,18 @@
         "title": "Spending limits"
       },
       "bySurface": {
-        "description": "Which part of the app spent the quota. Chat, an agent team, a scheduled workflow and a connector reply all draw on the same plan.",
+        "axis": {
+          "label": "Break down by",
+          "project": "Workspace",
+          "provider": "Provider",
+          "surface": "Surface"
+        },
+        "description": "Where the spend went: by the part of the app that ran it, the provider that billed it, or the workspace it belongs to.",
         "empty": "No usage recorded in this range.",
+        "noProject": "No workspace",
         "rowDetail": "{turns, plural, =1 {1 turn} other {# turns}} · {tokens} tokens",
-        "title": "By surface"
+        "title": "Spend breakdown",
+        "unknownProvider": "Unknown provider"
       },
       "col": {
         "fetchedAt": "Fetched at",
@@ -50691,11 +52148,18 @@
           "more": "More",
           "total": "{cost} over the last {days, plural, one {# day} other {# days}} · {requests, plural, one {# request} other {# requests}}"
         },
+        "stackBy": {
+          "label": "Stack by",
+          "model": "Model",
+          "provider": "Provider",
+          "surface": "Surface"
+        },
         "title": "Cost over time",
         "view": {
           "bar": "Bar chart",
           "heatmap": "Heatmap",
-          "label": "Chart view"
+          "label": "Chart view",
+          "stacked": "Stacked by series"
         }
       },
       "display": {
@@ -50703,6 +52167,10 @@
         "detailed": "Detailed",
         "simplified": "Simplified",
         "standard": "Standard"
+      },
+      "efficiency": {
+        "description": "What prompt caching saved, and how a typical turn compares with the expensive tail.",
+        "title": "Efficiency"
       },
       "emptyBody": "Send a chat message or enable the active probe to populate this table.",
       "emptyTitle": "No usage samples yet",
@@ -50722,6 +52190,10 @@
         "highContext": {
           "advice": "Longer sessions cost more even when cached. Compact mid-task, or start a new chat when switching to a new task.",
           "headline": "{pct}% of turns ran at >150k context"
+        },
+        "spike": {
+          "advice": "Your typical active day in this range costs {median}. Check that day’s top sessions for a runaway loop or an oversized context.",
+          "headline": "{date} cost {cost}, {ratio}× a typical day"
         },
         "title": "What's contributing to your usage?"
       },
@@ -51470,6 +52942,9 @@
       "overflowTabs": "More terminal tabs",
       "resize": "Drag to resize the terminal dock (arrow keys also work)",
       "resizeVertical": "Drag to resize the terminal dock (arrow keys also work)",
+      "restartError": "Couldn't restart terminal: {message}",
+      "restartSshUnknownProfile": "This SSH tab was opened before tabs remembered their saved host, so it cannot be reconnected. Open the host again from the + menu.",
+      "restartUnsupported": "This tab cannot be restarted. Open it again from the + menu.",
       "restore": "Restore terminal panel size",
       "serialConnected": "Opened {path} at {baud} baud.",
       "serialDesktopOnly": "A serial port is a device on this machine, so it can only be opened from the desktop app.",
@@ -51478,11 +52953,7 @@
       "spawnDenied": "Terminal blocked by a plugin",
       "spawnError": "Couldn't open terminal: {message}",
       "splitRight": "Split terminal right (Ctrl+\\)",
-      "sshConnected": {
-        "learned": "Connected and saved the host fingerprint",
-        "verified": "Connected with a verified host fingerprint"
-      },
-      "sshCredentialRequired": "Set a password for “{name}” in Settings → Terminal before connecting."
+      "sshConnecting": "Connecting to {name}…"
     },
     "emptyState": {
       "cloud": {
@@ -51528,6 +52999,8 @@
         "local": "Local (-L)",
         "remote": "Remote (-R)"
       },
+      "edit": "Edit forwarding rules",
+      "editHint": "Only rules that were on when this connection opened are listed. Turn one on in the saved host and reconnect to add it.",
       "error": {
         "hostTooOld": "This host is running a build that predates port-forward reporting.",
         "sessionUnreachable": "This tab's connection to the host is not open, so its tunnels cannot be read.",
@@ -51567,6 +53040,12 @@
         "unknown": "No exit code reported"
       },
       "title": "Command history"
+    },
+    "host": {
+      "differentTarget": "Terminal host: {host}. + New opens on the current host, not this tab’s host.",
+      "runsOn": "Terminal host: {host}",
+      "thisDesktop": "This desktop",
+      "unknown": "Unknown host"
     },
     "hostState": {
       "openSettings": "Open settings",
@@ -51705,12 +53184,44 @@
       "serialBaud": "{baud} baud",
       "serialLabel": "Serial ports",
       "sh": "sh",
+      "sshAdd": "Add an SSH host…",
       "sshLabel": "SSH hosts",
+      "sshLabelThisDesktop": "SSH hosts · dialed from this desktop",
+      "sshManage": "Manage SSH hosts…",
       "tmuxLabel": "tmux sessions",
       "tmuxSession": "{name} ({count, plural, =1 {# window} other {# windows}})",
       "zsh": "zsh"
     },
-    "sshConnectedViaHost": "Connected through the host. It verified the server key with the copy it keeps.",
+    "sshConnect": {
+      "actions": {
+        "addPassword": "Add password",
+        "editHost": "Edit host"
+      },
+      "agentUnavailable": "No SSH agent is reachable for “{name}”",
+      "chainBroken": "“{name}” goes through a jump host that was removed, loops back on itself, or is more than five hops deep.",
+      "connected": {
+        "learned": "Connected to {name} and saved its host fingerprint",
+        "verified": "Connected to {name} with a verified host fingerprint",
+        "viaHost": "Connected to {name} through the host. It verified the server key with the copy it keeps."
+      },
+      "credentialRequired": "“{name}” uses a password and none is stored on this desktop yet.",
+      "credentialRequiredBastion": "“{name}” connects through “{bastion}”, which uses a password and has none stored on this desktop yet.",
+      "failed": "Could not connect to “{name}”",
+      "invalidField": {
+        "host": "Its host address is empty or contains spaces.",
+        "jumpChain": "A jump host in its route is missing a host, username or port.",
+        "localForward": "One of its local forwards is invalid.",
+        "name": "It needs a display name.",
+        "port": "Its port must be between 1 and 65535.",
+        "privateKeyPath": "Private-key authentication needs a key path.",
+        "profile": "Check the saved fields.",
+        "remoteForward": "One of its remote forwards is invalid.",
+        "username": "Its username is empty or contains spaces."
+      },
+      "invalidProfile": "“{name}” is not complete enough to connect.",
+      "notOnHost": "“{name}” is not saved on the host this shell connects through. Only SSH hosts saved on that host's own desktop can be opened from here.",
+      "unknownHost": "This SSH host is no longer saved."
+    },
     "stickyScroll": {
       "label": "Sticky command header"
     },
@@ -51745,13 +53256,16 @@
       "close": "Close terminal",
       "menu": {
         "appearance": "Change appearance",
+        "browseSshFiles": "Browse files over SFTP",
         "clear": "Clear",
         "close": "Close",
         "closeOthers": "Close others",
         "copy": "Copy",
+        "editSshHost": "Edit SSH host",
         "find": "Find…",
         "locateInChat": "Locate in conversation",
         "paste": "Paste",
+        "reconnect": "Reconnect",
         "rename": "Rename tab",
         "restart": "Restart",
         "selectAll": "Select all",
@@ -53097,6 +54611,67 @@
     "openFull": "Open full usage",
     "row": "{provider}: {amount}",
     "title": "Capacity Dock"
+  },
+  "usageInsights": {
+    "activity": {
+      "cell": "{weekday} {hour}:00 · {turns} turns · {cost}",
+      "empty": "No activity in this range.",
+      "label": "Turns by weekday and hour",
+      "less": "Less",
+      "more": "More",
+      "peak": "Busiest: {weekday} around {hour}:00 ({turns} turns)"
+    },
+    "delta": {
+      "down": "Down {value} vs the previous period",
+      "flat": "Unchanged vs the previous period",
+      "noBaseline": "No comparable data in the previous period",
+      "points": "{value} pts",
+      "up": "Up {value} vs the previous period"
+    },
+    "efficiency": {
+      "cacheNone": "No cache reads in this range.",
+      "cacheSaved": "Saved by prompt cache",
+      "cacheSavedHint": "{pct}% cheaper than sending the same prompts uncached. Estimated from model rates.",
+      "cacheSavedValue": "≈ {cost}",
+      "cacheUnpriced": "{tokens} cached tokens are on models without a known input rate and are not counted.",
+      "colMax": "Max",
+      "colMetric": "Metric",
+      "colP50": "p50",
+      "colP90": "p90",
+      "colP99": "p99",
+      "costPerTurn": "Cost per turn",
+      "distributionEmpty": "Not enough timed or priced turns to compute a distribution.",
+      "distributionTitle": "Per-turn distribution",
+      "latency": "Generation time",
+      "sample": "Over {count} turns",
+      "throughput": "Output speed",
+      "tokPerSec": "{value} tok/s"
+    },
+    "forecast": {
+      "basis": {
+        "insufficient": "A projection needs at least one full day of history.",
+        "sinceFirstUse": "Run rate from the {days} days since you started.",
+        "trailing7d": "Run rate from the last 7 days."
+      },
+      "limit": {
+        "exceeded": "This month has already passed the {limit} limit.",
+        "label": "Projected vs monthly limit {limit}",
+        "willCross": "At this pace you reach the {limit} monthly limit around {date}.",
+        "within": "At this pace the month ends at {pct}% of the {limit} limit."
+      },
+      "monthToDate": "Month to date",
+      "perDay": "{cost}/day",
+      "projected": "Projected month-end",
+      "runRate": "Daily run rate",
+      "title": "Month-end forecast",
+      "unpriced": "{turns} turns this month could not be priced, so these figures are lower bounds."
+    },
+    "stack": {
+      "legend": "Series",
+      "other": "Other",
+      "total": "Total",
+      "unknown": "Unknown"
+    }
   },
   "usageOptimizer": {
     "findings": {

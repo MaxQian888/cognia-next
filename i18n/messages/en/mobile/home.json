@@ -38,12 +38,9 @@
     "title": "Customize home"
   },
   "edit": "Edit",
-  "emptyArchived": "No archived chats.",
-  "emptyChats": "No chats yet. Tap + to start one.",
-  "emptyFiltered": "No chats match “{query}”.",
-  "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
   "folderEmpty": "Empty — long-press a chat to move it here.",
   "hideSection": "Hide {section}",
+  "listActions": "Conversation list actions",
   "loadingChats": "Loading conversations…",
   "pinned": "Pinned",
   "presenceStreaming": "Streaming",
@@ -64,6 +61,7 @@
     "quickActions": "Quick actions",
     "recents": "Recent chats"
   },
+  "selectionRowHint": "Tap a chat to select or deselect it. Press Escape or Done to stop selecting.",
   "swipeArchive": "Archive",
   "swipeDelete": "Delete",
   "swipePin": "Pin",
@@ -77,5 +75,6 @@
   "viewArchived": "Show archived chats",
   "viewTabActive": "Chats",
   "viewTabArchived": "Archived",
+  "viewTabArchivedCount": "Archived · {count}",
   "viewTabsLabel": "Conversation view"
 }

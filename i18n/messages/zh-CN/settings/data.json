@@ -645,6 +645,7 @@
     "aiPrompt": "请帮助我在 Cognia 中为 {provider} 配置加密 WebDAV 备份。以服务商当前的官方文档 {docsUrl} 为准；如果可以使用浏览器自动化或相关 skill，请用它查看设置界面并指导配置。绝不要让我把密码、应用专用密码、加密口令、私有服务器地址或其他秘密粘贴到对话中。请说明我应在本地哪个位置输入秘密，核对正确的地址和认证方式，让我执行“测试连接”并保存设置，解释独立的零知识同步口令及“在设备上记住”的安全取舍，然后执行“立即同步”并验证结果。如果缺少必填值，只询问非敏感背景，并给出准确的服务商专属说明。",
     "aiSessionTitle": "配置 {provider} 备份",
     "allowInvalidCertificatesDescription": "仅用于你自行控制且使用自签名证书的服务器。开启后会跳过此 WebDAV 地址的证书验证，凭据可能遭到中间人截获。",
+    "certificateOverrideUnavailable": "仅桌面应用支持跳过证书验证。手机端请使用受信任的 HTTPS 证书，并关闭此选项。",
     "allowInvalidCertificatesLabel": "允许无效或自签名证书",
     "clear": "清除",
     "cleared": "密码已清除。",

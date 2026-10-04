@@ -1,4 +1,11 @@
 {
+  "drill": {
+    "pointHint": "点击数据点即可在探索视图查看对应追踪",
+    "pointLabel": "查看 {time} 的追踪",
+    "showFailing": "{metric}：{value} — 查看失败的追踪",
+    "showFailingHint": "在探索视图中查看这些失败",
+    "showTraces": "查看 {value} 的追踪"
+  },
   "droppedSpans": {
     "label": "{count, plural, other {丢失 # 条 span}}",
     "tooltip": "{count, plural, other {有 # 条 provider span 未被记录}}，原因是调用未传递 trace 上下文。下方的瀑布图缺少这些 span。"
@@ -8,8 +15,36 @@
     "title": "该时间窗口内暂无遥测数据",
     "widen": "放宽至近 30 天"
   },
+  "enums": {
+    "operation": {
+      "chat": "模型调用",
+      "embeddings": "向量嵌入",
+      "execute_tool": "工具调用",
+      "invoke_agent": "智能体运行",
+      "invoke_workflow": "工作流运行",
+      "retrieval": "检索"
+    },
+    "spanKind": {
+      "client": "客户端",
+      "internal": "内部",
+      "server": "服务端"
+    },
+    "surface": {
+      "agent-rpc": "智能体 RPC",
+      "agent-team": "智能体团队",
+      "chat": "对话",
+      "connector": "连接器",
+      "embedding": "向量嵌入",
+      "mcp": "MCP",
+      "plugin": "插件",
+      "plugin-hook": "插件钩子",
+      "retrieval": "检索",
+      "workflow": "工作流"
+    }
+  },
   "export": {
     "dashboardJson": "导出仪表盘为 JSON",
+    "exportList": "导出列表",
     "importDashboard": "导入仪表盘…",
     "importFailed": "导入失败：仪表盘文件无效",
     "imported": "已导入仪表盘配置",
@@ -33,8 +68,15 @@
     },
     "empty": "无可选项",
     "label": "筛选",
-    "search": "搜索…"
+    "search": "搜索…",
+    "searchLabel": "搜索{dimension}取值"
   },
+  "loadError": {
+    "hint": "本地数据库没有响应，通常是暂时的，请稍后重试。",
+    "retry": "重试",
+    "title": "无法读取追踪数据"
+  },
+  "loading": "正在加载遥测数据…",
   "metricToggle": {
     "cost": "成本",
     "errors": "错误",
@@ -67,7 +109,9 @@
     "absolute": "绝对范围",
     "apply": "应用",
     "custom": "自定义范围",
+    "customLabel": "{from} → {to}",
     "from": "起始",
+    "orderError": "“开始”必须早于“结束”。",
     "presets": {
       "15m": "近 15 分钟",
       "1h": "近 1 小时",
@@ -99,7 +143,8 @@
     "p50": "p50",
     "p95": "p95",
     "p99": "p99",
-    "perSec": "请求/秒"
+    "perSec": "请求/秒",
+    "perSecValue": "{value}/秒"
   },
   "settings": {
     "data": {
@@ -114,11 +159,6 @@
       "pruneDone": "已清理 {count} 条 Trace",
       "stored": "已存储 {count} 个 span",
       "title": "数据"
-    },
-    "defaults": {
-      "range": "默认时间范围",
-      "refresh": "自动刷新",
-      "title": "默认值"
     },
     "description": "调整可观测性仪表盘的阈值、面板与数据保留。",
     "metrics": {
@@ -141,7 +181,17 @@
     "title": "仪表盘设置",
     "unitFraction": "0–1 小数",
     "unitMs": "毫秒",
-    "unitUsd": "美元"
+    "unitUsd": "美元",
+    "view": {
+      "custom": "自定义范围",
+      "range": "时间范围",
+      "refresh": "自动刷新",
+      "title": "当前视图"
+    }
+  },
+  "thresholdLevel": {
+    "crit": "已超过严重阈值",
+    "warn": "已超过警告阈值"
   },
   "toolbar": {
     "edit": "编辑布局",
@@ -151,7 +201,9 @@
   },
   "waterfall": {
     "cost": "成本 {value}",
-    "toggleEvents": "展开/收起 span 详情",
+    "eventOffset": "+{offset}",
+    "failed": "失败",
+    "toggleEvents": "展开或收起 {name} 的详情",
     "tokens": "{count} tokens"
   }
 }

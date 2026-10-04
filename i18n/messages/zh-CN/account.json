@@ -70,19 +70,20 @@
     "unlockTitle": "解锁 {name}",
     "unlocking": "正在解锁…",
     "useRecoveryKey": "忘记密码？",
+    "welcomeBack": "欢迎回来",
     "openLocalWorkspace": "打开本地工作空间",
     "localWorkspaceUnavailable": "无法打开本地工作空间。请恢复此设备的凭据存储访问权限后重试。",
     "localWorkspaceLocked": "本地工作空间已锁定。",
     "allowCredentialStoreAccess": "允许访问凭据存储",
-    "errorSecretStoreUnavailable": "本设备的凭据存储未能保存密码。取消勾选“在这台设备上自动解锁”即可直接解锁。",
+    "errorSecretStoreUnavailable": "本设备的凭据存储未能保存密码。取消勾选“记住密码”即可直接解锁。",
     "autoUnlockFailedTitle": "未能自动解锁",
     "autoUnlockFailedStore": "无法读取本设备的凭据存储。请输入密码继续；自动解锁仍保持开启，下次启动时会再次尝试。",
     "autoUnlockFailedMissing": "在本设备上找不到已保存的密码，已关闭自动解锁。请输入密码继续。",
     "autoUnlockFailedRejected": "已保存的密码已无法打开此档案，已将其删除并关闭自动解锁。请输入当前密码。",
     "autoUnlockFailedOther": "未能自动打开此档案。请输入密码重试。",
     "deviceWorkspaceHint": "此工作空间由本设备的凭据存储保护，无需输入密码。",
-    "rememberOnDeviceLabel": "在这台设备上自动解锁",
-    "rememberOnDeviceHelp": "将密码保存在本设备的凭据存储中，以后在这台设备上不再询问。原密码仍然有效。",
+    "rememberOnDeviceLabel": "记住密码",
+    "rememberOnDeviceHelp": "保存在本设备的安全存储中，下次打开时自动解锁。原密码仍然有效。",
     "shareGuestHint": "这是一条分享链接，持有链接的人无需账户即可阅读；解锁后可将其加入你的库。",
     "shareGuestAction": "不解锁，直接阅读"
   },
@@ -190,7 +191,8 @@
     "method": {
       "pin": "PIN 码",
       "pattern": "图案",
-      "passkey": "通行密钥"
+      "passkey": "通行密钥",
+      "biometric": "指纹 / 面容识别"
     },
     "methodLabel": "解锁方式",
     "panelLabel": "快速解锁",
@@ -248,6 +250,15 @@
         "cancelled": "已取消。",
         "no-credential": "未创建通行密钥。",
         "failed": "通行密钥创建失败，请重试。"
+      },
+      "biometricTitle": "设置生物识别解锁",
+      "biometricPrompt": "使用指纹或面容保护本设备上的解锁密钥，同时需要验证账户密码。",
+      "biometricAction": "设置指纹 / 面容识别",
+      "biometricFailure": {
+        "unavailable": "安全生物识别存储不可用。请在系统设置中录入受支持的指纹或面容，或继续使用账户密码。",
+        "cancelled": "已取消设置，未添加生物识别解锁。",
+        "lockout": "生物识别暂时锁定，请稍后重试。",
+        "failed": "无法设置生物识别解锁，请检查账户密码后重试。"
       }
     },
     "policy": {
@@ -260,6 +271,17 @@
       "pattern-repeats-node": "图案不能重复经过同一个点。",
       "pattern-out-of-range": "该图案无效。",
       "pattern-too-simple": "这个图案太容易猜到。避免直线和沿正方形边缘的走法。"
+    },
+    "biometricTitle": "解锁账户",
+    "biometricReason": "验证指纹或面容，以在本设备上解锁此账户。",
+    "biometricCancel": "取消",
+    "biometricAction": "使用生物识别解锁",
+    "biometricWaiting": "正在等待生物识别验证…",
+    "biometricFailure": {
+      "unavailable": "生物识别解锁不可用，请使用账户密码。如果已录入的指纹或面容发生变化，请在账户设置中重新配置。",
+      "cancelled": "已取消，你可以重试或使用账户密码。",
+      "lockout": "生物识别暂时锁定，请使用账户密码。",
+      "failed": "生物识别解锁失败，请重试或使用账户密码。"
     }
   },
   "runtimeTarget": {

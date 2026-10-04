@@ -70,19 +70,20 @@
     "unlockTitle": "Unlock {name}",
     "unlocking": "Unlocking...",
     "useRecoveryKey": "Forgot your password?",
+    "welcomeBack": "Welcome back",
     "openLocalWorkspace": "Open local workspace",
     "localWorkspaceUnavailable": "The local workspace could not be opened. Retry after restoring access to this device’s credential store.",
     "localWorkspaceLocked": "The local workspace is locked.",
     "allowCredentialStoreAccess": "Allow credential store access",
-    "errorSecretStoreUnavailable": "This device’s credential store did not keep the password. Untick “Unlock automatically on this device” to unlock without it.",
+    "errorSecretStoreUnavailable": "This device’s credential store did not keep the password. Untick “Remember password” to unlock without it.",
     "autoUnlockFailedTitle": "Couldn’t unlock automatically",
     "autoUnlockFailedStore": "This device’s credential store could not be read. Enter your password to continue; automatic unlock stays on and is tried again at the next launch.",
     "autoUnlockFailedMissing": "The saved password was not found on this device, so automatic unlock was turned off. Enter your password to continue.",
     "autoUnlockFailedRejected": "The saved password no longer opens this profile, so it was removed and automatic unlock was turned off. Enter your current password.",
     "autoUnlockFailedOther": "The profile could not be opened automatically. Enter your password to try again.",
     "deviceWorkspaceHint": "This workspace is protected by this device’s credential store. No password is needed.",
-    "rememberOnDeviceLabel": "Unlock automatically on this device",
-    "rememberOnDeviceHelp": "Keeps the password in this device’s credential store so you are not asked again here. Your password keeps working.",
+    "rememberOnDeviceLabel": "Remember password",
+    "rememberOnDeviceHelp": "Saved in this device’s secure storage, so it opens without asking next time. Your password keeps working.",
     "shareGuestHint": "This is a shared link. Anyone who has it can read it without an account; unlock to add it to your library.",
     "shareGuestAction": "Read without unlocking"
   },
@@ -190,7 +191,8 @@
     "method": {
       "pin": "PIN",
       "pattern": "Pattern",
-      "passkey": "Passkey"
+      "passkey": "Passkey",
+      "biometric": "Fingerprint / Face ID"
     },
     "methodLabel": "Unlock method",
     "panelLabel": "Quick unlock",
@@ -248,6 +250,15 @@
         "cancelled": "Cancelled.",
         "no-credential": "No passkey was created.",
         "failed": "The passkey could not be created. Try again."
+      },
+      "biometricTitle": "Set up biometric unlock",
+      "biometricPrompt": "Use your fingerprint or face to protect an unlock key on this device. Your account password will also be checked.",
+      "biometricAction": "Set up fingerprint / Face ID",
+      "biometricFailure": {
+        "unavailable": "Secure biometric storage is unavailable. Enroll a supported fingerprint or face in system settings, or use your account password.",
+        "cancelled": "Setup cancelled. No biometric unlock was added.",
+        "lockout": "Biometrics are temporarily locked. Try again later.",
+        "failed": "Biometric unlock could not be set up. Check your account password and try again."
       }
     },
     "policy": {
@@ -260,6 +271,17 @@
       "pattern-repeats-node": "A pattern cannot reuse a point.",
       "pattern-out-of-range": "That pattern is not valid.",
       "pattern-too-simple": "That pattern is too easy to guess. Avoid straight lines and the outline of the square."
+    },
+    "biometricTitle": "Unlock account",
+    "biometricReason": "Authenticate to unlock this account on this device.",
+    "biometricCancel": "Cancel",
+    "biometricAction": "Unlock with biometrics",
+    "biometricWaiting": "Waiting for biometric authentication…",
+    "biometricFailure": {
+      "unavailable": "Biometric unlock is unavailable. Use your password; if your enrolled fingerprints or face changed, set it up again in account settings.",
+      "cancelled": "Cancelled. You can try again or use your password.",
+      "lockout": "Biometrics are temporarily locked. Use your password.",
+      "failed": "Biometric unlock failed. Try again, or use your password."
     }
   },
   "runtimeTarget": {

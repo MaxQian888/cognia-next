@@ -198,6 +198,13 @@
     },
     "close": "Close workspace",
     "currentTask": "Current task",
+    "filePreview": {
+      "back": "Back to workspace",
+      "emptyFile": "This file is empty.",
+      "openInEditor": "Edit",
+      "openInEditorLabel": "Open in the workspace editor",
+      "readOnly": "Read-only"
+    },
     "missingProject": {
       "description": "Link this conversation to a project before editing workspace files.",
       "title": "No project linked"
@@ -265,6 +272,7 @@
       "loadMoreEvents": "Load more events",
       "loading": "Loading task resource",
       "modified": "Modified",
+      "moreActions": "More actions",
       "originFilter": "Filter by source",
       "overflowCount": "{count} watcher gaps reconciled",
       "pin": "Pin task",

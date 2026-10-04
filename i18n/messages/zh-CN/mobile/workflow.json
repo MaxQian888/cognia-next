@@ -62,6 +62,8 @@
     "menu": "更多操作",
     "modeEdit": "编辑",
     "modeRead": "查看",
+    "orientationUnavailable": "此设备无法锁定屏幕方向",
+    "orientationPending": "正在检查屏幕方向锁定…",
     "orientationLock": "锁定横屏",
     "orientationUnlock": "允许竖屏",
     "publicationInvalidated": "工作流已保存，但因可调用接口发生变化而自动下架。请重新发布以开放新契约。",

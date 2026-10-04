@@ -493,5 +493,62 @@
     "installTitle": "安装 Chromium 之前，网页会在系统 WebView 中打开",
     "openFailed": "无法打开 {path}",
     "extensions": "扩展程序"
+  },
+  "sessionUsage": {
+    "title": "用量与上下文",
+    "description": "这个对话花了多少，以及上下文窗口里装了什么。",
+    "openReport": "健康报告",
+    "refresh": "刷新实时上下文读数",
+    "loading": "正在读取本对话的用量…",
+    "empty": "还没有计费的轮次。收到第一条回复后会显示图表。",
+    "windowEmpty": "运行时尚未上报窗口内容。",
+    "modelDetail": "{turns} 轮 · {tokens} tokens",
+    "sections": {
+      "window": "上下文窗口",
+      "growth": "上下文随轮次变化",
+      "cost": "单轮成本",
+      "tokenMix": "Token 构成",
+      "tools": "工具调用",
+      "models": "模型",
+      "efficiency": "效率"
+    },
+    "kpi": {
+      "cost": "成本",
+      "turns": "轮次",
+      "tokens": "Token",
+      "cacheHit": "缓存命中",
+      "avgCost": "平均每轮",
+      "speed": "速度",
+      "tokPerSec": "{value} tok/s"
+    },
+    "composition": {
+      "aria": "上下文窗口：已用 {used} / {max} tokens",
+      "ofWindow": "占整个窗口的比例，由运行时实时上报。",
+      "ofAttributed": "根据对话记录估算：为可归因部分内的占比，而非整个窗口。"
+    },
+    "growth": {
+      "empty": "还没有可绘制的轮次。",
+      "turn": "第 {index} 轮",
+      "context": "上下文",
+      "window": "窗口上限",
+      "compactAt": "自动压缩",
+      "summary": "峰值 {peak}，最新 {latest}。",
+      "drops": "上下文骤降 {count} 次（压缩、清空历史或新分支）。"
+    },
+    "tokenMix": {
+      "empty": "还没有记录到 Token。",
+      "aria": "按类型划分的 {total} tokens",
+      "input": "输入",
+      "output": "输出",
+      "cacheRead": "缓存读取",
+      "cacheWrite": "缓存写入",
+      "reasoning": "输出中有 {tokens} 为推理（{pct}）。"
+    },
+    "tools": {
+      "empty": "本对话没有工具调用。",
+      "summary": "共 {total} 次调用",
+      "errors": "· {count} 次失败（{pct}%）",
+      "other": "其他"
+    }
   }
 }

@@ -1,0 +1,61 @@
+{
+  "delta": {
+    "up": "较上一周期上升 {value}",
+    "down": "较上一周期下降 {value}",
+    "flat": "与上一周期持平",
+    "noBaseline": "上一周期没有可比较的数据",
+    "points": "{value} 个百分点"
+  },
+  "forecast": {
+    "title": "月末预测",
+    "monthToDate": "本月至今",
+    "runRate": "日均消耗",
+    "projected": "预计月末",
+    "perDay": "{cost}/天",
+    "basis": {
+      "trailing7d": "按最近 7 天的消耗速度推算。",
+      "sinceFirstUse": "按开始使用以来 {days} 天的消耗速度推算。",
+      "insufficient": "至少需要一整天的记录才能预测。"
+    },
+    "unpriced": "本月有 {turns} 轮无法定价，以上数字为下限值。",
+    "limit": {
+      "label": "预计花费 / 月度上限 {limit}",
+      "willCross": "按当前速度，大约在 {date} 达到 {limit} 的月度上限。",
+      "within": "按当前速度，月末将用到 {limit} 上限的 {pct}%。",
+      "exceeded": "本月已超过 {limit} 的上限。"
+    }
+  },
+  "stack": {
+    "other": "其他",
+    "unknown": "未知",
+    "legend": "系列",
+    "total": "合计"
+  },
+  "activity": {
+    "peak": "最活跃：{weekday} {hour}:00 前后（{turns} 轮）",
+    "cell": "{weekday} {hour}:00 · {turns} 轮 · {cost}",
+    "empty": "该范围内没有活动。",
+    "less": "少",
+    "more": "多",
+    "label": "按星期与小时分布的轮次"
+  },
+  "efficiency": {
+    "cacheSaved": "提示缓存节省",
+    "cacheSavedValue": "≈ {cost}",
+    "cacheSavedHint": "比不使用缓存发送相同提示便宜 {pct}%。按模型定价估算。",
+    "cacheNone": "该范围内没有缓存读取。",
+    "cacheUnpriced": "有 {tokens} 个缓存 Token 所属模型没有已知的输入单价，未计入。",
+    "distributionTitle": "单轮分布",
+    "colMetric": "指标",
+    "costPerTurn": "单轮成本",
+    "latency": "生成耗时",
+    "throughput": "输出速度",
+    "tokPerSec": "{value} tok/s",
+    "distributionEmpty": "已计时或已定价的轮次不足，无法计算分布。",
+    "sample": "基于 {count} 轮",
+    "colP50": "P50",
+    "colP90": "P90",
+    "colP99": "P99",
+    "colMax": "最大值"
+  }
+}

@@ -182,7 +182,7 @@
       "approveBuildHint": "批准会将此构建镜像及其最终运行配置绑定到仓库的确切提交。",
       "ignoredFields": "沙箱运行时不使用以下字段：{fields}"
     },
-    "description": "选择该项目的 Agent 运行时所使用的容器镜像。",
+    "description": "选择该项目的外部 Agent 运行时所使用的容器镜像。内置 Agent 不受影响。",
     "driver": "沙箱驱动：{driver}",
     "driverUnreachable": "无法连接沙箱驱动：{reason}",
     "egress": "网络预设",
@@ -198,8 +198,8 @@
     "localContainer": "在本设备的本地容器中运行",
     "localContainerDormant": "本设备暂时无法运行本地容器；开启此项的项目会被拒绝运行，而不会在无沙箱的情况下继续。",
     "noEnvironment": "请先在上方创建并启用一个环境，再为它选择运行环境。",
-    "optIn": "让该项目的 Agent 在运行环境中运行",
-    "optInHint": "关闭时：Agent 按原有的标准执行路径运行，与之前完全一致。",
+    "optIn": "让该项目的外部 Agent 在运行环境中运行",
+    "optInHint": "关闭时：外部 Agent 按原有的标准执行路径运行，与之前完全一致。",
     "poolOff": "该部署未启用运行环境，运行将使用标准执行路径。",
     "poolOffKept": "该项目的选择会被保留，待运维人员启用后生效。",
     "preview": {
@@ -207,11 +207,11 @@
       "declaredUser": "以声明的用户 {user} 运行",
       "imageUser": "以镜像中的用户 {user} 运行",
       "off": "标准执行路径 — 不使用沙箱。",
-      "placed": "下一次运行将在 {image} 的沙箱中进行",
+      "placed": "下一次外部 Agent 运行将在 {image} 的沙箱中进行",
       "requestedTier": "请求的隔离级别：至少 {tier}",
       "size": "规格：{size}",
       "tierDefaultUser": "以该隔离级别的默认用户运行",
-      "title": "下一次运行将如何执行"
+      "title": "下一次外部 Agent 运行将如何执行"
     },
     "save": "保存运行环境",
     "saved": "运行环境已保存。",

@@ -6,13 +6,18 @@
     "claude-code": "Claude Code",
     "codex": "Codex",
     "gemini-cli": "Gemini CLI",
-    "agent-plugins": "Agent Plugins 1.0",
+    "agent-plugins": "Agent Plugins",
     "cursor": "Cursor",
     "copilot": "GitHub Copilot",
-    "kimi": "Kimi Code",
+    "kimi": "Kimi CLI",
     "devin": "Devin",
     "opencode": "OpenCode",
-    "pi": "Pi"
+    "pi": "Pi",
+    "factory-droid": "Factory Droid",
+    "qoder": "Qoder CLI",
+    "codebuddy": "CodeBuddy",
+    "auggie": "Auggie",
+    "open-plugins": "Open Plugins (legacy .plugin)"
   },
   "fidelity": {
     "native-exact": "Native",

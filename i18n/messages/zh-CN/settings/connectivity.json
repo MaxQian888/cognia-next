@@ -57,6 +57,7 @@
     "hostMode": "这个壳",
     "hostModeValue": {
       "host": "本身是主机",
+      "driving": "本身是主机，正在驱动另一台",
       "companion": "驱动一台主机",
       "standalone": "独立运行"
     },
@@ -77,6 +78,7 @@
     },
     "tier": "传输层",
     "tierNotApplicable": "不适用：这个壳在本地运行工作。",
+    "tierPending": "尚未上报：与这台主机的链路仍在协商。",
     "activeHost": "当前主机",
     "activeHostSelf": "这台机器。",
     "activeHostNone": "没有正在驱动的主机。",
@@ -94,6 +96,7 @@
     "shortcutsTitle": "前往",
     "goPairing": "配对设备",
     "goRelay": "中继与隧道",
+    "goRemoteHosts": "远程主机",
     "goDevices": "设备控制台"
   },
   "pairing": {
@@ -108,19 +111,21 @@
     "count": "{count, plural, =0 {无} =1 {1 台主机} other {# 台主机}}",
     "empty": "还没有登记任何主机。在下方用主机的邀请添加一台。",
     "addTitle": "添加主机",
-    "addDescription": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
+    "addDescription": "粘贴来自主机「配对」主题的邀请。主机无法直连时会走中继。",
+    "addDescriptionScan": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
     "renameAria": "重命名 {label}",
     "renameSave": "保存名称",
     "active": "活动",
     "state": {
-      "disconnected": "已断开",
+      "disconnected": "未连接",
       "connecting": "连接中",
       "ready": "就绪",
       "degraded": "降级",
       "revoked": "已吊销",
-      "versionMismatch": "版本不匹配"
+      "versionMismatch": "需要升级"
     },
-    "drive": "驱动",
+    "connect": "连接",
+    "disconnect": "断开",
     "removeAria": "移除 {label}"
   },
   "push": {

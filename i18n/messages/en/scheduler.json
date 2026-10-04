@@ -456,7 +456,15 @@
       "executions": "Executions",
       "paused": "Paused",
       "successRate": "Success"
-    }
+    },
+    "viewLabel": "Scheduler view",
+    "tabTasks": "Tasks",
+    "tabActivity": "Activity",
+    "refresh": "Refresh",
+    "backToList": "Tasks",
+    "outcomesTitle": "Outcomes, 14 days",
+    "recentRunsTitle": "Recent runs",
+    "noRuns": "No runs recorded yet"
   },
   "more": "More",
   "moreOptions": "More options",
@@ -998,6 +1006,7 @@
     "connection:outbound:send": "Outbound Send",
     "connection:presence:refresh": "Presence Refresh",
     "connection:scheduled:digest": "Scheduled Digest",
+    "conversation-auto-archive": "Conversation Auto-archive",
     "custom": "Custom",
     "external-agent": "External Agent (ACP)",
     "github-issue-sync": "GitHub Issue Sync",
@@ -1225,7 +1234,9 @@
     "today": "Today",
     "tomorrow": "Tomorrow",
     "times": "×{count}",
-    "until": "until {time}"
+    "until": "until {time}",
+    "showMoreDays": "{count, plural, one {Show # more day} other {Show # more days}}",
+    "showFewerDays": "Show fewer days"
   },
   "kindSummary": {
     "activeOfTotal": "{active}/{total} active"
@@ -1268,7 +1279,16 @@
     "workspaceTitle": "Workspace",
     "backToOverview": "Overview",
     "starting": "Starting…",
-    "openAuthoringConversation": "Open the conversation that created it"
+    "openAuthoringConversation": "Open the conversation that created it",
+    "payloadTitle": "What it runs",
+    "stats": {
+      "successRate": "Success",
+      "runsLifetime": "Runs, all time",
+      "runsLoaded": "Runs loaded",
+      "averageDuration": "Avg duration",
+      "lastRun": "Last run",
+      "lastRunWhen": "Last run, {when}"
+    }
   },
   "runSheet": {
     "next": "Next run",
@@ -1344,5 +1364,30 @@
     "pause": "{count, plural, =1 {Paused 1 item} other {Paused # items}}",
     "resume": "{count, plural, =1 {Resumed 1 item} other {Resumed # items}}",
     "delete": "{count, plural, =1 {Deleted 1 item} other {Deleted # items}}"
+  },
+  "tagsInput": {
+    "label": "Tags",
+    "placeholder": "Add a tag",
+    "full": "Up to {max} tags",
+    "remove": "Remove tag {tag}",
+    "hint": "Enter or a comma adds a tag. Search the list with #tag."
+  },
+  "payloadSummary": {
+    "session": "Session",
+    "allowedTools": "Allowed tools",
+    "disallowedTools": "Disallowed tools",
+    "disabledSkills": "Disabled skills",
+    "timeout": "Timeout",
+    "maxRuntime": "Maximum runtime",
+    "condition": "Condition",
+    "echo": "Echo",
+    "delay": "Delay",
+    "failWith": "Fail with",
+    "handlerArgs": "Handler arguments",
+    "missingReference": "{id} (no longer exists)",
+    "empty": "This task stores no payload.",
+    "raw": "Stored payload (JSON)",
+    "copy": "Copy {label}",
+    "copied": "Copied"
   }
 }

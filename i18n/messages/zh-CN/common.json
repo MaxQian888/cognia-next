@@ -2,6 +2,7 @@
   "add": "添加",
   "all": "全部",
   "back": "上一步",
+  "backToApp": "返回应用",
   "biometricBlocked": {
     "cancelled": "已取消生物识别验证。",
     "error": "生物识别验证失败。",
@@ -14,6 +15,7 @@
   "copied": "已复制",
   "copy": "复制",
   "delete": "删除",
+  "desktopOnly": "此窗口仅在桌面应用中可用。",
   "dismiss": "忽略",
   "duplicate": "复制",
   "edit": "编辑",

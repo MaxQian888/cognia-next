@@ -708,7 +708,14 @@
       "view": {
         "bar": "Bar chart",
         "heatmap": "Heatmap",
-        "label": "Chart view"
+        "label": "Chart view",
+        "stacked": "Stacked by series"
+      },
+      "stackBy": {
+        "label": "Stack by",
+        "model": "Model",
+        "surface": "Surface",
+        "provider": "Provider"
       }
     },
     "display": {
@@ -736,7 +743,11 @@
         "advice": "Longer sessions cost more even when cached. Compact mid-task, or start a new chat when switching to a new task.",
         "headline": "{pct}% of turns ran at >150k context"
       },
-      "title": "What's contributing to your usage?"
+      "title": "What's contributing to your usage?",
+      "spike": {
+        "headline": "{date} cost {cost}, {ratio}× a typical day",
+        "advice": "Your typical active day in this range costs {median}. Check that day’s top sessions for a runaway loop or an oversized context."
+      }
     },
     "loading": "Loading…",
     "models": {
@@ -850,10 +861,18 @@
       "resetsAt": "Resets {at}"
     },
     "bySurface": {
-      "title": "By surface",
-      "description": "Which part of the app spent the quota. Chat, an agent team, a scheduled workflow and a connector reply all draw on the same plan.",
+      "title": "Spend breakdown",
+      "description": "Where the spend went: by the part of the app that ran it, the provider that billed it, or the workspace it belongs to.",
       "empty": "No usage recorded in this range.",
-      "rowDetail": "{turns, plural, =1 {1 turn} other {# turns}} · {tokens} tokens"
+      "rowDetail": "{turns, plural, =1 {1 turn} other {# turns}} · {tokens} tokens",
+      "axis": {
+        "label": "Break down by",
+        "surface": "Surface",
+        "provider": "Provider",
+        "project": "Workspace"
+      },
+      "noProject": "No workspace",
+      "unknownProvider": "Unknown provider"
     },
     "budget": {
       "title": "Spending limits",
@@ -864,6 +883,14 @@
         "critical": "Critical",
         "exceeded": "Exceeded"
       }
+    },
+    "efficiency": {
+      "title": "Efficiency",
+      "description": "What prompt caching saved, and how a typical turn compares with the expensive tail."
+    },
+    "activity": {
+      "title": "Activity pattern",
+      "description": "When in the week your turns ran. Unattended runs at odd hours show up here."
     }
   },
   "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app.",

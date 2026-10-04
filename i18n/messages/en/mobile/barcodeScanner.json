@@ -1,0 +1,8 @@
+{
+  "cancel": "Cancel scanning",
+  "instruction": "Point the camera at a QR code. It will be scanned automatically.",
+  "title": "Scan QR code",
+  "torchError": "Unable to change the flashlight. Please try again.",
+  "torchOff": "Turn flashlight off",
+  "torchOn": "Turn flashlight on"
+}

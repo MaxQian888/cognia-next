@@ -645,6 +645,7 @@
     "aiPrompt": "Help me configure encrypted WebDAV backup in Cognia for {provider}. Use the provider's current official documentation at {docsUrl}; if browser automation or a relevant skill is available, use it to inspect the settings screen and guide the configuration. Never ask me to paste a password, app password, encryption passphrase, private server URL, or other secret into chat. Explain where I should enter secrets locally, verify the correct endpoint and authentication method, have me use Test connection, save the settings, explain the separate zero-knowledge sync passphrase and its remember-on-device trade-off, then run Sync now and verify the result. If a required value is unknown, ask only for non-secret context and give precise provider-specific instructions.",
     "aiSessionTitle": "Configure {provider} backup",
     "allowInvalidCertificatesDescription": "Use only for a self-signed certificate on a server you control. This disables certificate verification for this WebDAV endpoint and can expose credentials to interception.",
+    "certificateOverrideUnavailable": "Certificate overrides are available only in the desktop app. On mobile, use a trusted HTTPS certificate and turn this option off.",
     "allowInvalidCertificatesLabel": "Allow an invalid or self-signed certificate",
     "clear": "Clear",
     "cleared": "Password cleared.",

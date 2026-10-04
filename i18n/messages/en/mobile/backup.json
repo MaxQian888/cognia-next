@@ -31,5 +31,6 @@
   "strategyOverwrite": "Overwrite (import wins)",
   "strategySkip": "Keep local (skip conflicts)",
   "title": "Backup & sync",
-  "webModeNote": "Web mode: backup downloads as a regular file."
+  "webModeNote": "Web mode: backup downloads as a regular file.",
+  "reminderFailed": "Could not update the backup reminder. Please check notification permission and try again."
 }

@@ -1,7 +1,8 @@
 {
-  "bannerHostOffline": "无法连接主机 — 发送将进入队列，等待主机恢复。",
-  "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",
-  "bannerReconnecting": "正在重连…",
+  "connectionSettings": "连接设置",
+  "detailCacheOnly": "仅可查看缓存数据",
+  "detailHostOffline": "发送将排队，恢复后自动送达",
+  "detailNetworkOffline": "仍可浏览，发送将进入队列",
   "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",
   "notifChannel": "cognia",
   "notifTitle": "cognia 离线发送中",
@@ -36,5 +37,8 @@
     "withdrawnUnconfirmed": "已撤回。之前的发送尝试可能已送达主机，主机上仍可能执行。"
   },
   "review": "查看",
-  "staleWarning": "{count} 条消息超过 30 分钟未送达。"
+  "staleWarning": "{count} 条消息超过 30 分钟未送达。",
+  "stateHostOffline": "主机离线",
+  "stateNetworkOffline": "网络已断开",
+  "stateReconnecting": "正在重连主机"
 }

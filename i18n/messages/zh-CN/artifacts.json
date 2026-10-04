@@ -198,6 +198,13 @@
     },
     "close": "关闭工作区",
     "currentTask": "当前任务",
+    "filePreview": {
+      "back": "返回工作区",
+      "emptyFile": "此文件为空。",
+      "openInEditor": "编辑",
+      "openInEditorLabel": "在工作区编辑器中打开",
+      "readOnly": "只读"
+    },
     "missingProject": {
       "description": "请先将当前对话关联到项目，再编辑工作区文件。",
       "title": "未关联项目"
@@ -265,6 +272,7 @@
       "loadMoreEvents": "加载更多事件",
       "loading": "正在加载任务资源",
       "modified": "已修改",
+      "moreActions": "更多操作",
       "originFilter": "按来源筛选",
       "overflowCount": "已核对 {count} 个监听缺口",
       "pin": "固定任务",

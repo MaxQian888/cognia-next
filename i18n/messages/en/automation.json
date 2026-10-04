@@ -392,6 +392,7 @@
     "empty": "No sandboxes configured yet.",
     "host": "Host",
     "image": "Docker image",
+    "imageHelp": "The built-in Linux desktop is prepared locally on first start. Setup needs internet access and may take several minutes. Custom images require the computer-server protocol, Cognia desktop authentication, and Python 3.",
     "lifecycleTitle": "Lifecycle",
     "manage": "Manage",
     "memoryMb": "Memory limit (MiB)",
@@ -441,7 +442,60 @@
     "unsupportedAction": "No live adapter implements this action for the imported provider",
     "workspaceContainerPath": "Path inside the machine",
     "workspaceHostPath": "Host directory to mount",
-    "workspaceMountHelp": "Both are needed together. Without a mount, shell and file work inside the machine cannot reach any host path."
+    "workspaceMountHelp": "Both are needed together. Without a mount, shell and file work inside the machine cannot reach any host path.",
+    "desktopViewer": {
+      "title": "Desktop",
+      "readOnly": "View only",
+      "controlling": "You have control",
+      "cadence": "Screenshots refresh about once per second while this view is visible.",
+      "screen": "Sandbox desktop screenshot",
+      "loading": "Connecting to the desktop…",
+      "disconnected": "Desktop disconnected. Retrying automatically…",
+      "unavailable": "Start this sandbox in the desktop app to view its screen.",
+      "refresh": "Refresh screen",
+      "acquiring": "Taking control…",
+      "release": "Release control",
+      "takeControl": "Take control",
+      "controlHelp": "Click the screen to use the keyboard. Drag or scroll to interact. Escape releases control. Control also ends when this window loses focus. Agent input is paused while you have control.",
+      "textLabel": "Text to type in the sandbox",
+      "textPlaceholder": "Compose or paste text here, including Chinese input.",
+      "sendText": "Send text",
+      "sendEscape": "Send Escape",
+      "error": {
+        "capture": "Unable to capture the desktop. Control has been released.",
+        "control": "Unable to acquire or renew control. Try taking control again.",
+        "input": "The input could not be confirmed. Control has been released; check the screen before retrying.",
+        "release": "The release could not be confirmed. Control expires automatically within 15 seconds."
+      },
+      "doubleClick": "Double-click mode"
+    },
+    "deleteConfirmTitle": "Delete {name}?",
+    "deleteConfirmDescription": "This permanently deletes the container and all files stored inside it. Files in mounted host folders remain. Export any files you need before deleting.",
+    "deleteConfirm": "Delete permanently",
+    "deleting": "Deleting…",
+    "fileTransfer": {
+      "title": "Files",
+      "help": "Upload or download one binary file up to {limit} MiB. Uploads use an existing folder and never overwrite a file. Uploading releases manual desktop control.",
+      "missingContainer": "Refresh the connection health to identify its container before transferring files.",
+      "folder": "Existing folder inside the sandbox",
+      "downloadPath": "File path inside the sandbox",
+      "upload": "Choose file and upload",
+      "uploading": "Uploading…",
+      "download": "Download file",
+      "downloading": "Downloading…",
+      "notice": {
+        "cancelled": "File transfer cancelled.",
+        "uploaded": "File uploaded to the selected sandbox.",
+        "downloaded": "File saved.",
+        "tooLarge": "The file exceeds the 8 MiB transfer limit.",
+        "readFailed": "Unable to read the selected file.",
+        "saveFailed": "Unable to save the downloaded file.",
+        "uploadFailed": "Upload failed. Check that the same container is running, the folder exists, the filename is unused, and control is available.",
+        "downloadFailed": "Download failed. Check that the same container is running and the file is readable.",
+        "invalidPath": "Enter an absolute path inside the sandbox without parent-directory traversal.",
+        "invalidPayload": "The downloaded file failed its size or checksum check."
+      }
+    }
   },
   "screenOff": {
     "activeMonitor": {

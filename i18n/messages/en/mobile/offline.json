@@ -1,7 +1,8 @@
 {
-  "bannerHostOffline": "Host unreachable — sends will queue until it is back.",
-  "bannerOffline": "Offline — sends will queue and retry automatically.",
-  "bannerReconnecting": "Reconnecting…",
+  "connectionSettings": "Connection",
+  "detailCacheOnly": "cached data only",
+  "detailHostOffline": "sends wait until it's back",
+  "detailNetworkOffline": "you can still browse; sends will be queued",
   "notifBody": "{count} messages waiting. Will retry when online.",
   "notifChannel": "cognia",
   "notifTitle": "cognia outbound queue",
@@ -36,5 +37,8 @@
     "withdrawnUnconfirmed": "Withdrawn. An earlier attempt may already have reached the host, so it could still run there."
   },
   "review": "Review",
-  "staleWarning": "{count} messages waiting > 30 min."
+  "staleWarning": "{count} messages waiting > 30 min.",
+  "stateHostOffline": "Host offline",
+  "stateNetworkOffline": "You're offline",
+  "stateReconnecting": "Reconnecting to host"
 }

@@ -45,7 +45,9 @@
   "deletedOnDisk": "已在磁盘删除",
   "deletedTab": "{name} —— 已在磁盘删除",
   "editorTab": "编辑器",
+  "emptyBrowseFiles": "浏览文件",
   "emptyEditor": "从文件树打开一个文件开始编辑。",
+  "emptyEditorMobile": "打开一个文件开始编辑。",
   "externallyChanged": "磁盘已变更",
   "fallback": {
     "binary": "此文件为二进制文件或使用了不受支持的文本编码，无法显示。",

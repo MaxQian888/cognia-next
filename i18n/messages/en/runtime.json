@@ -2,12 +2,18 @@
   "surfaceBoundary": {
     "back": "Back",
     "backToChat": "Back to chat",
+    "band": {
+      "cacheOnly": "cached data only",
+      "hostOffline": "Host offline",
+      "readOnly": "Read-only",
+      "reconnecting": "Reconnecting to host"
+    },
+    "connectionSettings": "Connection settings",
     "diagnose": "Open diagnostics",
     "pairHost": "Pair or switch host",
-    "readOnly": "Read-only mode: {reason}",
     "reasons": {
       "companion-not-paired": "This device isn't paired with a host yet, or its pairing no longer works.",
-      "connection-offline": "The current host is offline. This action will not be replayed automatically.",
+      "connection-offline": "This page needs a live connection to your host. It comes back on its own once the host reconnects.",
       "host-admin-only": "This operation is restricted to host administrators.",
       "host-manifest-missing": "The host did not provide a compatible capability manifest.",
       "host-protocol": "The host protocol is not compatible with this browser.",
@@ -19,9 +25,10 @@
       "requires-companion": "This capability needs a paired desktop or cloud host.",
       "service-only": "This operation can only run inside a trusted service.",
       "unknown-command": "This operation is not present in the shared command manifest.",
-      "vault-locked": "Unlock the local Vault before using this target."
+      "vault-locked": "Your local Vault is locked. Unlock your account to keep using this host."
     },
     "states": {
+      "connecting": "Reconnecting to host",
       "incompatible": "Host upgrade required",
       "offline": "Host offline",
       "requires-grant": "Device permission required",
@@ -29,6 +36,6 @@
       "requires-unlock": "Vault locked",
       "unsupported": "Not available on this device"
     },
-    "unlockVault": "Unlock Vault"
+    "unlockVault": "Unlock account"
   }
 }

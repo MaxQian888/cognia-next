@@ -62,6 +62,8 @@
     "menu": "More actions",
     "modeEdit": "Edit",
     "modeRead": "View",
+    "orientationUnavailable": "Orientation lock unavailable",
+    "orientationPending": "Checking orientation lock…",
     "orientationLock": "Lock to landscape",
     "orientationUnlock": "Allow portrait",
     "publicationInvalidated": "Workflow saved and unpublished because its callable interface changed. Publish it again to expose the new contract.",

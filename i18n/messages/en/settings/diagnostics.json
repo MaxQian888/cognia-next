@@ -1,18 +1,4 @@
 {
-  "crashReports": {
-    "delete": "Delete report",
-    "description": "Self-contained reports written by the Rust crash handler (panics) and the out-of-process minidump monitor (native faults). Each carries a full backtrace or .dmp, system details, and a redacted config snapshot.",
-    "desktopOnly": "Native crash reports are only available in the desktop app.",
-    "dialogTitle": "Crash report",
-    "empty": "No crash reports — nothing has crashed.",
-    "kindNative": "Native",
-    "kindPanic": "Panic",
-    "kindUnknown": "Report",
-    "openFolder": "Open folder",
-    "refresh": "Refresh",
-    "title": "Native crash reports",
-    "view": "View report"
-  },
   "developer": {
     "chatMiddleware": "Plugin chat middleware",
     "chatMiddlewareHint": "Experimental. Let enabled plugins wrap each send via their registered chat middleware. Off by default — no effect unless a plugin provides one.",
@@ -70,7 +56,7 @@
     "update": "Save",
     "disconnect": "Disconnect",
     "autoSubmit": "Submit crash reports automatically",
-    "autoSubmitDescription": "Off by default. When on, a captured crash is packaged and sent without the consent preview — minidumps and screenshots are still never included unless you ask for them per report.",
+    "autoSubmitDescription": "Off by default. When on, crashes captured from then on are sent at the next launch without the consent preview, with a receipt notification. Minidumps and screenshots are never included automatically; reports already on this device stay local.",
     "roles": {
       "uploader": "Uploader",
       "viewer": "Viewer",
@@ -81,6 +67,14 @@
       "url": "Enter an http or https service URL.",
       "ids": "Tenant and project IDs must be UUIDs.",
       "save": "The connection could not be saved."
+    },
+    "roleProbing": "Checking access…",
+    "roleRetry": "Try again",
+    "roleErrors": {
+      "invalid_oidc_session": "The service rejected this identity session token.",
+      "session_token_missing": "No identity session token is stored for this connection.",
+      "network_unavailable": "The diagnostic service could not be reached to check access.",
+      "other": "Access could not be confirmed with the diagnostic service."
     }
   },
   "sidecarRestart": {
@@ -95,5 +89,10 @@
     "label": "Diagnostics sections",
     "nativeReports": "Native reports",
     "system": "System"
+  },
+  "crashReportsLink": {
+    "title": "Crash reports",
+    "description": "Review, submit or delete the crash reports this device captured in Logs.",
+    "open": "Open in Logs"
   }
 }

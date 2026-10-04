@@ -1,0 +1,8 @@
+{
+  "cancel": "取消扫码",
+  "instruction": "将摄像头对准二维码，即可自动识别。",
+  "title": "扫描二维码",
+  "torchError": "无法切换手电筒，请重试。",
+  "torchOff": "关闭手电筒",
+  "torchOn": "打开手电筒"
+}

@@ -1,18 +1,4 @@
 {
-  "crashReports": {
-    "delete": "删除报告",
-    "description": "由 Rust 崩溃处理器（panic）和进程外 minidump 监控（原生崩溃）写出的自包含报告。每份报告含完整 backtrace 或 .dmp、系统信息以及脱敏后的配置快照。",
-    "desktopOnly": "原生崩溃报告仅在桌面应用中可用。",
-    "dialogTitle": "崩溃报告",
-    "empty": "暂无崩溃报告 —— 一切正常。",
-    "kindNative": "原生崩溃",
-    "kindPanic": "Panic",
-    "kindUnknown": "报告",
-    "openFolder": "打开文件夹",
-    "refresh": "刷新",
-    "title": "原生崩溃报告",
-    "view": "查看报告"
-  },
   "developer": {
     "chatMiddleware": "插件聊天中间件",
     "chatMiddlewareHint": "实验性。允许已启用的插件通过其注册的聊天中间件包裹每次发送。默认关闭——没有插件提供中间件时不产生任何影响。",
@@ -70,7 +56,7 @@
     "update": "保存",
     "disconnect": "断开连接",
     "autoSubmit": "自动提交崩溃报告",
-    "autoSubmitDescription": "默认关闭。开启后，捕获到的崩溃会直接打包发送，不再显示同意预览；minidump 与截图仍然只在你逐次勾选时才会包含。",
+    "autoSubmitDescription": "默认关闭。开启后，此后捕获的崩溃会在下次启动时直接发送，不再显示同意预览，并以通知告知回执。minidump 与截图不会被自动包含；本设备上已有的报告仍保留在本地。",
     "roles": {
       "uploader": "上传者",
       "viewer": "查看者",
@@ -81,6 +67,14 @@
       "url": "请填写 http 或 https 的服务地址。",
       "ids": "租户与项目 ID 必须是 UUID。",
       "save": "无法保存该连接。"
+    },
+    "roleProbing": "正在检查权限…",
+    "roleRetry": "重试",
+    "roleErrors": {
+      "invalid_oidc_session": "服务拒绝了该身份会话令牌。",
+      "session_token_missing": "该连接未保存身份会话令牌。",
+      "network_unavailable": "无法连接到诊断服务以检查权限。",
+      "other": "无法向诊断服务确认访问权限。"
     }
   },
   "sidecarRestart": {
@@ -95,5 +89,10 @@
     "label": "诊断分区",
     "nativeReports": "原生报告",
     "system": "系统"
+  },
+  "crashReportsLink": {
+    "title": "崩溃报告",
+    "description": "在“日志”中检查、提交或删除本设备捕获的崩溃报告。",
+    "open": "在日志中打开"
   }
 }

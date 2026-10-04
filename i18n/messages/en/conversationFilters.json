@@ -67,6 +67,7 @@
       "current": "This workspace",
       "all": "All workspaces"
     },
+    "includeActive": "Include active conversations",
     "includeArchived": "Include archived conversations",
     "content": "Search message content",
     "contentHint": "Needs {count} characters, and reads the local message index."

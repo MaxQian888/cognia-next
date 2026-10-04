@@ -163,6 +163,7 @@
     "levelUp": ["Level up!", "Getting stronger!"],
     "petted": ["Purr…", "That's nice.", "♥"],
     "played": ["So fun!", "Again!", "Wheee!"],
+    "pluginReward": ["A reward! Thank you!", "Ooh, a treat from a quest!"],
     "refused": {
       "cooldown": [
         "Give me a moment!",
@@ -442,6 +443,7 @@
   "quickMenu": {
     "clean": "Clean",
     "clickThrough": "Click-through",
+    "clickThroughDescription": "Clicks pass through the pet to what's behind it. Turn it back off from the tray menu or Settings → Pet.",
     "feed": "Feed",
     "hideDesktopPet": "Hide desktop pet",
     "minimize": "Minimize",
@@ -449,11 +451,12 @@
     "openSettings": "Open settings",
     "pet": "Pet",
     "play": "Play",
-    "sleep": "Sleep",
     "showDesktopPet": "Show desktop pet",
     "showMainWindow": "Show main window",
+    "sleep": "Sleep",
     "talk": "Talk",
-    "treat": "Treat"
+    "treat": "Treat",
+    "windowActions": "Desktop pet window"
   },
   "rarity": {
     "common": "Common",

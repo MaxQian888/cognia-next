@@ -42,6 +42,10 @@
     }
   },
   "channelList": {
+    "archivedChipAria": "Archived — show active conversations",
+    "archivedToggle": "Archived conversations",
+    "manageConversations": "Manage conversations…",
+    "viewArchivedCount": "Show archived conversations ({count})",
     "archivedTitleSuffix": "Archived",
     "bucketOlder": "Older",
     "bucketPrev30": "Previous 30 Days",
@@ -67,9 +71,16 @@
       "selectedCount": "{count, plural, one {# selected} other {# selected}}",
       "share": "Share",
       "unarchive": "Unarchive",
-      "unarchiveSuccess": "{count, plural, one {Restored # conversation} other {Restored # conversations}}",
+      "unarchiveSuccess": "{count, plural, one {Unarchived # conversation} other {Unarchived # conversations}}",
       "unpin": "Unpin",
-      "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
+      "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}",
+      "selectHint": "None selected",
+      "selectAll": "Select all ({count})",
+      "deselectAll": "Deselect all",
+      "done": "Done",
+      "markUnread": "Mark as unread",
+      "newFolder": "New folder…",
+      "deleteConfirmMore": "{count, plural, one {and # more} other {and # more}}"
     },
     "cancel": "Cancel",
     "chatsEmpty": "No chats yet — start one",
@@ -83,7 +94,6 @@
     "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
     "directMessages": "Chats",
     "displayOptions": "Display options",
-    "emptyArchived": "No archived conversations.",
     "emptyDm": "No chats yet. Pick a character to begin.",
     "emptyFiltered": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
     "emptyFolder": "Empty — move conversations here.",
@@ -170,7 +180,17 @@
     "ungroupedTeam": "Chats",
     "ungroupedWorkspace": "No workspace",
     "viewActive": "Show active conversations",
-    "viewArchived": "Show archived conversations"
+    "viewArchived": "Show archived conversations",
+    "selectConversations": "Select conversations",
+    "emptyArchivedTitle": "Nothing archived",
+    "emptyArchivedHint": "Archive a conversation to tidy the list without deleting it. Archived conversations stay searchable here.",
+    "backToConversations": "Back to conversations",
+    "searchWiden": {
+      "content": "Also search message content",
+      "archived": "Include archived conversations",
+      "workspaces": "Search all workspaces"
+    },
+    "selectConversationsHere": "Select conversations here"
   },
   "chatRuntime": {
     "connectionTitle": "Waiting for your host",
@@ -190,7 +210,27 @@
       "requiresUnlock": "Unlock the local Vault to use this host.",
       "unsupported": "Chat is not implemented for the current runtime target."
     },
-    "title": "Chat is read-only right now"
+    "title": "Chat is read-only right now",
+    "strip": {
+      "connecting": "Reconnecting",
+      "cacheOnly": "Cached chats only",
+      "placeholder": "You can send once the host reconnects",
+      "states": {
+        "available": "Chat available",
+        "incompatible": "Host needs an update",
+        "offline": "Host offline",
+        "queued": "Waiting for host",
+        "readOnly": "Chat is read-only",
+        "requiresGrant": "Device permission needed",
+        "requiresPairing": "No host paired",
+        "requiresUnlock": "Vault locked",
+        "unsupported": "Chat unsupported here"
+      },
+      "actions": {
+        "connectionSettings": "Settings",
+        "pair": "Pair"
+      }
+    }
   },
   "find": {
     "close": "Close find",
@@ -204,6 +244,7 @@
     "a2ui": "Mini-Apps",
     "agentRuns": "Agent runs",
     "aliases": {
+      "conversations": "History, chat history, sessions, archive, archived conversations, transcripts",
       "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
       "files": "Library, assets, attachments, uploads, documents, images, artifacts, favorites",
       "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
@@ -220,6 +261,7 @@
       "system": "System",
       "you": "You"
     },
+    "conversations": "Conversations",
     "createTeam": "Create team",
     "customize": {
       "behaviour": "Behaviour",
@@ -585,6 +627,7 @@
     "pickedUp": "Picked up {item}. Position {position} of {total}."
   },
   "sessionRow": {
+    "archived": "Archived",
     "actionsMenu": "Session actions",
     "archive": "Archive",
     "branchedFrom": "Branched conversation — open parent",
@@ -634,7 +677,8 @@
     "selectedState": "Selected",
     "unarchive": "Unarchive",
     "unpin": "Unpin",
-    "untitled": "(untitled)"
+    "untitled": "(untitled)",
+    "newFolder": "New folder…"
   },
   "shell": {
     "desktopOnlyBodyMiddle": " rather than ",
@@ -701,8 +745,13 @@
         "connectHost": "Connect Host",
         "reconnect": "Reconnect now",
         "recover": "Repair connection",
-        "settings": "Companion settings"
+        "settings": "Connectivity settings",
+        "returnLocal": "Return to local",
+        "manageHosts": "Manage hosts"
       },
+      "activeHost": "Active host",
+      "drivenAria": "Driving {label}: {state}",
+      "drivenScope": "Terminals, files, git and agent calls from this window run on {label}.",
       "address": "Host address",
       "auth": {
         "locked": "Locked",

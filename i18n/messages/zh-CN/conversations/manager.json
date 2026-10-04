@@ -1,0 +1,40 @@
+{
+  "archivedNote": "已归档的会话在归档期间保留置顶和所在文件夹，恢复后两者都会回来。向已归档会话发送消息会自动恢复它。",
+  "columns": {
+    "actions": "操作",
+    "activity": "最近活动",
+    "agent": "智能体",
+    "cost": "成本",
+    "created": "创建时间",
+    "selectAll": "选择此视图中的所有会话",
+    "title": "会话",
+    "tokens": "Token",
+    "turns": "轮次",
+    "workspace": "工作区"
+  },
+  "contentMatch": "在消息中匹配",
+  "description": "所有工作区的全部会话。在这里查找、重命名、归入文件夹、归档和恢复。",
+  "emptyArchive": "清空归档…",
+  "inFolder": "位于 {name}",
+  "loading": "正在加载会话",
+  "newChat": "新建对话",
+  "noWorkspace": "无工作区",
+  "none": "—",
+  "openRow": "打开 {title}",
+  "rowActions": "{title} 的操作",
+  "rowSelect": "选择 {title}",
+  "searchAria": "搜索会话",
+  "searchClear": "清除搜索",
+  "searchContent": "搜索消息内容",
+  "searchPlaceholder": "搜索会话…",
+  "showMore": "再显示 {count} 个",
+  "shownOf": "显示 {shown} / {total}",
+  "sortBy": "按{column}排序",
+  "summary": "{active} 个活跃 · {archived} 个已归档",
+  "tabs": {
+    "active": "活跃",
+    "archived": "已归档"
+  },
+  "tabsAria": "要显示的会话",
+  "title": "会话管理"
+}

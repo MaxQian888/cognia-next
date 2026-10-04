@@ -48,6 +48,15 @@
       "label": "退出登录前确认"
     }
   },
+  "policyChangeTitle": "更改生物识别保护",
+  "policyChangeReason": "关闭此保护前，请先验证身份",
+  "policyChangeBlocked": "未更改保护设置。{reason}",
+  "policyChangeFailed": "无法保存保护设置，请重试。",
+  "policyChangeContextChanged": "账户或连接的 Host 已更改，请在当前设置中重试。",
+  "testSuccess": "生物识别验证成功。",
+  "testBlocked": "生物识别测试未完成。{reason}",
+  "testError": "无法运行生物识别测试，请重试。",
+  "testPending": "正在等待身份验证…",
   "testCta": "测试生物识别提示",
   "testDescription": "这是一次空操作校验，用于确认你的设备生物识别可用。",
   "testReason": "验证你的生物识别是否可用",

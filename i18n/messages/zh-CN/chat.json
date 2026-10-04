@@ -104,6 +104,13 @@
     "timesInConversation": "{count} 次"
   },
   "branch": {
+    "workingSet": {
+      "label": "工作状态",
+      "historical": "沿用分支位置的状态",
+      "current": "沿用当前状态",
+      "initial": "从空白状态开始",
+      "unavailable": "此位置没有历史状态记录，请选择当前状态或从空白状态开始。"
+    },
     "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
     "cancel": "取消",
     "childCount": "{count, plural, other {# 个分支}}",
@@ -606,9 +613,8 @@
     },
     "modelPicker": {
       "agentModelSwitchFailed": "该 agent 拒绝了这个模型：{reason}",
-      "agentModelsGroup": "Agent 提供的模型",
-      "agentModelsLoading": "正在询问 {agent} 有哪些模型。",
-      "agentNoModels": "{agent} 没有报告自己的模型。下面这些是在 Cognia 中配置的模型。",
+      "agentModelsLoading": "正在读取 {agent} 的模型…",
+      "agentNoModels": "{agent} 没有提供可选的模型，将使用它自己的默认模型。",
       "agentNoSession": "{agent} 已连接但没有打开任何会话，它的模型会在第一轮对话时出现。",
       "agentNotConnected": "{agent} 尚未连接，因此还列不出它自己的模型。",
       "autoBadge": "自动",
@@ -629,7 +635,29 @@
       "switchModelAria": "切换模型",
       "title": "选择模型",
       "refreshAgentModels": "刷新模型",
-      "agentModelsFailed": "无法获取 {agent} 的模型列表，请重试刷新。"
+      "agentModelsFailed": "无法获取 {agent} 的模型列表，请重试刷新。",
+      "agentModelsDeferred": "{agent} 的模型会在第一条消息后显示，在此之前使用它自己的默认模型。",
+      "agentModelAppliesNextTurn": "所选模型会在下一条消息时生效。",
+      "agentDefaultModel": "{agent} · 默认",
+      "agentDefaultModelRow": "默认模型",
+      "agentFallbackName": "Agent",
+      "cogniaSection": "Cognia 模型",
+      "cogniaSectionHint": "通过本地网关让 {agent} 使用 Cognia 提供商的模型。所选模型从下一条消息开始生效。",
+      "cogniaModelsLoading": "正在询问主机可用的 Cognia 模型…",
+      "cogniaModelsFailed": "无法从主机获取 Cognia 模型。重新打开列表即可重试。",
+      "cogniaUnsupportedRuntime": "{agent} 无法使用 Cognia 模型：其运行时不支持隔离的网关启动。",
+      "cogniaRemoteServer": "{agent} 连接的是远程服务器，无法使用 Cognia 模型。",
+      "cogniaNoProcess": "{agent} 没有可由 Cognia 启动的本地进程，无法使用 Cognia 模型。",
+      "cogniaNetworkEndpoint": "{agent} 通过网络端点连接，无法使用 Cognia 模型。",
+      "cogniaHostUpdateRequired": "请更新已配对的主机，才能让 {agent} 使用 Cognia 模型。",
+      "cogniaNoEligibleModels": "没有可供 {agent} 使用的已配置提供商：需要兼容 OpenAI 或 Anthropic、配置了 API 密钥且支持工具调用和流式输出的提供商。",
+      "cogniaAccountLocked": "主机账户已锁定。解锁后才能让 {agent} 使用 Cognia 模型。",
+      "cogniaPublicHttpsRequired": "已配对的主机必须可通过公网 HTTPS 访问，才能让 {agent} 使用 Cognia 模型。",
+      "cogniaModelNoTools": "不支持工具调用",
+      "cogniaModelNoStreaming": "不支持流式输出",
+      "cogniaChipTitle": "{agent} → {provider}/{model}（经由 Cognia）",
+      "cogniaGlyph": "Cognia 模型",
+      "cogniaModelSwitchFailed": "无法保存模型选择：{reason}"
     },
     "paramForm": {
       "cancel": "取消",
@@ -861,6 +889,7 @@
       "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
     },
     "stopTooltip": "停止",
+    "stopTooltipKeyboard": "停止（Esc）",
     "templateParams": {
       "hint": "回车或 Esc 关闭 · Tab 跳到下一个参数",
       "loading": "搜索中…",
@@ -2136,6 +2165,8 @@
     },
     "code": {
       "ariaInLanguage": "{language} 代码",
+      "close": "关闭",
+      "closeAria": "关闭全屏查看",
       "copy": "复制",
       "copyAria": "复制代码",
       "defaultLabel": "代码",
@@ -2269,7 +2300,6 @@
   "runPanel": {
     "ariaDiscardQueue": "丢弃排队的消息",
     "ariaEditQueued": "修改这条排队的消息",
-    "ariaInterrupt": "中断当前回合",
     "ariaLocateSteer": "跳到第一条未送达的消息",
     "ariaManageSteer": "查看排队的消息",
     "ariaRemoveQueued": "移除这条排队的消息",
@@ -2305,8 +2335,6 @@
   },
   "runStatus": {
     "ariaSteerNow": "中断当前回合并立即发送队列中的消息",
-    "interruptHint": "按 Esc 中断",
-    "interruptHintTouch": "点按中断",
     "metricContext": "上下文 {pct}%",
     "metricSpeed": "{value} tok/s",
     "metricTokens": "{value} tok",
@@ -2592,6 +2620,7 @@
     "deny": "拒绝",
     "dismiss": "关闭",
     "inputLabel": "输入",
+    "noInputDetails": "代理未提供此次调用的参数，仅给出了名称。",
     "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
     "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
     "supersededNotice": "已被新指令取代——工具调用已被拒绝。",

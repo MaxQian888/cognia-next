@@ -67,6 +67,7 @@
       "current": "当前工作区",
       "all": "全部工作区"
     },
+    "includeActive": "包含活跃会话",
     "includeArchived": "包含已归档会话",
     "content": "搜索消息内容",
     "contentHint": "需要 {count} 个字符，读取本机消息索引。"

@@ -111,5 +111,21 @@
   "title": "Session insights",
   "units": {
     "tokPerSec": "{value} tok/s"
+  },
+  "costTimeline": {
+    "title": "Cost per turn",
+    "cost": "Cost",
+    "context": "Context",
+    "turn": "Turn {index}",
+    "contextShort": "{tokens} context",
+    "rank": "Costs more than {pct}% of your other conversations in the last {days} days (median {median}, {peers} compared).",
+    "concentration": "Turn {index} alone carried {pct}% of this conversation’s cost.",
+    "growth": "Context grew {ratio}× from the first turn to the last ({from} → {to}). Compacting or starting fresh keeps later turns cheaper.",
+    "priciest": "Priciest turns",
+    "jump": "Jump to turn {index}",
+    "jumpFailed": "Could not find that turn in the conversation."
+  },
+  "efficiency": {
+    "title": "Efficiency"
   }
 }

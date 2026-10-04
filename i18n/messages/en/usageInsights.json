@@ -1,0 +1,61 @@
+{
+  "delta": {
+    "up": "Up {value} vs the previous period",
+    "down": "Down {value} vs the previous period",
+    "flat": "Unchanged vs the previous period",
+    "noBaseline": "No comparable data in the previous period",
+    "points": "{value} pts"
+  },
+  "forecast": {
+    "title": "Month-end forecast",
+    "monthToDate": "Month to date",
+    "runRate": "Daily run rate",
+    "projected": "Projected month-end",
+    "perDay": "{cost}/day",
+    "basis": {
+      "trailing7d": "Run rate from the last 7 days.",
+      "sinceFirstUse": "Run rate from the {days} days since you started.",
+      "insufficient": "A projection needs at least one full day of history."
+    },
+    "unpriced": "{turns} turns this month could not be priced, so these figures are lower bounds.",
+    "limit": {
+      "label": "Projected vs monthly limit {limit}",
+      "willCross": "At this pace you reach the {limit} monthly limit around {date}.",
+      "within": "At this pace the month ends at {pct}% of the {limit} limit.",
+      "exceeded": "This month has already passed the {limit} limit."
+    }
+  },
+  "stack": {
+    "other": "Other",
+    "unknown": "Unknown",
+    "legend": "Series",
+    "total": "Total"
+  },
+  "activity": {
+    "peak": "Busiest: {weekday} around {hour}:00 ({turns} turns)",
+    "cell": "{weekday} {hour}:00 · {turns} turns · {cost}",
+    "empty": "No activity in this range.",
+    "less": "Less",
+    "more": "More",
+    "label": "Turns by weekday and hour"
+  },
+  "efficiency": {
+    "cacheSaved": "Saved by prompt cache",
+    "cacheSavedValue": "≈ {cost}",
+    "cacheSavedHint": "{pct}% cheaper than sending the same prompts uncached. Estimated from model rates.",
+    "cacheNone": "No cache reads in this range.",
+    "cacheUnpriced": "{tokens} cached tokens are on models without a known input rate and are not counted.",
+    "distributionTitle": "Per-turn distribution",
+    "colMetric": "Metric",
+    "costPerTurn": "Cost per turn",
+    "latency": "Generation time",
+    "throughput": "Output speed",
+    "tokPerSec": "{value} tok/s",
+    "distributionEmpty": "Not enough timed or priced turns to compute a distribution.",
+    "sample": "Over {count} turns",
+    "colP50": "p50",
+    "colP90": "p90",
+    "colP99": "p99",
+    "colMax": "Max"
+  }
+}

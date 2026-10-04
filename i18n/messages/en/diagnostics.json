@@ -141,6 +141,10 @@
       "hint": "The Cognia extension that enforces permissions inside this agent never reported ready, so the session was refused instead of running ungated.",
       "label": "Agent extension didn't start"
     },
+    "piPackageUnavailable": {
+      "hint": "A plugin Pi package this agent loads couldn't be loaded, so the session didn't start. Prepare the package or enable its plugin, or remove it from the agent's settings.",
+      "label": "Pi package unavailable"
+    },
     "extensionUnknown": {
       "hint": "Cognia hasn't determined whether this agent supports that operation yet — reconnect to probe it.",
       "label": "Support not determined"

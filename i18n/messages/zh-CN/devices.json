@@ -6,6 +6,11 @@
     "confirmCancel": "留在当前主机",
     "confirmSwitch": "仍然切换",
     "confirmTitle": "有任务在运行，仍要切换执行主机吗？",
+    "reconnectTitle": "有任务在运行，仍要重新连接吗？",
+    "reconnectBody": "当前有回合正在进行。重新连接 {label} 会替换它所依赖的链路，正在运行的回合可能无法完成。",
+    "reconnectConfirm": "仍然重新连接",
+    "removeActive": "{label} 是这个窗口正在驱动的主机。移除后，这个窗口会切回本机。",
+    "removeActiveBusy": "{label} 是这个窗口正在驱动的主机，且有回合正在其上运行。移除后这个窗口会立即切回本机，正在运行的回合仍留在该主机上。",
     "hint": "这个窗口的文件、Git 与 Agent 调用会落在哪台机器上。",
     "local": "本机",
     "localDetail": "终端、文件与 Git 都在这里运行。",
@@ -38,6 +43,13 @@
     "ssh-host": "SSH 主机",
     "worker": "执行 Worker"
   },
+  "kindPlural": {
+    "local": "本机",
+    "paired-device": "配对设备",
+    "remote-host": "主机",
+    "worker": "Worker",
+    "ssh-host": "SSH"
+  },
   "capabilityState": {
     "reported": "已上报",
     "expected": "预期具备",
@@ -57,11 +69,13 @@
     "searchPlaceholder": "搜索设备",
     "searchAria": "按名称、地址或平台搜索设备",
     "filterAria": "按设备类型筛选",
-    "filterAll": "全部类型",
+    "filterAll": "全部",
     "emptyTitle": "暂无设备",
     "emptyBody": "配对一台手机或添加远程主机后会显示在这里。",
     "emptyFiltered": "没有设备符合当前的搜索或筛选条件。",
-    "label": "设备列表"
+    "label": "设备列表",
+    "filterAttention": "需要处理",
+    "clearFilters": "清除筛选"
   },
   "row": {
     "needsAttention": "需要关注"
@@ -134,12 +148,11 @@
     "reportedAt": "上报于{when}",
     "neverReportedTitle": "该设备从未上报过能力",
     "neverReportedBody": "下面的内容都未经确认。标为「预期具备」的来自平台基线，其余的是真的未知。设备会在下次连接时上报。",
-    "noVocabularyTitle": "该设备没有可展示的能力词表",
     "noVocabulary": {
       "local": "本机能力由本地探测得出，不经上报。",
       "paired-device": "该设备未上报过，且平台未知，没有可推断的基线。",
       "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
-      "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。",
+      "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表，因此没有可展示的平台能力矩阵。",
       "ssh-host": "SSH 服务器不会上报任何东西，也不持有我们这套能力集。这里没有「缺失」，只是从未被询问过。"
     },
     "title": "能力",
@@ -194,18 +207,36 @@
       "reachableLearned": "可达。这是第一次连接，主机密钥已被信任并保存。",
       "reachableVerified": "可达。主机密钥与已信任的一致。",
       "running": "测试中…",
-      "unreachable": "无法连接：{message}"
+      "unreachable": "无法连接：{message}",
+      "invalidReason": {
+        "name": "缺少显示名称",
+        "host": "主机地址为空或包含空格",
+        "port": "端口不在 1–65535 范围内",
+        "username": "用户名为空或包含空格",
+        "privateKeyPath": "私钥认证缺少私钥路径",
+        "profile": "某个已保存字段无效",
+        "jumpChain": "跳板机缺失、形成循环或配置不完整",
+        "localForward": "某条本地转发规则无效",
+        "remoteForward": "某条远程转发规则无效"
+      }
     },
     "viaHostTitle": "由配对宿主发起连接",
     "viaHostBody": "当前外壳不保存 SSH 凭据，因此由配对宿主用它保存的密钥或密码建立连接。只有宿主所属桌面登记过的主机才能这样打开，而且这条传输不会回传主机密钥。",
     "noHostTitle": "没有可用于连接的终端宿主",
     "noHostBody": "SSH 运行在机器上，而不是浏览器标签页里。配对一台宿主，或打开桌面应用，这台主机就能再次连接。",
-    "notOnHost": "配对宿主上没有名为 {name} 的 SSH 配置。配置由宿主所属的桌面登记，请在那里添加后再连接。"
+    "credentialRequiredBastionBody": "“{name}”需经由“{bastion}”连接，而“{bastion}”使用密码认证且尚未保存密码。请在 SSH 主机编辑器中为“{bastion}”保存密码后再连接。"
   },
-  "shellOnly": {
-    "title": "对一台 SSH 主机不适用",
-    "description": "本控制台会向每台机器提出的问题，以及一台 SSH 主机为什么给不出答案。",
-    "runtime": "沙箱与工作区"
+  "notApplicable": {
+    "title": "此处不适用",
+    "nav": "不适用",
+    "runtime": "沙箱与工作区",
+    "description": {
+      "local": "本控制台会向每台机器提出的问题，以及本机为什么给不出答案。",
+      "paired-device": "本控制台会向每台机器提出的问题，以及配对设备为什么给不出答案。",
+      "remote-host": "本控制台会向每台机器提出的问题，以及远程主机为什么无法从这里给出答案。",
+      "worker": "本控制台会向每台机器提出的问题，以及 Worker 为什么给不出答案。",
+      "ssh-host": "本控制台会向每台机器提出的问题，以及一台 SSH 主机为什么给不出答案。"
+    }
   },
   "title": "设备",
   "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
@@ -213,14 +244,23 @@
   "attentionCount": "{count, plural, other {# 台需要处理}}",
   "hostUnreachableTitle": "当前显示的是本地记录",
   "hostUnreachableBody": "无法向主机查询，因此生命周期状态与每项授权背后的具体能力来自本地镜像。在别处被挂起的设备在这里可能仍显示为正常。",
+  "missingLinkTitle": "该设备不在当前设备群中",
+  "missingLinkBody": "链接指向的设备已不再配对或添加于此，因此改为显示本机。",
+  "missingLinkDismiss": "关闭",
   "actions": {
     "pair": "配对设备",
     "addHost": "添加主机",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "refreshing": "正在刷新…",
+    "refreshFailed": "无法刷新设备列表",
+    "grow": "配对设备或添加主机",
+    "addSshHost": "添加 SSH 主机"
   },
   "detail": {
     "noSelectionTitle": "未选择设备",
-    "noSelectionBody": "从左侧选择一台设备，查看它能做什么。"
+    "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
+    "drawerTitle": "设备详情",
+    "sectionNavAria": "跳转到分区"
   },
   "access": {
     "partialHint": "该设备只持有此项授权所包含能力中的一部分。关闭再打开可将其恢复一致。",
@@ -230,14 +270,11 @@
       "lockedUseUnavailable": "此授权在当前构建中没有强制执行点，因此无法发放。",
       "ownerMismatch": "这台设备属于另一个人，而不是当前登录的人，因此宿主不会兑现它的授权。授权本身没有被撤销——回到它所属的人手上就会重新生效。"
     },
-    "lifecycle": "生命周期",
-    "lifecycleHint": "暂停会阻断该设备，直到你恢复它。吊销不可逆——设备必须重新配对。",
     "pause": "暂停",
     "resume": "恢复",
     "revoke": "吊销",
     "revokedTitle": "该设备已被吊销",
     "revokedBody": "它不持有任何能力，且必须重新配对才能连接。",
-    "notApplicableTitle": "没有可管理的授权",
     "notApplicable": {
       "local": "本机不会给自己授权。",
       "remote-host": "远程主机自行决定本客户端可做什么；授权在主机侧管理，不在这里。",
@@ -249,7 +286,15 @@
     "heldCount": "已授权 {held}/{total}",
     "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。",
     "terminalReachesSsh": "该授权同时允许该设备打开本机保存的任意 SSH 主机。连接由宿主用它保存的密钥或密码发起，且这份已保存列表在所有获授权设备之间共享，无法按设备单独指定。",
-    "sshFilesReachIsWhole": "该授权没有目录范围限制。SFTP 路径是那台机器自己的绝对路径，符号链接也由它自己解析，因此没有可以限制的根目录。"
+    "sshFilesReachIsWhole": "该授权没有目录范围限制。SFTP 路径是那台机器自己的绝对路径，符号链接也由它自己解析，因此没有可以限制的根目录。",
+    "revokeConfirmTitle": "吊销 {label}？",
+    "revokeConfirmBody": "吊销不可逆。该设备会失去全部授权和密钥，必须重新配对才能回来。如果只是暂时停用，请改为暂停。",
+    "pauseHint": "暂停会阻断该设备，直到你恢复它。",
+    "lifecycleBlocked": {
+      "no-host": "此浏览器未连接任何主机，暂停、恢复或吊销无处发送。",
+      "needs-desktop-shell": "暂停、恢复和吊销需要主机上的桌面应用。",
+      "not-owner": "只有主机的所有者设备才能暂停、恢复或吊销配对设备。"
+    }
   },
   "runtime": {
     "probeEmpty": "该主机报告没有工作树。",
@@ -267,10 +312,8 @@
       "cuaDesktopNoConnection": "需要一台已绑定、且支持 shell 与文件执行的机器。Docker 连接通过 `docker exec` 提供，命令确实在容器内执行。云端与 Lume 连接目前没有适配器，只能提供远程桌面。"
     },
     "sandbox": "沙盒连接",
-    "sandboxUnsupportedTitle": "这里没有沙盒连接",
     "workspaces": "工作区环境",
     "workspacesInactiveTitle": "当前不是路由目标",
-    "workspacesUnsupportedTitle": "这里没有工作区",
     "reason": {
       "sandboxIsClientLocal": "沙盒连接只属于运行本窗口的机器，永远不会路由到其他设备。",
       "sandboxNotHosted": "这类设备不承载沙盒。",
@@ -337,8 +380,6 @@
     }
   },
   "host": {
-    "controls": "主机控制",
-    "controlsHint": "连接后，本窗口的执行会以这台主机为目标。添加与发现主机仍留在设置中。",
     "connect": "连接",
     "disconnect": "断开",
     "reconnect": "重新连接",
@@ -360,13 +401,14 @@
       "revoked": "该设备已被吊销",
       "versionMismatch": "需要升级"
     },
-    "managePairing": "管理已配对的 Host"
+    "managePairing": "管理已配对的 Host",
+    "moreAria": "{label} 的更多操作"
   },
   "settingsLink": {
     "pairedTitle": "配对设备",
     "pairedBody": "{count, plural, =0 {尚未配对任何设备。} other {已配对 # 台设备。}}授权、能力与生命周期在设备控制台中管理。",
     "hostsTitle": "远程主机",
-    "hostsBody": "{count, plural, =0 {尚未配置任何主机。} other {已配置 # 台主机。}}连接、重命名与移除在设备控制台中管理。",
+    "hostsBody": "{count, plural, =0 {尚未配置任何主机。} other {已配置 # 台主机。}}能力、工作区与实时在线状态在设备控制台中查看。",
     "open": "打开设备控制台"
   },
   "placementReason": {
@@ -422,7 +464,11 @@
   "files": {
     "title": "文件",
     "transfers": "传输",
-    "unknownProfile": "这一行没有指向已保存的 SSH 主机，因此没有可浏览的内容。"
+    "unknownProfile": "这一行没有指向已保存的 SSH 主机，因此没有可浏览的内容。",
+    "credentialRequired": "“{name}”的文件浏览与其 shell 使用同一登录方式，而它使用的密码尚未保存。",
+    "credentialRequiredBastion": "“{name}”的文件需经由“{bastion}”访问，而“{bastion}”使用的密码尚未保存。",
+    "chainBroken": "“{name}”的跳板机已被删除、形成循环或超过五跳，因此无法访问其文件。",
+    "fixInSettings": "在 SSH 主机中修复"
   },
   "justNow": "刚刚",
   "pairingAlert": {

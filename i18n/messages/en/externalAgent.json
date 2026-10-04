@@ -775,7 +775,8 @@
     "modelsFailed": "Could not load model information. Existing models are retained; retry when ready.",
     "modelsLoaded": "Account model information updated.",
     "unknown": "unknown",
-    "outputUnknown": "Maximum output: unknown"
+    "outputUnknown": "Maximum output: unknown",
+    "hostUpdateRequired": "The paired Host must be updated before this agent can run on a Cognia model."
   },
   "readiness": {
     "pipelineLabel": "Agent readiness",
@@ -844,5 +845,10 @@
     },
     "outputUnavailable": "Could not read login output. Retry, or check the native login process.",
     "openLoginPage": "Open {url}"
+  },
+  "supportTier": {
+    "executable": "Runs directly",
+    "guided": "Guided setup",
+    "documentedOnly": "Docs only"
   }
 }

@@ -1637,7 +1637,7 @@
       "errorInvalidPassword": "密码不正确。",
       "errorInvalidRecoveryKey": "恢复密钥不正确。",
       "errorPasswordRequired": "请输入密码。",
-      "errorSecretStoreUnavailable": "本设备的凭据存储未能保存密码。取消勾选“在这台设备上自动解锁”即可直接解锁。",
+      "errorSecretStoreUnavailable": "本设备的凭据存储未能保存密码。取消勾选“记住密码”即可直接解锁。",
       "errorStorageLayoutUnsupported": "本机数据由另一个版本的应用写入，无法打开。",
       "errorThrottled": "尝试次数过多，请等待冷却结束。",
       "errorUnknown": "解锁失败。如果反复出现，请复制下方详情。",
@@ -1671,8 +1671,8 @@
       "recoveryUnlockDescription": "输入创建账户时保存的一次性恢复密钥，然后设置新密码。恢复密钥在此之后依然有效。",
       "recoveryUnlockForm": "使用恢复密钥解锁",
       "reloadWindow": "重新加载窗口",
-      "rememberOnDeviceHelp": "将密码保存在本设备的凭据存储中，以后在这台设备上不再询问。原密码仍然有效。",
-      "rememberOnDeviceLabel": "在这台设备上自动解锁",
+      "rememberOnDeviceHelp": "保存在本设备的安全存储中，下次打开时自动解锁。原密码仍然有效。",
+      "rememberOnDeviceLabel": "记住密码",
       "revealPassword": "显示密码",
       "runtimeBadgeBrowser": "本设备的浏览器保险库",
       "runtimeBadgeDesktop": "本设备的桌面密钥链",
@@ -1698,7 +1698,8 @@
       "unlockForm": "解锁本地账户",
       "unlockTitle": "解锁 {name}",
       "unlocking": "正在解锁…",
-      "useRecoveryKey": "忘记密码？"
+      "useRecoveryKey": "忘记密码？",
+      "welcomeBack": "欢迎回来"
     },
     "identity": {
       "current": "当前",
@@ -1844,6 +1845,17 @@
     },
     "quickUnlock": {
       "attemptsLeft": "{count, plural, =0 {已无剩余次数} other {还剩 # 次机会，用尽后该方式将被停用}}",
+      "biometricAction": "使用生物识别解锁",
+      "biometricCancel": "取消",
+      "biometricFailure": {
+        "cancelled": "已取消，你可以重试或使用账户密码。",
+        "failed": "生物识别解锁失败，请重试或使用账户密码。",
+        "lockout": "生物识别暂时锁定，请使用账户密码。",
+        "unavailable": "生物识别解锁不可用，请使用账户密码。如果已录入的指纹或面容发生变化，请在账户设置中重新配置。"
+      },
+      "biometricReason": "验证指纹或面容，以在本设备上解锁此账户。",
+      "biometricTitle": "解锁账户",
+      "biometricWaiting": "正在等待生物识别验证…",
       "failure": {
         "failed": "出错了。请重试，或改用密码。",
         "locked-out": "该方式已停用，请使用密码。",
@@ -1853,6 +1865,7 @@
       },
       "lockedOut": "{method} 因尝试次数过多已停用。使用密码解锁后可重新启用。",
       "method": {
+        "biometric": "指纹 / 面容识别",
         "passkey": "通行密钥",
         "pattern": "图案",
         "pin": "PIN 码"
@@ -1896,6 +1909,15 @@
       "settings": {
         "active": "可用",
         "add": "添加{method}",
+        "biometricAction": "设置指纹 / 面容识别",
+        "biometricFailure": {
+          "cancelled": "已取消设置，未添加生物识别解锁。",
+          "failed": "无法设置生物识别解锁，请检查账户密码后重试。",
+          "lockout": "生物识别暂时锁定，请稍后重试。",
+          "unavailable": "安全生物识别存储不可用。请在系统设置中录入受支持的指纹或面容，或继续使用账户密码。"
+        },
+        "biometricPrompt": "使用指纹或面容保护本设备上的解锁密钥，同时需要验证账户密码。",
+        "biometricTitle": "设置生物识别解锁",
         "cancel": "取消",
         "confirm": "确认",
         "continue": "继续",
@@ -3787,7 +3809,7 @@
         "hostPinned": "{host}（在线）",
         "hostPinnedOffline": "{host}（离线）",
         "hostTarget": "执行主机",
-        "hostWaitingWarning": "固定的 Worker 当前离线；任务会保持排队且不会迁移。",
+        "hostWaitingWarning": "固定的 Worker 当前离线。启用远程派发后，任务会保持排队；请在 Worker 就绪后恢复任务，任务不会改到其他主机运行。",
         "modeInherit": "继承团队默认",
         "modePinned": "固定绑定",
         "modePool": "候选池",
@@ -3798,7 +3820,9 @@
         "modelRolePrimary": "主力",
         "previewNative": "原生委派",
         "previewOrchestrated": "编排委派（{reasons}）",
-        "remotePrerequisitesHint": "远程目标需要 resolver v2、远程调度、Task Workspace，以及可参与调度的 Worker profile。",
+        "remoteDispatchDisabled": "远程队友派发已关闭。请在 Fleet 设置中启用，或明确选择“与协调器一起运行”后重试。此任务不会在本地运行。",
+        "remoteDispatchUnavailable": "远程队友派发无法启动持久化运行。请在团队运行准入恢复后重试。此任务不会在本地运行。",
+        "remotePrerequisitesHint": "远程目标需要启用远程派发，并有在线、可参与调度且启用 Task Workspace 的 Worker。",
         "runtimeAiSdk": "AI SDK",
         "runtimeAuto": "自动",
         "runtimeClaudeSdk": "Claude Agent SDK",
@@ -4175,6 +4199,13 @@
       },
       "close": "关闭工作区",
       "currentTask": "当前任务",
+      "filePreview": {
+        "back": "返回工作区",
+        "emptyFile": "此文件为空。",
+        "openInEditor": "编辑",
+        "openInEditorLabel": "在工作区编辑器中打开",
+        "readOnly": "只读"
+      },
       "missingProject": {
         "description": "请先将当前对话关联到项目，再编辑工作区文件。",
         "title": "未关联项目"
@@ -4242,6 +4273,7 @@
         "loadMoreEvents": "加载更多事件",
         "loading": "正在加载任务资源",
         "modified": "已修改",
+        "moreActions": "更多操作",
         "originFilter": "按来源筛选",
         "overflowCount": "已核对 {count} 个监听缺口",
         "pin": "固定任务",
@@ -4697,12 +4729,66 @@
       "cpus": "CPU 上限",
       "cpusHelp": "例如 1.5。留空表示不限制。",
       "delete": "删除",
+      "deleteConfirm": "永久删除",
+      "deleteConfirmDescription": "此操作将永久删除容器及其内部存储的所有文件，挂载的主机目录中的文件会保留。请先导出需要保留的文件。",
+      "deleteConfirmTitle": "删除 {name}？",
       "deleteHelp": "销毁容器，以及其中所有不在挂载目录里的内容。",
+      "deleting": "正在删除…",
       "description": "让 computer-use 动作在隔离的 cua Docker 桌面里运行，而不是本机。需要宿主机安装 Docker。",
       "desktopOnly": "仅在桌面应用中可用",
+      "desktopViewer": {
+        "acquiring": "正在接管…",
+        "cadence": "此视图可见时，桌面截图约每秒刷新一次。",
+        "controlHelp": "点击画面后可使用键盘，也可拖拽和滚动。Escape 释放控制权；此窗口失去焦点时也会释放。接管期间智能体输入会暂停。",
+        "controlling": "正在由你控制",
+        "disconnected": "桌面已断开，正在自动重试…",
+        "doubleClick": "双击模式",
+        "error": {
+          "capture": "无法获取桌面画面，控制权已释放。",
+          "control": "无法获取或续期控制权，请重新接管。",
+          "input": "无法确认输入是否成功，控制权已释放；请检查画面后再重试。",
+          "release": "无法确认控制权是否已释放；控制权将在 15 秒内自动过期。"
+        },
+        "loading": "正在连接桌面…",
+        "readOnly": "仅查看",
+        "refresh": "刷新画面",
+        "release": "释放控制权",
+        "screen": "沙箱桌面截图",
+        "sendEscape": "发送 Escape",
+        "sendText": "发送文字",
+        "takeControl": "接管控制",
+        "textLabel": "发送到沙箱的文字",
+        "textPlaceholder": "在此输入或粘贴文字，支持中文输入法。",
+        "title": "桌面",
+        "unavailable": "在桌面应用中启动此沙箱后即可查看画面。"
+      },
       "empty": "尚未配置任何沙箱。",
+      "fileTransfer": {
+        "download": "下载文件",
+        "downloadPath": "沙箱内的文件路径",
+        "downloading": "正在下载…",
+        "folder": "沙箱内已存在的目录",
+        "help": "上传或下载单个最大 {limit} MiB 的二进制文件。上传目标必须是已存在的目录，且不会覆盖现有文件。上传会释放手动桌面控制权。",
+        "missingContainer": "请先刷新连接健康状态以确定容器，再传输文件。",
+        "notice": {
+          "cancelled": "文件传输已取消。",
+          "downloadFailed": "下载失败。请确认仍是同一运行中的容器且文件可读。",
+          "downloaded": "文件已保存。",
+          "invalidPath": "请输入沙箱内的绝对路径，不可包含上级目录跳转。",
+          "invalidPayload": "下载文件的大小或校验和检查失败。",
+          "readFailed": "无法读取所选文件。",
+          "saveFailed": "无法保存下载的文件。",
+          "tooLarge": "文件超过 8 MiB 传输限制。",
+          "uploadFailed": "上传失败。请确认仍是同一运行中的容器、目录存在、文件名未被占用且控制权可用。",
+          "uploaded": "文件已上传到所选沙箱。"
+        },
+        "title": "文件",
+        "upload": "选择文件并上传",
+        "uploading": "正在上传…"
+      },
       "host": "主机",
       "image": "Docker 镜像",
+      "imageHelp": "内置 Linux 桌面会在首次启动时于本地构建，需要联网，可能耗时数分钟。自定义镜像需兼容 computer-server 协议、Cognia 桌面鉴权，并提供 Python 3。",
       "lifecycleTitle": "生命周期",
       "manage": "管理",
       "memoryMb": "内存上限（MiB）",
@@ -6570,7 +6656,14 @@
         "session": "新建独立会话",
         "sessionHint": "会出现在侧栏。适合你打算保留的方向。"
       },
-      "title": "分支对话"
+      "title": "分支对话",
+      "workingSet": {
+        "current": "沿用当前状态",
+        "historical": "沿用分支位置的状态",
+        "initial": "从空白状态开始",
+        "label": "工作状态",
+        "unavailable": "此位置没有历史状态记录，请选择当前状态或从空白状态开始。"
+      }
     },
     "branchNavigator": {
       "nextBranch": "下一个回复",
@@ -7022,11 +7115,15 @@
         "userLabel": "用户 memory"
       },
       "modelPicker": {
+        "agentDefaultModel": "{agent} · 默认",
+        "agentDefaultModelRow": "默认模型",
+        "agentFallbackName": "Agent",
+        "agentModelAppliesNextTurn": "所选模型会在下一条消息时生效。",
         "agentModelSwitchFailed": "该 agent 拒绝了这个模型：{reason}",
+        "agentModelsDeferred": "{agent} 的模型会在第一条消息后显示，在此之前使用它自己的默认模型。",
         "agentModelsFailed": "无法获取 {agent} 的模型列表，请重试刷新。",
-        "agentModelsGroup": "Agent 提供的模型",
-        "agentModelsLoading": "正在询问 {agent} 有哪些模型。",
-        "agentNoModels": "{agent} 没有报告自己的模型。下面这些是在 Cognia 中配置的模型。",
+        "agentModelsLoading": "正在读取 {agent} 的模型…",
+        "agentNoModels": "{agent} 没有提供可选的模型，将使用它自己的默认模型。",
         "agentNoSession": "{agent} 已连接但没有打开任何会话，它的模型会在第一轮对话时出现。",
         "agentNotConnected": "{agent} 尚未连接，因此还列不出它自己的模型。",
         "autoBadge": "自动",
@@ -7038,6 +7135,23 @@
         "capReasoning": "推理",
         "capTools": "工具调用",
         "capVision": "视觉",
+        "cogniaAccountLocked": "主机账户已锁定。解锁后才能让 {agent} 使用 Cognia 模型。",
+        "cogniaChipTitle": "{agent} → {provider}/{model}（经由 Cognia）",
+        "cogniaGlyph": "Cognia 模型",
+        "cogniaHostUpdateRequired": "请更新已配对的主机，才能让 {agent} 使用 Cognia 模型。",
+        "cogniaModelNoStreaming": "不支持流式输出",
+        "cogniaModelNoTools": "不支持工具调用",
+        "cogniaModelSwitchFailed": "无法保存模型选择：{reason}",
+        "cogniaModelsFailed": "无法从主机获取 Cognia 模型。重新打开列表即可重试。",
+        "cogniaModelsLoading": "正在询问主机可用的 Cognia 模型…",
+        "cogniaNetworkEndpoint": "{agent} 通过网络端点连接，无法使用 Cognia 模型。",
+        "cogniaNoEligibleModels": "没有可供 {agent} 使用的已配置提供商：需要兼容 OpenAI 或 Anthropic、配置了 API 密钥且支持工具调用和流式输出的提供商。",
+        "cogniaNoProcess": "{agent} 没有可由 Cognia 启动的本地进程，无法使用 Cognia 模型。",
+        "cogniaPublicHttpsRequired": "已配对的主机必须可通过公网 HTTPS 访问，才能让 {agent} 使用 Cognia 模型。",
+        "cogniaRemoteServer": "{agent} 连接的是远程服务器，无法使用 Cognia 模型。",
+        "cogniaSection": "Cognia 模型",
+        "cogniaSectionHint": "通过本地网关让 {agent} 使用 Cognia 提供商的模型。所选模型从下一条消息开始生效。",
+        "cogniaUnsupportedRuntime": "{agent} 无法使用 Cognia 模型：其运行时不支持隔离的网关启动。",
         "contextWindowLabel": "上下文窗口",
         "liveSwitchFailed": "无法实时切换模型",
         "liveSwitched": "已切换到 {model}",
@@ -7278,6 +7392,7 @@
         "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
       },
       "stopTooltip": "停止",
+      "stopTooltipKeyboard": "停止（Esc）",
       "templateParams": {
         "hint": "回车或 Esc 关闭 · Tab 跳到下一个参数",
         "loading": "搜索中…",
@@ -8553,6 +8668,8 @@
       },
       "code": {
         "ariaInLanguage": "{language} 代码",
+        "close": "关闭",
+        "closeAria": "关闭全屏查看",
         "copy": "复制",
         "copyAria": "复制代码",
         "defaultLabel": "代码",
@@ -8686,7 +8803,6 @@
     "runPanel": {
       "ariaDiscardQueue": "丢弃排队的消息",
       "ariaEditQueued": "修改这条排队的消息",
-      "ariaInterrupt": "中断当前回合",
       "ariaLocateSteer": "跳到第一条未送达的消息",
       "ariaManageSteer": "查看排队的消息",
       "ariaRemoveQueued": "移除这条排队的消息",
@@ -8722,8 +8838,6 @@
     },
     "runStatus": {
       "ariaSteerNow": "中断当前回合并立即发送队列中的消息",
-      "interruptHint": "按 Esc 中断",
-      "interruptHintTouch": "点按中断",
       "metricContext": "上下文 {pct}%",
       "metricSpeed": "{value} tok/s",
       "metricTokens": "{value} tok",
@@ -9088,6 +9202,7 @@
       "dismiss": "关闭",
       "inputLabel": "输入",
       "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
+      "noInputDetails": "代理未提供此次调用的参数，仅给出了名称。",
       "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
       "supersededNotice": "已被新指令取代——工具调用已被拒绝。",
       "titleFallback": "允许执行 {tool}？",
@@ -10907,6 +11022,7 @@
     "add": "添加",
     "all": "全部",
     "back": "上一步",
+    "backToApp": "返回应用",
     "biometricBlocked": {
       "cancelled": "已取消生物识别验证。",
       "error": "生物识别验证失败。",
@@ -10919,6 +11035,7 @@
     "copied": "已复制",
     "copy": "复制",
     "delete": "删除",
+    "desktopOnly": "此窗口仅在桌面应用中可用。",
     "dismiss": "忽略",
     "duplicate": "复制",
     "edit": "编辑",
@@ -11388,6 +11505,63 @@
       "searchPlaceholder": "搜索文件、网页和工具…",
       "title": "会话来源"
     },
+    "sessionUsage": {
+      "composition": {
+        "aria": "上下文窗口：已用 {used} / {max} tokens",
+        "ofAttributed": "根据对话记录估算：为可归因部分内的占比，而非整个窗口。",
+        "ofWindow": "占整个窗口的比例，由运行时实时上报。"
+      },
+      "description": "这个对话花了多少，以及上下文窗口里装了什么。",
+      "empty": "还没有计费的轮次。收到第一条回复后会显示图表。",
+      "growth": {
+        "compactAt": "自动压缩",
+        "context": "上下文",
+        "drops": "上下文骤降 {count} 次（压缩、清空历史或新分支）。",
+        "empty": "还没有可绘制的轮次。",
+        "summary": "峰值 {peak}，最新 {latest}。",
+        "turn": "第 {index} 轮",
+        "window": "窗口上限"
+      },
+      "kpi": {
+        "avgCost": "平均每轮",
+        "cacheHit": "缓存命中",
+        "cost": "成本",
+        "speed": "速度",
+        "tokPerSec": "{value} tok/s",
+        "tokens": "Token",
+        "turns": "轮次"
+      },
+      "loading": "正在读取本对话的用量…",
+      "modelDetail": "{turns} 轮 · {tokens} tokens",
+      "openReport": "健康报告",
+      "refresh": "刷新实时上下文读数",
+      "sections": {
+        "cost": "单轮成本",
+        "efficiency": "效率",
+        "growth": "上下文随轮次变化",
+        "models": "模型",
+        "tokenMix": "Token 构成",
+        "tools": "工具调用",
+        "window": "上下文窗口"
+      },
+      "title": "用量与上下文",
+      "tokenMix": {
+        "aria": "按类型划分的 {total} tokens",
+        "cacheRead": "缓存读取",
+        "cacheWrite": "缓存写入",
+        "empty": "还没有记录到 Token。",
+        "input": "输入",
+        "output": "输出",
+        "reasoning": "输出中有 {tokens} 为推理（{pct}）。"
+      },
+      "tools": {
+        "empty": "本对话没有工具调用。",
+        "errors": "· {count} 次失败（{pct}%）",
+        "other": "其他",
+        "summary": "共 {total} 次调用"
+      },
+      "windowEmpty": "运行时尚未上报窗口内容。"
+    },
     "sidechatPlaceholder": {
       "description": "请先打开一个会话，再使用侧聊调查旁支问题，避免打扰主对话。",
       "title": "当前未打开会话"
@@ -11598,6 +11772,7 @@
       "content": "搜索消息内容",
       "contentHint": "需要 {count} 个字符，读取本机消息索引。",
       "hint": "决定搜索框能找到哪些会话。",
+      "includeActive": "包含活跃会话",
       "includeArchived": "包含已归档会话",
       "label": "搜索范围",
       "labelActive": "搜索范围 — 已放宽 {count} 项",
@@ -11669,6 +11844,85 @@
       "any": "任意工作区",
       "label": "工作区",
       "unassigned": "无工作区"
+    }
+  },
+  "conversations": {
+    "archive": {
+      "empty": {
+        "action": "清空归档…",
+        "body": "这些会话及其全部消息将被永久删除，且无法撤销。",
+        "cancel": "取消",
+        "confirm": "删除 {count} 个会话",
+        "lockedKept": "{count} 个已移交到其他设备的会话会被保留。",
+        "more": "以及另外 {count} 个",
+        "nothingBody": "没有可删除的已归档会话。",
+        "nothingTitle": "归档为空",
+        "scope": "范围：{scope}。",
+        "success": "已删除 {count} 个已归档会话",
+        "title": "{count, plural, =1 {删除 # 个已归档会话？} other {删除全部 # 个已归档会话？}}"
+      },
+      "restoredBySend": "已移回会话列表",
+      "scopeAllWorkspaces": "全部工作区"
+    },
+    "autoArchive": {
+      "card": {
+        "description": "自动归档一段时间内没有任何动静的会话，让会话列表保持清爽。",
+        "title": "归档"
+      },
+      "description": "会话在所选时间内没有任何活动后会被自动归档。已置顶、正在运行、已移交到其他设备以及 IM 会话不会被自动归档，当前打开的会话也不会。归档的会话随时可以恢复。",
+      "hostDecides": "这些会话归你的主机所有，何时归档由主机决定。请在主机上修改此设置。",
+      "hostPlaceholder": "在主机上设置",
+      "label": "自动归档",
+      "options": {
+        "days": "{count, plural, other {闲置 # 天后}}",
+        "off": "关闭"
+      },
+      "selectLabel": "自动归档闲置会话"
+    },
+    "banner": {
+      "body": "{since}归档。发送消息会将其移回会话列表。",
+      "title": "此会话已归档",
+      "unarchive": "取消归档"
+    },
+    "manager": {
+      "archivedNote": "已归档的会话在归档期间保留置顶和所在文件夹，恢复后两者都会回来。向已归档会话发送消息会自动恢复它。",
+      "columns": {
+        "actions": "操作",
+        "activity": "最近活动",
+        "agent": "智能体",
+        "cost": "成本",
+        "created": "创建时间",
+        "selectAll": "选择此视图中的所有会话",
+        "title": "会话",
+        "tokens": "Token",
+        "turns": "轮次",
+        "workspace": "工作区"
+      },
+      "contentMatch": "在消息中匹配",
+      "description": "所有工作区的全部会话。在这里查找、重命名、归入文件夹、归档和恢复。",
+      "emptyArchive": "清空归档…",
+      "inFolder": "位于 {name}",
+      "loading": "正在加载会话",
+      "newChat": "新建对话",
+      "noWorkspace": "无工作区",
+      "none": "—",
+      "openRow": "打开 {title}",
+      "rowActions": "{title} 的操作",
+      "rowSelect": "选择 {title}",
+      "searchAria": "搜索会话",
+      "searchClear": "清除搜索",
+      "searchContent": "搜索消息内容",
+      "searchPlaceholder": "搜索会话…",
+      "showMore": "再显示 {count} 个",
+      "shownOf": "显示 {shown} / {total}",
+      "sortBy": "按{column}排序",
+      "summary": "{active} 个活跃 · {archived} 个已归档",
+      "tabs": {
+        "active": "活跃",
+        "archived": "已归档"
+      },
+      "tabsAria": "要显示的会话",
+      "title": "会话管理"
     }
   },
   "crashDialog": {
@@ -11993,7 +12247,10 @@
       }
     },
     "channelList": {
+      "archivedChipAria": "已归档 — 返回活跃会话",
       "archivedTitleSuffix": "已归档",
+      "archivedToggle": "已归档会话",
+      "backToConversations": "返回会话列表",
       "bucketOlder": "更早",
       "bucketPrev30": "过去 30 天",
       "bucketPrev7": "过去 7 天",
@@ -12005,20 +12262,27 @@
         "cancel": "取消",
         "delete": "删除",
         "deleteConfirmBody": "将永久删除这些会话及其所有消息，不可撤销。",
+        "deleteConfirmMore": "以及另外 {count} 个",
         "deleteConfirmTitle": "删除 {count} 个会话？",
         "deleteSuccess": "已删除 {count} 个会话",
+        "deselectAll": "取消全选",
+        "done": "完成",
         "folderOtherWorkspace": "灰显的文件夹与部分所选会话不在同一工作区。",
         "markRead": "标为已读",
+        "markUnread": "标为未读",
         "moveSuccess": "已移动 {count} 个会话",
         "moveToFolder": "移动到文件夹",
+        "newFolder": "新建文件夹…",
         "pin": "置顶",
         "pinSuccess": "已置顶 {count} 个会话",
         "removeFromFolder": "移出文件夹",
         "removeFromFolderSuccess": "已将 {count} 个会话移出文件夹",
+        "selectAll": "全选（{count}）",
+        "selectHint": "未选择会话",
         "selectedCount": "已选 {count} 项",
         "share": "分享",
         "unarchive": "取消归档",
-        "unarchiveSuccess": "已恢复 {count} 个会话",
+        "unarchiveSuccess": "已取消归档 {count} 个会话",
         "unpin": "取消置顶",
         "unpinSuccess": "已取消置顶 {count} 个会话"
       },
@@ -12034,7 +12298,8 @@
       "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
       "directMessages": "对话",
       "displayOptions": "显示选项",
-      "emptyArchived": "没有已归档的会话。",
+      "emptyArchivedHint": "归档可以整理列表而不删除会话，已归档的会话仍可在这里查找。",
+      "emptyArchivedTitle": "暂无归档",
       "emptyDm": "还没有对话，挑选一个角色开始。",
       "emptyFiltered": "没有会话符合当前的 {count} 项筛选条件。",
       "emptyFolder": "空文件夹——把会话移动到这里。",
@@ -12063,6 +12328,7 @@
       "groupShowLess": "收起",
       "groupShowMore": "再显示 {count} 条",
       "listActions": "列表操作",
+      "manageConversations": "管理会话…",
       "metadata": {
         "agent": "Agent",
         "label": "行详情",
@@ -12097,10 +12363,17 @@
       "searchPlaceholder": "搜索对话…",
       "searchShortcutHint": "按 / 开始搜索",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
+      "searchWiden": {
+        "archived": "包含已归档会话",
+        "content": "同时搜索消息正文",
+        "workspaces": "搜索所有工作区"
+      },
       "searchingMessages": "正在搜索消息内容…",
       "sectionPinned": "置顶",
       "sectionRecent": "最近",
       "sectionResults": "搜索结果",
+      "selectConversations": "选择会话",
+      "selectConversationsHere": "选择此处的会话",
       "showCustomIcons": "显示自定义 Agent 和团队图标",
       "showPreview": "显示消息预览",
       "showTimestamps": "显示活动时间",
@@ -12121,7 +12394,8 @@
       "ungroupedTeam": "对话",
       "ungroupedWorkspace": "未归属工作区",
       "viewActive": "显示活跃会话",
-      "viewArchived": "显示已归档会话"
+      "viewArchived": "显示已归档会话",
+      "viewArchivedCount": "显示已归档会话（{count}）"
     },
     "chatRuntime": {
       "actions": {
@@ -12141,6 +12415,26 @@
         "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
         "unsupported": "当前运行目标尚未实现聊天能力。"
       },
+      "strip": {
+        "actions": {
+          "connectionSettings": "设置",
+          "pair": "配对"
+        },
+        "cacheOnly": "仅可查看缓存",
+        "connecting": "正在重连",
+        "placeholder": "主机恢复连接后即可发送",
+        "states": {
+          "available": "聊天可用",
+          "incompatible": "需要升级主机",
+          "offline": "主机离线",
+          "queued": "等待主机重连",
+          "readOnly": "聊天只读",
+          "requiresGrant": "需要设备授权",
+          "requiresPairing": "未配对主机",
+          "requiresUnlock": "Vault 已锁定",
+          "unsupported": "暂不支持聊天"
+        }
+      },
       "title": "聊天当前为只读"
     },
     "find": {
@@ -12155,6 +12449,7 @@
       "a2ui": "小应用",
       "agentRuns": "智能体运行",
       "aliases": {
+        "conversations": "历史, 聊天记录, 会话记录, 会话, 归档, 已归档会话, conversations, history",
         "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts",
         "files": "资源库, 素材, 附件, 上传, 文档, 图片, 产物, 收藏, library, files",
         "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
@@ -12171,6 +12466,7 @@
         "system": "系统",
         "you": "个人"
       },
+      "conversations": "会话管理",
       "createTeam": "创建团队",
       "customize": {
         "behaviour": "行为",
@@ -12538,6 +12834,7 @@
     "sessionRow": {
       "actionsMenu": "会话操作",
       "archive": "归档",
+      "archived": "已归档",
       "branch": "分支对话",
       "branchedFrom": "分支会话——打开父会话",
       "cancel": "取消",
@@ -12566,6 +12863,7 @@
       "markUnread": "标为未读",
       "moveToFolder": "移动到文件夹",
       "moveToWorkspace": "移动到工作区",
+      "newFolder": "新建文件夹…",
       "openInCodexApp": "在 Codex App 中打开",
       "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
       "openInTerminal": "在终端打开",
@@ -12650,10 +12948,13 @@
       "connectionCenter": {
         "actions": {
           "connectHost": "连接 Host",
+          "manageHosts": "管理主机",
           "reconnect": "立即重连",
           "recover": "修复连接",
-          "settings": "Companion 设置"
+          "returnLocal": "切回本机",
+          "settings": "连接设置"
         },
+        "activeHost": "当前主机",
         "address": "Host 地址",
         "auth": {
           "locked": "已锁定",
@@ -12665,6 +12966,8 @@
         "capabilityCount": "{count, plural, =0 {未发布能力} other {# 项操作}}",
         "cloudHost": "云端 Host",
         "desktopHost": "桌面 Host",
+        "drivenAria": "正在驱动 {label}：{state}",
+        "drivenScope": "这个窗口的终端、文件、Git 与 Agent 调用都在 {label} 上运行。",
         "eventPlane": "事件",
         "eventPlaneDegradedHint": "请求能应答但没有事件到达。在别处做的更改要等事件流重连后才会出现。",
         "eventPlaneState": {
@@ -12819,8 +13122,11 @@
   "devices": {
     "access": {
       "heldCount": "已授权 {held}/{total}",
-      "lifecycle": "生命周期",
-      "lifecycleHint": "暂停会阻断该设备，直到你恢复它。吊销不可逆——设备必须重新配对。",
+      "lifecycleBlocked": {
+        "needs-desktop-shell": "暂停、恢复和吊销需要主机上的桌面应用。",
+        "no-host": "此浏览器未连接任何主机，暂停、恢复或吊销无处发送。",
+        "not-owner": "只有主机的所有者设备才能暂停、恢复或吊销配对设备。"
+      },
       "notApplicable": {
         "local": "本机不会给自己授权。",
         "paired-device": "没有可管理的授权。",
@@ -12828,10 +13134,10 @@
         "ssh-host": "SSH 主机用密钥或密码连接，而不是通过授权。访问权限由服务器自己的配置决定。",
         "worker": "Worker 的能力来自它的登记。若要撤销，请到「设置 → 机队」吊销它。"
       },
-      "notApplicableTitle": "没有可管理的授权",
       "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。",
       "partialHint": "该设备只持有此项授权所包含能力中的一部分。关闭再打开可将其恢复一致。",
       "pause": "暂停",
+      "pauseHint": "暂停会阻断该设备，直到你恢复它。",
       "reason": {
         "deviceRevoked": "已吊销的设备不持有任何能力，无论本地记录还写着什么。",
         "lockedUseUnavailable": "此授权在当前构建中没有强制执行点，因此无法发放。",
@@ -12840,6 +13146,8 @@
       },
       "resume": "恢复",
       "revoke": "吊销",
+      "revokeConfirmBody": "吊销不可逆。该设备会失去全部授权和密钥，必须重新配对才能回来。如果只是暂时停用，请改为暂停。",
+      "revokeConfirmTitle": "吊销 {label}？",
       "revokedBody": "它不持有任何能力，且必须重新配对才能连接。",
       "revokedTitle": "该设备已被吊销",
       "sshFilesReachIsWhole": "该授权没有目录范围限制。SFTP 路径是那台机器自己的绝对路径，符号链接也由它自己解析，因此没有可以限制的根目录。",
@@ -12848,8 +13156,12 @@
     },
     "actions": {
       "addHost": "添加主机",
+      "addSshHost": "添加 SSH 主机",
+      "grow": "配对设备或添加主机",
       "pair": "配对设备",
-      "refresh": "刷新"
+      "refresh": "刷新",
+      "refreshFailed": "无法刷新设备列表",
+      "refreshing": "正在刷新…"
     },
     "activity": {
       "attempts": "第 {attempts} 次尝试，共 {max} 次",
@@ -12913,9 +13225,8 @@
         "paired-device": "该设备未上报过，且平台未知，没有可推断的基线。",
         "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
         "ssh-host": "SSH 服务器不会上报任何东西，也不持有我们这套能力集。这里没有「缺失」，只是从未被询问过。",
-        "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。"
+        "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表，因此没有可展示的平台能力矩阵。"
       },
-      "noVocabularyTitle": "该设备没有可展示的能力词表",
       "reportedAt": "上报于{when}",
       "reportedCount": "已上报 {reported}/{total}",
       "source": {
@@ -12942,8 +13253,10 @@
     },
     "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
     "detail": {
+      "drawerTitle": "设备详情",
       "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
-      "noSelectionTitle": "未选择设备"
+      "noSelectionTitle": "未选择设备",
+      "sectionNavAria": "跳转到分区"
     },
     "eventPlane": {
       "connecting": "连接中",
@@ -12968,6 +13281,11 @@
       "local": "本机",
       "localDetail": "终端、文件与 Git 都在这里运行。",
       "manage": "管理设备",
+      "reconnectBody": "当前有回合正在进行。重新连接 {label} 会替换它所依赖的链路，正在运行的回合可能无法完成。",
+      "reconnectConfirm": "仍然重新连接",
+      "reconnectTitle": "有任务在运行，仍要重新连接吗？",
+      "removeActive": "{label} 是这个窗口正在驱动的主机。移除后，这个窗口会切回本机。",
+      "removeActiveBusy": "{label} 是这个窗口正在驱动的主机，且有回合正在其上运行。移除后这个窗口会立即切回本机，正在运行的回合仍留在该主机上。",
       "state": {
         "connecting": "连接中",
         "degraded": "降级",
@@ -12978,6 +13296,10 @@
       }
     },
     "files": {
+      "chainBroken": "“{name}”的跳板机已被删除、形成循环或超过五跳，因此无法访问其文件。",
+      "credentialRequired": "“{name}”的文件浏览与其 shell 使用同一登录方式，而它使用的密码尚未保存。",
+      "credentialRequiredBastion": "“{name}”的文件需经由“{bastion}”访问，而“{bastion}”使用的密码尚未保存。",
+      "fixInSettings": "在 SSH 主机中修复",
       "title": "文件",
       "transfers": "传输",
       "unknownProfile": "这一行没有指向已保存的 SSH 主机，因此没有可浏览的内容。"
@@ -12992,10 +13314,9 @@
     "host": {
       "cancel": "取消",
       "connect": "连接",
-      "controls": "主机控制",
-      "controlsHint": "连接后，本窗口的执行会以这台主机为目标。添加与发现主机仍留在设置中。",
       "disconnect": "断开",
       "managePairing": "管理已配对的 Host",
+      "moreAria": "{label} 的更多操作",
       "reconnect": "重新连接",
       "remove": "移除",
       "removeAria": "移除 {label}",
@@ -13025,17 +13346,41 @@
       "ssh-host": "SSH 主机",
       "worker": "执行 Worker"
     },
+    "kindPlural": {
+      "local": "本机",
+      "paired-device": "配对设备",
+      "remote-host": "主机",
+      "ssh-host": "SSH",
+      "worker": "Worker"
+    },
     "listPane": {
+      "clearFilters": "清除筛选",
       "emptyBody": "配对一台手机或添加远程主机后会显示在这里。",
       "emptyFiltered": "没有设备符合当前的搜索或筛选条件。",
       "emptyTitle": "暂无设备",
-      "filterAll": "全部类型",
+      "filterAll": "全部",
       "filterAria": "按设备类型筛选",
+      "filterAttention": "需要处理",
       "label": "设备列表",
       "searchAria": "按名称、地址或平台搜索设备",
       "searchPlaceholder": "搜索设备"
     },
+    "missingLinkBody": "链接指向的设备已不再配对或添加于此，因此改为显示本机。",
+    "missingLinkDismiss": "关闭",
+    "missingLinkTitle": "该设备不在当前设备群中",
     "never": "从未",
+    "notApplicable": {
+      "description": {
+        "local": "本控制台会向每台机器提出的问题，以及本机为什么给不出答案。",
+        "paired-device": "本控制台会向每台机器提出的问题，以及配对设备为什么给不出答案。",
+        "remote-host": "本控制台会向每台机器提出的问题，以及远程主机为什么无法从这里给出答案。",
+        "ssh-host": "本控制台会向每台机器提出的问题，以及一台 SSH 主机为什么给不出答案。",
+        "worker": "本控制台会向每台机器提出的问题，以及 Worker 为什么给不出答案。"
+      },
+      "nav": "不适用",
+      "runtime": "沙箱与工作区",
+      "title": "此处不适用"
+    },
     "notAvailable": "—",
     "overview": {
       "added": "添加于",
@@ -13129,7 +13474,6 @@
       "routeLocally": "路由回本机",
       "routing": "执行路由",
       "sandbox": "沙盒连接",
-      "sandboxUnsupportedTitle": "这里没有沙盒连接",
       "shellTiers": "Shell 档位",
       "tierAvailable": "可用",
       "tierCount": "可用 {available}/{total}",
@@ -13143,20 +13487,14 @@
       "timingAuthorityAria": "将 {label} 设为定时调度权威",
       "timingAuthorityHint": "设置后，只有这台机器会武装定时任务。保持关闭则每台主机各自武装；重复触发会被确定性幂等键吸收。",
       "workspaces": "工作区环境",
-      "workspacesInactiveTitle": "当前不是路由目标",
-      "workspacesUnsupportedTitle": "这里没有工作区"
+      "workspacesInactiveTitle": "当前不是路由目标"
     },
     "settingsLink": {
-      "hostsBody": "{count, plural, =0 {尚未配置任何主机。} other {已配置 # 台主机。}}连接、重命名与移除在设备控制台中管理。",
+      "hostsBody": "{count, plural, =0 {尚未配置任何主机。} other {已配置 # 台主机。}}能力、工作区与实时在线状态在设备控制台中查看。",
       "hostsTitle": "远程主机",
       "open": "打开设备控制台",
       "pairedBody": "{count, plural, =0 {尚未配对任何设备。} other {已配对 # 台设备。}}授权、能力与生命周期在设备控制台中管理。",
       "pairedTitle": "配对设备"
-    },
-    "shellOnly": {
-      "description": "本控制台会向每台机器提出的问题，以及一台 SSH 主机为什么给不出答案。",
-      "runtime": "沙箱与工作区",
-      "title": "对一台 SSH 主机不适用"
     },
     "ssh": {
       "auth": {
@@ -13171,6 +13509,7 @@
       "chainBrokenTitle": "跳板链无法解析",
       "connect": "打开 shell",
       "connecting": "连接中…",
+      "credentialRequiredBastionBody": "“{name}”需经由“{bastion}”连接，而“{bastion}”使用密码认证且尚未保存密码。请在 SSH 主机编辑器中为“{bastion}”保存密码后再连接。",
       "credentialRequiredBody": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加。",
       "credentialRequiredTitle": "未保存密码",
       "edit": "在设置中编辑",
@@ -13186,12 +13525,22 @@
       "forwardsNone": "没有转发规则。",
       "noHostBody": "SSH 运行在机器上，而不是浏览器标签页里。配对一台宿主，或打开桌面应用，这台主机就能再次连接。",
       "noHostTitle": "没有可用于连接的终端宿主",
-      "notOnHost": "配对宿主上没有名为 {name} 的 SSH 配置。配置由宿主所属的桌面登记，请在那里添加后再连接。",
       "probe": {
         "action": "测试连接",
         "cost": "测试会真正建立一次连接：它会经过每一个跳板并完成认证、在对方日志中留下记录、可能向 ssh-agent 索要口令，并在首次连接时信任主机密钥。它不会打开任何端口转发。",
         "desktopOnly": "测试连接是从这台机器发起的，只能在桌面端做。在这里打开 shell 仍然可用：由配对的桌面替你拨号。",
         "invalid": "该配置无法生成连接（{reason}），因此没有联系过这台主机。请在 设置 → 终端 中修正。",
+        "invalidReason": {
+          "host": "主机地址为空或包含空格",
+          "jumpChain": "跳板机缺失、形成循环或配置不完整",
+          "localForward": "某条本地转发规则无效",
+          "name": "缺少显示名称",
+          "port": "端口不在 1–65535 范围内",
+          "privateKeyPath": "私钥认证缺少私钥路径",
+          "profile": "某个已保存字段无效",
+          "remoteForward": "某条远程转发规则无效",
+          "username": "用户名为空或包含空格"
+        },
         "reachableLearned": "可达。这是第一次连接，主机密钥已被信任并保存。",
         "reachableVerified": "可达。主机密钥与已信任的一致。",
         "running": "测试中…",
@@ -13490,6 +13839,10 @@
       "permissionDenied": {
         "hint": "智能体拒绝了一项未获授权的操作——请调整其权限模式。",
         "label": "权限被拒绝"
+      },
+      "piPackageUnavailable": {
+        "hint": "此智能体要加载的插件 Pi 包无法加载，因此会话未启动。请准备该包或启用其插件，或在智能体设置中移除它。",
+        "label": "Pi 包不可用"
       },
       "pluginToolMissing": {
         "hint": "请求的工具不可用——请启用提供该工具的插件。",
@@ -15289,6 +15642,7 @@
       "description": "每个任务使用独立的 Agent 配置和临时网关凭据，供应商密钥保留在 Cognia。文件和网络访问遵循所选沙箱设置。 更换模型或账号需要新建任务。",
       "empty": "没有兼容的已配置模型，请先在设置中添加 API 供应商或订阅。",
       "enable": "使用 Cognia 模型",
+      "hostUpdateRequired": "需要先更新已配对的主机，此 Agent 才能使用 Cognia 模型运行。",
       "input": "最大输入：{tokens, number}",
       "invalid": "请选择模型和受支持的本地 Agent 运行时。",
       "loadingModels": "正在读取账号模型信息…",
@@ -15993,6 +16347,11 @@
     "statusError": "错误",
     "statusReconnecting": "重连中",
     "stepsCompleted": "已完成",
+    "supportTier": {
+      "documentedOnly": "仅文档",
+      "executable": "可直接运行",
+      "guided": "引导配置"
+    },
     "togglePlan": "展开或收起执行计划",
     "traceHealth": {
       "cost": "成本",
@@ -19371,6 +19730,14 @@
     "zh-CN": "中"
   },
   "logging": {
+    "autoSubmit": {
+      "failed": "{count, plural, other {# 份崩溃报告未能发送}}",
+      "failedFinal": "报告仍保留在本设备上，可在“日志 → 崩溃报告”中检查后手动发送。",
+      "failedRetry": "报告仍保留在本设备上，下次启动时会再次尝试。",
+      "sent": "崩溃报告已发送 · 支持代码 {code}",
+      "sentDescription": "已自动发送，未包含任何可选附件。回执可在“日志 → 崩溃报告”中查看。",
+      "view": "查看"
+    },
     "crash": {
       "actions": {
         "back": "返回列表",
@@ -19391,21 +19758,27 @@
       "autoRefreshOff": "关闭",
       "autoRefreshOn": "开启",
       "autoRefreshStatus": "自动刷新",
-      "detailDescription": "查看该崩溃日志条目及随其采集的诊断快照。",
-      "detailTitle": "崩溃详情",
+      "clearStored": {
+        "cancel": "保留日志",
+        "confirm": "清除已保存",
+        "description": "这会永久删除本设备上保存的错误与致命级日志，其他日志历史会保留。",
+        "title": "清除已保存的错误日志？"
+      },
+      "detailDescription": "记录的错误及随之采集的诊断快照。",
+      "detailTitle": "错误详情",
       "diagnostics": {
         "runtime": "运行时诊断",
         "title": "诊断快照",
         "window": "窗口诊断"
       },
-      "emptyDescription": "请尝试放宽筛选条件，或重新触发失败流程。",
-      "emptyTitle": "未找到崩溃日志",
-      "errorTitle": "加载崩溃日志失败",
+      "emptyDescription": "本设备记录的错误与致命级日志会出现在这里。如果本应有内容，请放宽筛选条件。",
+      "emptyTitle": "没有错误日志",
+      "errorTitle": "无法加载错误日志",
       "lastUpdated": "最近更新",
       "levels": {
         "all": "全部级别"
       },
-      "loading": "正在加载崩溃日志...",
+      "loading": "正在加载错误日志…",
       "native": {
         "details": "完整原生日志详情",
         "logDirectory": "日志目录",
@@ -19414,6 +19787,15 @@
         "platformHealth": "平台健康度",
         "platformLevel": "平台阈值",
         "status": "状态",
+        "statuses": {
+          "active": "运行中",
+          "degraded": "降级",
+          "error": "错误",
+          "healthy": "正常",
+          "inactive": "未启用",
+          "other": "其他（{status}）",
+          "unavailable": "不可用"
+        },
         "title": "原生日志",
         "unavailable": "不可用"
       },
@@ -19428,8 +19810,18 @@
         "title": "分享前注意"
       },
       "refreshing": "刷新中...",
-      "resizeDetail": "调整诊断详情面板宽度",
-      "searchPlaceholder": "搜索崩溃日志...",
+      "resizeDetail": "调整错误详情面板宽度",
+      "searchPlaceholder": "搜索错误…",
+      "snapshot": {
+        "summaries": {
+          "diagnostics_error": "无法采集诊断信息",
+          "native_degraded": "原生日志已降级",
+          "native_inactive": "当前运行时未启用原生日志",
+          "runtime_error": "本地运行时报告了错误",
+          "snapshot": "最新的原生诊断快照"
+        },
+        "title": "诊断快照"
+      },
       "sourceCount": "个来源",
       "sourceLabel": "来源筛选",
       "sources": {
@@ -19442,29 +19834,51 @@
         "native": "原生日志",
         "recent": "最近错误",
         "recentDescription": "当前会话内存中的失败记录",
-        "total": "当前可见事件"
+        "total": "当前可见错误"
+      },
+      "toasts": {
+        "clearFailed": "无法清除日志",
+        "copied": "已复制到剪贴板",
+        "copyFailed": "无法写入剪贴板",
+        "exportFailed": "导出失败",
+        "exported": "导出已保存",
+        "openDirectoryFailed": "无法打开日志目录",
+        "recentCleared": "已清除最近错误",
+        "refreshFailed": "无法刷新错误日志",
+        "storedCleared": "{count, plural, =0 {没有可清除的已保存错误日志} other {已清除 # 条已保存的错误日志}}"
       }
     },
     "dashboard": {
       "currentPeriod": "当前周期",
+      "errorCount": "{count} 条错误",
       "errorRate": "错误率",
       "errorTrend": "错误趋势",
       "errors": "个错误",
       "levelDistribution": "级别分布",
+      "logCount": "{count} 条日志",
       "logRate": "日志速率",
       "logVolume": "日志量趋势",
       "logsPerMinUnit": "条/分钟",
       "logsSeries": "日志",
       "moduleActivity": "模块活跃度",
+      "moduleListLabel": "按模块筛选",
       "noData": "暂无可视化日志数据",
       "occurrences": "次出现",
       "otherSeries": "其他",
       "platformBackend": "平台后端",
+      "platformBackendNone": "无",
+      "platformError": "平台错误",
       "platformHealth": "平台健康度",
       "platformLogging": "平台日志",
       "platformTargets": "目标",
       "platformThreshold": "平台阈值",
       "previousPeriod": "上一周期",
+      "showErrors": "在列表中查看错误",
+      "showModule": "在列表中查看该模块",
+      "showWarnings": "在列表中查看警告",
+      "spanDays": "{value} 天",
+      "spanHours": "{value} 小时",
+      "spanMinutes": "{value} 分钟",
       "timeSpan": "时间跨度",
       "topErrors": "高频错误",
       "topModule": "最活跃模块",
@@ -19474,25 +19888,36 @@
       "trendUp": "上升",
       "uniqueModules": "独立模块数",
       "uniqueTraces": "独立追踪数",
+      "warningCount": "{count} 条警告",
       "warningRate": "警告率",
       "warnings": "个警告"
     },
     "description": "查看、搜索和导出应用程序日志",
     "detail": {
       "addBookmark": "收藏",
+      "close": "关闭详情",
       "copyData": "复制数据",
+      "copyEntry": "复制条目",
       "copyJson": "复制 JSON",
       "copyMessage": "复制消息",
+      "copySessionId": "复制会话 ID",
       "copyStack": "复制堆栈跟踪",
       "copyTraceId": "复制追踪 ID",
+      "focusSession": "只看此会话",
+      "focusTrace": "只看此追踪",
+      "jsonItems": "{count} 项",
+      "jsonKeys": "{count} 个键",
       "message": "消息",
       "module": "模块",
       "nextLog": "下一条日志",
+      "openTrace": "在追踪中打开",
       "prevLog": "上一条日志",
       "relatedLogs": "关联日志",
+      "relatedWindowed": "显示此条目前后的 {shown} 条，共 {total} 条。",
       "removeBookmark": "取消收藏",
       "sessionId": "会话 ID",
       "tags": "标签",
+      "thisEntry": "当前条目",
       "timestamp": "时间戳",
       "title": "日志详情"
     },
@@ -19507,6 +19932,7 @@
     "nativeViewer": {
       "empty": "扫描窗口内没有匹配的日志条目。",
       "entryCount": "{count} 条",
+      "errorTitle": "无法读取原生日志",
       "filePlain": "普通日志",
       "fileSelectLabel": "日志文件",
       "fileStructured": "结构化日志",
@@ -19534,7 +19960,7 @@
           "title": "Agent 追踪"
         },
         "statsBar": {
-          "avgLatencyHint": "平均延迟 {ms} ms",
+          "avgLatencyHint": "平均延迟 {value}",
           "cacheHitRate": "缓存命中率",
           "cacheReadHint": "缓存命中：{count}",
           "errors": "错误",
@@ -19557,8 +19983,10 @@
         },
         "tree": {
           "empty": "该 trace 暂无 span。",
+          "failed": "失败：",
           "loading": "正在加载 trace…",
           "title": "Trace",
+          "tokens": "输入 {input} / 输出 {output}",
           "treeLabel": "Span 树"
         }
       },
@@ -19592,7 +20020,6 @@
       "allLevelsTab": "全部",
       "allModules": "所有模块",
       "allSources": "所有来源",
-      "autoRefresh": "自动刷新",
       "back": "返回",
       "bookmarked": "已收藏",
       "clear": "清除日志",
@@ -19600,21 +20027,24 @@
       "clearConfirmConfirm": "清空日志",
       "clearConfirmDescription": "将永久删除本设备上所有已持久化的日志条目，被删除条目的导出与书签将失效。",
       "clearConfirmTitle": "清空全部日志？",
+      "clearFailedToast": "无法清除日志",
       "clearSearchHistory": "清除历史",
-      "clearSessionFocus": "清除会话聚焦",
-      "clearTraceFocus": "清除追踪聚焦",
       "clearedToast": "日志已清空",
       "closeDetails": "关闭详情面板",
       "closeTransportDetails": "关闭",
+      "collapseEntry": "收起条目",
       "copied": "已复制！",
       "copyEntry": "复制日志条目",
+      "copyFailed": "无法复制到剪贴板",
       "copyLogEntry": "复制日志条目",
       "copyShareUrl": "复制分享链接",
       "customTimeRange": "自定义...",
+      "customTimeRangeActive": "自定义范围",
       "customTimeRangeApply": "应用",
       "customTimeRangeChipPrefix": "时间",
       "customTimeRangeClear": "清除",
       "customTimeRangePickerLabel": "选择时间范围",
+      "customTimeRangeValue": "{start} 至 {end}",
       "dashboardView": "仪表盘视图",
       "data": "数据",
       "deletePreset": "删除选中预设",
@@ -19625,19 +20055,41 @@
       },
       "densityMenuLabel": "行密度",
       "disableAutoRefresh": "禁用自动刷新",
+      "durationUnits": {
+        "h": "{value} 小时",
+        "m": "{value} 分钟",
+        "ms": "{value} 毫秒",
+        "s": "{value} 秒"
+      },
+      "emptyChips": {
+        "bookmarks": "仅已收藏",
+        "customTime": "时间：自定义范围",
+        "level": "级别：{value}",
+        "module": "模块：{value}",
+        "search": "搜索：{value}",
+        "session": "会话：{value}",
+        "source": "来源：{value}",
+        "time": "时间：{value}",
+        "trace": "追踪：{value}",
+        "transport": "传输：{value}"
+      },
       "emptyStateClearFilters": "清除筛选",
       "emptyStateDescription": "使用应用时日志将自动出现。按 ? 查看键盘快捷键。",
       "emptyStateFilterPrefix": "没有匹配当前筛选的日志：",
       "emptyStateOpenPresets": "打开预设",
       "emptyStateTitle": "暂无日志",
+      "emptyStateWindowCapped": "只加载并搜索了最新的 {count} 条日志，更早的匹配项不会显示。按模块或追踪筛选可以查得更远。",
       "enableAutoRefresh": "启用自动刷新",
       "error": "错误",
       "errorAndFatal": "错误",
       "errorLoading": "加载日志失败",
+      "expandEntry": "展开条目",
       "export": "导出日志",
       "exportAs": "导出为...",
       "exportText": "纯文本",
+      "fieldValue": "{label}：{value}",
       "filterChip": {
+        "clearAll": "全部清除",
         "clearModule": "清除模块筛选",
         "clearSession": "清除会话筛选",
         "clearSource": "清除来源筛选 {value}",
@@ -19648,8 +20100,7 @@
         "sessionLabel": "会话：",
         "sourceLabel": "来源：",
         "traceLabel": "追踪：",
-        "transportLabel": "传输：",
-        "transportPrefix": "传输：{name}"
+        "transportLabel": "传输："
       },
       "filterIn": "范围：",
       "filters": "筛选",
@@ -19659,14 +20110,26 @@
       "focusTrace": "聚焦此追踪",
       "focusTraceMenu": "聚焦此追踪",
       "groupByTrace": "按追踪分组",
+      "healthStatus": {
+        "degraded": "降级",
+        "healthy": "正常",
+        "inactive": "未启用",
+        "offline": "离线"
+      },
       "highSeverityOnly": "仅显示高严重级别",
       "jumpToLatest": "跳到最新",
       "keyboardShortcuts": "键盘快捷键",
       "levelFilterGroup": "按级别筛选",
       "listView": "列表视图",
+      "live": "实时",
+      "liveOffAria": "实时跟随已关闭——开始跟随新日志",
+      "liveOnAria": "实时跟随已开启——新日志自动加载",
       "loadingLogs": "加载日志中...",
       "logDetails": "日志详情",
+      "logDetailsDescription": "所选日志条目：消息、元数据、数据、堆栈及相关条目。",
+      "logListLabel": "日志条目",
       "logRatePulse": "实时日志流活动",
+      "logRateValue": "约 {rate} 条/分钟",
       "logs": "条日志",
       "logsPerMin": "条/分钟",
       "modulePlaceholder": "模块",
@@ -19674,6 +20137,11 @@
       "moreFilters": {
         "hide": "隐藏更多筛选",
         "show": "更多筛选"
+      },
+      "nativeBridgeState": {
+        "active": "运行中",
+        "degraded": "降级",
+        "inactive": "未启用"
       },
       "nativeLoggingBridge": "桥接",
       "nativeLoggingDetails": "原生日志详情",
@@ -19683,6 +20151,14 @@
       "nativeLoggingNoTargets": "无",
       "nativeLoggingStatus": "状态",
       "nativeLoggingTargets": "目标",
+      "nativeStartupMode": {
+        "disabled": "已禁用",
+        "fallback": "降级",
+        "full": "完整",
+        "unknown": "未知"
+      },
+      "nativeTileAria": "原生日志：{status}",
+      "nativeTileLabel": "原生",
       "newLogsToast": "{count, plural, =0 {} other {新增 # 条日志}}",
       "nextPage": "下一页",
       "noLogs": "暂无日志",
@@ -19691,6 +20167,8 @@
       "noTraceEventsHint": "不包含 traceId 的日志已过滤",
       "noTraceId": "无追踪 ID",
       "openDetailsPanel": "打开详情面板",
+      "openLogSettings": "日志设置",
+      "openTraceAria": "在追踪中打开 {id}",
       "pageHeader": {
         "breadcrumbHome": "主页",
         "breadcrumbLogs": "日志",
@@ -19699,6 +20177,10 @@
       },
       "pageSize": "每页数量",
       "pauseAutoScroll": "暂停自动滚动",
+      "presetCancel": "取消",
+      "presetDefaultName": "预设 {index}",
+      "presetNameHint": "保存级别、模块、来源、会话、时间范围、搜索、追踪和传输筛选条件。",
+      "presetNameLabel": "预设名称",
       "presets": "预设",
       "previousPage": "上一页",
       "recentSearches": {
@@ -19708,6 +20190,13 @@
       },
       "refresh": "刷新日志",
       "regexPlaceholder": "正则表达式...",
+      "relativeTime": {
+        "days": "{count} 天前",
+        "hours": "{count} 小时前",
+        "justNow": "刚刚",
+        "minutes": "{count} 分钟前",
+        "seconds": "{count} 秒前"
+      },
       "removeBookmark": "取消收藏",
       "resumeAutoScroll": "恢复自动滚动",
       "savePreset": "保存当前筛选为预设",
@@ -19719,7 +20208,6 @@
       "sessionPlaceholder": "会话 ID...",
       "shareUrlCopied": "分享链接已复制",
       "shareUrlFailed": "复制分享链接失败",
-      "shiftClickPrefix": "按住 Shift 单击以",
       "shortcutAction": "操作",
       "shortcutKey": "按键",
       "shortcuts": {
@@ -19733,10 +20221,13 @@
         "openPresets": "打开预设",
         "previousEntry": "上一条",
         "refresh": "刷新",
-        "showShortcuts": "显示快捷键"
+        "showShortcuts": "显示快捷键",
+        "traceView": "追踪视图"
       },
+      "shortcutsDescription": "除在输入框中输入时外，这些按键在面板内任何位置都可用。",
       "showingRange": "{start}–{end} / 共 {total}",
       "source": "来源",
+      "sourceFilterLabel": "来源",
       "sources": {
         "frontend": "前端",
         "internal": "内部",
@@ -19755,26 +20246,40 @@
       "toggleRegex": "切换正则搜索",
       "total": "总计",
       "traceDurationLabel": "持续时间",
+      "traceEventCount": "{count} 个事件",
       "traceId": "追踪 ID",
-      "traceOverflow": "+{count} 条更早的 trace 已隐藏",
+      "traceIdValue": "追踪 ID：{id}",
+      "traceOverflow": "还有 {count} 条追踪",
+      "traceRowAria": "显示追踪 {id}：{count} 个事件，历时 {duration}",
+      "traceShowMore": "再显示 {count} 条",
       "traceTotal": "条事件",
       "traceView": "追踪视图",
       "transportDetails": "传输详情",
+      "transportDetailsTitle": "传输详情：{name}",
       "transportDropped": "丢弃数",
+      "transportDroppedShort": "丢{count}",
+      "transportDroppedTitle": "已丢弃条目：{count}",
       "transportFilterPrefix": "传输：{value}",
-      "transportHealthOverflow": "显示更多传输",
       "transportLastFailure": "上次失败",
       "transportLastSuccess": "上次成功",
       "transportQueueDepth": "队列深度",
+      "transportQueueDepthTitle": "队列深度：{count}",
       "transportQueueHistory": "队列深度历史",
+      "transportQueueShort": "队{count}",
       "transportRetries": "重试次数",
+      "transportSummaryAria": "日志传输：{total} 个中 {healthy} 个正常",
+      "transportSummaryCount": "{healthy}/{total}",
+      "transportSummaryLabel": "传输",
+      "transportSummaryTitle": "日志传输",
+      "transportTileAria": "{name}：{status}，队列 {queue}",
       "unsavedChanges": "有未保存的修改",
       "viewDetails": "查看详情",
       "viewDetailsMenu": "查看详情",
       "viewDiagnostics": "查看诊断",
       "viewModeGroup": "日志视图",
       "viewNativeDiagnostics": "查看原生诊断",
-      "warning": "警告"
+      "warning": "警告",
+      "windowCapped": "仅加载了最新的 {count} 条日志。搜索、级别、来源和时间筛选都只在这些条目内生效；按模块筛选或聚焦某个追踪可查看更早的条目。"
     },
     "settings": {
       "advanced": {
@@ -19881,10 +20386,14 @@
         "empty": "暂无原生覆盖设置。",
         "error": "应用失败",
         "levelLabel": "级别",
+        "loadError": "无法读取当前的原生日志级别。",
+        "loading": "正在加载原生日志级别…",
         "moduleLabel": "目标",
         "removeAria": "移除 {module} 覆盖",
+        "retry": "重试",
         "saved": "已应用",
-        "title": "原生（Rust）级别"
+        "title": "原生（Rust）级别",
+        "unsaved": "有未应用的更改"
       },
       "nav": {
         "badgeTransportsAria": "已启用 {enabled} / {total} 个传输通道",
@@ -20065,9 +20574,11 @@
     "settingsTitle": "日志配置",
     "statusSr": "状态：{status}",
     "timeline": {
+      "bucketAria": "{time}：{total} 条，{errors} 条错误，{warnings} 条警告",
       "clear": "清除",
       "empty": "暂无数据",
       "errors": "错误",
+      "otherLevels": "其他",
       "title": "时间线",
       "total": "总计",
       "warnings": "警告"
@@ -20083,6 +20594,14 @@
       "failed": "失败",
       "files": "文件",
       "modelId": "模型",
+      "operations": {
+        "chat": "模型调用",
+        "embeddings": "向量嵌入",
+        "execute_tool": "工具调用",
+        "invoke_agent": "智能体运行",
+        "invoke_workflow": "工作流运行",
+        "retrieval": "检索"
+      },
       "promptTokens": "输入",
       "responsePreview": "响应预览",
       "stepNumber": "步骤",
@@ -20090,7 +20609,12 @@
       "tokenUsage": "Token 用量",
       "toolArgs": "参数",
       "toolName": "工具",
-      "totalTokens": "总计"
+      "totalTokens": "总计",
+      "unknownEvent": "未知事件"
+    },
+    "virtualizedList": {
+      "details": "详情",
+      "retry": "重试"
     },
     "workspace": {
       "breadcrumbHome": "主页",
@@ -20106,7 +20630,45 @@
         "title": "提交预览"
       },
       "console": {
+        "artifactKinds": {
+          "attachment": "附件",
+          "events": "事件",
+          "manifest": "清单",
+          "minidump": "Minidump",
+          "screenshot": "截图",
+          "unknown": "其他（{kind}）"
+        },
+        "auditActions": {
+          "alert_permanent_failure": "告警：处理永久失败",
+          "artifact_read": "已下载制品",
+          "consent_withdrawn": "已撤回同意",
+          "group_triaged": "已分诊分组",
+          "incident_accepted": "事件已接收",
+          "incident_cancelled": "上传已取消",
+          "incident_created": "事件已创建",
+          "incident_deleted": "事件已删除",
+          "incident_processing_failed": "处理失败",
+          "incident_processing_queued": "已排队处理",
+          "incident_resumed": "上传已恢复",
+          "retention_artifact_deleted": "制品已按保留策略删除",
+          "retention_incident_deleted": "事件已按保留策略删除",
+          "retention_permanent_failure": "保留策略执行永久失败",
+          "symbol_indexed": "符号已索引",
+          "tenant_key_created": "租户密钥已创建",
+          "tenant_key_crypto_shredded": "租户密钥已加密销毁",
+          "tenant_key_rotated": "租户密钥已轮换",
+          "tenant_policy_changed": "租户策略已变更",
+          "unknown": "其他事件（{action}）",
+          "upload_part_rejected": "上传分片被拒绝",
+          "upload_part_stored": "上传分片已保存"
+        },
         "configure": "打开诊断设置",
+        "detail": {
+          "description": "分组、其中的事件以及分诊控制。",
+          "loading": "正在加载崩溃分组…",
+          "resize": "调整崩溃分组详情面板宽度",
+          "title": "崩溃分组"
+        },
         "errors": {
           "console_failed": "控制台请求未完成。",
           "group_not_found": "该崩溃分组已不存在。",
@@ -20124,6 +20686,14 @@
           "searchLabel": "按异常、模块或指纹筛选分组",
           "status": "状态",
           "statusAll": "全部状态"
+        },
+        "gates": {
+          "loading": "正在读取诊断服务连接…",
+          "probing": "正在检查你对控制台的访问权限…",
+          "retry": "重试",
+          "roleFailed": "无法确认你的访问权限",
+          "sessionRequired": "需要身份会话",
+          "sessionRequiredDescription": "该连接可以提交本设备自己的崩溃。读取并分诊所有人的报告需要身份会话令牌，请在“设置 → 诊断”中添加。"
         },
         "group": {
           "assign": "指派",
@@ -20149,8 +20719,11 @@
           "audit": "审计记录",
           "close": "关闭",
           "download": "下载",
+          "downloadFailed": "无法下载该制品",
+          "downloaded": "已保存 {filename}",
           "noArtifacts": "没有已存储的产物。",
           "noAudit": "没有审计事件。",
+          "part": "#{number} · {kind} · {size}",
           "system": "系统"
         },
         "incidents": {
@@ -20162,10 +20735,28 @@
         "notConnected": "尚未连接诊断服务",
         "notConnectedDescription": "将该账户连接到自建诊断服务后，即可分诊服务已接收的崩溃。",
         "policy": {
+          "cancel": "取消",
+          "confirmDisable": "停止下载",
+          "confirmDisableDescription": "在管理员再次允许之前，服务将拒绝该租户的所有原始 minidump 读取。",
+          "confirmDisableTitle": "为整个租户停止下载原始 minidump？",
+          "confirmEnable": "允许下载",
+          "confirmEnableDescription": "该租户的所有分诊者都将能下载 minidump，其中可能包含进程内存。每次下载都会记录在事件的审计轨迹中。",
+          "confirmEnableTitle": "为整个租户允许下载原始 minidump？",
           "load": "加载租户策略",
           "rawMinidump": "允许下载原始 minidump",
           "rawMinidumpDescription": "minidump 可能包含进程内存。关闭时服务会拒绝所有原始 minidump 读取；每次允许的读取都会带上运维者身份写入该事件的审计记录。",
           "title": "租户策略"
+        },
+        "processingStates": {
+          "accepted": "已接受",
+          "deleted": "已删除",
+          "grouping": "分组中",
+          "permanent_failure": "永久失败",
+          "received": "已接收",
+          "retryable_failure": "失败，将重试",
+          "scanning": "扫描中",
+          "symbolicating": "符号化中",
+          "unknown": "其他（{state}）"
         },
         "refresh": "刷新",
         "statuses": {
@@ -20179,18 +20770,20 @@
         "cancel": "保留报告",
         "confirm": "删除报告",
         "description": "这会从本设备移除本地诊断制品，操作无法撤销。",
+        "done": "崩溃报告已删除。",
+        "failed": "无法删除崩溃报告：{error}",
         "title": "删除此崩溃报告？"
       },
       "detail": {
-        "description": "检查已脱敏的本地诊断与可选附件。",
+        "description": "检查脱敏后的报告，选择要发送的内容，并查看回执。",
         "loading": "正在加载脱敏预览…",
         "noPreview": "再次选择报告以加载本地预览。",
         "previewDescription": "这是本地脱敏后的负载，可选附件仍未包含。",
         "previewTitle": "脱敏预览",
-        "resize": "调整事故详情面板宽度",
-        "runtime": "运行时",
+        "resize": "调整崩溃报告详情面板宽度",
+        "source": "来源",
         "state": "状态",
-        "title": "事故详情"
+        "title": "崩溃报告"
       },
       "filters": {
         "receiptsOnly": "仅回执",
@@ -20203,10 +20796,12 @@
         "stateLabel": "事故状态"
       },
       "incidents": {
-        "emptyDescription": "新的崩溃报告和异常退出会先在本地保留，再进入提交流程。",
-        "emptyTitle": "没有匹配的事故",
-        "error": "无法读取本地事故存储。",
-        "loading": "正在加载本地事故…"
+        "emptyDescription": "本设备捕获的崩溃报告会保留在这里，直到你决定是否发送。",
+        "emptyTitle": "没有匹配的崩溃报告",
+        "error": "无法读取本设备上的崩溃报告。",
+        "loading": "正在加载崩溃报告…",
+        "uncollectedDescription": "崩溃报告由桌面与移动应用采集。浏览器标签页没有崩溃处理器，因此这里没有可列出的内容。",
+        "uncollectedTitle": "崩溃报告由应用采集"
       },
       "moreActions": "更多操作",
       "navigation": {
@@ -20218,13 +20813,24 @@
       },
       "refresh": "刷新",
       "reset": "重置布局",
+      "sources": {
+        "android-acra": "Android 崩溃",
+        "android-application-exit": "Android 异常退出",
+        "ios-kscrash": "iOS 崩溃",
+        "ios-metrickit": "iOS MetricKit 报告",
+        "native": "原生崩溃",
+        "other": "其他（{source}）",
+        "panic": "Rust panic",
+        "unknown": "未知"
+      },
       "states": {
         "accepted": "已接收",
         "all": "所有状态",
-        "awaitingConsent": "等待同意",
+        "awaiting_consent": "等待同意",
         "cancelled": "已取消",
         "deleted": "已删除",
         "detected": "已检测",
+        "packaged": "已打包",
         "processing": "处理中",
         "queued": "已排队",
         "rejected": "已拒绝",
@@ -20236,7 +20842,12 @@
         "transports": "{healthy}/{total} 传输正常"
       },
       "submission": {
+        "checkingSupport": "正在检查本设备能否提交…",
         "configure": "打开诊断设置",
+        "confirmCancel": "取消",
+        "confirmDeleteRemoteDescription": "服务会删除其副本及由此生成的全部内容，本地报告仍保留在本设备上。",
+        "confirmDeleteRemoteTitle": "从服务中删除此报告？",
+        "confirmWithdrawTitle": "撤回此报告的同意？",
         "deleteRemote": "从服务删除",
         "desktopOnly": "仅桌面应用支持提交。",
         "errors": {
@@ -20255,6 +20866,7 @@
         "incidentId": "事件",
         "includedMinidump": "已包含 minidump",
         "includedScreenshot": "已包含截图",
+        "mobileReceiptNote": "已从本手机发送。如需撤回或删除，请向服务运营方提供此支持代码。",
         "notConfigured": "尚未配置诊断服务。",
         "parts": "已上传 {uploaded} 个 · 服务已有 {resumed} 个",
         "processingState": "处理状态",
@@ -20267,12 +20879,16 @@
         "submittedAt": "提交时间",
         "submitting": "提交中…",
         "supportCode": "支持代码",
+        "unsupported": "本设备无法提交崩溃报告。请在桌面应用中提交，或在安装了崩溃报告组件的移动应用中提交。",
         "withdraw": "撤回同意",
         "withdrawDescription": "阻止继续处理并安排删除。即使服务已停止接收新报告，该操作仍然可用。",
         "withdrawn": "已撤回同意"
       },
       "title": "日志与诊断",
       "traces": {
+        "clearSelection": "清除选择",
+        "closeTrace": "关闭追踪",
+        "closeTraceHint": "关闭追踪（Esc）",
         "counts": "{matched} / {total}",
         "detailDescription": "span 瀑布图与所选 span 的完整记录。",
         "detailTitle": "追踪详情",
@@ -20286,7 +20902,7 @@
             "otlp": "复制为 OTLP"
           },
           "copyFailed": "无法写入剪贴板",
-          "label": "导出",
+          "label": "导出追踪",
           "redactPreviews": "剔除内容预览",
           "save": {
             "json": "保存 span JSON…",
@@ -20296,16 +20912,21 @@
           "saved": "追踪已导出",
           "spanCount": "{count, plural, other {# 个 span}}"
         },
+        "listLabel": "追踪列表",
         "loading": "正在加载追踪…",
         "nextPage": "下一页",
         "noMatchDescription": "放宽时间窗口或清除筛选条件。",
         "noMatchTitle": "没有匹配的追踪",
+        "notFoundDescription": "本地没有 {id} 的 span，可能已被清理，或链接有误。",
+        "notFoundTitle": "未找到该追踪",
         "openDashboard": "观测台",
         "pageOf": "{page} / {total}",
+        "pending": "{count, plural, other {# 条新追踪 · 显示}}",
         "previousPage": "上一页",
         "searchLabel": "按名称、ID 或来源面筛选追踪",
         "searchPlaceholder": "筛选追踪…",
         "selectPrompt": "选择一条追踪以查看它的 span 瀑布图。",
+        "selectionOutside": "所选追踪不在当前列表中——它在时间范围之外，或被筛选条件隐藏。",
         "span": {
           "agent": "Agent",
           "cacheRead": "缓存读取",
@@ -20313,6 +20934,8 @@
           "cacheWriteSplit": "（{short} 5 分钟 · {long} 1 小时）",
           "content": "内容",
           "contentHint": "仅在开启内容采集且通过脱敏门后才会记录。",
+          "copied": "已复制{label} ID",
+          "copyValue": "复制{label} ID",
           "cost": "成本",
           "duration": "耗时",
           "empty": "在瀑布图中选择一个 span。",
@@ -20329,6 +20952,7 @@
           "metadata": "元数据",
           "model": "模型",
           "offset": "相对追踪起点",
+          "offsetValue": "+{value}",
           "openInLogs": "在日志中查看这条追踪",
           "openSession": "在日志中查看该会话",
           "outputTokens": "输出 token",
@@ -20353,6 +20977,7 @@
           "usage": "用量"
         },
         "spanCount": "{count, plural, other {# 个 span}}",
+        "subViewHint": "{view}（按 V 切换）",
         "subViewLabel": "追踪工作区视图",
         "subViews": {
           "dashboard": "观测台",
@@ -20361,9 +20986,12 @@
         "timeline": {
           "blockAria": "{lane} 中的 {label}，耗时 {duration}",
           "blockError": "该 span 失败",
-          "brushHint": "拖拽可放大某段时间 · 双击复位",
+          "brushHint": "在色带或泳道上拖拽即可放大 · 双击复位",
+          "collapse": "收起时间线",
           "empty": "这条追踪没有可绘制的 span。",
           "emptyWindow": "所选窗口内没有 span。双击色带可缩回全程。",
+          "errorCount": "{count, plural, other {# 个失败 span}}",
+          "expand": "展开时间线",
           "groupingLabel": "泳道分组",
           "groupings": {
             "agent": "按 Agent",
@@ -20375,18 +21003,29 @@
           "loading": "正在构建时间线…",
           "regionLabel": "追踪时间线",
           "resetZoom": "重置缩放",
+          "resetZoomHint": "显示整条追踪（0）",
           "scaleLabel": "时间线刻度",
           "scales": {
             "duration": "按时长",
             "sequence": "按次序"
           },
-          "spans": "{count, plural, other {# 个 span}}"
+          "sequenceTick": "#{index}",
+          "spans": "{count, plural, other {# 个 span}}",
+          "spansOf": "{count, number} / {total, plural, other {# 个 span}}",
+          "tokens": "{value} tokens",
+          "totalDuration": "整条追踪：{value}",
+          "zoomIn": "放大",
+          "zoomInHint": "放大（+）",
+          "zoomOut": "缩小",
+          "zoomOutHint": "缩小（−）"
         },
+        "traceFailed": "{count, plural, other {# 个失败 span}}",
         "truncated": "此窗口共 {total, number} 个 span，当前展示最新的 {shown, number} 个。",
         "waterfallEmpty": "这条追踪没有已持久化的 span。",
+        "waterfallLabel": "该追踪中的 span",
+        "widenRange": "扩大到最近 30 天",
         "windowEmpty": "所选窗口内没有 span。",
         "windowLabel": "追踪时间窗口",
-        "windowedTo": "窗口内 {count} / {total}",
         "windows": {
           "all": "全部",
           "month": "30 天",
@@ -20394,9 +21033,16 @@
           "week": "7 天"
         }
       },
+      "viewDescriptions": {
+        "diagnostics": "本设备记录的错误与致命级日志",
+        "incidents": "本设备捕获的原生崩溃报告",
+        "logs": "本应用记录的全部日志",
+        "service": "诊断服务从所有人处接收的崩溃",
+        "traces": "智能体与请求追踪"
+      },
       "views": {
-        "diagnostics": "诊断",
-        "incidents": "事故",
+        "diagnostics": "错误",
+        "incidents": "崩溃报告",
         "logs": "日志",
         "service": "服务",
         "traces": "追踪"
@@ -21506,6 +22152,7 @@
       "importing": "正在恢复…",
       "passphraseLabel": "密码短语（至少 {min} 个字符）",
       "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。",
+      "reminderFailed": "无法更新备份提醒，请检查通知权限后重试。",
       "shareFile": "分享文件",
       "shareTitle": "Cognia 备份",
       "strategyDuplicate": "全部新增（保留两份）",
@@ -21513,6 +22160,14 @@
       "strategySkip": "保留本地（跳过冲突）",
       "title": "备份与同步",
       "webModeNote": "Web 模式：备份会以普通文件下载。"
+    },
+    "barcodeScanner": {
+      "cancel": "取消扫码",
+      "instruction": "将摄像头对准二维码，即可自动识别。",
+      "title": "扫描二维码",
+      "torchError": "无法切换手电筒，请重试。",
+      "torchOff": "关闭手电筒",
+      "torchOn": "打开手电筒"
     },
     "characterEdit": {
       "avatarColorLabel": "头像颜色",
@@ -22061,10 +22716,12 @@
     },
     "composerPlus": {
       "album": "相册",
+      "back": "返回",
       "camera": "相机",
       "file": "文件",
       "permissionDeniedCamera": "需要相机权限。",
       "permissionDeniedMic": "需要麦克风权限。",
+      "photoFailed": "无法读取照片，请重试。",
       "sheetDescription": "附加媒体、调整本轮的能力，或接入其他工具。",
       "toggleAria": "添加内容",
       "unsupported": "当前平台不支持此功能。",
@@ -22273,25 +22930,59 @@
       "reject": "拒绝"
     },
     "externalAgents": {
+      "add": "添加 Agent",
+      "addAria": "添加外部 Agent",
+      "added": "{name} 已添加到主机。",
+      "advancedSummary": "协议、命令、环境变量和重试",
+      "advancedTitle": "高级设置",
+      "allSection": "全部 Agent",
       "backAria": "返回设置",
+      "backToListAria": "返回外部 Agent",
+      "backToPickerAria": "返回选择 Agent",
+      "configureCustomTitle": "自定义 Agent",
+      "configureTitle": "添加 {name}",
+      "createFailed": "无法添加 Agent：{message}",
+      "customDescription": "任意 ACP、A2A 或 OpenCode Agent，自行填写命令或端点。",
+      "customTitle": "自定义",
+      "deleteCancel": "取消",
+      "deleteConfirm": "移除",
+      "deleteConfirmBody": "{name} 将从主机上移除。已经用它进行过的对话会保留记录。",
+      "deleteConfirmTitle": "移除 {name}？",
+      "desktopLocalDescription": "在桌面端应用里单独配置的 Agent，只在你使用桌面端时运行，手机上无法调用。",
+      "desktopLocalTitle": "仅限桌面端的 Agent",
+      "detectedSection": "主机上已安装",
       "disabled": "关闭",
-      "empty": "已配对的桌面端尚未配置任何外部 Agent。",
+      "emptyDescription": "可以添加 Claude Code、Codex、Gemini 等。它们运行在已配对的主机上，手机负责发送任务。",
+      "emptyTitle": "主机上还没有 Agent",
       "enabled": "开启",
       "enabledAria": "启用 {name}",
-      "intro": "管理已配对桌面端上配置的外部 Agent。可逐个开启或关闭，并选择桌面端运行时所用的权限模式。",
+      "hostSectionTitle": "主机上的 Agent",
+      "intro": "已配对主机上配置的 Agent。这里的每个 Agent 都可以在聊天输入框的运行时菜单中选用。",
       "loadFailed": "无法加载外部 Agent：{message}",
+      "loadFailedTitle": "无法读取主机上的 Agent",
       "loading": "正在加载外部 Agent……",
-      "manageOnDesktop": "新增、删除以及编辑外部 Agent（命令、端点、重试）需在桌面端完成。请在桌面端打开 设置 → 外部 Agent。",
+      "moreActionsAria": "{name} 的更多操作",
+      "noMatches": "没有与“{query}”匹配的 Agent。",
       "permissionAcceptEdits": "自动接受编辑",
       "permissionBypass": "跳过权限检查",
       "permissionDefault": "默认",
       "permissionDontAsk": "不再询问",
+      "permissionHint": "Agent 无需询问即可执行的操作范围，之后可以随时修改。",
       "permissionLabel": "权限模式",
       "permissionModeAria": "{name} 的权限模式",
       "permissionPlan": "计划模式",
-      "sectionTitle": "已配置的 Agent",
+      "pickIntro": "选择要在主机上运行的 Agent。添加前可以检查每一项设置。",
+      "pickTitle": "添加外部 Agent",
+      "removed": "已移除 {name}。",
+      "retry": "重试",
+      "runsOnHost": "在已配对的主机上运行",
+      "searchAria": "搜索 Agent",
+      "searchPlaceholder": "搜索 Agent",
+      "submit": "添加到主机",
+      "submitting": "正在添加……",
       "title": "外部 Agent",
       "toggleFailed": "无法保存更改：{message}",
+      "unknownPreset": "这个 Agent 已不可用，请选择其他 Agent。",
       "updateQueued": "更改已保存到主机。"
     },
     "fleet": {
@@ -22395,12 +23086,9 @@
         "title": "自定义首页"
       },
       "edit": "编辑",
-      "emptyArchived": "没有已归档的聊天。",
-      "emptyChats": "还没有聊天，点击 + 新建一个。",
-      "emptyFiltered": "没有与「{query}」匹配的聊天。",
-      "emptyFilters": "没有会话符合当前的 {count} 项筛选条件。",
       "folderEmpty": "空文件夹——长按聊天即可移到这里。",
       "hideSection": "隐藏{section}",
+      "listActions": "会话列表操作",
       "loadingChats": "正在加载会话…",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
@@ -22421,6 +23109,7 @@
         "quickActions": "快捷操作",
         "recents": "最近会话"
       },
+      "selectionRowHint": "轻点聊天即可选中或取消选中。按 Esc 或点击“完成”结束选择。",
       "swipeArchive": "归档",
       "swipeDelete": "删除",
       "swipePin": "置顶",
@@ -22434,6 +23123,7 @@
       "viewArchived": "显示已归档聊天",
       "viewTabActive": "聊天",
       "viewTabArchived": "已归档",
+      "viewTabArchivedCount": "已归档 · {count}",
       "viewTabsLabel": "会话视图"
     },
     "hooks": {
@@ -23009,9 +23699,10 @@
       }
     },
     "offline": {
-      "bannerHostOffline": "无法连接主机 — 发送将进入队列，等待主机恢复。",
-      "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",
-      "bannerReconnecting": "正在重连…",
+      "connectionSettings": "连接设置",
+      "detailCacheOnly": "仅可查看缓存数据",
+      "detailHostOffline": "发送将排队，恢复后自动送达",
+      "detailNetworkOffline": "仍可浏览，发送将进入队列",
       "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",
       "notifChannel": "cognia",
       "notifTitle": "cognia 离线发送中",
@@ -23046,7 +23737,10 @@
         "withdrawnUnconfirmed": "已撤回。之前的发送尝试可能已送达主机，主机上仍可能执行。"
       },
       "review": "查看",
-      "staleWarning": "{count} 条消息超过 30 分钟未送达。"
+      "staleWarning": "{count} 条消息超过 30 分钟未送达。",
+      "stateHostOffline": "主机离线",
+      "stateNetworkOffline": "网络已断开",
+      "stateReconnecting": "正在重连主机"
     },
     "pair": {
       "accountContextMissing": "配对 Host 前需要一个活动的本地账户。",
@@ -23058,7 +23752,7 @@
         "invalid_pair_code": "配对码必须是 6 位数字。",
         "malformed": "请输入桌面上的 6 位数字配对码。",
         "malformed_request": "服务器无法解析请求，请升级 App 后重试。",
-        "pair_code_expired": "该配对码已过期（5 分钟有效），请在桌面 设置 → Companion 重新生成。",
+        "pair_code_expired": "该配对码已过期（5 分钟有效），请在桌面 设置 → 连接 → 配对 中重新生成。",
         "pair_code_not_found": "该配对码不存在或已使用，请在桌面重新生成。"
       },
       "codeHint": "在桌面 PairDeviceCard 上、QR 旁边可以看到这组数字。当相机无法对焦（例如 Android 仿真器）时使用。",
@@ -23086,13 +23780,13 @@
         "help": {
           "docsCta": "查看配置指南",
           "openSettings": "打开系统设置",
-          "tipEnableServer": "在桌面端 设置 → Companion 中开启 Companion 服务。",
+          "tipEnableServer": "在桌面端 设置 → 连接 → 本机主机 中开启 Companion 服务。",
           "tipFirewall": "请在桌面防火墙中允许 Cognia 通过。",
           "tipSameNetwork": "两台设备需连接到同一 Wi-Fi 网络。",
           "trigger": "找不到桌面？"
         },
         "latencyMs": "{ms} 毫秒",
-        "loopbackBlockedBody": "它拒绝了这个浏览器。打开它的 设置 → Companion → 浏览器访问，把 {origin} 加进允许的来源。",
+        "loopbackBlockedBody": "它拒绝了这个浏览器。打开它的 设置 → 连接 → 本机主机 → 浏览器访问，把 {origin} 加进允许的来源。",
         "loopbackBlockedTitle": "这台电脑上有一个 Host 在运行",
         "nearbyTitle": "本网络内",
         "precheckOk": "可连接 · v{version} · {ms} 毫秒",
@@ -23129,10 +23823,10 @@
           "allowlistOrigin": "把这个来源原样加入允许列表：{origin}",
           "checkHostLogs": "查看 Host 日志中对应的错误。",
           "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
-          "enableBrowserAccess": "在 Host 上打开 设置 → Companion → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
-          "freshInvitation": "在 Host 上重新生成邀请码（设置 → Companion，或执行 “cognia-server pair”），然后粘贴到这里。",
+          "enableBrowserAccess": "在 Host 上打开 设置 → 连接 → 本机主机 → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
+          "freshInvitation": "在 Host 上重新生成邀请码（设置 → 连接 → 配对，或执行 “cognia-server pair”），然后粘贴到这里。",
           "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。",
-          "removeStaleDevice": "在 Host 的 设置 → Companion → 已配对设备 中移除这台设备，然后重新配对。",
+          "removeStaleDevice": "在 Host 的设备控制台（设备）中移除这台设备，然后重新配对。",
           "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
           "unlockAccount": "用密码登录本地账户后再配对。",
           "updateHost": "把 Host 更新到能签发 cgnp3 邀请码的版本并重启。",
@@ -23194,7 +23888,7 @@
         "searching": "正在这台机器上寻找 Host…"
       },
       "httpError": {
-        "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
+        "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → 连接 → 配对 中重新生成。",
         "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
         "404": "服务器未暴露配对接口，请确认桌面运行的是开启 Companion 的 cognia v0.2+。",
         "403Identity": "Host 拒绝了这个账户——它记录的绑定或租户与本设备对不上。用同一个账户再发一份邀请也会被同样拒绝。",
@@ -23202,7 +23896,7 @@
         "5xx": "服务器错误（HTTP {status}），请查看桌面日志后重试。",
         "generic": "配对失败（HTTP {status}）。"
       },
-      "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+      "intro": "扫一下桌面端的二维码即可完成配对。二维码在桌面 设置 → 连接 → 配对 中；也可以手动粘贴那里的 5 分钟令牌。",
       "invitationCard": {
         "replace": "更换",
         "showRaw": "查看邀请原文",
@@ -23264,7 +23958,7 @@
         "repair": "重新配对此 Host",
         "requiresGrant": {
           "description": "此设备缺少准确的 Host 能力：{grant}。",
-          "instructions": "请在 Host 上打开“设置 → Companion → 已配对设备”并更新此设备。Web 客户端不能自行授予 Host 权限。",
+          "instructions": "请在 Host 上打开设备控制台（设备），选中此设备并更新它的授权。Web 客户端不能自行授予 Host 权限。",
           "title": "需要 Host 权限",
           "unknownGrant": "未知能力"
         },
@@ -23322,7 +24016,7 @@
         "clipboardEmpty": "剪贴板是空的。请先复制完整的 cgnp3 邀请，再点「粘贴」。",
         "clipboardReadFailed": "浏览器无法读取剪贴板，请手动粘贴完整配对邀请。",
         "clipboardWriteFailed": "浏览器无法复制命令，请手动选择并复制。",
-        "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 伴侣 中复制。",
+        "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 连接 → 配对 中复制。",
         "commandCopied": "命令已复制",
         "commandMode": {
           "compose": "Docker",
@@ -23565,6 +24259,7 @@
       "sessionMenu": "会话菜单",
       "sessionSettings": "会话设置",
       "settings": "设置",
+      "shareConversation": "共享会话…",
       "tabBarAria": "主导航"
     },
     "skills": {
@@ -23774,9 +24469,6 @@
       "historyTitle": "最近命令",
       "newSession": "新建终端会话",
       "search": "在终端中搜索",
-      "sshConnectFailed": "无法打开 SSH 会话",
-      "sshCredentialRequired": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加，然后重新连接。",
-      "sshUnknownHost": "该 SSH 主机已不在已保存列表中。",
       "title": "终端"
     },
     "transportTier": {
@@ -23957,6 +24649,8 @@
         "modeEdit": "编辑",
         "modeRead": "查看",
         "orientationLock": "锁定横屏",
+        "orientationPending": "正在检查屏幕方向锁定…",
+        "orientationUnavailable": "此设备无法锁定屏幕方向",
         "orientationUnlock": "允许竖屏",
         "publicationInvalidated": "工作流已保存，但因可调用接口发生变化而自动下架。请重新发布以开放新契约。",
         "redo": "重做",
@@ -24233,6 +24927,13 @@
     }
   },
   "observability": {
+    "drill": {
+      "pointHint": "点击数据点即可在探索视图查看对应追踪",
+      "pointLabel": "查看 {time} 的追踪",
+      "showFailing": "{metric}：{value} — 查看失败的追踪",
+      "showFailingHint": "在探索视图中查看这些失败",
+      "showTraces": "查看 {value} 的追踪"
+    },
     "droppedSpans": {
       "label": "{count, plural, other {丢失 # 条 span}}",
       "tooltip": "{count, plural, other {有 # 条 provider span 未被记录}}，原因是调用未传递 trace 上下文。下方的瀑布图缺少这些 span。"
@@ -24242,8 +24943,36 @@
       "title": "该时间窗口内暂无遥测数据",
       "widen": "放宽至近 30 天"
     },
+    "enums": {
+      "operation": {
+        "chat": "模型调用",
+        "embeddings": "向量嵌入",
+        "execute_tool": "工具调用",
+        "invoke_agent": "智能体运行",
+        "invoke_workflow": "工作流运行",
+        "retrieval": "检索"
+      },
+      "spanKind": {
+        "client": "客户端",
+        "internal": "内部",
+        "server": "服务端"
+      },
+      "surface": {
+        "agent-rpc": "智能体 RPC",
+        "agent-team": "智能体团队",
+        "chat": "对话",
+        "connector": "连接器",
+        "embedding": "向量嵌入",
+        "mcp": "MCP",
+        "plugin": "插件",
+        "plugin-hook": "插件钩子",
+        "retrieval": "检索",
+        "workflow": "工作流"
+      }
+    },
     "export": {
       "dashboardJson": "导出仪表盘为 JSON",
+      "exportList": "导出列表",
       "importDashboard": "导入仪表盘…",
       "importFailed": "导入失败：仪表盘文件无效",
       "imported": "已导入仪表盘配置",
@@ -24267,8 +24996,15 @@
       },
       "empty": "无可选项",
       "label": "筛选",
-      "search": "搜索…"
+      "search": "搜索…",
+      "searchLabel": "搜索{dimension}取值"
     },
+    "loadError": {
+      "hint": "本地数据库没有响应，通常是暂时的，请稍后重试。",
+      "retry": "重试",
+      "title": "无法读取追踪数据"
+    },
+    "loading": "正在加载遥测数据…",
     "metricToggle": {
       "cost": "成本",
       "errors": "错误",
@@ -24301,7 +25037,9 @@
       "absolute": "绝对范围",
       "apply": "应用",
       "custom": "自定义范围",
+      "customLabel": "{from} → {to}",
       "from": "起始",
+      "orderError": "“开始”必须早于“结束”。",
       "presets": {
         "15m": "近 15 分钟",
         "1h": "近 1 小时",
@@ -24333,7 +25071,8 @@
       "p50": "p50",
       "p95": "p95",
       "p99": "p99",
-      "perSec": "请求/秒"
+      "perSec": "请求/秒",
+      "perSecValue": "{value}/秒"
     },
     "settings": {
       "data": {
@@ -24348,11 +25087,6 @@
         "pruneDone": "已清理 {count} 条 Trace",
         "stored": "已存储 {count} 个 span",
         "title": "数据"
-      },
-      "defaults": {
-        "range": "默认时间范围",
-        "refresh": "自动刷新",
-        "title": "默认值"
       },
       "description": "调整可观测性仪表盘的阈值、面板与数据保留。",
       "metrics": {
@@ -24375,7 +25109,17 @@
       "title": "仪表盘设置",
       "unitFraction": "0–1 小数",
       "unitMs": "毫秒",
-      "unitUsd": "美元"
+      "unitUsd": "美元",
+      "view": {
+        "custom": "自定义范围",
+        "range": "时间范围",
+        "refresh": "自动刷新",
+        "title": "当前视图"
+      }
+    },
+    "thresholdLevel": {
+      "crit": "已超过严重阈值",
+      "warn": "已超过警告阈值"
     },
     "toolbar": {
       "edit": "编辑布局",
@@ -24385,7 +25129,9 @@
     },
     "waterfall": {
       "cost": "成本 {value}",
-      "toggleEvents": "展开/收起 span 详情",
+      "eventOffset": "+{offset}",
+      "failed": "失败",
+      "toggleEvents": "展开或收起 {name} 的详情",
       "tokens": "{count} tokens"
     }
   },
@@ -25284,52 +26030,217 @@
     "title": "Cognia"
   },
   "performance": {
+    "budgets": {
+      "aggregation": {
+        "median": "中位数",
+        "p95": "p95"
+      },
+      "buildProfile": {
+        "development": "开发",
+        "production": "生产",
+        "profiling": "性能分析"
+      },
+      "check": {
+        "acceptEnvironment": "接受不同的环境",
+        "budget": "预算",
+        "capture": "捕获",
+        "detail": "在 {expected} 个区间中的 {valid} 个有效区间上取值 {value}。",
+        "environmentAccepted": "本次检查已接受环境不匹配。",
+        "noCaptures": "没有匹配的捕获",
+        "run": "检查",
+        "running": "正在检查…",
+        "title": "检查捕获"
+      },
+      "created": "已创建预算“{name}”。",
+      "description": "针对单个指标的不可变阈值。用预算检查捕获可得到通过、警告或失败——前提是捕获足够长、连续，且录制环境匹配。",
+      "direction": {
+        "higher": "越高越好",
+        "lower": "越低越好"
+      },
+      "empty": "暂无预算。",
+      "form": {
+        "aggregation": "聚合方式",
+        "buildProfiles": "适用构建",
+        "cadence": "采样间隔",
+        "cadenceValue": "{seconds} 秒",
+        "cancel": "取消",
+        "description": "预算保存后不可修改。如需调整阈值，请新建预算。",
+        "directionHint": {
+          "higher": "越高越好：警告 ≥ 失败。",
+          "lower": "越低越好：警告 ≤ 失败。"
+        },
+        "errors": {
+          "buildProfiles": "请至少选择一种构建。",
+          "metric": "请为此数据源选择一个指标。",
+          "name": "请输入名称。",
+          "order": {
+            "higher": "此指标的警告阈值必须大于或等于失败阈值。",
+            "lower": "此指标的警告阈值必须小于或等于失败阈值。"
+          },
+          "runtimeKinds": "请至少选择一个运行环境。",
+          "thresholds": "请以数字填写两个阈值。"
+        },
+        "failure": "失败阈值（{unit}）",
+        "immutable": "已保存的预算无法编辑或覆盖。",
+        "metric": "指标",
+        "name": "名称",
+        "namePlaceholder": "例如：聊天保持流畅",
+        "runtimeKinds": "适用运行环境",
+        "save": "保存预算",
+        "source": "数据源",
+        "title": "新建预算",
+        "unit": {
+          "bytes": "MB",
+          "bytes-per-second": "MB/s",
+          "count": "次",
+          "fps": "fps",
+          "ms": "毫秒",
+          "percent": "%"
+        },
+        "warning": "警告阈值（{unit}）"
+      },
+      "locked": "请解锁当前账户以使用预算。",
+      "new": "新建预算",
+      "reason": {
+        "discontinuous-incarnation": "捕获跨越了重启或重新加载。",
+        "environment-mismatch": "捕获录制时的运行环境或构建不在预算适用范围内。",
+        "metadata-mismatch": "捕获的指标、数据源、schema 或采样间隔与预算不符。",
+        "minimum-coverage": "有效区间至少需占 90%。",
+        "minimum-valid-intervals": "至少需要 10 个有效区间。",
+        "mutable-budget": "该预算不是不可变的。",
+        "unknown-metric": "此预算的指标已不在目录中。"
+      },
+      "runtimeKind": {
+        "browser": "浏览器",
+        "node-headless": "Node 主机",
+        "tauri-rust": "桌面（Rust）"
+      },
+      "sourceKind": {
+        "host": "所选主机",
+        "renderer": "本窗口（渲染端）"
+      },
+      "summary": "{aggregation} · {direction} · 警告 {warning} · 失败 {failure} · {cadence} 秒",
+      "title": "预算",
+      "verdict": {
+        "fail": "失败",
+        "incomparable": "不可比较",
+        "insufficient-data": "数据不足",
+        "pass": "通过",
+        "warn": "警告"
+      }
+    },
     "captures": {
       "active": {
+        "description": "录制加密证据以便日后比较。切换页面时捕获会继续进行。",
         "elapsed": "已录制 {seconds} 秒",
         "gaps": "{count} 个缺口",
-        "title": "活动 Capture"
+        "progress": "捕获进度",
+        "title": "当前捕获"
       },
       "comparison": {
-        "absolute": "绝对差值",
-        "compare": "比较选中的 Capture",
+        "acceptEnvironment": "接受不同的环境",
+        "baseline": "基线",
+        "candidate": "对照",
+        "compare": "比较",
+        "deltaLine": "中位数变化：{absolute}（{percent}）",
+        "eligible": "可比较——两次捕获条件一致。",
+        "ineligible": "不可比较——这些数字仅供参考，不能作为结论。",
         "mad": "MAD",
         "median": "中位数",
+        "metric": "指标",
         "na": "不适用",
         "p95": "Type-7 p95",
-        "percent": "百分比差值"
+        "reasons": {
+          "discontinuous-incarnation": "某个捕获跨越了重启或重新加载。",
+          "environment-mismatch": "两个捕获录制于不同环境。",
+          "environment-missing": "某个捕获缺少环境指纹。",
+          "metric-definition-mismatch": "指标定义不同。",
+          "metric-schema-mismatch": "指标 schema 版本不同。",
+          "minimum-coverage": "有效区间至少需占 90%（基线 {baseline}%，对照 {candidate}%）。",
+          "minimum-valid-intervals": "每个捕获至少需要 10 个有效区间。",
+          "requested-cadence-mismatch": "两个捕获的采样间隔不同。",
+          "source-kind-mismatch": "两个捕获来自不同类型的数据源。",
+          "unit-mismatch": "单位不同。"
+        },
+        "running": "正在比较…",
+        "sourceMismatch": "这两个捕获来自不同数据源，其指标不可比较。",
+        "statistic": "统计量",
+        "swap": "互换",
+        "title": "比较捕获",
+        "validIntervals": "有效 / 预期区间"
       },
       "controls": {
-        "cadence": "Capture 采样间隔",
-        "delete": "删除 Capture {id}",
-        "duration": "Capture 时长",
-        "export": "导出 Capture {id}",
+        "cadence": "捕获采样间隔",
+        "delete": "删除捕获 {id}",
+        "deleteShort": "删除",
+        "duration": "捕获时长",
+        "export": "导出捕获 {id}",
+        "exportShort": "导出（已脱敏）",
         "import": "导入 .cognia-perf",
-        "rawExport": "原始导出 Capture {id}",
-        "selectCompare": "选择 Capture {id} 用于比较",
-        "source": "Capture 来源",
-        "start": "开始 Capture",
-        "stop": "停止 Capture"
+        "rawExport": "原始导出捕获 {id}",
+        "rawExportShort": "导出原始证据",
+        "selectCompare": "选择捕获 {id} 用于比较",
+        "source": "捕获来源",
+        "start": "开始捕获",
+        "stop": "停止捕获"
+      },
+      "delete": {
+        "cancel": "取消",
+        "confirm": "删除",
+        "description": "其加密帧、附件和缺口将从本设备移除，并释放配额。此操作无法撤销。",
+        "title": "删除此捕获？"
+      },
+      "errorCodes": {
+        "account-locked": "账户已锁定，捕获已停止。",
+        "cognia-perf-compressed-size-exceeded": "包过大。",
+        "cognia-perf-decompression-limit-exceeded": "包解压后超出允许大小。",
+        "cognia-perf-entry-count-invalid": "包中的条目数量无效。",
+        "cognia-perf-format-unsupported": "不支持此包格式。",
+        "cognia-perf-frame-schema-invalid": "包中的帧已损坏或版本不受支持。",
+        "cognia-perf-manifest-invalid": "包清单无效。",
+        "cognia-perf-manifest-missing": "包中缺少清单。",
+        "cognia-perf-samples-missing": "包中没有样本。",
+        "cognia-perf-signature-invalid": "包签名无效。",
+        "performance-account-quota-exceeded": "账户的捕获存储配额已满，请删除部分捕获以释放空间。",
+        "performance-attachment-too-large": "附件超出大小限制。",
+        "performance-budget-cadence-invalid": "预算采样间隔至少为 500 毫秒。",
+        "performance-budget-envelope-mismatch": "某个已保存的预算已损坏。",
+        "performance-budget-immutable": "已存在相同 ID 的预算；预算不可修改。",
+        "performance-budget-required-field-missing": "名称、指标和单位为必填项。",
+        "performance-budget-threshold-invalid": "阈值必须是数字。",
+        "performance-budget-threshold-order-invalid": "警告阈值必须先于失败阈值。",
+        "performance-capture-account-locked": "请解锁当前账户以使用加密捕获。",
+        "performance-capture-already-active": "已有捕获正在录制。",
+        "performance-capture-attachment-invalid": "附件无效。",
+        "performance-capture-cadence-invalid": "捕获采样间隔至少为 500 毫秒。",
+        "performance-capture-frame-schema-invalid": "捕获的帧已损坏或版本不受支持。",
+        "performance-capture-metadata-schema-invalid": "捕获的元数据已损坏或版本不受支持。",
+        "performance-capture-not-found": "此捕获已不存在。",
+        "performance-capture-not-ready": "此捕获尚未就绪。",
+        "performance-capture-source-mismatch": "捕获期间指标数据源发生了变化。",
+        "performance-capture-stopped": "捕获已经停止。",
+        "performance-capture-target-mismatch": "捕获期间目标发生了变化。",
+        "performance-security-generation-changed": "操作期间账户安全状态发生变化，请重试。",
+        "unknown": "出现问题：{detail}"
       },
       "errors": {
-        "compareSelection": "请选择两个 Capture 进行比较。",
-        "locked": "请解锁当前账户以访问加密 Capture。"
+        "locked": "请解锁当前账户以访问加密捕获。"
       },
       "library": {
-        "bytes": "{value} 字节",
-        "empty": "当前目标尚未保存 Capture。",
+        "compareHint": "勾选两个就绪的捕获即可比较。",
+        "empty": "当前目标尚未保存捕获。",
         "frames": "{count} 帧",
-        "retention": "未固定的 Capture 保留 {days} 天且每个目标最多 {count} 个；账户配额为 {quota} GiB。",
-        "title": "Capture 资料库"
+        "retention": "未固定的捕获保留 {days} 天且每个目标最多 {count} 个；账户配额为 {quota} GiB。",
+        "title": "捕获资料库"
       },
       "milliseconds": "{value} 毫秒",
       "minutes": "{value} 分钟",
       "raw": {
-        "attachment": "附件 {ordinal} · {type} · {bytes} 字节",
+        "attachment": "附件 {ordinal} · {type} · {bytes}",
         "attachments": "明确选择附件",
         "cancel": "取消",
         "confirm": "我已了解，导出原始证据",
-        "description": "原始证据可能包含进程、span、trace、错误和环境详情。本次确认会以密码学方式绑定当前 Capture 与下方附件选择。",
+        "description": "原始证据可能包含进程、span、trace、错误和环境详情。本次确认会以密码学方式绑定当前捕获与下方附件选择。",
         "noAttachments": "未选择附件；trace 字节仍会排除。",
         "title": "确认原始性能导出"
       },
@@ -25341,18 +26252,43 @@
       },
       "source": {
         "host": "选中主机",
+        "hostUnavailable": "所选主机（未连接）",
         "renderer": "本地 Renderer"
       },
       "state": {
         "idle": "空闲",
         "recording": "录制中"
       },
+      "status": {
+        "failed": "失败",
+        "finalizing": "收尾中",
+        "importing": "导入中",
+        "ready": "就绪",
+        "recording": "录制中"
+      },
+      "stopReason": {
+        "account-locked": "账户已锁定",
+        "client-terminated": "窗口已关闭",
+        "duration-limit": "已达时长",
+        "manual": "已停止",
+        "quota-exceeded": "超出配额",
+        "remote-timeout": "主机超时",
+        "target-switched": "目标已切换",
+        "terminal-host-state": "主机已停止"
+      },
       "toast": {
-        "exported": "已按默认脱敏策略导出 Capture。",
-        "imported": "Capture 已校验并导入。",
-        "rawExported": "已确认并导出原始 Capture。",
-        "started": "Capture 已开始。",
-        "stopped": "Capture 已停止。"
+        "deleted": "捕获已删除。",
+        "exported": "已按默认脱敏策略导出捕获。",
+        "imported": "捕获已校验并导入。",
+        "rawExported": "已确认并导出原始捕获。",
+        "started": "捕获已开始。",
+        "stopped": "捕获已停止。"
+      },
+      "trust": {
+        "origin-unverified": "来源未验证",
+        "rejected-invalid": "签名无效",
+        "valid-untrusted": "签名有效，签名者不受信任",
+        "verified": "签名已验证"
       }
     },
     "desktopOnly": {
@@ -25360,8 +26296,35 @@
       "title": "性能面板仅在桌面端可用"
     },
     "diagnose": {
+      "description": "时间花在哪里：主机 span 热点、本窗口的耗时，以及每个指标数据源的状态。",
       "logs": "打开日志",
-      "observability": "打开可观测性"
+      "observability": "打开追踪仪表盘"
+    },
+    "hostUnavailable": {
+      "openDiagnose": "查看数据源详情",
+      "reason": {
+        "issue": {
+          "contended": "另一个窗口正在占用主机的指标流，释放后本页会自动接管。",
+          "rejected": "主机拒绝了指标流。",
+          "renew-failed": "指标流已停止续租，会自动重连。",
+          "unreachable": "无法连接到所选主机以获取指标。"
+        },
+        "notReported": "所选主机的运行时不上报此项。",
+        "state": {
+          "connecting": "正在连接主机的指标流…",
+          "error": "主机指标流出错。",
+          "live": "正在等待主机的第一帧…",
+          "stale": "主机已停止发送指标。",
+          "unsupported": "当前运行环境没有可计量的主机。请打开桌面应用或连接一台主机。"
+        }
+      },
+      "title": {
+        "hotspots": "后端热点需要桌面主机",
+        "managed": "托管进程需要连接主机",
+        "processes": "进程需要连接主机",
+        "runtime": "异步运行时需要连接主机",
+        "system": "系统信息需要桌面主机"
+      }
     },
     "hotspots": {
       "columns": {
@@ -25375,8 +26338,19 @@
         "p95": "p95",
         "total": "合计"
       },
+      "description": "主机上的埋点操作，自主机启动或上次重置以来累计。",
       "empty": "尚未记录到热点。",
-      "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。"
+      "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。",
+      "reset": {
+        "cancel": "取消",
+        "confirm": "重置",
+        "confirmDescription": "这会为所有使用方（包括其他窗口）清空主机累计的 span 统计。捕获会保留各自的副本。",
+        "confirmTitle": "重置热点统计？",
+        "done": "热点统计已重置。",
+        "failed": "无法重置热点统计：{error}",
+        "label": "重置统计"
+      },
+      "title": "后端热点"
     },
     "hud": {
       "clear": "清空",
@@ -25452,15 +26426,60 @@
       "title": "内存压力",
       "utilization": "已用 / 总内存"
     },
+    "metricDescriptions": {
+      "cpu": "主机主进程的 CPU 占用，已按全部核心归一化。",
+      "diskIo": "应用进程树的磁盘读写吞吐合计。",
+      "eventLoopDelay": "定时器延后触发的程度——事件循环延迟的第 95 百分位。",
+      "eventLoopUtilization": "Node 事件循环处于忙碌而非空闲的时间占比。",
+      "fps": "本窗口每秒绘制的帧数。窗口隐藏时不计量。",
+      "jsHeap": "本窗口正在使用的 JavaScript 堆内存。",
+      "longTasks": "每个区间中超过 50 毫秒的主线程任务数。",
+      "mainThreadBlocked": "每个区间中耗在长任务（超过 50 毫秒）上的时间占比，长任务会阻塞输入和渲染。",
+      "memory": "主机主进程的常驻内存。",
+      "nodeHeap": "Node 主机正在使用的 JavaScript 堆内存。",
+      "runtimeBusy": "异步运行时工作线程执行任务的时间占比。",
+      "tasks": "运行时中当前存活的异步任务数。"
+    },
     "metrics": {
       "cpu": "应用 CPU",
       "diskIo": "磁盘 I/O",
+      "eventLoopDelay": "事件循环延迟（p95）",
+      "eventLoopUtilization": "事件循环利用率",
+      "fps": "帧率",
+      "jsHeap": "JS 堆内存",
+      "longTasks": "长任务",
+      "mainThreadBlocked": "主线程阻塞",
       "memory": "应用内存",
+      "nodeHeap": "堆内存占用",
       "runtimeBusy": "运行时繁忙",
       "tasks": "异步任务"
     },
     "overview": {
-      "selectMetric": "选择指标"
+      "groups": {
+        "host": "所选主机",
+        "renderer": "本窗口"
+      },
+      "noMetrics": "暂无数据源上报指标。",
+      "openDiagnose": "数据源详情",
+      "selectMetric": "选择指标",
+      "summary": "峰值 {peak} · 平均 {average} · 最近 {seconds} 秒",
+      "unavailable": {
+        "host": {
+          "connecting": "正在连接主机的指标流…",
+          "error": "主机指标流出错。",
+          "live": "主机已连接，但没有可绘制的指标。",
+          "stale": "主机已停止发送指标。",
+          "unsupported": "当前运行环境没有连接主机，只计量本窗口。"
+        },
+        "renderer": {
+          "connecting": "正在开始计量本窗口…",
+          "error": "计量本窗口失败。",
+          "live": "此浏览器不提供可绘制的指标。",
+          "stale": "本窗口已停止上报指标。",
+          "unsupported": "此浏览器不提供可绘制的指标。"
+        }
+      },
+      "waiting": "正在等待第一个样本…"
     },
     "process": {
       "columns": {
@@ -25490,9 +26509,27 @@
         "totalMemory": "总内存"
       }
     },
-    "resources": {
-      "host": "主机",
-      "renderer": "Renderer"
+    "rendererTimings": {
+      "categories": {
+        "all": "全部",
+        "chat": "聊天",
+        "other": "其他",
+        "react": "渲染"
+      },
+      "clear": "清空",
+      "columns": {
+        "count": "次数",
+        "last": "最近",
+        "max": "最大",
+        "name": "测量项",
+        "p50": "p50",
+        "p95": "p95"
+      },
+      "description": "在本窗口中测得的用户可感知延迟：聊天轮次、React 提交及其他埋点操作。每个名称保留最近 60 条。",
+      "empty": "尚未记录耗时。",
+      "filterLabel": "按类别筛选",
+      "hint": "发送一条聊天消息或打开较重的视图即可记录耗时。",
+      "title": "渲染端耗时"
     },
     "runtime": {
       "aliveTasks": "存活任务",
@@ -25524,7 +26561,18 @@
       "workers": "工作线程"
     },
     "sourceHealth": {
+      "details": "详情",
       "error": "最近错误",
+      "gapReason": {
+        "buffer-overrun": "缓冲区溢出",
+        "clock-discontinuity": "时钟跳变",
+        "collection-error": "采集出错",
+        "lease-expired": "租约过期",
+        "sequence-gap": "丢帧",
+        "source-reset": "数据源重置",
+        "target-switched": "目标已切换",
+        "transport-disconnected": "连接中断"
+      },
       "gaps": "可见缺口",
       "issue": {
         "contended": {
@@ -25545,6 +26593,7 @@
       "latestGap": "最近缺口：{reason}，{start}–{end}",
       "none": "无",
       "notAvailable": "不适用",
+      "noticeGaps": "可见窗口内有 {count} 个缺口",
       "overhead": "采集开销",
       "state": {
         "connecting": "连接中",
@@ -25555,7 +26604,7 @@
       },
       "title": "来源与能力"
     },
-    "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
+    "subtitle": "实时查看本窗口与所选主机的指标：正在运行什么、时间花在哪里，以及随时间留存的证据。",
     "system": {
       "build": {
         "appVersion": "应用版本",
@@ -25583,11 +26632,11 @@
       "loading": "正在读取系统信息…"
     },
     "tabs": {
-      "captures": "Capture",
+      "captures": "捕获",
       "diagnose": "诊断",
       "hotspots": "热点",
       "managed": "托管进程",
-      "overview": "性能",
+      "overview": "概览",
       "processes": "进程",
       "resources": "资源",
       "runtime": "异步运行时",
@@ -25605,8 +26654,14 @@
       "intervalLabel": "采样间隔",
       "intervalValue": "{seconds} 秒",
       "pause": "暂停",
-      "reset": "重置热点",
-      "resume": "继续"
+      "reset": "清空图表",
+      "resetHint": "从现在起重新绘制滚动图表。不影响热点统计和捕获。",
+      "resume": "继续",
+      "status": {
+        "live": "实时 · {seconds} 秒",
+        "paused": "已暂停",
+        "recording": "录制中"
+      }
     }
   },
   "pet": {
@@ -25829,6 +26884,10 @@
         "真好玩！",
         "再来！",
         "哇哦！"
+      ],
+      "pluginReward": [
+        "收到奖励啦！谢谢你！",
+        "哇，任务奖励到手！"
       ],
       "refused": {
         "cooldown": [
@@ -26154,6 +27213,7 @@
     "quickMenu": {
       "clean": "清洁",
       "clickThrough": "鼠标穿透",
+      "clickThroughDescription": "鼠标点击会穿过桌宠，落到后面的窗口上。可在托盘菜单或「设置 → 宠物」中关闭。",
       "feed": "喂食",
       "hideDesktopPet": "隐藏桌宠",
       "minimize": "最小化",
@@ -26165,7 +27225,8 @@
       "showMainWindow": "显示主窗口",
       "sleep": "休息",
       "talk": "聊天",
-      "treat": "奖励"
+      "treat": "奖励",
+      "windowActions": "桌宠窗口"
     },
     "rarity": {
       "common": "普通",
@@ -27519,17 +28580,22 @@
       "noIssues": "未检测到转换问题。",
       "source": "识别到的来源：{source}",
       "sources": {
-        "agent-plugins": "Agent Plugins 1.0",
+        "agent-plugins": "Agent Plugins",
+        "auggie": "Auggie",
         "claude-code": "Claude Code",
+        "codebuddy": "CodeBuddy",
         "codex": "Codex",
         "cognia": "Cognia",
         "copilot": "GitHub Copilot",
         "cursor": "Cursor",
         "devin": "Devin",
+        "factory-droid": "Factory Droid",
         "gemini-cli": "Gemini CLI",
-        "kimi": "Kimi Code",
+        "kimi": "Kimi CLI",
+        "open-plugins": "Open Plugins（旧版 .plugin）",
         "opencode": "OpenCode",
-        "pi": "Pi"
+        "pi": "Pi",
+        "qoder": "Qoder CLI"
       },
       "title": "转换报告"
     },
@@ -28562,6 +29628,95 @@
       "normalSection": "标准权限",
       "reviewAria": "审查 {name} 的权限",
       "title": "权限"
+    },
+    "piPackages": {
+      "errors": {
+        "binaryMissing": "本机未找到 {program}。请安装后重试。",
+        "botIsolation": "Bot 隔离的智能体无法加载插件 Pi 包：包所在的文件夹位于主目录中，而隔离会隐藏主目录。",
+        "declined": "准备步骤未获批准。",
+        "desktopOnly": "仅在桌面应用中可用。",
+        "doubleLoad": "此包也已安装在此智能体会加载的 Pi 范围中，会被加载两次。请把智能体切换为隔离策略，或从 Pi 中移除该包。",
+        "envConflict": "此智能体加载的两个包把同一设置设为了不同的值。请从智能体中移除其中一个。",
+        "executionFailed": "操作失败。",
+        "exitCode": "准备步骤（{program}）以退出码 {code} 结束。",
+        "invalidPath": "此包声明的路径位于插件文件夹之外。",
+        "markerMissing": "准备步骤已结束，但没有生成其标记文件。",
+        "needsPrepare": "请先运行准备步骤。",
+        "noPrepare": "此包没有准备步骤。",
+        "notFound": "没有已启用的插件提供此包。",
+        "notHosted": "此包不能加载到托管会话。",
+        "notOnDisk": "此插件没有安装在文件夹中（内置插件不能携带 Pi 包），Pi 无从读取。",
+        "notPrepared": "此包的准备步骤尚未运行。",
+        "piVersion": "此包需要 Pi {version} 或更新版本；当前主机为 {installed}。",
+        "resolutionFailed": "无法加载此包。",
+        "symlinksCreated": "准备步骤创建了符号链接（{path}），而 Cognia 拒绝加载包含链接的插件。需要插件作者提供不创建链接的准备步骤。",
+        "timeout": "准备步骤（{program}）在 {seconds} 秒后超时。",
+        "workspaceRequired": "此包需要一个工作区文件夹。"
+      },
+      "fromPlugin": "来自 {plugin}",
+      "hosted": {
+        "available": "可加载到托管的 Pi 会话",
+        "controlsSession": "会接管会话的工具面。加载它的智能体可能无法再使用其他工具。",
+        "installOnly": "仅可安装",
+        "tools": "工具：{tools}"
+      },
+      "install": {
+        "degraded": "Pi 不可用，因此 Cognia 会把包路径写入 Pi 的 settings.json，而不是运行 pi install。Pi 会在下次启动时解析它。",
+        "failureToast": "无法安装 {name}：{message}",
+        "install": "安装",
+        "installed": "已安装",
+        "noWorkspace": "打开一个工作区后才能安装到项目范围。",
+        "notInstalled": "未安装",
+        "remove": "移除",
+        "removeFailureToast": "无法移除 {name}：{message}",
+        "removeSuccessToast": "已移除 {name}（{scope}）",
+        "scopeProject": "项目",
+        "scopeStatus": "{scope}：{status}",
+        "scopeUser": "用户",
+        "successDegradedToast": "已将 {name} 记录到 Pi 设置（{scope}），Pi 会在下次启动时加载它。",
+        "successToast": "已安装 {name}（{scope}）",
+        "working": "处理中…"
+      },
+      "loading": "正在检查包状态…",
+      "minPiVersion": "Pi ≥ {version}",
+      "minPiVersionUnmet": "需要 Pi {version} 或更新版本（当前：{installed}）",
+      "paneGroupDescription": "已启用的 Cognia 插件提供的 Pi 包。",
+      "paneGroupTitle": "来自 Cognia 插件",
+      "pathLabel": "路径",
+      "picker": {
+        "empty": "没有已启用的插件提供支持托管会话的 Pi 包。",
+        "hint": "每个选中的包都会在此智能体的每次会话中加载，位于 Cognia 自身扩展之前。",
+        "label": "插件 Pi 包",
+        "notPrepared": "未准备：开始会话前，请先在插件页面运行其准备步骤。",
+        "remove": "移除",
+        "unavailable": "{ref} 已不可用。移除它之前，会话将无法启动。",
+        "unavailableTitle": "不可用的包"
+      },
+      "pluginDisabled": "启用此插件后，才能安装其 Pi 包或在托管会话中加载它们。",
+      "prepare": {
+        "cancel": "取消",
+        "commandLabel": "命令",
+        "confirm": "运行",
+        "cwdLabel": "工作目录",
+        "dialogDescription": "{plugin} 需要安装此包的依赖。Cognia 将在包目录中不经 shell 精确运行以下命令：",
+        "dialogTitle": "运行此包的准备步骤？",
+        "failureToast": "无法准备 {name}：{message}",
+        "rerun": "重新运行准备步骤",
+        "run": "准备",
+        "running": "正在准备…",
+        "status": {
+          "missing": "未准备",
+          "notRequired": "无需依赖安装步骤",
+          "prepared": "已准备",
+          "unknown": "无法检查准备状态",
+          "unverifiable": "准备状态未知"
+        },
+        "successToast": "已准备 {name}",
+        "thenInstall": "此步骤成功后会把包安装到 Pi。",
+        "timeout": "时间上限：{seconds} 秒"
+      },
+      "sectionDescription": "此插件携带的 Pi coding-agent 包。可以安装到你的 Pi，也可以让 Pi 智能体在 Cognia 托管的会话中加载它们。",
+      "sectionTitle": "Pi 包"
     },
     "preInstall": {
       "back": "上一步",
@@ -29601,7 +30756,9 @@
     "deletedOnDisk": "已在磁盘删除",
     "deletedTab": "{name} —— 已在磁盘删除",
     "editorTab": "编辑器",
+    "emptyBrowseFiles": "浏览文件",
     "emptyEditor": "从文件树打开一个文件开始编辑。",
+    "emptyEditorMobile": "打开一个文件开始编辑。",
     "externallyChanged": "磁盘已变更",
     "fallback": {
       "binary": "此文件为二进制文件或使用了不受支持的文本编码，无法显示。",
@@ -30294,7 +31451,7 @@
         "title": "仓库声明",
         "user": "以 {user} 身份运行"
       },
-      "description": "选择该项目的 Agent 运行时所使用的容器镜像。",
+      "description": "选择该项目的外部 Agent 运行时所使用的容器镜像。内置 Agent 不受影响。",
       "driver": "沙箱驱动：{driver}",
       "driverUnreachable": "无法连接沙箱驱动：{reason}",
       "egress": "网络预设",
@@ -30310,8 +31467,8 @@
       "localContainer": "在本设备的本地容器中运行",
       "localContainerDormant": "本设备暂时无法运行本地容器；开启此项的项目会被拒绝运行，而不会在无沙箱的情况下继续。",
       "noEnvironment": "请先在上方创建并启用一个环境，再为它选择运行环境。",
-      "optIn": "让该项目的 Agent 在运行环境中运行",
-      "optInHint": "关闭时：Agent 按原有的标准执行路径运行，与之前完全一致。",
+      "optIn": "让该项目的外部 Agent 在运行环境中运行",
+      "optInHint": "关闭时：外部 Agent 按原有的标准执行路径运行，与之前完全一致。",
       "poolOff": "该部署未启用运行环境，运行将使用标准执行路径。",
       "poolOffKept": "该项目的选择会被保留，待运维人员启用后生效。",
       "ports": {
@@ -30325,11 +31482,11 @@
         "declaredUser": "以声明的用户 {user} 运行",
         "imageUser": "以镜像中的用户 {user} 运行",
         "off": "标准执行路径 — 不使用沙箱。",
-        "placed": "下一次运行将在 {image} 的沙箱中进行",
+        "placed": "下一次外部 Agent 运行将在 {image} 的沙箱中进行",
         "requestedTier": "请求的隔离级别：至少 {tier}",
         "size": "规格：{size}",
         "tierDefaultUser": "以该隔离级别的默认用户运行",
-        "title": "下一次运行将如何执行"
+        "title": "下一次外部 Agent 运行将如何执行"
       },
       "save": "保存运行环境",
       "saved": "运行环境已保存。",
@@ -32354,6 +33511,7 @@
       "latestUpdate": "最新进展",
       "loadMore": "加载更多事件",
       "loadMoreError": "无法加载更早的事件。",
+      "loadOlder": "查找更早的事件",
       "loadingMore": "正在加载…",
       "noMore": "没有更早的事件了。",
       "pastEmpty": "暂无历史事件记录。",
@@ -33580,12 +34738,18 @@
     "surfaceBoundary": {
       "back": "返回",
       "backToChat": "返回聊天",
+      "band": {
+        "cacheOnly": "仅可查看缓存数据",
+        "hostOffline": "主机离线",
+        "readOnly": "只读模式",
+        "reconnecting": "正在重连主机"
+      },
+      "connectionSettings": "连接设置",
       "diagnose": "打开诊断",
       "pairHost": "配对或切换主机",
-      "readOnly": "只读模式：{reason}",
       "reasons": {
         "companion-not-paired": "此设备尚未与主机配对，或配对已失效。",
-        "connection-offline": "当前主机离线，此操作不会自动重放。",
+        "connection-offline": "此页面需要实时连接主机，主机恢复连接后会自动可用。",
         "host-admin-only": "此操作仅限主机管理员。",
         "host-manifest-missing": "主机没有提供兼容的能力清单。",
         "host-protocol": "主机协议与此浏览器不兼容。",
@@ -33597,9 +34761,10 @@
         "requires-companion": "此能力需要已配对的桌面或云主机。",
         "service-only": "此操作只能在可信服务中运行。",
         "unknown-command": "共享命令清单中不存在此操作。",
-        "vault-locked": "使用此目标前请先解锁本地 Vault。"
+        "vault-locked": "本地 Vault 已锁定，解锁账户后即可继续使用当前主机。"
       },
       "states": {
+        "connecting": "正在重连主机",
         "incompatible": "需要升级主机",
         "offline": "主机离线",
         "requires-grant": "需要设备授权",
@@ -33607,7 +34772,7 @@
         "requires-unlock": "Vault 已锁定",
         "unsupported": "此设备暂不支持"
       },
-      "unlockVault": "解锁 Vault"
+      "unlockVault": "解锁账户"
     }
   },
   "safeMode": {
@@ -33688,6 +34853,8 @@
       "empty": "未来两周没有计划中的运行",
       "emptyDay": "这一天没有计划中的运行",
       "runsCount": "{count} 次运行",
+      "showFewerDays": "收起",
+      "showMoreDays": "{count, plural, other {再显示 # 天}}",
       "times": "×{count}",
       "today": "今天",
       "tomorrow": "明天",
@@ -34020,7 +35187,16 @@
       "openAuthoringConversation": "打开创建它的对话",
       "originTitle": "来源",
       "outcomesTitle": "14 天运行结果",
+      "payloadTitle": "执行内容",
       "starting": "正在启动…",
+      "stats": {
+        "averageDuration": "平均耗时",
+        "lastRun": "上次运行",
+        "lastRunWhen": "上次运行（{when}）",
+        "runsLifetime": "累计运行",
+        "runsLoaded": "已加载运行",
+        "successRate": "成功率"
+      },
       "storage": "存储位置",
       "tagsTitle": "标签",
       "updatedAt": "更新时间",
@@ -34249,13 +35425,21 @@
       "serverListLabel": "可用 MCP 服务器"
     },
     "mobile": {
+      "backToList": "任务",
       "fabCreateAria": "新建计划任务",
+      "noRuns": "尚无运行记录",
+      "outcomesTitle": "近 14 天结果",
+      "recentRunsTitle": "最近运行",
+      "refresh": "刷新",
       "statStripLabels": {
         "active": "运行中",
         "executions": "执行次数",
         "paused": "已暂停",
         "successRate": "成功率"
-      }
+      },
+      "tabActivity": "动态",
+      "tabTasks": "任务",
+      "viewLabel": "调度视图"
     },
     "more": "更多",
     "moreOptions": "更多选项",
@@ -34526,6 +35710,24 @@
     "payloadFieldErrors": "请修正高亮字段",
     "payloadHelp": "传递给执行器的 JSON 配置",
     "payloadStructuredHelp": "为本次运行选择 agent / 工具 / MCP 服务 / 内置工具开关。",
+    "payloadSummary": {
+      "allowedTools": "允许的工具",
+      "condition": "条件",
+      "copied": "已复制",
+      "copy": "复制{label}",
+      "delay": "延迟",
+      "disabledSkills": "禁用的技能",
+      "disallowedTools": "禁用的工具",
+      "echo": "回显",
+      "empty": "此任务没有存储负载。",
+      "failWith": "失败信息",
+      "handlerArgs": "处理器参数",
+      "maxRuntime": "最长运行时间",
+      "missingReference": "{id}（已不存在）",
+      "raw": "存储的负载（JSON）",
+      "session": "会话",
+      "timeout": "超时"
+    },
     "payloadTooLarge": "负载超过 64KB 限制",
     "permissionModeUseDefault": "使用默认值",
     "permissionModes": {
@@ -34843,6 +36045,13 @@
     "systemTrigger": "触发器",
     "systemTriggerType": "触发类型",
     "tags": "标签",
+    "tagsInput": {
+      "full": "最多 {max} 个标签",
+      "hint": "按回车或逗号添加标签。在列表搜索中使用 #标签 只匹配标签。",
+      "label": "标签",
+      "placeholder": "添加标签",
+      "remove": "移除标签 {tag}"
+    },
     "taskName": "任务名称",
     "taskNamePlaceholder": "输入任务名称",
     "taskPayload": "任务负载",
@@ -34862,6 +36071,7 @@
       "connection:outbound:send": "外发消息",
       "connection:presence:refresh": "在线状态刷新",
       "connection:scheduled:digest": "定时摘要",
+      "conversation-auto-archive": "对话自动归档",
       "custom": "自定义",
       "external-agent": "外部代理 (ACP)",
       "github-issue-sync": "GitHub Issue 同步",
@@ -35810,7 +37020,23 @@
       "title": "每轮平均",
       "tokens": "Token"
     },
+    "costTimeline": {
+      "concentration": "仅第 {index} 轮就占了本对话 {pct}% 的成本。",
+      "context": "上下文",
+      "contextShort": "上下文 {tokens}",
+      "cost": "成本",
+      "growth": "上下文从第一轮到最后一轮增长了 {ratio} 倍（{from} → {to}）。压缩上下文或另开新对话能让后续轮次更便宜。",
+      "jump": "跳转到第 {index} 轮",
+      "jumpFailed": "在对话中找不到该轮次。",
+      "priciest": "花费最高的轮次",
+      "rank": "花费高于你最近 {days} 天内 {pct}% 的其他对话（中位数 {median}，共比较 {peers} 个）。",
+      "title": "单轮成本",
+      "turn": "第 {index} 轮"
+    },
     "degradedTree": "对话以线性时间线展示（未存储分支数据）。",
+    "efficiency": {
+      "title": "效率"
+    },
     "empty": "活动还不足以分析。",
     "idle": {
       "headline": "轮次之间出现 {count} 处超过 {seconds}s 的空闲间隙"
@@ -36463,41 +37689,58 @@
         }
       },
       "sessions": {
-        "ago": {
-          "days": "{n} 天前",
-          "hours": "{n} 小时前",
-          "justNow": "刚刚",
-          "minutes": "{n} 分钟前"
+        "bound": {
+          "archived": "已归档",
+          "cancel": "取消",
+          "col": {
+            "actions": "操作",
+            "conversation": "对话",
+            "cost": "成本",
+            "lastActivity": "最近活动",
+            "sdkSession": "SDK 会话",
+            "storage": "存储位置",
+            "tokens": "Token",
+            "turns": "轮次"
+          },
+          "count": "{count} 个对话",
+          "description": "下一轮回复时会续接原生 Claude Agent SDK 会话的 Cognia 对话，以及每个对话记录的用量。",
+          "empty": "还没有对话绑定到 SDK 会话。对话在会下发 SDK 会话 id 的 provider 上完成第一轮回复后才会绑定。",
+          "emptyFilter": "没有匹配该筛选条件的 SDK 绑定对话。",
+          "filterLabel": "筛选 SDK 绑定对话",
+          "filterPlaceholder": "按标题或 id 筛选…",
+          "fork": "分叉 SDK 会话",
+          "forkFailedToast": "无法分叉该 SDK 会话。",
+          "forkHint": "新建一个续接此 SDK 会话的对话，但不复制消息。如需保留消息，请在对话中的消息上使用“分支对话”。",
+          "forkNamed": "分叉“{title}”的 SDK 会话",
+          "forkedToast": "已分叉为“{title}”。",
+          "loading": "正在加载 SDK 绑定对话",
+          "lockedReason": "该对话已移交到另一台设备，移交期间为只读。",
+          "open": "打开对话",
+          "openNamed": "打开“{title}”",
+          "runningReason": "请等待当前回复结束后再解除 SDK 会话绑定。",
+          "storage": {
+            "filesystem": "本地文件",
+            "hostSqlite": "主机存储"
+          },
+          "title": "SDK 绑定对话",
+          "unlink": "解除 SDK 会话绑定",
+          "unlinkConfirm": "解除绑定",
+          "unlinkDescription": "“{title}”会保留所有消息，但下一轮回复将开始新的 SDK 会话，而不再续接 {sdkSessionId}。原生 SDK 会话本身不会被删除。",
+          "unlinkFailedToast": "无法解除 SDK 会话绑定。",
+          "unlinkNamed": "解除“{title}”的 SDK 会话绑定",
+          "unlinkTitle": "解除 SDK 会话绑定？",
+          "unlinkedToast": "已解除 SDK 会话绑定。"
         },
-        "cancel": "取消",
-        "colActions": "操作",
-        "colCost": "成本",
-        "colKind": "类型",
-        "colTitle": "会话",
-        "colTokens": "Token",
-        "colTurns": "轮次",
-        "colUpdated": "更新于",
-        "delete": "删除",
-        "deleteDesc": "将永久移除 `{title}` 以及绑定的所有消息和用量记录，无法撤销。",
-        "deleteTitle": "删除该会话？",
-        "deletedToast": "会话已删除。",
-        "description": "展示每个会话，附带从 SDK result 收集到的 token 与 USD 累计。Resume 切换当前活跃会话；Fork 在 SDK 会话上分支；可在此处直接重命名或删除。",
-        "emptyAll": "暂无会话，开始聊天后会出现在这里。",
-        "emptyFilter": "没有匹配该筛选条件的会话。",
-        "filterPlaceholder": "按标题或 id 过滤…",
-        "fork": "SDK 会话 fork",
-        "forkDisabledTip": "需要该会话已有可 fork 的 SDK 对话 —— 至少完成一次回复，且只有会下发 session id 的 provider 才有。",
-        "forkFailedToast": "无法 fork 该 SDK 会话。",
-        "forkedToast": "已分支为 `{title}`。",
-        "rename": "重命名",
-        "renameDesc": "为会话选择新的显示名。重命名不会影响聊天历史或底层 SDK 会话。",
-        "renameEmpty": "标题不能为空。",
-        "renamePlaceholder": "会话标题",
-        "renameTitle": "重命名会话",
-        "renamedToast": "已重命名。",
-        "resume": "切换到此会话",
-        "resumedToast": "已切换到 `{title}`。",
-        "save": "保存",
+        "manager": {
+          "activeCount": "{count} 个活跃对话",
+          "archivedCount": "{count} 个已归档对话",
+          "countsLabel": "所有工作区中的对话",
+          "description": "在“对话”页面中浏览、重命名、归档和删除所有工作区的对话。此标签页只展示对话与智能体运行时的绑定情况。",
+          "loading": "正在加载对话数量",
+          "open": "打开对话管理",
+          "openArchive": "打开归档",
+          "title": "对话历史"
+        },
         "sdk": {
           "cancel": "取消",
           "close": "关闭",
@@ -36507,6 +37750,7 @@
           "delete": "删除 SDK 会话",
           "deleteConfirm": "永久删除",
           "deleteDescription": "将删除原生 SDK 对话记录及其所有子智能体对话记录，此操作无法撤销。",
+          "deleteLinkedNote": "{count, plural, other {已关联的 # 个 Cognia 对话会保留消息，但下一轮回复将开始新的 SDK 会话。}}",
           "deleteTitle": "删除原生 SDK 会话？",
           "deleted": "SDK 会话已删除。",
           "description": "由 Claude Agent SDK 保存的会话，包括尚未关联到 Cognia 对话的记录。",
@@ -36521,16 +37765,21 @@
           "errors": {
             "continueFailed": "无法在对话中继续此 SDK 会话。",
             "deleteFailed": "无法删除 SDK 会话。",
-            "forkFailed": "无法分支 SDK 会话。",
+            "forkFailed": "无法分叉 SDK 会话。",
             "importFailed": "无法导入 SDK 会话。",
             "loadFailed": "无法加载 SDK 会话。",
             "renameFailed": "无法重命名 SDK 会话。",
-            "tagFailed": "无法保存 SDK 会话标签。"
+            "tagFailed": "无法保存 SDK 会话标签。",
+            "unlinkAfterDeleteFailed": "SDK 会话已删除，但有关联对话未能解除绑定。请在 SDK 绑定对话列表中手动解除。"
           },
-          "fork": "Fork SDK 会话",
-          "forked": "SDK 会话已分支。",
+          "fork": "分叉 SDK 会话",
+          "forked": "SDK 会话已分叉。",
           "importStore": "导入 SessionStore",
           "imported": "SDK 会话已导入 SessionStore。",
+          "lastModified": "更新于 {time}",
+          "linked": "{count, plural, other {已关联 # 个对话}}",
+          "linkedOpen": "打开已关联的对话“{title}”",
+          "loading": "正在加载原生 SDK 会话",
           "loadingDetails": "正在加载 SDK 会话详情",
           "mainTranscript": "主对话记录",
           "refresh": "刷新 SDK 会话",
@@ -36539,6 +37788,7 @@
           "renameTitle": "重命名原生 SDK 会话",
           "renamed": "SDK 会话已重命名。",
           "save": "保存",
+          "subagentTranscript": "子智能体 {agentId}",
           "subagentTranscripts": "子智能体对话记录",
           "tagDescription": "使用简短标签对原生 SDK 会话进行分组；留空可清除标签。",
           "tagLabel": "会话标签",
@@ -36546,9 +37796,7 @@
           "tagged": "SDK 会话标签已保存。",
           "title": "原生 SDK 会话",
           "titleLabel": "会话标题"
-        },
-        "title": "会话列表",
-        "untitled": "（未命名）"
+        }
       },
       "sidecar": {
         "capabilities": {
@@ -36565,7 +37813,7 @@
         "countHooks": "Hook",
         "countHooksHint": "打开 hooks",
         "countMcpServers": "MCP 服务器",
-        "countSessions": "会话",
+        "countSessions": "对话",
         "countSlashCommands": "Slash 命令",
         "countsDescription": "与 Claude Code 相关的设置面板的实时计数——点击对应卡片跳转。",
         "countsTitle": "关联面板",
@@ -39579,8 +40827,8 @@
         "intentsInvalid": "Gateway intents 必须是非负整数。",
         "intentsLabel": "Gateway intents（高级）",
         "intentsPlaceholder": "默认：46593",
-        "openCompanion": "打开伴侣设置",
-        "openCompanionAria": "打开 移动端伴侣 → Tunnel",
+        "openCompanion": "打开隧道设置",
+        "openCompanionAria": "打开 平台连接 → 概览 中的隧道设置",
         "openConsole": "打开 Discord 开发者门户",
         "openConsoleAria": "在 Discord 开发者门户 → General Information 打开当前应用",
         "publicKeyHelp": "Discord Developer Portal 中的 Ed25519 公钥，用于校验 Interactions webhook 签名。",
@@ -39622,7 +40870,7 @@
         "webhookUrlNewAdapterHint": "请先保存适配器；端点 URL 使用新适配器 ID 拼接。",
         "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成交互端点 URL。请让应用与伴生服务共用同一个前置入口，然后重新打开此对话框。",
         "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
-        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
+        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 设置 → 平台连接 → 概览 中启动 Cloudflared Tunnel，然后回到此处。",
         "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站交互。请打开桌面应用，或先将此浏览器与宿主配对。"
       },
       "dispatchRules": {
@@ -39770,7 +41018,7 @@
         },
         "authorizeButton": "连接账号",
         "authorizeNeedsAppId": "请先保存 App ID —— 授权需要它。",
-        "authorizeNeedsRedirect": "请先设置回调地址（或启动 Companion 隧道以自动生成）—— 授权需要它。",
+        "authorizeNeedsRedirect": "请先设置回调地址（或在 设置 → 平台连接 → 概览 中启动隧道以自动生成）—— 授权需要它。",
         "authorizeNeedsSavedAdapter": "请先保存适配器；授权需要已保存的凭据。",
         "authorizeOpened": "已在浏览器中打开授权页面。请在那里确认后返回。",
         "cancel": "取消",
@@ -39930,8 +41178,8 @@
           "workbenchSaveFailed": "工作台模式保存失败，请重试。",
           "workbenchUrlLabel": "应用主页链接"
         },
-        "openCompanion": "打开伴侣设置",
-        "openCompanionAria": "打开 移动端伴侣 → Tunnel",
+        "openCompanion": "打开隧道设置",
+        "openCompanionAria": "打开 平台连接 → 概览 中的隧道设置",
         "openConsole": "打开飞书控制台",
         "openConsoleAria": "在飞书开放平台打开当前应用的事件订阅页",
         "openConsoleSecurityAria": "在飞书开放平台打开当前应用的安全设置页",
@@ -40138,7 +41386,7 @@
         "webhookUrlNewAdapterHint": "请先保存适配器；回调 URL 使用新生成的适配器 ID 拼接。",
         "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成回调 URL。请设置 COGNIA_LARK_PUBLIC_BASE（或让应用与伴生服务共用同一个前置入口），然后重新打开此对话框。",
         "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
-        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
+        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 设置 → 平台连接 → 概览 中启动 Cloudflared Tunnel，然后回到此处。",
         "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站请求。请打开桌面应用，或先将此浏览器与宿主配对。",
         "whitelist": {
           "addChatIdPlaceholder": "oc_… （粘贴 chat id）",
@@ -40416,8 +41664,8 @@
         "displayNameLabel": "显示名称",
         "displayNamePlaceholder": "QQ 机器人",
         "displayNameRequired": "显示名称不能为空",
-        "openCompanion": "打开伴侣设置",
-        "openCompanionAria": "打开 移动端伴侣 → Tunnel",
+        "openCompanion": "打开隧道设置",
+        "openCompanionAria": "打开 平台连接 → 概览 中的隧道设置",
         "openConsole": "打开 QQ 机器人控制台",
         "openConsoleAria": "在 QQ 机器人控制台打开当前机器人的开发设置",
         "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
@@ -40451,7 +41699,7 @@
         "webhookUrlNewAdapterHint": "请先保存适配器。回调地址使用新适配器 ID 拼接。",
         "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成回调地址。请让应用与伴生服务共用同一个前置入口，然后重新打开此对话框。",
         "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
-        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
+        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 设置 → 平台连接 → 概览 中启动 Cloudflared Tunnel，然后回到此处。",
         "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站请求。请打开桌面应用，或先将此浏览器与宿主配对。"
       },
       "quickCommands": {
@@ -40598,8 +41846,8 @@
         "oauthNeedsSavedAdapter": "请先保存这个连接 —— 授权要绑定到它。",
         "oauthOpened": "已在浏览器中打开 Slack 授权页。",
         "oauthRedirectHint": "请在你的 Slack 应用里注册这个完全一致的回调地址：{url}",
-        "openCompanion": "打开伴侣设置",
-        "openCompanionAria": "打开 移动端伴侣 → Tunnel",
+        "openCompanion": "打开隧道设置",
+        "openCompanionAria": "打开 平台连接 → 概览 中的隧道设置",
         "openConsole": "打开 Slack 应用控制台",
         "openConsoleAria": "在 Slack App → Event Subscriptions 打开当前应用",
         "quietHoursIncomplete": "免打扰时段需要同时填写开始、结束与时区。",
@@ -40636,7 +41884,7 @@
         "webhookUrlNewAdapterHint": "请先保存适配器；Request URL 使用新适配器 ID 拼接。",
         "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成 Request URL。请让应用与伴生服务共用同一个前置入口，然后重新打开此对话框。",
         "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
-        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
+        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 设置 → 平台连接 → 概览 中启动 Cloudflared Tunnel，然后回到此处。",
         "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站请求。请打开桌面应用，或先将此浏览器与宿主配对。"
       },
       "tabs": {
@@ -40675,7 +41923,7 @@
         "displayNamePlaceholder": "我的 Telegram 机器人",
         "displayNameRequired": "显示名称不能为空。",
         "openCompanion": "打开隧道设置",
-        "openCompanionAria": "打开「隧道」标签页",
+        "openCompanionAria": "打开 平台连接 → 概览 中的隧道设置",
         "openDocs": "打开 Telegram 文档",
         "openDocsAria": "打开 Telegram Bot API 的 setWebhook 文档",
         "quietHoursIncomplete": "免打扰时段需要同时填写开始、结束与时区。",
@@ -40920,8 +42168,8 @@
         "encodingAesKeyHelp": "服务器配置（安全模式）中的 43 位密钥 —— 用于解密回调。",
         "encodingAesKeyInvalid": "EncodingAESKey 必须为 43 个字符。",
         "encodingAesKeyLabel": "EncodingAESKey",
-        "openCompanion": "打开陪伴端",
-        "openCompanionAria": "打开陪伴端隧道设置",
+        "openCompanion": "打开隧道设置",
+        "openCompanionAria": "打开 平台连接 → 概览 中的隧道设置",
         "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
         "save": "保存",
         "sectionAdvanced": "高级",
@@ -40951,7 +42199,7 @@
         "webhookUrlNewAdapterHint": "请先保存适配器。Webhook 地址使用新适配器 ID 拼接。",
         "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成 Webhook 地址。请让应用与伴生服务共用同一个前置入口，然后重新打开此对话框。",
         "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
-        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
+        "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 设置 → 平台连接 → 概览 中启动 Cloudflared Tunnel，然后回到此处。",
         "webhookUrlUnsupportedHelp": "当前浏览器背后没有 Cognia 宿主，无法接收任何入站请求。请打开桌面应用，或先将此浏览器与宿主配对。",
         "windowNote": "回复使用客服消息接口，仅允许在用户最后一条消息后的 48 小时内发送。"
       },
@@ -41281,9 +42529,11 @@
         "goDevices": "设备控制台",
         "goPairing": "配对设备",
         "goRelay": "中继与隧道",
+        "goRemoteHosts": "远程主机",
         "hostMode": "这个壳",
         "hostModeValue": {
           "companion": "驱动一台主机",
+          "driving": "本身是主机，正在驱动另一台",
           "host": "本身是主机",
           "standalone": "独立运行"
         },
@@ -41313,7 +42563,8 @@
         "runtimeTitle": "运行时",
         "shortcutsTitle": "前往",
         "tier": "传输层",
-        "tierNotApplicable": "不适用：这个壳在本地运行工作。"
+        "tierNotApplicable": "不适用：这个壳在本地运行工作。",
+        "tierPending": "尚未上报：与这台主机的链路仍在协商。"
       },
       "pairing": {
         "reachDirect": "同一网络",
@@ -41405,10 +42656,12 @@
       },
       "remoteHosts": {
         "active": "活动",
-        "addDescription": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
+        "addDescription": "粘贴来自主机「配对」主题的邀请。主机无法直连时会走中继。",
+        "addDescriptionScan": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
         "addTitle": "添加主机",
+        "connect": "连接",
         "count": "{count, plural, =0 {无} =1 {1 台主机} other {# 台主机}}",
-        "drive": "驱动",
+        "disconnect": "断开",
         "empty": "还没有登记任何主机。在下方用主机的邀请添加一台。",
         "registryDescription": "这台设备可以驱动的主机。同一时间只有一台处于活动状态。",
         "registryTitle": "已登记的主机",
@@ -41418,10 +42671,10 @@
         "state": {
           "connecting": "连接中",
           "degraded": "降级",
-          "disconnected": "已断开",
+          "disconnected": "未连接",
           "ready": "就绪",
           "revoked": "已吊销",
-          "versionMismatch": "版本不匹配"
+          "versionMismatch": "需要升级"
         }
       },
       "statusPage": {
@@ -42360,6 +43613,7 @@
         "aiSessionTitle": "配置 {provider} 备份",
         "allowInvalidCertificatesDescription": "仅用于你自行控制且使用自签名证书的服务器。开启后会跳过此 WebDAV 地址的证书验证，凭据可能遭到中间人截获。",
         "allowInvalidCertificatesLabel": "允许无效或自签名证书",
+        "certificateOverrideUnavailable": "仅桌面应用支持跳过证书验证。手机端请使用受信任的 HTTPS 证书，并关闭此选项。",
         "clear": "清除",
         "cleared": "密码已清除。",
         "credentialHints": {
@@ -42754,19 +44008,10 @@
       }
     },
     "diagnostics": {
-      "crashReports": {
-        "delete": "删除报告",
-        "description": "由 Rust 崩溃处理器（panic）和进程外 minidump 监控（原生崩溃）写出的自包含报告。每份报告含完整 backtrace 或 .dmp、系统信息以及脱敏后的配置快照。",
-        "desktopOnly": "原生崩溃报告仅在桌面应用中可用。",
-        "dialogTitle": "崩溃报告",
-        "empty": "暂无崩溃报告 —— 一切正常。",
-        "kindNative": "原生崩溃",
-        "kindPanic": "Panic",
-        "kindUnknown": "报告",
-        "openFolder": "打开文件夹",
-        "refresh": "刷新",
-        "title": "原生崩溃报告",
-        "view": "查看报告"
+      "crashReportsLink": {
+        "description": "在“日志”中检查、提交或删除本设备捕获的崩溃报告。",
+        "open": "在日志中打开",
+        "title": "崩溃报告"
       },
       "developer": {
         "chatMiddleware": "插件聊天中间件",
@@ -42810,7 +44055,7 @@
       },
       "service": {
         "autoSubmit": "自动提交崩溃报告",
-        "autoSubmitDescription": "默认关闭。开启后，捕获到的崩溃会直接打包发送，不再显示同意预览；minidump 与截图仍然只在你逐次勾选时才会包含。",
+        "autoSubmitDescription": "默认关闭。开启后，此后捕获的崩溃会在下次启动时直接发送，不再显示同意预览，并以通知告知回执。minidump 与截图不会被自动包含；本设备上已有的报告仍保留在本地。",
         "browserTransport": "在浏览器中，只有服务端开启 CORS 时请求才能到达。桌面与移动应用具备直连传输。",
         "connect": "连接",
         "connected": "已连接",
@@ -42823,6 +44068,14 @@
           "url": "请填写 http 或 https 的服务地址。"
         },
         "projectId": "项目 ID",
+        "roleErrors": {
+          "invalid_oidc_session": "服务拒绝了该身份会话令牌。",
+          "network_unavailable": "无法连接到诊断服务以检查权限。",
+          "other": "无法向诊断服务确认访问权限。",
+          "session_token_missing": "该连接未保存身份会话令牌。"
+        },
+        "roleProbing": "正在检查权限…",
+        "roleRetry": "重试",
         "roles": {
           "admin": "管理员",
           "triager": "分诊者",
@@ -45654,7 +46907,7 @@
         "connectAfter": "配对后立即连接",
         "discover": {
           "empty": "本网络内没有正在广播的 Cognia 主机。",
-          "emptyHint": "对方需要开着 companion 服务并打开 mDNS（它的 设置 → Companion）。",
+          "emptyHint": "对方需要开着 companion 服务并打开 mDNS（它的 设置 → 连接 → 本机主机）。",
           "matchLive": "这台主机正在 {url} 广播。",
           "matchStale": "邀请里的地址是 {claimed}，但这台主机现在广播的是 {live}。",
           "notAdvertising": "这台主机没有在本网络广播——配对会使用邀请里的地址。",
@@ -45677,18 +46930,20 @@
           "absent": "这台电脑的回环端口上没有主机应答。",
           "absentHint": "浏览器只能通过 http://127.0.0.1 访问主机。若主机在另一台机器上，请在上面粘贴它的邀请码。",
           "blocked": "{url} 有主机应答，但它尚未允许这个浏览器。",
-          "blockedHint": "请在那台机器的 设置 → 伴侣 → 浏览器访问 中添加 {origin}。",
+          "blockedHint": "请在那台机器的 设置 → 连接 → 本机主机 → 浏览器访问 中添加 {origin}。",
+          "commandCopied": "已复制命令。在主机上运行后，把邀请粘贴到下方。",
+          "copyCommand": "复制配对命令",
+          "copyFailed": "无法复制命令，请手动选中复制。",
           "found": "在 {url} 找到 cognia {version}。",
-          "foundHint": "在那台机器上运行 `cognia-server pair`，把输出粘贴到上面。",
+          "foundHint": "配对需要的是邀请，而不是这个地址。若是无头服务器，请在那台机器上运行下面的命令，并把输出粘贴到下方的邀请框；若是桌面应用，请在 设置 → 连接 → 配对 中生成邀请。",
           "probe": "查找主机",
           "probing": "查找中…",
-          "title": "这台电脑上",
-          "useAddress": "使用该地址"
+          "title": "这台电脑上"
         },
         "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
         "payloadLabel": "配对载荷或 JWT",
         "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",
-        "seededFrom": "来自 {url}。仍需粘贴该主机的邀请码。",
+        "seededFrom": "正在添加 {url} 上的主机。请在下方粘贴它生成的邀请：仅凭地址无法配对。",
         "submit": "配对主机",
         "submitting": "配对中…",
         "success": "已配对 {label}。"
@@ -45870,6 +47125,11 @@
         "whyTitle": "为何执行此行动"
       },
       "description": "在执行敏感操作前要求生物识别校验。未录入生物识别的设备在导出时会放行（避免你被锁在自己的数据之外），在揭示密钥时会阻止。",
+      "policyChangeBlocked": "未更改保护设置。{reason}",
+      "policyChangeContextChanged": "账户或连接的 Host 已更改，请在当前设置中重试。",
+      "policyChangeFailed": "无法保存保护设置，请重试。",
+      "policyChangeReason": "关闭此保护前，请先验证身份",
+      "policyChangeTitle": "更改生物识别保护",
       "revealGate": {
         "description": "「设置 → 安全」要求先验证身份，才会显示 API 密钥或令牌。",
         "reason": "确认后显示该密钥",
@@ -45893,9 +47153,13 @@
           "label": "退出登录前确认"
         }
       },
+      "testBlocked": "生物识别测试未完成。{reason}",
       "testCta": "测试生物识别提示",
       "testDescription": "这是一次空操作校验，用于确认你的设备生物识别可用。",
+      "testError": "无法运行生物识别测试，请重试。",
+      "testPending": "正在等待身份验证…",
       "testReason": "验证你的生物识别是否可用",
+      "testSuccess": "生物识别验证成功。",
       "testTitle": "测试生物识别提示",
       "title": "安全与隐私"
     },
@@ -45920,6 +47184,7 @@
         "commandPaletteToggle": "打开全局搜索 / 命令面板",
         "conversationNext": "下一个会话",
         "conversationPrevious": "上一个会话",
+        "conversationToggleArchive": "归档或取消归档会话",
         "dockLayoutRedo": "重做停靠布局更改",
         "dockLayoutReset": "重置停靠布局",
         "dockLayoutUndo": "撤销停靠布局更改",
@@ -45945,6 +47210,7 @@
         "observabilityOpenSettings": "打开设置",
         "observabilityRefresh": "刷新",
         "observabilityToggleEdit": "切换编辑布局",
+        "observabilityToggleSubView": "切换探索 / 观测台",
         "searchFocus": "聚焦搜索",
         "sessionSummaryToggle": "对话：显示 / 隐藏任务摘要",
         "settingsOpen": "打开设置",
@@ -47029,6 +48295,59 @@
         "max": "最大（21）",
         "off": "关闭"
       },
+      "nav": {
+        "groups": {
+          "connectGroup": "连接",
+          "generalGroup": "终端",
+          "hostGroup": "主机",
+          "workspaceGroup": "工作区"
+        },
+        "items": {
+          "agents": {
+            "description": "代理可在终端面板中运行什么，以及无人值守运行如何请求确认。",
+            "label": "代理与自动化"
+          },
+          "ai": {
+            "description": "输入时的行内建议。",
+            "label": "AI 自动补全"
+          },
+          "appearance": {
+            "description": "字体、光标、配色与渲染。",
+            "label": "外观"
+          },
+          "behavior": {
+            "description": "复制粘贴、响铃、滚动与关闭标签页。",
+            "label": "行为"
+          },
+          "host": {
+            "description": "保持会话存活的进程、远程访问及其限额。",
+            "label": "持久终端主机"
+          },
+          "productivity": {
+            "description": "快速修复、命令操作与粘性滚动。",
+            "label": "效率工具"
+          },
+          "profiles": {
+            "description": "新建标签页菜单可打开的命名 shell。",
+            "label": "启动配置文件"
+          },
+          "project": {
+            "description": "工作区自己的 shell、工作目录与环境变量。",
+            "label": "按工作区覆盖"
+          },
+          "shell": {
+            "description": "默认 shell、回滚行数、编码与沙箱。",
+            "label": "Shell 与会话"
+          },
+          "ssh": {
+            "description": "已保存的服务器、认证方式、跳板机与端口转发。",
+            "label": "SSH 主机"
+          }
+        },
+        "mobileTrigger": "主题",
+        "sshCountAria": "{count, plural, other {已保存 # 个 SSH 主机}}",
+        "title": "终端主题"
+      },
       "profiles": {
         "add": "添加配置文件",
         "argsLabel": "启动参数（每行一个）",
@@ -47122,6 +48441,8 @@
           "password": "密码",
           "privateKey": "私钥"
         },
+        "browseFiles": "浏览文件",
+        "collapse": "收起 {name}",
         "configImport": {
           "absent": "{path} 不存在。",
           "adjustments": {
@@ -47163,7 +48484,11 @@
         },
         "connect": "连接",
         "connecting": "连接中…",
+        "copyName": "{name}（副本）",
+        "duplicate": "复制",
         "empty": "尚未保存 SSH 主机。",
+        "emptyHint": "在此添加服务器，或导入 ~/.ssh/config 中已有的主机。",
+        "expand": "编辑 {name}",
         "fields": {
           "agentNotice": "签名委托给正在运行的 ssh-agent。此主机不会存储密码、口令或密钥路径。",
           "authMethod": "认证方式",
@@ -47177,11 +48502,15 @@
           "port": "端口",
           "privateKeyPath": "私钥路径",
           "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
+          "secretDesktopOnly": "密码和私钥口令保存在桌面端的系统钥匙串中，只能在桌面应用中填写。",
+          "secretSavedOnConnect": "连接时保存到系统钥匙串。",
           "username": "用户名"
         },
+        "filterPlaceholder": "按名称、用户或地址筛选",
+        "forgetCredential": "清除已保存的密钥",
         "forwarding": {
           "add": "添加规则",
-          "desktopApplies": "在这里配置，由桌面端生效。跳板链和转发规则会从发给宿主的 profile 里剥掉，所以在配对设备上这些字段只被记录、不会生效：手机指定一个 profile 得到的是 shell，永远不是监听端口。",
+          "desktopApplies": "端口转发只由发起连接的桌面端应用。主机端收到的配置包含跳板机，因此配对设备经由主机建立的连接会走同样的路由，但主机端永远不会收到转发规则：手机按名称打开配置只会得到一个 shell，绝不会开启监听端口。",
           "errors": {
             "duplicate_local_port": "已有其他规则监听这个本地端口。",
             "duplicate_remote_port": "已有其他规则占用服务器上的这个端口。",
@@ -47228,29 +48557,100 @@
           "unknownFingerprint": "无法从 known_hosts 中读取"
         },
         "newName": "新 SSH 主机",
-        "notSynced": "只保存在本设备。把这些推送给宿主的是桌面端，所以在这里新增的主机在桌面同步之前不会存在于宿主上，点连接会提示 profile 不在宿主上。跳板机和端口转发按设计永远不会同步。",
+        "noMatch": "没有与“{query}”匹配的已保存主机。",
+        "notSynced": "仅保存在本设备上。由桌面应用负责将这些主机推送到主机端，因此在桌面端同步之前，这里新增的主机在主机端并不存在，连接时会提示该配置不在主机上。主机端收到的配置包含跳板机；端口转发按设计永不同步。",
+        "probe": {
+          "action": "测试连接",
+          "cost": "测试会建立一次真实连接：它会依次通过每个跳板机认证、出现在它们的日志中、可能向 ssh-agent 请求口令，并在首次连接时信任主机密钥。测试不会开启任何端口转发。",
+          "desktopOnly": "测试连接需从本机发起，因此只能在桌面应用中进行。",
+          "invalid": {
+            "host": "未测试：主机地址为空或包含空格。",
+            "jumpChain": "未测试：跳板机缺失、形成循环或配置不完整。",
+            "localForward": "未测试：某条本地转发规则无效。",
+            "name": "未测试：缺少显示名称。",
+            "port": "未测试：端口不在 1–65535 范围内。",
+            "privateKeyPath": "未测试：私钥认证缺少私钥路径。",
+            "profile": "未测试：某个已保存字段无效。",
+            "remoteForward": "未测试：某条远程转发规则无效。",
+            "username": "未测试：用户名为空或包含空格。"
+          },
+          "reachableLearned": "可连接。这是首次连接，主机密钥 {fingerprint} 已被信任并保存。",
+          "reachableVerified": "可连接。主机密钥 {fingerprint} 与已信任的一致。",
+          "running": "测试中…",
+          "unreachable": "无法连接：{message}"
+        },
         "remove": "移除 SSH 主机",
+        "removeConfirm": {
+          "body": "该主机将从本设备和终端主机中删除。已打开的会话不受影响。",
+          "bodyWithCredential": "该主机及其保存在系统钥匙串中的密码或口令都将被删除。已打开的会话不受影响。",
+          "cancel": "取消",
+          "confirm": "删除主机",
+          "dependents": "{names} 通过此主机作为跳板连接。删除后它们将拒绝连接，直到你为其另选跳板机。",
+          "title": "删除“{name}”？"
+        },
+        "summary": {
+          "auth": {
+            "agent": "SSH agent",
+            "password": "密码",
+            "privateKey": "私钥"
+          },
+          "forwards": "{count, plural, other {# 条转发}}",
+          "issue": {
+            "chainBroken": "跳板机缺失",
+            "invalid": {
+              "host": "需要主机地址",
+              "name": "需要名称",
+              "port": "端口无效",
+              "privateKeyPath": "需要私钥路径",
+              "username": "需要用户名"
+            },
+            "passwordMissing": "未保存密码"
+          },
+          "untitled": "未命名主机",
+          "via": "经由 {names}"
+        },
         "title": "SSH 主机",
         "toasts": {
-          "agentUnavailable": "无法连接到 SSH agent",
-          "connectFailed": "SSH 连接失败",
-          "connectedViaHost": "已通过宿主连接，宿主用它保存的副本核对了服务器密钥。",
-          "credentialRequired": "连接前请输入密码。",
+          "credentialClearFailed": "无法从钥匙串中删除已保存的密钥",
+          "credentialCleared": "已删除保存的密钥",
+          "credentialSaveFailed": "无法将密钥保存到钥匙串",
           "hostKeyForgetFailed": "无法更新 known_hosts",
-          "hostKeyForgotten": "已忘记旧的主机密钥。重新连接即可信任新密钥。",
+          "hostKeyForgotten": "已忘记旧的主机密钥，正在重新连接以信任新密钥…",
           "importJumpsDropped": "以下主机的跳板机未被导入，将直接连接：{names}",
           "imported": "已新增 {created} 个、覆盖 {replaced} 个 SSH 主机",
-          "learned": "已连接并保存主机指纹",
           "removeFailed": "无法移除 SSH 主机",
-          "syncFailed": "无法与终端主机同步 SSH 配置",
-          "verified": "已通过主机指纹校验并连接"
+          "syncFailed": "无法与终端主机同步 SSH 配置"
+        },
+        "trustedKeys": {
+          "confirm": {
+            "action": "忘记密钥",
+            "body": "下次连接将信任此服务器提供的密钥。重新连接前，请通过其他渠道核实其指纹。已保存的配置、凭据和现有连接不会更改。",
+            "cancel": "取消",
+            "title": "忘记 {address} 的受信任密钥？"
+          },
+          "description": "本桌面信任的 SSH 服务器密钥，包括跳板机。切换 Cognia 主机不会改变本桌面的信任记录。",
+          "desktopOnly": "请在桌面应用中查看或忘记该桌面信任的 SSH 主机密钥。配对浏览器和手机无法管理此信任文件。",
+          "empty": "本桌面尚未信任任何 SSH 主机密钥。",
+          "fingerprint": "SHA256 指纹",
+          "forget": "忘记",
+          "forgetEntry": "忘记 {address} 的密钥 {fingerprint}",
+          "forgetFailed": "无法忘记此主机密钥。受信任的密钥可能已更改，请取消并刷新列表后重试。",
+          "forgetting": "正在忘记…",
+          "keyType": "密钥类型",
+          "loadFailed": "无法读取本桌面受信任的主机密钥。",
+          "loading": "正在读取受信任的主机密钥…",
+          "noProfiles": "没有已保存的配置指向此地址和端口。",
+          "profiles": "已保存的配置：{names}",
+          "refresh": "刷新密钥",
+          "retry": "重试",
+          "title": "受信任的主机密钥"
         }
       },
       "stickyScroll": {
         "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
         "label": "粘性滚动"
       },
-      "subheading": "底部终端面板的默认 shell、字体和回滚行数。按工作区覆盖优先于全局默认。",
+      "subheading": "终端面板的外观与行为、保持会话存活的主机进程，以及新标签页可以连接的目标：启动配置与已保存的 SSH 主机。按工作区覆盖优先于这些默认值。",
       "unattended": {
         "askPolicy": {
           "consent": "在终端面板中询问",
@@ -47527,6 +48927,7 @@
   },
   "sftp": {
     "browser": {
+      "approvalRefused": "未能获得主机批准，无法创建 {path}。请在主机上批准此设备的文件传输，然后重试。",
       "failure": {
         "capacity": "那台机器上已经没有空间了：{path}",
         "conflict": "那里已经有东西了，或者目录非空：{path}",
@@ -50702,6 +52103,10 @@
     },
     "title": "订阅",
     "usage": {
+      "activity": {
+        "description": "一周内各时段的轮次分布。非常规时段的无人值守运行会在这里显现。",
+        "title": "活跃规律"
+      },
       "budget": {
         "description": "相对硬性美元上限的实时花费。达到 100% 时下一次请求会被拦截，需你确认后放行。",
         "empty": "尚未设置支出上限。可在「设置 › 用量与成本」中配置。",
@@ -50713,10 +52118,18 @@
         "title": "支出上限"
       },
       "bySurface": {
-        "description": "额度花在了应用的哪一部分。对话、智能体团队、定时工作流与连接器回复都消耗同一份套餐。",
+        "axis": {
+          "label": "拆分维度",
+          "project": "工作区",
+          "provider": "提供商",
+          "surface": "场景"
+        },
+        "description": "花费去了哪里：按发起的应用场景、计费的提供商，或所属的工作区查看。",
         "empty": "该区间内没有用量记录。",
+        "noProject": "无工作区",
         "rowDetail": "{turns} 轮 · {tokens} tokens",
-        "title": "按来源"
+        "title": "花费拆分",
+        "unknownProvider": "未知提供商"
       },
       "col": {
         "fetchedAt": "采集时间",
@@ -50735,11 +52148,18 @@
           "more": "多",
           "total": "最近 {days} 天共 {cost} · {requests} 次请求"
         },
+        "stackBy": {
+          "label": "堆叠维度",
+          "model": "模型",
+          "provider": "提供商",
+          "surface": "场景"
+        },
         "title": "成本随时间",
         "view": {
           "bar": "柱状图",
           "heatmap": "热力图",
-          "label": "图表视图"
+          "label": "图表视图",
+          "stacked": "按系列堆叠"
         }
       },
       "display": {
@@ -50747,6 +52167,10 @@
         "detailed": "详细",
         "simplified": "简化",
         "standard": "标准"
+      },
+      "efficiency": {
+        "description": "提示缓存节省了多少，以及典型单轮与高花费长尾的对比。",
+        "title": "效率"
       },
       "emptyBody": "发一条对话或启用主动探测以填充本表。",
       "emptyTitle": "还没有用量样本",
@@ -50766,6 +52190,10 @@
         "highContext": {
           "advice": "更长的会话即便命中缓存也更昂贵。可在任务中途压缩上下文，或切换新任务时另开会话。",
           "headline": "{pct}% 的轮次运行在 >150k 上下文"
+        },
+        "spike": {
+          "advice": "该范围内活跃日的典型花费为 {median}。查看当天花费最高的会话，排查失控循环或过大的上下文。",
+          "headline": "{date} 花费 {cost}，是平常一天的 {ratio} 倍"
         },
         "title": "哪些因素在推高你的用量？"
       },
@@ -51514,6 +52942,9 @@
       "overflowTabs": "更多终端标签页",
       "resize": "拖动调整终端 dock 高度（方向键亦可）",
       "resizeVertical": "拖动以调整终端面板宽度（也可使用方向键）",
+      "restartError": "无法重启终端：{message}",
+      "restartSshUnknownProfile": "此 SSH 标签页创建时尚未记录其对应的已保存主机，因此无法重新连接。请从“+”菜单重新打开该主机。",
+      "restartUnsupported": "此标签页无法重启。请从“+”菜单重新打开。",
       "restore": "还原终端面板大小",
       "serialConnected": "已以 {baud} 波特打开 {path}。",
       "serialDesktopOnly": "串口是本机上的设备，只能在桌面应用中打开。",
@@ -51522,11 +52953,7 @@
       "spawnDenied": "终端被插件拦截",
       "spawnError": "无法打开终端：{message}",
       "splitRight": "向右分屏（Ctrl+\\）",
-      "sshConnected": {
-        "learned": "已连接，并保存了主机指纹",
-        "verified": "已连接，主机指纹校验通过"
-      },
-      "sshCredentialRequired": "请先在 设置 → 终端 中为「{name}」设置密码，然后再连接。"
+      "sshConnecting": "正在连接 {name}…"
     },
     "emptyState": {
       "cloud": {
@@ -51572,6 +52999,8 @@
         "local": "本地 (-L)",
         "remote": "远程 (-R)"
       },
+      "edit": "编辑转发规则",
+      "editHint": "这里只列出建立此连接时已启用的规则。如需添加，请在已保存的主机中启用该规则后重新连接。",
       "error": {
         "hostTooOld": "该宿主的版本早于端口转发上报功能。",
         "sessionUnreachable": "这个标签页与宿主的连接未打开，读不到它的隧道。",
@@ -51611,6 +53040,12 @@
         "unknown": "未报告退出码"
       },
       "title": "命令历史"
+    },
+    "host": {
+      "differentTarget": "终端主机：{host}。+ 新建会在当前主机上打开，不会沿用此标签页的主机。",
+      "runsOn": "终端主机：{host}",
+      "thisDesktop": "这台桌面设备",
+      "unknown": "未知主机"
     },
     "hostState": {
       "openSettings": "打开设置",
@@ -51749,12 +53184,44 @@
       "serialBaud": "{baud} 波特",
       "serialLabel": "串口",
       "sh": "sh",
+      "sshAdd": "添加 SSH 主机…",
       "sshLabel": "SSH 主机",
+      "sshLabelThisDesktop": "SSH 主机 · 从本桌面端发起连接",
+      "sshManage": "管理 SSH 主机…",
       "tmuxLabel": "tmux 会话",
       "tmuxSession": "{name}（{count, plural, other {# 个窗口}}）",
       "zsh": "zsh"
     },
-    "sshConnectedViaHost": "已通过宿主连接。宿主用它保存的副本核对了服务器密钥。",
+    "sshConnect": {
+      "actions": {
+        "addPassword": "添加密码",
+        "editHost": "编辑主机"
+      },
+      "agentUnavailable": "“{name}”无法连接到 SSH agent",
+      "chainBroken": "“{name}”的跳板机已被删除、形成了循环，或超过五跳。",
+      "connected": {
+        "learned": "已连接到 {name}，并保存了主机指纹",
+        "verified": "已连接到 {name}，主机指纹验证通过",
+        "viaHost": "已通过主机连接到 {name}。主机使用其保存的副本验证了服务器密钥。"
+      },
+      "credentialRequired": "“{name}”使用密码认证，但此桌面端尚未保存密码。",
+      "credentialRequiredBastion": "“{name}”需经由“{bastion}”连接，而“{bastion}”使用密码认证且此桌面端尚未保存密码。",
+      "failed": "无法连接到“{name}”",
+      "invalidField": {
+        "host": "主机地址为空或包含空格。",
+        "jumpChain": "路由中的某个跳板机缺少主机、用户名或端口。",
+        "localForward": "某条本地转发规则无效。",
+        "name": "需要填写显示名称。",
+        "port": "端口必须在 1 到 65535 之间。",
+        "privateKeyPath": "私钥认证需要填写私钥路径。",
+        "profile": "请检查已保存的字段。",
+        "remoteForward": "某条远程转发规则无效。",
+        "username": "用户名为空或包含空格。"
+      },
+      "invalidProfile": "“{name}”的配置不完整，无法连接。",
+      "notOnHost": "当前连接的主机上没有保存“{name}”。只有该主机自身桌面端保存的 SSH 主机才能从这里打开。",
+      "unknownHost": "此 SSH 主机已不在已保存列表中。"
+    },
     "stickyScroll": {
       "label": "固定的命令标题"
     },
@@ -51789,13 +53256,16 @@
       "close": "关闭终端",
       "menu": {
         "appearance": "更改外观",
+        "browseSshFiles": "通过 SFTP 浏览文件",
         "clear": "清屏",
         "close": "关闭",
         "closeOthers": "关闭其他",
         "copy": "复制",
+        "editSshHost": "编辑 SSH 主机",
         "find": "查找…",
         "locateInChat": "在对话中定位",
         "paste": "粘贴",
+        "reconnect": "重新连接",
         "rename": "重命名 tab",
         "restart": "重启",
         "selectAll": "全选",
@@ -53141,6 +54611,67 @@
     "openFull": "查看完整用量",
     "row": "{provider}：{amount}",
     "title": "用量边栏"
+  },
+  "usageInsights": {
+    "activity": {
+      "cell": "{weekday} {hour}:00 · {turns} 轮 · {cost}",
+      "empty": "该范围内没有活动。",
+      "label": "按星期与小时分布的轮次",
+      "less": "少",
+      "more": "多",
+      "peak": "最活跃：{weekday} {hour}:00 前后（{turns} 轮）"
+    },
+    "delta": {
+      "down": "较上一周期下降 {value}",
+      "flat": "与上一周期持平",
+      "noBaseline": "上一周期没有可比较的数据",
+      "points": "{value} 个百分点",
+      "up": "较上一周期上升 {value}"
+    },
+    "efficiency": {
+      "cacheNone": "该范围内没有缓存读取。",
+      "cacheSaved": "提示缓存节省",
+      "cacheSavedHint": "比不使用缓存发送相同提示便宜 {pct}%。按模型定价估算。",
+      "cacheSavedValue": "≈ {cost}",
+      "cacheUnpriced": "有 {tokens} 个缓存 Token 所属模型没有已知的输入单价，未计入。",
+      "colMax": "最大值",
+      "colMetric": "指标",
+      "colP50": "P50",
+      "colP90": "P90",
+      "colP99": "P99",
+      "costPerTurn": "单轮成本",
+      "distributionEmpty": "已计时或已定价的轮次不足，无法计算分布。",
+      "distributionTitle": "单轮分布",
+      "latency": "生成耗时",
+      "sample": "基于 {count} 轮",
+      "throughput": "输出速度",
+      "tokPerSec": "{value} tok/s"
+    },
+    "forecast": {
+      "basis": {
+        "insufficient": "至少需要一整天的记录才能预测。",
+        "sinceFirstUse": "按开始使用以来 {days} 天的消耗速度推算。",
+        "trailing7d": "按最近 7 天的消耗速度推算。"
+      },
+      "limit": {
+        "exceeded": "本月已超过 {limit} 的上限。",
+        "label": "预计花费 / 月度上限 {limit}",
+        "willCross": "按当前速度，大约在 {date} 达到 {limit} 的月度上限。",
+        "within": "按当前速度，月末将用到 {limit} 上限的 {pct}%。"
+      },
+      "monthToDate": "本月至今",
+      "perDay": "{cost}/天",
+      "projected": "预计月末",
+      "runRate": "日均消耗",
+      "title": "月末预测",
+      "unpriced": "本月有 {turns} 轮无法定价，以上数字为下限值。"
+    },
+    "stack": {
+      "legend": "系列",
+      "other": "其他",
+      "total": "合计",
+      "unknown": "未知"
+    }
   },
   "usageOptimizer": {
     "findings": {

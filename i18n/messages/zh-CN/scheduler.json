@@ -456,7 +456,15 @@
       "executions": "执行次数",
       "paused": "已暂停",
       "successRate": "成功率"
-    }
+    },
+    "viewLabel": "调度视图",
+    "tabTasks": "任务",
+    "tabActivity": "动态",
+    "refresh": "刷新",
+    "backToList": "任务",
+    "outcomesTitle": "近 14 天结果",
+    "recentRunsTitle": "最近运行",
+    "noRuns": "尚无运行记录"
   },
   "more": "更多",
   "moreOptions": "更多选项",
@@ -998,6 +1006,7 @@
     "connection:outbound:send": "外发消息",
     "connection:presence:refresh": "在线状态刷新",
     "connection:scheduled:digest": "定时摘要",
+    "conversation-auto-archive": "对话自动归档",
     "custom": "自定义",
     "external-agent": "外部代理 (ACP)",
     "github-issue-sync": "GitHub Issue 同步",
@@ -1225,7 +1234,9 @@
     "today": "今天",
     "tomorrow": "明天",
     "times": "×{count}",
-    "until": "直到 {time}"
+    "until": "直到 {time}",
+    "showMoreDays": "{count, plural, other {再显示 # 天}}",
+    "showFewerDays": "收起"
   },
   "kindSummary": {
     "activeOfTotal": "{active}/{total} 活动"
@@ -1268,7 +1279,16 @@
     "workspaceTitle": "工作区",
     "backToOverview": "概览",
     "starting": "正在启动…",
-    "openAuthoringConversation": "打开创建它的对话"
+    "openAuthoringConversation": "打开创建它的对话",
+    "payloadTitle": "执行内容",
+    "stats": {
+      "successRate": "成功率",
+      "runsLifetime": "累计运行",
+      "runsLoaded": "已加载运行",
+      "averageDuration": "平均耗时",
+      "lastRun": "上次运行",
+      "lastRunWhen": "上次运行（{when}）"
+    }
   },
   "runSheet": {
     "next": "下一次运行",
@@ -1344,5 +1364,30 @@
     "pause": "{count, plural, other {已暂停 # 项}}",
     "resume": "{count, plural, other {已恢复 # 项}}",
     "delete": "{count, plural, other {已删除 # 项}}"
+  },
+  "tagsInput": {
+    "label": "标签",
+    "placeholder": "添加标签",
+    "full": "最多 {max} 个标签",
+    "remove": "移除标签 {tag}",
+    "hint": "按回车或逗号添加标签。在列表搜索中使用 #标签 只匹配标签。"
+  },
+  "payloadSummary": {
+    "session": "会话",
+    "allowedTools": "允许的工具",
+    "disallowedTools": "禁用的工具",
+    "disabledSkills": "禁用的技能",
+    "timeout": "超时",
+    "maxRuntime": "最长运行时间",
+    "condition": "条件",
+    "echo": "回显",
+    "delay": "延迟",
+    "failWith": "失败信息",
+    "handlerArgs": "处理器参数",
+    "missingReference": "{id}（已不存在）",
+    "empty": "此任务没有存储负载。",
+    "raw": "存储的负载（JSON）",
+    "copy": "复制{label}",
+    "copied": "已复制"
   }
 }

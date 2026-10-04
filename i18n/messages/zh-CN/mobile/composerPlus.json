@@ -1,9 +1,11 @@
 {
   "album": "相册",
+  "back": "返回",
   "camera": "相机",
   "file": "文件",
   "permissionDeniedCamera": "需要相机权限。",
   "permissionDeniedMic": "需要麦克风权限。",
+  "photoFailed": "无法读取照片，请重试。",
   "sheetDescription": "附加媒体、调整本轮的能力，或接入其他工具。",
   "toggleAria": "添加内容",
   "unsupported": "当前平台不支持此功能。",

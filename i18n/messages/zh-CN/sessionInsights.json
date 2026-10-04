@@ -111,5 +111,21 @@
   "title": "会话洞察",
   "units": {
     "tokPerSec": "{value} tok/s"
+  },
+  "costTimeline": {
+    "title": "单轮成本",
+    "cost": "成本",
+    "context": "上下文",
+    "turn": "第 {index} 轮",
+    "contextShort": "上下文 {tokens}",
+    "rank": "花费高于你最近 {days} 天内 {pct}% 的其他对话（中位数 {median}，共比较 {peers} 个）。",
+    "concentration": "仅第 {index} 轮就占了本对话 {pct}% 的成本。",
+    "growth": "上下文从第一轮到最后一轮增长了 {ratio} 倍（{from} → {to}）。压缩上下文或另开新对话能让后续轮次更便宜。",
+    "priciest": "花费最高的轮次",
+    "jump": "跳转到第 {index} 轮",
+    "jumpFailed": "在对话中找不到该轮次。"
+  },
+  "efficiency": {
+    "title": "效率"
   }
 }

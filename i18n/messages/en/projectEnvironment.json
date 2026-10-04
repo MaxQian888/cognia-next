@@ -182,7 +182,7 @@
       "approveBuildHint": "Approval binds this built image and its effective runtime configuration to the exact repository commit.",
       "ignoredFields": "Fields not used by the sandbox runtime: {fields}"
     },
-    "description": "Choose the container image this project's agents run in.",
+    "description": "Choose the container image this project's external agents run in. Built-in agents are not affected.",
     "driver": "Sandbox driver: {driver}",
     "driverUnreachable": "The sandbox driver is unreachable: {reason}",
     "egress": "Network presets",
@@ -198,8 +198,8 @@
     "localContainer": "Run in a local container on this device",
     "localContainerDormant": "This device cannot run local containers yet, so a project that turns this on is refused rather than run unsandboxed.",
     "noEnvironment": "Create and enable an environment above to choose a runtime environment for it.",
-    "optIn": "Run this project's agents in a runtime environment",
-    "optInHint": "Off: agents run on the standard execution path, exactly as before.",
+    "optIn": "Run this project's external agents in a runtime environment",
+    "optInHint": "Off: external agents run on the standard execution path, exactly as before.",
     "poolOff": "Runtime environments are not enabled on this deployment, so runs use the standard execution path.",
     "poolOffKept": "This project's selection is kept and takes effect once an operator enables them.",
     "preview": {
@@ -207,11 +207,11 @@
       "declaredUser": "Runs as the declared user {user}",
       "imageUser": "Runs as the image's user {user}",
       "off": "Standard execution path — nothing is sandboxed.",
-      "placed": "The next run is sandboxed in {image}",
+      "placed": "The next external-agent run is sandboxed in {image}",
       "requestedTier": "Requested isolation: at least {tier}",
       "size": "Size: {size}",
       "tierDefaultUser": "Runs as the tier's default user",
-      "title": "What the next run would do"
+      "title": "What the next external-agent run would do"
     },
     "save": "Save runtime environment",
     "saved": "Runtime environment saved.",

@@ -3,48 +3,75 @@
     "active": {
       "elapsed": "已录制 {seconds} 秒",
       "gaps": "{count} 个缺口",
-      "title": "活动 Capture"
+      "title": "当前捕获",
+      "description": "录制加密证据以便日后比较。切换页面时捕获会继续进行。",
+      "progress": "捕获进度"
     },
     "comparison": {
-      "absolute": "绝对差值",
-      "compare": "比较选中的 Capture",
+      "compare": "比较",
       "mad": "MAD",
       "median": "中位数",
       "na": "不适用",
       "p95": "Type-7 p95",
-      "percent": "百分比差值"
+      "title": "比较捕获",
+      "swap": "互换",
+      "baseline": "基线",
+      "candidate": "对照",
+      "sourceMismatch": "这两个捕获来自不同数据源，其指标不可比较。",
+      "metric": "指标",
+      "acceptEnvironment": "接受不同的环境",
+      "running": "正在比较…",
+      "eligible": "可比较——两次捕获条件一致。",
+      "ineligible": "不可比较——这些数字仅供参考，不能作为结论。",
+      "reasons": {
+        "minimum-valid-intervals": "每个捕获至少需要 10 个有效区间。",
+        "minimum-coverage": "有效区间至少需占 90%（基线 {baseline}%，对照 {candidate}%）。",
+        "metric-definition-mismatch": "指标定义不同。",
+        "unit-mismatch": "单位不同。",
+        "source-kind-mismatch": "两个捕获来自不同类型的数据源。",
+        "metric-schema-mismatch": "指标 schema 版本不同。",
+        "requested-cadence-mismatch": "两个捕获的采样间隔不同。",
+        "discontinuous-incarnation": "某个捕获跨越了重启或重新加载。",
+        "environment-missing": "某个捕获缺少环境指纹。",
+        "environment-mismatch": "两个捕获录制于不同环境。"
+      },
+      "statistic": "统计量",
+      "validIntervals": "有效 / 预期区间",
+      "deltaLine": "中位数变化：{absolute}（{percent}）"
     },
     "controls": {
-      "cadence": "Capture 采样间隔",
-      "delete": "删除 Capture {id}",
-      "duration": "Capture 时长",
-      "export": "导出 Capture {id}",
+      "cadence": "捕获采样间隔",
+      "delete": "删除捕获 {id}",
+      "duration": "捕获时长",
+      "export": "导出捕获 {id}",
       "import": "导入 .cognia-perf",
-      "rawExport": "原始导出 Capture {id}",
-      "selectCompare": "选择 Capture {id} 用于比较",
-      "source": "Capture 来源",
-      "start": "开始 Capture",
-      "stop": "停止 Capture"
+      "rawExport": "原始导出捕获 {id}",
+      "selectCompare": "选择捕获 {id} 用于比较",
+      "source": "捕获来源",
+      "start": "开始捕获",
+      "stop": "停止捕获",
+      "exportShort": "导出（已脱敏）",
+      "rawExportShort": "导出原始证据",
+      "deleteShort": "删除"
     },
     "errors": {
-      "compareSelection": "请选择两个 Capture 进行比较。",
-      "locked": "请解锁当前账户以访问加密 Capture。"
+      "locked": "请解锁当前账户以访问加密捕获。"
     },
     "library": {
-      "bytes": "{value} 字节",
-      "empty": "当前目标尚未保存 Capture。",
+      "empty": "当前目标尚未保存捕获。",
       "frames": "{count} 帧",
-      "retention": "未固定的 Capture 保留 {days} 天且每个目标最多 {count} 个；账户配额为 {quota} GiB。",
-      "title": "Capture 资料库"
+      "retention": "未固定的捕获保留 {days} 天且每个目标最多 {count} 个；账户配额为 {quota} GiB。",
+      "title": "捕获资料库",
+      "compareHint": "勾选两个就绪的捕获即可比较。"
     },
     "milliseconds": "{value} 毫秒",
     "minutes": "{value} 分钟",
     "raw": {
-      "attachment": "附件 {ordinal} · {type} · {bytes} 字节",
+      "attachment": "附件 {ordinal} · {type} · {bytes}",
       "attachments": "明确选择附件",
       "cancel": "取消",
       "confirm": "我已了解，导出原始证据",
-      "description": "原始证据可能包含进程、span、trace、错误和环境详情。本次确认会以密码学方式绑定当前 Capture 与下方附件选择。",
+      "description": "原始证据可能包含进程、span、trace、错误和环境详情。本次确认会以密码学方式绑定当前捕获与下方附件选择。",
       "noAttachments": "未选择附件；trace 字节仍会排除。",
       "title": "确认原始性能导出"
     },
@@ -56,18 +83,82 @@
     },
     "source": {
       "host": "选中主机",
-      "renderer": "本地 Renderer"
+      "renderer": "本地 Renderer",
+      "hostUnavailable": "所选主机（未连接）"
     },
     "state": {
       "idle": "空闲",
       "recording": "录制中"
     },
     "toast": {
-      "exported": "已按默认脱敏策略导出 Capture。",
-      "imported": "Capture 已校验并导入。",
-      "rawExported": "已确认并导出原始 Capture。",
-      "started": "Capture 已开始。",
-      "stopped": "Capture 已停止。"
+      "exported": "已按默认脱敏策略导出捕获。",
+      "imported": "捕获已校验并导入。",
+      "rawExported": "已确认并导出原始捕获。",
+      "started": "捕获已开始。",
+      "stopped": "捕获已停止。",
+      "deleted": "捕获已删除。"
+    },
+    "status": {
+      "recording": "录制中",
+      "finalizing": "收尾中",
+      "importing": "导入中",
+      "ready": "就绪",
+      "failed": "失败"
+    },
+    "stopReason": {
+      "manual": "已停止",
+      "duration-limit": "已达时长",
+      "target-switched": "目标已切换",
+      "remote-timeout": "主机超时",
+      "terminal-host-state": "主机已停止",
+      "account-locked": "账户已锁定",
+      "quota-exceeded": "超出配额",
+      "client-terminated": "窗口已关闭"
+    },
+    "trust": {
+      "verified": "签名已验证",
+      "valid-untrusted": "签名有效，签名者不受信任",
+      "origin-unverified": "来源未验证",
+      "rejected-invalid": "签名无效"
+    },
+    "delete": {
+      "title": "删除此捕获？",
+      "description": "其加密帧、附件和缺口将从本设备移除，并释放配额。此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除"
+    },
+    "errorCodes": {
+      "unknown": "出现问题：{detail}",
+      "account-locked": "账户已锁定，捕获已停止。",
+      "performance-capture-account-locked": "请解锁当前账户以使用加密捕获。",
+      "performance-capture-already-active": "已有捕获正在录制。",
+      "performance-capture-cadence-invalid": "捕获采样间隔至少为 500 毫秒。",
+      "performance-capture-not-ready": "此捕获尚未就绪。",
+      "performance-capture-not-found": "此捕获已不存在。",
+      "performance-capture-frame-schema-invalid": "捕获的帧已损坏或版本不受支持。",
+      "performance-capture-metadata-schema-invalid": "捕获的元数据已损坏或版本不受支持。",
+      "performance-capture-source-mismatch": "捕获期间指标数据源发生了变化。",
+      "performance-capture-target-mismatch": "捕获期间目标发生了变化。",
+      "performance-capture-stopped": "捕获已经停止。",
+      "performance-capture-attachment-invalid": "附件无效。",
+      "performance-attachment-too-large": "附件超出大小限制。",
+      "performance-account-quota-exceeded": "账户的捕获存储配额已满，请删除部分捕获以释放空间。",
+      "performance-security-generation-changed": "操作期间账户安全状态发生变化，请重试。",
+      "performance-budget-immutable": "已存在相同 ID 的预算；预算不可修改。",
+      "performance-budget-required-field-missing": "名称、指标和单位为必填项。",
+      "performance-budget-threshold-order-invalid": "警告阈值必须先于失败阈值。",
+      "performance-budget-threshold-invalid": "阈值必须是数字。",
+      "performance-budget-cadence-invalid": "预算采样间隔至少为 500 毫秒。",
+      "performance-budget-envelope-mismatch": "某个已保存的预算已损坏。",
+      "cognia-perf-signature-invalid": "包签名无效。",
+      "cognia-perf-format-unsupported": "不支持此包格式。",
+      "cognia-perf-manifest-missing": "包中缺少清单。",
+      "cognia-perf-manifest-invalid": "包清单无效。",
+      "cognia-perf-compressed-size-exceeded": "包过大。",
+      "cognia-perf-decompression-limit-exceeded": "包解压后超出允许大小。",
+      "cognia-perf-entry-count-invalid": "包中的条目数量无效。",
+      "cognia-perf-frame-schema-invalid": "包中的帧已损坏或版本不受支持。",
+      "cognia-perf-samples-missing": "包中没有样本。"
     }
   },
   "desktopOnly": {
@@ -76,7 +167,8 @@
   },
   "diagnose": {
     "logs": "打开日志",
-    "observability": "打开可观测性"
+    "observability": "打开追踪仪表盘",
+    "description": "时间花在哪里：主机 span 热点、本窗口的耗时，以及每个指标数据源的状态。"
   },
   "hotspots": {
     "columns": {
@@ -91,7 +183,18 @@
       "total": "合计"
     },
     "empty": "尚未记录到热点。",
-    "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。"
+    "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。",
+    "title": "后端热点",
+    "description": "主机上的埋点操作，自主机启动或上次重置以来累计。",
+    "reset": {
+      "label": "重置统计",
+      "done": "热点统计已重置。",
+      "failed": "无法重置热点统计：{error}",
+      "confirmTitle": "重置热点统计？",
+      "confirmDescription": "这会为所有使用方（包括其他窗口）清空主机累计的 span 统计。捕获会保留各自的副本。",
+      "cancel": "取消",
+      "confirm": "重置"
+    }
   },
   "hud": {
     "clear": "清空",
@@ -172,10 +275,41 @@
     "diskIo": "磁盘 I/O",
     "memory": "应用内存",
     "runtimeBusy": "运行时繁忙",
-    "tasks": "异步任务"
+    "tasks": "异步任务",
+    "eventLoopUtilization": "事件循环利用率",
+    "eventLoopDelay": "事件循环延迟（p95）",
+    "nodeHeap": "堆内存占用",
+    "fps": "帧率",
+    "mainThreadBlocked": "主线程阻塞",
+    "longTasks": "长任务",
+    "jsHeap": "JS 堆内存"
   },
   "overview": {
-    "selectMetric": "选择指标"
+    "selectMetric": "选择指标",
+    "groups": {
+      "host": "所选主机",
+      "renderer": "本窗口"
+    },
+    "unavailable": {
+      "host": {
+        "connecting": "正在连接主机的指标流…",
+        "live": "主机已连接，但没有可绘制的指标。",
+        "stale": "主机已停止发送指标。",
+        "error": "主机指标流出错。",
+        "unsupported": "当前运行环境没有连接主机，只计量本窗口。"
+      },
+      "renderer": {
+        "connecting": "正在开始计量本窗口…",
+        "live": "此浏览器不提供可绘制的指标。",
+        "stale": "本窗口已停止上报指标。",
+        "error": "计量本窗口失败。",
+        "unsupported": "此浏览器不提供可绘制的指标。"
+      }
+    },
+    "openDiagnose": "数据源详情",
+    "waiting": "正在等待第一个样本…",
+    "summary": "峰值 {peak} · 平均 {average} · 最近 {seconds} 秒",
+    "noMetrics": "暂无数据源上报指标。"
   },
   "process": {
     "columns": {
@@ -204,10 +338,6 @@
       "totalDisk": "磁盘 I/O",
       "totalMemory": "总内存"
     }
-  },
-  "resources": {
-    "host": "主机",
-    "renderer": "Renderer"
   },
   "runtime": {
     "aliveTasks": "存活任务",
@@ -268,9 +398,21 @@
       "stale": "已过期",
       "unsupported": "不支持"
     },
-    "title": "来源与能力"
+    "title": "来源与能力",
+    "noticeGaps": "可见窗口内有 {count} 个缺口",
+    "details": "详情",
+    "gapReason": {
+      "sequence-gap": "丢帧",
+      "source-reset": "数据源重置",
+      "clock-discontinuity": "时钟跳变",
+      "transport-disconnected": "连接中断",
+      "target-switched": "目标已切换",
+      "lease-expired": "租约过期",
+      "buffer-overrun": "缓冲区溢出",
+      "collection-error": "采集出错"
+    }
   },
-  "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
+  "subtitle": "实时查看本窗口与所选主机的指标：正在运行什么、时间花在哪里，以及随时间留存的证据。",
   "system": {
     "build": {
       "appVersion": "应用版本",
@@ -298,11 +440,11 @@
     "loading": "正在读取系统信息…"
   },
   "tabs": {
-    "captures": "Capture",
+    "captures": "捕获",
     "diagnose": "诊断",
     "hotspots": "热点",
     "managed": "托管进程",
-    "overview": "性能",
+    "overview": "概览",
     "processes": "进程",
     "resources": "资源",
     "runtime": "异步运行时",
@@ -320,7 +462,174 @@
     "intervalLabel": "采样间隔",
     "intervalValue": "{seconds} 秒",
     "pause": "暂停",
-    "reset": "重置热点",
-    "resume": "继续"
+    "reset": "清空图表",
+    "resume": "继续",
+    "resetHint": "从现在起重新绘制滚动图表。不影响热点统计和捕获。",
+    "status": {
+      "live": "实时 · {seconds} 秒",
+      "paused": "已暂停",
+      "recording": "录制中"
+    }
+  },
+  "metricDescriptions": {
+    "cpu": "主机主进程的 CPU 占用，已按全部核心归一化。",
+    "memory": "主机主进程的常驻内存。",
+    "diskIo": "应用进程树的磁盘读写吞吐合计。",
+    "runtimeBusy": "异步运行时工作线程执行任务的时间占比。",
+    "tasks": "运行时中当前存活的异步任务数。",
+    "eventLoopUtilization": "Node 事件循环处于忙碌而非空闲的时间占比。",
+    "eventLoopDelay": "定时器延后触发的程度——事件循环延迟的第 95 百分位。",
+    "nodeHeap": "Node 主机正在使用的 JavaScript 堆内存。",
+    "fps": "本窗口每秒绘制的帧数。窗口隐藏时不计量。",
+    "mainThreadBlocked": "每个区间中耗在长任务（超过 50 毫秒）上的时间占比，长任务会阻塞输入和渲染。",
+    "longTasks": "每个区间中超过 50 毫秒的主线程任务数。",
+    "jsHeap": "本窗口正在使用的 JavaScript 堆内存。"
+  },
+  "hostUnavailable": {
+    "title": {
+      "processes": "进程需要连接主机",
+      "runtime": "异步运行时需要连接主机",
+      "managed": "托管进程需要连接主机",
+      "system": "系统信息需要桌面主机",
+      "hotspots": "后端热点需要桌面主机"
+    },
+    "reason": {
+      "notReported": "所选主机的运行时不上报此项。",
+      "issue": {
+        "contended": "另一个窗口正在占用主机的指标流，释放后本页会自动接管。",
+        "rejected": "主机拒绝了指标流。",
+        "renew-failed": "指标流已停止续租，会自动重连。",
+        "unreachable": "无法连接到所选主机以获取指标。"
+      },
+      "state": {
+        "connecting": "正在连接主机的指标流…",
+        "live": "正在等待主机的第一帧…",
+        "stale": "主机已停止发送指标。",
+        "error": "主机指标流出错。",
+        "unsupported": "当前运行环境没有可计量的主机。请打开桌面应用或连接一台主机。"
+      }
+    },
+    "openDiagnose": "查看数据源详情"
+  },
+  "rendererTimings": {
+    "title": "渲染端耗时",
+    "description": "在本窗口中测得的用户可感知延迟：聊天轮次、React 提交及其他埋点操作。每个名称保留最近 60 条。",
+    "filterLabel": "按类别筛选",
+    "categories": {
+      "all": "全部",
+      "chat": "聊天",
+      "react": "渲染",
+      "other": "其他"
+    },
+    "clear": "清空",
+    "empty": "尚未记录耗时。",
+    "hint": "发送一条聊天消息或打开较重的视图即可记录耗时。",
+    "columns": {
+      "name": "测量项",
+      "count": "次数",
+      "last": "最近",
+      "p50": "p50",
+      "p95": "p95",
+      "max": "最大"
+    }
+  },
+  "budgets": {
+    "title": "预算",
+    "description": "针对单个指标的不可变阈值。用预算检查捕获可得到通过、警告或失败——前提是捕获足够长、连续，且录制环境匹配。",
+    "new": "新建预算",
+    "locked": "请解锁当前账户以使用预算。",
+    "empty": "暂无预算。",
+    "summary": "{aggregation} · {direction} · 警告 {warning} · 失败 {failure} · {cadence} 秒",
+    "aggregation": {
+      "median": "中位数",
+      "p95": "p95"
+    },
+    "direction": {
+      "lower": "越低越好",
+      "higher": "越高越好"
+    },
+    "runtimeKind": {
+      "browser": "浏览器",
+      "tauri-rust": "桌面（Rust）",
+      "node-headless": "Node 主机"
+    },
+    "buildProfile": {
+      "production": "生产",
+      "profiling": "性能分析",
+      "development": "开发"
+    },
+    "sourceKind": {
+      "renderer": "本窗口（渲染端）",
+      "host": "所选主机"
+    },
+    "check": {
+      "title": "检查捕获",
+      "budget": "预算",
+      "capture": "捕获",
+      "noCaptures": "没有匹配的捕获",
+      "acceptEnvironment": "接受不同的环境",
+      "run": "检查",
+      "running": "正在检查…",
+      "detail": "在 {expected} 个区间中的 {valid} 个有效区间上取值 {value}。",
+      "environmentAccepted": "本次检查已接受环境不匹配。"
+    },
+    "verdict": {
+      "pass": "通过",
+      "warn": "警告",
+      "fail": "失败",
+      "insufficient-data": "数据不足",
+      "incomparable": "不可比较"
+    },
+    "reason": {
+      "unknown-metric": "此预算的指标已不在目录中。",
+      "mutable-budget": "该预算不是不可变的。",
+      "minimum-valid-intervals": "至少需要 10 个有效区间。",
+      "minimum-coverage": "有效区间至少需占 90%。",
+      "discontinuous-incarnation": "捕获跨越了重启或重新加载。",
+      "metadata-mismatch": "捕获的指标、数据源、schema 或采样间隔与预算不符。",
+      "environment-mismatch": "捕获录制时的运行环境或构建不在预算适用范围内。"
+    },
+    "created": "已创建预算“{name}”。",
+    "form": {
+      "title": "新建预算",
+      "description": "预算保存后不可修改。如需调整阈值，请新建预算。",
+      "name": "名称",
+      "namePlaceholder": "例如：聊天保持流畅",
+      "source": "数据源",
+      "metric": "指标",
+      "aggregation": "聚合方式",
+      "cadence": "采样间隔",
+      "cadenceValue": "{seconds} 秒",
+      "warning": "警告阈值（{unit}）",
+      "failure": "失败阈值（{unit}）",
+      "unit": {
+        "percent": "%",
+        "bytes": "MB",
+        "bytes-per-second": "MB/s",
+        "count": "次",
+        "ms": "毫秒",
+        "fps": "fps"
+      },
+      "directionHint": {
+        "lower": "越低越好：警告 ≤ 失败。",
+        "higher": "越高越好：警告 ≥ 失败。"
+      },
+      "runtimeKinds": "适用运行环境",
+      "buildProfiles": "适用构建",
+      "immutable": "已保存的预算无法编辑或覆盖。",
+      "errors": {
+        "metric": "请为此数据源选择一个指标。",
+        "name": "请输入名称。",
+        "thresholds": "请以数字填写两个阈值。",
+        "order": {
+          "lower": "此指标的警告阈值必须小于或等于失败阈值。",
+          "higher": "此指标的警告阈值必须大于或等于失败阈值。"
+        },
+        "runtimeKinds": "请至少选择一个运行环境。",
+        "buildProfiles": "请至少选择一种构建。"
+      },
+      "cancel": "取消",
+      "save": "保存预算"
+    }
   }
 }

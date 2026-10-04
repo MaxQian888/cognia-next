@@ -2,6 +2,7 @@
   "add": "Add",
   "all": "All",
   "back": "Back",
+  "backToApp": "Back to app",
   "biometricBlocked": {
     "cancelled": "The biometric check was cancelled.",
     "error": "The biometric check failed.",
@@ -14,6 +15,7 @@
   "copied": "Copied",
   "copy": "Copy",
   "delete": "Delete",
+  "desktopOnly": "This window is only available in the desktop app.",
   "dismiss": "Dismiss",
   "duplicate": "Duplicate",
   "edit": "Edit",

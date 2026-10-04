@@ -708,7 +708,14 @@
       "view": {
         "bar": "柱状图",
         "heatmap": "热力图",
-        "label": "图表视图"
+        "label": "图表视图",
+        "stacked": "按系列堆叠"
+      },
+      "stackBy": {
+        "label": "堆叠维度",
+        "model": "模型",
+        "surface": "场景",
+        "provider": "提供商"
       }
     },
     "display": {
@@ -736,7 +743,11 @@
         "advice": "更长的会话即便命中缓存也更昂贵。可在任务中途压缩上下文，或切换新任务时另开会话。",
         "headline": "{pct}% 的轮次运行在 >150k 上下文"
       },
-      "title": "哪些因素在推高你的用量？"
+      "title": "哪些因素在推高你的用量？",
+      "spike": {
+        "headline": "{date} 花费 {cost}，是平常一天的 {ratio} 倍",
+        "advice": "该范围内活跃日的典型花费为 {median}。查看当天花费最高的会话，排查失控循环或过大的上下文。"
+      }
     },
     "loading": "加载中…",
     "models": {
@@ -850,10 +861,18 @@
       "resetsAt": "{at} 重置"
     },
     "bySurface": {
-      "title": "按来源",
-      "description": "额度花在了应用的哪一部分。对话、智能体团队、定时工作流与连接器回复都消耗同一份套餐。",
+      "title": "花费拆分",
+      "description": "花费去了哪里：按发起的应用场景、计费的提供商，或所属的工作区查看。",
       "empty": "该区间内没有用量记录。",
-      "rowDetail": "{turns} 轮 · {tokens} tokens"
+      "rowDetail": "{turns} 轮 · {tokens} tokens",
+      "axis": {
+        "label": "拆分维度",
+        "surface": "场景",
+        "provider": "提供商",
+        "project": "工作区"
+      },
+      "noProject": "无工作区",
+      "unknownProvider": "未知提供商"
     },
     "budget": {
       "title": "支出上限",
@@ -864,6 +883,14 @@
         "critical": "严重",
         "exceeded": "已超出"
       }
+    },
+    "efficiency": {
+      "title": "效率",
+      "description": "提示缓存节省了多少，以及典型单轮与高花费长尾的对比。"
+    },
+    "activity": {
+      "title": "活跃规律",
+      "description": "一周内各时段的轮次分布。非常规时段的无人值守运行会在这里显现。"
     }
   },
   "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。",

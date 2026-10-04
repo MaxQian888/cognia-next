@@ -775,7 +775,8 @@
     "modelsFailed": "未能读取模型信息，已保留现有模型，可重试。",
     "modelsLoaded": "已更新账号模型信息。",
     "unknown": "未知",
-    "outputUnknown": "最大输出：未知"
+    "outputUnknown": "最大输出：未知",
+    "hostUpdateRequired": "需要先更新已配对的主机，此 Agent 才能使用 Cognia 模型运行。"
   },
   "readiness": {
     "pipelineLabel": "Agent 就绪度",
@@ -844,5 +845,10 @@
     },
     "outputUnavailable": "无法读取登录输出。请重试或检查原生登录进程。",
     "openLoginPage": "打开 {url}"
+  },
+  "supportTier": {
+    "executable": "可直接运行",
+    "guided": "引导配置",
+    "documentedOnly": "仅文档"
   }
 }

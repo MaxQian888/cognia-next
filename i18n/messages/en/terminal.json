@@ -100,11 +100,10 @@
     "spawnDenied": "Terminal blocked by a plugin",
     "spawnError": "Couldn't open terminal: {message}",
     "splitRight": "Split terminal right (Ctrl+\\)",
-    "sshConnected": {
-      "learned": "Connected and saved the host fingerprint",
-      "verified": "Connected with a verified host fingerprint"
-    },
-    "sshCredentialRequired": "Set a password for “{name}” in Settings → Terminal before connecting."
+    "restartSshUnknownProfile": "This SSH tab was opened before tabs remembered their saved host, so it cannot be reconnected. Open the host again from the + menu.",
+    "restartUnsupported": "This tab cannot be restarted. Open it again from the + menu.",
+    "restartError": "Couldn't restart terminal: {message}",
+    "sshConnecting": "Connecting to {name}…"
   },
   "emptyState": {
     "cloud": {
@@ -170,7 +169,9 @@
     "toggle": {
       "local": "Enable or disable the local forward {summary}",
       "remote": "Enable or disable the remote forward {summary}"
-    }
+    },
+    "edit": "Edit forwarding rules",
+    "editHint": "Only rules that were on when this connection opened are listed. Turn one on in the saved host and reconnect to add it."
   },
   "ghost": {
     "acceptHint": "Tab"
@@ -330,7 +331,10 @@
     "sshLabel": "SSH hosts",
     "tmuxLabel": "tmux sessions",
     "tmuxSession": "{name} ({count, plural, =1 {# window} other {# windows}})",
-    "zsh": "zsh"
+    "zsh": "zsh",
+    "sshLabelThisDesktop": "SSH hosts · dialed from this desktop",
+    "sshManage": "Manage SSH hosts…",
+    "sshAdd": "Add an SSH host…"
   },
   "stickyScroll": {
     "label": "Sticky command header"
@@ -376,7 +380,10 @@
       "rename": "Rename tab",
       "restart": "Restart",
       "selectAll": "Select all",
-      "trustAgent": "Trust agent in this tab"
+      "trustAgent": "Trust agent in this tab",
+      "reconnect": "Reconnect",
+      "browseSshFiles": "Browse files over SFTP",
+      "editSshHost": "Edit SSH host"
     },
     "rename": {
       "inputLabel": "New tab title",
@@ -398,5 +405,40 @@
     "selectPlaceholder": "Choose an option",
     "title": "Fill template variables"
   },
-  "sshConnectedViaHost": "Connected through the host. It verified the server key with the copy it keeps."
+  "sshConnect": {
+    "unknownHost": "This SSH host is no longer saved.",
+    "credentialRequired": "“{name}” uses a password and none is stored on this desktop yet.",
+    "credentialRequiredBastion": "“{name}” connects through “{bastion}”, which uses a password and has none stored on this desktop yet.",
+    "chainBroken": "“{name}” goes through a jump host that was removed, loops back on itself, or is more than five hops deep.",
+    "notOnHost": "“{name}” is not saved on the host this shell connects through. Only SSH hosts saved on that host's own desktop can be opened from here.",
+    "invalidProfile": "“{name}” is not complete enough to connect.",
+    "invalidField": {
+      "name": "It needs a display name.",
+      "host": "Its host address is empty or contains spaces.",
+      "port": "Its port must be between 1 and 65535.",
+      "username": "Its username is empty or contains spaces.",
+      "privateKeyPath": "Private-key authentication needs a key path.",
+      "profile": "Check the saved fields.",
+      "jumpChain": "A jump host in its route is missing a host, username or port.",
+      "localForward": "One of its local forwards is invalid.",
+      "remoteForward": "One of its remote forwards is invalid."
+    },
+    "agentUnavailable": "No SSH agent is reachable for “{name}”",
+    "failed": "Could not connect to “{name}”",
+    "connected": {
+      "learned": "Connected to {name} and saved its host fingerprint",
+      "verified": "Connected to {name} with a verified host fingerprint",
+      "viaHost": "Connected to {name} through the host. It verified the server key with the copy it keeps."
+    },
+    "actions": {
+      "addPassword": "Add password",
+      "editHost": "Edit host"
+    }
+  },
+  "host": {
+    "thisDesktop": "This desktop",
+    "unknown": "Unknown host",
+    "runsOn": "Terminal host: {host}",
+    "differentTarget": "Terminal host: {host}. + New opens on the current host, not this tab’s host."
+  }
 }

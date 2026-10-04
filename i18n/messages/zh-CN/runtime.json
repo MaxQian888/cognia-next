@@ -2,12 +2,18 @@
   "surfaceBoundary": {
     "back": "返回",
     "backToChat": "返回聊天",
+    "band": {
+      "cacheOnly": "仅可查看缓存数据",
+      "hostOffline": "主机离线",
+      "readOnly": "只读模式",
+      "reconnecting": "正在重连主机"
+    },
+    "connectionSettings": "连接设置",
     "diagnose": "打开诊断",
     "pairHost": "配对或切换主机",
-    "readOnly": "只读模式：{reason}",
     "reasons": {
       "companion-not-paired": "此设备尚未与主机配对，或配对已失效。",
-      "connection-offline": "当前主机离线，此操作不会自动重放。",
+      "connection-offline": "此页面需要实时连接主机，主机恢复连接后会自动可用。",
       "host-admin-only": "此操作仅限主机管理员。",
       "host-manifest-missing": "主机没有提供兼容的能力清单。",
       "host-protocol": "主机协议与此浏览器不兼容。",
@@ -19,9 +25,10 @@
       "requires-companion": "此能力需要已配对的桌面或云主机。",
       "service-only": "此操作只能在可信服务中运行。",
       "unknown-command": "共享命令清单中不存在此操作。",
-      "vault-locked": "使用此目标前请先解锁本地 Vault。"
+      "vault-locked": "本地 Vault 已锁定，解锁账户后即可继续使用当前主机。"
     },
     "states": {
+      "connecting": "正在重连主机",
       "incompatible": "需要升级主机",
       "offline": "主机离线",
       "requires-grant": "需要设备授权",
@@ -29,6 +36,6 @@
       "requires-unlock": "Vault 已锁定",
       "unsupported": "此设备暂不支持"
     },
-    "unlockVault": "解锁 Vault"
+    "unlockVault": "解锁账户"
   }
 }

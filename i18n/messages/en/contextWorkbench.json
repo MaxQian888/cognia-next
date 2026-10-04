@@ -493,5 +493,62 @@
     "installTitle": "Pages open in the system webview until Chromium is installed",
     "openFailed": "Couldn't open {path}",
     "extensions": "Extensions"
+  },
+  "sessionUsage": {
+    "title": "Usage & context",
+    "description": "What this conversation spends, and what fills its context window.",
+    "openReport": "Health report",
+    "refresh": "Refresh live context reading",
+    "loading": "Reading this conversation's usage…",
+    "empty": "No billed turns yet. Charts appear after the first reply.",
+    "windowEmpty": "The runtime has not reported what is in the window yet.",
+    "modelDetail": "{turns} turns · {tokens} tokens",
+    "sections": {
+      "window": "Context window",
+      "growth": "Context over turns",
+      "cost": "Cost per turn",
+      "tokenMix": "Token mix",
+      "tools": "Tool calls",
+      "models": "Models",
+      "efficiency": "Efficiency"
+    },
+    "kpi": {
+      "cost": "Cost",
+      "turns": "Turns",
+      "tokens": "Tokens",
+      "cacheHit": "Cache hit",
+      "avgCost": "Avg / turn",
+      "speed": "Speed",
+      "tokPerSec": "{value} tok/s"
+    },
+    "composition": {
+      "aria": "Context window: {used} of {max} tokens",
+      "ofWindow": "Shares of the whole window, as reported live by the runtime.",
+      "ofAttributed": "Estimated from the transcript: shares of what could be attributed, not of the whole window."
+    },
+    "growth": {
+      "empty": "No turns to chart yet.",
+      "turn": "Turn {index}",
+      "context": "Context",
+      "window": "Window",
+      "compactAt": "Auto-compact",
+      "summary": "Peak {peak}, latest {latest}.",
+      "drops": "{count, plural, =1 {Context dropped once (compaction, cleared history or a new branch).} other {Context dropped # times (compaction, cleared history or a new branch).}}"
+    },
+    "tokenMix": {
+      "empty": "No tokens recorded yet.",
+      "aria": "{total} tokens by type",
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache read",
+      "cacheWrite": "Cache write",
+      "reasoning": "{tokens} of the output was reasoning ({pct})."
+    },
+    "tools": {
+      "empty": "No tool calls in this conversation.",
+      "summary": "{total, plural, =1 {1 call} other {# calls}}",
+      "errors": "· {count} failed ({pct}%)",
+      "other": "Other"
+    }
   }
 }

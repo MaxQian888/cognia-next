@@ -19,21 +19,21 @@
     "autoRefreshOff": "关闭",
     "autoRefreshOn": "开启",
     "autoRefreshStatus": "自动刷新",
-    "detailDescription": "查看该崩溃日志条目及随其采集的诊断快照。",
-    "detailTitle": "崩溃详情",
+    "detailDescription": "记录的错误及随之采集的诊断快照。",
+    "detailTitle": "错误详情",
     "diagnostics": {
       "runtime": "运行时诊断",
       "title": "诊断快照",
       "window": "窗口诊断"
     },
-    "emptyDescription": "请尝试放宽筛选条件，或重新触发失败流程。",
-    "emptyTitle": "未找到崩溃日志",
-    "errorTitle": "加载崩溃日志失败",
+    "emptyDescription": "本设备记录的错误与致命级日志会出现在这里。如果本应有内容，请放宽筛选条件。",
+    "emptyTitle": "没有错误日志",
+    "errorTitle": "无法加载错误日志",
     "lastUpdated": "最近更新",
     "levels": {
       "all": "全部级别"
     },
-    "loading": "正在加载崩溃日志...",
+    "loading": "正在加载错误日志…",
     "native": {
       "details": "完整原生日志详情",
       "logDirectory": "日志目录",
@@ -43,7 +43,16 @@
       "platformLevel": "平台阈值",
       "status": "状态",
       "title": "原生日志",
-      "unavailable": "不可用"
+      "unavailable": "不可用",
+      "statuses": {
+        "active": "运行中",
+        "healthy": "正常",
+        "degraded": "降级",
+        "error": "错误",
+        "inactive": "未启用",
+        "unavailable": "不可用",
+        "other": "其他（{status}）"
+      }
     },
     "noSelectionDescription": "从左侧列表选择一条记录查看崩溃详情。",
     "noSelectionTitle": "尚未选择事件",
@@ -56,8 +65,8 @@
       "title": "分享前注意"
     },
     "refreshing": "刷新中...",
-    "resizeDetail": "调整诊断详情面板宽度",
-    "searchPlaceholder": "搜索崩溃日志...",
+    "resizeDetail": "调整错误详情面板宽度",
+    "searchPlaceholder": "搜索错误…",
     "sourceCount": "个来源",
     "sourceLabel": "来源筛选",
     "sources": {
@@ -70,7 +79,34 @@
       "native": "原生日志",
       "recent": "最近错误",
       "recentDescription": "当前会话内存中的失败记录",
-      "total": "当前可见事件"
+      "total": "当前可见错误"
+    },
+    "snapshot": {
+      "title": "诊断快照",
+      "summaries": {
+        "diagnostics_error": "无法采集诊断信息",
+        "runtime_error": "本地运行时报告了错误",
+        "native_degraded": "原生日志已降级",
+        "native_inactive": "当前运行时未启用原生日志",
+        "snapshot": "最新的原生诊断快照"
+      }
+    },
+    "clearStored": {
+      "title": "清除已保存的错误日志？",
+      "description": "这会永久删除本设备上保存的错误与致命级日志，其他日志历史会保留。",
+      "cancel": "保留日志",
+      "confirm": "清除已保存"
+    },
+    "toasts": {
+      "copied": "已复制到剪贴板",
+      "copyFailed": "无法写入剪贴板",
+      "openDirectoryFailed": "无法打开日志目录",
+      "exported": "导出已保存",
+      "exportFailed": "导出失败",
+      "refreshFailed": "无法刷新错误日志",
+      "recentCleared": "已清除最近错误",
+      "storedCleared": "{count, plural, =0 {没有可清除的已保存错误日志} other {已清除 # 条已保存的错误日志}}",
+      "clearFailed": "无法清除日志"
     }
   },
   "dashboard": {
@@ -103,24 +139,46 @@
     "uniqueModules": "独立模块数",
     "uniqueTraces": "独立追踪数",
     "warningRate": "警告率",
-    "warnings": "个警告"
+    "warnings": "个警告",
+    "spanMinutes": "{value} 分钟",
+    "spanHours": "{value} 小时",
+    "spanDays": "{value} 天",
+    "errorCount": "{count} 条错误",
+    "warningCount": "{count} 条警告",
+    "logCount": "{count} 条日志",
+    "showErrors": "在列表中查看错误",
+    "showWarnings": "在列表中查看警告",
+    "showModule": "在列表中查看该模块",
+    "platformBackendNone": "无",
+    "platformError": "平台错误",
+    "moduleListLabel": "按模块筛选"
   },
   "description": "查看、搜索和导出应用程序日志",
   "detail": {
     "addBookmark": "收藏",
+    "close": "关闭详情",
     "copyData": "复制数据",
+    "copyEntry": "复制条目",
     "copyJson": "复制 JSON",
     "copyMessage": "复制消息",
+    "copySessionId": "复制会话 ID",
     "copyStack": "复制堆栈跟踪",
     "copyTraceId": "复制追踪 ID",
+    "focusSession": "只看此会话",
+    "focusTrace": "只看此追踪",
+    "jsonItems": "{count} 项",
+    "jsonKeys": "{count} 个键",
     "message": "消息",
     "module": "模块",
     "nextLog": "下一条日志",
+    "openTrace": "在追踪中打开",
     "prevLog": "上一条日志",
     "relatedLogs": "关联日志",
+    "relatedWindowed": "显示此条目前后的 {shown} 条，共 {total} 条。",
     "removeBookmark": "取消收藏",
     "sessionId": "会话 ID",
     "tags": "标签",
+    "thisEntry": "当前条目",
     "timestamp": "时间戳",
     "title": "日志详情"
   },
@@ -146,7 +204,8 @@
     "searchPlaceholder": "过滤消息…",
     "truncatedBadge": "扫描窗口外还有更早的条目",
     "unavailableDescription": "移动端需先与桌面端配对——原生日志读取自桌面应用。",
-    "unavailableTitle": "原生日志不可用"
+    "unavailableTitle": "原生日志不可用",
+    "errorTitle": "无法读取原生日志"
   },
   "panel": {
     "addBookmark": "收藏此日志",
@@ -162,7 +221,7 @@
         "title": "Agent 追踪"
       },
       "statsBar": {
-        "avgLatencyHint": "平均延迟 {ms} ms",
+        "avgLatencyHint": "平均延迟 {value}",
         "cacheHitRate": "缓存命中率",
         "cacheReadHint": "缓存命中：{count}",
         "errors": "错误",
@@ -187,7 +246,9 @@
         "empty": "该 trace 暂无 span。",
         "loading": "正在加载 trace…",
         "title": "Trace",
-        "treeLabel": "Span 树"
+        "treeLabel": "Span 树",
+        "tokens": "输入 {input} / 输出 {output}",
+        "failed": "失败："
       }
     },
     "agentTraceModule": "Agent 追踪",
@@ -220,7 +281,6 @@
     "allLevelsTab": "全部",
     "allModules": "所有模块",
     "allSources": "所有来源",
-    "autoRefresh": "自动刷新",
     "back": "返回",
     "bookmarked": "已收藏",
     "clear": "清除日志",
@@ -229,13 +289,13 @@
     "clearConfirmDescription": "将永久删除本设备上所有已持久化的日志条目，被删除条目的导出与书签将失效。",
     "clearConfirmTitle": "清空全部日志？",
     "clearSearchHistory": "清除历史",
-    "clearSessionFocus": "清除会话聚焦",
-    "clearTraceFocus": "清除追踪聚焦",
     "clearedToast": "日志已清空",
     "closeDetails": "关闭详情面板",
     "closeTransportDetails": "关闭",
+    "collapseEntry": "收起条目",
     "copied": "已复制！",
     "copyEntry": "复制日志条目",
+    "copyFailed": "无法复制到剪贴板",
     "copyLogEntry": "复制日志条目",
     "copyShareUrl": "复制分享链接",
     "customTimeRange": "自定义...",
@@ -262,10 +322,12 @@
     "error": "错误",
     "errorAndFatal": "错误",
     "errorLoading": "加载日志失败",
+    "expandEntry": "展开条目",
     "export": "导出日志",
     "exportAs": "导出为...",
     "exportText": "纯文本",
     "filterChip": {
+      "clearAll": "全部清除",
       "clearModule": "清除模块筛选",
       "clearSession": "清除会话筛选",
       "clearSource": "清除来源筛选 {value}",
@@ -276,8 +338,7 @@
       "sessionLabel": "会话：",
       "sourceLabel": "来源：",
       "traceLabel": "追踪：",
-      "transportLabel": "传输：",
-      "transportPrefix": "传输：{name}"
+      "transportLabel": "传输："
     },
     "filterIn": "范围：",
     "filters": "筛选",
@@ -287,11 +348,20 @@
     "focusTrace": "聚焦此追踪",
     "focusTraceMenu": "聚焦此追踪",
     "groupByTrace": "按追踪分组",
+    "healthStatus": {
+      "degraded": "降级",
+      "healthy": "正常",
+      "inactive": "未启用",
+      "offline": "离线"
+    },
     "highSeverityOnly": "仅显示高严重级别",
     "jumpToLatest": "跳到最新",
     "keyboardShortcuts": "键盘快捷键",
     "levelFilterGroup": "按级别筛选",
     "listView": "列表视图",
+    "live": "实时",
+    "liveOffAria": "实时跟随已关闭——开始跟随新日志",
+    "liveOnAria": "实时跟随已开启——新日志自动加载",
     "loadingLogs": "加载日志中...",
     "logDetails": "日志详情",
     "logRatePulse": "实时日志流活动",
@@ -327,6 +397,10 @@
     },
     "pageSize": "每页数量",
     "pauseAutoScroll": "暂停自动滚动",
+    "presetCancel": "取消",
+    "presetDefaultName": "预设 {index}",
+    "presetNameHint": "保存级别、模块、来源、会话、时间范围、搜索、追踪和传输筛选条件。",
+    "presetNameLabel": "预设名称",
     "presets": "预设",
     "previousPage": "上一页",
     "recentSearches": {
@@ -336,6 +410,13 @@
     },
     "refresh": "刷新日志",
     "regexPlaceholder": "正则表达式...",
+    "relativeTime": {
+      "days": "{count} 天前",
+      "hours": "{count} 小时前",
+      "justNow": "刚刚",
+      "minutes": "{count} 分钟前",
+      "seconds": "{count} 秒前"
+    },
     "removeBookmark": "取消收藏",
     "resumeAutoScroll": "恢复自动滚动",
     "savePreset": "保存当前筛选为预设",
@@ -347,7 +428,6 @@
     "sessionPlaceholder": "会话 ID...",
     "shareUrlCopied": "分享链接已复制",
     "shareUrlFailed": "复制分享链接失败",
-    "shiftClickPrefix": "按住 Shift 单击以",
     "shortcutAction": "操作",
     "shortcutKey": "按键",
     "shortcuts": {
@@ -361,10 +441,12 @@
       "openPresets": "打开预设",
       "previousEntry": "上一条",
       "refresh": "刷新",
-      "showShortcuts": "显示快捷键"
+      "showShortcuts": "显示快捷键",
+      "traceView": "追踪视图"
     },
     "showingRange": "{start}–{end} / 共 {total}",
     "source": "来源",
+    "sourceFilterLabel": "来源",
     "sources": {
       "frontend": "前端",
       "internal": "内部",
@@ -384,25 +466,81 @@
     "total": "总计",
     "traceDurationLabel": "持续时间",
     "traceId": "追踪 ID",
-    "traceOverflow": "+{count} 条更早的 trace 已隐藏",
+    "traceOverflow": "还有 {count} 条追踪",
     "traceTotal": "条事件",
     "traceView": "追踪视图",
     "transportDetails": "传输详情",
     "transportDropped": "丢弃数",
+    "transportDroppedTitle": "已丢弃条目：{count}",
     "transportFilterPrefix": "传输：{value}",
-    "transportHealthOverflow": "显示更多传输",
     "transportLastFailure": "上次失败",
     "transportLastSuccess": "上次成功",
     "transportQueueDepth": "队列深度",
+    "transportQueueDepthTitle": "队列深度：{count}",
     "transportQueueHistory": "队列深度历史",
     "transportRetries": "重试次数",
+    "transportSummaryAria": "日志传输：{total} 个中 {healthy} 个正常",
+    "transportSummaryLabel": "传输",
+    "transportSummaryTitle": "日志传输",
+    "transportTileAria": "{name}：{status}，队列 {queue}",
     "unsavedChanges": "有未保存的修改",
     "viewDetails": "查看详情",
     "viewDetailsMenu": "查看详情",
     "viewDiagnostics": "查看诊断",
     "viewModeGroup": "日志视图",
     "viewNativeDiagnostics": "查看原生诊断",
-    "warning": "警告"
+    "warning": "警告",
+    "windowCapped": "仅加载了最新的 {count} 条日志。搜索、级别、来源和时间筛选都只在这些条目内生效；按模块筛选或聚焦某个追踪可查看更早的条目。",
+    "traceIdValue": "追踪 ID：{id}",
+    "logListLabel": "日志条目",
+    "emptyStateWindowCapped": "只加载并搜索了最新的 {count} 条日志，更早的匹配项不会显示。按模块或追踪筛选可以查得更远。",
+    "durationUnits": {
+      "ms": "{value} 毫秒",
+      "s": "{value} 秒",
+      "m": "{value} 分钟",
+      "h": "{value} 小时"
+    },
+    "traceRowAria": "显示追踪 {id}：{count} 个事件，历时 {duration}",
+    "traceEventCount": "{count} 个事件",
+    "fieldValue": "{label}：{value}",
+    "openTraceAria": "在追踪中打开 {id}",
+    "traceShowMore": "再显示 {count} 条",
+    "logRateValue": "约 {rate} 条/分钟",
+    "transportQueueShort": "队{count}",
+    "transportDroppedShort": "丢{count}",
+    "nativeTileLabel": "原生",
+    "nativeTileAria": "原生日志：{status}",
+    "transportSummaryCount": "{healthy}/{total}",
+    "transportDetailsTitle": "传输详情：{name}",
+    "openLogSettings": "日志设置",
+    "nativeStartupMode": {
+      "full": "完整",
+      "fallback": "降级",
+      "disabled": "已禁用",
+      "unknown": "未知"
+    },
+    "nativeBridgeState": {
+      "active": "运行中",
+      "inactive": "未启用",
+      "degraded": "降级"
+    },
+    "customTimeRangeActive": "自定义范围",
+    "shortcutsDescription": "除在输入框中输入时外，这些按键在面板内任何位置都可用。",
+    "customTimeRangeValue": "{start} 至 {end}",
+    "clearFailedToast": "无法清除日志",
+    "logDetailsDescription": "所选日志条目：消息、元数据、数据、堆栈及相关条目。",
+    "emptyChips": {
+      "level": "级别：{value}",
+      "module": "模块：{value}",
+      "source": "来源：{value}",
+      "session": "会话：{value}",
+      "time": "时间：{value}",
+      "customTime": "时间：自定义范围",
+      "search": "搜索：{value}",
+      "trace": "追踪：{value}",
+      "transport": "传输：{value}",
+      "bookmarks": "仅已收藏"
+    }
   },
   "settings": {
     "advanced": {
@@ -512,7 +650,11 @@
       "moduleLabel": "目标",
       "removeAria": "移除 {module} 覆盖",
       "saved": "已应用",
-      "title": "原生（Rust）级别"
+      "title": "原生（Rust）级别",
+      "unsaved": "有未应用的更改",
+      "loadError": "无法读取当前的原生日志级别。",
+      "retry": "重试",
+      "loading": "正在加载原生日志级别…"
     },
     "nav": {
       "badgeTransportsAria": "已启用 {enabled} / {total} 个传输通道",
@@ -693,9 +835,11 @@
   "settingsTitle": "日志配置",
   "statusSr": "状态：{status}",
   "timeline": {
+    "bucketAria": "{time}：{total} 条，{errors} 条错误，{warnings} 条警告",
     "clear": "清除",
     "empty": "暂无数据",
     "errors": "错误",
+    "otherLevels": "其他",
     "title": "时间线",
     "total": "总计",
     "warnings": "警告"
@@ -718,7 +862,16 @@
     "tokenUsage": "Token 用量",
     "toolArgs": "参数",
     "toolName": "工具",
-    "totalTokens": "总计"
+    "totalTokens": "总计",
+    "unknownEvent": "未知事件",
+    "operations": {
+      "invoke_agent": "智能体运行",
+      "execute_tool": "工具调用",
+      "chat": "模型调用",
+      "invoke_workflow": "工作流运行",
+      "retrieval": "检索",
+      "embeddings": "向量嵌入"
+    }
   },
   "workspace": {
     "breadcrumbHome": "主页",
@@ -783,13 +936,23 @@
         "download": "下载",
         "audit": "审计记录",
         "noAudit": "没有审计事件。",
-        "system": "系统"
+        "system": "系统",
+        "part": "#{number} · {kind} · {size}",
+        "downloaded": "已保存 {filename}",
+        "downloadFailed": "无法下载该制品"
       },
       "policy": {
         "title": "租户策略",
         "load": "加载租户策略",
         "rawMinidump": "允许下载原始 minidump",
-        "rawMinidumpDescription": "minidump 可能包含进程内存。关闭时服务会拒绝所有原始 minidump 读取；每次允许的读取都会带上运维者身份写入该事件的审计记录。"
+        "rawMinidumpDescription": "minidump 可能包含进程内存。关闭时服务会拒绝所有原始 minidump 读取；每次允许的读取都会带上运维者身份写入该事件的审计记录。",
+        "confirmEnableTitle": "为整个租户允许下载原始 minidump？",
+        "confirmEnableDescription": "该租户的所有分诊者都将能下载 minidump，其中可能包含进程内存。每次下载都会记录在事件的审计轨迹中。",
+        "confirmDisableTitle": "为整个租户停止下载原始 minidump？",
+        "confirmDisableDescription": "在管理员再次允许之前，服务将拒绝该租户的所有原始 minidump 读取。",
+        "confirmEnable": "允许下载",
+        "confirmDisable": "停止下载",
+        "cancel": "取消"
       },
       "errors": {
         "insufficient_grant_scope": "当前身份无权执行该操作。",
@@ -800,6 +963,63 @@
         "incident_not_found": "该事件已不存在。",
         "network_unavailable": "无法连接到诊断服务。",
         "console_failed": "控制台请求未完成。"
+      },
+      "gates": {
+        "loading": "正在读取诊断服务连接…",
+        "probing": "正在检查你对控制台的访问权限…",
+        "sessionRequired": "需要身份会话",
+        "sessionRequiredDescription": "该连接可以提交本设备自己的崩溃。读取并分诊所有人的报告需要身份会话令牌，请在“设置 → 诊断”中添加。",
+        "roleFailed": "无法确认你的访问权限",
+        "retry": "重试"
+      },
+      "detail": {
+        "title": "崩溃分组",
+        "description": "分组、其中的事件以及分诊控制。",
+        "loading": "正在加载崩溃分组…",
+        "resize": "调整崩溃分组详情面板宽度"
+      },
+      "processingStates": {
+        "received": "已接收",
+        "scanning": "扫描中",
+        "symbolicating": "符号化中",
+        "grouping": "分组中",
+        "accepted": "已接受",
+        "retryable_failure": "失败，将重试",
+        "permanent_failure": "永久失败",
+        "deleted": "已删除",
+        "unknown": "其他（{state}）"
+      },
+      "artifactKinds": {
+        "manifest": "清单",
+        "events": "事件",
+        "attachment": "附件",
+        "minidump": "Minidump",
+        "screenshot": "截图",
+        "unknown": "其他（{kind}）"
+      },
+      "auditActions": {
+        "alert_permanent_failure": "告警：处理永久失败",
+        "artifact_read": "已下载制品",
+        "consent_withdrawn": "已撤回同意",
+        "group_triaged": "已分诊分组",
+        "incident_accepted": "事件已接收",
+        "incident_cancelled": "上传已取消",
+        "incident_created": "事件已创建",
+        "incident_deleted": "事件已删除",
+        "incident_processing_failed": "处理失败",
+        "incident_processing_queued": "已排队处理",
+        "incident_resumed": "上传已恢复",
+        "retention_artifact_deleted": "制品已按保留策略删除",
+        "retention_incident_deleted": "事件已按保留策略删除",
+        "retention_permanent_failure": "保留策略执行永久失败",
+        "symbol_indexed": "符号已索引",
+        "tenant_policy_changed": "租户策略已变更",
+        "tenant_key_created": "租户密钥已创建",
+        "tenant_key_crypto_shredded": "租户密钥已加密销毁",
+        "tenant_key_rotated": "租户密钥已轮换",
+        "upload_part_rejected": "上传分片被拒绝",
+        "upload_part_stored": "上传分片已保存",
+        "unknown": "其他事件（{action}）"
       }
     },
     "delete": {
@@ -807,18 +1027,20 @@
       "cancel": "保留报告",
       "confirm": "删除报告",
       "description": "这会从本设备移除本地诊断制品，操作无法撤销。",
-      "title": "删除此崩溃报告？"
+      "title": "删除此崩溃报告？",
+      "done": "崩溃报告已删除。",
+      "failed": "无法删除崩溃报告：{error}"
     },
     "detail": {
-      "description": "检查已脱敏的本地诊断与可选附件。",
+      "description": "检查脱敏后的报告，选择要发送的内容，并查看回执。",
       "loading": "正在加载脱敏预览…",
       "noPreview": "再次选择报告以加载本地预览。",
       "previewDescription": "这是本地脱敏后的负载，可选附件仍未包含。",
       "previewTitle": "脱敏预览",
-      "resize": "调整事故详情面板宽度",
-      "runtime": "运行时",
+      "resize": "调整崩溃报告详情面板宽度",
       "state": "状态",
-      "title": "事故详情"
+      "title": "崩溃报告",
+      "source": "来源"
     },
     "filters": {
       "sourceLabel": "事故来源",
@@ -831,10 +1053,12 @@
       "receiptsOnly": "仅回执"
     },
     "incidents": {
-      "emptyDescription": "新的崩溃报告和异常退出会先在本地保留，再进入提交流程。",
-      "emptyTitle": "没有匹配的事故",
-      "error": "无法读取本地事故存储。",
-      "loading": "正在加载本地事故…"
+      "emptyDescription": "本设备捕获的崩溃报告会保留在这里，直到你决定是否发送。",
+      "emptyTitle": "没有匹配的崩溃报告",
+      "error": "无法读取本设备上的崩溃报告。",
+      "loading": "正在加载崩溃报告…",
+      "uncollectedTitle": "崩溃报告由应用采集",
+      "uncollectedDescription": "崩溃报告由桌面与移动应用采集。浏览器标签页没有崩溃处理器，因此这里没有可列出的内容。"
     },
     "moreActions": "更多操作",
     "navigation": {
@@ -849,14 +1073,15 @@
     "states": {
       "accepted": "已接收",
       "all": "所有状态",
-      "awaitingConsent": "等待同意",
       "cancelled": "已取消",
       "deleted": "已删除",
       "detected": "已检测",
       "processing": "处理中",
       "queued": "已排队",
       "rejected": "已拒绝",
-      "uploading": "上传中"
+      "uploading": "上传中",
+      "packaged": "已打包",
+      "awaiting_consent": "等待同意"
     },
     "status": {
       "transports": "{healthy}/{total} 传输正常",
@@ -897,7 +1122,14 @@
         "submission_failed": "提交未完成。",
         "submission_not_found": "该报告没有提交记录。",
         "unauthorized": "服务拒绝了本安装的凭据。"
-      }
+      },
+      "checkingSupport": "正在检查本设备能否提交…",
+      "unsupported": "本设备无法提交崩溃报告。请在桌面应用中提交，或在安装了崩溃报告组件的移动应用中提交。",
+      "mobileReceiptNote": "已从本手机发送。如需撤回或删除，请向服务运营方提供此支持代码。",
+      "confirmWithdrawTitle": "撤回此报告的同意？",
+      "confirmDeleteRemoteTitle": "从服务中删除此报告？",
+      "confirmDeleteRemoteDescription": "服务会删除其副本及由此生成的全部内容，本地报告仍保留在本设备上。",
+      "confirmCancel": "取消"
     },
     "title": "日志与诊断",
     "traces": {
@@ -908,7 +1140,7 @@
       "emptyTitle": "暂无 Agent 追踪",
       "errorsOnly": "仅错误",
       "export": {
-        "label": "导出",
+        "label": "导出追踪",
         "spanCount": "{count, plural, other {# 个 span}}",
         "copy": {
           "json": "复制 span JSON",
@@ -983,7 +1215,10 @@
         "sessionId": "会话",
         "runId": "运行",
         "openInLogs": "在日志中查看这条追踪",
-        "openSession": "在日志中查看该会话"
+        "openSession": "在日志中查看该会话",
+        "offsetValue": "+{value}",
+        "copyValue": "复制{label} ID",
+        "copied": "已复制{label} ID"
       },
       "spanCount": "{count, plural, other {# 个 span}}",
       "timeline": {
@@ -1005,29 +1240,81 @@
         },
         "spans": "{count, plural, other {# 个 span}}",
         "resetZoom": "重置缩放",
-        "brushHint": "拖拽可放大某段时间 · 双击复位",
+        "brushHint": "在色带或泳道上拖拽即可放大 · 双击复位",
         "laneErrors": "{count, plural, other {# 个失败 span}}",
         "blockAria": "{lane} 中的 {label}，耗时 {duration}",
-        "blockError": "该 span 失败"
+        "blockError": "该 span 失败",
+        "spansOf": "{count, number} / {total, plural, other {# 个 span}}",
+        "totalDuration": "整条追踪：{value}",
+        "tokens": "{value} tokens",
+        "errorCount": "{count, plural, other {# 个失败 span}}",
+        "zoomIn": "放大",
+        "zoomInHint": "放大（+）",
+        "zoomOut": "缩小",
+        "zoomOutHint": "缩小（−）",
+        "resetZoomHint": "显示整条追踪（0）",
+        "sequenceTick": "#{index}",
+        "collapse": "收起时间线",
+        "expand": "展开时间线"
       },
       "truncated": "此窗口共 {total, number} 个 span，当前展示最新的 {shown, number} 个。",
       "waterfallEmpty": "这条追踪没有已持久化的 span。",
       "windowEmpty": "所选窗口内没有 span。",
       "windowLabel": "追踪时间窗口",
-      "windowedTo": "窗口内 {count} / {total}",
       "windows": {
         "today": "今天",
         "week": "7 天",
         "month": "30 天",
         "all": "全部"
-      }
+      },
+      "notFoundTitle": "未找到该追踪",
+      "notFoundDescription": "本地没有 {id} 的 span，可能已被清理，或链接有误。",
+      "clearSelection": "清除选择",
+      "closeTrace": "关闭追踪",
+      "closeTraceHint": "关闭追踪（Esc）",
+      "waterfallLabel": "该追踪中的 span",
+      "listLabel": "追踪列表",
+      "pending": "{count, plural, other {# 条新追踪 · 显示}}",
+      "selectionOutside": "所选追踪不在当前列表中——它在时间范围之外，或被筛选条件隐藏。",
+      "widenRange": "扩大到最近 30 天",
+      "subViewHint": "{view}（按 V 切换）",
+      "traceFailed": "{count, plural, other {# 个失败 span}}"
     },
     "views": {
       "logs": "日志",
       "traces": "追踪",
-      "diagnostics": "诊断",
-      "incidents": "事故",
+      "diagnostics": "错误",
+      "incidents": "崩溃报告",
       "service": "服务"
+    },
+    "viewDescriptions": {
+      "logs": "本应用记录的全部日志",
+      "traces": "智能体与请求追踪",
+      "diagnostics": "本设备记录的错误与致命级日志",
+      "incidents": "本设备捕获的原生崩溃报告",
+      "service": "诊断服务从所有人处接收的崩溃"
+    },
+    "sources": {
+      "panic": "Rust panic",
+      "native": "原生崩溃",
+      "unknown": "未知",
+      "android-acra": "Android 崩溃",
+      "android-application-exit": "Android 异常退出",
+      "ios-kscrash": "iOS 崩溃",
+      "ios-metrickit": "iOS MetricKit 报告",
+      "other": "其他（{source}）"
     }
+  },
+  "autoSubmit": {
+    "sent": "崩溃报告已发送 · 支持代码 {code}",
+    "sentDescription": "已自动发送，未包含任何可选附件。回执可在“日志 → 崩溃报告”中查看。",
+    "failed": "{count, plural, other {# 份崩溃报告未能发送}}",
+    "failedRetry": "报告仍保留在本设备上，下次启动时会再次尝试。",
+    "failedFinal": "报告仍保留在本设备上，可在“日志 → 崩溃报告”中检查后手动发送。",
+    "view": "查看"
+  },
+  "virtualizedList": {
+    "retry": "重试",
+    "details": "详情"
   }
 }

@@ -57,6 +57,7 @@
     "hostMode": "This shell",
     "hostModeValue": {
       "host": "Is a Host",
+      "driving": "Is a Host, driving another",
       "companion": "Drives a Host",
       "standalone": "Standalone"
     },
@@ -77,6 +78,7 @@
     },
     "tier": "Transport",
     "tierNotApplicable": "Not applicable: this shell runs work locally.",
+    "tierPending": "Not reported yet: the link to this host is still being negotiated.",
     "activeHost": "Active host",
     "activeHostSelf": "This machine.",
     "activeHostNone": "No host is being driven.",
@@ -94,6 +96,7 @@
     "shortcutsTitle": "Go to",
     "goPairing": "Pair a device",
     "goRelay": "Relay and tunnel",
+    "goRemoteHosts": "Remote hosts",
     "goDevices": "Device console"
   },
   "pairing": {
@@ -108,19 +111,21 @@
     "count": "{count, plural, =0 {none} =1 {1 host} other {# hosts}}",
     "empty": "No hosts are registered yet. Add one below with an invitation from the Host.",
     "addTitle": "Add a host",
-    "addDescription": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
+    "addDescription": "Paste an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
+    "addDescriptionScan": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
     "renameAria": "Rename {label}",
     "renameSave": "Save name",
     "active": "Active",
     "state": {
-      "disconnected": "Disconnected",
+      "disconnected": "Not connected",
       "connecting": "Connecting",
       "ready": "Ready",
       "degraded": "Degraded",
       "revoked": "Revoked",
-      "versionMismatch": "Version mismatch"
+      "versionMismatch": "Upgrade required"
     },
-    "drive": "Drive",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
     "removeAria": "Remove {label}"
   },
   "push": {

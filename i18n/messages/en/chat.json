@@ -104,6 +104,13 @@
     "timesInConversation": "{count, plural, one {# time} other {# times}}"
   },
   "branch": {
+    "workingSet": {
+      "label": "Working state",
+      "historical": "At the branch point",
+      "current": "Current state",
+      "initial": "Start fresh",
+      "unavailable": "Historical state is unavailable. Choose current state or start fresh."
+    },
     "ariaLineage": "Go to the message this branch was created from, in {title}",
     "cancel": "Cancel",
     "childCount": "{count, plural, =1 {1 branch} other {# branches}}",
@@ -606,9 +613,8 @@
     },
     "modelPicker": {
       "agentModelSwitchFailed": "The agent refused that model: {reason}",
-      "agentModelsGroup": "Agent models",
-      "agentModelsLoading": "Asking {agent} which models it has.",
-      "agentNoModels": "{agent} reported no models of its own. The models below are the ones configured in Cognia.",
+      "agentModelsLoading": "Reading {agent}'s models…",
+      "agentNoModels": "{agent} reported no models to choose from, so it runs its own default.",
       "agentNoSession": "{agent} is connected with nothing open, so its models arrive with the first turn.",
       "agentNotConnected": "{agent} is not connected, so its own models are not listed yet.",
       "autoBadge": "Auto",
@@ -629,7 +635,29 @@
       "switchModelAria": "Switch model",
       "title": "Select a model",
       "refreshAgentModels": "Refresh models",
-      "agentModelsFailed": "Could not load models from {agent}. Try refreshing again."
+      "agentModelsFailed": "Could not load models from {agent}. Try refreshing again.",
+      "agentModelsDeferred": "{agent}'s models appear after the first message. Until then it runs its own default model.",
+      "agentModelAppliesNextTurn": "The model you pick is applied on the next message.",
+      "agentDefaultModel": "{agent} · default",
+      "agentDefaultModelRow": "Default model",
+      "agentFallbackName": "Agent",
+      "cogniaSection": "Cognia models",
+      "cogniaSectionHint": "Runs {agent} on a Cognia provider through the local gateway. A pick applies from the next message.",
+      "cogniaModelsLoading": "Asking the Host which Cognia models it can use…",
+      "cogniaModelsFailed": "Could not ask the Host for its Cognia models. Reopen the list to try again.",
+      "cogniaUnsupportedRuntime": "{agent} cannot run on Cognia models: its runtime has no isolated gateway launch.",
+      "cogniaRemoteServer": "{agent} is attached to a remote server, so it cannot run on Cognia models.",
+      "cogniaNoProcess": "{agent} has no local process for Cognia to launch, so it cannot run on Cognia models.",
+      "cogniaNetworkEndpoint": "{agent} connects to a network endpoint, so it cannot run on Cognia models.",
+      "cogniaHostUpdateRequired": "Update the paired Host to run {agent} on Cognia models.",
+      "cogniaNoEligibleModels": "No configured provider can serve {agent}: it needs an OpenAI- or Anthropic-compatible provider with an API key, tool calling and streaming.",
+      "cogniaAccountLocked": "The Host's account is locked. Unlock it to run {agent} on Cognia models.",
+      "cogniaPublicHttpsRequired": "The paired Host must be reachable over public HTTPS to run {agent} on Cognia models.",
+      "cogniaModelNoTools": "No tool calling",
+      "cogniaModelNoStreaming": "No streaming",
+      "cogniaChipTitle": "{agent} → {provider}/{model} via Cognia",
+      "cogniaGlyph": "Cognia model",
+      "cogniaModelSwitchFailed": "Couldn't save the model choice: {reason}"
     },
     "paramForm": {
       "cancel": "Cancel",
@@ -861,6 +889,7 @@
       "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
     },
     "stopTooltip": "Stop",
+    "stopTooltipKeyboard": "Stop (Esc)",
     "templateParams": {
       "hint": "Enter or Esc to close · Tab for the next parameter",
       "loading": "Searching…",
@@ -2136,6 +2165,8 @@
     },
     "code": {
       "ariaInLanguage": "Code in {language}",
+      "close": "Close",
+      "closeAria": "Close fullscreen view",
       "copy": "Copy",
       "copyAria": "Copy code",
       "defaultLabel": "Code",
@@ -2269,7 +2300,6 @@
   "runPanel": {
     "ariaDiscardQueue": "Discard queued messages",
     "ariaEditQueued": "Edit this queued message",
-    "ariaInterrupt": "Interrupt the current turn",
     "ariaLocateSteer": "Go to the first undelivered message",
     "ariaManageSteer": "Show the queued messages",
     "ariaRemoveQueued": "Remove this queued message",
@@ -2305,8 +2335,6 @@
   },
   "runStatus": {
     "ariaSteerNow": "Interrupt the current turn and send queued messages now",
-    "interruptHint": "Esc to interrupt",
-    "interruptHintTouch": "Tap to interrupt",
     "metricContext": "context {pct}%",
     "metricSpeed": "{value} tok/s",
     "metricTokens": "{value} tok",
@@ -2592,6 +2620,7 @@
     "deny": "Deny",
     "dismiss": "Dismiss",
     "inputLabel": "Input",
+    "noInputDetails": "The agent sent no arguments for this call — only its name.",
     "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
     "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
     "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
