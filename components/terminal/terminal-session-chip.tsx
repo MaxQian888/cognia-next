@@ -32,6 +32,8 @@ import type {
   TerminalReplayGap,
 } from "@/lib/terminal/types"
 import { cn } from "@/lib/utils"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { useTerminalHostLabel } from "@/hooks/terminal/use-terminal-host-label"
 
 /** How long the chip stays expanded before collapsing to its dot. */
 export const CHIP_AUTOHIDE_MS = 4000
@@ -111,6 +113,8 @@ export function TerminalSessionChip({
   flowControlSupported = false,
 }: TerminalSessionChipProps) {
   const t = useTranslations("terminal.sessionState")
+  const row = useTerminalStore((state) => state.sessions[sessionId])
+  const host = useTerminalHostLabel(row)
   const [open, setOpen] = React.useState(false)
   const [collapsed, setCollapsed] = React.useState(false)
   const [hovered, setHovered] = React.useState(false)
@@ -235,6 +239,7 @@ export function TerminalSessionChip({
           data-testid="terminal-session-chip-details"
         >
           <p className="font-medium">{t("chipDetails")}</p>
+          {row ? <p className="text-muted-foreground">{host.description}</p> : null}
           <ul className="space-y-1">
             {states.map((state) => (
               <li key={state.key} className="flex items-start gap-2" data-state-key={state.key}>

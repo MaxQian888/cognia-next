@@ -197,7 +197,17 @@ export function createSftpFileTreeDeps(profileId: string): ProjectFileTreeDeps {
       await createSftpDir(profileId, joinRemotePath(root, relPath))
     },
     writeFile: async (root, relPath, contents) => {
-      await uploadSftpFile(profileId, joinRemotePath(root, relPath), new Blob([contents]))
+      // File creation is an explicit user action and opens the same transfer
+      // as a queued upload, including when the file has zero bytes.
+      let adminLease: string | null
+      try {
+        adminLease = await requestSftpTransferApproval()
+      } catch (error) {
+        throw new SftpFileWriteApprovalError(error)
+      }
+      await uploadSftpFile(profileId, joinRemotePath(root, relPath), new Blob([contents]), {
+        adminLease,
+      })
     },
     deleteEntry: async (root, relPath, isDir) => {
       await deleteSftpEntry(profileId, joinRemotePath(root, relPath), isDir === true)
@@ -205,6 +215,17 @@ export function createSftpFileTreeDeps(profileId: string): ProjectFileTreeDeps {
     renameEntry: async (root, from, to) => {
       await renameSftpEntry(profileId, joinRemotePath(root, from), joinRemotePath(root, to))
     },
+  }
+}
+
+/** Gives the file-tree failure renderer a translated approval-specific reason. */
+class SftpFileWriteApprovalError extends Error {
+  readonly code = "sftp_approval_required"
+  readonly retryable = false
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = "SftpFileWriteApprovalError"
   }
 }
 

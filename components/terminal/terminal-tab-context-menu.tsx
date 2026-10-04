@@ -20,6 +20,13 @@
  *                    and for the dismiss gesture, and the menu already
  *                    provides a positioned, keyboard-navigable surface.
  *   * Trust Agent  — toggles `agentTrusted` (Wave 3D consumes this).
+ *   * SSH tabs     — Edit host / Browse files, the two places a live SSH tab
+ *                    most often sends you and that nothing in the dock linked
+ *                    to. Shown only for a tab that knows its saved profile.
+ *
+ * Restart is withheld from serial tabs. A serial row has no shell to respawn
+ * and no profile to reconnect from, and offering it produced a local spawn of
+ * the label `/dev/ttyUSB0 (115200 8N1)`.
  */
 
 import type { ReactNode } from "react"
@@ -62,6 +69,10 @@ export interface TerminalTabContextMenuProps {
   ) => void
   /** Jump to the chat session that spawned this tab. Shown only for agent-spawned tabs. */
   onLocateInChat?: (chatSessionId: string, messageId?: string | null) => void
+  /** Open the saved SSH host this tab was launched from in Settings. */
+  onEditSshHost?: (profileId: string) => void
+  /** Open the saved SSH host's Files card in the device console. */
+  onBrowseSshFiles?: (profileId: string) => void
   /**
    * Clipboard / edit actions on the focused pane. When provided, an edit
    * group (Copy / Paste / Select all / Clear / Find) renders at the top of
@@ -85,6 +96,8 @@ export function TerminalTabContextMenu({
   onToggleAgentTrust,
   onChangeAppearance,
   onLocateInChat,
+  onEditSshHost,
+  onBrowseSshFiles,
   onCopy,
   onPaste,
   onSelectAll,
@@ -93,6 +106,8 @@ export function TerminalTabContextMenu({
 }: TerminalTabContextMenuProps) {
   const t = useTranslations("terminal.tab.menu")
   const hasEditGroup = !!(onCopy || onPaste || onSelectAll || onClear || onFind)
+  const sshProfileId = row.kind === "ssh" && row.profileId ? row.profileId : null
+  const canRestart = row.kind !== "serial"
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
@@ -147,9 +162,35 @@ export function TerminalTabContextMenu({
             </ContextMenuSubContent>
           </ContextMenuSub>
         ) : null}
-        <ContextMenuItem onSelect={() => onRestart(row.id)} data-testid="terminal-tab-menu-restart">
-          {t("restart")}
-        </ContextMenuItem>
+        {canRestart ? (
+          <ContextMenuItem
+            onSelect={() => onRestart(row.id)}
+            data-testid="terminal-tab-menu-restart"
+          >
+            {row.kind === "ssh" ? t("reconnect") : t("restart")}
+          </ContextMenuItem>
+        ) : null}
+        {sshProfileId && (onEditSshHost || onBrowseSshFiles) ? (
+          <>
+            <ContextMenuSeparator />
+            {onBrowseSshFiles ? (
+              <ContextMenuItem
+                onSelect={() => onBrowseSshFiles(sshProfileId)}
+                data-testid="terminal-tab-menu-ssh-files"
+              >
+                {t("browseSshFiles")}
+              </ContextMenuItem>
+            ) : null}
+            {onEditSshHost ? (
+              <ContextMenuItem
+                onSelect={() => onEditSshHost(sshProfileId)}
+                data-testid="terminal-tab-menu-ssh-edit"
+              >
+                {t("editSshHost")}
+              </ContextMenuItem>
+            ) : null}
+          </>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => onClose(row.id)} data-testid="terminal-tab-menu-close">
           {t("close")}

@@ -21,7 +21,8 @@
  * SSH profiles go only to the local host. An SSH profile names a destination
  * and a credential, and installing one from a paired device would let it drive
  * outbound connections from the host; the Rust arm refuses them for the same
- * reason.
+ * reason. What the host receives is the profile and its jump chain, never a
+ * forwarding rule (`buildSynchronizedConnectRequest`).
  */
 
 import { transport } from "@/lib/tauri"
@@ -29,11 +30,8 @@ import { transport } from "@/lib/tauri"
 import { selectTerminalTransportChain } from "./pick-transport"
 
 import { profileToSpawnFields, type TerminalProfile } from "./profiles"
-import {
-  sshHostToConnectRequest,
-  type SshConnectRequest,
-  type SshHostProfile,
-} from "./ssh-profiles"
+import { buildSynchronizedConnectRequest } from "./ssh-forwarding"
+import { type SshConnectRequest, type SshHostProfile } from "./ssh-profiles"
 import type { SpawnRequest } from "./types"
 
 export interface TerminalProfileHostDefaults {
@@ -86,8 +84,9 @@ export function buildSynchronizedTerminalProfiles(
 export function buildSynchronizedSshProfiles(
   profiles: SshHostProfile[] | undefined
 ): SynchronizedSshProfile[] {
-  return (profiles ?? []).flatMap((profile) => {
-    const request = sshHostToConnectRequest(profile, 24, 80)
+  const all = profiles ?? []
+  return all.flatMap((profile) => {
+    const request = buildSynchronizedConnectRequest(profile, all)
     return request ? [{ profileId: profile.id, request }] : []
   })
 }

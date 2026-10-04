@@ -79,9 +79,16 @@ function reattachToActiveHost(
         // the reload. Rebuilding it as a plain `TerminalSession` still moves
         // bytes — the `ssh_terminal_*` commands are aliases of their generic
         // twins — but silently drops the fingerprint the user was shown.
-        return info.kind === "ssh"
-          ? SshTerminalSession.reattach(info, resumeAfter)
-          : TerminalSession.reattach(info.id, resumeAfter)
+        return (
+          info.kind === "ssh"
+            ? SshTerminalSession.reattach(info, resumeAfter)
+            : TerminalSession.reattach(info.id, resumeAfter)
+        ).then((session) => {
+          // Origin describes the spawning client, which may have been a phone;
+          // reattaching over the desktop channel identifies the owning host.
+          session.info.remoteHost = null
+          return session
+        })
       case "ws":
         return RemoteTerminalSession.reattachLan(info.id, resumeAfter)
       case "webrtc":
@@ -143,6 +150,8 @@ export async function rehydrateTerminals(
         kind: info.kind,
         profileId: info.profileId,
         hostId: info.hostId,
+        remoteHost:
+          session.info.remoteHost !== undefined ? session.info.remoteHost : info.remoteHost,
       })
       wireSessionToStore(session, store)
       restored++

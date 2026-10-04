@@ -167,6 +167,48 @@ describe("connectSshFromDock", () => {
  * is what ADR-0082 describes. Three UI gates are what made SSH look
  * desktop-only.
  */
+/**
+ * A desktop driving a remote Cognia host prefers the `ws` transport for every
+ * terminal, but its SSH profiles, jump chains and keyring entries are all on
+ * this machine. Sending the id to the remote host matched that host's own
+ * `ssh-N` profile, which can be a different server entirely.
+ */
+describe("connectSshFromDock, on a desktop driving a remote host", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("dials from this desktop with the full request, never through the host", async () => {
+    const connect = jest.fn(async () => ({
+      info: {
+        id: "local-ssh",
+        projectId: null,
+        extensionId: null,
+        origin: "local" as const,
+        shell: "ssh deploy@prod.example.com",
+      },
+      hostKeyStatus: "verified" as const,
+      hostKeyFingerprint: "SHA256:xyz",
+    }))
+    const result = await connectSshFromDock({
+      profile,
+      allProfiles: [profile],
+      rows: 24,
+      cols: 80,
+      store: store(),
+      connect: connect as never,
+      transportChain: REMOTE,
+      dialsLocally: () => true,
+    })
+
+    expect(spawnFromDock).not.toHaveBeenCalled()
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: "ssh-1", host: "prod.example.com" })
+    )
+    expect(result).toMatchObject({ kind: "connected", hostKeyStatus: "verified" })
+  })
+})
+
 describe("connectSshFromDock, through the host", () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -331,7 +373,56 @@ describe("resolveSshHostLaunch", () => {
     expect(resolveSshHostLaunch("ssh-1", [{ ...profile, credentialRef: undefined }])).toEqual({
       kind: "credentialRequired",
       name: "Production",
+      hostId: "ssh-1",
+      bastion: null,
     })
+  })
+
+  it("names a bastion that has no stored password, not the target", () => {
+    // The target is ready, but the hop in front of it is a password host with
+    // nothing in the keyring. Passing it as ready used to end in the native
+    // "SSH password credential is missing", naming nobody.
+    const bastion: SshHostProfile = {
+      ...profile,
+      id: "ssh-2",
+      name: "Bastion",
+      host: "jump.example.com",
+      credentialRef: undefined,
+    }
+    const target: SshHostProfile = { ...profile, authMethod: "agent", jumpHostId: "ssh-2" }
+    expect(resolveSshHostLaunch("ssh-1", [target, bastion])).toEqual({
+      kind: "credentialRequired",
+      name: "Production",
+      hostId: "ssh-2",
+      bastion: { id: "ssh-2", name: "Bastion" },
+    })
+  })
+
+  it("reports the target before a bastion when both lack a credential", () => {
+    const bastion: SshHostProfile = {
+      ...profile,
+      id: "ssh-2",
+      name: "Bastion",
+      credentialRef: undefined,
+    }
+    const target: SshHostProfile = { ...profile, credentialRef: undefined, jumpHostId: "ssh-2" }
+    expect(resolveSshHostLaunch("ssh-1", [target, bastion])).toMatchObject({
+      kind: "credentialRequired",
+      hostId: "ssh-1",
+      bastion: null,
+    })
+  })
+
+  it("refuses a chain that cannot be walked instead of calling it ready", () => {
+    const missing: SshHostProfile = { ...profile, jumpHostId: "ssh-404" }
+    expect(resolveSshHostLaunch("ssh-1", [missing])).toEqual({
+      kind: "chainBroken",
+      name: "Production",
+      hostId: "ssh-1",
+    })
+    const a: SshHostProfile = { ...profile, id: "a", jumpHostId: "b" }
+    const b: SshHostProfile = { ...profile, id: "b", jumpHostId: "a" }
+    expect(resolveSshHostLaunch("a", [a, b])).toMatchObject({ kind: "chainBroken" })
   })
 
   it("launches key and agent hosts that hold no credential", () => {

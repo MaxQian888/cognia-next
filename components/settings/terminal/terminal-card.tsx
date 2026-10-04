@@ -13,6 +13,11 @@
  * settings list stays scannable — mirrors how VS Code buckets terminal
  * settings. Every control keeps a stable `data-testid`, so grouping is purely
  * presentational.
+ *
+ * `panel` renders one group alone, for the Settings → Terminal master/detail
+ * pane, which names each group in its rail and draws the heading itself. With
+ * no `panel` the card is the whole list, as before (Storybook and the tests
+ * that cover every control at once).
  */
 
 import type { ReactNode } from "react"
@@ -224,19 +229,42 @@ const SHELL_PRESETS: Array<{ value: string; labelKey: string }> = [
   { value: CUSTOM, labelKey: "settings.terminal.shell.custom" },
 ]
 
-/** Labeled section header — groups the long settings list for scannability. */
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** The groups `TerminalCard` can render alone. */
+export type TerminalCardPanel =
+  "appearance" | "shell" | "behavior" | "productivity" | "ai" | "host" | "agents"
+
+/**
+ * Labeled section header — groups the long settings list for scannability.
+ * `bare` drops the heading when the group is shown alone under a pane that
+ * already names it, so the title is not printed twice.
+ */
+function Section({
+  title,
+  bare = false,
+  children,
+}: {
+  title: string
+  bare?: boolean
+  children: ReactNode
+}) {
   return (
     <section className="space-y-4">
-      <h3 className="border-b pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h3>
+      {bare ? null : (
+        <h3 className="border-b pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h3>
+      )}
       {children}
     </section>
   )
 }
 
-export function TerminalCard() {
+export interface TerminalCardProps {
+  /** Render one group alone; omit for the whole card. */
+  panel?: TerminalCardPanel
+}
+
+export function TerminalCard({ panel }: TerminalCardProps) {
   const t = useTranslations()
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
@@ -321,6 +349,10 @@ export function TerminalCard() {
     return w
   }
 
+  /** Whether a group is drawn: all of them for the full card, one for a panel. */
+  const shows = (group: TerminalCardPanel): boolean => panel === undefined || panel === group
+  const bare = panel !== undefined
+
   const currentShellValue = !terminal.defaultShell
     ? AUTO
     : SHELL_PRESETS.find(
@@ -331,941 +363,971 @@ export function TerminalCard() {
 
   return (
     <div className="space-y-6">
-      <Section title={t("settings.terminal.groups.appearance")}>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.fontFamily.label")}</Label>
-            {/* Quick-pick from monospace fonts detected on this device. Writes
-                into the same `fontFamily` value as the text input below, which
-                stays for custom stacks / the Nerd Font preset. */}
-            <FontFamilyPicker
-              namespace="settings.terminal.fontFamily"
-              labelKey="pickerLabel"
-              hintKey="pickerHint"
-              monoOnly
-              value={terminal.fontFamily || undefined}
-              onChange={(next) => update({ fontFamily: next ?? "" })}
-            />
-            {/* Commit-on-blur: a font stack typed one character at a time would
-                otherwise be persisted (and pushed into the live terminal) in
-                broken intermediate states. */}
-            <DeferredTextInput
-              value={terminal.fontFamily ?? ""}
-              placeholder={
-                /* i18n-exempt: example font stack, not translatable UI */ '"JetBrains Mono", monospace'
-              }
-              onCommit={(next) => update({ fontFamily: next })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.fontFamily.label")}
-              data-testid="terminal-card-font-family"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.fontSize.label")}</Label>
-            <ClampedNumberInput
-              min={FONT_SIZE_RANGE.min}
-              max={FONT_SIZE_RANGE.max}
-              integer
-              value={terminal.fontSize ?? DEFAULT_VALUES.fontSize!}
-              onCommit={(fontSize) => update({ fontSize })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.fontSize.label")}
-              data-testid="terminal-card-font-size"
-            />
-          </div>
-        </div>
-
-        <TerminalFontPreview
-          fontFamily={terminal.fontFamily || undefined}
-          fontSize={terminal.fontSize ?? DEFAULT_VALUES.fontSize!}
-          fontWeight={terminal.fontWeight ?? "normal"}
-          lineHeight={terminal.lineHeight ?? 1}
-          letterSpacing={terminal.letterSpacing ?? 0}
-          colorScheme={terminal.colorScheme}
-        />
-        {terminal.fontSize !== DEFAULT_VALUES.fontSize || terminal.fontFamily ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            onClick={() =>
-              update({ fontFamily: "", fontSize: DEFAULT_VALUES.fontSize, fontWeight: "normal" })
-            }
-            data-testid="terminal-card-reset-font"
-          >
-            {t("settings.terminal.fontFamily.reset")}
-          </Button>
-        ) : null}
-
-        <div className="space-y-1.5">
-          <p className="text-[11px] text-muted-foreground">
-            {t("settings.terminal.fontFamily.nerdFontHelper")}
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => update({ fontFamily: NERD_FONT_STACK })}
-            data-testid="terminal-card-use-nerd-font"
-          >
-            {t("settings.terminal.fontFamily.useNerdFont")}
-          </Button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.fontWeight.label")}</Label>
-            <Select
-              value={terminal.fontWeight ?? "normal"}
-              onValueChange={(value) => update({ fontWeight: value as FontWeightOption })}
-            >
-              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-font-weight">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FONT_WEIGHTS.map((w) => (
-                  <SelectItem key={w} value={w} className="text-xs">
-                    {weightLabel(w)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.fontWeightBold.label")}</Label>
-            <Select
-              value={terminal.fontWeightBold ?? "bold"}
-              onValueChange={(value) => update({ fontWeightBold: value as FontWeightOption })}
-            >
-              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-font-weight-bold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FONT_WEIGHTS.map((w) => (
-                  <SelectItem key={w} value={w} className="text-xs">
-                    {weightLabel(w)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.lineHeight.label")}</Label>
-            <ClampedNumberInput
-              min={0.8}
-              max={2}
-              step={0.05}
-              value={terminal.lineHeight ?? 1}
-              onCommit={(lineHeight) => update({ lineHeight })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.lineHeight.label")}
-              data-testid="terminal-card-line-height"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.letterSpacing.label")}</Label>
-            <ClampedNumberInput
-              min={-2}
-              max={8}
-              step={0.5}
-              value={terminal.letterSpacing ?? 0}
-              onCommit={(letterSpacing) => update({ letterSpacing })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.letterSpacing.label")}
-              data-testid="terminal-card-letter-spacing"
-            />
-          </div>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          {t("settings.terminal.lineHeight.helper")}
-        </p>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.cursor.label")}</Label>
-            <Select
-              value={terminal.cursorStyle ?? "block"}
-              onValueChange={(value) =>
-                update({ cursorStyle: value as "block" | "bar" | "underline" })
-              }
-            >
-              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-cursor-style">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CURSOR_STYLES.map((style) => (
-                  <SelectItem key={style} value={style} className="text-xs">
-                    {t(`settings.terminal.cursor.${style}` as never)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-end justify-between rounded border p-3">
-            <Label className="text-xs">{t("settings.terminal.cursor.blink")}</Label>
-            <Switch
-              checked={terminal.cursorBlink ?? true}
-              onCheckedChange={(checked) => update({ cursorBlink: checked })}
-              aria-label={t("settings.terminal.cursor.blink")}
-              data-testid="terminal-card-cursor-blink"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.cursor.width")}</Label>
-            <ClampedNumberInput
-              min={1}
-              max={10}
-              step={1}
-              integer
-              value={terminal.cursorWidth ?? 1}
-              onCommit={(cursorWidth) => update({ cursorWidth })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.cursor.width")}
-              data-testid="terminal-card-cursor-width"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.cursor.inactiveLabel")}</Label>
-            <Select
-              value={terminal.cursorInactiveStyle ?? "outline"}
-              onValueChange={(value) =>
-                update({
-                  cursorInactiveStyle: value as "outline" | "block" | "bar" | "underline" | "none",
-                })
-              }
-            >
-              <SelectTrigger
+      {shows("appearance") ? (
+        <Section title={t("settings.terminal.groups.appearance")} bare={bare}>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.fontFamily.label")}</Label>
+              {/* Quick-pick from monospace fonts detected on this device. Writes
+                  into the same `fontFamily` value as the text input below, which
+                  stays for custom stacks / the Nerd Font preset. */}
+              <FontFamilyPicker
+                namespace="settings.terminal.fontFamily"
+                labelKey="pickerLabel"
+                hintKey="pickerHint"
+                monoOnly
+                value={terminal.fontFamily || undefined}
+                onChange={(next) => update({ fontFamily: next ?? "" })}
+              />
+              {/* Commit-on-blur: a font stack typed one character at a time would
+                  otherwise be persisted (and pushed into the live terminal) in
+                  broken intermediate states. */}
+              <DeferredTextInput
+                value={terminal.fontFamily ?? ""}
+                placeholder={
+                  /* i18n-exempt: example font stack, not translatable UI */ '"JetBrains Mono", monospace'
+                }
+                onCommit={(next) => update({ fontFamily: next })}
                 className="h-8 text-xs"
-                data-testid="terminal-card-cursor-inactive-style"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {INACTIVE_CURSOR_STYLES.map((style) => (
-                  <SelectItem key={style.value} value={style.value} className="text-xs">
-                    {t(style.labelKey as never)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                aria-label={t("settings.terminal.fontFamily.label")}
+                data-testid="terminal-card-font-family"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.fontSize.label")}</Label>
+              <ClampedNumberInput
+                min={FONT_SIZE_RANGE.min}
+                max={FONT_SIZE_RANGE.max}
+                integer
+                value={terminal.fontSize ?? DEFAULT_VALUES.fontSize!}
+                onCommit={(fontSize) => update({ fontSize })}
+                className="h-8 text-xs"
+                aria-label={t("settings.terminal.fontSize.label")}
+                data-testid="terminal-card-font-size"
+              />
+            </div>
           </div>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          {t("settings.terminal.cursor.widthHelper")}
-        </p>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.colorScheme.label")}</Label>
-            <Select
-              value={terminal.colorScheme || AUTO_SCHEME_ID}
-              onValueChange={(value) => update({ colorScheme: value })}
+          <TerminalFontPreview
+            fontFamily={terminal.fontFamily || undefined}
+            fontSize={terminal.fontSize ?? DEFAULT_VALUES.fontSize!}
+            fontWeight={terminal.fontWeight ?? "normal"}
+            lineHeight={terminal.lineHeight ?? 1}
+            letterSpacing={terminal.letterSpacing ?? 0}
+            colorScheme={terminal.colorScheme}
+          />
+          {terminal.fontSize !== DEFAULT_VALUES.fontSize || terminal.fontFamily ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() =>
+                update({ fontFamily: "", fontSize: DEFAULT_VALUES.fontSize, fontWeight: "normal" })
+              }
+              data-testid="terminal-card-reset-font"
             >
-              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-color-scheme">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={AUTO_SCHEME_ID} className="text-xs">
-                  {t("settings.terminal.colorScheme.auto")}
-                </SelectItem>
-                <SelectGroup>
-                  <SelectLabel className="text-[11px]">
-                    {t("settings.terminal.colorScheme.darkGroup")}
-                  </SelectLabel>
-                  {DARK_SCHEMES.map((scheme) => (
-                    <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
-                      <SchemeSwatch scheme={scheme} />
-                      {scheme.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel className="text-[11px]">
-                    {t("settings.terminal.colorScheme.lightGroup")}
-                  </SelectLabel>
-                  {LIGHT_SCHEMES.map((scheme) => (
-                    <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
-                      <SchemeSwatch scheme={scheme} />
-                      {scheme.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.renderer.label")}</Label>
-            <Select
-              value={terminal.renderer ?? "auto"}
-              onValueChange={(value) =>
-                update({ renderer: value as "auto" | "webgl" | "canvas" | "dom" })
-              }
-            >
-              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-renderer">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {RENDERERS.map((r) => (
-                  <SelectItem key={r} value={r} className="text-xs">
-                    {t(`settings.terminal.renderer.${r}` as never)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          {t("settings.terminal.renderer.helper")}
-        </p>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.ligatures.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.ligatures.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.fontLigatures ?? false}
-            onCheckedChange={(checked) => update({ fontLigatures: checked })}
-            aria-label={t("settings.terminal.ligatures.label")}
-            data-testid="terminal-card-ligatures"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.customGlyphs.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.customGlyphs.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.customGlyphs ?? true}
-            onCheckedChange={(checked) => update({ customGlyphs: checked })}
-            aria-label={t("settings.terminal.customGlyphs.label")}
-            data-testid="terminal-card-custom-glyphs"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">
-              {t("settings.terminal.rescaleOverlappingGlyphs.label")}
-            </Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.rescaleOverlappingGlyphs.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.rescaleOverlappingGlyphs ?? true}
-            onCheckedChange={(checked) => update({ rescaleOverlappingGlyphs: checked })}
-            aria-label={t("settings.terminal.rescaleOverlappingGlyphs.label")}
-            data-testid="terminal-card-rescale-overlapping-glyphs"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.boldBrightColors.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.boldBrightColors.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.drawBoldTextInBrightColors ?? true}
-            onCheckedChange={(checked) => update({ drawBoldTextInBrightColors: checked })}
-            aria-label={t("settings.terminal.boldBrightColors.label")}
-            data-testid="terminal-card-bold-bright-colors"
-          />
-        </div>
-      </Section>
-
-      <Section title={t("settings.terminal.groups.shell")}>
-        <div className="space-y-2">
-          <Label className="text-xs">{t("settings.terminal.shell.label")}</Label>
-          <Select
-            value={currentShellValue}
-            onValueChange={(value) => {
-              if (value === AUTO) {
-                update({ defaultShell: "" })
-              } else if (value === CUSTOM) {
-                if (!terminal.defaultShell) update({ defaultShell: "/bin/sh" })
-              } else {
-                update({ defaultShell: value })
-              }
-            }}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder={t("settings.terminal.shell.auto")} />
-            </SelectTrigger>
-            <SelectContent>
-              {SHELL_PRESETS.map((p) => (
-                <SelectItem key={p.value} value={p.value} className="text-xs">
-                  {t(p.labelKey as never)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {currentShellValue === CUSTOM ? (
-            <DeferredTextInput
-              value={terminal.defaultShell ?? ""}
-              placeholder={
-                /* i18n-exempt: example shell path, not translatable UI */ "/usr/local/bin/fish"
-              }
-              onCommit={(defaultShell) => update({ defaultShell })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.shell.customLabel")}
-            />
+              {t("settings.terminal.fontFamily.reset")}
+            </Button>
           ) : null}
-          <p className="text-[11px] text-muted-foreground">{t("settings.terminal.shell.helper")}</p>
-        </div>
 
-        <div className="space-y-2">
-          <Label className="text-xs">{t("settings.terminal.scrollback.label")}</Label>
-          <ClampedNumberInput
-            min={1000}
-            max={100000}
-            step={1000}
-            integer
-            value={terminal.scrollback ?? DEFAULT_VALUES.scrollback!}
-            onCommit={(scrollback) => update({ scrollback })}
-            className="h-8 text-xs"
-            aria-label={t("settings.terminal.scrollback.label")}
-            data-testid="terminal-card-scrollback"
-          />
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.fontFamily.nerdFontHelper")}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => update({ fontFamily: NERD_FONT_STACK })}
+              data-testid="terminal-card-use-nerd-font"
+            >
+              {t("settings.terminal.fontFamily.useNerdFont")}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.fontWeight.label")}</Label>
+              <Select
+                value={terminal.fontWeight ?? "normal"}
+                onValueChange={(value) => update({ fontWeight: value as FontWeightOption })}
+              >
+                <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-font-weight">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FONT_WEIGHTS.map((w) => (
+                    <SelectItem key={w} value={w} className="text-xs">
+                      {weightLabel(w)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.fontWeightBold.label")}</Label>
+              <Select
+                value={terminal.fontWeightBold ?? "bold"}
+                onValueChange={(value) => update({ fontWeightBold: value as FontWeightOption })}
+              >
+                <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-font-weight-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FONT_WEIGHTS.map((w) => (
+                    <SelectItem key={w} value={w} className="text-xs">
+                      {weightLabel(w)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.lineHeight.label")}</Label>
+              <ClampedNumberInput
+                min={0.8}
+                max={2}
+                step={0.05}
+                value={terminal.lineHeight ?? 1}
+                onCommit={(lineHeight) => update({ lineHeight })}
+                className="h-8 text-xs"
+                aria-label={t("settings.terminal.lineHeight.label")}
+                data-testid="terminal-card-line-height"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.letterSpacing.label")}</Label>
+              <ClampedNumberInput
+                min={-2}
+                max={8}
+                step={0.5}
+                value={terminal.letterSpacing ?? 0}
+                onCommit={(letterSpacing) => update({ letterSpacing })}
+                className="h-8 text-xs"
+                aria-label={t("settings.terminal.letterSpacing.label")}
+                data-testid="terminal-card-letter-spacing"
+              />
+            </div>
+          </div>
           <p className="text-[11px] text-muted-foreground">
-            {t("settings.terminal.scrollback.helper")}
+            {t("settings.terminal.lineHeight.helper")}
           </p>
-        </div>
 
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.shellIntegration.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.shellIntegration.helper")}
-            </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.cursor.label")}</Label>
+              <Select
+                value={terminal.cursorStyle ?? "block"}
+                onValueChange={(value) =>
+                  update({ cursorStyle: value as "block" | "bar" | "underline" })
+                }
+              >
+                <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-cursor-style">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURSOR_STYLES.map((style) => (
+                    <SelectItem key={style} value={style} className="text-xs">
+                      {t(`settings.terminal.cursor.${style}` as never)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end justify-between rounded border p-3">
+              <Label className="text-xs">{t("settings.terminal.cursor.blink")}</Label>
+              <Switch
+                checked={terminal.cursorBlink ?? true}
+                onCheckedChange={(checked) => update({ cursorBlink: checked })}
+                aria-label={t("settings.terminal.cursor.blink")}
+                data-testid="terminal-card-cursor-blink"
+              />
+            </div>
           </div>
-          <Switch
-            checked={terminal.enableShellIntegration ?? true}
-            onCheckedChange={(checked) => update({ enableShellIntegration: checked })}
-            aria-label={t("settings.terminal.shellIntegration.label")}
-          />
-        </div>
 
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.forceUtf8.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.forceUtf8.helper")}
-            </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.cursor.width")}</Label>
+              <ClampedNumberInput
+                min={1}
+                max={10}
+                step={1}
+                integer
+                value={terminal.cursorWidth ?? 1}
+                onCommit={(cursorWidth) => update({ cursorWidth })}
+                className="h-8 text-xs"
+                aria-label={t("settings.terminal.cursor.width")}
+                data-testid="terminal-card-cursor-width"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.cursor.inactiveLabel")}</Label>
+              <Select
+                value={terminal.cursorInactiveStyle ?? "outline"}
+                onValueChange={(value) =>
+                  update({
+                    cursorInactiveStyle: value as
+                      "outline" | "block" | "bar" | "underline" | "none",
+                  })
+                }
+              >
+                <SelectTrigger
+                  className="h-8 text-xs"
+                  data-testid="terminal-card-cursor-inactive-style"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INACTIVE_CURSOR_STYLES.map((style) => (
+                    <SelectItem key={style.value} value={style.value} className="text-xs">
+                      {t(style.labelKey as never)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <Switch
-            checked={terminal.forceUtf8 ?? true}
-            onCheckedChange={(checked) => update({ forceUtf8: checked })}
-            aria-label={t("settings.terminal.forceUtf8.label")}
-            data-testid="terminal-card-force-utf8"
-          />
-        </div>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.cursor.widthHelper")}
+          </p>
 
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.sandboxed.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.sandboxed.helper")}
-            </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.colorScheme.label")}</Label>
+              <Select
+                value={terminal.colorScheme || AUTO_SCHEME_ID}
+                onValueChange={(value) => update({ colorScheme: value })}
+              >
+                <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-color-scheme">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO_SCHEME_ID} className="text-xs">
+                    {t("settings.terminal.colorScheme.auto")}
+                  </SelectItem>
+                  <SelectGroup>
+                    <SelectLabel className="text-[11px]">
+                      {t("settings.terminal.colorScheme.darkGroup")}
+                    </SelectLabel>
+                    {DARK_SCHEMES.map((scheme) => (
+                      <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
+                        <SchemeSwatch scheme={scheme} />
+                        {scheme.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel className="text-[11px]">
+                      {t("settings.terminal.colorScheme.lightGroup")}
+                    </SelectLabel>
+                    {LIGHT_SCHEMES.map((scheme) => (
+                      <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
+                        <SchemeSwatch scheme={scheme} />
+                        {scheme.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.renderer.label")}</Label>
+              <Select
+                value={terminal.renderer ?? "auto"}
+                onValueChange={(value) =>
+                  update({ renderer: value as "auto" | "webgl" | "canvas" | "dom" })
+                }
+              >
+                <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-renderer">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RENDERERS.map((r) => (
+                    <SelectItem key={r} value={r} className="text-xs">
+                      {t(`settings.terminal.renderer.${r}` as never)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <Switch
-            checked={terminal.sandboxed ?? false}
-            onCheckedChange={(checked) => update({ sandboxed: checked })}
-            aria-label={t("settings.terminal.sandboxed.label")}
-            data-testid="terminal-card-sandboxed"
-          />
-        </div>
-      </Section>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.renderer.helper")}
+          </p>
 
-      <Section title={t("settings.terminal.groups.behavior")}>
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.copyOnSelect.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.copyOnSelect.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.copyOnSelect ?? false}
-            onCheckedChange={(checked) => update({ copyOnSelect: checked })}
-            aria-label={t("settings.terminal.copyOnSelect.label")}
-            data-testid="terminal-card-copy-on-select"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-xs">{t("settings.terminal.bell.label")}</Label>
-          <Select
-            value={terminal.bell ?? "none"}
-            onValueChange={(value) =>
-              update({ bell: value as "none" | "visual" | "sound" | "both" })
-            }
-          >
-            <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-bell">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {BELL_STYLES.map((b) => (
-                <SelectItem key={b} value={b} className="text-xs">
-                  {t(`settings.terminal.bell.${b}` as never)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-[11px] text-muted-foreground">{t("settings.terminal.bell.helper")}</p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.scrollSensitivity.label")}</Label>
-            <ClampedNumberInput
-              min={1}
-              max={10}
-              step={1}
-              integer
-              value={terminal.scrollSensitivity ?? 1}
-              onCommit={(scrollSensitivity) => update({ scrollSensitivity })}
-              className="h-8 text-xs"
-              aria-label={t("settings.terminal.scrollSensitivity.label")}
-              data-testid="terminal-card-scroll-sensitivity"
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.ligatures.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.ligatures.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.fontLigatures ?? false}
+              onCheckedChange={(checked) => update({ fontLigatures: checked })}
+              aria-label={t("settings.terminal.ligatures.label")}
+              data-testid="terminal-card-ligatures"
             />
           </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.customGlyphs.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.customGlyphs.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.customGlyphs ?? true}
+              onCheckedChange={(checked) => update({ customGlyphs: checked })}
+              aria-label={t("settings.terminal.customGlyphs.label")}
+              data-testid="terminal-card-custom-glyphs"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">
+                {t("settings.terminal.rescaleOverlappingGlyphs.label")}
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.rescaleOverlappingGlyphs.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.rescaleOverlappingGlyphs ?? true}
+              onCheckedChange={(checked) => update({ rescaleOverlappingGlyphs: checked })}
+              aria-label={t("settings.terminal.rescaleOverlappingGlyphs.label")}
+              data-testid="terminal-card-rescale-overlapping-glyphs"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.boldBrightColors.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.boldBrightColors.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.drawBoldTextInBrightColors ?? true}
+              onCheckedChange={(checked) => update({ drawBoldTextInBrightColors: checked })}
+              aria-label={t("settings.terminal.boldBrightColors.label")}
+              data-testid="terminal-card-bold-bright-colors"
+            />
+          </div>
+        </Section>
+      ) : null}
+
+      {shows("shell") ? (
+        <Section title={t("settings.terminal.groups.shell")} bare={bare}>
           <div className="space-y-2">
-            <Label className="text-xs">{t("settings.terminal.minContrast.label")}</Label>
+            <Label className="text-xs">{t("settings.terminal.shell.label")}</Label>
             <Select
-              value={String(terminal.minimumContrastRatio ?? 1)}
-              onValueChange={(value) => update({ minimumContrastRatio: Number(value) })}
+              value={currentShellValue}
+              onValueChange={(value) => {
+                if (value === AUTO) {
+                  update({ defaultShell: "" })
+                } else if (value === CUSTOM) {
+                  if (!terminal.defaultShell) update({ defaultShell: "/bin/sh" })
+                } else {
+                  update({ defaultShell: value })
+                }
+              }}
             >
-              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-min-contrast">
-                <SelectValue />
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder={t("settings.terminal.shell.auto")} />
               </SelectTrigger>
               <SelectContent>
-                {CONTRAST_PRESETS.map((p) => (
-                  <SelectItem key={p.value} value={String(p.value)} className="text-xs">
+                {SHELL_PRESETS.map((p) => (
+                  <SelectItem key={p.value} value={p.value} className="text-xs">
                     {t(p.labelKey as never)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          {t("settings.terminal.minContrast.helper")}
-        </p>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.smoothScrolling.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.smoothScrolling.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.smoothScrolling ?? false}
-            onCheckedChange={(checked) => update({ smoothScrolling: checked })}
-            aria-label={t("settings.terminal.smoothScrolling.label")}
-            data-testid="terminal-card-smooth-scrolling"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.confirmOnClose.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.confirmOnClose.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.confirmOnClose ?? true}
-            onCheckedChange={(checked) => update({ confirmOnClose: checked })}
-            aria-label={t("settings.terminal.confirmOnClose.label")}
-            data-testid="terminal-card-confirm-on-close"
-          />
-        </div>
-      </Section>
-
-      <Section title={t("settings.terminal.groups.productivity")}>
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.quickFixes.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.quickFixes.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.quickFixes ?? true}
-            onCheckedChange={(checked) => update({ quickFixes: checked })}
-            aria-label={t("settings.terminal.quickFixes.label")}
-            data-testid="terminal-card-quick-fixes"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.commandActions.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.commandActions.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.commandActions ?? true}
-            onCheckedChange={(checked) => update({ commandActions: checked })}
-            aria-label={t("settings.terminal.commandActions.label")}
-            data-testid="terminal-card-command-actions"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.stickyScroll.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.stickyScroll.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.stickyScroll ?? true}
-            onCheckedChange={(checked) => update({ stickyScroll: checked })}
-            aria-label={t("settings.terminal.stickyScroll.label")}
-            data-testid="terminal-card-sticky-scroll"
-          />
-        </div>
-      </Section>
-
-      <Section title={t("settings.terminal.groups.ai")}>
-        <div className="space-y-3 rounded border p-3">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">{t("settings.terminal.autocomplete.label")}</Label>
-              <p className="text-[11px] text-muted-foreground">
-                {t("settings.terminal.autocomplete.helper")}
-              </p>
-            </div>
-            <Switch
-              checked={autocomplete.enabled ?? false}
-              onCheckedChange={(checked) =>
-                update({ autocomplete: { ...autocomplete, enabled: checked } })
-              }
-              aria-label={t("settings.terminal.autocomplete.label")}
-              data-testid="terminal-card-autocomplete-enabled"
-            />
-          </div>
-
-          {autocomplete.enabled ? (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label className="text-xs">
-                    {t("settings.terminal.autocomplete.source.label")}
-                  </Label>
-                  <Select
-                    value={autocomplete.source ?? "both"}
-                    onValueChange={(value) =>
-                      update({
-                        autocomplete: {
-                          ...autocomplete,
-                          source: value as "both" | "ai" | "history",
-                        },
-                      })
-                    }
-                  >
-                    <SelectTrigger
-                      className="h-8 text-xs"
-                      data-testid="terminal-card-autocomplete-source"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {AUTOCOMPLETE_SOURCES.map((s) => (
-                        <SelectItem key={s} value={s} className="text-xs">
-                          {t(`settings.terminal.autocomplete.source.${s}` as never)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs" htmlFor="terminal-card-autocomplete-debounce">
-                    {t("settings.terminal.autocomplete.debounce.label")}
-                  </Label>
-                  <ClampedNumberInput
-                    id="terminal-card-autocomplete-debounce"
-                    min={50}
-                    max={2000}
-                    step={50}
-                    integer
-                    value={autocomplete.debounceMs ?? 350}
-                    onCommit={(debounceMs) =>
-                      update({ autocomplete: { ...autocomplete, debounceMs } })
-                    }
-                    className="h-8 text-xs"
-                    aria-label={t("settings.terminal.autocomplete.debounce.label")}
-                    data-testid="terminal-card-autocomplete-debounce"
-                  />
-                </div>
-              </div>
-              {/* One per row below sm: each cell pairs a label ("Command names",
-                  "File paths") with a ~32px switch, and a third of a phone-width
-                  settings pane leaves the label about 50px — not enough to
-                  shrink into, so the row overflowed its border. */}
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
-                {(["path", "exe", "spec"] as const).map((key) => (
-                  <div key={key} className="flex items-center justify-between rounded border p-2">
-                    <Label className="min-w-0 text-xs">
-                      {t(`settings.terminal.autocomplete.${key}.label` as never)}
-                    </Label>
-                    <Switch
-                      checked={autocomplete[key] ?? true}
-                      onCheckedChange={(checked) =>
-                        update({ autocomplete: { ...autocomplete, [key]: checked } })
-                      }
-                      aria-label={t(`settings.terminal.autocomplete.${key}.label` as never)}
-                      data-testid={`terminal-card-autocomplete-${key}`}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex items-center justify-between rounded border p-3">
-                <div className="space-y-0.5">
-                  <Label className="text-xs">
-                    {t("settings.terminal.autocomplete.popup.label")}
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("settings.terminal.autocomplete.popup.helper")}
-                  </p>
-                </div>
-                <Switch
-                  checked={autocomplete.popup ?? true}
-                  onCheckedChange={(checked) =>
-                    update({ autocomplete: { ...autocomplete, popup: checked } })
-                  }
-                  aria-label={t("settings.terminal.autocomplete.popup.label")}
-                  data-testid="terminal-card-autocomplete-popup"
-                />
-              </div>
-
-              <div className="flex items-center justify-between rounded border p-3">
-                <div className="space-y-0.5">
-                  <Label className="text-xs">
-                    {t("settings.terminal.autocomplete.persistHistory.label")}
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("settings.terminal.autocomplete.persistHistory.helper")}
-                  </p>
-                </div>
-                <Switch
-                  checked={autocomplete.persistHistory ?? true}
-                  onCheckedChange={(checked) =>
-                    update({ autocomplete: { ...autocomplete, persistHistory: checked } })
-                  }
-                  aria-label={t("settings.terminal.autocomplete.persistHistory.label")}
-                  data-testid="terminal-card-autocomplete-persist-history"
-                />
-              </div>
-
-              <p className="text-[11px] text-muted-foreground">
-                {t("settings.terminal.autocomplete.privacy")}
-              </p>
-            </>
-          ) : null}
-        </div>
-      </Section>
-
-      <Section title={t("settings.terminal.groups.host")}>
-        {/* Every control below configures the terminal HOST. Without one to
-            configure they would write a local mirror nobody reads — the exact
-            shape of "settings that lie" this card was changed to stop. */}
-        {!hostReachable ? (
-          <p
-            className="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-[11px]"
-            role="status"
-            data-testid="terminal-host-unreachable"
-          >
-            {t("settings.terminal.host.unreachable")}
-          </p>
-        ) : null}
-        <fieldset disabled={!hostReachable} className="space-y-3 disabled:opacity-60">
-          <div className="grid gap-3 md:grid-cols-3">
-            {(
-              [
-                ["allowRemoteAccess", "remoteAccess"],
-                ["startAtLogin", "startAtLogin"],
-                ["diagnostics", "diagnostics"],
-              ] as const
-            ).map(([key, message]) => (
-              <div key={key} className="flex items-center justify-between gap-3 rounded border p-3">
-                <div className="space-y-0.5">
-                  <Label className="text-xs">{t(`settings.terminal.host.${message}.label`)}</Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t(`settings.terminal.host.${message}.helper`)}
-                  </p>
-                </div>
-                <Switch
-                  checked={terminal.host?.[key] ?? DEFAULT_HOST_SETTINGS[key]}
-                  onCheckedChange={(checked) => void updateHost({ [key]: checked })}
-                  aria-label={t(`settings.terminal.host.${message}.label`)}
-                  data-testid={`terminal-host-${key}`}
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <HostNumberSetting
-              id="max-sessions"
-              label={t("settings.terminal.host.maxSessions.label")}
-              helper={t("settings.terminal.host.maxSessions.helper")}
-              value={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
-              min={1}
-              max={256}
-              onCommit={(maxSessions) => void updateHost({ maxSessions })}
-            />
-            <HostNumberSetting
-              id="max-remote-sessions"
-              label={t("settings.terminal.host.maxRemoteSessions.label")}
-              helper={t("settings.terminal.host.maxRemoteSessions.helper")}
-              value={
-                terminal.host?.maxRemoteSessionsPerDevice ??
-                DEFAULT_HOST_SETTINGS.maxRemoteSessionsPerDevice
-              }
-              min={1}
-              max={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
-              onCommit={(maxRemoteSessionsPerDevice) =>
-                void updateHost({ maxRemoteSessionsPerDevice })
-              }
-            />
-            <HostNumberSetting
-              id="replay-per-session"
-              label={t("settings.terminal.host.replayPerSession.label")}
-              helper={t("settings.terminal.host.replayPerSession.helper")}
-              value={
-                (terminal.host?.replayBytesPerSession ??
-                  DEFAULT_HOST_SETTINGS.replayBytesPerSession) / MIB
-              }
-              min={1}
-              max={64}
-              onCommit={(value) => void updateHost({ replayBytesPerSession: value * MIB })}
-            />
-            <HostNumberSetting
-              id="replay-total"
-              label={t("settings.terminal.host.replayTotal.label")}
-              helper={t("settings.terminal.host.replayTotal.helper")}
-              value={
-                (terminal.host?.totalReplayBytes ?? DEFAULT_HOST_SETTINGS.totalReplayBytes) / MIB
-              }
-              min={1}
-              max={1024}
-              onCommit={(value) => void updateHost({ totalReplayBytes: value * MIB })}
-            />
-          </div>
-        </fieldset>
-      </Section>
-
-      <Section title={t("settings.terminal.groups.agents")}>
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs">{t("settings.terminal.exposeDockToAgents.label")}</Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.exposeDockToAgents.helper")}
-            </p>
-          </div>
-          <Switch
-            checked={terminal.exposeDockToAgents ?? false}
-            onCheckedChange={(checked) => update({ exposeDockToAgents: checked })}
-            aria-label={t("settings.terminal.exposeDockToAgents.label")}
-            data-testid="terminal-card-expose-to-agents"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded border p-3">
-          <div className="space-y-0.5">
-            <Label className="text-xs" htmlFor="terminal-card-run-in-dock-timeout">
-              {t("settings.terminal.runInDockTimeout.label")}
-            </Label>
-            <p className="text-[11px] text-muted-foreground">
-              {t("settings.terminal.runInDockTimeout.helper")}
-            </p>
-          </div>
-          <ClampedNumberInput
-            id="terminal-card-run-in-dock-timeout"
-            min={5}
-            max={600}
-            integer
-            className="w-24"
-            value={terminal.runInDockTimeoutSec ?? 60}
-            onCommit={(runInDockTimeoutSec) => update({ runInDockTimeoutSec })}
-            aria-label={t("settings.terminal.runInDockTimeout.label")}
-            data-testid="terminal-card-run-in-dock-timeout"
-          />
-        </div>
-
-        <div className="space-y-3 rounded border p-3">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">{t("settings.terminal.unattended.label")}</Label>
-              <p className="text-[11px] text-muted-foreground">
-                {t("settings.terminal.unattended.helper")}
-              </p>
-            </div>
-            <Switch
-              checked={terminal.allowUnattendedExecution ?? false}
-              onCheckedChange={(checked) => update({ allowUnattendedExecution: checked })}
-              aria-label={t("settings.terminal.unattended.label")}
-              data-testid="terminal-card-unattended"
-            />
-          </div>
-
-          {terminal.allowUnattendedExecution ? (
-            <div className="space-y-2">
-              <Label className="text-xs">{t("settings.terminal.unattended.askPolicy.label")}</Label>
-              <Select
-                value={terminal.unattendedAskPolicy ?? "fail"}
-                onValueChange={(value) =>
-                  update({ unattendedAskPolicy: value as "fail" | "consent" | "run" })
+            {currentShellValue === CUSTOM ? (
+              <DeferredTextInput
+                value={terminal.defaultShell ?? ""}
+                placeholder={
+                  /* i18n-exempt: example shell path, not translatable UI */ "/usr/local/bin/fish"
                 }
+                onCommit={(defaultShell) => update({ defaultShell })}
+                className="h-8 text-xs"
+                aria-label={t("settings.terminal.shell.customLabel")}
+              />
+            ) : null}
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.shell.helper")}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs">{t("settings.terminal.scrollback.label")}</Label>
+            <ClampedNumberInput
+              min={1000}
+              max={100000}
+              step={1000}
+              integer
+              value={terminal.scrollback ?? DEFAULT_VALUES.scrollback!}
+              onCommit={(scrollback) => update({ scrollback })}
+              className="h-8 text-xs"
+              aria-label={t("settings.terminal.scrollback.label")}
+              data-testid="terminal-card-scrollback"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.scrollback.helper")}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.shellIntegration.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.shellIntegration.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.enableShellIntegration ?? true}
+              onCheckedChange={(checked) => update({ enableShellIntegration: checked })}
+              aria-label={t("settings.terminal.shellIntegration.label")}
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.forceUtf8.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.forceUtf8.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.forceUtf8 ?? true}
+              onCheckedChange={(checked) => update({ forceUtf8: checked })}
+              aria-label={t("settings.terminal.forceUtf8.label")}
+              data-testid="terminal-card-force-utf8"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.sandboxed.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.sandboxed.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.sandboxed ?? false}
+              onCheckedChange={(checked) => update({ sandboxed: checked })}
+              aria-label={t("settings.terminal.sandboxed.label")}
+              data-testid="terminal-card-sandboxed"
+            />
+          </div>
+        </Section>
+      ) : null}
+
+      {shows("behavior") ? (
+        <Section title={t("settings.terminal.groups.behavior")} bare={bare}>
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.copyOnSelect.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.copyOnSelect.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.copyOnSelect ?? false}
+              onCheckedChange={(checked) => update({ copyOnSelect: checked })}
+              aria-label={t("settings.terminal.copyOnSelect.label")}
+              data-testid="terminal-card-copy-on-select"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs">{t("settings.terminal.bell.label")}</Label>
+            <Select
+              value={terminal.bell ?? "none"}
+              onValueChange={(value) =>
+                update({ bell: value as "none" | "visual" | "sound" | "both" })
+              }
+            >
+              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-bell">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BELL_STYLES.map((b) => (
+                  <SelectItem key={b} value={b} className="text-xs">
+                    {t(`settings.terminal.bell.${b}` as never)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.bell.helper")}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.scrollSensitivity.label")}</Label>
+              <ClampedNumberInput
+                min={1}
+                max={10}
+                step={1}
+                integer
+                value={terminal.scrollSensitivity ?? 1}
+                onCommit={(scrollSensitivity) => update({ scrollSensitivity })}
+                className="h-8 text-xs"
+                aria-label={t("settings.terminal.scrollSensitivity.label")}
+                data-testid="terminal-card-scroll-sensitivity"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">{t("settings.terminal.minContrast.label")}</Label>
+              <Select
+                value={String(terminal.minimumContrastRatio ?? 1)}
+                onValueChange={(value) => update({ minimumContrastRatio: Number(value) })}
               >
-                <SelectTrigger
-                  className="h-8 text-xs"
-                  data-testid="terminal-card-unattended-policy"
-                >
+                <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-min-contrast">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ASK_POLICIES.map((p) => (
-                    <SelectItem key={p} value={p} className="text-xs">
-                      {t(`settings.terminal.unattended.askPolicy.${p}` as never)}
+                  {CONTRAST_PRESETS.map((p) => (
+                    <SelectItem key={p.value} value={String(p.value)} className="text-xs">
+                      {t(p.labelKey as never)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.minContrast.helper")}
+          </p>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.smoothScrolling.label")}</Label>
               <p className="text-[11px] text-muted-foreground">
-                {t("settings.terminal.unattended.askPolicy.helper")}
+                {t("settings.terminal.smoothScrolling.helper")}
               </p>
             </div>
+            <Switch
+              checked={terminal.smoothScrolling ?? false}
+              onCheckedChange={(checked) => update({ smoothScrolling: checked })}
+              aria-label={t("settings.terminal.smoothScrolling.label")}
+              data-testid="terminal-card-smooth-scrolling"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.confirmOnClose.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.confirmOnClose.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.confirmOnClose ?? true}
+              onCheckedChange={(checked) => update({ confirmOnClose: checked })}
+              aria-label={t("settings.terminal.confirmOnClose.label")}
+              data-testid="terminal-card-confirm-on-close"
+            />
+          </div>
+        </Section>
+      ) : null}
+
+      {shows("productivity") ? (
+        <Section title={t("settings.terminal.groups.productivity")} bare={bare}>
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.quickFixes.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.quickFixes.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.quickFixes ?? true}
+              onCheckedChange={(checked) => update({ quickFixes: checked })}
+              aria-label={t("settings.terminal.quickFixes.label")}
+              data-testid="terminal-card-quick-fixes"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.commandActions.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.commandActions.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.commandActions ?? true}
+              onCheckedChange={(checked) => update({ commandActions: checked })}
+              aria-label={t("settings.terminal.commandActions.label")}
+              data-testid="terminal-card-command-actions"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.stickyScroll.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.stickyScroll.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.stickyScroll ?? true}
+              onCheckedChange={(checked) => update({ stickyScroll: checked })}
+              aria-label={t("settings.terminal.stickyScroll.label")}
+              data-testid="terminal-card-sticky-scroll"
+            />
+          </div>
+        </Section>
+      ) : null}
+
+      {shows("ai") ? (
+        <Section title={t("settings.terminal.groups.ai")} bare={bare}>
+          <div className="space-y-3 rounded border p-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">{t("settings.terminal.autocomplete.label")}</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {t("settings.terminal.autocomplete.helper")}
+                </p>
+              </div>
+              <Switch
+                checked={autocomplete.enabled ?? false}
+                onCheckedChange={(checked) =>
+                  update({ autocomplete: { ...autocomplete, enabled: checked } })
+                }
+                aria-label={t("settings.terminal.autocomplete.label")}
+                data-testid="terminal-card-autocomplete-enabled"
+              />
+            </div>
+
+            {autocomplete.enabled ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs">
+                      {t("settings.terminal.autocomplete.source.label")}
+                    </Label>
+                    <Select
+                      value={autocomplete.source ?? "both"}
+                      onValueChange={(value) =>
+                        update({
+                          autocomplete: {
+                            ...autocomplete,
+                            source: value as "both" | "ai" | "history",
+                          },
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        className="h-8 text-xs"
+                        data-testid="terminal-card-autocomplete-source"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {AUTOCOMPLETE_SOURCES.map((s) => (
+                          <SelectItem key={s} value={s} className="text-xs">
+                            {t(`settings.terminal.autocomplete.source.${s}` as never)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs" htmlFor="terminal-card-autocomplete-debounce">
+                      {t("settings.terminal.autocomplete.debounce.label")}
+                    </Label>
+                    <ClampedNumberInput
+                      id="terminal-card-autocomplete-debounce"
+                      min={50}
+                      max={2000}
+                      step={50}
+                      integer
+                      value={autocomplete.debounceMs ?? 350}
+                      onCommit={(debounceMs) =>
+                        update({ autocomplete: { ...autocomplete, debounceMs } })
+                      }
+                      className="h-8 text-xs"
+                      aria-label={t("settings.terminal.autocomplete.debounce.label")}
+                      data-testid="terminal-card-autocomplete-debounce"
+                    />
+                  </div>
+                </div>
+                {/* One per row below sm: each cell pairs a label ("Command names",
+                    "File paths") with a ~32px switch, and a third of a phone-width
+                    settings pane leaves the label about 50px — not enough to
+                    shrink into, so the row overflowed its border. */}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+                  {(["path", "exe", "spec"] as const).map((key) => (
+                    <div key={key} className="flex items-center justify-between rounded border p-2">
+                      <Label className="min-w-0 text-xs">
+                        {t(`settings.terminal.autocomplete.${key}.label` as never)}
+                      </Label>
+                      <Switch
+                        checked={autocomplete[key] ?? true}
+                        onCheckedChange={(checked) =>
+                          update({ autocomplete: { ...autocomplete, [key]: checked } })
+                        }
+                        aria-label={t(`settings.terminal.autocomplete.${key}.label` as never)}
+                        data-testid={`terminal-card-autocomplete-${key}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between rounded border p-3">
+                  <div className="space-y-0.5">
+                    <Label className="text-xs">
+                      {t("settings.terminal.autocomplete.popup.label")}
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("settings.terminal.autocomplete.popup.helper")}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={autocomplete.popup ?? true}
+                    onCheckedChange={(checked) =>
+                      update({ autocomplete: { ...autocomplete, popup: checked } })
+                    }
+                    aria-label={t("settings.terminal.autocomplete.popup.label")}
+                    data-testid="terminal-card-autocomplete-popup"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded border p-3">
+                  <div className="space-y-0.5">
+                    <Label className="text-xs">
+                      {t("settings.terminal.autocomplete.persistHistory.label")}
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("settings.terminal.autocomplete.persistHistory.helper")}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={autocomplete.persistHistory ?? true}
+                    onCheckedChange={(checked) =>
+                      update({ autocomplete: { ...autocomplete, persistHistory: checked } })
+                    }
+                    aria-label={t("settings.terminal.autocomplete.persistHistory.label")}
+                    data-testid="terminal-card-autocomplete-persist-history"
+                  />
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">
+                  {t("settings.terminal.autocomplete.privacy")}
+                </p>
+              </>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+
+      {shows("host") ? (
+        <Section title={t("settings.terminal.groups.host")} bare={bare}>
+          {/* Every control below configures the terminal HOST. Without one to
+              configure they would write a local mirror nobody reads — the exact
+              shape of "settings that lie" this card was changed to stop. */}
+          {!hostReachable ? (
+            <p
+              className="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-[11px]"
+              role="status"
+              data-testid="terminal-host-unreachable"
+            >
+              {t("settings.terminal.host.unreachable")}
+            </p>
           ) : null}
-        </div>
-      </Section>
+          <fieldset disabled={!hostReachable} className="space-y-3 disabled:opacity-60">
+            <div className="grid gap-3 md:grid-cols-3">
+              {(
+                [
+                  ["allowRemoteAccess", "remoteAccess"],
+                  ["startAtLogin", "startAtLogin"],
+                  ["diagnostics", "diagnostics"],
+                ] as const
+              ).map(([key, message]) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-3 rounded border p-3"
+                >
+                  <div className="space-y-0.5">
+                    <Label className="text-xs">
+                      {t(`settings.terminal.host.${message}.label`)}
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t(`settings.terminal.host.${message}.helper`)}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={terminal.host?.[key] ?? DEFAULT_HOST_SETTINGS[key]}
+                    onCheckedChange={(checked) => void updateHost({ [key]: checked })}
+                    aria-label={t(`settings.terminal.host.${message}.label`)}
+                    data-testid={`terminal-host-${key}`}
+                  />
+                </div>
+              ))}
+            </div>
 
-      <TerminalProfiles />
+            <div className="grid gap-3 md:grid-cols-2">
+              <HostNumberSetting
+                id="max-sessions"
+                label={t("settings.terminal.host.maxSessions.label")}
+                helper={t("settings.terminal.host.maxSessions.helper")}
+                value={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
+                min={1}
+                max={256}
+                onCommit={(maxSessions) => void updateHost({ maxSessions })}
+              />
+              <HostNumberSetting
+                id="max-remote-sessions"
+                label={t("settings.terminal.host.maxRemoteSessions.label")}
+                helper={t("settings.terminal.host.maxRemoteSessions.helper")}
+                value={
+                  terminal.host?.maxRemoteSessionsPerDevice ??
+                  DEFAULT_HOST_SETTINGS.maxRemoteSessionsPerDevice
+                }
+                min={1}
+                max={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
+                onCommit={(maxRemoteSessionsPerDevice) =>
+                  void updateHost({ maxRemoteSessionsPerDevice })
+                }
+              />
+              <HostNumberSetting
+                id="replay-per-session"
+                label={t("settings.terminal.host.replayPerSession.label")}
+                helper={t("settings.terminal.host.replayPerSession.helper")}
+                value={
+                  (terminal.host?.replayBytesPerSession ??
+                    DEFAULT_HOST_SETTINGS.replayBytesPerSession) / MIB
+                }
+                min={1}
+                max={64}
+                onCommit={(value) => void updateHost({ replayBytesPerSession: value * MIB })}
+              />
+              <HostNumberSetting
+                id="replay-total"
+                label={t("settings.terminal.host.replayTotal.label")}
+                helper={t("settings.terminal.host.replayTotal.helper")}
+                value={
+                  (terminal.host?.totalReplayBytes ?? DEFAULT_HOST_SETTINGS.totalReplayBytes) / MIB
+                }
+                min={1}
+                max={1024}
+                onCommit={(value) => void updateHost({ totalReplayBytes: value * MIB })}
+              />
+            </div>
+          </fieldset>
+        </Section>
+      ) : null}
 
-      <SshHosts />
+      {shows("agents") ? (
+        <Section title={t("settings.terminal.groups.agents")} bare={bare}>
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{t("settings.terminal.exposeDockToAgents.label")}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.exposeDockToAgents.helper")}
+              </p>
+            </div>
+            <Switch
+              checked={terminal.exposeDockToAgents ?? false}
+              onCheckedChange={(checked) => update({ exposeDockToAgents: checked })}
+              aria-label={t("settings.terminal.exposeDockToAgents.label")}
+              data-testid="terminal-card-expose-to-agents"
+            />
+          </div>
 
-      <TerminalProjectOverride />
+          <div className="flex items-center justify-between rounded border p-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs" htmlFor="terminal-card-run-in-dock-timeout">
+                {t("settings.terminal.runInDockTimeout.label")}
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.terminal.runInDockTimeout.helper")}
+              </p>
+            </div>
+            <ClampedNumberInput
+              id="terminal-card-run-in-dock-timeout"
+              min={5}
+              max={600}
+              integer
+              className="w-24"
+              value={terminal.runInDockTimeoutSec ?? 60}
+              onCommit={(runInDockTimeoutSec) => update({ runInDockTimeoutSec })}
+              aria-label={t("settings.terminal.runInDockTimeout.label")}
+              data-testid="terminal-card-run-in-dock-timeout"
+            />
+          </div>
+
+          <div className="space-y-3 rounded border p-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">{t("settings.terminal.unattended.label")}</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {t("settings.terminal.unattended.helper")}
+                </p>
+              </div>
+              <Switch
+                checked={terminal.allowUnattendedExecution ?? false}
+                onCheckedChange={(checked) => update({ allowUnattendedExecution: checked })}
+                aria-label={t("settings.terminal.unattended.label")}
+                data-testid="terminal-card-unattended"
+              />
+            </div>
+
+            {terminal.allowUnattendedExecution ? (
+              <div className="space-y-2">
+                <Label className="text-xs">
+                  {t("settings.terminal.unattended.askPolicy.label")}
+                </Label>
+                <Select
+                  value={terminal.unattendedAskPolicy ?? "fail"}
+                  onValueChange={(value) =>
+                    update({ unattendedAskPolicy: value as "fail" | "consent" | "run" })
+                  }
+                >
+                  <SelectTrigger
+                    className="h-8 text-xs"
+                    data-testid="terminal-card-unattended-policy"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ASK_POLICIES.map((p) => (
+                      <SelectItem key={p} value={p} className="text-xs">
+                        {t(`settings.terminal.unattended.askPolicy.${p}` as never)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {t("settings.terminal.unattended.askPolicy.helper")}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+
+      {/* The three editors below are panels of their own in the
+          master/detail section; the full card still lists them. */}
+      {panel === undefined ? (
+        <>
+          <TerminalProfiles />
+          <SshHosts />
+          <TerminalProjectOverride />
+        </>
+      ) : null}
     </div>
   )
 }

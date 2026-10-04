@@ -43,25 +43,43 @@ const defaultResolver = defaultCompanionEndpointResolver
 
 let endpointResolver: CompanionEndpointResolver = defaultResolver
 
+/** Capture the endpoint, never the host active after a network await finishes. */
+function endpointHost(endpoint: CompanionEndpoint): NonNullable<SessionInfo["remoteHost"]> {
+  const baseUrl = endpoint.baseUrl.replace(/\/+$/, "")
+  return endpoint.remoteHost ? { ...endpoint.remoteHost } : { id: null, label: baseUrl }
+}
+
 interface TerminalDataChannelBinding {
   channel: RTCDataChannel
   clientId?: string
+  remoteHost?: SessionInfo["remoteHost"]
+  /** Reads a replacement channel from the same captured transport, never the active host. */
+  getChannel?: () => RTCDataChannel | null
 }
 
 type TerminalDataChannelResolver = () => Promise<TerminalDataChannelBinding | null>
 
 const defaultTerminalDataChannelResolver: TerminalDataChannelResolver = async () => {
-  const [{ getActiveRemoteTransport }, transportModule] = await Promise.all([
-    import("@/lib/tauri/transport-routing"),
-    import("@/lib/tauri/transport-instance"),
-  ])
+  const [{ getActiveRemoteTransport, getActiveRemoteEndpoint }, transportModule] =
+    await Promise.all([
+      import("@/lib/tauri/transport-routing"),
+      import("@/lib/tauri/transport-instance"),
+    ])
   const candidate = getActiveRemoteTransport() ?? transportModule.transport
+  const endpoint = getActiveRemoteEndpoint()
   const capable = candidate as {
     getTerminalDataChannel?: () => RTCDataChannel | null
     getTerminalClientId?: () => string | null
   }
   const channel = capable.getTerminalDataChannel?.() ?? null
-  return channel ? { channel, clientId: capable.getTerminalClientId?.() ?? undefined } : null
+  return channel
+    ? {
+        channel,
+        clientId: capable.getTerminalClientId?.() ?? undefined,
+        remoteHost: endpoint ? endpointHost(endpoint) : undefined,
+        getChannel: () => capable.getTerminalDataChannel?.() ?? null,
+      }
+    : null
 }
 
 let terminalDataChannelResolver = defaultTerminalDataChannelResolver
@@ -184,33 +202,53 @@ export class RemoteTerminalSession extends BaseTerminalSession {
       throw new TerminalSessionError("unpaired", "terminal host is not paired")
     }
     const connectionFactory = () => openLanConnection(endpoint)
-    return RemoteTerminalSession.spawnWithConnection(req, connectionFactory)
+    const remoteHost = endpointHost(endpoint)
+    const session = await RemoteTerminalSession.spawnWithConnection(req, connectionFactory)
+    session.info = { ...session.info, remoteHost }
+    return session
   }
 
   static async spawnWan(req: SpawnRequest): Promise<RemoteTerminalSession> {
-    return RemoteTerminalSession.spawnWithConnection(req, openWanConnection)
+    const target = await captureWanTarget()
+    const session = await RemoteTerminalSession.spawnWithConnection(req, target.connectionFactory)
+    session.info = { ...session.info, remoteHost: target.remoteHost }
+    return session
   }
 
   static async listLan(): Promise<SessionInfo[]> {
     const endpoint = await endpointResolver()
     if (!endpoint) throw new TerminalSessionError("unpaired", "terminal host is not paired")
-    return RemoteTerminalSession.listWithConnection(() => openLanConnection(endpoint))
+    const remoteHost = endpointHost(endpoint)
+    const infos = await RemoteTerminalSession.listWithConnection(() => openLanConnection(endpoint))
+    return infos.map((info) => ({ ...info, remoteHost }))
   }
 
   static async listWan(): Promise<SessionInfo[]> {
-    return RemoteTerminalSession.listWithConnection(openWanConnection)
+    const target = await captureWanTarget()
+    const infos = await RemoteTerminalSession.listWithConnection(target.connectionFactory)
+    return infos.map((info) => ({ ...info, remoteHost: target.remoteHost }))
   }
 
   static async reattachLan(sessionId: string, resumeAfter = 0): Promise<RemoteTerminalSession> {
     const endpoint = await endpointResolver()
     if (!endpoint) throw new TerminalSessionError("unpaired", "terminal host is not paired")
-    return RemoteTerminalSession.reattachWithConnection(sessionId, resumeAfter, () =>
+    const remoteHost = endpointHost(endpoint)
+    const session = await RemoteTerminalSession.reattachWithConnection(sessionId, resumeAfter, () =>
       openLanConnection(endpoint)
     )
+    session.info = { ...session.info, remoteHost }
+    return session
   }
 
   static async reattachWan(sessionId: string, resumeAfter = 0): Promise<RemoteTerminalSession> {
-    return RemoteTerminalSession.reattachWithConnection(sessionId, resumeAfter, openWanConnection)
+    const target = await captureWanTarget()
+    const session = await RemoteTerminalSession.reattachWithConnection(
+      sessionId,
+      resumeAfter,
+      target.connectionFactory
+    )
+    session.info = { ...session.info, remoteHost: target.remoteHost }
+    return session
   }
 
   private static async spawnWithConnection(
@@ -610,7 +648,7 @@ export class RemoteTerminalSession extends BaseTerminalSession {
       const response = await this.sendCommand(TerminalFrameKind.Attach, this.info.id, {
         resumeAfter: Number(this.lastOutputSequence),
       })
-      this.info = decodeTerminalJson<SessionInfo>(response)
+      this.info = { ...decodeTerminalJson<SessionInfo>(response), remoteHost: this.info.remoteHost }
       this.reconnectStartedAt = null
       this.backoffIndex = 0
       this.emitTransportState("connected")
@@ -666,11 +704,37 @@ async function openLanConnection(endpoint: CompanionEndpoint): Promise<TerminalH
   return connection
 }
 
-async function openWanConnection(): Promise<TerminalHostConnection> {
+async function captureWanTarget(): Promise<{
+  remoteHost: SessionInfo["remoteHost"]
+  connectionFactory: RemoteConnectionFactory
+}> {
   const binding = await terminalDataChannelResolver()
   if (!binding) {
     throw new TerminalSessionError("host_offline", "terminal WebRTC channel is unavailable")
   }
+  let first = true
+  return {
+    remoteHost: binding.remoteHost,
+    connectionFactory: () => {
+      const channel = first || !binding.getChannel ? binding.channel : binding.getChannel()
+      first = false
+      if (!channel) {
+        return Promise.reject(
+          new TerminalSessionError("host_offline", "terminal WebRTC channel is unavailable")
+        )
+      }
+      return openBoundWanConnection({ ...binding, channel })
+    },
+  }
+}
+
+async function openWanConnection(): Promise<TerminalHostConnection> {
+  return (await captureWanTarget()).connectionFactory()
+}
+
+async function openBoundWanConnection(
+  binding: TerminalDataChannelBinding
+): Promise<TerminalHostConnection> {
   let connection = wanConnections.get(binding.channel)
   if (!connection) {
     connection = new WanTerminalHostConnection(binding.channel, binding.clientId)

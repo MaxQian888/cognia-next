@@ -92,6 +92,8 @@ export interface SessionInfo {
   alive?: boolean
   /** Stable identity of the durable terminal host that owns the process. */
   hostId?: string
+  /** Renderer-only endpoint attribution; null is this desktop, id is a registry id, not hostId. */
+  remoteHost?: { id: string | null; label: string } | null
   /**
    * Process kind. `localPty` and `ssh` are host-owned and arrive on the wire.
    * `serial` never does: a serial port is not a host session, it is a device

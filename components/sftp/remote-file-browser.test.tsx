@@ -38,6 +38,19 @@ beforeEach(() => {
 const browser = () => <RemoteFileBrowser profileId="production" profileLabel="Production" />
 
 describe("RemoteFileBrowser", () => {
+  it("explains that creating a file needs host approval", async () => {
+    render(browser())
+    await screen.findByTestId("tree")
+    act(() =>
+      (treeProps.onFailure as (f: unknown, o: string, p: string) => void)(
+        { kind: "refused", detail: null, code: "sftp_approval_required" },
+        "write",
+        "new.txt"
+      )
+    )
+    expect(screen.getByTestId("sftp-failure")).toHaveTextContent("host approval")
+    expect(screen.getByTestId("sftp-failure")).toHaveTextContent("/home/deploy/new.txt")
+  })
   /**
    * `/home/<user>` is wrong for root, for macOS, for a chrooted account and for
    * anything with a non-default home, and the failure a guess produces is an

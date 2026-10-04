@@ -84,6 +84,26 @@ export function parseHostKeyChange(message: unknown): SshHostKeyChange | null {
  * Returns how many `known_hosts` entries were removed; `0` means there was
  * nothing recorded, which is not an error.
  */
-export async function forgetSshHostKey(host: string, port: number): Promise<number> {
-  return transport.call<number>("ssh_forget_host_key", { host, port })
+export async function forgetSshHostKey(
+  host: string,
+  port: number,
+  fingerprint?: string
+): Promise<number> {
+  return transport.call<number>("ssh_forget_host_key", {
+    host,
+    port,
+    ...(fingerprint ? { fingerprint } : {}),
+  })
+}
+
+export interface TrustedSshHostKey {
+  host: string
+  port: number
+  keyType: string
+  fingerprint: string
+}
+
+/** The command manifest pins this read to this desktop, even with a remote host active. */
+export async function listSshHostKeys(): Promise<TrustedSshHostKey[]> {
+  return transport.call<TrustedSshHostKey[]>("ssh_list_host_keys")
 }

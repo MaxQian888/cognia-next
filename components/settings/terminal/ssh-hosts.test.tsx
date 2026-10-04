@@ -17,6 +17,13 @@ let settings: { terminal?: Record<string, unknown> } | undefined = {}
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
+const mockPush = jest.fn()
+const mockReplace = jest.fn()
+let mockSearch = new URLSearchParams()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  useSearchParams: () => mockSearch,
+}))
 jest.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
@@ -60,7 +67,10 @@ jest.mock("@/lib/terminal/ssh-credentials", () => ({
   saveSshCredential: (...args: unknown[]) => saveCredential(...args),
   clearSshCredential: (...args: unknown[]) => clearCredential(...args),
 }))
+// `resolveSshHostLaunch` stays real: the editor's refusals are part of what is
+// under test. Only the native connection is stubbed.
 jest.mock("@/lib/terminal/ssh-connect", () => ({
+  ...jest.requireActual("@/lib/terminal/ssh-connect"),
   connectSshFromDock: (...args: unknown[]) => connect(...args),
 }))
 jest.mock("@/lib/terminal/host-profiles", () => ({
@@ -84,8 +94,29 @@ jest.mock("@/lib/terminal/ssh-host-key", () => ({
   ...jest.requireActual("@/lib/terminal/ssh-host-key"),
   forgetSshHostKey: (...args: unknown[]) => mockForgetHostKey(...args),
 }))
+jest.mock("./ssh-trusted-host-keys", () => ({
+  SshTrustedHostKeys: ({ profiles }: { profiles: Array<{ name: string }> }) => (
+    <section aria-label="Trusted host keys">
+      {profiles.map((profile) => profile.name).join(", ")}
+    </section>
+  ),
+}))
 
 import { SshHosts } from "./ssh-hosts"
+
+/** Rows are one-line summaries until opened; the form is under the toggle. */
+function expand(id: string): void {
+  fireEvent.click(screen.getByTestId(`ssh-host-toggle-${id}`))
+}
+
+/** Remove asks first. */
+async function removeConfirmed(id: string): Promise<void> {
+  expand(id)
+  fireEvent.click(screen.getByTestId(`ssh-host-remove-${id}`))
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("ssh-host-remove-confirm"))
+  })
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -102,9 +133,36 @@ beforeEach(() => {
   mockSyncHostProfiles.mockResolvedValue(undefined)
   mockForgetHostKey.mockResolvedValue(1)
   mockTauri = true
+  mockSearch = new URLSearchParams()
 })
 
 describe("SshHosts", () => {
+  it("keeps the trusted-key manager available with no saved profiles", () => {
+    render(<SshHosts />)
+    expect(screen.getByRole("region", { name: "Trusted host keys" })).toBeInTheDocument()
+  })
+
+  it("passes every saved profile to the trusted-key manager", () => {
+    settings = {
+      terminal: {
+        sshHosts: [
+          {
+            id: "ssh-1",
+            name: "Production",
+            host: "prod.example.com",
+            port: 22,
+            username: "deploy",
+            authMethod: "agent",
+          },
+        ],
+      },
+    }
+    render(<SshHosts />)
+    expect(screen.getByRole("region", { name: "Trusted host keys" })).toHaveTextContent(
+      "Production"
+    )
+  })
+
   it("renders while settings are still loading", () => {
     settings = undefined
     render(<SshHosts />)
@@ -146,6 +204,7 @@ describe("SshHosts", () => {
       },
     }
     render(<SshHosts />)
+    expand("ssh-1")
     fireEvent.change(screen.getByTestId("ssh-host-secret-ssh-1"), {
       target: { value: "  correct horse  " },
     })
@@ -169,7 +228,7 @@ describe("SshHosts", () => {
     )
     expect(setPanelOpen).toHaveBeenCalledWith(true)
     expect(toastSuccess).toHaveBeenCalledWith(
-      "toasts.learned",
+      "connected.learned",
       expect.objectContaining({ description: "SHA256:abc" })
     )
   })
@@ -191,9 +250,7 @@ describe("SshHosts", () => {
       },
     }
     render(<SshHosts />)
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("ssh-host-remove-ssh-1"))
-    })
+    await removeConfirmed("ssh-1")
     expect(clearCredential).toHaveBeenCalledWith("ssh-1")
     expect(saveSettings).toHaveBeenCalledWith({
       terminal: expect.objectContaining({ sshHosts: [] }),
@@ -226,6 +283,8 @@ describe("SshHosts", () => {
       },
     }
     render(<SshHosts />)
+    expand("ssh-1")
+    expand("ssh-2")
 
     await act(async () => {
       fireEvent.change(screen.getAllByLabelText("fields.name")[0], {
@@ -267,6 +326,7 @@ describe("SshHosts", () => {
       },
     }
     render(<SshHosts />)
+    expand("ssh-1")
     const keyPath = screen.getByLabelText("fields.privateKeyPath")
     expect(keyPath).toHaveValue("~/.ssh/id_ed25519")
     await act(async () => {
@@ -301,6 +361,7 @@ describe("SshHosts", () => {
       },
     }
     render(<SshHosts />)
+    expand("ssh-1")
     fireEvent.change(screen.getByTestId("ssh-host-secret-ssh-1"), {
       target: { value: "key phrase" },
     })
@@ -335,7 +396,10 @@ describe("SshHosts", () => {
       fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
     })
     expect(connect).not.toHaveBeenCalled()
-    expect(toastError).toHaveBeenCalledWith("toasts.credentialRequired")
+    expect(toastError).toHaveBeenCalledWith(
+      "credentialRequired",
+      expect.objectContaining({ action: expect.objectContaining({ label: "actions.addPassword" }) })
+    )
   })
 
   it("reports returned and thrown connection failures", async () => {
@@ -359,9 +423,10 @@ describe("SshHosts", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
     })
-    expect(toastError).toHaveBeenCalledWith("toasts.connectFailed", {
-      description: "rejected",
-    })
+    expect(toastError).toHaveBeenCalledWith(
+      "failed",
+      expect.objectContaining({ description: "rejected" })
+    )
     unmount()
 
     render(<SshHosts />)
@@ -369,9 +434,10 @@ describe("SshHosts", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
     })
-    expect(toastError).toHaveBeenCalledWith("toasts.connectFailed", {
-      description: "offline",
-    })
+    expect(toastError).toHaveBeenCalledWith(
+      "failed",
+      expect.objectContaining({ description: "offline" })
+    )
   })
 
   it("keeps the host when credential removal fails", async () => {
@@ -392,9 +458,7 @@ describe("SshHosts", () => {
     }
     clearCredential.mockRejectedValueOnce(new Error("keyring unavailable"))
     render(<SshHosts />)
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("ssh-host-remove-ssh-1"))
-    })
+    await removeConfirmed("ssh-1")
     expect(saveSettings).not.toHaveBeenCalled()
     expect(toastError).toHaveBeenCalledWith("toasts.removeFailed", {
       description: "keyring unavailable",
@@ -583,6 +647,7 @@ describe("SshHosts", () => {
     it("replaces the secret field with the agent notice", () => {
       agentHost()
       render(<SshHosts />)
+      expand("ssh-1")
       expect(screen.getByTestId("ssh-host-agent-notice-ssh-1")).toBeInTheDocument()
       expect(screen.queryByTestId("ssh-host-secret-ssh-1")).not.toBeInTheDocument()
     })
@@ -618,7 +683,7 @@ describe("SshHosts", () => {
       })
 
       expect(toastError).toHaveBeenCalledWith(
-        "toasts.agentUnavailable",
+        "agentUnavailable",
         expect.objectContaining({
           description: expect.stringContaining("SSH_AUTH_SOCK"),
         })
@@ -633,9 +698,10 @@ describe("SshHosts", () => {
         fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
       })
 
-      expect(toastError).toHaveBeenCalledWith("toasts.connectFailed", {
-        description: "connection refused",
-      })
+      expect(toastError).toHaveBeenCalledWith(
+        "failed",
+        expect.objectContaining({ description: "connection refused" })
+      )
     })
 
     it("discards a typed secret when the auth method changes", async () => {
@@ -655,6 +721,7 @@ describe("SshHosts", () => {
         },
       }
       render(<SshHosts />)
+      expand("ssh-1")
       fireEvent.change(screen.getByTestId("ssh-host-secret-ssh-1"), {
         target: { value: "typed-but-unsaved" },
       })
@@ -696,5 +763,217 @@ describe("the editor's reach", () => {
     render(<SshHosts />)
     await screen.findByTestId("ssh-hosts")
     expect(screen.queryByTestId("ssh-hosts-not-synced")).toBeNull()
+  })
+})
+
+describe("list and navigation", () => {
+  const prod = {
+    id: "ssh-1",
+    name: "Production",
+    host: "prod.example.com",
+    port: 22,
+    username: "deploy",
+    authMethod: "agent",
+  }
+
+  it("shows one summary line per host, with the form closed", () => {
+    settings = { terminal: { sshHosts: [prod] } }
+    render(<SshHosts />)
+    expect(screen.getByTestId("ssh-host-ssh-1")).toHaveTextContent("deploy@prod.example.com")
+    expect(screen.queryByLabelText("fields.name")).toBeNull()
+    expand("ssh-1")
+    expect(screen.getByLabelText("fields.name")).toHaveValue("Production")
+  })
+
+  it("opens the form of a host it just added", async () => {
+    render(<SshHosts />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-hosts-add"))
+    })
+    expect(screen.getByLabelText("fields.host")).toHaveValue("")
+  })
+
+  it("opens the host a link names and spends the link", async () => {
+    settings = { terminal: { sshHosts: [prod, { ...prod, id: "ssh-2", name: "Backup" }] } }
+    mockSearch = new URLSearchParams("section=terminal&terminalPanel=ssh&sshHost=ssh-2")
+    render(<SshHosts />)
+    expect(await screen.findByLabelText("fields.name")).toHaveValue("Backup")
+    expect(mockReplace).toHaveBeenCalledWith("?section=terminal&terminalPanel=ssh", {
+      scroll: false,
+    })
+  })
+
+  it("starts a new host for a `new` link, once", async () => {
+    mockSearch = new URLSearchParams("terminalPanel=ssh&sshHost=new")
+    const { rerender } = render(<SshHosts />)
+    await act(async () => {})
+    rerender(<SshHosts />)
+    expect(
+      saveSettings.mock.calls.filter(([patch]) =>
+        Boolean((patch as { terminal?: unknown }).terminal)
+      )
+    ).toHaveLength(1)
+  })
+
+  it("filters a long list by name, user or address", () => {
+    settings = {
+      terminal: {
+        sshHosts: Array.from({ length: 6 }, (_, index) => ({
+          ...prod,
+          id: `ssh-${index + 1}`,
+          name: `Host ${index + 1}`,
+          host: index === 4 ? "db.internal" : `h${index}.example.com`,
+        })),
+      },
+    }
+    render(<SshHosts />)
+    fireEvent.change(screen.getByTestId("ssh-hosts-filter"), { target: { value: "db.int" } })
+    expect(screen.getByTestId("ssh-host-ssh-5")).toBeInTheDocument()
+    expect(screen.queryByTestId("ssh-host-ssh-1")).toBeNull()
+    fireEvent.change(screen.getByTestId("ssh-hosts-filter"), { target: { value: "nothing" } })
+    expect(screen.getByTestId("ssh-hosts-no-match")).toBeInTheDocument()
+  })
+
+  it("offers no filter for a short list", () => {
+    settings = { terminal: { sshHosts: [prod] } }
+    render(<SshHosts />)
+    expect(screen.queryByTestId("ssh-hosts-filter")).toBeNull()
+  })
+
+  it("links a host to its files in the device console", () => {
+    settings = { terminal: { sshHosts: [prod] } }
+    render(<SshHosts />)
+    expand("ssh-1")
+    expect(screen.getByTestId("ssh-host-files-ssh-1")).toHaveAttribute(
+      "href",
+      "/devices?device=ssh%3Assh-1&deviceSection=files"
+    )
+  })
+
+  it("says why Connect would fail on the collapsed line", () => {
+    settings = { terminal: { sshHosts: [{ ...prod, authMethod: "password" }] } }
+    render(<SshHosts />)
+    expect(screen.getByTestId("ssh-host-summary-issue")).toHaveAttribute(
+      "data-issue",
+      "passwordMissing"
+    )
+  })
+})
+
+describe("removing, duplicating and credentials", () => {
+  const bastion = {
+    id: "ssh-1",
+    name: "Bastion",
+    host: "jump.example.com",
+    port: 22,
+    username: "jump",
+    authMethod: "password",
+    credentialRef: "ssh-1",
+  }
+  const target = {
+    id: "ssh-2",
+    name: "Target",
+    host: "10.0.0.5",
+    port: 22,
+    username: "deploy",
+    authMethod: "agent",
+    jumpHostId: "ssh-1",
+    remoteForwards: [
+      { id: "r1", remotePort: 9000, localHost: "localhost", localPort: 3000, enabled: true },
+    ],
+  }
+
+  it("asks before removing, and removes nothing when cancelled", async () => {
+    settings = { terminal: { sshHosts: [bastion] } }
+    render(<SshHosts />)
+    expand("ssh-1")
+    fireEvent.click(screen.getByTestId("ssh-host-remove-ssh-1"))
+    expect(screen.getByTestId("ssh-host-remove-dialog")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByText("removeConfirm.cancel"))
+    })
+    expect(clearCredential).not.toHaveBeenCalled()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("names the hosts that jump through the one being removed, and keeps their route", async () => {
+    settings = { terminal: { sshHosts: [bastion, target] } }
+    render(<SshHosts />)
+    expand("ssh-1")
+    fireEvent.click(screen.getByTestId("ssh-host-remove-ssh-1"))
+    expect(screen.getByTestId("ssh-host-remove-dependents")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-host-remove-confirm"))
+    })
+    // The dependent keeps pointing at the removed bastion and fails closed,
+    // rather than being rewritten to dial its target direct.
+    expect(saveSettings).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        sshHosts: [expect.objectContaining({ id: "ssh-2", jumpHostId: "ssh-1" })],
+      }),
+    })
+  })
+
+  it("duplicates without the keyring entry, and with every remote forward off", async () => {
+    settings = { terminal: { sshHosts: [bastion, target] } }
+    render(<SshHosts />)
+    expand("ssh-2")
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-host-duplicate-ssh-2"))
+    })
+    const [{ terminal }] = saveSettings.mock.calls.at(-1) as [
+      { terminal: { sshHosts: Array<Record<string, unknown>> } },
+    ]
+    const copy = terminal.sshHosts.at(-1)!
+    expect(copy).toMatchObject({ id: "ssh-3", name: "copyName", jumpHostId: "ssh-1" })
+    expect(copy.credentialRef).toBeUndefined()
+    expect(copy.remoteForwards).toEqual([expect.objectContaining({ enabled: false })])
+  })
+
+  it("deletes the stored secret when the auth method changes", async () => {
+    const user = userEvent.setup()
+    settings = { terminal: { sshHosts: [bastion] } }
+    render(<SshHosts />)
+    expand("ssh-1")
+    await user.click(screen.getByLabelText("fields.authMethod"))
+    await user.click(await screen.findByRole("option", { name: "auth.agent" }))
+    expect(clearCredential).toHaveBeenCalledWith("ssh-1")
+  })
+
+  it("forgets a saved secret on request", async () => {
+    settings = { terminal: { sshHosts: [bastion] } }
+    render(<SshHosts />)
+    expand("ssh-1")
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-host-forget-credential-ssh-1"))
+    })
+    expect(clearCredential).toHaveBeenCalledWith("ssh-1")
+    expect(saveSettings).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        sshHosts: [expect.objectContaining({ credentialRef: undefined })],
+      }),
+    })
+  })
+
+  it("does not take a secret off the desktop, where there is no keyring to keep it", () => {
+    mockTauri = false
+    settings = { terminal: { sshHosts: [{ ...bastion, credentialRef: undefined }] } }
+    render(<SshHosts />)
+    expand("ssh-1")
+    expect(screen.getByTestId("ssh-host-secret-ssh-1")).toBeDisabled()
+    expect(screen.getByTestId("ssh-host-secret-desktop-only-ssh-1")).toBeInTheDocument()
+    expect(screen.getByTestId("ssh-host-probe-ssh-1")).toBeDisabled()
+  })
+
+  it("refuses a password bastion with nothing stored before dialing, naming it", async () => {
+    settings = {
+      terminal: { sshHosts: [{ ...bastion, credentialRef: undefined }, target] },
+    }
+    render(<SshHosts />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-2"))
+    })
+    expect(connect).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledWith("credentialRequiredBastion", expect.anything())
   })
 })

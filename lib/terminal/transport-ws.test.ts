@@ -17,7 +17,7 @@ jest.mock("@/lib/tauri/companion-storage", () => ({
   pickCompanionStorage: () => ({ load: mockCompanionStorageLoad }),
 }))
 
-import { setActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
+import { setActiveRemoteEndpoint, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 import {
   decodeTerminalFrame,
@@ -233,6 +233,8 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+  setActiveRemoteTransport(null)
+  setActiveRemoteEndpoint(null)
   sockets.splice(0)
   ticketCounter = 0
   __resetHostCapabilitiesForTests()
@@ -256,6 +258,32 @@ afterEach(() => {
 })
 
 describe("RemoteTerminalSession canonical LAN transport", () => {
+  it("keeps the captured endpoint attribution when the active host changes during spawn", async () => {
+    configureCompanionEndpointResolver(async () => ({
+      ...COMPANION_ENDPOINT,
+      remoteHost: { id: "registry-a", label: "Build host" },
+    }))
+    const pending = RemoteTerminalSession.spawn({ shell: "/bin/zsh", rows: 24, cols: 80 })
+    await flush()
+    configureCompanionEndpointResolver(async () => ({
+      ...COMPANION_ENDPOINT,
+      baseUrl: "https://other.local",
+      remoteHost: { id: "registry-b", label: "Other host" },
+    }))
+    latestSocket().fireOpen()
+    await flush()
+    const request = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    latestSocket().fireFrame(
+      TerminalFrameKind.SessionSnapshot,
+      { ...sessionInfo(), hostId: "durable-a" },
+      request.sequence
+    )
+    expect((await pending).info).toMatchObject({
+      hostId: "durable-a",
+      remoteHost: { id: "registry-a", label: "Build host" },
+    })
+  })
+
   it("lists and reattaches existing host-owned sessions", async () => {
     const listPromise = RemoteTerminalSession.listLan()
     await flush()
@@ -268,7 +296,9 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
       { hostId: "host-a", sessions: [sessionInfo()] },
       list.sequence
     )
-    await expect(listPromise).resolves.toEqual([sessionInfo()])
+    await expect(listPromise).resolves.toEqual([
+      { ...sessionInfo(), remoteHost: { id: null, label: COMPANION_ENDPOINT.baseUrl } },
+    ])
 
     const attachPromise = RemoteTerminalSession.reattachLan(SESSION_ID, 9)
     await flush()
@@ -278,7 +308,9 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
     expect(attach.kind).toBe(TerminalFrameKind.Attach)
     expect(decodeTerminalJson(attach)).toEqual({ resumeAfter: 9 })
     latestSocket().fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), attach.sequence)
-    await expect(attachPromise).resolves.toMatchObject({ info: { id: SESSION_ID } })
+    await expect(attachPromise).resolves.toMatchObject({
+      info: { id: SESSION_ID, remoteHost: { id: null, label: COMPANION_ENDPOINT.baseUrl } },
+    })
   })
 
   it("uses a single-use ticket URL and sends only a synchronized profile identifier", async () => {
@@ -492,6 +524,81 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
 })
 
 describe("RemoteTerminalSession canonical WAN transport", () => {
+  function activateWanHost(id: string, channel: () => MockTerminalDataChannel) {
+    const hostTransport = {
+      call: jest.fn(),
+      subscribe: jest.fn(),
+      getTerminalDataChannel: () => channel() as unknown as RTCDataChannel,
+    }
+    setActiveRemoteTransport(hostTransport)
+    setActiveRemoteEndpoint({ ...COMPANION_ENDPOINT, remoteHost: { id, label: id } })
+  }
+
+  async function flushWan() {
+    // The production resolver imports routing and the transport instance before
+    // it captures their matching endpoint/channel binding.
+    for (let index = 0; index < 12; index++) await flush()
+  }
+
+  it("attributes a WAN fallback and reconnects to its captured host after switching", async () => {
+    jest.useFakeTimers()
+    const original = new MockTerminalDataChannel()
+    original.open()
+    let hostAChannel = original
+    activateWanHost("registry-a", () => hostAChannel)
+    __setSocketTicketIssuerForTesting(async () => {
+      throw new Error("LAN unavailable")
+    })
+    await expect(RemoteTerminalSession.spawn({ shell: "zsh", rows: 24, cols: 80 })).rejects.toThrow(
+      "LAN unavailable"
+    )
+    const pending = RemoteTerminalSession.spawnWan({ shell: "zsh", rows: 24, cols: 80 })
+    await flushWan()
+    const other = new MockTerminalDataChannel()
+    other.open()
+    activateWanHost("registry-b", () => other)
+    const spawn = decodeTerminalFrame(original.sent[0])
+    original.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), spawn.sequence)
+    const session = await pending
+    expect(session.info.remoteHost).toEqual({ id: "registry-a", label: "registry-a" })
+
+    hostAChannel = new MockTerminalDataChannel()
+    hostAChannel.open()
+    original.close()
+    await jest.advanceTimersByTimeAsync(1000)
+    await flushWan()
+    const attach = decodeTerminalFrame(hostAChannel.sent[0])
+    expect(attach.kind).toBe(TerminalFrameKind.Attach)
+    expect(other.sent).toHaveLength(0)
+    hostAChannel.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), attach.sequence)
+    await flushWan()
+    expect(session.info.remoteHost).toEqual({ id: "registry-a", label: "registry-a" })
+  })
+
+  it.each(["list", "reattach"] as const)(
+    "captures WAN %s attribution before a host switch",
+    async (operation) => {
+      const channel = new MockTerminalDataChannel()
+      channel.open()
+      activateWanHost("registry-a", () => channel)
+      const pending =
+        operation === "list"
+          ? RemoteTerminalSession.listWan()
+          : RemoteTerminalSession.reattachWan(SESSION_ID)
+      await flushWan()
+      activateWanHost("registry-b", () => new MockTerminalDataChannel())
+      const request = decodeTerminalFrame(channel.sent[0])
+      channel.fireFrame(
+        operation === "list" ? TerminalFrameKind.HostSnapshot : TerminalFrameKind.SessionSnapshot,
+        operation === "list" ? { sessions: [sessionInfo()] } : sessionInfo(),
+        request.sequence
+      )
+      const result = await pending
+      const info = Array.isArray(result) ? result[0] : result.info
+      expect(info.remoteHost).toEqual({ id: "registry-a", label: "registry-a" })
+    }
+  )
+
   it("spawns over the ordered cognia.terminal channel without a socket ticket", async () => {
     const channel = new MockTerminalDataChannel()
     __setTerminalDataChannelResolverForTesting(() => channel as unknown as RTCDataChannel)

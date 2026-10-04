@@ -85,13 +85,24 @@ describe("terminal host profile synchronization", () => {
     ])
   })
 
-  it("never synchronizes a jump chain or a tunnel to the terminal host", () => {
-    // A synchronized profile is what a phone or LAN client names to get a
-    // shell. Carrying forwarding here would let a remote client make the
-    // desktop open a listening port, which ADR-0082 §8 forbids — so the
-    // stripping is pinned rather than left to `sshHostToConnectRequest`
-    // happening not to copy the fields.
-    const [synchronized] = buildSynchronizedSshProfiles([
+  it("synchronizes the jump chain but never a forwarding rule", () => {
+    // A synchronized profile is what a phone, a LAN client, or SFTP names to
+    // reach a machine. Forwarding here would let a remote client make the
+    // desktop open a listening port, which ADR-0082 §9 forbids, so stripping it
+    // is pinned rather than left to happenstance. The jump chain is the
+    // opposite case: it opens nothing, and without it a bastion-backed host is
+    // dialed direct, which reaches a different machine or none.
+    const bastion = {
+      id: "bastion",
+      name: "Bastion",
+      host: "jump.example.com",
+      port: 2200,
+      username: "jumper",
+      authMethod: "password" as const,
+      credentialRef: "bastion",
+    }
+    const synchronized = buildSynchronizedSshProfiles([
+      bastion,
       {
         id: "production",
         name: "Production",
@@ -120,10 +131,39 @@ describe("terminal host profile synchronization", () => {
         ],
       },
     ])
+    const production = synchronized.find((entry) => entry.profileId === "production")!
 
-    expect(synchronized.request).not.toHaveProperty("jumpChain")
-    expect(synchronized.request).not.toHaveProperty("localForwards")
-    expect(synchronized.request).not.toHaveProperty("remoteForwards")
+    expect(production.request.jumpChain).toEqual([
+      {
+        host: "jump.example.com",
+        port: 2200,
+        username: "jumper",
+        authMethod: "password",
+        credentialRef: "bastion",
+        privateKeyPath: undefined,
+      },
+    ])
+    expect(production.request).not.toHaveProperty("localForwards")
+    expect(production.request).not.toHaveProperty("remoteForwards")
+    // A direct host carries no empty chain field at all.
+    expect(synchronized.find((entry) => entry.profileId === "bastion")!.request).not.toHaveProperty(
+      "jumpChain"
+    )
+  })
+
+  it("leaves out a profile whose chain cannot be walked rather than syncing it direct", () => {
+    const synchronized = buildSynchronizedSshProfiles([
+      {
+        id: "orphan",
+        name: "Orphan",
+        host: "server.example.com",
+        port: 22,
+        username: "deploy",
+        authMethod: "agent",
+        jumpHostId: "deleted-bastion",
+      },
+    ])
+    expect(synchronized).toEqual([])
   })
 
   it("replaces the host profile set, including clearing deleted profiles", async () => {

@@ -897,13 +897,11 @@ impl TerminalHost {
             .ssh_profiles
             .get(&profile_id)
             .cloned();
-        let Some(mut request) = ssh_request else {
+        let Some(request) = ssh_request else {
             return self.spawn_profile(connection_id, profile_id, script_dir);
         };
         self.check_spawn_limit(&identity)?;
-        if !identity.local {
-            request.project_id = None;
-        }
+        let request = narrow_ssh_request_for(&identity, request);
 
         let session_id = Uuid::new_v4().to_string();
         let replay_bytes_per_session = self.inner.config.lock().replay_bytes_per_session;
@@ -1552,6 +1550,20 @@ impl TerminalHost {
         Ok(())
     }
 
+    /// Close pooled SFTP connections that have sat idle past `IDLE_TTL`.
+    ///
+    /// Every SFTP operation already reaps on its way in, which was enough while
+    /// an idle SSH transport dropped itself after 30 s. It no longer does: the
+    /// link heartbeat keeps a live connection up indefinitely, so a Files panel
+    /// opened once and forgotten would hold an authenticated session on
+    /// somebody's server until the next unrelated SFTP call. The host's
+    /// maintenance tick calls this so the TTL is a promise, not a hint.
+    pub fn reap_idle_sftp(&self) -> usize {
+        self.inner
+            .sftp
+            .reap_idle(crate::sftp::IDLE_TTL, unix_millis())
+    }
+
     /// Release flow pauses older than [`FLOW_PAUSE_MAX`]. Runs on the host's
     /// 1 Hz maintenance tick alongside the controller-lease reaper.
     pub fn reap_flow_pauses(&self, now: Instant) {
@@ -2043,6 +2055,41 @@ impl TerminalHost {
 /// The audit ring keys on a session identifier, and a transfer has no terminal
 /// session. Naming the profile keeps the field answering the same question it
 /// answers for a shell: which of the host's things did this happen to.
+/// Narrow a stored SSH profile to what `identity` may make this host do.
+///
+/// `ssh_profiles` is written only by the local desktop, but not only by the
+/// forwarding-free profile sync: a local `Spawn` frame carrying an `sshRequest`
+/// stores its whole request, `-L`/`-R` rules included, under its profile id.
+/// Without this a phone or LAN client naming that id would make the desktop
+/// bind a listening port, or ask the server to open one pointing back here,
+/// which ADR-0082 §9 rules out: a remote device naming a profile gets a shell
+/// and never a port. Forwarding stays a local decision, exactly as starting or
+/// stopping a rule on a live session is (`set_forward_enabled`).
+///
+/// The jump chain is kept on purpose. Routing through a bastion opens no
+/// listening socket anywhere, and dropping it would not make the spawn safer,
+/// only aim it at a different machine than the profile names (or at nothing,
+/// for a target only reachable through the bastion).
+///
+/// `project_id` is cleared for the same reason as before this helper existed:
+/// a device does not get to attribute a session to the desktop's project.
+///
+/// SFTP needs no counterpart: `open_hosted_sftp` never passes a forward
+/// registry to the dial, so a profile's rules are inert on that path for every
+/// identity.
+fn narrow_ssh_request_for(
+    identity: &ClientIdentity,
+    mut request: SshSpawnRequest,
+) -> SshSpawnRequest {
+    if identity.local {
+        return request;
+    }
+    request.project_id = None;
+    request.local_forwards.clear();
+    request.remote_forwards.clear();
+    request
+}
+
 fn sftp_audit_subject(profile_id: &str) -> String {
     format!("sftp:{profile_id}")
 }
@@ -3167,5 +3214,176 @@ mod tests {
         let error = host.sftp_profile("invented").unwrap_err();
         assert_eq!(error.code(), "sftp_invalid_request");
         assert!(error.to_string().contains("invented"));
+    }
+
+    // ---- Forwarding never rides a profile a device names (ADR-0082 §9) ----
+
+    fn forwarding_rule_set() -> (
+        Vec<crate::ssh_forward::LocalForward>,
+        Vec<crate::ssh_forward::RemoteForward>,
+    ) {
+        (
+            vec![crate::ssh_forward::LocalForward {
+                id: "lfwd-1".into(),
+                local_port: 15_432,
+                remote_host: "127.0.0.1".into(),
+                remote_port: 5432,
+                enabled: true,
+            }],
+            vec![crate::ssh_forward::RemoteForward {
+                id: "rfwd-1".into(),
+                remote_port: 18_080,
+                local_host: "127.0.0.1".into(),
+                local_port: 8080,
+                enabled: true,
+            }],
+        )
+    }
+
+    fn bastion(port: u16, key_path: Option<String>) -> crate::ssh::SshJumpHop {
+        crate::ssh::SshJumpHop {
+            host: "127.0.0.1".into(),
+            port,
+            username: "bastion".into(),
+            auth_method: crate::ssh::SshAuthMethod::PrivateKey,
+            credential_ref: None,
+            private_key_path: key_path,
+        }
+    }
+
+    #[test]
+    fn the_maintenance_sweep_reaps_an_empty_sftp_pool_without_touching_anything() {
+        // The sweep runs every second on the host's maintenance tick, with or
+        // without a Files panel open. With nothing pooled it must be a no-op,
+        // not an error and not a dial.
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        assert_eq!(host.reap_idle_sftp(), 0);
+        let desktop = host.connect(ClientIdentity::local("desktop")).unwrap();
+        assert!(host
+            .sftp_sessions(&desktop.connection_id)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_device_spawn_drops_forwarding_but_keeps_the_route() {
+        let (local_forwards, remote_forwards) = forwarding_rule_set();
+        let mut stored = ssh_profile_request("production");
+        stored.project_id = Some("project-1".into());
+        stored.jump_chain = vec![bastion(2222, None)];
+        stored.local_forwards = local_forwards;
+        stored.remote_forwards = remote_forwards;
+
+        let device = ClientIdentity::remote("phone", "device-a", true);
+        let narrowed = narrow_ssh_request_for(&device, stored.clone());
+        assert!(narrowed.local_forwards.is_empty());
+        assert!(narrowed.remote_forwards.is_empty());
+        assert!(narrowed.project_id.is_none());
+        // The bastion opens no port; dropping it would aim the shell at a
+        // different machine than the profile names.
+        assert_eq!(
+            serde_json::to_value(&narrowed.jump_chain).unwrap(),
+            serde_json::to_value(&stored.jump_chain).unwrap()
+        );
+        assert_eq!(narrowed.host, stored.host);
+        assert_eq!(narrowed.port, stored.port);
+
+        // The desktop that wrote the rules keeps them.
+        let desktop = ClientIdentity::local("desktop");
+        assert_eq!(
+            serde_json::to_value(narrow_ssh_request_for(&desktop, stored.clone())).unwrap(),
+            serde_json::to_value(&stored).unwrap()
+        );
+    }
+
+    /// The whole path, against a real in-process SSH server behind a real
+    /// bastion: a local Spawn frame stores a profile with a `-L` rule (what
+    /// `host_wire` does with an `sshRequest`), then a device names that id.
+    #[tokio::test]
+    async fn a_profile_stored_by_a_local_spawn_never_binds_a_port_for_a_device() {
+        use crate::ssh::test_server;
+
+        let bastion_server = test_server::start(test_server::HOST_KEY_A, false).await;
+        let target = test_server::start(test_server::HOST_KEY_B, false).await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key_path = dir.path().join("id_ed25519");
+        std::fs::write(&key_path, test_server::CLIENT_KEY).expect("client key");
+        let key_path = key_path.to_string_lossy().into_owned();
+        let forward_port = {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("reserve");
+            listener.local_addr().expect("addr").port()
+        };
+
+        let mut request = ssh_profile_request("production");
+        request.host = "127.0.0.1".into();
+        request.port = target.port;
+        request.auth_method = crate::ssh::SshAuthMethod::PrivateKey;
+        request.credential_ref = None;
+        request.private_key_path = Some(key_path.clone());
+        request.jump_chain = vec![bastion(bastion_server.port, Some(key_path))];
+        request.local_forwards = vec![crate::ssh_forward::LocalForward {
+            id: "lfwd-1".into(),
+            local_port: forward_port,
+            remote_host: "127.0.0.1".into(),
+            remote_port: 5432,
+            enabled: true,
+        }];
+
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let desktop = host.connect(ClientIdentity::local("desktop")).unwrap();
+        let device = host
+            .connect(ClientIdentity::remote("phone", "device-a", true))
+            .unwrap();
+        host.sync_ssh_profile(&desktop.connection_id, "production".into(), request)
+            .unwrap();
+        let script_dir = dir.path().join("scripts");
+
+        // A device's known_hosts starts empty, so whatever it learns is what
+        // its spawn actually dialled.
+        let device_known_hosts = dir.path().join("device_known_hosts");
+        let spawned = host
+            .spawn_synchronized_profile(
+                &device.connection_id,
+                "production".into(),
+                &script_dir,
+                &device_known_hosts,
+            )
+            .await
+            .expect("a device naming the profile gets a shell");
+        assert!(host
+            .forward_status(&device.connection_id, &spawned.id)
+            .unwrap()
+            .is_empty());
+        assert!(spawned.project_id.is_none());
+        // The jump chain survived: the bastion was dialled in its own right.
+        let learned = std::fs::read_to_string(&device_known_hosts).expect("known_hosts");
+        assert!(
+            learned.contains(&format!("127.0.0.1]:{}", bastion_server.port)),
+            "{learned}"
+        );
+        assert!(
+            learned.contains(&format!("127.0.0.1]:{}", target.port)),
+            "{learned}"
+        );
+        // Nothing listens on the rule's port.
+        std::net::TcpListener::bind(("127.0.0.1", forward_port))
+            .expect("the forward's port was never bound for a device");
+
+        // The control: the desktop spawning the same profile gets its rule,
+        // so the empty status above is the narrowing, not a missing rule.
+        let desktop_spawn = host
+            .spawn_synchronized_profile(
+                &desktop.connection_id,
+                "production".into(),
+                &script_dir,
+                &dir.path().join("desktop_known_hosts"),
+            )
+            .await
+            .expect("the desktop spawns its own profile");
+        let rules = host
+            .forward_status(&desktop.connection_id, &desktop_spawn.id)
+            .unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].id, "lfwd-1");
     }
 }

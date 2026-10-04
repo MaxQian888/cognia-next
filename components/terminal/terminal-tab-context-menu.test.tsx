@@ -174,4 +174,46 @@ describe("TerminalTabContextMenu", () => {
     fireEvent.click(screen.getByTestId("tab-color-red"))
     expect(onChangeAppearance).toHaveBeenCalledWith("s-1", { color: "red" })
   })
+  describe("SSH and serial tabs", () => {
+    it("labels Restart as Reconnect on an SSH tab", () => {
+      renderMenu({ row: row({ kind: "ssh", profileId: "ssh-1" }) })
+      expect(screen.getByTestId("terminal-tab-menu-restart")).toHaveTextContent("reconnect")
+    })
+
+    it("offers the saved host's files and editor on an SSH tab", () => {
+      const onBrowseSshFiles = jest.fn()
+      const onEditSshHost = jest.fn()
+      renderMenu({
+        row: row({ kind: "ssh", profileId: "ssh-1" }),
+        onBrowseSshFiles,
+        onEditSshHost,
+      })
+      fireEvent.click(screen.getByTestId("terminal-tab-menu-ssh-files"))
+      expect(onBrowseSshFiles).toHaveBeenCalledWith("ssh-1")
+      fireEvent.contextMenu(screen.getByTestId("trigger"))
+      fireEvent.click(screen.getByTestId("terminal-tab-menu-ssh-edit"))
+      expect(onEditSshHost).toHaveBeenCalledWith("ssh-1")
+    })
+
+    it("offers no SSH actions for a tab that does not know its saved host", () => {
+      renderMenu({
+        row: row({ kind: "ssh" }),
+        onBrowseSshFiles: jest.fn(),
+        onEditSshHost: jest.fn(),
+      })
+      expect(screen.queryByTestId("terminal-tab-menu-ssh-files")).toBeNull()
+      expect(screen.queryByTestId("terminal-tab-menu-ssh-edit")).toBeNull()
+    })
+
+    it("offers no SSH actions on a local shell", () => {
+      renderMenu({ onBrowseSshFiles: jest.fn(), onEditSshHost: jest.fn() })
+      expect(screen.queryByTestId("terminal-tab-menu-ssh-files")).toBeNull()
+    })
+
+    it("withholds Restart from a serial tab, which has nothing to respawn", () => {
+      renderMenu({ row: row({ kind: "serial", shell: "/dev/ttyUSB0 (115200 8N1)" }) })
+      expect(screen.queryByTestId("terminal-tab-menu-restart")).toBeNull()
+      expect(screen.getByTestId("terminal-tab-menu-close")).toBeInTheDocument()
+    })
+  })
 })

@@ -202,7 +202,12 @@ describe("rehydrateTerminals", () => {
     // as a plain `TerminalSession` still moves bytes, so only this assertion
     // catches the fingerprint being silently dropped.
     const store = makeStore()
-    const sshInfo: SessionInfo = { ...info("ssh-a"), kind: "ssh", profileId: "ssh-1" }
+    const sshInfo: SessionInfo = {
+      ...info("ssh-a"),
+      origin: "remote",
+      kind: "ssh",
+      profileId: "ssh-1",
+    }
     const sshReattach = jest
       .spyOn(SshTerminalSession, "reattach")
       .mockResolvedValue({ info: sshInfo } as unknown as SshTerminalSession)
@@ -217,6 +222,9 @@ describe("rehydrateTerminals", () => {
 
     expect(sshReattach).toHaveBeenCalledWith(expect.objectContaining({ kind: "ssh" }), 0)
     expect(localReattach).toHaveBeenCalledWith("local-a", 0)
+    expect(store.registerSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ssh-a", origin: "remote", remoteHost: null })
+    )
   })
 
   it("carries SSH identity onto the restored row", async () => {
@@ -229,6 +237,7 @@ describe("rehydrateTerminals", () => {
       kind: "ssh",
       profileId: "ssh-1",
       hostId: "host-1",
+      remoteHost: { id: "registry-a", label: "Build host" },
       shell: "ssh deploy@prod.example.com",
       sshHostKeyStatus: "verified",
       sshHostKeyFingerprint: "SHA256:abc",
@@ -244,6 +253,7 @@ describe("rehydrateTerminals", () => {
         kind: "ssh",
         profileId: "ssh-1",
         hostId: "host-1",
+        remoteHost: { id: "registry-a", label: "Build host" },
       })
     )
   })

@@ -5,6 +5,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import type { TerminalControlState, TerminalReplayGap } from "@/lib/terminal/types"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -54,6 +56,8 @@ function renderChip(props: Partial<React.ComponentProps<typeof TerminalSessionCh
 }
 
 beforeEach(() => {
+  useTerminalStore.getState().reset()
+  useRemoteHostStore.setState({ hosts: [], activeHostId: null })
   registry.info = sessionInfo()
   registry.takeControl.mockReset().mockResolvedValue(undefined)
   registry.releaseControl.mockReset().mockResolvedValue(undefined)
@@ -67,6 +71,23 @@ afterEach(() => {
 })
 
 describe("TerminalSessionChip", () => {
+  it("lists the captured host and updates the current-target distinction", () => {
+    useTerminalStore.getState().registerSession({
+      id: "s-1",
+      projectId: null,
+      extensionId: null,
+      shell: "/bin/zsh",
+      origin: "remote",
+      hostId: "durable-a",
+      remoteHost: { id: "registry-a", label: "Build host" },
+    })
+    renderChip()
+    fireEvent.click(screen.getByTestId("terminal-session-chip"))
+    expect(screen.getByText("differentTarget:Build host")).toBeInTheDocument()
+    act(() => useRemoteHostStore.setState({ activeHostId: "registry-a" }))
+    expect(screen.getByText("runsOn:Build host")).toBeInTheDocument()
+  })
+
   it("renders nothing when there is no live session and no state to report", () => {
     registry.info = null
     renderChip()

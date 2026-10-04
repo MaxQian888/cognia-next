@@ -2,7 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { detachFromDock, spawnFromDock, killFromDock, restartFromDock } from "./spawn-orchestrator"
+import {
+  detachFromDock,
+  spawnFromDock,
+  killFromDock,
+  restartFromDock,
+  RESTART_NOT_LOCAL_PTY,
+} from "./spawn-orchestrator"
 import { __clearLiveSessionsForTesting, getLiveSession } from "./session-registry"
 import type { SpawnRequest, SessionInfo } from "./types"
 
@@ -125,6 +131,7 @@ interface FakeStoreRow {
   projectId: string | null
   extensionId: string | null
   agentSpawner: string | null
+  kind?: SessionInfo["kind"]
 }
 
 interface FakeStore {
@@ -334,7 +341,12 @@ describe("spawnFromDock", () => {
   it("registers the session in store + live registry on success", async () => {
     const hooks = makeFakeHooks()
     const store = makeFakeStore()
-    const fake = makeFakeSession("s-1")
+    const fake = makeFakeSession("s-1", {
+      hostId: "durable-a",
+      remoteHost: { id: "registry-a", label: "Build host" },
+      kind: "ssh",
+      profileId: "ssh-1",
+    })
     const out = await spawnFromDock({
       req: baseReq,
       store,
@@ -345,6 +357,7 @@ describe("spawnFromDock", () => {
     expect(out.kind).toBe("spawned")
     expect(store.registered.map((r) => r.info.id)).toEqual(["s-1"])
     expect(getLiveSession("s-1")).toBe(fake)
+    expect(store.registered[0].info).toEqual(fake.info)
   })
 
   it("threads agentSpawner through registerSession", async () => {
@@ -804,4 +817,33 @@ describe("restartFromDock", () => {
     })
     expect(out.kind).toBe("error")
   })
+
+  it.each(["ssh", "serial"] as const)(
+    "refuses a %s tab without killing it, instead of respawning its label as a local shell",
+    async (kind) => {
+      const hooks = makeFakeHooks()
+      const store = makeFakeStore()
+      const fake = makeFakeSession("remote-tab", { shell: "ssh deploy@prod.example.com" })
+      await spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        spawn: async () =>
+          fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      })
+      store.sessions["remote-tab"].kind = kind
+      const spawn = jest.fn()
+      const out = await restartFromDock({
+        sessionId: "remote-tab",
+        store,
+        rows: 24,
+        cols: 80,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        spawn,
+      })
+      expect(out).toEqual({ kind: "error", message: `${RESTART_NOT_LOCAL_PTY}:${kind}` })
+      expect(fake.killed).toBe(0)
+      expect(spawn).not.toHaveBeenCalled()
+    }
+  )
 })

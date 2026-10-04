@@ -9,22 +9,52 @@ jest.mock("next-intl", () => ({
     vals ? `${ns}.${key}:${JSON.stringify(vals)}` : `${ns}.${key}`,
 }))
 
-import { LoopbackDiscoveryPanel } from "./loopback-discovery-panel"
+const mockWriteClipboardText = jest.fn()
+jest.mock("@/lib/tauri/clipboard", () => ({
+  writeClipboardText: (value: string) => mockWriteClipboardText(value),
+}))
+
+import { LoopbackDiscoveryPanel, loopbackPairCommand } from "./loopback-discovery-panel"
 
 const health = { version: "1.2.3", fingerprint: "ff", advertisedPort: 27890, serverId: "s1" }
 
-it("offers the discovered address once a host answers", async () => {
-  const onUseAddress = jest.fn()
+beforeEach(() => {
+  mockWriteClipboardText.mockReset().mockResolvedValue(undefined)
+})
+
+/**
+ * A found host's address is not something the form can pair with: pairing
+ * redeems a signed `cgnp<N>|` invitation. The panel hands over the command
+ * that mints one aimed at the address it found, never the bare URL.
+ */
+it("offers the command that mints an invitation for the host it found", async () => {
   const discover = jest
     .fn()
     .mockResolvedValue({ kind: "found", baseUrl: "http://127.0.0.1:27891", health })
 
-  render(<LoopbackDiscoveryPanel discover={discover} onUseAddress={onUseAddress} />)
+  render(<LoopbackDiscoveryPanel discover={discover} />)
   await userEvent.click(screen.getByRole("button"))
 
   expect(await screen.findByTestId("loopback-found")).toBeInTheDocument()
-  await userEvent.click(screen.getByRole("button", { name: /useAddress/ }))
-  expect(onUseAddress).toHaveBeenCalledWith("http://127.0.0.1:27891")
+  expect(screen.queryByRole("button", { name: /useAddress/ })).not.toBeInTheDocument()
+  expect(screen.getByTestId("loopback-pair-command")).toHaveTextContent(
+    "cognia-server pair --device-name browser --advertise-url http://127.0.0.1:27891"
+  )
+
+  await userEvent.click(screen.getByTestId("loopback-copy-command"))
+  expect(mockWriteClipboardText).toHaveBeenCalledWith(loopbackPairCommand("http://127.0.0.1:27891"))
+  expect(await screen.findByRole("status")).toHaveTextContent("commandCopied")
+})
+
+it("says so when the clipboard refuses the command", async () => {
+  mockWriteClipboardText.mockRejectedValue(new Error("denied"))
+  const discover = jest
+    .fn()
+    .mockResolvedValue({ kind: "found", baseUrl: "http://127.0.0.1:27891", health })
+  render(<LoopbackDiscoveryPanel discover={discover} />)
+  await userEvent.click(screen.getByRole("button"))
+  await userEvent.click(await screen.findByTestId("loopback-copy-command"))
+  expect(await screen.findByRole("status")).toHaveTextContent("copyFailed")
 })
 
 /**

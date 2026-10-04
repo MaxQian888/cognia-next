@@ -203,9 +203,9 @@ describe("SshForwardingEditor", () => {
 })
 
 /**
- * `buildSynchronizedSshProfiles` emits neither a jump chain nor a forwarding
- * rule, so on a paired device every field here is recorded and none of it is
- * applied. The editor stayed fully interactive and said nothing about it.
+ * `buildSynchronizedSshProfiles` carries the jump chain but never a forwarding
+ * rule, so on a paired device the forwards here are recorded and not applied.
+ * The editor stayed fully interactive and said nothing about it.
  */
 describe("where these rules take effect", () => {
   afterEach(() => {

@@ -216,6 +216,39 @@ export function buildForwardedConnectRequest(input: {
   }
 }
 
+/**
+ * Build the request a host stores for a profile id, for spawns that name only
+ * the id (a phone, a browser, SFTP).
+ *
+ * The jump chain rides along; forwarding never does. A synchronized profile
+ * used to carry neither, on the reading that both were "tunnels". They are not
+ * the same thing. A forwarding rule makes a machine open a listening port, and
+ * letting a remote device trigger that is exactly what ADR-0082 §9 forbids. A
+ * jump chain opens nothing: it is the route to the machine the profile names.
+ * Dropping it did not make a remote spawn safer, it made it dial the target
+ * direct, which either failed (the target is only reachable from the bastion)
+ * or reached whatever answered to that name from the host's network. SFTP
+ * resolves its profile from the same map, so file browsing for a
+ * bastion-backed host had the same defect on every shell.
+ *
+ * Returns `null` for a profile that cannot be launched at all: invalid fields
+ * or a chain that cannot be walked. Leaving such a profile out means a remote
+ * spawn answers "not on host" instead of connecting somewhere other than where
+ * the user meant.
+ */
+export function buildSynchronizedConnectRequest(
+  profile: SshHostProfile,
+  allProfiles: readonly SshHostProfile[]
+): SshConnectRequest | null {
+  const base = sshHostToConnectRequest(profile, 24, 80)
+  if (!base) return null
+  const chain = resolveJumpChain(profile, allProfiles)
+  if (!chain) return null
+  const hops = chain.slice(0, -1)
+  if (hops.some(validateSshHopProfile)) return null
+  return hops.length > 0 ? { ...base, jumpChain: hops.map(toJumpHop) } : base
+}
+
 function validateSshHopProfile(hop: SshHostProfile): boolean {
   if (!hop.host.trim() || /\s/.test(hop.host)) return true
   if (!hop.username.trim() || /\s/.test(hop.username)) return true

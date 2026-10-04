@@ -1,7 +1,12 @@
 const call = jest.fn(async (..._args: unknown[]): Promise<unknown> => 0)
 jest.mock("@/lib/tauri", () => ({ transport: { call: (...args: unknown[]) => call(...args) } }))
 
-import { forgetSshHostKey, parseHostKeyChange, HOST_KEY_CHANGED_CODE } from "./ssh-host-key"
+import {
+  forgetSshHostKey,
+  listSshHostKeys,
+  parseHostKeyChange,
+  HOST_KEY_CHANGED_CODE,
+} from "./ssh-host-key"
 
 const payload = {
   host: "prod.example.com",
@@ -67,6 +72,14 @@ describe("parseHostKeyChange", () => {
 })
 
 describe("forgetSshHostKey", () => {
+  it("forgets only the fingerprint the user confirmed", async () => {
+    await forgetSshHostKey("prod.example.com", 2222, "SHA256:confirmed")
+    expect(call).toHaveBeenCalledWith("ssh_forget_host_key", {
+      host: "prod.example.com",
+      port: 2222,
+      fingerprint: "SHA256:confirmed",
+    })
+  })
   it("asks the native side to drop the recorded key", async () => {
     call.mockResolvedValue(1)
     await expect(forgetSshHostKey("prod.example.com", 2222)).resolves.toBe(1)
@@ -85,5 +98,21 @@ describe("forgetSshHostKey", () => {
     await expect(forgetSshHostKey("prod.example.com", 22)).rejects.toThrow(
       "known_hosts could not be written"
     )
+  })
+})
+
+describe("listSshHostKeys", () => {
+  it("reads trusted keys through the desktop-targeted command", async () => {
+    const entries = [
+      { host: "prod.example.com", port: 2222, keyType: "ssh-ed25519", fingerprint: "SHA256:key" },
+    ]
+    call.mockResolvedValue(entries)
+    await expect(listSshHostKeys()).resolves.toEqual(entries)
+    expect(call).toHaveBeenCalledWith("ssh_list_host_keys")
+  })
+
+  it("preserves read failures for the UI to report", async () => {
+    call.mockRejectedValue(new Error("known_hosts could not be read"))
+    await expect(listSshHostKeys()).rejects.toThrow("known_hosts could not be read")
   })
 })

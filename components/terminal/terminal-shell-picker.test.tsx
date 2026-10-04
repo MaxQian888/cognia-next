@@ -395,6 +395,88 @@ describe("TerminalShellPicker", () => {
     })
   })
 
+  it("shows each host's address so look-alike profiles can be told apart", async () => {
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSshHost={jest.fn()}
+        sshHosts={[
+          {
+            id: "ssh-1",
+            name: "Production",
+            host: "prod.example.com",
+            port: 2222,
+            username: "deploy",
+            authMethod: "agent",
+          },
+        ]}
+      />
+    )
+    expect(screen.getByTestId("terminal-shell-picker-ssh-ssh-1")).toHaveTextContent(
+      "deploy@prod.example.com:2222"
+    )
+  })
+
+  it("offers to add an SSH host when none is saved, instead of hiding SSH", async () => {
+    const onManageSshHosts = jest.fn()
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSshHost={jest.fn()}
+        onManageSshHosts={onManageSshHosts}
+        sshHosts={[]}
+      />
+    )
+    const manage = screen.getByTestId("terminal-shell-picker-ssh-manage")
+    expect(manage).toHaveTextContent("terminal.shellPicker.sshAdd")
+    fireEvent.click(manage)
+    expect(onManageSshHosts).toHaveBeenCalled()
+  })
+
+  it("offers to manage hosts once some are saved", async () => {
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSshHost={jest.fn()}
+        onManageSshHosts={jest.fn()}
+        sshHosts={[
+          {
+            id: "ssh-1",
+            name: "Production",
+            host: "prod.example.com",
+            port: 22,
+            username: "deploy",
+            authMethod: "agent",
+          },
+        ]}
+      />
+    )
+    expect(screen.getByTestId("terminal-shell-picker-ssh-manage")).toHaveTextContent(
+      "terminal.shellPicker.sshManage"
+    )
+  })
+
+  it("says SSH dials from this desktop while the window drives a remote host", async () => {
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSshHost={jest.fn()}
+        onManageSshHosts={jest.fn()}
+        sshDialsFromThisDesktop
+        sshHosts={[]}
+      />
+    )
+    expect(screen.getByText("terminal.shellPicker.sshLabelThisDesktop")).toBeInTheDocument()
+  })
+
   it("omits the SSH group when hosts exist but no connect handler is wired", async () => {
     // The dock withholds `onNewSshHost` nowhere today, but a caller that
     // supplies hosts without a handler must not render dead menu rows.

@@ -15,7 +15,7 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
     open ? <div>{children}</div> : null,
 }))
 
-const sessions: Record<string, { kind?: string }> = {}
+const sessions: Record<string, { kind?: string; profileId?: string }> = {}
 jest.mock("@/stores/terminal/terminal-store", () => ({
   useTerminalStore: (selector: (state: unknown) => unknown) => selector({ sessions }),
 }))
@@ -37,9 +37,9 @@ function row(overrides: Partial<SshForwardStatus> = {}): SshForwardStatus {
   }
 }
 
-function setSession(kind?: string): void {
+function setSession(kind?: string, profileId?: string): void {
   for (const key of Object.keys(sessions)) delete sessions[key]
-  sessions["s-1"] = { kind }
+  sessions["s-1"] = { kind, profileId }
 }
 
 function renderPanel(
@@ -277,5 +277,22 @@ describe("a shell that does not hold the SSH connection", () => {
       expect(text).toContain("error.unknown")
       expect(text).toContain("something nobody planned for")
     })
+  })
+  it("leads back to the saved host's rules, and says which rules it can show", async () => {
+    setSession("ssh", "ssh-1")
+    renderPanel(jest.fn(async () => [row()]))
+    await userEvent.click(await screen.findByTestId("terminal-forward-open"))
+    expect(screen.getByTestId("terminal-forward-footer")).toHaveTextContent("editHint")
+    expect(screen.getByTestId("terminal-forward-edit")).toHaveAttribute(
+      "href",
+      "/settings?section=terminal&terminalPanel=ssh&sshHost=ssh-1"
+    )
+  })
+
+  it("offers no edit link for a tab that never recorded its saved host", async () => {
+    setSession("ssh")
+    renderPanel(jest.fn(async () => [row()]))
+    await userEvent.click(await screen.findByTestId("terminal-forward-open"))
+    expect(screen.queryByTestId("terminal-forward-edit")).toBeNull()
   })
 })

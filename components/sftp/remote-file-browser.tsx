@@ -234,7 +234,12 @@ export function RemoteFileBrowser({
 
       {failure ? (
         <p className="text-[11px] text-destructive" data-testid="sftp-failure">
-          {t(`failure.${failure.failure.kind}`, { path: failure.path })}
+          {t(
+            failure.failure.code === "sftp_approval_required"
+              ? "approvalRefused"
+              : `failure.${failure.failure.kind}`,
+            { path: failure.path }
+          )}
           {failure.failure.detail ? ` ${failure.failure.detail}` : ""}
         </p>
       ) : null}

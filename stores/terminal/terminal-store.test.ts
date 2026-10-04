@@ -1016,6 +1016,8 @@ describe("SSH session rows", () => {
     useTerminalStore.getState().registerSession(
       baseInfo({
         id: "ssh-a",
+        hostId: "durable-a",
+        remoteHost: { id: "registry-a", label: "Build host" },
         kind: "ssh",
         profileId: "ssh-1",
         shell: "ssh deploy@prod.example.com",
@@ -1024,6 +1026,8 @@ describe("SSH session rows", () => {
     const row = useTerminalStore.getState().sessions["ssh-a"]
     expect(row?.kind).toBe("ssh")
     expect(row?.profileId).toBe("ssh-1")
+    expect(row?.hostId).toBe("durable-a")
+    expect(row?.remoteHost).toEqual({ id: "registry-a", label: "Build host" })
   })
 
   it("titles an SSH tab by its target, not the word ssh", () => {

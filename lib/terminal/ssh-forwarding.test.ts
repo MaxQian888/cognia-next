@@ -1,5 +1,6 @@
 import {
   buildForwardedConnectRequest,
+  buildSynchronizedConnectRequest,
   formatLocalForward,
   formatRemoteForward,
   jumpHostCandidates,
@@ -255,5 +256,31 @@ describe("buildForwardedConnectRequest", () => {
     expect(buildForwardedConnectRequest({ profile, allProfiles: [profile], ...base }).kind).toBe(
       "ok"
     )
+  })
+})
+
+describe("buildSynchronizedConnectRequest", () => {
+  it("carries the resolved jump chain and drops every forwarding rule", () => {
+    const bastion = host("bastion")
+    const target = host("target", {
+      jumpHostId: "bastion",
+      localForwards: [local()],
+      remoteForwards: [remote({ enabled: true })],
+    })
+    const request = buildSynchronizedConnectRequest(target, [bastion, target])
+    expect(request?.jumpChain?.map((hop) => hop.host)).toEqual(["bastion.example"])
+    expect(request).not.toHaveProperty("localForwards")
+    expect(request).not.toHaveProperty("remoteForwards")
+  })
+
+  it("refuses an invalid hop instead of syncing a chain the host would reject", () => {
+    const bastion = host("bastion", { username: "" })
+    const target = host("target", { jumpHostId: "bastion" })
+    expect(buildSynchronizedConnectRequest(target, [bastion, target])).toBeNull()
+  })
+
+  it("refuses a chain that cannot be walked", () => {
+    const target = host("target", { jumpHostId: "missing" })
+    expect(buildSynchronizedConnectRequest(target, [target])).toBeNull()
   })
 })

@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 import { tabColorBorderClass } from "@/lib/terminal/tab-appearance"
 import { TAB_ICON_COMPONENTS } from "@/lib/terminal/tab-icon-map"
 import { displayTitle, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
+import { useTerminalHostLabel } from "@/hooks/terminal/use-terminal-host-label"
 
 export interface TerminalTabProps {
   row: TerminalSessionRow
@@ -57,6 +58,7 @@ export function TerminalTab({
   ...rest
 }: TerminalTabProps) {
   const t = useTranslations("terminal.tab")
+  const host = useTerminalHostLabel(row)
 
   const statusKey =
     row.status === "running"
@@ -131,6 +133,15 @@ export function TerminalTab({
       </MotionStatusSwap>
       {TabIcon && <TabIcon className="h-3 w-3 shrink-0 text-muted-foreground" />}
       <span className="max-w-[180px] truncate">{displayTitle(row)}</span>
+      {host.different ? (
+        <span
+          className="max-w-24 truncate rounded border px-1 text-[10px] text-muted-foreground"
+          title={host.description}
+          aria-label={host.description}
+        >
+          {host.label}
+        </span>
+      ) : null}
       {hasActivity && !active && (
         <span
           className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500"

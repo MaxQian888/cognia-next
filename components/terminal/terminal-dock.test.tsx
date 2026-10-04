@@ -42,10 +42,17 @@ const mockSpawnFromDock = jest.fn(async (..._args: unknown[]) => ({
 }))
 const mockKillFromDock = jest.fn(async (..._args: unknown[]) => undefined)
 const mockDetachFromDock = jest.fn(async (..._args: unknown[]) => undefined)
+const mockRestartFromDock = jest.fn(async (..._args: unknown[]): Promise<unknown> => ({
+  kind: "spawned",
+  sessionId: "s-2",
+  shell: "",
+}))
 jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
+  ...jest.requireActual("@/lib/terminal/spawn-orchestrator"),
   spawnFromDock: (...args: unknown[]) => mockSpawnFromDock(...(args as [])),
   killFromDock: (...args: unknown[]) => mockKillFromDock(...(args as [])),
   detachFromDock: (...args: unknown[]) => mockDetachFromDock(...(args as [])),
+  restartFromDock: (...args: unknown[]) => mockRestartFromDock(...args),
 }))
 
 // The dock delegates shell / profile / cwd precedence to `spawnDefaultTerminal`
@@ -338,6 +345,20 @@ describe("TerminalDock", () => {
     fireEvent.click(await screen.findByTestId("tab-color-red"))
 
     expect(useTerminalStore.getState().sessions["s-1"].tabColor).toBe("red")
+  })
+
+  it("reports a failed restart instead of swallowing it", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    mockRestartFromDock.mockResolvedValueOnce({ kind: "error", message: "pty exhausted" })
+    render(<TerminalDock />)
+
+    fireEvent.contextMenu(screen.getAllByTestId("terminal-tab")[0])
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId("terminal-tab-menu-restart"))
+    })
+
+    expect(mockRestartFromDock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s-1" }))
+    expect(toastError).toHaveBeenCalledWith("restartError")
   })
 
   it("renders a tab per session belonging to the active project", () => {
@@ -645,7 +666,7 @@ describe("TerminalDock", () => {
         })
       )
       expect(toastSuccess).toHaveBeenCalledWith(
-        "sshConnected.learned",
+        "connected.learned",
         expect.objectContaining({ description: "SHA256:abc" })
       )
       // SSH never routes through the local shell/profile/cwd precedence.
@@ -701,7 +722,17 @@ describe("TerminalDock", () => {
       })
 
       expect(mockConnectSsh).not.toHaveBeenCalled()
-      expect(toastError).toHaveBeenCalledWith("sshCredentialRequired")
+      // Refused with a way to fix it, not just told where the fix is.
+      expect(toastError).toHaveBeenCalledWith(
+        "credentialRequired",
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "actions.addPassword" }),
+        })
+      )
+      toastError.mock.calls[0][1].action.onClick()
+      expect(mockPush).toHaveBeenCalledWith(
+        "/settings?section=terminal&terminalPanel=ssh&sshHost=ssh-1"
+      )
     })
 
     it("surfaces a failed connection without opening a tab", async () => {
@@ -713,11 +744,32 @@ describe("TerminalDock", () => {
         fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
       })
 
-      expect(toastError).toHaveBeenCalledWith("spawnError")
+      expect(toastError).toHaveBeenCalledWith(
+        "failed",
+        expect.objectContaining({ description: "host unreachable" })
+      )
       expect(toastSuccess).not.toHaveBeenCalled()
     })
 
-    it("ignores an id that no longer matches a saved host", async () => {
+    it("says it is connecting while the dial is in flight", async () => {
+      seedSshHost()
+      seedProjectAndSession()
+      let release: (value: unknown) => void = () => undefined
+      mockConnectSsh.mockReturnValueOnce(new Promise((resolve) => (release = resolve)))
+      render(<TerminalDock />)
+      act(() => {
+        fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
+      })
+      expect(await screen.findByTestId("terminal-dock-ssh-connecting")).toHaveTextContent(
+        "sshConnecting"
+      )
+      await act(async () => {
+        release({ kind: "error", message: "refused" })
+      })
+      expect(screen.queryByTestId("terminal-dock-ssh-connecting")).toBeNull()
+    })
+
+    it("says so when an id no longer matches a saved host, without dialing", async () => {
       seedSshHost()
       seedProjectAndSession()
       render(<TerminalDock />)
@@ -726,7 +778,74 @@ describe("TerminalDock", () => {
       })
 
       expect(mockConnectSsh).not.toHaveBeenCalled()
-      expect(toastError).not.toHaveBeenCalled()
+      expect(toastError).toHaveBeenCalledWith("unknownHost", expect.anything())
+    })
+
+    function seedSshTab(project: { id: string }, profileId?: string) {
+      useTerminalStore.getState().registerSession({
+        id: "ssh-tab",
+        projectId: project.id,
+        extensionId: null,
+        origin: "local",
+        shell: "ssh deploy@prod.example.com",
+        kind: "ssh",
+        profileId,
+      })
+    }
+
+    /**
+     * Restart used to respawn the tab's `ssh user@host` label as a LOCAL
+     * command, with no jump chain, forwards or keyring behind it.
+     */
+    it("reconnects an SSH tab from its saved profile, closing the old tab after", async () => {
+      seedSshHost()
+      const project = seedProjectAndSession()
+      seedSshTab(project, "ssh-1")
+      render(<TerminalDock />)
+
+      fireEvent.contextMenu(screen.getAllByTestId("terminal-tab")[0])
+      await act(async () => {
+        fireEvent.click(await screen.findByTestId("terminal-tab-menu-restart"))
+      })
+
+      expect(mockConnectSsh).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: expect.objectContaining({ id: "ssh-1" }) })
+      )
+      expect(mockSpawnFromDock).not.toHaveBeenCalled()
+      expect(mockKillFromDock).toHaveBeenCalledWith("ssh-tab", expect.anything())
+    })
+
+    it("refuses to reconnect an SSH tab that never recorded its profile", async () => {
+      seedSshHost()
+      const project = seedProjectAndSession()
+      seedSshTab(project)
+      render(<TerminalDock />)
+
+      fireEvent.contextMenu(screen.getAllByTestId("terminal-tab")[0])
+      await act(async () => {
+        fireEvent.click(await screen.findByTestId("terminal-tab-menu-restart"))
+      })
+
+      expect(mockConnectSsh).not.toHaveBeenCalled()
+      expect(mockKillFromDock).not.toHaveBeenCalled()
+      expect(toastError).toHaveBeenCalledWith("restartSshUnknownProfile")
+    })
+
+    it("links an SSH tab to its host's settings and its files", async () => {
+      seedSshHost()
+      const project = seedProjectAndSession()
+      seedSshTab(project, "ssh-1")
+      render(<TerminalDock />)
+
+      fireEvent.contextMenu(screen.getAllByTestId("terminal-tab")[0])
+      fireEvent.click(await screen.findByTestId("terminal-tab-menu-ssh-edit"))
+      expect(mockPush).toHaveBeenCalledWith(
+        "/settings?section=terminal&terminalPanel=ssh&sshHost=ssh-1"
+      )
+
+      fireEvent.contextMenu(screen.getAllByTestId("terminal-tab")[0])
+      fireEvent.click(await screen.findByTestId("terminal-tab-menu-ssh-files"))
+      expect(mockPush).toHaveBeenCalledWith("/devices?device=ssh%3Assh-1&deviceSection=files")
     })
 
     /**

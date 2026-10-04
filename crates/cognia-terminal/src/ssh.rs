@@ -358,6 +358,120 @@ pub fn forget_host_key(host: &str, port: u16, known_hosts_path: &Path) -> Result
     Ok(doomed.len())
 }
 
+/// A key learned by this desktop's SSH client. No credential material is exposed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustedHostKey {
+    pub host: String,
+    pub port: u16,
+    pub key_type: String,
+    pub fingerprint: String,
+}
+
+fn known_host_address(address: &str) -> Option<(&str, u16)> {
+    // Cognia writes literal names, never wildcard, hashed or marked entries.
+    if address.is_empty() || address.contains(['|', '*', '?', '!', '@']) {
+        return None;
+    }
+    if let Some(bracketed) = address.strip_prefix('[') {
+        let (host, port) = bracketed.rsplit_once("]:")?;
+        let port = port.parse::<u16>().ok()?;
+        return (!host.is_empty() && port > 0).then_some((host, port));
+    }
+    Some((address, 22))
+}
+
+/// Read the owner-only TOFU file, including hosts with no remaining saved profile.
+pub fn list_host_keys(path: &Path) -> Result<Vec<TrustedHostKey>, String> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(format!("known_hosts could not be read: {error}")),
+    };
+    let mut entries = Vec::new();
+    for (index, line) in contents.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<_> = line.split_whitespace().collect();
+        let invalid = || format!("known_hosts has an unsupported entry on line {}", index + 1);
+        if fields.len() < 3 {
+            return Err(invalid());
+        }
+        let key = ssh_key::PublicKey::from_openssh(&format!("{} {}", fields[1], fields[2]))
+            .map_err(|_| invalid())?;
+        for address in fields[0].split(',') {
+            // Refuse an imported format we cannot display faithfully rather than
+            // presenting a partial trust inventory as if it were complete.
+            let (host, port) = known_host_address(address).ok_or_else(invalid)?;
+            entries.push(TrustedHostKey {
+                host: host.to_string(),
+                port,
+                key_type: key.algorithm().to_string(),
+                fingerprint: fingerprint_of(&key),
+            });
+        }
+    }
+    entries.sort_by(|a, b| {
+        (&a.host, a.port, &a.key_type, &a.fingerprint).cmp(&(
+            &b.host,
+            b.port,
+            &b.key_type,
+            &b.fingerprint,
+        ))
+    });
+    entries.dedup();
+    Ok(entries)
+}
+
+/// Forget only the displayed key, preserving other algorithms and host aliases.
+pub fn forget_host_key_entry(
+    host: &str,
+    port: u16,
+    fingerprint: &str,
+    path: &Path,
+) -> Result<usize, String> {
+    let entries = list_host_keys(path)?;
+    if !entries
+        .iter()
+        .any(|entry| entry.host == host && entry.port == port && entry.fingerprint == fingerprint)
+    {
+        return Ok(0);
+    }
+    let matches_address = |name: &str| known_host_address(name) == Some((host, port));
+    let contents = std::fs::read_to_string(path)
+        .map_err(|error| format!("known_hosts could not be read: {error}"))?;
+    let mut removed = 0;
+    let mut kept = Vec::new();
+    for line in contents.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        if fields.len() >= 3 && !line.trim_start().starts_with('#') {
+            let key = ssh_key::PublicKey::from_openssh(&format!("{} {}", fields[1], fields[2]))
+                .map_err(|error| error.to_string())?;
+            if fingerprint_of(&key) == fingerprint && fields[0].split(',').any(matches_address) {
+                removed += 1;
+                let aliases: Vec<_> = fields[0]
+                    .split(',')
+                    .filter(|name| !matches_address(name))
+                    .collect();
+                if !aliases.is_empty() {
+                    kept.push(format!("{} {}", aliases.join(","), fields[1..].join(" ")));
+                }
+                continue;
+            }
+        }
+        kept.push(line.to_string());
+    }
+    let mut next = kept.join("\n");
+    if !next.is_empty() {
+        next.push('\n');
+    }
+    std::fs::write(path, next)
+        .map_err(|error| format!("known_hosts could not be written: {error}"))?;
+    Ok(removed)
+}
+
 #[derive(Debug, Default)]
 struct HostObservation {
     status: Option<HostKeyStatus>,
@@ -631,11 +745,108 @@ fn describe_connect_failure(
     format!("SSH connection to {host}:{port} failed: {error}")
 }
 
-fn client_config() -> Arc<client::Config> {
-    Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(30)),
-        ..Default::default()
-    })
+/// How long a connection may go without anything arriving before russh gives
+/// up on it (`russh::Error::InactivityTimeout`).
+///
+/// This is the one dead-peer detector for every phase of a connection. Before
+/// authentication it bounds a handshake that stalls (a tarpit that sends a
+/// banner and then nothing, a blackholed route mid key exchange). After it, it
+/// bounds a peer that stopped answering. russh resets the timer on every loop
+/// iteration that did not itself send a russh-generated keepalive: any packet
+/// received, and any message this side sends through the handle.
+const SSH_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often an authenticated connection asks the server to prove it is alive.
+///
+/// Without this an idle shell receives nothing, so the inactivity timer above
+/// fires after 30 s of quiet and the reconnect ladder replaces the user's shell
+/// with a fresh one, losing its state. The server's reply to
+/// `keepalive@openssh.com` (`REQUEST_FAILURE` from OpenSSH, `REQUEST_SUCCESS`
+/// from others) is received data, so a live idle session never trips the
+/// timer. Kept well under [`SSH_INACTIVITY_TIMEOUT`] so the reply has a full
+/// interval of round-trip slack before the timer could fire.
+const SSH_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+
+/// The liveness policy every dialled SSH connection runs under: target, each
+/// jump hop, and the SFTP sessions that share [`dial_authenticated`].
+///
+/// A struct rather than two free constants so the end-to-end tests can drive the
+/// real dial path with millisecond timings instead of waiting out 30 s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LinkPolicy {
+    inactivity_timeout: Duration,
+    heartbeat_interval: Duration,
+}
+
+impl LinkPolicy {
+    const STANDARD: Self = Self {
+        inactivity_timeout: SSH_INACTIVITY_TIMEOUT,
+        heartbeat_interval: SSH_HEARTBEAT_INTERVAL,
+    };
+
+    /// The russh transport configuration.
+    ///
+    /// `keepalive_interval` stays `None` on purpose, even though russh's own
+    /// keepalive looks like the obvious fix for idle drops. In russh 0.63 the
+    /// keepalive timer starts with the session loop, before authentication. When
+    /// it fires pre-auth (no packet for one interval during key exchange, or
+    /// while an agent waits on a Touch ID approval) russh sends nothing because
+    /// the session is not yet `Authenticated`, does not re-arm the timer, and
+    /// treats the iteration as "did not send a keepalive", which resets the
+    /// inactivity timer. The elapsed `Sleep` is then ready on every poll, so the
+    /// loop busy-spins and the inactivity timeout can never fire: a stalled
+    /// handshake hangs at 100% CPU until the server hangs up, and if the caller
+    /// gives up first the detached session task keeps spinning. Liveness is
+    /// therefore driven from outside russh, and only once authenticated, by
+    /// [`spawn_heartbeat`]; the pre-auth phase keeps the plain inactivity bound.
+    fn client_config(self) -> Arc<client::Config> {
+        Arc::new(client::Config {
+            inactivity_timeout: Some(self.inactivity_timeout),
+            keepalive_interval: None,
+            ..Default::default()
+        })
+    }
+}
+
+/// Ping an authenticated connection every `interval` until it closes.
+///
+/// One `keepalive@openssh.com` with `want_reply` is in flight at a time, and the
+/// next is only scheduled after its reply. That keeps russh's inactivity timer
+/// the single dead-peer detector: sending the ping resets the timer once, and
+/// if no reply arrives nothing else resets it, so a peer that stopped answering
+/// is still dropped one inactivity window later (about `interval` +
+/// `inactivity_timeout` after the last packet). Firing pings on a fixed clock
+/// instead would reset the timer on every send and keep a dead connection open
+/// forever.
+///
+/// The task holds only a weak reference between pings, so it never keeps a
+/// handle its owners dropped alive. A strong reference is held while a reply
+/// is awaited, which delays teardown by at most one round trip on a live peer,
+/// or until the inactivity timeout ends the session on a dead one. The task
+/// ends when the handle is dropped or the session has closed.
+fn spawn_heartbeat(handle: &Arc<client::Handle<ClientHandler>>, interval: Duration) {
+    let weak = Arc::downgrade(handle);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(interval).await;
+            let Some(handle) = weak.upgrade() else {
+                return;
+            };
+            if handle.is_closed() || handle.send_ping().await.is_err() || handle.is_closed() {
+                return;
+            }
+        }
+    });
+}
+
+/// Share an authenticated handle and start its heartbeat.
+fn keep_alive(
+    handle: client::Handle<ClientHandler>,
+    policy: LinkPolicy,
+) -> Arc<client::Handle<ClientHandler>> {
+    let handle = Arc::new(handle);
+    spawn_heartbeat(&handle, policy.heartbeat_interval);
+    handle
 }
 
 fn make_handler(
@@ -711,16 +922,19 @@ async fn open_jump_chain(
     request: &SshSpawnRequest,
     credentials: &SshCredentials,
     known_hosts_path: &Path,
+    policy: LinkPolicy,
 ) -> Result<Vec<Arc<client::Handle<ClientHandler>>>, String> {
     let mut handles: Vec<Arc<client::Handle<ClientHandler>>> = Vec::new();
     for (index, hop) in request.jump_chain.iter().enumerate() {
         let (handler, observation) = make_handler(&hop.host, hop.port, known_hosts_path, None);
         let mut handle = match handles.last() {
-            None => client::connect(client_config(), (hop.host.as_str(), hop.port), handler)
-                .await
-                .map_err(|error| {
-                    describe_connect_failure(&hop.host, hop.port, &error, &observation)
-                })?,
+            None => client::connect(
+                policy.client_config(),
+                (hop.host.as_str(), hop.port),
+                handler,
+            )
+            .await
+            .map_err(|error| describe_connect_failure(&hop.host, hop.port, &error, &observation))?,
             Some(previous) => {
                 let channel = previous
                     .channel_open_direct_tcpip(
@@ -736,7 +950,7 @@ async fn open_jump_chain(
                             hop.host, hop.port
                         )
                     })?;
-                client::connect_stream(client_config(), channel.into_stream(), handler)
+                client::connect_stream(policy.client_config(), channel.into_stream(), handler)
                     .await
                     .map_err(|error| {
                         describe_connect_failure(&hop.host, hop.port, &error, &observation)
@@ -756,7 +970,7 @@ async fn open_jump_chain(
         )
         .await
         .map_err(|error| format!("{error} (jump host {}:{})", hop.host, hop.port))?;
-        handles.push(Arc::new(handle));
+        handles.push(keep_alive(handle, policy));
     }
     Ok(handles)
 }
@@ -791,8 +1005,9 @@ async fn dial_authenticated(
     credentials: &SshCredentials,
     known_hosts_path: &Path,
     forwards: Option<Arc<ForwardRegistry>>,
+    policy: LinkPolicy,
 ) -> Result<DialedSsh, String> {
-    let jump_handles = open_jump_chain(request, credentials, known_hosts_path).await?;
+    let jump_handles = open_jump_chain(request, credentials, known_hosts_path, policy).await?;
     let (handler, observation) = make_handler(
         &request.host,
         request.port,
@@ -801,7 +1016,7 @@ async fn dial_authenticated(
     );
     let mut handle = match jump_handles.last() {
         None => client::connect(
-            client_config(),
+            policy.client_config(),
             (request.host.as_str(), request.port),
             handler,
         )
@@ -824,7 +1039,7 @@ async fn dial_authenticated(
                         request.host, request.port
                     )
                 })?;
-            client::connect_stream(client_config(), channel.into_stream(), handler)
+            client::connect_stream(policy.client_config(), channel.into_stream(), handler)
                 .await
                 .map_err(|error| {
                     describe_connect_failure(&request.host, request.port, &error, &observation)
@@ -841,7 +1056,7 @@ async fn dial_authenticated(
     )
     .await?;
     Ok(DialedSsh {
-        handle: Arc::new(handle),
+        handle: keep_alive(handle, policy),
         jump_handles,
         observation,
     })
@@ -858,7 +1073,14 @@ async fn connect_remote(
         handle,
         jump_handles,
         observation,
-    } = dial_authenticated(request, credentials, known_hosts_path, forwards).await?;
+    } = dial_authenticated(
+        request,
+        credentials,
+        known_hosts_path,
+        forwards,
+        LinkPolicy::STANDARD,
+    )
+    .await?;
 
     let probed_shell = probe_remote_shell(&handle).await;
 
@@ -1720,7 +1942,14 @@ pub async fn open_hosted_sftp(
         handle,
         jump_handles,
         observation,
-    } = dial_authenticated(&req, &credentials, &known_hosts_path, None).await?;
+    } = dial_authenticated(
+        &req,
+        &credentials,
+        &known_hosts_path,
+        None,
+        LinkPolicy::STANDARD,
+    )
+    .await?;
 
     let channel = handle
         .channel_open_session()
@@ -1764,13 +1993,14 @@ pub async fn open_hosted_sftp(
 /// and jump code is driven by a real SSH handshake over a real socket rather
 /// than a stub — which is the only way to cover the parts that can go wrong.
 #[cfg(test)]
-mod test_server {
+pub(crate) mod test_server {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     use russh::keys::PrivateKey;
     use russh::server::{self, Auth, ChannelOpenHandle, Msg, Session};
     use russh::{Channel, ChannelId};
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
     /// Test-only key material. Committed on purpose: a fixed pair keeps the
@@ -1994,6 +2224,78 @@ EkUgg9byMeDuVd92H8WqAAAAEmNvZ25pYS10ZXN0LWNsaWVudAECAw==
         });
         port
     }
+
+    /// A listener that answers with an SSH banner and then says nothing more,
+    /// holding the socket open: a handshake that stalls before key exchange.
+    pub async fn start_tarpit() -> u16 {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind tarpit");
+        let port = listener.local_addr().expect("addr").port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    let _ = socket.write_all(b"SSH-2.0-cognia-tarpit\r\n").await;
+                    std::future::pending::<()>().await;
+                    drop(socket);
+                });
+            }
+        });
+        port
+    }
+
+    /// A TCP relay in front of `target_port` that can be frozen.
+    ///
+    /// Once the flag is set, whatever arrives next in either direction is
+    /// swallowed and both sockets stay open, which is what a peer that vanished
+    /// behind a NAT or a dead route looks like: no reset, no FIN, just silence.
+    pub async fn start_freezable_relay(target_port: u16) -> (u16, Arc<AtomicBool>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind relay");
+        let port = listener.local_addr().expect("addr").port();
+        let frozen = Arc::new(AtomicBool::new(false));
+        let relay_frozen = Arc::clone(&frozen);
+        tokio::spawn(async move {
+            loop {
+                let Ok((client_side, _)) = listener.accept().await else {
+                    return;
+                };
+                let Ok(server_side) = TcpStream::connect(("127.0.0.1", target_port)).await else {
+                    return;
+                };
+                let (client_read, client_write) = client_side.into_split();
+                let (server_read, server_write) = server_side.into_split();
+                tokio::spawn(pump(client_read, server_write, Arc::clone(&relay_frozen)));
+                tokio::spawn(pump(server_read, client_write, Arc::clone(&relay_frozen)));
+            }
+        });
+        (port, frozen)
+    }
+
+    async fn pump(
+        mut from: tokio::net::tcp::OwnedReadHalf,
+        mut to: tokio::net::tcp::OwnedWriteHalf,
+        frozen: Arc<AtomicBool>,
+    ) {
+        let mut buffer = [0u8; 16 * 1024];
+        loop {
+            let read = match from.read(&mut buffer).await {
+                Ok(0) | Err(_) => return,
+                Ok(read) => read,
+            };
+            if frozen.load(Ordering::SeqCst) {
+                // Park with both halves held, so neither side sees a close.
+                std::future::pending::<()>().await;
+            }
+            if to.write_all(&buffer[..read]).await.is_err() {
+                return;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2019,6 +2321,97 @@ mod tests {
 
     fn fingerprint(encoded: &str) -> String {
         super::fingerprint_of(&key(encoded))
+    }
+
+    #[test]
+    fn trusted_host_keys_list_ports_algorithms_fingerprints_and_orphans() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        assert!(super::list_host_keys(&path).unwrap().is_empty());
+        verify_or_learn_host_key("orphan.example", 22, &key(KEY_A), &path).unwrap();
+        verify_or_learn_host_key("::1", 2222, &key(KEY_B), &path).unwrap();
+        let listed = super::list_host_keys(&path).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].host, "::1");
+        assert_eq!(listed[0].port, 2222);
+        assert_eq!(listed[0].key_type, "ssh-ed25519");
+        assert_eq!(listed[0].fingerprint, fingerprint(KEY_B));
+        assert_eq!(listed[1].host, "orphan.example");
+        assert_eq!(listed[1].port, 22);
+        assert_eq!(listed[1].fingerprint, fingerprint(KEY_A));
+    }
+
+    #[test]
+    fn trusted_host_key_forget_preserves_other_keys_aliases_and_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let contents = format!("# retained\n\nhost.example,alias.example ssh-ed25519 {KEY_A}\nhost.example ssh-ed25519 {KEY_B}\n[host.example]:2222 ssh-ed25519 {KEY_A}\n");
+        fs::write(&path, &contents).unwrap();
+        assert_eq!(
+            super::forget_host_key_entry("host.example", 22, "SHA256:stale", &path).unwrap(),
+            0
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+        assert_eq!(
+            super::forget_host_key_entry("host.example", 22, &fingerprint(KEY_A), &path).unwrap(),
+            1
+        );
+        let listed = super::list_host_keys(&path).unwrap();
+        assert_eq!(listed.len(), 3);
+        assert!(listed.iter().any(|entry| entry.host == "alias.example"));
+        assert!(listed.iter().any(|entry| entry.host == "host.example"
+            && entry.port == 22
+            && entry.fingerprint == fingerprint(KEY_B)));
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("# retained\n\n"));
+    }
+
+    #[test]
+    fn trusted_host_keys_refuse_unreadable_or_malformed_inventory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(super::list_host_keys(dir.path()).is_err());
+        let path = dir.path().join("known_hosts");
+        for invalid in [
+            "broken".to_string(),
+            format!("[host]:0 ssh-ed25519 {KEY_A}"),
+            format!("*.example ssh-ed25519 {KEY_A}"),
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert!(super::list_host_keys(&path).is_err());
+        }
+    }
+
+    #[test]
+    fn trusted_host_key_forget_matches_an_explicit_default_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        fs::write(
+            &path,
+            format!(
+                "[host.example]:022 ssh-ed25519 {KEY_A}\n[host.example]:22 ssh-ed25519 {KEY_A}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(super::list_host_keys(&path).unwrap()[0].port, 22);
+        assert_eq!(
+            super::forget_host_key_entry("host.example", 22, &fingerprint(KEY_A), &path).unwrap(),
+            2
+        );
+        assert!(super::list_host_keys(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn trusted_host_key_commands_are_client_local_only() {
+        use cognia_companion_contract::command_manifest::{
+            descriptor, CommandTarget, CommandTransport,
+        };
+        for name in ["ssh_list_host_keys", "ssh_forget_host_key"] {
+            let command = descriptor(name).unwrap();
+            assert_eq!(command.target, CommandTarget::Client);
+            assert_eq!(command.transports, &[CommandTransport::Internal]);
+            assert_eq!(command.capability, "client.local");
+        }
     }
 
     #[tokio::test]
@@ -2737,5 +3130,148 @@ mod tests {
         assert!(ssh_integration_command(ShellKind::Pwsh, nonce).is_none());
         assert!(ssh_integration_command(ShellKind::Unknown, nonce).is_none());
         assert!(ssh_integration_command(ShellKind::Bash, "unsafe';command").is_none());
+    }
+
+    // ---- Connection liveness -------------------------------------------
+
+    /// The shipped policy's shape (heartbeat well inside the inactivity
+    /// window) scaled to milliseconds, so the real dial path can be driven
+    /// through several windows in well under a second each.
+    const FAST_LINK: super::LinkPolicy = super::LinkPolicy {
+        inactivity_timeout: StdDuration::from_millis(400),
+        heartbeat_interval: StdDuration::from_millis(100),
+    };
+
+    /// No heartbeat within the test's lifetime: what the policy was before.
+    const NO_HEARTBEAT_LINK: super::LinkPolicy = super::LinkPolicy {
+        inactivity_timeout: StdDuration::from_millis(400),
+        heartbeat_interval: StdDuration::from_secs(3600),
+    };
+
+    async fn dial_with(
+        policy: super::LinkPolicy,
+        request: SshSpawnRequest,
+        client: &TestClient,
+    ) -> Result<super::DialedSsh, String> {
+        let credentials = super::load_all_credentials(&request)?;
+        super::dial_authenticated(&request, &credentials, &client.known_hosts, None, policy).await
+    }
+
+    async fn expect_dialed(
+        policy: super::LinkPolicy,
+        request: SshSpawnRequest,
+        client: &TestClient,
+    ) -> super::DialedSsh {
+        match dial_with(policy, request, client).await {
+            Ok(dialed) => dialed,
+            Err(error) => panic!("dial should have succeeded: {error}"),
+        }
+    }
+
+    #[test]
+    fn the_shipped_link_policy_heartbeats_well_inside_the_inactivity_window() {
+        let policy = super::LinkPolicy::STANDARD;
+        let config = policy.client_config();
+        assert_eq!(config.inactivity_timeout, Some(policy.inactivity_timeout));
+        // russh's built-in keepalive busy-spins before authentication and
+        // defeats the inactivity bound (see `LinkPolicy::client_config`), so
+        // liveness must come from `spawn_heartbeat`, never from this field.
+        assert_eq!(config.keepalive_interval, None);
+        assert!(policy.heartbeat_interval > StdDuration::ZERO);
+        // A full interval of round-trip slack between a ping and the timer.
+        assert!(policy.heartbeat_interval * 2 <= policy.inactivity_timeout);
+        assert!(FAST_LINK.heartbeat_interval * 2 <= FAST_LINK.inactivity_timeout);
+    }
+
+    #[tokio::test]
+    async fn an_idle_session_outlives_the_inactivity_window_only_while_heartbeating() {
+        let server = test_server::start(test_server::HOST_KEY_A, false).await;
+        let client = test_client();
+
+        let kept = expect_dialed(FAST_LINK, connect_request(&client, server.port), &client).await;
+        let unkept = expect_dialed(
+            NO_HEARTBEAT_LINK,
+            connect_request(&client, server.port),
+            &client,
+        )
+        .await;
+        tokio::time::sleep(FAST_LINK.inactivity_timeout * 4).await;
+
+        assert!(
+            !kept.handle.is_closed(),
+            "a heartbeating idle session must survive several inactivity windows"
+        );
+        // The control: the same idle connection without a heartbeat is
+        // dropped, so the assertion above is not vacuous.
+        assert!(unkept.handle.is_closed());
+    }
+
+    #[tokio::test]
+    async fn every_jump_hop_is_kept_alive_while_idle() {
+        let outer = test_server::start(test_server::HOST_KEY_A, false).await;
+        let inner = test_server::start(test_server::HOST_KEY_B, false).await;
+        let client = test_client();
+        let mut request = connect_request(&client, inner.port);
+        request.jump_chain = vec![SshJumpHop {
+            host: "127.0.0.1".into(),
+            port: outer.port,
+            username: "bastion".into(),
+            auth_method: SshAuthMethod::PrivateKey,
+            credential_ref: None,
+            private_key_path: Some(client.key_path.clone()),
+        }];
+
+        let dialed = expect_dialed(FAST_LINK, request, &client).await;
+        tokio::time::sleep(FAST_LINK.inactivity_timeout * 4).await;
+
+        assert!(!dialed.handle.is_closed());
+        assert_eq!(dialed.jump_handles.len(), 1);
+        assert!(dialed.jump_handles.iter().all(|hop| !hop.is_closed()));
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_stops_answering_is_still_dropped_while_heartbeating() {
+        let server = test_server::start(test_server::HOST_KEY_A, false).await;
+        let (relay_port, frozen) = test_server::start_freezable_relay(server.port).await;
+        let client = test_client();
+
+        let dialed = expect_dialed(FAST_LINK, connect_request(&client, relay_port), &client).await;
+        tokio::time::sleep(FAST_LINK.inactivity_timeout * 2).await;
+        assert!(!dialed.handle.is_closed(), "alive before the peer vanishes");
+
+        frozen.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Expected after about one heartbeat interval plus one inactivity
+        // window; the bound is generous so a loaded CI runner does not flake.
+        let mut closed = false;
+        for _ in 0..80 {
+            if dialed.handle.is_closed() {
+                closed = true;
+                break;
+            }
+            tokio::time::sleep(StdDuration::from_millis(50)).await;
+        }
+        assert!(
+            closed,
+            "the heartbeat must not keep a silent peer's connection open"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_handshake_that_stalls_before_authentication_is_abandoned() {
+        let tarpit = test_server::start_tarpit().await;
+        let client = test_client();
+
+        // With russh's own keepalive configured this dial never returns (and
+        // spins a core): the inactivity bound must hold before authentication.
+        let outcome = tokio::time::timeout(
+            StdDuration::from_secs(5),
+            dial_with(FAST_LINK, connect_request(&client, tarpit), &client),
+        )
+        .await
+        .expect("a stalled handshake must end within the inactivity window");
+        match outcome {
+            Ok(_) => panic!("a server that never completes key exchange cannot be dialled"),
+            Err(error) => assert!(error.contains("failed"), "{error}"),
+        }
     }
 }

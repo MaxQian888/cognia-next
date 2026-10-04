@@ -22,7 +22,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { NetworkIcon } from "lucide-react"
+import Link from "next/link"
+import { NetworkIcon, SettingsIcon, XIcon } from "lucide-react"
 
 import { MotionPopover } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"
@@ -39,6 +40,7 @@ import {
   type SshForwardRunState,
   type SshForwardStatus,
 } from "@/lib/terminal/ssh-forward-control"
+import { sshHostSettingsHref } from "@/lib/terminal/terminal-settings-link"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 import { TERMINAL_LAYOUT } from "./terminal-layout-tokens"
@@ -78,6 +80,7 @@ export function TerminalForwardPanel({
   // Mounted with `key={sessionId}`, so every piece of state below belongs to
   // one session and switching tabs cannot show another tab's tunnels.
   const isSsh = useTerminalStore((state) => state.sessions[sessionId]?.kind) === "ssh"
+  const profileId = useTerminalStore((state) => state.sessions[sessionId]?.profileId)
   const [open, setOpen] = useState(false)
   const [forwards, setForwards] = useState<SshForwardStatus[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -195,7 +198,7 @@ export function TerminalForwardPanel({
               aria-label={t("close")}
               data-testid="terminal-forward-close"
             >
-              <span className="text-xs">×</span>
+              <XIcon className="h-3 w-3" aria-hidden />
             </Button>
           </div>
           <ScrollArea className="flex-1">
@@ -261,6 +264,27 @@ export function TerminalForwardPanel({
               ))}
             </ul>
           </ScrollArea>
+          {/*
+            The rules live in the saved profile, and only the ones enabled when
+            this connection was made were sent with it. Nothing here said either
+            thing or led back to where the rules are edited.
+          */}
+          {profileId ? (
+            <div className="space-y-1 border-t px-2.5 py-2" data-testid="terminal-forward-footer">
+              <p className="text-[10px] text-muted-foreground">{t("editHint")}</p>
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                className="h-6 w-full justify-start gap-1 px-1.5 text-[11px]"
+              >
+                <Link href={sshHostSettingsHref(profileId)} data-testid="terminal-forward-edit">
+                  <SettingsIcon className="h-3 w-3" aria-hidden />
+                  {t("edit")}
+                </Link>
+              </Button>
+            </div>
+          ) : null}
         </aside>
       </MotionPopover>
     </>

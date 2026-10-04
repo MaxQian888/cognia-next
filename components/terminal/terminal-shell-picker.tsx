@@ -76,12 +76,26 @@ export interface TerminalShellPickerProps {
    * Offered on every shell. A desktop builds the request itself and hands it to
    * `ssh_terminal_spawn`; anywhere else the host resolves the profile id
    * against its own `ssh_profiles` map and dials with credentials that never
-   * leave it. What a paired device does NOT get is a jump chain or a port
-   * forward, which `buildSynchronizedSshProfiles` strips by design.
+   * leave it, through the same jump chain. What a paired device does NOT get
+   * is a port forward, which `buildSynchronizedSshProfiles` strips by design.
    */
   sshHosts?: readonly SshHostProfile[]
   /** Connect a tab to a saved SSH host. */
   onNewSshHost?: (hostId: string) => void | Promise<void>
+  /**
+   * Open the SSH hosts editor. When given, the SSH group is always drawn, with
+   * an "Add SSH host…" row when nothing is saved yet. Without it a user with
+   * no saved host had no sign this menu could open SSH at all: the group
+   * simply did not exist, and the only editor was at the bottom of a settings
+   * page nothing linked to.
+   */
+  onManageSshHosts?: () => void
+  /**
+   * The window drives a remote Cognia host but SSH is still dialed from this
+   * desktop (its profiles and keyring are here). Said in the group label,
+   * because every other row in this menu opens on the remote host.
+   */
+  sshDialsFromThisDesktop?: boolean
   /**
    * Open a serial port as a tab. Omitted on every shell that is not holding
    * the hardware: a port is a device node on this machine, and
@@ -192,6 +206,8 @@ export function TerminalShellPicker({
   onNewProfile,
   sshHosts,
   onNewSshHost,
+  onManageSshHosts,
+  sshDialsFromThisDesktop = false,
   onNewSerialPort,
   onAttachTmuxSession,
   listSerialPorts = defaultListSerialPorts,
@@ -339,10 +355,12 @@ export function TerminalShellPicker({
               <DropdownMenuSeparator />
             </>
           ) : null}
-          {namedSshHosts.length > 0 && onNewSshHost ? (
+          {onNewSshHost && (namedSshHosts.length > 0 || onManageSshHosts) ? (
             <>
               <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-                {t("terminal.shellPicker.sshLabel")}
+                {sshDialsFromThisDesktop
+                  ? t("terminal.shellPicker.sshLabelThisDesktop")
+                  : t("terminal.shellPicker.sshLabel")}
               </DropdownMenuLabel>
               {namedSshHosts.map((host) => (
                 <DropdownMenuItem
@@ -350,12 +368,28 @@ export function TerminalShellPicker({
                   onSelect={() => {
                     void onNewSshHost(host.id)
                   }}
-                  className="text-xs"
+                  className="flex-col items-start gap-0 text-xs"
                   data-testid={`terminal-shell-picker-ssh-${host.id}`}
                 >
-                  {host.name}
+                  <span className="max-w-56 truncate">{host.name}</span>
+                  {/* Two saved profiles often differ only by host or user, and
+                      the name alone cannot tell them apart. */}
+                  <span className="max-w-56 truncate font-mono text-[10px] text-muted-foreground">
+                    {`${host.username}@${host.host}${host.port === 22 ? "" : `:${host.port}`}`}
+                  </span>
                 </DropdownMenuItem>
               ))}
+              {onManageSshHosts ? (
+                <DropdownMenuItem
+                  onSelect={() => onManageSshHosts()}
+                  className="text-xs text-muted-foreground"
+                  data-testid="terminal-shell-picker-ssh-manage"
+                >
+                  {namedSshHosts.length > 0
+                    ? t("terminal.shellPicker.sshManage")
+                    : t("terminal.shellPicker.sshAdd")}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuSeparator />
             </>
           ) : null}

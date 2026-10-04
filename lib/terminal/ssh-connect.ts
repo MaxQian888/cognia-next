@@ -1,11 +1,12 @@
 "use client"
 
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { isTauri } from "@/lib/platform/detect"
 
 import { selectTerminalTransportChain } from "./pick-transport"
 import { registerLiveSession } from "./session-registry"
 import { spawnFromDock, wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
-import { buildForwardedConnectRequest } from "./ssh-forwarding"
+import { buildForwardedConnectRequest, resolveJumpChain } from "./ssh-forwarding"
 import { type SshHostProfile } from "./ssh-profiles"
 import { SshTerminalSession } from "./ssh-session"
 
@@ -35,22 +36,60 @@ export type SshConnectOutcome =
  * has nothing in the keyring to authenticate with. Catching that here turns an
  * opaque native "credential was not found" into an instruction the user can
  * act on, and keeps every id-based entry point honest about the same rule.
+ *
+ * The rule covers every hop, not only the target. A bastion authenticates on
+ * its own account against its own keyring entry (ADR-0082 §9), so a password
+ * bastion with nothing stored failed with the native "SSH password credential
+ * is missing" after the target itself had passed this check. `bastion` names
+ * the hop that is missing one, so the fix can be pointed at the right profile.
+ *
+ * A chain that cannot be walked (a missing profile, a cycle, or more than five
+ * hops) is its own answer rather than `ready`: `buildForwardedConnectRequest`
+ * refuses it anyway, and saying so before a click is what lets a caller name
+ * the reason instead of printing `invalid SSH host profile: jumpChain`.
  */
 export type SshHostLaunch =
   | { kind: "ready"; profile: SshHostProfile }
   | { kind: "unknownHost" }
-  | { kind: "credentialRequired"; name: string }
+  | {
+      kind: "credentialRequired"
+      /** The target's display name. */
+      name: string
+      /** The profile that has no stored credential: the target or a bastion. */
+      hostId: string
+      /** Set when the hop missing a credential is a bastion, not the target. */
+      bastion: { id: string; name: string } | null
+    }
+  | { kind: "chainBroken"; name: string; hostId: string }
+
+function needsStoredCredential(profile: SshHostProfile): boolean {
+  // Key and agent auth both connect without anything in the keyring: an
+  // unencrypted key needs no passphrase, and the agent holds its own material.
+  return profile.authMethod === "password" && !profile.credentialRef
+}
 
 export function resolveSshHostLaunch(
   hostId: string,
   hosts: readonly SshHostProfile[] | undefined
 ): SshHostLaunch {
-  const profile = (hosts ?? []).find((host) => host.id === hostId)
+  const saved = hosts ?? []
+  const profile = saved.find((host) => host.id === hostId)
   if (!profile) return { kind: "unknownHost" }
-  // Key and agent auth both connect without anything in the keyring: an
-  // unencrypted key needs no passphrase, and the agent holds its own material.
-  if (profile.authMethod === "password" && !profile.credentialRef) {
-    return { kind: "credentialRequired", name: profile.name }
+  const chain = resolveJumpChain(profile, saved)
+  if (!chain) return { kind: "chainBroken", name: profile.name, hostId: profile.id }
+  if (needsStoredCredential(profile)) {
+    return { kind: "credentialRequired", name: profile.name, hostId: profile.id, bastion: null }
+  }
+  // Outermost bastion first, the order a connection would fail in.
+  for (const hop of chain.slice(0, -1)) {
+    if (needsStoredCredential(hop)) {
+      return {
+        kind: "credentialRequired",
+        name: profile.name,
+        hostId: hop.id,
+        bastion: { id: hop.id, name: hop.name },
+      }
+    }
   }
   return { kind: "ready", profile }
 }
@@ -101,9 +140,22 @@ export const SSH_PROFILE_NOT_ON_HOST = "ssh_profile_not_on_host"
  * profile id gets a shell and never a tunnel. The path has been live in Rust
  * the whole time. Three UI gates are what made SSH look desktop-only.
  *
- * The branch is `selectTerminalTransportChain()[0]`, the same test
- * `syncTerminalHostProfiles` already branches on, so there is one answer to
- * "who is running the terminal" rather than two that can disagree.
+ * ## The desktop always dials its own profiles
+ *
+ * The branch is "is this the desktop", not "which terminal transport is
+ * preferred right now". The two used to be the same question, until a desktop
+ * could drive a remote Cognia host (ADR-0082): with a host active the preferred
+ * transport is `ws`, and this function sent the profile id to the remote host.
+ * That host only holds the SSH profiles its OWN desktop synced, under ids of
+ * the form `ssh-N`, so the request either failed with "profile not on host" or,
+ * worse, matched a different machine's `ssh-1` and opened a shell on a server
+ * the user never picked, with somebody else's credential.
+ *
+ * The profile, its jump chain and its keyring entry all live on this desktop,
+ * and `SshTerminalSession` talks to this desktop's terminal host directly
+ * (`invoke`, not `transport`), so the session is dialed from here whichever
+ * host the rest of the window is pointed at. Off the desktop there is no local
+ * keyring and no native client, so the host-mediated path is the only one.
  */
 export async function connectSshFromDock(input: {
   profile: SshHostProfile
@@ -117,12 +169,19 @@ export async function connectSshFromDock(input: {
   spawn?: typeof spawnFromDock
   /** Test seam. Defaults to the live transport chain. */
   transportChain?: typeof selectTerminalTransportChain
+  /**
+   * Test seam for "is this the desktop". Defaults to `isTauri()`. The live
+   * chain's `tauri-channel` head implies the same answer and is accepted too,
+   * so a caller that only stubs the chain still reaches the native path.
+   */
+  dialsLocally?: () => boolean
 }): Promise<SshConnectOutcome> {
   const chain = (input.transportChain ?? selectTerminalTransportChain)()
-  if (chain.length === 0) {
-    return { kind: "error", message: "no terminal host is reachable from this shell" }
-  }
-  if (chain[0] !== "tauri-channel") {
+  const local = (input.dialsLocally ?? isTauri)() || chain[0] === "tauri-channel"
+  if (!local) {
+    if (chain.length === 0) {
+      return { kind: "error", message: "no terminal host is reachable from this shell" }
+    }
     return connectThroughHost(input)
   }
 

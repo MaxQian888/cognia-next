@@ -67,6 +67,8 @@ export interface TerminalStoreLike {
       projectId: string | null
       extensionId: string | null
       agentSpawner: string | null
+      /** Absent on rows persisted before the field existed: a local PTY. */
+      kind?: SessionInfo["kind"]
     }
   >
 }
@@ -257,13 +259,7 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
   registerLiveSession(session)
   input.store.setHostState?.("online")
   input.store.registerSession(
-    {
-      id: session.info.id,
-      projectId: session.info.projectId,
-      extensionId: session.info.extensionId,
-      origin: session.info.origin,
-      shell: session.info.shell,
-    },
+    session.info,
     input.agentSpawner || input.title
       ? {
           ...(input.title ? { title: input.title } : {}),
@@ -487,12 +483,28 @@ export async function detachFromDock(
 }
 
 /**
+ * Marker for a restart this function will not perform, followed by `:<kind>`.
+ *
+ * A marker, like `SSH_PROFILE_NOT_ON_HOST`, because this module has no
+ * translator and the caller decides what to do instead.
+ */
+export const RESTART_NOT_LOCAL_PTY = "restart_not_local_pty"
+
+/**
  * Restart a tab by killing the old session and spawning a fresh one
  * with the same shell + cwd + agent identity. Used by the right-click
  * "Restart" action and by exited-tab one-click revival.
  *
  * The previous row's `cwd` is preferred over the original spawn `cwd`
  * because it reflects where the user actually was when the shell died.
+ *
+ * Local PTYs only, and refused BEFORE the old session is killed. An SSH row's
+ * `shell` is the display string `ssh user@host` and a serial row's is
+ * `/dev/ttyUSB0 (115200 8N1)`, so respawning either through `spawnFromDock`
+ * started a local shell with that string as its argv: the SSH tab came back as
+ * a local `ssh` with no jump chain, forwards or keyring, and the serial tab as
+ * a command that does not exist. Neither carries enough to rebuild itself
+ * here; an SSH tab is reconnected from its saved profile by the caller.
  */
 export async function restartFromDock(input: {
   sessionId: string
@@ -506,6 +518,10 @@ export async function restartFromDock(input: {
   const previous = input.store.sessions[input.sessionId]
   if (!previous) {
     return { kind: "error", message: `unknown session: ${input.sessionId}` }
+  }
+  // Rows persisted before `kind` existed lack it and are local PTYs.
+  if (previous.kind && previous.kind !== "localPty") {
+    return { kind: "error", message: `${RESTART_NOT_LOCAL_PTY}:${previous.kind}` }
   }
   const respawnReq: SpawnRequest = {
     shell: previous.shell,

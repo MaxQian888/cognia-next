@@ -63,6 +63,8 @@ export interface TerminalSessionRow {
   id: string
   /** Stable durable-host identity used to reject cross-host layout collisions. */
   hostId: string | null
+  /** Captured endpoint identity; retained when the active host changes or is removed. */
+  remoteHost?: SessionInfo["remoteHost"]
   /** Last host snapshot controller; live control events remain authoritative. */
   controllerId: string | null
   projectId: string | null
@@ -669,6 +671,7 @@ export const useTerminalStore = create<TerminalStoreState>()(
         const row: TerminalSessionRow = {
           id: info.id,
           hostId: info.hostId ?? null,
+          remoteHost: info.remoteHost,
           controllerId: info.currentController ?? null,
           projectId: info.projectId,
           extensionId: info.extensionId,

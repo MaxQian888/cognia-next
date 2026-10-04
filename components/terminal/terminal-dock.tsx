@@ -50,15 +50,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { type TerminalProfile } from "@/lib/terminal/profiles"
-import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
-import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
+import { useSshConnect } from "@/hooks/terminal/use-ssh-connect"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
+import { sshHostSettingsHref, terminalSettingsHref } from "@/lib/terminal/terminal-settings-link"
+import { deviceConsoleHref } from "@/lib/devices/device-console-href"
+import { sshHostRef } from "@/lib/devices/build-device-rows"
 import { nextDockPosition } from "@/lib/terminal/dock-position"
 import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import {
   detachFromDock,
   killFromDock,
   restartFromDock,
+  RESTART_NOT_LOCAL_PTY,
   type SpawnOutcome,
 } from "@/lib/terminal/spawn-orchestrator"
 import { getLiveSession } from "@/lib/terminal/session-registry"
@@ -68,6 +71,7 @@ import { useTerminalTransport } from "@/hooks/terminal/use-terminal-transport"
 import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { PanelRootChip } from "@/components/workspace/panel-root-chip"
 import { useSessionExecutionContext } from "@/hooks/workspace/use-session-execution-context"
 import { resolvePanelRoot } from "@/lib/workspace/panel-follow"
@@ -147,11 +151,28 @@ export function TerminalDock({
   // has never declared, so every saved host silently resolved to `undefined`.
   const settingsSshHosts = useSettingsStore(selectSavedSshHosts)
   /**
-   * The changed-host-key adjudication, shared with Settings and the device
-   * console. The dock previously toasted the raw native payload, which is JSON
-   * and offers the user nothing to act on.
+   * Connecting a saved host, shared with Settings, the device console and the
+   * phone: credential and jump-chain checks with a way to fix them, the
+   * changed-host-key dialog with a retry after re-trust, and one set of
+   * translated failures. The dock had its own copy of all of it and printed
+   * the raw `ssh_profile_not_on_host:` marker.
    */
-  const hostKeyGuard = useSshHostKeyChange()
+  const sshConnect = useSshConnect()
+  const { connect: connectSsh } = sshConnect
+  const pendingSshHost = useMemo(
+    () =>
+      sshConnect.pendingHostId
+        ? (settingsSshHosts ?? []).find((host) => host.id === sshConnect.pendingHostId)
+        : undefined,
+    [settingsSshHosts, sshConnect.pendingHostId]
+  )
+  /**
+   * A desktop driving a remote Cognia host still dials SSH from this machine
+   * (`connectSshFromDock`), unlike every other "+ New" in this toolbar, which
+   * opens on the remote host. The picker says so rather than leave the user
+   * to infer which machine the bastion is reached from.
+   */
+  const remoteHostActive = useRemoteHostStore((s) => s.activeHostId !== null)
 
   const projectKey = activeProjectId ?? ""
 
@@ -263,46 +284,14 @@ export function TerminalDock({
    * `spawnDefaultTerminal`'s shell/profile/cwd precedence, and its outcome
    * carries the host-key verdict the user needs to see on first connect.
    * Secrets stay where they are — the dock offers no secret field, so a
-   * password host that has never been connected from settings is sent back
-   * there rather than failing with a bare native error.
+   * password host (or bastion) with nothing stored is refused before dialing,
+   * with an action that opens that host in Settings.
    */
   const handleNewSshHost = useCallback(
     async (hostId: string) => {
-      const launch = resolveSshHostLaunch(hostId, settingsSshHosts)
-      if (launch.kind === "unknownHost") return
-      if (launch.kind === "credentialRequired") {
-        toast.error(t("sshCredentialRequired", { name: launch.name }))
-        return
-      }
-      const result = await connectSshFromDock({
-        profile: launch.profile,
-        // A jump host is stored as a profile id, so the whole set has to travel
-        // with the one being launched or a bastion-backed host connects direct.
-        allProfiles: settingsSshHosts ?? [],
-        projectId: activeProjectId ?? undefined,
-        rows: 24,
-        cols: 80,
-        store: useTerminalStore.getState(),
-      })
-      if (result.kind === "error") {
-        // A changed host key is the one connection failure a toast cannot
-        // resolve: the user has to see both fingerprints and decide. The dock
-        // used to print the raw `ssh_host_key_changed:{…}` payload instead.
-        if (hostKeyGuard.capture(result.message)) return
-        toast.error(t("spawnError", { message: result.message }))
-        return
-      }
-      if (result.hostKeyStatus === null) {
-        // The host connected on our behalf and the terminal wire carries no
-        // host-key fields, so there is no verdict to report here.
-        toast.success(t("sshConnectedViaHost"))
-        return
-      }
-      toast.success(t(`sshConnected.${result.hostKeyStatus}`), {
-        description: result.hostKeyFingerprint ?? undefined,
-      })
+      await connectSsh({ hostId, projectId: activeProjectId ?? undefined })
     },
-    [activeProjectId, hostKeyGuard, settingsSshHosts, t]
+    [activeProjectId, connectSsh]
   )
 
   /**
@@ -429,14 +418,48 @@ export function TerminalDock({
     [activeProjectId, setActiveSession]
   )
 
-  const handleRestart = useCallback((id: string) => {
-    void restartFromDock({
-      sessionId: id,
-      store: useTerminalStore.getState(),
-      rows: 24,
-      cols: 80,
-    })
-  }, [])
+  /**
+   * Restart by kind. A local PTY respawns with its shell and cwd. An SSH tab is
+   * reconnected from the saved profile it was opened from, the only thing that
+   * still knows its jump chain, forwards and credential; `restartFromDock`
+   * refuses it rather than respawning the `ssh user@host` label as a local
+   * command, which is what it used to do. Serial tabs never offer Restart (the
+   * menu hides it), so reaching here with one is reported, not attempted.
+   */
+  const handleRestart = useCallback(
+    (id: string) => {
+      const row = useTerminalStore.getState().sessions[id]
+      if (row?.kind === "ssh") {
+        if (!row.profileId) {
+          toast.error(t("restartSshUnknownProfile"))
+          return
+        }
+        void connectSsh({
+          hostId: row.profileId,
+          projectId: row.projectId ?? undefined,
+          replacesSessionId: id,
+        })
+        return
+      }
+      void restartFromDock({
+        sessionId: id,
+        store: useTerminalStore.getState(),
+        rows: 24,
+        cols: 80,
+      }).then((outcome) => {
+        if (outcome.kind === "error") {
+          toast.error(
+            outcome.message.startsWith(`${RESTART_NOT_LOCAL_PTY}:`)
+              ? t("restartUnsupported")
+              : t("restartError", { message: outcome.message })
+          )
+        } else if (outcome.kind === "denied") {
+          toast.error(t("spawnDenied"))
+        }
+      })
+    },
+    [connectSsh, t]
+  )
 
   const handleCloseOthers = useCallback(
     (anchorId: string) => {
@@ -498,6 +521,16 @@ export function TerminalDock({
   // deferred exactly this for want of a scroll-to-message seam. Falling back to
   // the plain route keeps tabs spawned before the field existed working.
   const router = useRouter()
+
+  /** Where the SSH tab's saved host is edited, its files browsed. */
+  const handleEditSshHost = useCallback(
+    (profileId: string) => router.push(sshHostSettingsHref(profileId)),
+    [router]
+  )
+  const handleBrowseSshFiles = useCallback(
+    (profileId: string) => router.push(deviceConsoleHref(sshHostRef({ id: profileId }), "files")),
+    [router]
+  )
   const handleLocateInChat = useCallback(
     (chatSessionId: string, messageId?: string | null) => {
       useChatStore.getState().setActiveSession(chatSessionId)
@@ -555,6 +588,8 @@ export function TerminalDock({
         onToggleAgentTrust={handleToggleTrust}
         onLocateInChat={handleLocateInChat}
         onChangeAppearance={handleChangeAppearance}
+        onEditSshHost={handleEditSshHost}
+        onBrowseSshFiles={handleBrowseSshFiles}
       >
         {tab}
       </TerminalTabContextMenu>
@@ -562,6 +597,8 @@ export function TerminalDock({
     [
       handleRename,
       handleRestart,
+      handleEditSshHost,
+      handleBrowseSshFiles,
       requestCloseTab,
       handleCloseOthers,
       handleToggleTrust,
@@ -715,9 +752,22 @@ export function TerminalDock({
                 onNewProfile={handleNewFromProfile}
                 sshHosts={pickerSshHosts}
                 onNewSshHost={handleNewSshHost}
+                onManageSshHosts={() => router.push(sshHostSettingsHref())}
+                sshDialsFromThisDesktop={remoteHostActive && isTauri()}
                 onNewSerialPort={isTauri() ? handleNewSerialPort : undefined}
                 onAttachTmuxSession={handleAttachTmuxSession}
               />
+            ) : null}
+            {/* An SSH dial can take seconds (a bastion, an agent prompt) and the
+                menu has closed by then; without this the click looks ignored. */}
+            {pendingSshHost ? (
+              <span
+                role="status"
+                className="max-w-40 truncate px-1 text-[11px] text-muted-foreground"
+                data-testid="terminal-dock-ssh-connecting"
+              >
+                {t("sshConnecting", { name: pendingSshHost.name })}
+              </span>
             ) : null}
             {canSpawn && activeRow ? (
               <DockToolbarButton
@@ -792,7 +842,7 @@ export function TerminalDock({
             rehydrateTerminals()
           )
         }}
-        onOpenSettings={() => router.push("/settings?section=terminal")}
+        onOpenSettings={() => router.push(terminalSettingsHref("host"))}
       />
       <div className="relative flex-1 overflow-hidden">
         {activeRow ? (
@@ -809,6 +859,8 @@ export function TerminalDock({
               onToggleAgentTrust={handleToggleTrust}
               onLocateInChat={handleLocateInChat}
               onChangeAppearance={handleChangeAppearance}
+              onEditSshHost={handleEditSshHost}
+              onBrowseSshFiles={handleBrowseSshFiles}
               onCopy={() => void focusedHandleRef.current?.copySelection()}
               onPaste={() => void focusedHandleRef.current?.pasteFromClipboard()}
               onSelectAll={() => focusedHandleRef.current?.selectAll()}
@@ -928,7 +980,7 @@ export function TerminalDock({
         </AlertDialogContent>
       </AlertDialog>
 
-      {hostKeyGuard.dialog}
+      {sshConnect.dialog}
     </div>
   )
 }

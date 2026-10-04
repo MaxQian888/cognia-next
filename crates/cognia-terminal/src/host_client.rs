@@ -7,8 +7,9 @@
 //! helpers. Callers pass the app's resource dir, where the host finds its
 //! shell-integration scripts; the headless server has none and passes `None`.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -18,8 +19,9 @@ use crate::host::{ClientIdentity, HostSessionInfo};
 use crate::host_wire::{read_frame, write_frame};
 use crate::protocol::{FrameKind, TerminalErrorCode, TerminalFrame};
 use crate::terminal_host_service::{
-    connect_terminal_host_as, default_terminal_host_endpoint, load_terminal_host_settings,
-    save_terminal_host_settings, BoxedTerminalHostIo, TerminalHostDescriptor, TerminalHostSettings,
+    default_terminal_host_endpoint, load_terminal_host_settings, open_terminal_host_log,
+    save_terminal_host_settings, try_connect_terminal_host_as, BoxedTerminalHostIo,
+    TerminalHostConnectError, TerminalHostDescriptor, TerminalHostSettings,
 };
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -59,11 +61,45 @@ pub fn error_code_name(code: TerminalErrorCode) -> &'static str {
     }
 }
 
+/// A host process this client started.
+///
+/// Kept so the connect loop notices (and reaps) a host that exits during
+/// startup instead of waiting out every retry, and can say where its stderr
+/// went.
+#[derive(Debug, Default)]
+pub struct SpawnedTerminalHost {
+    child: Option<Child>,
+    log_path: Option<PathBuf>,
+}
+
+impl SpawnedTerminalHost {
+    /// The exit status, once the process has exited. Never blocks.
+    fn exit_status(&mut self) -> Option<ExitStatus> {
+        self.child.as_mut()?.try_wait().ok().flatten()
+    }
+
+    fn log_hint(&self) -> String {
+        self.log_path
+            .as_ref()
+            .map(|path| format!(" (host log: {})", path.display()))
+            .unwrap_or_default()
+    }
+}
+
 fn spawn_terminal_host(
     endpoint: &str,
     terminal_resource_dir: Option<PathBuf>,
-) -> Result<(), String> {
+) -> Result<SpawnedTerminalHost, String> {
     let binary = resolve_server_binary()?;
+    // The host's stderr carries its log and the reason it exits. A log that
+    // cannot be opened costs only that record, not the host.
+    let (stderr, log_path) = match open_terminal_host_log() {
+        Ok((file, path)) => (Stdio::from(file), Some(path)),
+        Err(error) => {
+            log::warn!("terminal host stderr is discarded: {error}");
+            (Stdio::null(), None)
+        }
+    };
     let mut command = Command::new(&binary);
     command
         .arg("desktop-host")
@@ -71,23 +107,116 @@ fn spawn_terminal_host(
         .arg(endpoint)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(stderr);
     if let Some(resource_dir) = terminal_resource_dir {
         command.env("COGNIA_TERMINAL_RESOURCES", resource_dir);
     }
-    command
+    let child = command
         .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("failed to start {}: {error}", binary.display()))
+        .map_err(|error| format!("failed to start {}: {error}", binary.display()))?;
+    Ok(SpawnedTerminalHost {
+        child: Some(child),
+        log_path,
+    })
 }
 
 pub async fn spawn_terminal_host_async(
     endpoint: String,
     terminal_resource_dir: Option<PathBuf>,
-) -> Result<(), String> {
+) -> Result<SpawnedTerminalHost, String> {
     tokio::task::spawn_blocking(move || spawn_terminal_host(&endpoint, terminal_resource_dir))
         .await
         .map_err(|error| format!("terminal host spawn task failed: {error}"))?
+}
+
+/// Connect with `connect`, starting the host first if nothing is listening.
+///
+/// Shared by the one-shot clients below and the desktop bridge, which
+/// connects its own long-lived client the same way.
+pub async fn connect_or_spawn_terminal_host<T, C, F>(
+    endpoint: &str,
+    terminal_resource_dir: Option<PathBuf>,
+    connect: C,
+) -> Result<T, String>
+where
+    C: FnMut() -> F,
+    F: Future<Output = Result<T, TerminalHostConnectError>>,
+{
+    let endpoint = endpoint.to_string();
+    connect_with_start_policy(
+        connect,
+        move || spawn_terminal_host_async(endpoint, terminal_resource_dir),
+        START_RETRY_COUNT,
+        START_RETRY_DELAY,
+    )
+    .await
+}
+
+/// The start policy behind [`connect_or_spawn_terminal_host`], with the spawn
+/// and timing injectable for tests.
+///
+/// Only an unreachable host leads to a spawn. A credential the OS store
+/// refuses, or a host that is listening but failed the connection, comes back
+/// unchanged from every retry, and a second host would only exit with
+/// "already running"; those return at once with their own message. While
+/// waiting for a spawned host, a refused credential still returns at once, and
+/// the error finally reported is the most telling one seen (by
+/// [`TerminalHostConnectError::severity`]) rather than merely the last, so a
+/// host that accepted and then died is not reported as "connection refused".
+async fn connect_with_start_policy<T, C, F, S, SF>(
+    mut connect: C,
+    spawn: S,
+    retries: usize,
+    delay: Duration,
+) -> Result<T, String>
+where
+    C: FnMut() -> F,
+    F: Future<Output = Result<T, TerminalHostConnectError>>,
+    S: FnOnce() -> SF,
+    SF: Future<Output = Result<SpawnedTerminalHost, String>>,
+{
+    match connect().await {
+        Ok(stream) => return Ok(stream),
+        Err(error) if error.host_start_may_help() => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut spawned = spawn().await?;
+    let mut reported: Option<TerminalHostConnectError> = None;
+    for _ in 0..retries {
+        tokio::time::sleep(delay).await;
+        // Read before connecting: a host that exited may have lost a race to
+        // one that is now listening, so it still gets one more attempt.
+        let exited = spawned.exit_status();
+        match connect().await {
+            Ok(stream) => return Ok(stream),
+            Err(error @ TerminalHostConnectError::CredentialUnavailable(_)) => {
+                return Err(error.into());
+            }
+            Err(error) => {
+                if reported
+                    .as_ref()
+                    .is_none_or(|current| error.severity() >= current.severity())
+                {
+                    reported = Some(error);
+                }
+            }
+        }
+        if let Some(status) = exited {
+            return Err(format!(
+                "terminal host exited during startup with {status}{}: {}",
+                spawned.log_hint(),
+                reported.map(String::from).unwrap_or_default()
+            ));
+        }
+    }
+    Err(format!(
+        "terminal host did not start within {}ms{}: {}",
+        delay.saturating_mul(retries as u32).as_millis(),
+        spawned.log_hint(),
+        reported
+            .map(String::from)
+            .unwrap_or_else(|| "no connection was attempted".to_string())
+    ))
 }
 
 /// Open an authenticated, identity-scoped connection for a non-renderer
@@ -97,19 +226,10 @@ pub async fn connect_terminal_host_client(
     identity: ClientIdentity,
 ) -> Result<BoxedTerminalHostIo, String> {
     let endpoint = default_terminal_host_endpoint();
-    if let Ok(stream) = connect_terminal_host_as(&endpoint, identity.clone()).await {
-        return Ok(stream);
-    }
-    spawn_terminal_host_async(endpoint.clone(), terminal_resources(resource_dir)).await?;
-    let mut last_error = "terminal host did not start".to_string();
-    for _ in 0..START_RETRY_COUNT {
-        tokio::time::sleep(START_RETRY_DELAY).await;
-        match connect_terminal_host_as(&endpoint, identity.clone()).await {
-            Ok(stream) => return Ok(stream),
-            Err(error) => last_error = error,
-        }
-    }
-    Err(last_error)
+    connect_or_spawn_terminal_host(&endpoint, terminal_resources(resource_dir), || {
+        try_connect_terminal_host_as(&endpoint, identity.clone())
+    })
+    .await
 }
 
 async fn request_over_host_stream(
@@ -506,5 +626,153 @@ mod tests {
     fn the_dev_workspace_root_is_the_repository() {
         let root = dev_workspace_root().expect("workspace root");
         assert!(root.join("src-tauri").join("Cargo.toml").is_file());
+    }
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+
+    /// Drive the start policy with scripted connect outcomes, counting spawns.
+    async fn run_policy(
+        outcomes: Vec<Result<u8, TerminalHostConnectError>>,
+        spawned: SpawnedTerminalHost,
+    ) -> (Result<u8, String>, usize, usize) {
+        let outcomes = RefCell::new(VecDeque::from(outcomes));
+        let attempts = Cell::new(0usize);
+        let spawns = Cell::new(0usize);
+        let spawned = RefCell::new(Some(spawned));
+        let result = connect_with_start_policy(
+            || {
+                attempts.set(attempts.get() + 1);
+                let next = outcomes.borrow_mut().pop_front().unwrap_or_else(|| {
+                    Err(TerminalHostConnectError::Unreachable(
+                        "terminal host socket connect failed: Connection refused".into(),
+                    ))
+                });
+                async move { next }
+            },
+            || {
+                spawns.set(spawns.get() + 1);
+                let spawned = spawned.borrow_mut().take().unwrap();
+                async move { Ok(spawned) }
+            },
+            5,
+            Duration::from_millis(1),
+        )
+        .await;
+        (result, attempts.get(), spawns.get())
+    }
+
+    fn unreachable() -> Result<u8, TerminalHostConnectError> {
+        Err(TerminalHostConnectError::Unreachable(
+            "terminal host socket connect failed: No such file or directory".into(),
+        ))
+    }
+
+    /// Bug 2 regression: a Keychain refusal used to spawn a host and then be
+    /// reported as the last retry's "Connection refused".
+    #[tokio::test]
+    async fn a_refused_credential_returns_at_once_without_spawning() {
+        let (result, attempts, spawns) = run_policy(
+            vec![Err(TerminalHostConnectError::CredentialUnavailable(
+                "terminal credential read failed for com.cognia.terminal-host".into(),
+            ))],
+            SpawnedTerminalHost::default(),
+        )
+        .await;
+        assert_eq!(
+            result.unwrap_err(),
+            "terminal credential read failed for com.cognia.terminal-host"
+        );
+        assert_eq!((attempts, spawns), (1, 0));
+    }
+
+    #[tokio::test]
+    async fn a_listening_host_that_fails_the_connection_is_not_respawned() {
+        let (result, attempts, spawns) = run_policy(
+            vec![Err(TerminalHostConnectError::Failed(
+                "terminal host socket connect failed: Permission denied".into(),
+            ))],
+            SpawnedTerminalHost::default(),
+        )
+        .await;
+        assert!(result.unwrap_err().contains("Permission denied"));
+        assert_eq!((attempts, spawns), (1, 0));
+    }
+
+    #[tokio::test]
+    async fn an_absent_host_is_started_once_and_retried_until_it_answers() {
+        let (result, attempts, spawns) = run_policy(
+            vec![unreachable(), unreachable(), Ok(7)],
+            SpawnedTerminalHost::default(),
+        )
+        .await;
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!((attempts, spawns), (3, 1));
+    }
+
+    #[tokio::test]
+    async fn a_credential_refusal_while_waiting_ends_the_wait() {
+        let (result, attempts, spawns) = run_policy(
+            vec![
+                unreachable(),
+                unreachable(),
+                Err(TerminalHostConnectError::CredentialUnavailable(
+                    "denied".into(),
+                )),
+                Ok(7),
+            ],
+            SpawnedTerminalHost::default(),
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), "denied");
+        assert_eq!((attempts, spawns), (3, 1));
+    }
+
+    #[tokio::test]
+    async fn the_most_telling_retry_error_is_reported_not_the_last() {
+        let (result, attempts, spawns) = run_policy(
+            vec![
+                unreachable(),
+                Err(TerminalHostConnectError::Failed(
+                    "terminal host auth write failed: Broken pipe".into(),
+                )),
+                // Every later attempt: "Connection refused".
+            ],
+            SpawnedTerminalHost {
+                child: None,
+                log_path: Some(PathBuf::from("/tmp/terminal-host.log")),
+            },
+        )
+        .await;
+        let error = result.unwrap_err();
+        assert!(error.contains("did not start within 5ms"), "{error}");
+        assert!(error.contains("/tmp/terminal-host.log"), "{error}");
+        assert!(error.contains("Broken pipe"), "{error}");
+        assert!(!error.contains("Connection refused"), "{error}");
+        assert_eq!((attempts, spawns), (6, 1));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_host_that_exits_during_startup_ends_the_wait_with_its_status() {
+        // Waited for here, so the first retry sees the status (`try_wait`
+        // returns the recorded one).
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 3"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let (result, attempts, spawns) = run_policy(
+            vec![unreachable()],
+            SpawnedTerminalHost {
+                child: Some(child),
+                log_path: None,
+            },
+        )
+        .await;
+        let error = result.unwrap_err();
+        assert!(error.contains("exited during startup"), "{error}");
+        assert!(error.contains('3'), "{error}");
+        // The initial attempt, then one more after the exit was seen.
+        assert_eq!((attempts, spawns), (2, 1));
     }
 }

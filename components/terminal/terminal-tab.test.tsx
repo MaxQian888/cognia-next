@@ -2,14 +2,16 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import {
   HOVER_REVEAL_FORBIDDEN_CLASSES,
   HOVER_REVEAL_REQUIRED_VARIANTS,
 } from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
 import { TerminalTab } from "./terminal-tab"
@@ -42,6 +44,38 @@ function row(overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow {
 }
 
 describe("TerminalTab", () => {
+  beforeEach(() => useRemoteHostStore.setState({ hosts: [], activeHostId: null }))
+
+  it("labels a retained remote tab after switching hosts or returning local", () => {
+    useRemoteHostStore.setState({ activeHostId: "registry-a" })
+    render(
+      <TerminalTab
+        row={row({ hostId: "durable-a", remoteHost: { id: "registry-a", label: "Build host" } })}
+        active
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.queryByText("Build host")).toBeNull()
+    act(() => useRemoteHostStore.setState({ activeHostId: "registry-b" }))
+    expect(screen.getByLabelText("differentTarget:Build host")).toHaveTextContent("Build host")
+    act(() => useRemoteHostStore.setState({ activeHostId: null }))
+    expect(screen.getByText("Build host")).toHaveAttribute("title", "differentTarget:Build host")
+  })
+
+  it("identifies a locally dialed SSH tab as this desktop while a remote host is active", () => {
+    useRemoteHostStore.setState({ activeHostId: "registry-a" })
+    render(
+      <TerminalTab
+        row={row({ kind: "ssh", hostId: "durable-desktop" })}
+        active
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByText("thisDesktop")).toHaveAttribute("title", "differentTarget:thisDesktop")
+  })
+
   it("renders the title", () => {
     const onSelect = jest.fn()
     const onClose = jest.fn()

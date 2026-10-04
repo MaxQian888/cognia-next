@@ -151,6 +151,52 @@ pub fn terminal_host_data_dir() -> PathBuf {
         .join("terminal-host")
 }
 
+const HOST_LOG_FILE: &str = "terminal-host.log";
+/// Past this size the log is rotated to `terminal-host.log.1` (replacing the
+/// previous one) when the next host is spawned.
+const HOST_LOG_ROTATE_BYTES: u64 = 1024 * 1024;
+
+/// Where a spawned host's stderr goes: its `log` output, panics, and the
+/// reason it exited. Owner-only, inside the host data directory.
+pub fn terminal_host_log_path() -> PathBuf {
+    terminal_host_data_dir().join(HOST_LOG_FILE)
+}
+
+/// Open the host log for a host about to be spawned, appending.
+///
+/// Bounded per spawn rather than continuously: a log past
+/// [`HOST_LOG_ROTATE_BYTES`] is moved aside first, so at most two files exist
+/// and each holds what one or more hosts wrote after their spawn found it
+/// small. A host that is already running keeps writing to its own descriptor,
+/// so rotating under it loses nothing.
+pub fn open_terminal_host_log() -> Result<(std::fs::File, PathBuf), String> {
+    open_terminal_host_log_in(&terminal_host_data_dir())
+}
+
+fn open_terminal_host_log_in(dir: &Path) -> Result<(std::fs::File, PathBuf), String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|error| format!("terminal host data directory failed: {error}"))?;
+    set_owner_only_dir(dir)?;
+    let path = dir.join(HOST_LOG_FILE);
+    if std::fs::metadata(&path).is_ok_and(|metadata| metadata.len() > HOST_LOG_ROTATE_BYTES) {
+        std::fs::rename(&path, dir.join(format!("{HOST_LOG_FILE}.1")))
+            .map_err(|error| format!("terminal host log rotation failed: {error}"))?;
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&path)
+        .map_err(|error| format!("terminal host log open failed: {error}"))?;
+    // `mode` applies only on create; tighten a file left by an older build.
+    set_owner_only_file(&path)?;
+    Ok((file, path))
+}
+
 pub fn load_terminal_host_settings() -> Result<TerminalHostSettings, String> {
     let path = terminal_host_data_dir().join(SETTINGS_FILE);
     match std::fs::read_to_string(&path) {
@@ -388,12 +434,40 @@ fn xml_escape(value: &str) -> String {
 // cross-process authority. Background reconnects must never display OS dialogs.
 fn load_or_create_credential(account: &str) -> Result<String, String> {
     load_or_create_credential_with(
+        account,
         || read_password_without_prompt(KEYRING_SERVICE, account),
         |secret| write_password_without_prompt(KEYRING_SERVICE, account, secret),
     )
 }
 
+/// What to do when the OS credential store refuses a no-prompt access.
+///
+/// The background paths never show a dialog, so a refusal is silent; without
+/// this the only trace is the store's own error text, which on macOS reads like
+/// a wrong password.
+#[cfg(target_os = "macos")]
+const CREDENTIAL_ACCESS_HINT: &str = "the login Keychain refused access without a prompt; this \
+     usually means the item was created by a different build of cognia-server (a rebuilt or \
+     re-signed binary has a new code identity). Allow this binary on the item in Keychain \
+     Access, or delete the item and restart the terminal host so it is recreated";
+#[cfg(target_os = "linux")]
+const CREDENTIAL_ACCESS_HINT: &str = "the Secret Service refused access; check that a keyring \
+     daemon (gnome-keyring, KWallet) is running and its login collection is unlocked";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const CREDENTIAL_ACCESS_HINT: &str = "the OS credential store refused access; check the \
+     Credential Manager entry for this item";
+
+/// Names the store item and says what to do about it. Never includes the
+/// secret: neither argument carries it.
+fn credential_failure(operation: &str, account: &str, error: &keyring::Error) -> String {
+    format!(
+        "terminal credential {operation} failed for {KEYRING_SERVICE} (account {account}): \
+         {error}. Hint: {CREDENTIAL_ACCESS_HINT}"
+    )
+}
+
 fn load_or_create_credential_with(
+    account: &str,
     read: impl FnOnce() -> keyring::Result<String>,
     write: impl FnOnce(&str) -> keyring::Result<()>,
 ) -> Result<String, String> {
@@ -403,10 +477,10 @@ fn load_or_create_credential_with(
             let mut bytes = [0u8; 32];
             rand::fill(&mut bytes);
             let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-            write(&secret).map_err(|error| format!("terminal credential write failed: {error}"))?;
+            write(&secret).map_err(|error| credential_failure("write", account, &error))?;
             Ok(secret)
         }
-        Err(error) => Err(format!("terminal credential read failed: {error}")),
+        Err(error) => Err(credential_failure("read", account, &error)),
     }
 }
 
@@ -500,34 +574,34 @@ fn valid_bootstrap_secret(secret: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-async fn authenticate_client<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    identity: &ClientIdentity,
-) -> Result<(), String> {
-    let secret = tokio::task::spawn_blocking(bootstrap_secret)
-        .await
-        .map_err(|error| format!("terminal host auth task failed: {error}"))??;
-    stream
-        .write_u16(secret.len() as u16)
-        .await
-        .map_err(|error| format!("terminal host auth length write failed: {error}"))?;
-    stream
-        .write_all(secret.as_bytes())
-        .await
-        .map_err(|error| format!("terminal host auth write failed: {error}"))?;
+/// The client half of the handshake: secret, then identity, each behind a
+/// big-endian `u16` length. Built before any socket is opened, so an identity
+/// the host would refuse is reported locally.
+fn client_auth_payload(secret: &str, identity: &ClientIdentity) -> Result<Vec<u8>, String> {
     let identity = serde_json::to_vec(&SerializableClientIdentity::from(identity))
         .map_err(|error| format!("terminal host identity serialization failed: {error}"))?;
     if identity.len() > AUTH_MAX_BYTES {
         return Err("terminal host client identity is too large".into());
     }
+    if !valid_bootstrap_secret(secret) {
+        return Err("terminal host bootstrap secret is invalid".into());
+    }
+    let mut payload = Vec::with_capacity(4 + secret.len() + identity.len());
+    payload.extend_from_slice(&(secret.len() as u16).to_be_bytes());
+    payload.extend_from_slice(secret.as_bytes());
+    payload.extend_from_slice(&(identity.len() as u16).to_be_bytes());
+    payload.extend_from_slice(&identity);
+    Ok(payload)
+}
+
+async fn write_client_auth<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    payload: &[u8],
+) -> Result<(), String> {
     stream
-        .write_u16(identity.len() as u16)
+        .write_all(payload)
         .await
-        .map_err(|error| format!("terminal host identity length write failed: {error}"))?;
-    stream
-        .write_all(&identity)
-        .await
-        .map_err(|error| format!("terminal host identity write failed: {error}"))?;
+        .map_err(|error| format!("terminal host auth write failed: {error}"))?;
     stream
         .flush()
         .await
@@ -720,6 +794,9 @@ pub async fn run_terminal_host(endpoint: String) -> Result<(), String> {
             // (backgrounded phone, hung JS main thread) — without this its PTY
             // would stay parked forever.
             maintenance_host.reap_flow_pauses(now);
+            // Idle file-transfer connections, which no longer time themselves
+            // out now that the SSH link heartbeats (see `reap_idle_sftp`).
+            maintenance_host.reap_idle_sftp();
         }
     });
     if diagnostics {
@@ -785,32 +862,172 @@ async fn run_platform_listener(
         .await
         .map_err(|error| format!("terminal host socket permissions failed: {error}"))?;
 
-    loop {
-        let (mut stream, _) = listener
-            .accept()
-            .await
-            .map_err(|error| format!("terminal host socket accept failed: {error}"))?;
-        verify_unix_peer(&stream)?;
-        let host = host.clone();
-        let script_dir = script_dir.clone();
-        let known_hosts_path = known_hosts_path.clone();
-        tokio::spawn(async move {
-            let identity = match authenticate_server(&mut stream).await {
-                Ok(identity) => identity,
-                Err(error) => {
-                    log::warn!("terminal host client authentication rejected: {error}");
-                    return;
+    accept_unix_connections(listener, verify_unix_peer, move |stream| {
+        tokio::spawn(serve_connection(
+            stream,
+            host.clone(),
+            script_dir.clone(),
+            known_hosts_path.clone(),
+            diagnostics,
+        ));
+    })
+    .await
+}
+
+/// Authenticate one accepted connection and serve it until it closes.
+///
+/// Runs on its own task: whatever goes wrong here ends this connection, never
+/// the listener.
+async fn serve_connection<S>(
+    mut stream: S,
+    host: TerminalHost,
+    script_dir: PathBuf,
+    known_hosts_path: PathBuf,
+    diagnostics: bool,
+) where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let identity = match authenticate_server(&mut stream).await {
+        Ok(identity) => identity,
+        Err(error) => {
+            log::warn!("terminal host client authentication rejected: {error}");
+            return;
+        }
+    };
+    if diagnostics {
+        log::info!("terminal host authenticated client {}", identity.client_id);
+    }
+    if let Err(error) =
+        serve_host_stream(stream, host, identity, script_dir, known_hosts_path).await
+    {
+        log::warn!("terminal host connection closed: {error}");
+    }
+}
+
+/// What the accept loop does after a failed accept.
+///
+/// Only the Unix listener classifies OS errors; the named-pipe listener uses
+/// `Unknown` for instance-creation failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(unix), allow(dead_code))]
+enum AcceptFailure {
+    /// One pending connection went bad (aborted by its client, interrupted
+    /// call). The next accept is unaffected, so retry at once.
+    Connection,
+    /// The process or system is out of descriptors or memory. Usually this
+    /// host's own sessions, so it clears as they close; back off rather than
+    /// spin, and never exit over it: exiting would take every live PTY with it.
+    Resources,
+    /// Not a known class. Backed off like `Resources`, but only
+    /// [`MAX_UNKNOWN_ACCEPT_FAILURES`] times in a row before the listener gives
+    /// up, so a broken listener ends the process (and the next client starts a
+    /// fresh host) instead of holding the endpoint while answering no one.
+    Unknown,
+    /// The listening descriptor itself is unusable. No retry can fix it.
+    Listener,
+}
+
+const ACCEPT_BACKOFF_START: Duration = Duration::from_millis(50);
+const ACCEPT_BACKOFF_MAX: Duration = Duration::from_secs(1);
+const MAX_UNKNOWN_ACCEPT_FAILURES: u32 = 64;
+
+/// Exponential pause between failed accepts, reset by the next good one.
+#[derive(Debug, Default)]
+struct AcceptBackoff {
+    consecutive: u32,
+    unknown: u32,
+}
+
+impl AcceptBackoff {
+    fn succeeded(&mut self) {
+        self.consecutive = 0;
+        self.unknown = 0;
+    }
+
+    /// The pause before the next accept, or `None` when the listener should
+    /// give up.
+    fn failed(&mut self, failure: AcceptFailure) -> Option<Duration> {
+        match failure {
+            AcceptFailure::Connection => return Some(Duration::ZERO),
+            AcceptFailure::Listener => return None,
+            AcceptFailure::Unknown => {
+                self.unknown += 1;
+                if self.unknown > MAX_UNKNOWN_ACCEPT_FAILURES {
+                    return None;
                 }
-            };
-            if diagnostics {
-                log::info!("terminal host authenticated client {}", identity.client_id);
             }
-            if let Err(error) =
-                serve_host_stream(stream, host, identity, script_dir, known_hosts_path).await
-            {
-                log::warn!("terminal host connection closed: {error}");
+            AcceptFailure::Resources => {}
+        }
+        let delay = ACCEPT_BACKOFF_START
+            .saturating_mul(1 << self.consecutive.min(5))
+            .min(ACCEPT_BACKOFF_MAX);
+        self.consecutive = self.consecutive.saturating_add(1);
+        Some(delay)
+    }
+}
+
+#[cfg(unix)]
+fn classify_accept_error(error: &std::io::Error) -> AcceptFailure {
+    match error.raw_os_error() {
+        Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM) => {
+            AcceptFailure::Resources
+        }
+        Some(libc::EBADF | libc::EINVAL | libc::ENOTSOCK | libc::EOPNOTSUPP | libc::EFAULT) => {
+            AcceptFailure::Listener
+        }
+        Some(libc::ECONNABORTED | libc::EINTR | libc::EAGAIN | libc::EPROTO | libc::EPERM) => {
+            AcceptFailure::Connection
+        }
+        _ => match error.kind() {
+            std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::WouldBlock => AcceptFailure::Connection,
+            _ => AcceptFailure::Unknown,
+        },
+    }
+}
+
+/// Accept connections until the listener itself fails.
+///
+/// A connection that fails `check_peer` is logged and dropped; it does not
+/// end the loop. That covers a client that hung up before its credentials
+/// could be read (`ENOTCONN` from `peer_cred`) and a process of another OS user
+/// reaching the socket, which must not be able to stop this user's host.
+#[cfg(unix)]
+async fn accept_unix_connections<C, H>(
+    listener: tokio::net::UnixListener,
+    check_peer: C,
+    mut handle: H,
+) -> Result<(), String>
+where
+    C: Fn(&tokio::net::UnixStream) -> Result<(), String>,
+    H: FnMut(tokio::net::UnixStream),
+{
+    let mut backoff = AcceptBackoff::default();
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                backoff.succeeded();
+                match check_peer(&stream) {
+                    Ok(()) => handle(stream),
+                    Err(error) => log::warn!("terminal host dropped a connection: {error}"),
+                }
             }
-        });
+            Err(error) => {
+                let failure = classify_accept_error(&error);
+                let Some(delay) = backoff.failed(failure) else {
+                    return Err(format!("terminal host socket accept failed: {error}"));
+                };
+                log::warn!(
+                    "terminal host socket accept failed ({failure:?}), retrying in {}ms: {error}",
+                    delay.as_millis()
+                );
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
     }
 }
 
@@ -835,39 +1052,120 @@ async fn run_platform_listener(
     diagnostics: bool,
 ) -> Result<(), String> {
     use tokio::net::windows::named_pipe::ServerOptions;
-    let mut first = true;
+    // The first instance claims the name; failing that means another host owns
+    // it, so it stays fatal.
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .reject_remote_clients(true)
+        .create(&endpoint)
+        .map_err(|error| format!("terminal host named pipe create failed: {error}"))?;
+    let mut backoff = AcceptBackoff::default();
     loop {
-        let server = ServerOptions::new()
-            .first_pipe_instance(first)
-            .reject_remote_clients(true)
-            .create(&endpoint)
-            .map_err(|error| format!("terminal host named pipe create failed: {error}"))?;
-        first = false;
-        server
-            .connect()
-            .await
-            .map_err(|error| format!("terminal host named pipe connect failed: {error}"))?;
-        let host = host.clone();
-        let script_dir = script_dir.clone();
-        let known_hosts_path = known_hosts_path.clone();
-        tokio::spawn(async move {
-            let mut server = server;
-            let identity = match authenticate_server(&mut server).await {
-                Ok(identity) => identity,
-                Err(error) => {
-                    log::warn!("terminal host client authentication rejected: {error}");
-                    return;
-                }
-            };
-            if diagnostics {
-                log::info!("terminal host authenticated client {}", identity.client_id);
-            }
-            if let Err(error) =
-                serve_host_stream(server, host, identity, script_dir, known_hosts_path).await
+        // A client that connects and hangs up before this resolves
+        // (`ERROR_NO_DATA`) fails only its own instance.
+        let connected = server.connect().await;
+        // Have the next instance listening before letting go of this one, as
+        // tokio's named-pipe docs prescribe: while no instance exists a client
+        // sees the name as missing and starts a second host, which could then
+        // claim it.
+        let next = loop {
+            match ServerOptions::new()
+                .reject_remote_clients(true)
+                .create(&endpoint)
             {
-                log::warn!("terminal host connection closed: {error}");
+                Ok(next) => {
+                    backoff.succeeded();
+                    break next;
+                }
+                Err(error) => {
+                    let Some(delay) = backoff.failed(AcceptFailure::Unknown) else {
+                        return Err(format!("terminal host named pipe create failed: {error}"));
+                    };
+                    log::warn!(
+                        "terminal host named pipe create failed, retrying in {}ms: {error}",
+                        delay.as_millis()
+                    );
+                    tokio::time::sleep(delay).await;
+                }
             }
-        });
+        };
+        let current = std::mem::replace(&mut server, next);
+        match connected {
+            Ok(()) => {
+                tokio::spawn(serve_connection(
+                    current,
+                    host.clone(),
+                    script_dir.clone(),
+                    known_hosts_path.clone(),
+                    diagnostics,
+                ));
+            }
+            Err(error) => log::warn!("terminal host dropped a named pipe connection: {error}"),
+        }
+    }
+}
+
+/// Why a connection to the terminal host could not be opened.
+///
+/// The distinction is what a caller may do about it: only
+/// [`Unreachable`](Self::Unreachable) is fixed by starting a host. The other two
+/// come back unchanged however many hosts are spawned, so retrying them only
+/// replaces the real reason with a later, vaguer one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalHostConnectError {
+    /// Nothing is listening: the socket (or pipe) is missing or refuses
+    /// connections, which is what a host that is not running looks like.
+    Unreachable(String),
+    /// This process cannot read (or create) the bootstrap secret from the OS
+    /// credential store. Checked before the socket is opened.
+    CredentialUnavailable(String),
+    /// Something answered but the connection still failed: a socket this user
+    /// may not open, an identity the handshake cannot carry, or a host that
+    /// hung up mid-handshake.
+    Failed(String),
+}
+
+impl TerminalHostConnectError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Unreachable(message)
+            | Self::CredentialUnavailable(message)
+            | Self::Failed(message) => message,
+        }
+    }
+
+    /// Whether starting a host could make the next attempt succeed.
+    pub fn host_start_may_help(&self) -> bool {
+        matches!(self, Self::Unreachable(_))
+    }
+
+    /// How much an error says about the actual problem, for picking which one
+    /// to report after several attempts: a refused credential beats a host
+    /// that hung up, which beats "nothing is listening".
+    pub fn severity(&self) -> u8 {
+        match self {
+            Self::Unreachable(_) => 0,
+            Self::Failed(_) => 1,
+            Self::CredentialUnavailable(_) => 2,
+        }
+    }
+}
+
+impl std::fmt::Display for TerminalHostConnectError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.message())
+    }
+}
+
+impl std::error::Error for TerminalHostConnectError {}
+
+impl From<TerminalHostConnectError> for String {
+    fn from(error: TerminalHostConnectError) -> Self {
+        match error {
+            TerminalHostConnectError::Unreachable(message)
+            | TerminalHostConnectError::CredentialUnavailable(message)
+            | TerminalHostConnectError::Failed(message) => message,
+        }
     }
 }
 
@@ -875,27 +1173,96 @@ pub async fn connect_terminal_host(endpoint: &str) -> Result<BoxedTerminalHostIo
     connect_terminal_host_as(endpoint, ClientIdentity::local("desktop")).await
 }
 
+/// [`try_connect_terminal_host_as`] with the error flattened to its message,
+/// for callers that only report it.
 pub async fn connect_terminal_host_as(
     endpoint: &str,
     identity: ClientIdentity,
 ) -> Result<BoxedTerminalHostIo, String> {
+    try_connect_terminal_host_as(endpoint, identity)
+        .await
+        .map_err(String::from)
+}
+
+/// Open an authenticated connection, classifying any failure.
+///
+/// The secret is read before the socket is opened: a credential the OS store
+/// refuses is a local problem no host can fix, and connecting first would only
+/// hand the host a connection it then has to reject.
+pub async fn try_connect_terminal_host_as(
+    endpoint: &str,
+    identity: ClientIdentity,
+) -> Result<BoxedTerminalHostIo, TerminalHostConnectError> {
+    connect_terminal_host_with_secret(endpoint, &identity, bootstrap_secret).await
+}
+
+async fn connect_terminal_host_with_secret(
+    endpoint: &str,
+    identity: &ClientIdentity,
+    load_secret: fn() -> Result<String, String>,
+) -> Result<BoxedTerminalHostIo, TerminalHostConnectError> {
+    let secret = tokio::task::spawn_blocking(load_secret)
+        .await
+        .map_err(|error| {
+            TerminalHostConnectError::CredentialUnavailable(format!(
+                "terminal credential task failed: {error}"
+            ))
+        })?
+        .map_err(TerminalHostConnectError::CredentialUnavailable)?;
+    let payload =
+        client_auth_payload(&secret, identity).map_err(TerminalHostConnectError::Failed)?;
     #[cfg(unix)]
     let mut stream: BoxedTerminalHostIo = Box::pin(
         tokio::net::UnixStream::connect(endpoint)
             .await
-            .map_err(|error| format!("terminal host socket connect failed: {error}"))?,
+            .map_err(|error| {
+                classify_connect_error(
+                    &error,
+                    format!("terminal host socket connect failed: {error}"),
+                )
+            })?,
     );
     #[cfg(windows)]
     let mut stream: BoxedTerminalHostIo = {
         use tokio::net::windows::named_pipe::ClientOptions;
-        Box::pin(
-            ClientOptions::new()
-                .open(endpoint)
-                .map_err(|error| format!("terminal host named pipe open failed: {error}"))?,
-        )
+        Box::pin(ClientOptions::new().open(endpoint).map_err(|error| {
+            classify_connect_error(
+                &error,
+                format!("terminal host named pipe open failed: {error}"),
+            )
+        })?)
     };
-    authenticate_client(&mut stream, &identity).await?;
+    write_client_auth(&mut stream, &payload)
+        .await
+        .map_err(TerminalHostConnectError::Failed)?;
     Ok(stream)
+}
+
+/// Sort a socket/pipe open failure into "nothing is listening" or not.
+///
+/// Unix: `NotFound` is a missing socket, `ConnectionRefused` a stale one left
+/// by a host that died, and `WouldBlock` a full backlog (Linux), which a
+/// retry outlasts. Windows: `NotFound` is a missing pipe, and `ERROR_PIPE_BUSY`
+/// means every instance is taken for the moment; it is retried like an absent
+/// host, and a host spawned for it exits at once because the pipe name is
+/// already owned. Anything else (a socket this user may not open, for one)
+/// stays the same however many hosts start.
+fn classify_connect_error(error: &std::io::Error, message: String) -> TerminalHostConnectError {
+    #[cfg(windows)]
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let unreachable = matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::WouldBlock
+    );
+    #[cfg(windows)]
+    let unreachable = unreachable || error.raw_os_error() == Some(ERROR_PIPE_BUSY);
+    if unreachable {
+        TerminalHostConnectError::Unreachable(message)
+    } else {
+        TerminalHostConnectError::Failed(message)
+    }
 }
 
 #[cfg(unix)]
@@ -931,6 +1298,7 @@ mod tests {
         for existing in ["existing", "invalid"] {
             assert_eq!(
                 load_or_create_credential_with(
+                    KEYRING_ACCOUNT,
                     || Ok(existing.into()),
                     |_| panic!("must not replace an existing credential"),
                 )
@@ -939,17 +1307,25 @@ mod tests {
             );
         }
         let denied = keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("denied")));
-        assert!(load_or_create_credential_with(
+        let error = load_or_create_credential_with(
+            KEYRING_ACCOUNT,
             || Err(denied),
             |_| panic!("denial is not absence"),
         )
-        .is_err());
+        .unwrap_err();
+        // The message names the item and says what to do, so the Host's
+        // `HostOffline` reason is actionable.
+        assert!(error.contains("read failed"));
+        assert!(error.contains(KEYRING_SERVICE));
+        assert!(error.contains(KEYRING_ACCOUNT));
+        assert!(error.contains("Hint:"));
     }
 
     #[test]
     fn missing_credentials_are_persisted_before_they_are_returned() {
         let written = std::cell::RefCell::new(None);
         let secret = load_or_create_credential_with(
+            KEYRING_ACCOUNT,
             || Err(keyring::Error::NoEntry),
             |value| {
                 *written.borrow_mut() = Some(value.to_owned());
@@ -961,6 +1337,7 @@ mod tests {
         assert!(decode_signing_key(&secret).is_ok());
         assert_eq!(written.into_inner(), Some(secret));
         assert!(load_or_create_credential_with(
+            KEYRING_ACCOUNT,
             || Err(keyring::Error::NoEntry),
             |_| Err(keyring::Error::NoStorageAccess(Box::new(
                 std::io::Error::other("denied")
@@ -1075,5 +1452,258 @@ mod tests {
         assert!(quoted.contains("\\\"terminal\\\""));
         // A literal backslash must survive as an escaped pair.
         assert!(quote_service_arg(r"a\b").contains(r"a\\b"));
+    }
+    /// Tests share one process-wide secret cache; fill it with a test value so
+    /// nothing here ever reaches the real credential store.
+    fn install_test_bootstrap_secret() -> String {
+        BOOTSTRAP_SECRET.get_or_init(|| "t".repeat(43)).clone()
+    }
+
+    fn test_secret() -> Result<String, String> {
+        Ok("s".repeat(43))
+    }
+
+    #[test]
+    fn connect_errors_say_whether_starting_a_host_can_help() {
+        let unreachable = TerminalHostConnectError::Unreachable("refused".into());
+        let credential = TerminalHostConnectError::CredentialUnavailable("denied".into());
+        let failed = TerminalHostConnectError::Failed("hung up".into());
+        assert!(unreachable.host_start_may_help());
+        assert!(!credential.host_start_may_help());
+        assert!(!failed.host_start_may_help());
+        assert!(credential.severity() > failed.severity());
+        assert!(failed.severity() > unreachable.severity());
+        assert_eq!(String::from(credential), "denied");
+
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::ConnectionRefused,
+        ] {
+            assert!(matches!(
+                classify_connect_error(&std::io::Error::from(kind), String::new()),
+                TerminalHostConnectError::Unreachable(_)
+            ));
+        }
+        assert!(matches!(
+            classify_connect_error(
+                &std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+                String::new()
+            ),
+            TerminalHostConnectError::Failed(_)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accept_errors_are_classified_by_what_retrying_can_fix() {
+        let class = |errno| classify_accept_error(&std::io::Error::from_raw_os_error(errno));
+        assert_eq!(class(libc::EMFILE), AcceptFailure::Resources);
+        assert_eq!(class(libc::ENFILE), AcceptFailure::Resources);
+        assert_eq!(class(libc::ECONNABORTED), AcceptFailure::Connection);
+        assert_eq!(class(libc::EINTR), AcceptFailure::Connection);
+        assert_eq!(class(libc::EBADF), AcceptFailure::Listener);
+        assert_eq!(class(libc::EINVAL), AcceptFailure::Listener);
+        assert_eq!(class(libc::EIO), AcceptFailure::Unknown);
+    }
+
+    #[test]
+    fn accept_backoff_grows_resets_and_gives_up_only_on_unknown_failures() {
+        let mut backoff = AcceptBackoff::default();
+        assert_eq!(
+            backoff.failed(AcceptFailure::Connection),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(backoff.failed(AcceptFailure::Listener), None);
+        let first = backoff.failed(AcceptFailure::Resources).unwrap();
+        let second = backoff.failed(AcceptFailure::Resources).unwrap();
+        assert_eq!(first, ACCEPT_BACKOFF_START);
+        assert!(second > first);
+        // Descriptor exhaustion never ends the host, and never spins.
+        for _ in 0..1_000 {
+            let delay = backoff.failed(AcceptFailure::Resources).unwrap();
+            assert!(delay >= ACCEPT_BACKOFF_START && delay <= ACCEPT_BACKOFF_MAX);
+        }
+        backoff.succeeded();
+        assert_eq!(
+            backoff.failed(AcceptFailure::Resources),
+            Some(ACCEPT_BACKOFF_START)
+        );
+
+        let mut backoff = AcceptBackoff::default();
+        for _ in 0..MAX_UNKNOWN_ACCEPT_FAILURES {
+            assert!(backoff.failed(AcceptFailure::Unknown).is_some());
+        }
+        assert_eq!(backoff.failed(AcceptFailure::Unknown), None);
+    }
+
+    /// Bug 1 regression: a client that hangs up before its peer credentials are
+    /// read (what a second host's "already running" probe does), and a peer
+    /// that fails the check (another OS user), used to end the whole host.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn listener_survives_hung_up_and_rejected_peers() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        use tokio::io::AsyncReadExt;
+
+        install_test_bootstrap_secret();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.sock");
+        let endpoint = path.to_string_lossy().into_owned();
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let checked = Arc::new(AtomicUsize::new(0));
+        let check_count = Arc::clone(&checked);
+        let (authenticated_tx, mut authenticated_rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener_task = tokio::spawn(accept_unix_connections(
+            listener,
+            move |stream| {
+                // The second connection stands in for another OS user's process.
+                if check_count.fetch_add(1, Ordering::SeqCst) == 1 {
+                    return Err("terminal host rejected a peer owned by another OS user".into());
+                }
+                verify_unix_peer(stream)
+            },
+            move |mut stream| {
+                let authenticated_tx = authenticated_tx.clone();
+                // Finishes on its own: every client here either sends its
+                // handshake or closes.
+                tokio::spawn(async move {
+                    let outcome = authenticate_server(&mut stream)
+                        .await
+                        .map(|identity| identity.client_id);
+                    let _ = authenticated_tx.send(outcome);
+                });
+            },
+        ));
+
+        let outcome = tokio::time::timeout(Duration::from_secs(10), async {
+            drop(tokio::net::UnixStream::connect(&path).await.unwrap());
+
+            let mut rejected = tokio::net::UnixStream::connect(&path).await.unwrap();
+            let mut byte = [0u8; 1];
+            assert_eq!(
+                rejected.read(&mut byte).await.unwrap(),
+                0,
+                "a rejected peer is dropped"
+            );
+
+            let _client = connect_terminal_host_with_secret(
+                &endpoint,
+                &ClientIdentity::local("probe"),
+                bootstrap_secret,
+            )
+            .await
+            .expect("a well-behaved client still connects");
+            loop {
+                if let Some(Ok(client_id)) = authenticated_rx.recv().await {
+                    break client_id;
+                }
+            }
+        })
+        .await
+        .expect("listener answered within the timeout");
+
+        assert_eq!(outcome, "probe");
+        assert!(checked.load(Ordering::SeqCst) >= 3);
+        assert!(!listener_task.is_finished(), "listener kept running");
+        listener_task.abort();
+        let _ = listener_task.await;
+    }
+
+    /// A credential this process cannot read is reported as such, before any
+    /// socket is opened for the host to reject.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn credential_failure_is_reported_without_opening_the_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let error = match connect_terminal_host_with_secret(
+            &path.to_string_lossy(),
+            &ClientIdentity::local("probe"),
+            || Err("terminal credential read failed: denied".into()),
+        )
+        .await
+        {
+            Ok(_) => panic!("a refused credential cannot connect"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error,
+            TerminalHostConnectError::CredentialUnavailable(
+                "terminal credential read failed: denied".into()
+            )
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                .await
+                .is_err(),
+            "no connection reached the host"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn missing_and_stale_sockets_are_unreachable() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity = ClientIdentity::local("probe");
+        let missing = dir.path().join("missing.sock");
+        let error =
+            connect_terminal_host_with_secret(&missing.to_string_lossy(), &identity, test_secret)
+                .await
+                .err()
+                .expect("nothing listens on a missing socket");
+        assert!(
+            matches!(error, TerminalHostConnectError::Unreachable(_)),
+            "{error}"
+        );
+
+        // A host that died leaves its socket file behind.
+        let stale = dir.path().join("stale.sock");
+        drop(tokio::net::UnixListener::bind(&stale).unwrap());
+        assert!(stale.exists());
+        let error =
+            connect_terminal_host_with_secret(&stale.to_string_lossy(), &identity, test_secret)
+                .await
+                .err()
+                .expect("nothing listens on a stale socket");
+        assert!(
+            matches!(error, TerminalHostConnectError::Unreachable(_)),
+            "{error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_log_is_owner_only_and_rotated_when_large() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut file, path) = open_terminal_host_log_in(dir.path()).unwrap();
+        file.write_all(b"first host\n").unwrap();
+        drop(file);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        // Appends while small.
+        let (mut file, _) = open_terminal_host_log_in(dir.path()).unwrap();
+        file.write_all(b"second host\n").unwrap();
+        drop(file);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "first host\nsecond host\n"
+        );
+
+        // Rotated once past the bound.
+        std::fs::write(&path, vec![b'x'; HOST_LOG_ROTATE_BYTES as usize + 1]).unwrap();
+        let (_file, path) = open_terminal_host_log_in(dir.path()).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(
+            std::fs::metadata(dir.path().join(format!("{HOST_LOG_FILE}.1")))
+                .unwrap()
+                .len(),
+            HOST_LOG_ROTATE_BYTES + 1
+        );
     }
 }

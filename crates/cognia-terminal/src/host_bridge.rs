@@ -31,10 +31,12 @@ use tauri::{AppHandle, Manager, Runtime, State};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+use crate::host::ClientIdentity;
 use crate::terminal_host_service::{
-    connect_terminal_host, default_terminal_host_endpoint, load_terminal_host_settings,
+    default_terminal_host_endpoint, load_terminal_host_settings,
     provision_terminal_host_descriptor, save_terminal_host_settings,
-    set_terminal_host_login_service, ssh_known_hosts_path, TerminalHostSettings,
+    set_terminal_host_login_service, ssh_known_hosts_path, try_connect_terminal_host_as,
+    TerminalHostConnectError, TerminalHostSettings,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,8 +146,9 @@ struct BridgeClient {
 }
 
 impl BridgeClient {
-    async fn connect(endpoint: &str) -> Result<Arc<Self>, String> {
-        let stream = connect_terminal_host(endpoint).await?;
+    async fn connect(endpoint: &str) -> Result<Arc<Self>, TerminalHostConnectError> {
+        let stream =
+            try_connect_terminal_host_as(endpoint, ClientIdentity::local("desktop")).await?;
         let (mut reader, mut writer) = tokio::io::split(stream);
         let (writer_tx, mut writer_rx) = mpsc::channel::<TerminalFrame>(256);
         let client = Arc::new(Self {
@@ -371,26 +374,14 @@ impl TerminalHostBridgeState {
             return Ok(Arc::clone(client));
         }
         let endpoint = default_terminal_host_endpoint();
-        if let Ok(client) = BridgeClient::connect(&endpoint).await {
-            send_hello(&client, app).await;
-            *slot = Some(Arc::clone(&client));
-            return Ok(client);
-        }
         let resource_dir = terminal_resources(app.path().resource_dir().ok().as_deref());
-        spawn_terminal_host_async(endpoint.clone(), resource_dir).await?;
-        let mut last_error = "terminal host did not start".to_string();
-        for _ in 0..START_RETRY_COUNT {
-            tokio::time::sleep(START_RETRY_DELAY).await;
-            match BridgeClient::connect(&endpoint).await {
-                Ok(client) => {
-                    send_hello(&client, app).await;
-                    *slot = Some(Arc::clone(&client));
-                    return Ok(client);
-                }
-                Err(error) => last_error = error,
-            }
-        }
-        Err(last_error)
+        let client = connect_or_spawn_terminal_host(&endpoint, resource_dir, || {
+            BridgeClient::connect(&endpoint)
+        })
+        .await?;
+        send_hello(&client, app).await;
+        *slot = Some(Arc::clone(&client));
+        Ok(client)
     }
 
     /// The already-connected client, or `None`.
@@ -733,7 +724,11 @@ pub async fn ssh_terminal_kill<R: Runtime>(
 /// through the host socket and have no path to this surface, so they cannot
 /// re-trust a server on the desktop's behalf.
 #[tauri::command]
-pub async fn ssh_forget_host_key(host: String, port: u16) -> Result<usize, String> {
+pub async fn ssh_forget_host_key(
+    host: String,
+    port: u16,
+    fingerprint: Option<String>,
+) -> Result<usize, String> {
     let host = host.trim().to_string();
     if host.is_empty() || host.chars().any(char::is_whitespace) {
         return Err("SSH host is invalid".into());
@@ -746,10 +741,23 @@ pub async fn ssh_forget_host_key(host: String, port: u16) -> Result<usize, Strin
         if !path.exists() {
             return Ok(0);
         }
-        forget_host_key(&host, port, &path)
+        match fingerprint {
+            Some(fingerprint) => {
+                crate::ssh::forget_host_key_entry(&host, port, &fingerprint, &path)
+            }
+            None => forget_host_key(&host, port, &path),
+        }
     })
     .await
     .map_err(|error| format!("SSH known_hosts task failed: {error}"))?
+}
+
+/// Same local-webview identity boundary as forgetting a key; never a device RPC.
+#[tauri::command]
+pub async fn ssh_list_host_keys() -> Result<Vec<crate::ssh::TrustedHostKey>, String> {
+    tokio::task::spawn_blocking(|| crate::ssh::list_host_keys(&ssh_known_hosts_path()))
+        .await
+        .map_err(|error| format!("SSH known_hosts task failed: {error}"))?
 }
 
 async fn ssh_forward_control<R: Runtime>(

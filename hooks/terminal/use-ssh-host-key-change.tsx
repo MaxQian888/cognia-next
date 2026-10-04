@@ -12,9 +12,9 @@
  * rebuilt had no way forward at all, and no indication that a way existed
  * somewhere else in the app.
  *
- * So the flow lives here and the three sites mount it. Settings keeps its exact
- * behaviour by becoming this hook's first consumer rather than a second
- * implementation of it.
+ * So the flow lives here. Its one consumer is `useSshConnect`, which every
+ * surface that opens a saved host mounts, and which passes `onForgotten` to
+ * retry the connection once the old key is gone.
  *
  * The hook hands back the dialog itself rather than the state to build one.
  * Mounting is the step that was missing, and returning an element is the shape

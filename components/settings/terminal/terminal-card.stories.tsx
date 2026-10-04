@@ -34,6 +34,10 @@ type Story = StoryObj<typeof meta>
 // Built-in defaults.
 export const Default: Story = {}
 
+// One group alone, as the Settings → Terminal panel renders it: no group
+// heading, because the pane already names the panel.
+export const HostPanel: Story = { args: { panel: "host" } }
+
 // A configured terminal: pwsh shell, Nerd Font stack, larger scrollback.
 export const Configured: Story = {
   beforeEach: () => {

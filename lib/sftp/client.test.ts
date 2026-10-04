@@ -109,6 +109,39 @@ describe("browsing", () => {
 })
 
 describe("createSftpFileTreeDeps", () => {
+  it.each([true, false])(
+    "creates files with the correct approval for desktop=%s",
+    async (desktop) => {
+      isTauri.mockReturnValue(desktop)
+      issueHostAdminLease.mockResolvedValue({ token: "lease-tree" })
+      call.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+        if (command === "sftp_upload_open") {
+          if (!desktop && args.adminLease !== "lease-tree") throw new Error("approval required")
+          return { transferId: "tree-upload", chunkBytes: 32, writeHead: 0 }
+        }
+        return { complete: true, size: 0 }
+      })
+      await createSftpFileTreeDeps("production").writeFile("/srv", "new.txt", "")
+      expect(call).toHaveBeenCalledWith("sftp_upload_open", {
+        profileId: "production",
+        path: "/srv/new.txt",
+        size: 0,
+        ...(!desktop ? { adminLease: "lease-tree" } : {}),
+      })
+      expect(call).toHaveBeenCalledWith("sftp_upload_commit", { transferId: "tree-upload" })
+      expect(issueHostAdminLease).toHaveBeenCalledTimes(desktop ? 0 : 1)
+    }
+  )
+
+  it("does not write when the paired device's approval is refused", async () => {
+    isTauri.mockReturnValue(false)
+    issueHostAdminLease.mockRejectedValue(new Error("REMOTE_CONSENT_REQUIRED (code ABC123)"))
+    await expect(
+      createSftpFileTreeDeps("production").writeFile("/srv", "new.txt", "")
+    ).rejects.toMatchObject({ code: "sftp_approval_required", retryable: false })
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it("turns the tree's base and relative path into one absolute path", async () => {
     call.mockResolvedValue({ entries: [entry({ path: "/srv/app/config", kind: "dir" })] })
     const deps = createSftpFileTreeDeps("production")

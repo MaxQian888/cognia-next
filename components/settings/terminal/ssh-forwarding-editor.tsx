@@ -73,11 +73,11 @@ export function SshForwardingEditor({ profile, allProfiles, onChange }: SshForwa
   return (
     <div className="space-y-3 rounded border border-dashed p-2.5" data-testid="ssh-forwarding">
       {/*
-        `buildSynchronizedSshProfiles` emits neither a jump chain nor a
-        forwarding rule (ADR-0082, forwarding amendment), so on a paired device
-        every field below is recorded and none of it is ever applied. Saying so
-        is not an apology for a missing feature: it is the difference between
-        "this does nothing here" and "this is broken".
+        `buildSynchronizedSshProfiles` carries the jump chain to the Host but
+        never a forwarding rule (ADR-0082, 2026-10 amendment), so on a paired
+        device the route set here is used and the forwards are recorded but
+        never applied. Saying so is not an apology for a missing feature: it is
+        the difference between "this does nothing here" and "this is broken".
       */}
       {isTauri() ? null : (
         <p
@@ -133,7 +133,7 @@ export function SshForwardingEditor({ profile, allProfiles, onChange }: SshForwa
           )
           return (
             <div key={rule.id} className="space-y-1" data-testid={`ssh-local-forward-${rule.id}`}>
-              <div className="grid grid-cols-[70px_1fr_70px_auto_auto] items-center gap-1.5">
+              <div className="grid grid-cols-[88px_1fr_88px_auto_auto] items-center gap-1.5">
                 <Input
                   type="number"
                   min={1}
@@ -226,7 +226,7 @@ export function SshForwardingEditor({ profile, allProfiles, onChange }: SshForwa
           )
           return (
             <div key={rule.id} className="space-y-1" data-testid={`ssh-remote-forward-${rule.id}`}>
-              <div className="grid grid-cols-[70px_1fr_70px_auto_auto] items-center gap-1.5">
+              <div className="grid grid-cols-[88px_1fr_88px_auto_auto] items-center gap-1.5">
                 <Input
                   type="number"
                   min={1}
